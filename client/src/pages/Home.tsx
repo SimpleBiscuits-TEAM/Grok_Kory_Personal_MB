@@ -10,6 +10,8 @@ import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
 import { getVehicleInfoFromFilename } from '@/lib/vinLookup';
+import EcuReferencePanel from '@/components/EcuReferencePanel';
+import { Cpu } from 'lucide-react';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
@@ -94,9 +96,10 @@ export default function Home() {
                     <h2 className="text-2xl font-bold text-gray-900 mb-2">
                       Upload Your Duramax Log
                     </h2>
-                    <p className="text-gray-600 mb-6">
-                      Drag and drop your CSV datalog file or click to browse
-                    </p>
+              <p className="text-gray-600 mb-6">
+                    Drag and drop your CSV datalog file or click to browse.<br/>
+                    <span className="text-sm text-gray-500">Supports HP Tuners, EFILIVE, and Banks Power CSV formats.</span>
+                  </p>
                   </div>
 
                   <input
@@ -143,8 +146,10 @@ export default function Home() {
                   <li>✓ Estimated horsepower (dual methods)</li>
                   <li>✓ Boost pressure trends</li>
                   <li>✓ Time-series performance overview</li>
-                  <li>✓ Automatic diagnostic checks</li>
+                  <li>✓ Automatic diagnostic checks (P0087, P0088, P0299, P0101)</li>
                   <li>✓ Peak performance statistics</li>
+                  <li>✓ Vehicle health report with VIN lookup</li>
+                  <li>✓ ECU reference database (A2L-sourced)</li>
                 </ul>
               </Card>
 
@@ -261,6 +266,16 @@ export default function Home() {
                 </li>
               </ul>
             </Card>
+
+            {/* ECU Reference Panel */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Cpu className="w-5 h-5 text-blue-600" />
+                <h2 className="text-2xl font-bold text-gray-900">ECU Reference Database</h2>
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium border border-blue-200">A2L-Sourced</span>
+              </div>
+              <EcuReferencePanel />
+            </div>
           </div>
         )}
 
