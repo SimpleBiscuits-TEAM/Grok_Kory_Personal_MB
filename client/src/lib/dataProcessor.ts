@@ -12,6 +12,12 @@ export interface DuramaxData {
   vehicleSpeed: number[];
   fuelRate: number[];
   offset: number[];
+  railPressureActual: number[];
+  railPressureDesired: number[];
+  pcvDutyCycle: number[];
+  boostDesired: number[];
+  turboVanePosition: number[];
+  exhaustGasTemp: number[];
   timestamp: string;
   duration: number; // in seconds
 }
@@ -24,6 +30,12 @@ export interface ProcessedMetrics {
   hpMaf: number[];
   vehicleSpeed: number[];
   timeMinutes: number[];
+  railPressureActual: number[];
+  railPressureDesired: number[];
+  pcvDutyCycle: number[];
+  boostDesired: number[];
+  turboVanePosition: number[];
+  exhaustGasTemp: number[];
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -79,6 +91,12 @@ export function parseCSV(content: string): DuramaxData {
   const maxTorqueIdx = getColumnIndex(['Maximum Engine Torque']);
   const speedIdx = getColumnIndex(['Vehicle Speed']);
   const fuelRateIdx = getColumnIndex(['Engine Fuel Rate']);
+  const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
+  const railDesiredIdx = getColumnIndex(['Desired Fuel Pressure']);
+  const pcvIdx = getColumnIndex(['PCV', 'Pressure Regulator']);
+  const boostDesiredIdx = getColumnIndex(['Desired Boost']);
+  const turboVaneIdx = getColumnIndex(['Turbo Vane Position', 'Turbo A Vane Position']);
+  const egtIdx = getColumnIndex(['Exhaust Gas Temperature', 'EGT']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns: RPM, MAF, or Torque');
@@ -94,6 +112,12 @@ export function parseCSV(content: string): DuramaxData {
   const vehicleSpeed: number[] = [];
   const fuelRate: number[] = [];
   const offset: number[] = [];
+  const railPressureActual: number[] = [];
+  const railPressureDesired: number[] = [];
+  const pcvDutyCycle: number[] = [];
+  const boostDesired: number[] = [];
+  const turboVanePosition: number[] = [];
+  const exhaustGasTemp: number[] = [];
   
   for (let i = dataStart; i < lines.length; i++) {
     const line = lines[i];
@@ -114,6 +138,12 @@ export function parseCSV(content: string): DuramaxData {
     vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
     fuelRate.push(fuelRateIdx !== -1 ? values[fuelRateIdx] : 0);
     offset.push(offsetIdx !== -1 ? values[offsetIdx] : i - dataStart);
+    railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
+    railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
+    pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
+    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
+    turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -131,6 +161,12 @@ export function parseCSV(content: string): DuramaxData {
     vehicleSpeed,
     fuelRate,
     offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    exhaustGasTemp,
     timestamp: new Date().toLocaleString(),
     duration,
   };
@@ -194,6 +230,12 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     hpMaf,
     vehicleSpeed: rawData.vehicleSpeed,
     timeMinutes,
+    railPressureActual: rawData.railPressureActual,
+    railPressureDesired: rawData.railPressureDesired,
+    pcvDutyCycle: rawData.pcvDutyCycle,
+    boostDesired: rawData.boostDesired,
+    turboVanePosition: rawData.turboVanePosition,
+    exhaustGasTemp: rawData.exhaustGasTemp,
     stats,
   };
 }
@@ -218,6 +260,12 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     hpMaf: downsample(data.hpMaf),
     vehicleSpeed: downsample(data.vehicleSpeed),
     timeMinutes: downsample(data.timeMinutes),
+    railPressureActual: downsample(data.railPressureActual),
+    railPressureDesired: downsample(data.railPressureDesired),
+    pcvDutyCycle: downsample(data.pcvDutyCycle),
+    boostDesired: downsample(data.boostDesired),
+    turboVanePosition: downsample(data.turboVanePosition),
+    exhaustGasTemp: downsample(data.exhaustGasTemp),
   };
 }
 

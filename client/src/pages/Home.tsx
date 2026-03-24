@@ -5,10 +5,13 @@ import { Upload, AlertCircle, CheckCircle, Loader2, FileDown } from 'lucide-reac
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { RPMvMAFChart, HPvsRPMChart, TimeSeriesChart, StatsSummary } from '@/components/Charts';
 import { usePdfExport } from '@/hooks/usePdfExport';
+import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
+import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -32,10 +35,15 @@ export default function Home() {
       setData(downsampled);
       setBinnedData(binned);
       setFileName(file.name);
+
+      // Run diagnostics
+      const diagnosticReport = analyzeDiagnostics(downsampled);
+      setDiagnostics(diagnosticReport);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
       setData(null);
       setBinnedData(undefined);
+      setDiagnostics(null);
     } finally {
       setLoading(false);
       if (fileInputRef.current) {
@@ -55,7 +63,7 @@ export default function Home() {
             </div>
             <h1 className="text-3xl font-bold text-gray-900">Duramax Performance Analyzer</h1>
           </div>
-          <p className="text-gray-600">Upload OBD-II logs to visualize engine performance metrics</p>
+          <p className="text-gray-600">Upload OBD-II logs to visualize engine performance metrics and diagnose issues</p>
         </div>
       </header>
 
@@ -123,6 +131,7 @@ export default function Home() {
                   <li>✓ Estimated horsepower (dual methods)</li>
                   <li>✓ Boost pressure trends</li>
                   <li>✓ Time-series performance overview</li>
+                  <li>✓ Automatic diagnostic checks</li>
                   <li>✓ Peak performance statistics</li>
                 </ul>
               </Card>
@@ -135,6 +144,7 @@ export default function Home() {
                   <li>• Optional: Boost, Speed, Fuel Rate</li>
                   <li>• No file size limit</li>
                   <li>• Data processed in your browser</li>
+                  <li>• Diagnostic rules applied automatically</li>
                 </ul>
               </Card>
             </div>
@@ -179,6 +189,7 @@ export default function Home() {
                   onClick={() => {
                     setData(null);
                     setBinnedData(undefined);
+                    setDiagnostics(null);
                     setFileName(null);
                   }}
                   variant="outline"
@@ -187,6 +198,14 @@ export default function Home() {
                 </Button>
               </div>
             </div>
+
+            {/* Diagnostic Report */}
+            {diagnostics && (
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagnostic Analysis</h2>
+                <DiagnosticReportComponent report={diagnostics} />
+              </div>
+            )}
 
             {/* Statistics Summary */}
             <StatsSummary data={data} />
@@ -226,7 +245,7 @@ export default function Home() {
 
         {/* Error Messages */}
         {error && (
-          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md">
+          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md z-50">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-red-900">Error Processing File</p>
@@ -235,7 +254,7 @@ export default function Home() {
           </div>
         )}
         {exportError && (
-          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md">
+          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md z-50">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-red-900">PDF Export Failed</p>
