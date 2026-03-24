@@ -7,11 +7,14 @@ import { RPMvMAFChart, HPvsRPMChart, TimeSeriesChart, StatsSummary } from '@/com
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
+import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
+import HealthReport from '@/components/HealthReport';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
+  const [healthReport, setHealthReport] = useState<HealthReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -39,11 +42,16 @@ export default function Home() {
       // Run diagnostics
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
+
+      // Generate health report
+      const report = generateHealthReport(downsampled);
+      setHealthReport(report);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
       setData(null);
       setBinnedData(undefined);
       setDiagnostics(null);
+      setHealthReport(null);
     } finally {
       setLoading(false);
       if (fileInputRef.current) {
@@ -190,6 +198,7 @@ export default function Home() {
                     setData(null);
                     setBinnedData(undefined);
                     setDiagnostics(null);
+                    setHealthReport(null);
                     setFileName(null);
                   }}
                   variant="outline"
@@ -198,6 +207,14 @@ export default function Home() {
                 </Button>
               </div>
             </div>
+
+            {/* Health Report */}
+            {healthReport && (
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Vehicle Health Report</h2>
+                <HealthReport report={healthReport} />
+              </div>
+            )}
 
             {/* Diagnostic Report */}
             {diagnostics && (
