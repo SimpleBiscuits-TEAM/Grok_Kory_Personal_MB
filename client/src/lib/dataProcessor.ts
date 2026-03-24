@@ -23,7 +23,7 @@ export interface DuramaxData {
   converterPressure: number[];
   timestamp: string;
   duration: number;
-  fileFormat: 'hptuners' | 'efilive';
+  fileFormat: 'hptuners' | 'efilive' | 'bankspower';
 }
 
 export interface ProcessedMetrics {
@@ -55,7 +55,7 @@ export interface ProcessedMetrics {
     boostMax: number;
     duration: number;
   };
-  fileFormat: 'hptuners' | 'efilive';
+  fileFormat: 'hptuners' | 'efilive' | 'bankspower';
 }
 
 /**
@@ -65,11 +65,19 @@ export function parseCSV(content: string): DuramaxData {
   // Try to detect format
   const lines = content.split('\n').map(line => line.trim());
   
-  // HP Tuners format has "Offset" and "Mass Airflow" in header
+  // Check for Banks Power format (has "Horsepower ECU", "Torque ECU", "DYNO" columns)
+  const isBanksPower = lines.some(line => 
+    line.includes('Horsepower ECU') || 
+    line.includes('DYNO - WHP') || 
+    line.includes('Transmission Slip')
+  );
+  
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
   const isEFILive = lines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
   
-  if (isEFILive) {
+  if (isBanksPower) {
+    return parseBanksPowerCSV(content);
+  } else if (isEFILive) {
     return parseEFILiveCSV(content);
   } else {
     return parseHPTunersCSV(content);
@@ -324,6 +332,138 @@ function parseEFILiveCSV(content: string): DuramaxData {
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'efilive',
+  };
+}
+
+/**
+ * Parse Banks Power CSV format
+ */
+function parseBanksPowerCSV(content: string): DuramaxData {
+  const lines = content.split('\n').map(line => line.trim());
+  
+  if (lines.length < 2) {
+    throw new Error('Invalid Banks Power CSV format');
+  }
+  
+  // Banks Power format: first line is header
+  const headers = lines[0].split(',').map(h => h.trim());
+  
+  const getColumnIndex = (keywords: string[]): number => {
+    for (const keyword of keywords) {
+      const idx = headers.findIndex(h => h.includes(keyword));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  
+  // Banks Power column mappings
+  const timeIdx = getColumnIndex(['TIME']);
+  const rpmIdx = getColumnIndex(['Engine RPM']);
+  const mafIdx = getColumnIndex(['Mass Air Flow']);
+  const mapIdx = getColumnIndex(['Manifold Absolute Pressure']);
+  const torqueIdx = getColumnIndex(['Torque ECU']);
+  const hpIdx = getColumnIndex(['Horsepower ECU']);
+  const speedIdx = getColumnIndex(['Vehicle Speed']);
+  const fuelRateIdx = getColumnIndex(['Fuel Flow Rate', 'Cylinder Fuel Rate']);
+  const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
+  const railDesiredIdx = getColumnIndex(['FRP Commanded']);
+  const pcvIdx = getColumnIndex(['Fuel Rail Pressure']); // Banks doesn't have direct PCV, use FRP
+  const boostDesiredIdx = getColumnIndex(['MAP Commanded']);
+  const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
+  const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
+  const converterSlipIdx = getColumnIndex(['Transmission Slip']);
+  const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
+  const converterPressureIdx = getColumnIndex(['Trans Line 1 Pressure']);
+  
+  if (rpmIdx === -1 || mafIdx === -1) {
+    throw new Error('Missing required columns in Banks Power format: Engine RPM or Mass Air Flow');
+  }
+  
+  const rpm: number[] = [];
+  const maf: number[] = [];
+  const boost: number[] = [];
+  const torquePercent: number[] = [];
+  const maxTorque: number[] = [];
+  const vehicleSpeed: number[] = [];
+  const fuelRate: number[] = [];
+  const offset: number[] = [];
+  const railPressureActual: number[] = [];
+  const railPressureDesired: number[] = [];
+  const pcvDutyCycle: number[] = [];
+  const boostDesired: number[] = [];
+  const turboVanePosition: number[] = [];
+  const exhaustGasTemp: number[] = [];
+  const converterSlip: number[] = [];
+  const converterDutyCycle: number[] = [];
+  const converterPressure: number[] = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    
+    const values = line.split(',').map(v => {
+      const num = parseFloat(v.trim());
+      return isNaN(num) ? 0 : num;
+    });
+    
+    if (values.length < Math.max(rpmIdx, mafIdx) + 1) continue;
+    
+    rpm.push(values[rpmIdx] || 0);
+    maf.push(values[mafIdx] || 0);
+    boost.push(mapIdx !== -1 ? values[mapIdx] : 0);
+    
+    // Banks Power provides actual torque and HP, not percentages
+    // Convert torque to percentage if we have max torque reference
+    if (torqueIdx !== -1 && hpIdx !== -1) {
+      // Use torque directly, assume 879 lb-ft reference
+      torquePercent.push((values[torqueIdx] / 879.174) * 100);
+      maxTorque.push(879.174);
+    } else {
+      torquePercent.push(0);
+      maxTorque.push(879.174);
+    }
+    
+    vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
+    fuelRate.push(fuelRateIdx !== -1 ? values[fuelRateIdx] : 0);
+    offset.push(timeIdx !== -1 ? values[timeIdx] : i);
+    railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
+    railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
+    pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
+    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
+    turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
+    converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
+    converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
+    converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+  }
+  
+  if (rpm.length === 0) {
+    throw new Error('No valid data rows found in Banks Power CSV');
+  }
+  
+  const duration = offset[offset.length - 1] - offset[0];
+  
+  return {
+    rpm,
+    maf,
+    boost,
+    torquePercent,
+    maxTorque,
+    vehicleSpeed,
+    fuelRate,
+    offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
+    timestamp: new Date().toLocaleString(),
+    duration,
+    fileFormat: 'bankspower',
   };
 }
 
