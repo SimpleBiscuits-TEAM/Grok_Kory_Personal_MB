@@ -4,11 +4,13 @@
  */
 
 import { ProcessedMetrics } from './dataProcessor';
+import { VehicleInfo } from './vinLookup';
 
 export interface HealthReportData {
   overallStatus: 'excellent' | 'good' | 'fair' | 'poor';
   overallScore: number; // 0-100
   timestamp: Date;
+  vehicleInfo?: VehicleInfo;
   engineHealth: EngineHealthSection;
   fuelSystem: FuelSystemSection;
   transmission: TransmissionSection;
@@ -60,7 +62,7 @@ interface DiagnosticSummarySection {
 /**
  * Generate comprehensive health report from processed metrics
  */
-export function generateHealthReport(data: ProcessedMetrics): HealthReportData {
+export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: VehicleInfo): HealthReportData {
   const engineHealth = evaluateEngineHealth(data);
   const fuelSystem = evaluateFuelSystem(data);
   const transmission = evaluateTransmission(data);
@@ -93,6 +95,7 @@ export function generateHealthReport(data: ProcessedMetrics): HealthReportData {
     overallStatus,
     overallScore,
     timestamp: new Date(),
+    vehicleInfo,
     engineHealth,
     fuelSystem,
     transmission,

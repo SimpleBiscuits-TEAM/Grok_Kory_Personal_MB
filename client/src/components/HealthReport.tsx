@@ -31,6 +31,55 @@ export default function HealthReport({ report }: HealthReportProps) {
 
   return (
     <div className="space-y-6">
+      {/* Vehicle Information Section */}
+      {report.vehicleInfo && (
+        <Card className="border-2 border-blue-200 bg-blue-50">
+          <CardHeader>
+            <CardTitle className="text-lg">Vehicle Information</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Year / Make / Model</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.year} {report.vehicleInfo.make} {report.vehicleInfo.model}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">VIN</div>
+                <div className="text-sm font-mono text-gray-700 break-all">{report.vehicleInfo.vin}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Series / Trim</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.series} {report.vehicleInfo.trim}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Engine</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.engine}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Displacement / Cylinders</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.displacement} / {report.vehicleInfo.cylinders}cyl</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Factory Rating</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.factoryHp} HP / {report.vehicleInfo.factoryTorque} lb-ft</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Transmission</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.transmission}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Drive Type</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.driveType}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase">Fuel Type</div>
+                <div className="text-lg font-bold text-gray-900">{report.vehicleInfo.fuelType}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Overall Health Summary */}
       <Card className={`border-2 ${getOverallStatusColor(report.overallStatus)}`}>
         <CardHeader>

@@ -9,6 +9,7 @@ import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
+import { getVehicleInfoFromFilename } from '@/lib/vinLookup';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
@@ -43,8 +44,11 @@ export default function Home() {
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
 
+      // Extract vehicle info from filename
+      const vehicleInfo = getVehicleInfoFromFilename(file.name) || undefined;
+
       // Generate health report
-      const report = generateHealthReport(downsampled);
+      const report = generateHealthReport(downsampled, vehicleInfo);
       setHealthReport(report);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
