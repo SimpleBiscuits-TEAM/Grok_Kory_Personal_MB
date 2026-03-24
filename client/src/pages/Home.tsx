@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { RPMvMAFChart, HPvsRPMChart, TimeSeriesChart, StatsSummary } from '@/components/Charts';
+import { usePdfExport } from '@/hooks/usePdfExport';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
@@ -12,6 +13,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { exportToPdf, isExporting, exportError, rpmVsMafRef, hpVsRpmRef, timeSeriesRef } = usePdfExport();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -151,16 +153,39 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <Button
-                onClick={() => {
-                  setData(null);
-                  setBinnedData(undefined);
-                  setFileName(null);
-                }}
-                variant="outline"
-              >
-                Upload New File
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => {
+                    if (data && fileName) {
+                      exportToPdf(data, fileName);
+                    }
+                  }}
+                  disabled={isExporting}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {isExporting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <FileDown className="w-4 h-4 mr-2" />
+                      Export PDF Report
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setData(null);
+                    setBinnedData(undefined);
+                    setFileName(null);
+                  }}
+                  variant="outline"
+                >
+                  Upload New File
+                </Button>
+              </div>
             </div>
 
             {/* Statistics Summary */}
@@ -168,12 +193,18 @@ export default function Home() {
 
             {/* Charts */}
             <div className="grid lg:grid-cols-2 gap-6">
-              <RPMvMAFChart data={data} binnedData={binnedData} />
-              <HPvsRPMChart data={data} binnedData={binnedData} />
+              <div ref={rpmVsMafRef}>
+                <RPMvMAFChart data={data} binnedData={binnedData} />
+              </div>
+              <div ref={hpVsRpmRef}>
+                <HPvsRPMChart data={data} binnedData={binnedData} />
+              </div>
             </div>
 
             {/* Full-width Time Series */}
-            <TimeSeriesChart data={data} />
+            <div ref={timeSeriesRef}>
+              <TimeSeriesChart data={data} />
+            </div>
 
             {/* Methodology Footer */}
             <Card className="p-6 bg-blue-50 border-blue-200">
@@ -193,13 +224,22 @@ export default function Home() {
           </div>
         )}
 
-        {/* Error Message */}
+        {/* Error Messages */}
         {error && (
           <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md">
             <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-red-900">Error Processing File</p>
               <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        )}
+        {exportError && (
+          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-900">PDF Export Failed</p>
+              <p className="text-sm text-red-700">{exportError}</p>
             </div>
           </div>
         )}
