@@ -28,6 +28,9 @@ interface RawDataPoint {
   exhaustGasTemp?: number;
   maf?: number;
   rpm?: number;
+  converterSlip?: number;
+  converterDutyCycle?: number;
+  converterPressure?: number;
   timestamp?: number;
 }
 
@@ -37,16 +40,18 @@ interface RawDataPoint {
 export function analyzeDiagnostics(data: any): DiagnosticReport {
   const issues: DiagnosticIssue[] = [];
 
-  // Extract relevant columns from the data
   const railPressureActual = data.railPressureActual || [];
   const railPressureDesired = data.railPressureDesired || [];
   const pcvDutyCycle = data.pcvDutyCycle || [];
-  const boostActual = data.boostActual || [];
+  const boostActual = data.boost || [];
   const boostDesired = data.boostDesired || [];
   const turboVanePosition = data.turboVanePosition || [];
   const exhaustGasTemp = data.exhaustGasTemp || [];
   const maf = data.maf || [];
   const rpm = data.rpm || [];
+  const converterSlip = data.converterSlip || [];
+  const converterDutyCycle = data.converterDutyCycle || [];
+  const converterPressure = data.converterPressure || [];
 
   // Check for Low Rail Pressure (P0087)
   if (railPressureActual.length > 0) {
@@ -74,7 +79,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
       boostActual,
       boostDesired,
       turboVanePosition,
-      maf
+      maf,
+      rpm
     );
     issues.push(...lowBoostIssues);
   }
@@ -91,6 +97,17 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...mafIssues);
   }
 
+  // Check Torque Converter Slip
+  if (converterSlip.length > 0) {
+    const converterIssues = checkConverterSlip(
+      converterSlip,
+      converterDutyCycle,
+      converterPressure,
+      rpm
+    );
+    issues.push(...converterIssues);
+  }
+
   const summary =
     issues.length === 0
       ? 'No diagnostic issues detected. Engine parameters are within normal ranges.'
@@ -104,7 +121,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
 }
 
 /**
- * Check for Low Rail Pressure (P0087) conditions
+ * Check for Low Rail Pressure (P0087) - Updated thresholds
  */
 function checkLowRailPressure(
   actual: number[],
@@ -113,8 +130,8 @@ function checkLowRailPressure(
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   const threshold = 3000; // 3k psi offset
-  const minDuration = 2; // seconds
-  const sampleRate = 10; // samples per second (approximate)
+  const minDuration = 5; // seconds (UPDATED from 2)
+  const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
 
   let consecutiveViolations = 0;
@@ -147,7 +164,7 @@ function checkLowRailPressure(
           });
         }
 
-        consecutiveViolations = 0; // Reset to avoid duplicate reports
+        consecutiveViolations = 0;
       }
     } else {
       consecutiveViolations = 0;
@@ -159,19 +176,26 @@ function checkLowRailPressure(
     const avgDesired = desired.reduce((a, b) => a + b) / desired.length;
     if (avgDesired > 25000) {
       let lowPressureCount = 0;
+      let consecutiveLowCount = 0;
+      const minConsecutive = 2 * 10; // 2 seconds
+
       for (let i = 0; i < actual.length; i++) {
         if (actual[i] >= 12000 && actual[i] <= 15000) {
-          lowPressureCount++;
+          consecutiveLowCount++;
+          if (consecutiveLowCount >= minConsecutive) {
+            lowPressureCount++;
+          }
+        } else {
+          consecutiveLowCount = 0;
         }
       }
 
-      const lowPressurePercentage = (lowPressureCount / actual.length) * 100;
-      if (lowPressurePercentage > 20) {
+      if (lowPressureCount > 0) {
         issues.push({
           code: 'P0087-RELIEF-VALVE',
           severity: 'warning',
           title: 'Low Rail Pressure - Possible Relief Valve Issue',
-          description: `Desired rail pressure exceeds 25kpsi, but actual pressure stays between 12k-15kpsi for extended periods (${lowPressurePercentage.toFixed(1)}% of session).`,
+          description: `Desired rail pressure exceeds 25kpsi, but actual pressure stays between 12k-15kpsi for extended periods.`,
           recommendation:
             'The pressure relief valve on the fuel rail may be stuck or faulty. Inspect and test the relief valve. Contact PPEI for additional diagnostics if issue persists.',
         });
@@ -183,7 +207,7 @@ function checkLowRailPressure(
 }
 
 /**
- * Check for High Rail Pressure (P0088) conditions
+ * Check for High Rail Pressure (P0088) - Updated thresholds
  */
 function checkHighRailPressure(
   actual: number[],
@@ -192,7 +216,7 @@ function checkHighRailPressure(
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   const threshold = 1500; // 1.5k psi offset
-  const minDuration = 2; // seconds
+  const minDuration = 5; // seconds (UPDATED from 2)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
 
@@ -274,17 +298,18 @@ function checkHighRailPressure(
 }
 
 /**
- * Check for Low Boost Pressure (P0299) conditions
+ * Check for Low Boost Pressure (P0299) - Updated thresholds
  */
 function checkLowBoostPressure(
   actual: number[],
   desired: number[],
   turboVane: number[],
-  maf: number[]
+  maf: number[],
+  rpm: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   const threshold = 5; // 5 psi offset
-  const minDuration = 3; // seconds
+  const minDuration = 5; // seconds (UPDATED from 3)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
 
@@ -298,8 +323,10 @@ function checkLowBoostPressure(
       if (consecutiveViolations >= minSamples) {
         const vanePos = turboVane[i] || 0;
         const mafFlow = maf[i] || 0;
+        const currentRpm = rpm[i] || 0;
 
-        if (vanePos > 45 && mafFlow > 55) {
+        // Check conditions for boost leak
+        if (mafFlow > 55 && actual[i] < 40 && vanePos > 45) {
           issues.push({
             code: 'P0299-BOOST-LEAK',
             severity: 'critical',
@@ -308,12 +335,12 @@ function checkLowBoostPressure(
             recommendation:
               'A boost leak is very likely. Perform a boost leakdown test and inspect intake system for leaks, cracks, or loose connections. Check intercooler, piping, and clamps.',
           });
-        } else if (vanePos > 45) {
+        } else if (vanePos > 45 && currentRpm > 2800) {
           issues.push({
             code: 'P0299-UNDERBOOST',
             severity: 'warning',
             title: 'Low Boost Pressure - Turbo Issue',
-            description: `Boost is ${offset.toFixed(1)} psi lower than desired for more than ${minDuration} seconds. Turbo vane position is ${vanePos.toFixed(1)}% (above 45%).`,
+            description: `Boost is ${offset.toFixed(1)} psi lower than desired for more than ${minDuration} seconds at ${currentRpm.toFixed(0)} RPM. Turbo vane position is ${vanePos.toFixed(1)}% (above 45%).`,
             recommendation:
               'Perform a boost leakdown test and check the intake system for leaks. Inspect turbo for damage or excessive play.',
           });
@@ -339,11 +366,11 @@ function checkLowBoostPressure(
 }
 
 /**
- * Check Exhaust Gas Temperature conditions
+ * Check Exhaust Gas Temperature - Updated thresholds
  */
 function checkExhaustGasTemp(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const highThreshold = 1475; // degrees F
+  const highThreshold = 1475;
   const criticalThreshold = 1800;
   const minDuration = 5; // seconds
   const sampleRate = 10;
@@ -388,12 +415,11 @@ function checkExhaustGasTemp(egt: number[]): DiagnosticIssue[] {
 }
 
 /**
- * Check Mass Airflow (P0101) conditions
+ * Check Mass Airflow (P0101) - Updated thresholds
  */
 function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
 
-  // Find idle conditions (RPM < 1000)
   const idleIndices = rpm
     .map((r, i) => (r < 1000 ? i : -1))
     .filter((i) => i !== -1);
@@ -404,27 +430,102 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
     const maxIdleMaf = Math.max(...idleMaf);
     const minIdleMaf = Math.min(...idleMaf);
 
-    if (maxIdleMaf > 6) {
+    // Check for high MAF at idle (above 6 lb/min for 5 seconds)
+    let highMafCount = 0;
+    for (let i = 0; i < idleIndices.length; i++) {
+      if (idleMaf[i] > 6) {
+        highMafCount++;
+      }
+    }
+
+    if (highMafCount > 50) {
+      // More than 5 seconds
       issues.push({
         code: 'P0101-HIGH-IDLE-MAF',
         severity: 'warning',
         title: 'High MAF at Idle',
-        description: `MAF flow exceeds 6 lb/min at idle (peak: ${maxIdleMaf.toFixed(1)} lb/min, average: ${avgIdleMaf.toFixed(1)} lb/min).`,
+        description: `MAF flow exceeds 6 lb/min at idle for extended periods (peak: ${maxIdleMaf.toFixed(1)} lb/min, average: ${avgIdleMaf.toFixed(1)} lb/min).`,
         recommendation:
           'Check MAF sensor for contamination or damage. Contact tuner to verify MAF calibration. May indicate air leak or sensor fault.',
       });
     }
 
-    if (minIdleMaf < 2) {
+    // Check for low MAF at idle (below 2 lb/min for 5 seconds)
+    let lowMafCount = 0;
+    for (let i = 0; i < idleIndices.length; i++) {
+      if (idleMaf[i] < 2) {
+        lowMafCount++;
+      }
+    }
+
+    if (lowMafCount > 50) {
+      // More than 5 seconds
       issues.push({
         code: 'P0101-LOW-IDLE-MAF',
         severity: 'warning',
         title: 'Low MAF at Idle',
-        description: `MAF flow drops below 2 lb/min at idle (minimum: ${minIdleMaf.toFixed(1)} lb/min).`,
+        description: `MAF flow drops below 2 lb/min at idle for extended periods (minimum: ${minIdleMaf.toFixed(1)} lb/min).`,
         recommendation:
           'Check MAF sensor for contamination or blockage. Contact tuner to verify MAF calibration. May indicate intake restriction or sensor fault.',
       });
     }
+  }
+
+  return issues;
+}
+
+/**
+ * Check Torque Converter Slip - NEW
+ */
+function checkConverterSlip(
+  slip: number[],
+  dutyCycle: number[],
+  pressure: number[],
+  rpm: number[]
+): DiagnosticIssue[] {
+  const issues: DiagnosticIssue[] = [];
+
+  if (slip.length === 0) {
+    return issues;
+  }
+
+  // Look for patterns: duty cycle and pressure maxed out but slip is not controlled
+  let slipViolationCount = 0;
+  let maxDutyCycleCount = 0;
+  let maxPressureCount = 0;
+
+  for (let i = 0; i < slip.length; i++) {
+    // Check if slip is fluctuating more than ±15 RPM
+    if (Math.abs(slip[i]) > 15) {
+      slipViolationCount++;
+    }
+
+    // Check if duty cycle is maxed (near 100%)
+    if (dutyCycle[i] > 95) {
+      maxDutyCycleCount++;
+    }
+
+    // Check if pressure is maxed
+    if (pressure[i] > 200) {
+      // Assuming max pressure is around 200 PSI
+      maxPressureCount++;
+    }
+  }
+
+  const slipPercentage = (slipViolationCount / slip.length) * 100;
+  const dutyPercentage = (maxDutyCycleCount / slip.length) * 100;
+  const pressurePercentage = (maxPressureCount / slip.length) * 100;
+
+  // If duty cycle and pressure are maxed but slip is still high, converter is slipping
+  if (dutyPercentage > 30 && pressurePercentage > 30 && slipPercentage > 20) {
+    issues.push({
+      code: 'CONVERTER-SLIP',
+      severity: 'critical',
+      title: 'Torque Converter Slip Detected',
+      description: `Converter duty cycle and pressure are maxed out (${dutyPercentage.toFixed(1)}% and ${pressurePercentage.toFixed(1)}% respectively), but converter slip is fluctuating by more than ±15 RPM (${slipPercentage.toFixed(1)}% of session).`,
+      recommendation:
+        'The torque converter is slipping excessively. This indicates internal converter wear or damage. Have the converter inspected and possibly rebuilt or replaced. Contact your transmission specialist.',
+    });
   }
 
   return issues;

@@ -1,6 +1,6 @@
 /**
  * Data processing utilities for Duramax OBD-II logs
- * Handles CSV parsing, data extraction, and horsepower calculations
+ * Handles CSV parsing for both HP Tuners and EFILIVE formats
  */
 
 export interface DuramaxData {
@@ -18,8 +18,12 @@ export interface DuramaxData {
   boostDesired: number[];
   turboVanePosition: number[];
   exhaustGasTemp: number[];
+  converterSlip: number[];
+  converterDutyCycle: number[];
+  converterPressure: number[];
   timestamp: string;
-  duration: number; // in seconds
+  duration: number;
+  fileFormat: 'hptuners' | 'efilive';
 }
 
 export interface ProcessedMetrics {
@@ -36,6 +40,9 @@ export interface ProcessedMetrics {
   boostDesired: number[];
   turboVanePosition: number[];
   exhaustGasTemp: number[];
+  converterSlip: number[];
+  converterDutyCycle: number[];
+  converterPressure: number[];
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -48,17 +55,33 @@ export interface ProcessedMetrics {
     boostMax: number;
     duration: number;
   };
+  fileFormat: 'hptuners' | 'efilive';
 }
 
 /**
- * Parse CSV content from Duramax log file
- * Handles the specific format with metadata headers
+ * Detect file format and parse accordingly
  */
 export function parseCSV(content: string): DuramaxData {
+  // Try to detect format
   const lines = content.split('\n').map(line => line.trim());
   
-  // Find the header row (contains "Offset", "Mass Airflow", etc.)
-  // HP Tuners format: line 0=title, 1=version, 2=blank, 3=[Log Info], 4=time, 5=notes, 6=blank, 7=[Channel Info], 8=IDs, 9=HEADER, 10=units, 11=blank, 12=[Channel Data], 13+=data
+  // HP Tuners format has "Offset" and "Mass Airflow" in header
+  // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
+  const isEFILive = lines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
+  
+  if (isEFILive) {
+    return parseEFILiveCSV(content);
+  } else {
+    return parseHPTunersCSV(content);
+  }
+}
+
+/**
+ * Parse HP Tuners CSV format
+ */
+function parseHPTunersCSV(content: string): DuramaxData {
+  const lines = content.split('\n').map(line => line.trim());
+  
   let headerIndex = -1;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].includes('Offset') && lines[i].includes('Mass Airflow')) {
@@ -68,13 +91,11 @@ export function parseCSV(content: string): DuramaxData {
   }
   
   if (headerIndex === -1) {
-    throw new Error('Could not find CSV header in log file');
+    throw new Error('Could not find CSV header in HP Tuners log file');
   }
   
-  // Parse header
   const headers = lines[headerIndex].split(',').map(h => h.trim());
   
-  // Find column indices
   const getColumnIndex = (keywords: string[]): number => {
     for (const keyword of keywords) {
       const idx = headers.findIndex(h => h.includes(keyword));
@@ -97,13 +118,15 @@ export function parseCSV(content: string): DuramaxData {
   const boostDesiredIdx = getColumnIndex(['Desired Boost']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position', 'Turbo A Vane Position']);
   const egtIdx = getColumnIndex(['Exhaust Gas Temperature', 'EGT']);
+  const converterSlipIdx = getColumnIndex(['Converter Slip', 'TCM.TCSLIP']);
+  const converterDutyIdx = getColumnIndex(['Converter Duty', 'Converter PWM']);
+  const converterPressureIdx = getColumnIndex(['Converter Pressure', 'TCC Pressure']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns: RPM, MAF, or Torque');
   }
   
-  // Skip units row (headerIndex + 1) and blank row (headerIndex + 2) and [Channel Data] marker (headerIndex + 3), start from first data row (headerIndex + 4)
-  const dataStart = headerIndex + 4; 
+  const dataStart = headerIndex + 4;
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -118,6 +141,9 @@ export function parseCSV(content: string): DuramaxData {
   const boostDesired: number[] = [];
   const turboVanePosition: number[] = [];
   const exhaustGasTemp: number[] = [];
+  const converterSlip: number[] = [];
+  const converterDutyCycle: number[] = [];
+  const converterPressure: number[] = [];
   
   for (let i = dataStart; i < lines.length; i++) {
     const line = lines[i];
@@ -144,6 +170,9 @@ export function parseCSV(content: string): DuramaxData {
     boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
+    converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
+    converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
+    converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -167,14 +196,139 @@ export function parseCSV(content: string): DuramaxData {
     boostDesired,
     turboVanePosition,
     exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
     timestamp: new Date().toLocaleString(),
     duration,
+    fileFormat: 'hptuners',
+  };
+}
+
+/**
+ * Parse EFILIVE CSV format
+ */
+function parseEFILiveCSV(content: string): DuramaxData {
+  const lines = content.split('\n').map(line => line.trim());
+  
+  if (lines.length < 2) {
+    throw new Error('Invalid EFILIVE CSV format');
+  }
+  
+  // EFILIVE format: first line is header
+  const headers = lines[0].split(',').map(h => h.trim());
+  
+  const getColumnIndex = (keywords: string[]): number => {
+    for (const keyword of keywords) {
+      const idx = headers.findIndex(h => h.includes(keyword));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  
+  // EFILIVE column mappings
+  const timeIdx = getColumnIndex(['Time']);
+  const rpmIdx = getColumnIndex(['ECM.RPM']);
+  const mafIdx = getColumnIndex(['ECM.MAF']);
+  const mapIdx = getColumnIndex(['ECM.MAP']);
+  const torqueIdx = getColumnIndex(['ECM.TQ_ACT']);
+  const maxTorqueIdx = getColumnIndex(['ECM.TQ_REF']);
+  const speedIdx = getColumnIndex(['ECM.VSS']);
+  const fuelRateIdx = getColumnIndex(['ECM.FUEL_RATE']);
+  const railActualIdx = getColumnIndex(['ECM.FRP_A']);
+  const railDesiredIdx = getColumnIndex(['ECM.FRPDI']);
+  const pcvIdx = getColumnIndex(['ECM.FRPVDC']);
+  const boostDesiredIdx = getColumnIndex(['ECM.DESTQ']);
+  const turboVaneIdx = getColumnIndex(['ECM.TCVPOS']);
+  const egtIdx = getColumnIndex(['ECM.EGTS1', 'ECM.EGTS']);
+  const converterSlipIdx = getColumnIndex(['TCM.TCSLIP']);
+  const converterDutyIdx = getColumnIndex(['TCM.TCCPCSCP']);
+  const converterPressureIdx = getColumnIndex(['TCM.TCCP']);
+  
+  if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
+    throw new Error('Missing required columns in EFILIVE format: ECM.RPM, ECM.MAF, or ECM.TQ_ACT');
+  }
+  
+  const rpm: number[] = [];
+  const maf: number[] = [];
+  const boost: number[] = [];
+  const torquePercent: number[] = [];
+  const maxTorque: number[] = [];
+  const vehicleSpeed: number[] = [];
+  const fuelRate: number[] = [];
+  const offset: number[] = [];
+  const railPressureActual: number[] = [];
+  const railPressureDesired: number[] = [];
+  const pcvDutyCycle: number[] = [];
+  const boostDesired: number[] = [];
+  const turboVanePosition: number[] = [];
+  const exhaustGasTemp: number[] = [];
+  const converterSlip: number[] = [];
+  const converterDutyCycle: number[] = [];
+  const converterPressure: number[] = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    
+    const values = line.split(',').map(v => {
+      const num = parseFloat(v.trim());
+      return isNaN(num) ? 0 : num;
+    });
+    
+    if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
+    
+    rpm.push(values[rpmIdx] || 0);
+    maf.push(values[mafIdx] || 0);
+    boost.push(mapIdx !== -1 ? values[mapIdx] : 0);
+    torquePercent.push(values[torqueIdx] || 0);
+    maxTorque.push(maxTorqueIdx !== -1 ? values[maxTorqueIdx] : 879.174);
+    vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
+    fuelRate.push(fuelRateIdx !== -1 ? values[fuelRateIdx] : 0);
+    offset.push(timeIdx !== -1 ? values[timeIdx] : i);
+    railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
+    railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
+    pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
+    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
+    turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
+    converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
+    converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
+    converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+  }
+  
+  if (rpm.length === 0) {
+    throw new Error('No valid data rows found in EFILIVE CSV');
+  }
+  
+  const duration = offset[offset.length - 1] - offset[0];
+  
+  return {
+    rpm,
+    maf,
+    boost,
+    torquePercent,
+    maxTorque,
+    vehicleSpeed,
+    fuelRate,
+    offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
+    timestamp: new Date().toLocaleString(),
+    duration,
+    fileFormat: 'efilive',
   };
 }
 
 /**
  * Calculate horsepower from torque and RPM
- * HP = Torque(lb·ft) × RPM / 5252
  */
 function calculateHPFromTorque(torquePercent: number[], maxTorque: number[], rpm: number[]): number[] {
   return torquePercent.map((pct, i) => {
@@ -184,18 +338,19 @@ function calculateHPFromTorque(torquePercent: number[], maxTorque: number[], rpm
 }
 
 /**
- * Calculate horsepower from MAF (Mass Air Flow)
- * For diesel: HP ≈ MAF(lb/min) × 60 / (BSFC × AFR)
- * Using BSFC ≈ 0.35 lb/hp-hr and AFR ≈ 19:1
+ * Calculate horsepower from MAF
  */
 function calculateHPFromMAF(maf: number[]): number[] {
-  const BSFC = 0.35;
-  const AFR = 19;
-  return maf.map(m => (m * 60) / (BSFC * AFR));
+  const BSFC = 0.35; // Brake Specific Fuel Consumption for diesel
+  const AFR = 19; // Air-Fuel Ratio for diesel
+  
+  return maf.map(m => {
+    return (m * 60) / (BSFC * AFR);
+  });
 }
 
 /**
- * Process raw data and calculate all metrics
+ * Process raw data into metrics
  */
 export function processData(rawData: DuramaxData): ProcessedMetrics {
   const hpTorque = calculateHPFromTorque(
@@ -208,7 +363,6 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
   
   const timeMinutes = rawData.offset.map(o => o / 60);
   
-  // Calculate statistics
   const stats = {
     rpmMin: Math.min(...rawData.rpm),
     rpmMax: Math.max(...rawData.rpm),
@@ -236,19 +390,21 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     boostDesired: rawData.boostDesired,
     turboVanePosition: rawData.turboVanePosition,
     exhaustGasTemp: rawData.exhaustGasTemp,
+    converterSlip: rawData.converterSlip,
+    converterDutyCycle: rawData.converterDutyCycle,
+    converterPressure: rawData.converterPressure,
     stats,
+    fileFormat: rawData.fileFormat,
   };
 }
 
 /**
- * Downsample data for performance (keep every nth point)
- * Useful for large datasets to reduce chart rendering time
+ * Downsample data for performance
  */
 export function downsampleData(data: ProcessedMetrics, targetPoints: number = 1000): ProcessedMetrics {
   if (data.rpm.length <= targetPoints) return data;
   
   const factor = Math.ceil(data.rpm.length / targetPoints);
-  
   const downsample = (arr: number[]) => arr.filter((_, i) => i % factor === 0);
   
   return {
@@ -266,12 +422,14 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     boostDesired: downsample(data.boostDesired),
     turboVanePosition: downsample(data.turboVanePosition),
     exhaustGasTemp: downsample(data.exhaustGasTemp),
+    converterSlip: downsample(data.converterSlip),
+    converterDutyCycle: downsample(data.converterDutyCycle),
+    converterPressure: downsample(data.converterPressure),
   };
 }
 
 /**
  * Create binned data for trend lines
- * Groups data into RPM bins and calculates mean values
  */
 export function createBinnedData(
   data: ProcessedMetrics,
