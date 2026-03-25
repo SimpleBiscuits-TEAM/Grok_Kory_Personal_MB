@@ -67,6 +67,9 @@ interface DiagnosticSummarySection {
   egtStatus: string;
   p0101Status: string;
   converterSlipStatus: string;
+  // Whether any fault was actually detected (controls UI visibility)
+  anyFaultDetected: boolean;
+  detectedCodes: string[];
 }
 
 // Helper: filter out zero-padded / missing values (0 means not logged)
@@ -425,13 +428,116 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
 }
 
 function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
+  const detectedCodes: string[] = [];
+
+  // ── P0087: Low Rail Pressure ──────────────────────────────────────────────
+  // Actual is 3k+ lower than desired for >2 seconds (50 samples at 25Hz)
+  let p0087Status = '✓ PASS';
+  const railActual = data.railPressureActual;
+  const railDesired = data.railPressureDesired;
+  const hasRailData = validValues(railActual).length > 10 && validValues(railDesired).length > 10;
+  if (hasRailData) {
+    const lowRailCount = railActual.filter((a, i) => a > 0 && railDesired[i] > 0 && (railDesired[i] - a) > 3000).length;
+    if (lowRailCount >= 50) {
+      p0087Status = '✗ DETECTED — P0087 Low Rail Pressure';
+      detectedCodes.push('P0087');
+    }
+  } else {
+    p0087Status = '— Rail pressure not logged';
+  }
+
+  // ── P0088: High Rail Pressure ─────────────────────────────────────────────
+  // Actual is 1.5k+ higher than desired for >2 seconds
+  let p0088Status = '✓ PASS';
+  if (hasRailData) {
+    const highRailCount = railActual.filter((a, i) => a > 0 && railDesired[i] > 0 && (a - railDesired[i]) > 1500).length;
+    if (highRailCount >= 50) {
+      p0088Status = '✗ DETECTED — P0088 High Rail Pressure';
+      detectedCodes.push('P0088');
+    }
+  } else {
+    p0088Status = '— Rail pressure not logged';
+  }
+
+  // ── P0299: Underboost ─────────────────────────────────────────────────────
+  // Actual boost 5+ PSI below desired for >3 seconds (75 samples at 25Hz)
+  let p0299Status = '✓ PASS';
+  const boostActual = validValues(data.boost);
+  if (boostActual.length > 0) {
+    // Check for high MAF but low boost (boost leak indicator)
+    const highMafLowBoost = data.maf.filter((m, i) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;
+    if (highMafLowBoost >= 75) {
+      p0299Status = '✗ DETECTED — P0299 Underboost (possible boost leak)';
+      detectedCodes.push('P0299');
+    }
+  } else {
+    p0299Status = '— Boost pressure not logged';
+  }
+
+  // ── EGT Warning ───────────────────────────────────────────────────────────
+  // >1475°F for >5 seconds, or stuck >1800°F
+  let egtStatus = '✓ PASS';
+  const egtVals = validValues(data.exhaustGasTemp);
+  if (egtVals.length > 0) {
+    const sensorFaultCount = egtVals.filter(e => e > 1800).length;
+    const highEgtCount = egtVals.filter(e => e > 1475).length;
+    if (sensorFaultCount > 0) {
+      egtStatus = '✗ DETECTED — EGT Sensor Fault (>1800°F, likely disconnected)';
+      detectedCodes.push('EGT_SENSOR_FAULT');
+    } else if (highEgtCount >= 125) {
+      egtStatus = '⚠ WARNING — EGT exceeded 1475°F for >5 seconds';
+      detectedCodes.push('EGT_HIGH');
+    }
+  } else {
+    egtStatus = '— EGT not logged';
+  }
+
+  // ── P0101: MAF Out of Range at Idle ──────────────────────────────────────
+  let p0101Status = '✓ PASS';
+  const idleIndices = data.rpm.map((r, i) => (r > 500 && r < 900 ? i : -1)).filter(i => i !== -1);
+  if (idleIndices.length > 50) {
+    const idleMafVals = idleIndices.map(i => data.maf[i]).filter(m => m > 0);
+    if (idleMafVals.length > 0) {
+      const highIdleCount = idleMafVals.filter(m => m > 6).length;
+      const lowIdleCount = idleMafVals.filter(m => m < 2).length;
+      if (highIdleCount > 30) {
+        p0101Status = '✗ DETECTED — P0101 MAF High at Idle (>6 lb/min)';
+        detectedCodes.push('P0101');
+      } else if (lowIdleCount > 30) {
+        p0101Status = '✗ DETECTED — P0101 MAF Low at Idle (<2 lb/min)';
+        detectedCodes.push('P0101');
+      }
+    }
+  } else {
+    p0101Status = '— Insufficient idle data';
+  }
+
+  // ── Converter Slip ────────────────────────────────────────────────────────
+  let converterSlipStatus = '✓ PASS';
+  const slipVals = validValues(data.converterSlip.map(s => Math.abs(s)));
+  if (slipVals.length > 0) {
+    const criticalSlipCount = slipVals.filter(s => s > 25).length;
+    const highSlipCount = slipVals.filter(s => s > 15).length;
+    if (criticalSlipCount > 10) {
+      converterSlipStatus = '✗ DETECTED — Excessive Converter Slip (>25 RPM)';
+      detectedCodes.push('TCC_SLIP_CRITICAL');
+    } else if (highSlipCount > 10) {
+      converterSlipStatus = '⚠ WARNING — Elevated Converter Slip (>15 RPM)';
+      detectedCodes.push('TCC_SLIP_WARNING');
+    }
+  } else {
+    converterSlipStatus = '— Converter slip not logged';
+  }
+
   return {
-    p0087Status: '✓ PASS',
-    p0088Status: '✓ PASS',
-    p0299Status: '✓ PASS',
-    egtStatus: '✓ PASS',
-    p0101Status: '✓ PASS',
-    converterSlipStatus: '✓ PASS',
+    p0087Status,
+    p0088Status,
+    p0299Status,
+    egtStatus,
+    p0101Status,
+    converterSlipStatus,
+    anyFaultDetected: detectedCodes.length > 0,
+    detectedCodes,
   };
 }
 

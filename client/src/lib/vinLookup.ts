@@ -218,7 +218,7 @@ function getEngineDetail(year: number, engineChar: string): EngineDetail {
       peakTorqueRpm: 1600,
       peakHpRpm: 3000,
       redline: 3500,
-      injectionSystem: 'Denso CP4.2 High-Pressure Common Rail (up to 29,000 psi)',
+      injectionSystem: 'Bosch HP4 High-Pressure Common Rail (up to 29,000 psi)',
       maxRailPressure: '29,000 psi (200 MPa)',
       turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
       aftertreatment: 'DOC + DPF + SCR (DEF/AdBlue) + EGR',

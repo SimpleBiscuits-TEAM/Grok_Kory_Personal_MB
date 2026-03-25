@@ -1,6 +1,6 @@
 /**
  * Duramax ECU Reference Data
- * Source: ECM_E41 Series_11 calibration database (2017–2023 L5P 6.6L Diesel)
+ * Source: GM OBD Documentation & Duramax engine management data (2017–2023 L5P 6.6L Diesel)
  * Cross-referenced with GM TechLink bulletins, TSBs, GDS2 service data,
  * DuramaxForum real-world scan logs, and iDash PID lists.
  *
@@ -45,7 +45,7 @@ export const ECU_PARAMETERS: Record<string, EcuParameter> = {
     internalName: 'VeFCBR_p_SnsdFuelPresAbs',
     displayName: 'Fuel Rail Pressure (Actual)',
     unit: 'psi',
-    description: 'Sensed absolute fuel rail pressure from the high-pressure fuel rail sensor (FRP sensor). Used by the ECM for closed-loop fuel pressure control via the PCV solenoid. Denso CP4.2 pump system; sensitive to fuel quality.',
+    description: 'Sensed absolute fuel rail pressure from the high-pressure fuel rail sensor (FRP sensor). Used by the ECM for closed-loop fuel pressure control via the PCV solenoid. HP4 high-pressure pump system; sensitive to fuel quality and filter condition.',
     normalMin: 3000,
     normalMax: 26000,
     warnMin: 1500,
@@ -59,7 +59,7 @@ export const ECU_PARAMETERS: Record<string, EcuParameter> = {
     internalName: 'VeFCBR_p_FuelRailRequest',
     displayName: 'Fuel Rail Pressure (Desired)',
     unit: 'psi',
-    description: 'ECM-commanded fuel rail pressure target. Calculated based on engine load, RPM, and fuel quantity demand tables. The PCV solenoid duty cycle is modulated to achieve this target.',
+    description: 'ECM-commanded fuel rail pressure target. Calculated based on engine load, RPM, and fuel quantity demand tables. The HP4 pump PCV solenoid duty cycle is modulated to achieve this target.',
     normalMin: 3000,
     normalMax: 26000,
     category: 'fuel_rail',
@@ -258,10 +258,10 @@ export const DTC_DEFINITIONS: DtcDefinition[] = [
     thresholds: 'Actual FRP ~1,000–2,000+ PSI below commanded (or absolute <5,000 PSI under load) for sustained seconds',
     enableCriteria: 'Runs continuously above idle; no active related DTCs required for some conditions',
     causes: [
-      'Contaminated or bad fuel quality (Denso CP4.2 system is more sensitive than older Bosch)',
+      'Contaminated or bad fuel quality (HP4 pump is sensitive to clean, lubricated diesel fuel)',
       'Clogged fuel filter (replace every 15–20k miles)',
       'Weak or failing lift pump',
-      'Failing Denso high-pressure CP4.2 pump',
+      'Failing HP4 high-pressure pump',
       'Leaking or worn fuel injectors',
       'Wiring or connector corrosion on rail pressure sensors (very common)',
       'Air in fuel lines',
@@ -688,12 +688,12 @@ export const DTC_DEFINITIONS: DtcDefinition[] = [
     severity: 'warning',
     description: 'Fuel pressure regulator 1 is commanding maximum flow but pressure is still too low. Indicates the high-pressure pump may be worn or the regulator is stuck.',
     causes: [
-      'Worn high-pressure pump (CP4.2)',
+      'Worn HP4 high-pressure pump',
       'Stuck fuel pressure regulator',
       'Severe fuel contamination',
     ],
     remedies: [
-      'Evaluate high-pressure pump output',
+      'Evaluate HP4 high-pressure pump output',
       'Check fuel quality and filter condition',
       'Replace pump or regulator as indicated',
     ],
@@ -748,12 +748,12 @@ export const L5P_SPECS = {
     bore: '103 mm (4.06 in)',
     stroke: '99 mm (3.90 in)',
     compressionRatio: '15.0:1',
-    injectionSystem: 'Denso CP4.2 High-Pressure Common Rail',
+    injectionSystem: 'Bosch HP4 High-Pressure Common Rail (4-piston design)',
     maxRailPressure: '29,000 psi (200 MPa)',
     turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
     intercooler: 'Air-to-Air Charge Air Cooler (CAC)',
     aftertreatment: 'DPF + SCR (DEF) + DOC',
-    ecuPart: 'ECM_E41 Series_11',
+    ecuPart: 'GM ECM Series 11 (E41)',
   },
   performance: {
     stockHp: 445,
@@ -781,7 +781,7 @@ export const L5P_SPECS = {
     dpfServiceRegen_pct: 140,
   },
   subsystems: {
-    FRPR: 'Fuel Rail Pressure Regulation — Closed-loop control of high-pressure fuel rail via PCV solenoid. The Denso CP4.2 pump generates up to 29,000 psi. The PCV (Pressure Control Valve) modulates flow back to the low-pressure side. The L5P Denso system is more sensitive to fuel quality than older Bosch systems.',
+    FRPR: 'Fuel Rail Pressure Regulation — Closed-loop control of high-pressure fuel rail via PCV solenoid. The HP4 (Bosch 4-piston) pump generates up to 29,000 psi. The PCV (Pressure Control Valve) modulates flow back to the low-pressure side. The HP4 is the standard high-pressure pump on the L5P Duramax.',
     BSTR: 'Boost Pressure Regulation — Variable Geometry Turbocharger (VGT) with electronically controlled vane position. The ECM uses a PID controller comparing MAP sensor reading to the boost pressure target table. VGT position 0% = open (low boost), 100% = closed (max boost).',
     EGTR: 'Exhaust Gas Temperature Monitoring — Up to 5 EGT sensors in the exhaust path (pre-turbo, post-turbo, DPF upstream/downstream, SCR). The ECM uses these for aftertreatment control and engine protection. Cold start: all sensors should read near-ambient.',
     MAFR: 'Mass Airflow Regulation — Hot-film MAF sensor. Normal idle MAF with clean filter: 17–18 g/s. The ECM compares two MAF signals for rationality diagnostics. Short-trip idling with EGR builds soot on the sensor quickly.',

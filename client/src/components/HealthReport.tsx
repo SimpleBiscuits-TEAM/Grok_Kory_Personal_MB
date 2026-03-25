@@ -279,6 +279,46 @@ export default function HealthReport({ report }: HealthReportProps) {
         </CardContent>
       </Card>
 
+      {/* ── DIAGNOSTIC FAULT SUMMARY (only shown when faults detected) ──── */}
+      {report.diagnosticSummary.anyFaultDetected && (
+        <Card className="border-2 border-red-200 bg-red-50">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+              <CardTitle className="text-lg text-red-800">Fault Code Summary</CardTitle>
+              <Badge className="bg-red-100 text-red-800 ml-auto">
+                {report.diagnosticSummary.detectedCodes.length} Fault{report.diagnosticSummary.detectedCodes.length > 1 ? 's' : ''} Detected
+              </Badge>
+            </div>
+            <CardDescription className="text-red-700">
+              The following conditions were detected in the datalog. Use the Diagnostic Code Lookup below for full remedies.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {report.diagnosticSummary.p0087Status.includes('DETECTED') && (
+                <FaultItem code="P0087" status={report.diagnosticSummary.p0087Status} />
+              )}
+              {report.diagnosticSummary.p0088Status.includes('DETECTED') && (
+                <FaultItem code="P0088" status={report.diagnosticSummary.p0088Status} />
+              )}
+              {report.diagnosticSummary.p0299Status.includes('DETECTED') && (
+                <FaultItem code="P0299" status={report.diagnosticSummary.p0299Status} />
+              )}
+              {(report.diagnosticSummary.egtStatus.includes('DETECTED') || report.diagnosticSummary.egtStatus.includes('WARNING')) && (
+                <FaultItem code="EGT" status={report.diagnosticSummary.egtStatus} />
+              )}
+              {report.diagnosticSummary.p0101Status.includes('DETECTED') && (
+                <FaultItem code="P0101" status={report.diagnosticSummary.p0101Status} />
+              )}
+              {(report.diagnosticSummary.converterSlipStatus.includes('DETECTED') || report.diagnosticSummary.converterSlipStatus.includes('WARNING')) && (
+                <FaultItem code="TCC Slip" status={report.diagnosticSummary.converterSlipStatus} />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ── RECOMMENDATIONS ───────────────────────────────────────────────── */}
       <Card className="bg-blue-50 border-blue-200">
         <CardHeader>
@@ -322,11 +362,14 @@ function SystemScoreCard({ title, score, status }: { title: string; score: numbe
 }
 
 function StatusItem({ label, status }: { label: string; status: string }) {
-  const isGood = status.includes('✓') || status.toLowerCase().includes('normal') || status.toLowerCase().includes('optimal');
+  const isNotLogged = status.startsWith('—');
+  const isGood = !isNotLogged && (status.includes('✓') || status.toLowerCase().includes('normal') || status.toLowerCase().includes('optimal'));
   const isWarn = status.includes('⚠') || status.toLowerCase().includes('warning');
   return (
     <div className="flex items-start gap-2">
-      {isGood ? (
+      {isNotLogged ? (
+        <span className="w-4 h-4 shrink-0 mt-0.5 text-gray-400 text-sm font-bold">—</span>
+      ) : isGood ? (
         <CheckCircle className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
       ) : isWarn ? (
         <AlertTriangle className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
@@ -334,8 +377,29 @@ function StatusItem({ label, status }: { label: string; status: string }) {
         <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
       )}
       <div>
-        <div className="text-sm font-semibold">{label}</div>
-        <div className="text-xs text-gray-600">{status}</div>
+        <div className={`text-sm font-semibold ${isNotLogged ? 'text-gray-400' : ''}`}>{label}</div>
+        <div className={`text-xs ${isNotLogged ? 'text-gray-400 italic' : 'text-gray-600'}`}>{status}</div>
+      </div>
+    </div>
+  );
+}
+
+function FaultItem({ code, status }: { code: string; status: string }) {
+  const isCritical = status.includes('✗');
+  return (
+    <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+      isCritical ? 'bg-red-100 border-red-300' : 'bg-yellow-50 border-yellow-300'
+    }`}>
+      {isCritical ? (
+        <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+      ) : (
+        <AlertTriangle className="w-4 h-4 text-yellow-600 shrink-0 mt-0.5" />
+      )}
+      <div>
+        <div className={`text-sm font-bold font-mono ${isCritical ? 'text-red-800' : 'text-yellow-800'}`}>{code}</div>
+        <div className={`text-xs mt-0.5 ${isCritical ? 'text-red-700' : 'text-yellow-700'}`}>
+          {status.replace('✗ DETECTED — ', '').replace('⚠ WARNING — ', '')}
+        </div>
       </div>
     </div>
   );

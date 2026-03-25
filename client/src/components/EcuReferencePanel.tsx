@@ -1,7 +1,7 @@
 /**
  * Engine Reference Panel
  * Displays Duramax L5P engine specifications, parameter definitions,
- * and DTC descriptions sourced from the ECM_E41 Series_11 calibration database.
+ * and DTC descriptions sourced from GM OBD documentation and engine management data.
  */
 
 import { useState } from 'react';
@@ -215,7 +215,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           <div>
             <CardTitle className="text-base font-bold text-gray-900">Engine Reference Database</CardTitle>
             <p className="text-xs text-gray-500 mt-0.5">
-              ECM_E41 Series_11 · 2017–2023 Duramax L5P · Cross-referenced with GM TechLink &amp; TSBs
+              GM OBD Documentation · 2017–2023 Duramax L5P · Cross-referenced with GM TechLink &amp; TSBs
             </p>
           </div>
         </div>
@@ -309,7 +309,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
               </div>
               <p className="text-xs text-blue-700 leading-relaxed">
                 All parameter definitions, operating limits, and diagnostic thresholds are derived from the
-                Duramax ECM calibration database (ECM_E41 Series_11), cross-referenced with official GM TechLink
+                Duramax engine management database, cross-referenced with official GM TechLink
                 bulletins, GDS2 service data, TSBs, and real-world scan logs from DuramaxForum. Thresholds
                 may vary slightly by calibration year and software update.
               </p>
@@ -343,7 +343,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           {/* SUBSYSTEMS TAB */}
           <TabsContent value="subsystems" className="p-4 mt-0">
             <p className="text-xs text-gray-500 mb-3">
-              ECU software subsystem descriptions from the engine management calibration database.
+              ECU software subsystem descriptions from the Duramax engine management system.
             </p>
             <div className="space-y-3">
               {Object.entries(L5P_SPECS.subsystems).map(([key, desc]) => (
