@@ -322,21 +322,31 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
   const peakTorque = dynoData.length ? dynoData.reduce((max, d) => (d.torque as number) > (max.torque as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
   const maxY = dynoData.length ? Math.max(...dynoData.map(d => Math.max(d.hp as number, d.torque as number)), 500) * 1.12 : 700;
 
-  // Build a unified right-axis domain across all selected PIDs
+  // Build per-PID axis domains (each PID gets its own right Y-axis)
   const hasPids = activePidDefs.length > 0;
-  const allPidValues: number[] = [];
-  for (const pidDef of activePidDefs) {
-    dynoData.forEach((d: any) => {
-      const v = d[`pid_${pidDef.key as string}`];
-      if (v != null) allPidValues.push(v);
-    });
-  }
-  const pidMin = allPidValues.length ? Math.min(...allPidValues) : 0;
-  const pidMax = allPidValues.length ? Math.max(...allPidValues) : 100;
-  // If all selected PIDs share the same domain hint, use it; otherwise auto-scale
-  const sharedDomain = activePidDefs.length === 1 && activePidDefs[0].domain
-    ? activePidDefs[0].domain
-    : ([Math.max(0, pidMin - (pidMax - pidMin) * 0.1), pidMax + (pidMax - pidMin) * 0.15] as [number, number]);
+  const pidAxisDomains = useMemo(() => {
+    const domains: Record<string, [number, number]> = {};
+    for (const pidDef of activePidDefs) {
+      if (pidDef.domain) {
+        domains[pidDef.key as string] = pidDef.domain;
+      } else {
+        const vals = dynoData
+          .map((d: any) => d[`pid_${pidDef.key as string}`])
+          .filter((v: any) => v != null) as number[];
+        if (vals.length) {
+          const mn = Math.min(...vals);
+          const mx = Math.max(...vals);
+          const pad = (mx - mn) * 0.15 || mx * 0.15 || 1;
+          domains[pidDef.key as string] = [Math.max(0, mn - pad), mx + pad];
+        } else {
+          domains[pidDef.key as string] = [0, 100];
+        }
+      }
+    }
+    return domains;
+  }, [activePidDefs, dynoData]);
+  // Right margin grows with number of PID axes (60px each)
+  const rightMargin = hasPids ? Math.max(60, activePidDefs.length * 60) : 40;
 
   if (dynoData.length < 3) {
     return (
@@ -548,7 +558,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       {/* Chart */}
       <div style={{ height: fullscreen ? 'calc(100vh - 260px)' : 360, flex: fullscreen ? '1 1 auto' : undefined }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={dynoData} margin={{ top: 10, right: hasPids ? 60 : 40, bottom: 30, left: 10 }}>
+          <ComposedChart data={dynoData} margin={{ top: 10, right: rightMargin, bottom: 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
@@ -574,26 +584,39 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
               domain={[0, maxY]}
               label={{ value: 'HORSEPOWER', angle: -90, position: 'insideLeft', offset: 14, fill: '#ff4d00', fontSize: 10, fontFamily: 'monospace' }}
             />
-            <YAxis
-              yAxisId="right"
-              orientation="right"
-              stroke="#333"
-              tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
-              domain={hasPids ? sharedDomain : [0, maxY]}
-              label={{
-                value: hasPids
-                  ? activePidDefs.length === 1
-                    ? `${activePidDefs[0].label.toUpperCase()} (${activePidDefs[0].unit})`
-                    : 'PID OVERLAY'
-                  : 'TORQUE (LB·FT)',
-                angle: 90,
-                position: 'insideRight',
-                offset: 14,
-                fill: hasPids ? (activePidDefs[0]?.color ?? '#aaa') : '#00c8ff',
-                fontSize: 10,
-                fontFamily: 'monospace',
-              }}
-            />
+            {/* Torque axis (shown only when no PIDs selected) */}
+            {!hasPids && (
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                stroke="#333"
+                tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
+                domain={[0, maxY]}
+                label={{ value: 'TORQUE (LB·FT)', angle: 90, position: 'insideRight', offset: 14, fill: '#00c8ff', fontSize: 10, fontFamily: 'monospace' }}
+              />
+            )}
+            {/* One Y-axis per selected PID, offset to the right */}
+            {hasPids && activePidDefs.map((pidDef, idx) => (
+              <YAxis
+                key={`yaxis_${pidDef.key as string}`}
+                yAxisId={`pid_axis_${pidDef.key as string}`}
+                orientation="right"
+                stroke={pidDef.color}
+                tick={{ fill: pidDef.color, fontSize: 9, fontFamily: 'monospace' }}
+                domain={pidAxisDomains[pidDef.key as string] ?? [0, 100]}
+                width={55}
+                tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v.toFixed(0)}
+                label={{
+                  value: `${pidDef.label} (${pidDef.unit})`,
+                  angle: 90,
+                  position: 'insideRight',
+                  offset: idx * 60 + 14,
+                  fill: pidDef.color,
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                }}
+              />
+            ))}
             <Tooltip
               content={(props: any) => {
                 const { active, payload, label } = props;
@@ -638,11 +661,11 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
                 stroke="#00c8ff" strokeWidth={2.5} fill="url(#torqueGrad)"
                 dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
             )}
-            {/* Render one Line per selected PID */}
+            {/* Render one Line per selected PID, each on its own axis */}
             {activePidDefs.map(pidDef => (
               <Line
                 key={pidDef.key as string}
-                yAxisId="right"
+                yAxisId={`pid_axis_${pidDef.key as string}`}
                 type="monotone"
                 dataKey={`pid_${pidDef.key as string}`}
                 stroke={pidDef.color}

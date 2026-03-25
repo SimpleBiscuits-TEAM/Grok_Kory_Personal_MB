@@ -202,16 +202,18 @@ function checkLowRailPressure(
     }
   }
 
-  // Check for relief valve issue
+   // Check for relief valve issue
+  // Exclude decel events: during engine braking, desired stays high while actual
+  // drops to 12k-15k range naturally — this is NOT a relief valve fault.
   if (desired.length > 0) {
     const avgDesired = desired.reduce((a, b) => a + b) / desired.length;
     if (avgDesired > 25000) {
       let lowPressureCount = 0;
       let consecutiveLowCount = 0;
       const minConsecutive = 2 * 10; // 2 seconds
-
       for (let i = 0; i < actual.length; i++) {
-        if (actual[i] >= 12000 && actual[i] <= 15000) {
+        const decel = i >= 3 && (rpmArr[i - 3] - rpmArr[i]) > 90;
+        if (actual[i] >= 12000 && actual[i] <= 15000 && !decel) {
           consecutiveLowCount++;
           if (consecutiveLowCount >= minConsecutive) {
             lowPressureCount++;
