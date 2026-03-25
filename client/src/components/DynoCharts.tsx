@@ -960,52 +960,52 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
 MafFaultChart.displayName = 'MafFaultChart';
 
 // ─── BOOST EFFICIENCY CHART ───────────────────────────────────────────────────
-// Scatter plot: X = Turbo Vane Position (%), Y = Boost Pressure (PSIG)
-// Color-coded by RPM band to show how efficiently the VGT is building boost.
+// Line graph: X = RPM, Left Y = Boost PSIG (actual + desired), Right Y = Vane % (actual + desired)
+// Shows how efficiently the VGT builds boost across the RPM range.
 interface BoostEfficiencyProps {
   data: ProcessedMetrics;
 }
 
 export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyProps>(({ data }, ref) => {
-  const hasData = data.boost.some(v => v > 0) && data.turboVanePosition.some(v => v > 0);
+  const hasBoost = data.boost.some(v => v > 0);
+  const hasVane = data.turboVanePosition.some(v => v > 0);
+  const hasData = hasBoost || hasVane;
 
+  // Bin all 4 channels by RPM bucket (100 RPM bins), only above 600 RPM
   const chartData = useMemo(() => {
     if (!hasData) return [];
-    const step = Math.ceil(data.boost.length / 800);
-    const points: Array<{ vane: number; boost: number; rpm: number; fill: string }> = [];
-    for (let i = 0; i < data.boost.length; i += step) {
-      const boost = data.boost[i];
-      const vane = data.turboVanePosition[i];
-      const rpm = data.rpm[i] || 0;
-      if (boost > 0 && vane > 0 && rpm > 600) {
-        // Color by RPM band
-        let fill = '#555';
-        if (rpm < 1500)       fill = '#3b82f6'; // blue  — idle/low
-        else if (rpm < 2000)  fill = '#22d3ee'; // cyan
-        else if (rpm < 2500)  fill = '#34d399'; // green
-        else if (rpm < 3000)  fill = '#a3e635'; // lime
-        else if (rpm < 3500)  fill = '#facc15'; // yellow
-        else if (rpm < 4000)  fill = '#fb923c'; // orange
-        else                  fill = '#f87171'; // red — high RPM
-        points.push({ vane, boost, rpm: Math.round(rpm), fill });
-      }
+    const bucketSize = 100;
+    type Bucket = { boostActualSum: number; boostDesiredSum: number; vaneActualSum: number; vaneDesiredSum: number; count: number };
+    const map: Record<number, Bucket> = {};
+    for (let i = 0; i < data.rpm.length; i++) {
+      const rpm = data.rpm[i];
+      if (!rpm || rpm < 600) continue;
+      const bucket = Math.round(rpm / bucketSize) * bucketSize;
+      if (!map[bucket]) map[bucket] = { boostActualSum: 0, boostDesiredSum: 0, vaneActualSum: 0, vaneDesiredSum: 0, count: 0 };
+      map[bucket].boostActualSum += data.boost[i] || 0;
+      map[bucket].boostDesiredSum += data.boostDesired[i] || 0;
+      map[bucket].vaneActualSum += data.turboVanePosition[i] || 0;
+      map[bucket].vaneDesiredSum += data.turboVaneDesired[i] || 0;
+      map[bucket].count++;
     }
-    return points;
-  }, [data, hasData]);
+    return Object.entries(map)
+      .map(([rpmStr, b]) => ({
+        rpm: Number(rpmStr),
+        boostActual: b.count > 0 ? b.boostActualSum / b.count : null,
+        boostDesired: b.count > 0 && data.boostDesired.some(v => v > 0) ? b.boostDesiredSum / b.count : null,
+        vaneActual: b.count > 0 && hasVane ? b.vaneActualSum / b.count : null,
+        vaneDesired: b.count > 0 && data.turboVaneDesired.some(v => v > 0) ? b.vaneDesiredSum / b.count : null,
+      }))
+      .sort((a, b) => a.rpm - b.rpm);
+  }, [data, hasData, hasVane]);
 
-  const maxBoost = chartData.length ? Math.max(...chartData.map(d => d.boost)) : 50;
-  const yMax = Math.ceil(maxBoost * 1.1 / 5) * 5;
+  const maxBoost = chartData.length
+    ? Math.max(...chartData.map(d => Math.max(d.boostActual ?? 0, d.boostDesired ?? 0)), 10)
+    : 50;
+  const boostYMax = Math.ceil(maxBoost * 1.12 / 5) * 5;
 
-  // RPM band legend entries
-  const rpmBands = [
-    { label: '<1500', color: '#3b82f6' },
-    { label: '1500-2000', color: '#22d3ee' },
-    { label: '2000-2500', color: '#34d399' },
-    { label: '2500-3000', color: '#a3e635' },
-    { label: '3000-3500', color: '#facc15' },
-    { label: '3500-4000', color: '#fb923c' },
-    { label: '>4000', color: '#f87171' },
-  ];
+  const hasDesiredBoost = data.boostDesired.some(v => v > 0);
+  const hasDesiredVane = data.turboVaneDesired.some(v => v > 0);
 
   return (
     <div ref={ref} style={{
@@ -1021,7 +1021,7 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
           BOOST EFFICIENCY
         </div>
         <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
-          Actual Boost (PSIG) vs Turbo Vane Position (%) — color coded by RPM band
+          Actual &amp; Desired Boost (PSIG) + Vane Position (%) vs Engine RPM — binned averages
         </div>
       </div>
 
@@ -1031,85 +1031,122 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
         </div>
       ) : (
         <>
-          {/* RPM Band Legend */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-            {rpmBands.map(b => (
-              <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: b.color, flexShrink: 0 }} />
-                <span style={{ color: '#666', fontFamily: 'monospace', fontSize: 10 }}>{b.label} RPM</span>
+          {/* Legend */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
+            {[
+              { color: '#a78bfa', label: 'Boost Actual (PSIG)', show: hasBoost },
+              { color: '#7c3aed', label: 'Boost Desired (PSIG)', show: hasDesiredBoost, dashed: true },
+              { color: '#fb923c', label: 'Vane Actual (%)', show: hasVane },
+              { color: '#fbbf24', label: 'Vane Desired (%)', show: hasDesiredVane, dashed: true },
+            ].filter(l => l.show).map(l => (
+              <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="22" height="8">
+                  <line x1="0" y1="4" x2="22" y2="4"
+                    stroke={l.color} strokeWidth="2"
+                    strokeDasharray={l.dashed ? '4 3' : undefined} />
+                </svg>
+                <span style={{ color: '#888', fontFamily: 'monospace', fontSize: 10 }}>{l.label}</span>
               </div>
             ))}
           </div>
 
-          <div style={{ height: 340 }}>
+          <div style={{ height: 360 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 10, right: 30, bottom: 30, left: 10 }}>
+              <ComposedChart data={chartData} margin={{ top: 10, right: 55, bottom: 30, left: 10 }}>
                 <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
                 <XAxis
-                  dataKey="vane"
-                  type="number"
-                  domain={[0, 100]}
+                  dataKey="rpm"
                   stroke="#333"
                   tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                  tickFormatter={(v) => `${v}%`}
-                  label={{ value: 'VANE POSITION (%)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
+                  tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
+                  label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
                 />
+                {/* Left Y: Boost PSIG */}
                 <YAxis
-                  dataKey="boost"
-                  type="number"
-                  domain={[0, yMax]}
+                  yAxisId="boost"
+                  orientation="left"
                   stroke="#333"
                   tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+                  domain={[0, boostYMax]}
                   label={{ value: 'BOOST (PSIG)', angle: -90, position: 'insideLeft', offset: 14, fill: '#a78bfa', fontSize: 10, fontFamily: 'monospace' }}
                 />
-                <ZAxis range={[12, 12]} />
+                {/* Right Y: Vane % */}
+                {hasVane && (
+                  <YAxis
+                    yAxisId="vane"
+                    orientation="right"
+                    stroke="#333"
+                    tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+                    domain={[0, 100]}
+                    tickFormatter={(v) => `${v}%`}
+                    label={{ value: 'VANE POS (%)', angle: 90, position: 'insideRight', offset: 14, fill: '#fb923c', fontSize: 10, fontFamily: 'monospace' }}
+                  />
+                )}
                 <Tooltip
-                  cursor={{ strokeDasharray: '3 3', stroke: '#333' }}
-                  content={({ active, payload }: any) => {
+                  content={({ active, payload, label }: any) => {
                     if (!active || !payload?.length) return null;
-                    const d = payload[0]?.payload;
                     return (
                       <div style={{
-                        background: 'rgba(13,15,20,0.97)',
-                        border: '1px solid #a78bfa',
-                        borderRadius: 6,
-                        padding: '8px 12px',
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: '#e0e0e0',
+                        background: 'rgba(13,15,20,0.97)', border: '1px solid #a78bfa',
+                        borderRadius: 6, padding: '10px 14px', fontFamily: 'monospace', fontSize: 11, color: '#e0e0e0',
                       }}>
-                        <div style={{ color: '#a78bfa', fontWeight: 'bold', marginBottom: 4 }}>{d?.rpm} RPM</div>
-                        <div>Vane: <strong>{d?.vane?.toFixed(1)}%</strong></div>
-                        <div>Boost: <strong>{d?.boost?.toFixed(1)} PSIG</strong></div>
+                        <div style={{ color: '#a78bfa', fontWeight: 'bold', marginBottom: 6 }}>
+                          {label ? `${Number(label).toFixed(0)} RPM` : ''}
+                        </div>
+                        {payload.map((p: any, i: number) =>
+                          p.value != null && (
+                            <div key={i} style={{ color: p.color, marginBottom: 2 }}>
+                              {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                                {typeof p.value === 'number' ? p.value.toFixed(1) : p.value}
+                              </span>
+                            </div>
+                          )
+                        )}
                       </div>
                     );
                   }}
                 />
-                {/* Efficiency reference lines */}
-                <ReferenceLine y={maxBoost * 0.9} stroke="#a78bfa" strokeDasharray="6 3" strokeOpacity={0.4}
-                  label={{ value: '90% MAX BOOST', position: 'insideTopRight', fill: '#a78bfa', fontSize: 9, fontFamily: 'monospace' }} />
-                <Scatter
-                  data={chartData}
-                  fill="#a78bfa"
-                  shape={(props: any) => {
-                    const { cx, cy, payload } = props;
-                    return <circle cx={cx} cy={cy} r={3} fill={payload.fill} fillOpacity={0.75} />;
-                  }}
-                />
-              </ScatterChart>
+                {/* Boost Actual */}
+                {hasBoost && (
+                  <Line yAxisId="boost" type="monotone" dataKey="boostActual"
+                    stroke="#a78bfa" strokeWidth={2.5} dot={false} isAnimationActive={false}
+                    name="Boost Actual (PSIG)" connectNulls />
+                )}
+                {/* Boost Desired */}
+                {hasDesiredBoost && (
+                  <Line yAxisId="boost" type="monotone" dataKey="boostDesired"
+                    stroke="#7c3aed" strokeWidth={1.5} strokeDasharray="6 3"
+                    dot={false} isAnimationActive={false}
+                    name="Boost Desired (PSIG)" connectNulls />
+                )}
+                {/* Vane Actual */}
+                {hasVane && (
+                  <Line yAxisId="vane" type="monotone" dataKey="vaneActual"
+                    stroke="#fb923c" strokeWidth={2} dot={false} isAnimationActive={false}
+                    name="Vane Actual (%)" connectNulls />
+                )}
+                {/* Vane Desired */}
+                {hasDesiredVane && (
+                  <Line yAxisId="vane" type="monotone" dataKey="vaneDesired"
+                    stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="6 3"
+                    dot={false} isAnimationActive={false}
+                    name="Vane Desired (%)" connectNulls />
+                )}
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
           {/* Stats row */}
-          <div style={{ display: 'flex', gap: 20, marginTop: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
             {[
-              { label: 'Peak Boost', value: `${maxBoost.toFixed(1)} PSIG` },
-              { label: 'Max Vane Pos', value: `${Math.max(...chartData.map(d => d.vane)).toFixed(1)}%` },
-              { label: 'Data Points', value: chartData.length.toLocaleString() },
-            ].map(s => (
+              { label: 'Peak Boost Actual', value: `${Math.max(...chartData.map(d => d.boostActual ?? 0)).toFixed(1)} PSIG`, color: '#a78bfa' },
+              hasDesiredBoost ? { label: 'Peak Boost Desired', value: `${Math.max(...chartData.map(d => d.boostDesired ?? 0)).toFixed(1)} PSIG`, color: '#7c3aed' } : null,
+              hasVane ? { label: 'Max Vane Actual', value: `${Math.max(...chartData.map(d => d.vaneActual ?? 0)).toFixed(1)}%`, color: '#fb923c' } : null,
+              hasDesiredVane ? { label: 'Max Vane Desired', value: `${Math.max(...chartData.map(d => d.vaneDesired ?? 0)).toFixed(1)}%`, color: '#fbbf24' } : null,
+            ].filter(Boolean).map((s: any) => (
               <div key={s.label} style={{ fontFamily: 'monospace', fontSize: 11 }}>
                 <span style={{ color: '#444' }}>{s.label}: </span>
-                <span style={{ color: '#a78bfa', fontWeight: 'bold' }}>{s.value}</span>
+                <span style={{ color: s.color, fontWeight: 'bold' }}>{s.value}</span>
               </div>
             ))}
           </div>

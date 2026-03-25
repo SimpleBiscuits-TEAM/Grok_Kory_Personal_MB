@@ -17,6 +17,7 @@ export interface DuramaxData {
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
+  turboVaneDesired: number[];
   exhaustGasTemp: number[];
   converterSlip: number[];
   converterDutyCycle: number[];
@@ -44,6 +45,7 @@ export interface ProcessedMetrics {
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
+  turboVaneDesired: number[];
   exhaustGasTemp: number[];
   converterSlip: number[];
   converterDutyCycle: number[];
@@ -135,6 +137,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const pcvIdx = getColumnIndex(['PCV', 'Pressure Regulator']);
   const boostDesiredIdx = getColumnIndex(['Desired Boost']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position', 'Turbo A Vane Position']);
+  const turboVaneDesiredIdx = getColumnIndex(['Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo A Vane Desired']);
   const egtIdx = getColumnIndex(['Exhaust Gas Temperature', 'EGT']);
   const converterSlipIdx = getColumnIndex(['Converter Slip', 'TCM.TCSLIP']);
   const converterDutyIdx = getColumnIndex(['Converter Duty', 'Converter PWM']);
@@ -163,6 +166,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const pcvDutyCycle: number[] = [];
   const boostDesired: number[] = [];
   const turboVanePosition: number[] = [];
+  const turboVaneDesired: number[] = [];
   const exhaustGasTemp: number[] = [];
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
@@ -197,6 +201,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
     boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
@@ -228,6 +233,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     pcvDutyCycle,
     boostDesired,
     turboVanePosition,
+    turboVaneDesired,
     exhaustGasTemp,
     converterSlip,
     converterDutyCycle,
@@ -278,6 +284,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const pcvIdx = getColumnIndex(['ECM.FRPVDC']);
   const boostDesiredIdx = getColumnIndex(['ECM.DESTQ']);
   const turboVaneIdx = getColumnIndex(['ECM.TCVPOS']);
+  const turboVaneDesiredIdx = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD', 'Desired Turbo Vane Position']);
   const egtIdx = getColumnIndex(['ECM.EGTS1', 'ECM.EGTS']);
   const converterSlipIdx = getColumnIndex(['TCM.TCSLIP']);
   const converterDutyIdx = getColumnIndex(['TCM.TCCPCSCP']);
@@ -305,6 +312,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const pcvDutyCycle: number[] = [];
   const boostDesired: number[] = [];
   const turboVanePosition: number[] = [];
+  const turboVaneDesired: number[] = [];
   const exhaustGasTemp: number[] = [];
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
@@ -339,6 +347,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
     boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
@@ -370,6 +379,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     pcvDutyCycle,
     boostDesired,
     turboVanePosition,
+    turboVaneDesired,
     exhaustGasTemp,
     converterSlip,
     converterDutyCycle,
@@ -424,6 +434,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const mapCommandedIdx = getColumnIndex(['MAP Commanded']);
   const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
+  const turboVaneDesiredIdx = getColumnIndex(['Turbo Vane Position Desired', 'Desired Turbo Vane Position', 'Turbo Vane Desired']);
   const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT (DOC) Inlet', 'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
   const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
@@ -450,6 +461,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const pcvDutyCycle: number[] = [];
   const boostDesired: number[] = [];
   const turboVanePosition: number[] = [];
+  const turboVaneDesired: number[] = [];
   const exhaustGasTemp: number[] = [];
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
@@ -514,6 +526,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     const mapCmdVal = mapCommandedIdx !== -1 ? values[mapCommandedIdx] : 0;
     boostDesired.push(mapCmdVal > 0 ? Math.max(0, mapCmdVal - ambientVal) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
+    turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
@@ -545,6 +558,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     pcvDutyCycle,
     boostDesired,
     turboVanePosition,
+    turboVaneDesired,
     exhaustGasTemp,
     converterSlip,
     converterDutyCycle,
@@ -622,6 +636,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     pcvDutyCycle: rawData.pcvDutyCycle,
     boostDesired: rawData.boostDesired,
     turboVanePosition: rawData.turboVanePosition,
+    turboVaneDesired: rawData.turboVaneDesired,
     exhaustGasTemp: rawData.exhaustGasTemp,
     converterSlip: rawData.converterSlip,
     converterDutyCycle: rawData.converterDutyCycle,
@@ -659,6 +674,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     pcvDutyCycle: downsample(data.pcvDutyCycle),
     boostDesired: downsample(data.boostDesired),
     turboVanePosition: downsample(data.turboVanePosition),
+    turboVaneDesired: downsample(data.turboVaneDesired),
     exhaustGasTemp: downsample(data.exhaustGasTemp),
     converterSlip: downsample(data.converterSlip),
     converterDutyCycle: downsample(data.converterDutyCycle),

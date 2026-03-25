@@ -82,7 +82,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     const lowRailIssues = checkLowRailPressure(
       railPressureActual,
       railPressureDesired,
-      pcvDutyCycle
+      pcvDutyCycle,
+      rpm
     );
     issues.push(...lowRailIssues);
   }
@@ -146,34 +147,39 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
 
 /**
  * Check for Low Rail Pressure (P0087) - Updated thresholds
+ * Decel exclusion: skip samples where RPM is actively dropping (engine braking)
+ * to avoid false positives during lift-throttle events.
  */
 function checkLowRailPressure(
   actual: number[],
   desired: number[],
-  pcv: number[]
+  pcv: number[],
+  rpmArr: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   const threshold = 3000; // 3k psi offset
-  const minDuration = 5; // seconds (UPDATED from 2)
+  const minDuration = 5; // seconds
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
-
+  // Decel detection: look back 3 samples (0.3s) for a sustained RPM drop
+  const decelLookback = 3;
+  const decelRpmDropPerSample = 30; // >30 RPM drop per sample = decel
   let consecutiveViolations = 0;
-
   for (let i = 0; i < actual.length; i++) {
     const offset = desired[i] - actual[i];
-    if (offset > threshold) {
+    // Decel guard: if RPM is actively falling, skip this sample
+    const isDecel = i >= decelLookback &&
+      (rpmArr[i - decelLookback] - rpmArr[i]) > (decelRpmDropPerSample * decelLookback);
+    if (offset > threshold && !isDecel) {
       consecutiveViolations++;
-
       if (consecutiveViolations >= minSamples) {
         const pcvValue = pcv[i] || 0;
-
         if (pcvValue < 500) {
           issues.push({
             code: 'P0087-RAIL-MAXED',
             severity: 'critical',
             title: 'Low Rail Pressure - System Maxed Out',
-            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds. PCV duty cycle is ${pcvValue.toFixed(0)}mA (below 500mA threshold).`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds. PCV duty cycle is ${pcvValue.toFixed(0)}mA (below 500mA threshold). Deceleration events excluded.`,
             recommendation:
               'The fuel rail system is at maximum capacity. Check for fuel pump issues, fuel filter restrictions, or fuel line blockages. Consider upgrading the fuel system.',
           });
@@ -182,15 +188,15 @@ function checkLowRailPressure(
             code: 'P0087-RAIL-TUNING',
             severity: 'warning',
             title: 'Low Rail Pressure - Possible Tuning Issue',
-            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds. PCV duty cycle is ${pcvValue.toFixed(0)}mA (above 500mA threshold).`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds. PCV duty cycle is ${pcvValue.toFixed(0)}mA (above 500mA threshold). Deceleration events excluded.`,
             recommendation:
               'A tuning adjustment may resolve this issue. Contact your tuner to review fuel pressure calibration and PCV settings.',
           });
         }
-
         consecutiveViolations = 0;
       }
     } else {
+      // Reset counter on non-violation OR decel event
       consecutiveViolations = 0;
     }
   }
