@@ -10,7 +10,7 @@
  *  - EGT (Turbo Inlet):   Normal <1500°F  | Warning >1650°F for >5s | Sensor fault >1800°F
  *  - EGT (DOC Inlet):     Normal <900°F   | Warning >1000°F
  *  - MAF at idle:         Normal 2–6 lb/min
- *  - Boost:               Normal 0–50 PSI (L5P peaks ~48 PSI stock)
+ *  - Boost:               Normal 0–48 PSIG gauge (L5P peaks ~48 PSIG stock; atmospheric ~14.7 PSI subtracted)
  */
 
 import { ProcessedMetrics } from './dataProcessor';
@@ -195,15 +195,15 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
 
   if (boostVals.length > 0) {
     const maxBoost = Math.max(...boostVals);
-    // P0299 condition: high MAF (>55 lb/min) but low boost (<40 PSI) = likely boost leak
-    const highMafLowBoostCount = data.maf.filter((m, i) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 40).length;
+    // P0299 condition: high MAF (>55 lb/min) but low boost (<25 PSIG gauge) = likely boost leak
+    const highMafLowBoostCount = data.maf.filter((m, i) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 25).length;
 
     if (highMafLowBoostCount > 30) {
       turboStatus = '⚠ WARNING — Possible boost leak (high MAF, low boost pressure)';
       score -= 15;
       findings.push('High MAF with low boost pressure detected — perform boost leak test and inspect intake');
     } else {
-      findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSI, peak MAF ${maxMaf.toFixed(1)} lb/min`);
+      findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSIG, peak MAF ${maxMaf.toFixed(1)} lb/min`);
     }
   } else {
     findings.push(`Turbocharger data — peak MAF ${maxMaf.toFixed(1)} lb/min (boost channel not logged)`);

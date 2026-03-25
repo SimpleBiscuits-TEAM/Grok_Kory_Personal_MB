@@ -25,6 +25,7 @@ export interface DuramaxData {
   coolantTemp: number[];
   oilTemp: number[];
   transFluidTemp: number[];
+  barometricPressure: number[];
   timestamp: string;
   duration: number;
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
@@ -51,6 +52,7 @@ export interface ProcessedMetrics {
   coolantTemp: number[];
   oilTemp: number[];
   transFluidTemp: number[];
+  barometricPressure: number[];
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -141,6 +143,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temperature', 'ECT']);
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
   const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp', 'Trans Temp']);
+  const baroIdx = getColumnIndex(['Barometric Pressure', 'Baro Pressure', 'Ambient Pressure']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns: RPM, MAF, or Torque');
@@ -168,6 +171,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
+  const barometricPressure: number[] = [];
   
   for (let i = dataStart; i < lines.length; i++) {
     const line = lines[i];
@@ -201,6 +205,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
+    barometricPressure.push(baroIdx !== -1 ? values[baroIdx] : 14.7);
   }
   
   if (rpm.length === 0) {
@@ -231,6 +236,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     coolantTemp,
     oilTemp,
     transFluidTemp,
+    barometricPressure,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'hptuners',
@@ -280,6 +286,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const coolantTempIdx = getColumnIndex(['ECM.ECT', 'Engine Coolant Temp']);
   const oilTempIdx = getColumnIndex(['ECM.EOT', 'Engine Oil Temp']);
   const transFluidTempIdx = getColumnIndex(['TCM.TFT', 'Transmission Fluid Temp']);
+  const baroIdx = getColumnIndex(['ECM.BARO', 'Barometric Pressure', 'Baro']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns in EFILIVE format: ECM.RPM, ECM.MAF, or ECM.TQ_ACT');
@@ -306,6 +313,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
+  const barometricPressure: number[] = [];
   
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
@@ -339,6 +347,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
+    barometricPressure.push(baroIdx !== -1 ? values[baroIdx] : 14.7);
   }
   
   if (rpm.length === 0) {
@@ -369,6 +378,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     coolantTemp,
     oilTemp,
     transFluidTemp,
+    barometricPressure,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'efilive',
@@ -400,6 +410,8 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const timeIdx = getColumnIndex(['TIME']);
   const rpmIdx = getColumnIndex(['Engine RPM']);
   const mafIdx = getColumnIndex(['Mass Air Flow']);
+  // Use 'Boost Pressure' (gauge, PSIG) if available; fall back to MAP absolute
+  const boostGaugeIdx = getColumnIndex(['Boost Pressure']);
   const mapIdx = getColumnIndex(['Manifold Absolute Pressure']);
   const torqueIdx = getColumnIndex(['Torque ECU']);
   const hpIdx = getColumnIndex(['Horsepower ECU']);
@@ -408,7 +420,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
   const railDesiredIdx = getColumnIndex(['FRP Commanded']);
   const pcvIdx = -1; // Banks Power does not log PCV duty cycle — leave unmapped
-  const boostDesiredIdx = getColumnIndex(['MAP Commanded']);
+  // MAP Commanded is absolute (PSIA); subtract ambient to get gauge
+  const mapCommandedIdx = getColumnIndex(['MAP Commanded']);
+  const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
   const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT (DOC) Inlet', 'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
@@ -444,6 +458,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
+  const barometricPressure: number[] = [];
   
   // Banks Power CSV has 4 header rows:
   //   Row 0: column names (e.g. "FRP Commanded")
@@ -468,7 +483,15 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     
     rpm.push(values[rpmIdx] || 0);
     maf.push(values[mafIdx] || 0);
-    boost.push(mapIdx !== -1 ? values[mapIdx] : 0);
+    // Use Boost Pressure (gauge, PSIG) if available; otherwise subtract ambient from MAP
+    const ambientVal = ambientIdx !== -1 ? (values[ambientIdx] || 14.7) : 14.7;
+    if (boostGaugeIdx !== -1) {
+      boost.push(values[boostGaugeIdx]);
+    } else if (mapIdx !== -1) {
+      boost.push(Math.max(0, values[mapIdx] - ambientVal));
+    } else {
+      boost.push(0);
+    }
     
     // Banks Power provides actual torque and HP, not percentages
     // Convert torque to percentage if we have max torque reference
@@ -487,7 +510,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
     railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
-    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
+    // MAP Commanded is absolute (PSIA); subtract ambient to get gauge (PSIG)
+    const mapCmdVal = mapCommandedIdx !== -1 ? values[mapCommandedIdx] : 0;
+    boostDesired.push(mapCmdVal > 0 ? Math.max(0, mapCmdVal - ambientVal) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
@@ -497,6 +522,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
+    barometricPressure.push(ambientVal);
   }
   
   if (rpm.length === 0) {
@@ -527,6 +553,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     coolantTemp,
     oilTemp,
     transFluidTemp,
+    barometricPressure,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'bankspower',
@@ -603,6 +630,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     coolantTemp: rawData.coolantTemp,
     oilTemp: rawData.oilTemp,
     transFluidTemp: rawData.transFluidTemp,
+    barometricPressure: rawData.barometricPressure,
     stats,
     fileFormat: rawData.fileFormat,
   };
@@ -639,6 +667,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     coolantTemp: downsample(data.coolantTemp),
     oilTemp: downsample(data.oilTemp),
     transFluidTemp: downsample(data.transFluidTemp),
+    barometricPressure: downsample(data.barometricPressure),
   };
 }
 

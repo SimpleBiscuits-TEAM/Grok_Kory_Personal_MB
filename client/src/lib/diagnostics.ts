@@ -53,6 +53,30 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   const converterDutyCycle = data.converterDutyCycle || [];
   const converterPressure = data.converterPressure || [];
 
+  // Debug logging — helps trace false positives
+  if (railPressureActual.length > 0) {
+    const maxActual = Math.max(...railPressureActual);
+    const maxDesired = Math.max(...railPressureDesired);
+    const maxDelta = Math.max(...railPressureActual.map((a: number, i: number) => a - (railPressureDesired[i] || 0)));
+    console.log('[Diagnostics] Rail Pressure:', {
+      samples: railPressureActual.length,
+      maxActual: maxActual.toFixed(0),
+      maxDesired: maxDesired.toFixed(0),
+      maxDeltaHigh: maxDelta.toFixed(0),
+      format: data.fileFormat,
+    });
+  }
+  if (boostActual.length > 0) {
+    const maxBoost = Math.max(...boostActual);
+    const maxBoostDesired = Math.max(...boostDesired);
+    console.log('[Diagnostics] Boost Pressure:', {
+      samples: boostActual.length,
+      maxActual: maxBoost.toFixed(1),
+      maxDesired: maxBoostDesired.toFixed(1),
+      unit: 'PSIG (gauge)',
+    });
+  }
+
   // Check for Low Rail Pressure (P0087)
   if (railPressureActual.length > 0) {
     const lowRailIssues = checkLowRailPressure(
@@ -271,19 +295,17 @@ function checkHighRailPressure(
     }
   }
 
-  // Check idle condition
-  if (desired.length > 0) {
+    // Check idle condition — only when PCV data is actually logged (non-zero values present)
+  const hasPcvData = pcv.some((v) => v > 0);
+  if (desired.length > 0 && hasPcvData) {
     const idleIndices = desired
       .map((d, i) => (d < 5000 ? i : -1))
       .filter((i) => i !== -1);
-
     if (idleIndices.length > 50) {
       const idleActual = idleIndices.map((i) => actual[i]);
       const avgIdleActual = idleActual.reduce((a, b) => a + b) / idleActual.length;
-
       if (avgIdleActual >= 12000 && avgIdleActual <= 14000) {
         const avgIdlePcv = idleIndices.map((i) => pcv[i] || 0).reduce((a, b) => a + b) / idleIndices.length;
-
         if (avgIdlePcv < 1600) {
           issues.push({
             code: 'P0088-IDLE-PCV',
@@ -329,8 +351,8 @@ function checkLowBoostPressure(
         const mafFlow = maf[i] || 0;
         const currentRpm = rpm[i] || 0;
 
-        // Check conditions for boost leak
-        if (mafFlow > 55 && actual[i] < 40 && vanePos > 45) {
+        // Check conditions for boost leak (actual is in PSIG; 25 PSIG ≈ 40 PSIA)
+        if (mafFlow > 55 && actual[i] < 25 && vanePos > 45) {
           issues.push({
             code: 'P0299-BOOST-LEAK',
             severity: 'critical',

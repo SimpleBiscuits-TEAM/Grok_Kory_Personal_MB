@@ -294,15 +294,15 @@ export function StatsSummary({ data }: ChartProps) {
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <p className="text-sm text-gray-600 mb-1">Max Boost</p>
         <p className="text-2xl font-bold text-gray-900">
-          {stats.boostMax.toFixed(1)} psi
+          {stats.boostMax.toFixed(1)} <span className="text-base font-normal text-gray-500">PSIG</span>
         </p>
-        <p className="text-xs text-gray-500 mt-1">Peak HP/Torque shown in dyno chart</p>
+        <p className="text-xs text-gray-500 mt-1">Gauge pressure (above atmospheric)</p>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
         <p className="text-sm text-gray-600 mb-1">Session Duration</p>
         <p className="text-2xl font-bold text-gray-900">{durationMin} min</p>
-        <p className="text-xs text-gray-500 mt-1">Max Boost: {stats.boostMax.toFixed(1)} psi</p>
+        <p className="text-xs text-gray-500 mt-1">Max Boost: {stats.boostMax.toFixed(1)} PSIG</p>
       </div>
     </div>
   );

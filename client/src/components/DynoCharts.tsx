@@ -537,21 +537,21 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
                 tickFormatter={(v) => `${Number(v).toFixed(1)}m`}
                 label={{ value: 'TIME (min)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
               <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: 'BOOST PRESSURE (PSI)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
+                label={{ value: 'BOOST PRESSURE (PSIG)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
               <Tooltip content={<FaultTooltip xLabel="Time (min)" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
-                formatter={(v) => <span style={{ color: v === 'Desired PSI' ? '#44ff88' : v === 'Actual PSI' ? '#00c8ff' : '#ff2222' }}>{v}</span>} />
+                formatter={(v) => <span style={{ color: v === 'Desired PSIG' ? '#44ff88' : v === 'Actual PSIG' ? '#00c8ff' : '#ff2222' }}>{v}</span>} />
               {faultTimeMin > 0 && (
                 <ReferenceArea x1={faultTimeMin - 0.05} x2={faultTimeMax + 0.05}
                   fill="rgba(255,34,34,0.1)" stroke="#ff2222" strokeWidth={1.5} strokeDasharray="5 3"
                   label={{ value: '⚠ FAULT ZONE', position: 'insideTop', fill: '#ff4444', fontSize: 9, fontFamily: 'monospace' }} />
               )}
-              <ReferenceLine y={40} stroke="#ff9900" strokeDasharray="6 3"
-                label={{ value: 'MIN 40 PSI', position: 'insideTopRight', fill: '#ff9900', fontSize: 9, fontFamily: 'monospace' }} />
+              <ReferenceLine y={25} stroke="#ff9900" strokeDasharray="6 3"
+                label={{ value: 'BOOST LEAK THRESHOLD (25 PSIG)', position: 'insideTopRight', fill: '#ff9900', fontSize: 9, fontFamily: 'monospace' }} />
               <Line type="monotone" dataKey="desired" stroke="#44ff88" strokeWidth={2.5}
-                dot={false} isAnimationActive={false} name="Desired PSI" />
+                dot={false} isAnimationActive={false} name="Desired PSIG" />
               <Line type="monotone" dataKey="actual" stroke="#00c8ff" strokeWidth={2.5}
-                dot={false} isAnimationActive={false} name="Actual PSI" />
+                dot={false} isAnimationActive={false} name="Actual PSIG" />
               <Area type="monotone" dataKey="delta" stroke="none"
                 fill="url(#boostDeltaGrad)" isAnimationActive={false} name="Δ Underboost" />
             </ComposedChart>
