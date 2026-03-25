@@ -292,11 +292,11 @@ export function StatsSummary({ data }: ChartProps) {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <p className="text-sm text-gray-600 mb-1">Peak HP</p>
+        <p className="text-sm text-gray-600 mb-1">Max Boost</p>
         <p className="text-2xl font-bold text-gray-900">
-          {Math.max(stats.hpTorqueMax, stats.hpMafMax).toFixed(0)}
+          {stats.boostMax.toFixed(1)} psi
         </p>
-        <p className="text-xs text-gray-500 mt-1">Torque: {stats.hpTorqueMax.toFixed(0)} HP</p>
+        <p className="text-xs text-gray-500 mt-1">Peak HP/Torque shown in dyno chart</p>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">

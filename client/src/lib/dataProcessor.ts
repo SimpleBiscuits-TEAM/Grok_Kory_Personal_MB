@@ -445,9 +445,13 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
   
-  // Banks Power CSV has 3 header rows: column names (row 0), short names (row 1), units (row 2)
-  // Data starts at row 3 (index 3)
-  for (let i = 3; i < lines.length; i++) {
+  // Banks Power CSV has 4 header rows:
+  //   Row 0: column names (e.g. "FRP Commanded")
+  //   Row 1: hex addresses (e.g. "0x0144")
+  //   Row 2: short names (e.g. "FRPCMD")
+  //   Row 3: units (e.g. "PSIA") — was previously parsed as data causing zero-value contamination
+  // Data starts at row 4 (index 4)
+  for (let i = 4; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
     
