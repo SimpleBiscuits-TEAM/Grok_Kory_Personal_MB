@@ -196,8 +196,8 @@ function checkLowRailPressure(
   rpmArr: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 3000; // 3k psi offset
-  const minDuration = 5; // seconds
+  const threshold = 3900; // 3k psi offset +30%
+  const minDuration = 6.5; // seconds +30%
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
   // Pre-compute a decel flag for every sample using a wider 10-sample (1s) window.
@@ -219,7 +219,7 @@ function checkLowRailPressure(
       consecutiveViolations++;
       if (consecutiveViolations >= minSamples) {
         const pcvValue = pcv[i] || 0;
-        if (pcvValue < 500) {
+        if (pcvValue < 325) { // 500mA -30% (lower = harder to trigger)
           issues.push({
             code: 'P0087-RAIL-MAXED',
             severity: 'critical',
@@ -254,7 +254,7 @@ function checkLowRailPressure(
     if (avgDesired > 25000) {
       let lowPressureCount = 0;
       let consecutiveLowCount = 0;
-      const minConsecutive = 2 * 10; // 2 seconds
+      const minConsecutive = 2.6 * 10; // 2 seconds +30%
       for (let i = 0; i < actual.length; i++) {
         if (actual[i] >= 12000 && actual[i] <= 15000 && !decelFlags[i]) {
           consecutiveLowCount++;
@@ -297,7 +297,7 @@ function checkHighRailPressure(
   rpmArr: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 1500; // 1.5k psi offset
+  const threshold = 1950; // 1.5k psi offset +30%
   const minDuration = 5; // seconds
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
@@ -339,13 +339,13 @@ function checkHighRailPressure(
       const actualDeviation = actual[i] - desired[i];
       const prevActualDeviation = actual[i - 1] - desired[i - 1];
       // Only flag if desired is stable (< 1000 psi change) but actual swings > 2500 psi from desired
-      if (desiredChange < 1000 && Math.abs(actualDeviation - prevActualDeviation) > 2500) {
+      if (desiredChange < 1000 && Math.abs(actualDeviation - prevActualDeviation) > 3250) { // 2500 +30%
         oscillationCount++;
       }
     }
 
     const oscillationPercentage = (oscillationCount / actual.length) * 100;
-    if (oscillationPercentage > 15) {
+    if (oscillationPercentage > 19.5) { // 15% +30%
       issues.push({
         code: 'P0088-OSCILLATION',
         severity: 'warning',
@@ -368,7 +368,7 @@ function checkHighRailPressure(
       const avgIdleActual = idleActual.reduce((a, b) => a + b) / idleActual.length;
       if (avgIdleActual >= 12000 && avgIdleActual <= 14000) {
         const avgIdlePcv = idleIndices.map((i) => pcv[i] || 0).reduce((a, b) => a + b) / idleIndices.length;
-        if (avgIdlePcv < 1600) {
+        if (avgIdlePcv < 1040) { // 1600mA -30% (lower = harder to trigger)
           issues.push({
             code: 'P0088-IDLE-PCV',
             severity: 'info',
@@ -396,8 +396,8 @@ function checkLowBoostPressure(
   rpm: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 5; // 5 psi offset
-  const minDuration = 5; // seconds (UPDATED from 3)
+  const threshold = 6.5; // 5 psi offset +30%
+  const minDuration = 6.5; // seconds +30%
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
 
@@ -414,7 +414,7 @@ function checkLowBoostPressure(
         const currentRpm = rpm[i] || 0;
 
         // Check conditions for boost leak (actual is in PSIG; 25 PSIG ≈ 40 PSIA)
-        if (mafFlow > 55 && actual[i] < 25 && vanePos > 45) {
+        if (mafFlow > 71.5 && actual[i] < 25 && vanePos > 58.5) { // 55 lb/min +30%, 45% vane +30%
           issues.push({
             code: 'P0299-BOOST-LEAK',
             severity: 'critical',
@@ -423,7 +423,7 @@ function checkLowBoostPressure(
             recommendation:
               'A boost leak is very likely. Perform a boost leakdown test and inspect intake system for leaks, cracks, or loose connections. Check intercooler, piping, and clamps.',
           });
-        } else if (vanePos > 45 && currentRpm > 2800) {
+        } else if (vanePos > 58.5 && currentRpm > 3640) { // 45% +30%, 2800 RPM +30%
           issues.push({
             code: 'P0299-UNDERBOOST',
             severity: 'warning',
@@ -458,8 +458,8 @@ function checkLowBoostPressure(
  */
 function checkExhaustGasTemp(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const highThreshold = 1650;
-  const criticalThreshold = 1800;
+  const highThreshold = 1750; // 1650F +~6% (already conservative, small bump)
+  const criticalThreshold = 1900; // 1800F +~6%
   const minDuration = 5; // seconds
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
@@ -521,13 +521,13 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
     // Check for high MAF at idle (above 6 lb/min for 5 seconds)
     let highMafCount = 0;
     for (let i = 0; i < idleIndices.length; i++) {
-      if (idleMaf[i] > 6) {
+      if (idleMaf[i] > 7.8) { // 6 lb/min +30%
         highMafCount++;
       }
     }
 
-    if (highMafCount > 50) {
-      // More than 5 seconds
+    if (highMafCount > 65) { // 50 samples +30%
+      // More than ~6.5 seconds
       issues.push({
         code: 'P0101-HIGH-IDLE-MAF',
         severity: 'warning',
@@ -541,13 +541,13 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
     // Check for low MAF at idle (below 2 lb/min for 5 seconds)
     let lowMafCount = 0;
     for (let i = 0; i < idleIndices.length; i++) {
-      if (idleMaf[i] < 2) {
+      if (idleMaf[i] < 1.54) { // 2 lb/min -30% (lower = harder to trigger)
         lowMafCount++;
       }
     }
 
-    if (lowMafCount > 50) {
-      // More than 5 seconds
+    if (lowMafCount > 65) { // 50 samples +30%
+      // More than ~6.5 seconds
       issues.push({
         code: 'P0101-LOW-IDLE-MAF',
         severity: 'warning',
@@ -584,7 +584,7 @@ function checkConverterSlip(
 
   for (let i = 0; i < slip.length; i++) {
     // Check if slip is fluctuating more than ±15 RPM
-    if (Math.abs(slip[i]) > 15) {
+    if (Math.abs(slip[i]) > 19.5) { // 15 RPM +30%
       slipViolationCount++;
     }
 
@@ -605,7 +605,7 @@ function checkConverterSlip(
   const pressurePercentage = (maxPressureCount / slip.length) * 100;
 
   // If duty cycle and pressure are maxed but slip is still high, converter is slipping
-  if (dutyPercentage > 30 && pressurePercentage > 30 && slipPercentage > 20) {
+  if (dutyPercentage > 39 && pressurePercentage > 39 && slipPercentage > 26) { // 30/30/20 +30%
     issues.push({
       code: 'CONVERTER-SLIP',
       severity: 'critical',
@@ -633,8 +633,8 @@ export function checkVgtTracking(
   const issues: DiagnosticIssue[] = [];
   if (!vaneActual.length || !vaneDesired.length) return issues;
 
-  const TRACKING_THRESHOLD = 15; // % vane position error
-  const MIN_SAMPLES = 30; // ~3 seconds at 10Hz
+  const TRACKING_THRESHOLD = 19.5; // 15% +30%
+  const MIN_SAMPLES = 39; // ~3 seconds +30%
   const MIN_RPM = 1200;
 
   let consecutiveCount = 0;
@@ -679,7 +679,7 @@ export function checkFuelPressureRegulatorPerformance(
   const issues: DiagnosticIssue[] = [];
   if (!actual.length) return issues;
 
-  const OSCILLATION_THRESHOLD = 2000; // psi swing per sample
+  const OSCILLATION_THRESHOLD = 2600; // 2000 psi +30%
   const MIN_RPM = 800;
   let oscillationCount = 0;
   let prevDelta = 0;
@@ -692,14 +692,14 @@ export function checkFuelPressureRegulatorPerformance(
     if (swing > OSCILLATION_THRESHOLD) {
       oscillationCount++;
     }
-    if (i > 1 && Math.sign(delta) !== Math.sign(prevDelta) && Math.abs(delta) > 1000) {
+    if (i > 1 && Math.sign(delta) !== Math.sign(prevDelta) && Math.abs(delta) > 1300) { // 1000 psi +30%
       directionChanges++;
     }
     prevDelta = delta;
   }
 
   const oscillationRate = (oscillationCount / actual.length) * 100;
-  if (oscillationRate > 5 || directionChanges > 20) {
+  if (oscillationRate > 6.5 || directionChanges > 26) { // 5%/20 +30%
     issues.push({
       code: 'P0089',
       severity: 'warning',
@@ -727,7 +727,7 @@ export function checkCoolantTemp(
   const runTime = timeMinutes.length > 1 ? timeMinutes[timeMinutes.length - 1] - timeMinutes[0] : 0;
 
   // P0128: Coolant never reaches thermostat operating temp (195F)
-  if (runTime > 5 && maxTemp < 190) {
+  if (runTime > 6.5 && maxTemp < 185) { // 5 min +30%, 190F tightened slightly
     issues.push({
       code: 'P0128',
       severity: 'warning',
@@ -740,11 +740,11 @@ export function checkCoolantTemp(
   // P0116: Coolant temp sensor erratic (large rapid swings)
   let erraticCount = 0;
   for (let i = 1; i < coolantTemp.length; i++) {
-    if (Math.abs(coolantTemp[i] - coolantTemp[i - 1]) > 20) {
+    if (Math.abs(coolantTemp[i] - coolantTemp[i - 1]) > 26) { // 20F +30%
       erraticCount++;
     }
   }
-  if (erraticCount > 5) {
+  if (erraticCount > 6.5) { // 5 +30%
     issues.push({
       code: 'P0116',
       severity: 'warning',
@@ -765,9 +765,9 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
   if (!rpm.length) return issues;
 
   const IDLE_MAX_RPM = 900;
-  const IDLE_LOW_THRESHOLD = 600;
-  const IDLE_HIGH_THRESHOLD = 1000;
-  const MIN_SAMPLES = 50;
+  const IDLE_LOW_THRESHOLD = 540; // 600 -10% (harder to trigger low)
+  const IDLE_HIGH_THRESHOLD = 1100; // 1000 +10% (harder to trigger high)
+  const MIN_SAMPLES = 65; // 50 +30%
 
   let lowCount = 0;
   let highCount = 0;
@@ -823,10 +823,10 @@ export function checkTccOperation(
   if (!slip.length || !dutyCycle.length) return issues;
 
   const MIN_RPM = 1500;
-  const HIGH_DUTY_THRESHOLD = 80;
-  const SLIP_THRESHOLD_LOCKED = 50;
-  const LOW_DUTY_THRESHOLD = 20;
-  const SLIP_THRESHOLD_OPEN = 10;
+  const HIGH_DUTY_THRESHOLD = 90; // 80 +10% (harder to trigger)
+  const SLIP_THRESHOLD_LOCKED = 65; // 50 RPM +30%
+  const LOW_DUTY_THRESHOLD = 15; // 20 -25% (harder to trigger stuck-on)
+  const SLIP_THRESHOLD_OPEN = 7; // 10 -30% (harder to trigger stuck-on)
 
   let stuckOffCount = 0;
   let stuckOnCount = 0;
@@ -842,7 +842,7 @@ export function checkTccOperation(
     }
   }
 
-  if (stuckOffCount > 30) {
+  if (stuckOffCount > 39) { // 30 +30%
     issues.push({
       code: 'P0741',
       severity: 'critical',
@@ -852,7 +852,7 @@ export function checkTccOperation(
     });
   }
 
-  if (stuckOnCount > 50) {
+  if (stuckOnCount > 65) { // 50 +30%
     issues.push({
       code: 'P0742',
       severity: 'warning',
@@ -876,7 +876,7 @@ export function checkHighRailOnDecel(
   const issues: DiagnosticIssue[] = [];
   if (!actual.length) return issues;
 
-  const HIGH_DECEL_THRESHOLD = 20000;
+  const HIGH_DECEL_THRESHOLD = 23000; // 20000 psi +15% (decel check, be conservative)
   const RPM_DROP_WINDOW = 5;
   const RPM_DROP_RATE = 100;
   let highDecelCount = 0;
@@ -884,12 +884,12 @@ export function checkHighRailOnDecel(
   for (let i = RPM_DROP_WINDOW; i < actual.length; i++) {
     const rpmDrop = rpm[i - RPM_DROP_WINDOW] - rpm[i];
     const isDecel = rpmDrop > RPM_DROP_RATE;
-    if (isDecel && actual[i] > HIGH_DECEL_THRESHOLD && actual[i] > desired[i] + 3000) {
+    if (isDecel && actual[i] > HIGH_DECEL_THRESHOLD && actual[i] > desired[i] + 3900) { // 3000 psi +30%
       highDecelCount++;
     }
   }
 
-  if (highDecelCount > 20) {
+  if (highDecelCount > 26) { // 20 +30%
     issues.push({
       code: 'P1089',
       severity: 'warning',
@@ -921,7 +921,7 @@ export function checkEgtSensorPerformance(egt: number[]): DiagnosticIssue[] {
     }
   }
 
-  if (maxStuck > 50) {
+  if (maxStuck > 65) { // 50 +30%
     issues.push({
       code: 'P2080',
       severity: 'warning',
@@ -934,11 +934,11 @@ export function checkEgtSensorPerformance(egt: number[]): DiagnosticIssue[] {
   // Check for erratic readings
   let erraticCount = 0;
   for (let i = 1; i < egt.length; i++) {
-    if (Math.abs(egt[i] - egt[i - 1]) > 200) {
+    if (Math.abs(egt[i] - egt[i - 1]) > 260) { // 200F +30%
       erraticCount++;
     }
   }
-  if (erraticCount > 3) {
+  if (erraticCount > 4) { // 3 +30%
     issues.push({
       code: 'P2084',
       severity: 'warning',
