@@ -240,6 +240,7 @@ const PID_OVERLAYS: Array<{
 export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, binnedData }, ref) => {
   const [selectedPids, setSelectedPids] = useState<Set<string>>(new Set());
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // Determine which PIDs have data in this log
   const availablePids = useMemo(() => {
@@ -351,14 +352,17 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
     );
   }
 
-  return (
+  const chartContent = (
     <div ref={ref} style={{
       background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
-      border: '1px solid #1e2330',
-      borderRadius: '12px',
-      padding: '20px',
-      boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
+      border: fullscreen ? 'none' : '1px solid #1e2330',
+      borderRadius: fullscreen ? 0 : '12px',
+      padding: fullscreen ? '24px 28px' : '20px',
+      boxShadow: fullscreen ? 'none' : '0 4px 32px rgba(0,0,0,0.6)',
       position: 'relative',
+      height: fullscreen ? '100%' : undefined,
+      display: 'flex',
+      flexDirection: 'column',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
@@ -371,6 +375,26 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
           </div>
         </div>
         <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setFullscreen(f => !f)}
+            title={fullscreen ? 'Exit fullscreen' : 'Expand to fullscreen'}
+            style={{
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid #2a2e3a',
+              borderRadius: 6,
+              color: '#555',
+              cursor: 'pointer',
+              padding: '5px 9px',
+              fontFamily: 'monospace',
+              fontSize: 13,
+              lineHeight: 1,
+              transition: 'all 0.15s',
+              alignSelf: 'center',
+            }}
+          >
+            {fullscreen ? '✕' : '⛶'}
+          </button>
           <div style={{ textAlign: 'right' }}>
             <div style={{ color: '#ff4d00', fontSize: 32, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
               {peakHp.hp}
@@ -489,6 +513,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
                   return (
                     <label
                       key={pid.key as string}
+                      onClick={(e) => { e.preventDefault(); togglePid(pid.key as string); }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '6px 10px', borderRadius: 6,
@@ -501,8 +526,8 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => togglePid(pid.key as string)}
-                        style={{ accentColor: pid.color, width: 13, height: 13, cursor: 'pointer' }}
+                        readOnly
+                        style={{ accentColor: pid.color, width: 13, height: 13, cursor: 'pointer', pointerEvents: 'none' }}
                       />
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: pid.color, flexShrink: 0 }} />
                       <span style={{ fontFamily: 'monospace', fontSize: 10, color: checked ? pid.color : '#666' }}>
@@ -521,7 +546,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       )}
 
       {/* Chart */}
-      <div style={{ height: 360 }}>
+      <div style={{ height: fullscreen ? 'calc(100vh - 260px)' : 360, flex: fullscreen ? '1 1 auto' : undefined }}>
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={dynoData} margin={{ top: 10, right: hasPids ? 60 : 40, bottom: 30, left: 10 }}>
             <defs>
@@ -642,6 +667,30 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       </div>
     </div>
   );
+
+  if (fullscreen) {
+    return (
+      <>
+        {/* Fullscreen overlay portal */}
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: '#0a0c10',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setFullscreen(false); }}
+          tabIndex={-1}
+        >
+          {chartContent}
+        </div>
+        {/* Placeholder in original location so layout doesn't collapse */}
+        <div style={{ height: 0 }} />
+      </>
+    );
+  }
+
+  return chartContent;
 });
 DynoHPChart.displayName = 'DynoHPChart';
 

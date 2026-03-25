@@ -93,7 +93,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     const highRailIssues = checkHighRailPressure(
       railPressureActual,
       railPressureDesired,
-      pcvDutyCycle
+      pcvDutyCycle,
+      rpm
     );
     issues.push(...highRailIssues);
   }
@@ -237,16 +238,22 @@ function checkLowRailPressure(
 }
 
 /**
- * Check for High Rail Pressure (P0088) - Updated thresholds
+ * Decel guard: returns true when RPM is actively falling (engine braking).
+ * Looks back decelLookback samples; if total RPM drop exceeds threshold, it's decel.
  */
+function isDecelEvent(rpmArr: number[], i: number, lookback = 3, dropPerSample = 30): boolean {
+  return i >= lookback && (rpmArr[i - lookback] - rpmArr[i]) > (dropPerSample * lookback);
+}
+
 function checkHighRailPressure(
   actual: number[],
   desired: number[],
-  pcv: number[]
+  pcv: number[],
+  rpmArr: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   const threshold = 1500; // 1.5k psi offset
-  const minDuration = 5; // seconds (UPDATED from 2)
+  const minDuration = 5; // seconds
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
 
@@ -254,7 +261,10 @@ function checkHighRailPressure(
 
   for (let i = 0; i < actual.length; i++) {
     const offset = actual[i] - desired[i];
-    if (offset > threshold) {
+    // Decel guard: during engine braking, rail pressure can spike above desired
+    // transiently as the CP4 overshoots. Skip these samples to avoid false P0088.
+    const decel = isDecelEvent(rpmArr, i);
+    if (offset > threshold && !decel) {
       consecutiveViolations++;
 
       if (consecutiveViolations >= minSamples) {
@@ -262,7 +272,7 @@ function checkHighRailPressure(
           code: 'P0088-HIGH-RAIL',
           severity: 'warning',
           title: 'High Rail Pressure Detected',
-          description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds.`,
+          description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds. Deceleration events excluded.`,
           recommendation:
             'Check PCV (pressure regulator duty cycle) settings. This is generally a regulator adjustment by the tuner. Contact your tuner to review fuel pressure calibration.',
         });
@@ -270,6 +280,7 @@ function checkHighRailPressure(
         consecutiveViolations = 0;
       }
     } else {
+      // Reset on non-violation OR decel event
       consecutiveViolations = 0;
     }
   }
