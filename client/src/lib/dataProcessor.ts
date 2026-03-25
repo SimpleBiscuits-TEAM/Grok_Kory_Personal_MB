@@ -407,10 +407,10 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const fuelRateIdx = getColumnIndex(['Fuel Flow Rate', 'Cylinder Fuel Rate']);
   const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
   const railDesiredIdx = getColumnIndex(['FRP Commanded']);
-  const pcvIdx = getColumnIndex(['Fuel Rail Pressure']); // Banks doesn't have direct PCV, use FRP
+  const pcvIdx = -1; // Banks Power does not log PCV duty cycle — leave unmapped
   const boostDesiredIdx = getColumnIndex(['MAP Commanded']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
-  const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
+  const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT (DOC) Inlet', 'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
   const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
   const converterPressureIdx = getColumnIndex(['Trans Line 1 Pressure']);

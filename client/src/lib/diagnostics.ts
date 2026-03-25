@@ -259,7 +259,7 @@ function checkHighRailPressure(
     }
 
     const oscillationPercentage = (oscillationCount / actual.length) * 100;
-    if (oscillationPercentage > 5) {
+    if (oscillationPercentage > 15) {
       issues.push({
         code: 'P0088-OSCILLATION',
         severity: 'warning',
@@ -374,7 +374,7 @@ function checkLowBoostPressure(
  */
 function checkExhaustGasTemp(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const highThreshold = 1475;
+  const highThreshold = 1650;
   const criticalThreshold = 1800;
   const minDuration = 5; // seconds
   const sampleRate = 10;

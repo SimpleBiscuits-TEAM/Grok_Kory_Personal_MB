@@ -7,7 +7,7 @@
  *  - Engine Oil Temp:     Normal 180–230°F | Warning >240°F | Critical >260°F
  *  - Engine Oil Pressure: Normal 25–80 PSI | Warning <20 PSI at idle or <30 PSI at speed
  *  - Trans Fluid Temp:    Normal 100–200°F | Warning >220°F | Critical >240°F
- *  - EGT (Turbo Inlet):   Normal <1400°F  | Warning >1475°F for >5s | Sensor fault >1800°F
+ *  - EGT (Turbo Inlet):   Normal <1500°F  | Warning >1650°F for >5s | Sensor fault >1800°F
  *  - EGT (DOC Inlet):     Normal <900°F   | Warning >1000°F
  *  - MAF at idle:         Normal 2–6 lb/min
  *  - Boost:               Normal 0–50 PSI (L5P peaks ~48 PSI stock)
@@ -139,23 +139,23 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
 
     // Rule: >1800°F = sensor fault
     const sensorFaultCount = egtVals.filter(e => e > 1800).length;
-    // Rule: >1475°F for >5 seconds (at 25Hz = 125 samples)
-    const highEgtCount = egtVals.filter(e => e > 1475).length;
+    // Rule: >1650°F for >5 seconds (at 25Hz = 125 samples)
+    const highEgtCount = egtVals.filter(e => e > 1650).length;
 
     if (sensorFaultCount > 0) {
       egtStatus = '✗ FAULT — EGT sensor disconnected or out of service (readings >1800°F)';
       score -= 20;
       findings.push('EGT sensor fault detected — readings above 1800°F indicate sensor is disconnected or failed');
     } else if (highEgtCount >= 125) {
-      egtStatus = '⚠ WARNING — EGT exceeded 1475°F for more than 5 seconds';
+      egtStatus = '⚠ WARNING — EGT exceeded 1650°F for more than 5 seconds';
       score -= 15;
-      findings.push(`EGT exceeded 1475°F for ${(highEgtCount / 25).toFixed(1)}s — contact tuner for review`);
+      findings.push(`EGT exceeded 1650°F for ${(highEgtCount / 25).toFixed(1)}s — contact tuner for review`);
     } else if (highEgtCount > 0) {
-      egtStatus = `⚠ CAUTION — Brief EGT spike to ${maxEgt.toFixed(0)}°F (${highEgtCount} samples)`;
+      egtStatus = `⚠ CAUTION — Brief EGT spike to ${maxEgt.toFixed(0)}°F (${highEgtCount} samples above 1650°F)`;
       score -= 5;
-      findings.push(`EGT briefly exceeded 1475°F (${highEgtCount} samples) — monitor under sustained load`);
+      findings.push(`EGT briefly exceeded 1650°F (${highEgtCount} samples) — monitor under sustained load`);
     } else {
-      findings.push(`EGT healthy — max ${maxEgt.toFixed(0)}°F, avg ${avgEgt.toFixed(0)}°F (limit: 1475°F)`);
+      findings.push(`EGT healthy — max ${maxEgt.toFixed(0)}°F, avg ${avgEgt.toFixed(0)}°F (limit: 1650°F)`);
     }
   } else {
     egtStatus = '— EGT not logged in this file';
@@ -267,7 +267,7 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
   } else if (highRailCount >= 50) {
     pressureStatus = '⚠ WARNING — High rail pressure (P0088 condition)';
     score -= 15;
-    findings.push('High rail pressure detected — regulator adjustment may be needed. Contact tuner.');
+    findings.push(`High rail pressure detected (${highRailCount} samples > +1500 psi offset) — regulator adjustment may be needed. Contact tuner.`);
   } else {
     findings.push(`Fuel rail pressure regulation excellent — avg differential: ${avgDiff.toFixed(0)} PSI`);
     findings.push(`Rail pressure: actual avg ${avgActual.toFixed(0)} PSI vs desired avg ${avgDesired.toFixed(0)} PSI`);
