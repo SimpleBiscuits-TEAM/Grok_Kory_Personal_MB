@@ -6,6 +6,7 @@ import { generatePerformanceReport } from '@/lib/pdfExport';
 
 export interface PdfExportRefs {
   dynoRef: React.RefObject<HTMLDivElement | null>;
+  boostEffRef: React.RefObject<HTMLDivElement | null>;
   railFaultRef: React.RefObject<HTMLDivElement | null>;
   boostFaultRef: React.RefObject<HTMLDivElement | null>;
   egtFaultRef: React.RefObject<HTMLDivElement | null>;

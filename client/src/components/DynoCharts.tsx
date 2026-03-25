@@ -14,9 +14,12 @@
  * 'P0087-RAIL-MAXED', 'P0088-OSCILLATION', 'P0299-BOOST-LEAK', etc.
  */
 
-import { useMemo, forwardRef } from 'react';
+import { useMemo, forwardRef, useState } from 'react';
 import {
   ComposedChart,
+  ScatterChart,
+  Scatter,
+  ZAxis,
   Line,
   Area,
   XAxis,
@@ -210,12 +213,49 @@ const FaultChartWrapper = forwardRef<HTMLDivElement, {
 });
 FaultChartWrapper.displayName = 'FaultChartWrapper';
 
+// ─── PID OVERLAY DEFINITIONS ─────────────────────────────────────────────────
+const PID_OVERLAYS: Array<{
+  key: keyof ProcessedMetrics;
+  label: string;
+  unit: string;
+  color: string;
+  domain?: [number, number];
+}> = [
+  { key: 'boost',              label: 'Boost',          unit: 'PSIG',    color: '#a78bfa' },
+  { key: 'boostDesired',       label: 'Boost Desired',  unit: 'PSIG',    color: '#7c3aed' },
+  { key: 'maf',                label: 'MAF',            unit: 'lb/min',  color: '#34d399' },
+  { key: 'railPressureActual', label: 'Rail Pressure',  unit: 'psi',     color: '#f59e0b' },
+  { key: 'turboVanePosition',  label: 'Vane Pos',       unit: '%',       color: '#fb923c', domain: [0, 100] },
+  { key: 'exhaustGasTemp',     label: 'EGT',            unit: '°F',      color: '#ef4444' },
+  { key: 'vehicleSpeed',       label: 'Speed',          unit: 'mph',     color: '#38bdf8' },
+  { key: 'coolantTemp',        label: 'Coolant',        unit: '°F',      color: '#22d3ee' },
+  { key: 'oilTemp',            label: 'Oil Temp',       unit: '°F',      color: '#f97316' },
+  { key: 'oilPressure',        label: 'Oil Press',      unit: 'psi',     color: '#84cc16' },
+  { key: 'transFluidTemp',     label: 'Trans Temp',     unit: '°F',      color: '#e879f9' },
+  { key: 'converterSlip',      label: 'Conv Slip',      unit: 'RPM',     color: '#fb7185' },
+  { key: 'pcvDutyCycle',       label: 'PCV Duty',       unit: 'mA',      color: '#fbbf24' },
+];
+
 // ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
 export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, binnedData }, ref) => {
+  const [activePid, setActivePid] = useState<string | null>(null);
+
+  // Determine which PIDs have data in this log
+  const availablePids = useMemo(() => {
+    return PID_OVERLAYS.filter(p => {
+      const arr = data[p.key] as number[] | undefined;
+      return Array.isArray(arr) && arr.some(v => v > 0);
+    });
+  }, [data]);
+
+  const activePidDef = activePid ? PID_OVERLAYS.find(p => p.key === activePid) : null;
+
   const dynoData = useMemo(() => {
+    // Build base dyno points binned by RPM
+    let base: Array<{ rpm: number; hp: number; torque: number }> = [];
     if (!binnedData || binnedData.length === 0) {
       const step = Math.ceil(data.rpm.length / 80);
-      return data.rpm
+      base = data.rpm
         .map((rpm, i) => ({
           rpm: Math.round(rpm),
           hp: Math.round(data.hpTorque[i] || 0),
@@ -224,20 +264,57 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
         .filter((_, i) => i % step === 0)
         .filter(d => d.rpm > 600 && d.hp > 10 && d.torque > 0 && d.torque < 2500)
         .sort((a, b) => a.rpm - b.rpm);
+    } else {
+      base = binnedData
+        .filter(b => b.rpmBin > 600 && b.hpTorqueMean > 10)
+        .map(b => ({
+          rpm: Math.round(b.rpmBin),
+          hp: Math.round(b.hpTorqueMean),
+          torque: b.rpmBin > 100 ? Math.round(b.hpTorqueMean * 5252 / b.rpmBin) : 0,
+        }))
+        .filter(d => d.torque > 0 && d.torque < 2500);
     }
-    return binnedData
-      .filter(b => b.rpmBin > 600 && b.hpTorqueMean > 10)
-      .map(b => ({
-        rpm: Math.round(b.rpmBin),
-        hp: Math.round(b.hpTorqueMean),
-        torque: b.rpmBin > 100 ? Math.round(b.hpTorqueMean * 5252 / b.rpmBin) : 0,
-      }))
-      .filter(d => d.torque > 0 && d.torque < 2500);
-  }, [binnedData, data]);
+
+    // If a PID is selected, bin its values by RPM bucket and attach
+    if (activePid && activePidDef) {
+      const pidArr = data[activePidDef.key as keyof ProcessedMetrics] as number[];
+      // Build a map: rpmBucket -> avg pid value
+      const bucketSize = 100;
+      const bucketMap: Record<number, { sum: number; count: number }> = {};
+      data.rpm.forEach((rpm, i) => {
+        const pidVal = pidArr[i];
+        if (pidVal > 0 && rpm > 600) {
+          const bucket = Math.round(rpm / bucketSize) * bucketSize;
+          if (!bucketMap[bucket]) bucketMap[bucket] = { sum: 0, count: 0 };
+          bucketMap[bucket].sum += pidVal;
+          bucketMap[bucket].count++;
+        }
+      });
+      return base.map(d => ({
+        ...d,
+        pid: bucketMap[Math.round(d.rpm / bucketSize) * bucketSize]
+          ? bucketMap[Math.round(d.rpm / bucketSize) * bucketSize].sum /
+            bucketMap[Math.round(d.rpm / bucketSize) * bucketSize].count
+          : null,
+      }));
+    }
+    return base;
+  }, [binnedData, data, activePid, activePidDef]);
 
   const peakHp = dynoData.length ? dynoData.reduce((max, d) => d.hp > max.hp ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
   const peakTorque = dynoData.length ? dynoData.reduce((max, d) => d.torque > max.torque ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
   const maxY = dynoData.length ? Math.max(...dynoData.map(d => Math.max(d.hp, d.torque)), 500) * 1.12 : 700;
+
+  // PID right-axis domain
+  const pidValues = activePid && activePidDef
+    ? (dynoData as any[]).map((d: any) => d.pid).filter((v: any) => v != null) as number[]
+    : [];
+  const pidMin = pidValues.length ? Math.min(...pidValues) : 0;
+  const pidMax = pidValues.length ? Math.max(...pidValues) : 100;
+  const pidDomain = activePidDef?.domain ?? [
+    Math.max(0, pidMin - (pidMax - pidMin) * 0.1),
+    pidMax + (pidMax - pidMin) * 0.15,
+  ];
 
   if (dynoData.length < 3) {
     return (
@@ -262,7 +339,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ color: '#ff4d00', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
             DYNO RESULTS
@@ -287,10 +364,69 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
         </div>
       </div>
 
+      {/* PID Selector Tabs */}
+      {availablePids.length > 0 && (
+        <div style={{
+          marginBottom: 12,
+          padding: '8px 10px',
+          background: 'rgba(255,255,255,0.03)',
+          border: '1px solid #1e2330',
+          borderRadius: 8,
+        }}>
+          <div style={{ color: '#444', fontSize: 9, fontFamily: 'monospace', marginBottom: 6, letterSpacing: 1 }}>
+            OVERLAY PID — click to plot on dyno graph
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {availablePids.map(pid => {
+              const isActive = activePid === pid.key;
+              return (
+                <button
+                  key={pid.key}
+                  onClick={() => setActivePid(isActive ? null : pid.key as string)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 5,
+                    border: `1px solid ${isActive ? pid.color : '#2a2e3a'}`,
+                    background: isActive ? `${pid.color}22` : 'transparent',
+                    color: isActive ? pid.color : '#555',
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    cursor: 'pointer',
+                    fontWeight: isActive ? 'bold' : 'normal',
+                    transition: 'all 0.15s',
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {pid.label} <span style={{ opacity: 0.7 }}>{pid.unit}</span>
+                </button>
+              );
+            })}
+            {activePid && (
+              <button
+                onClick={() => setActivePid(null)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 5,
+                  border: '1px solid #333',
+                  background: 'transparent',
+                  color: '#444',
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                  cursor: 'pointer',
+                  marginLeft: 4,
+                }}
+              >
+                ✕ clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Chart */}
       <div style={{ height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={dynoData} margin={{ top: 10, right: 40, bottom: 30, left: 10 }}>
+          <ComposedChart data={dynoData} margin={{ top: 10, right: activePid ? 60 : 40, bottom: 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
@@ -321,14 +457,53 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
               orientation="right"
               stroke="#333"
               tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
-              domain={[0, maxY]}
-              label={{ value: 'TORQUE (LB·FT)', angle: 90, position: 'insideRight', offset: 14, fill: '#00c8ff', fontSize: 10, fontFamily: 'monospace' }}
+              domain={activePid && activePidDef ? pidDomain : [0, maxY]}
+              label={{
+                value: activePid && activePidDef
+                  ? `${activePidDef.label.toUpperCase()} (${activePidDef.unit})`
+                  : 'TORQUE (LB·FT)',
+                angle: 90,
+                position: 'insideRight',
+                offset: 14,
+                fill: activePid && activePidDef ? activePidDef.color : '#00c8ff',
+                fontSize: 10,
+                fontFamily: 'monospace',
+              }}
             />
-            <Tooltip content={<DynoTooltip />} />
+            <Tooltip
+              content={(props: any) => {
+                const { active, payload, label } = props;
+                if (!active || !payload?.length) return null;
+                return (
+                  <div style={{
+                    background: 'rgba(13,15,20,0.97)', border: '1px solid #ff4d00',
+                    borderRadius: 6, padding: '10px 14px', fontFamily: 'monospace',
+                    fontSize: 12, color: '#e0e0e0', boxShadow: '0 0 12px rgba(255,77,0,0.3)',
+                  }}>
+                    <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6 }}>
+                      {label ? `${Number(label).toFixed(0)} RPM` : ''}
+                    </div>
+                    {payload.map((p: any, i: number) =>
+                      p.value != null && (
+                        <div key={i} style={{ color: p.color, marginBottom: 2 }}>
+                          {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>
+                            {typeof p.value === 'number' ? p.value.toFixed(1) : p.value}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                );
+              }}
+            />
             <Legend
               wrapperStyle={{ fontFamily: 'monospace', fontSize: 11, paddingTop: 8 }}
               formatter={(value) => (
-                <span style={{ color: value === 'Horsepower' ? '#ff4d00' : '#00c8ff' }}>{value}</span>
+                <span style={{
+                  color: value === 'Horsepower' ? '#ff4d00'
+                    : value === 'Torque (lb·ft)' ? '#00c8ff'
+                    : activePidDef?.color ?? '#aaa'
+                }}>{value}</span>
               )}
             />
             <ReferenceLine yAxisId="left" y={445} stroke="#333" strokeDasharray="6 3"
@@ -336,9 +511,24 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
             <Area yAxisId="left" type="monotone" dataKey="hp"
               stroke="#ff4d00" strokeWidth={3} fill="url(#hpGrad)"
               dot={false} isAnimationActive={false} name="Horsepower" />
-            <Area yAxisId="right" type="monotone" dataKey="torque"
-              stroke="#00c8ff" strokeWidth={2.5} fill="url(#torqueGrad)"
-              dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
+            {!activePid && (
+              <Area yAxisId="right" type="monotone" dataKey="torque"
+                stroke="#00c8ff" strokeWidth={2.5} fill="url(#torqueGrad)"
+                dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
+            )}
+            {activePid && activePidDef && (
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="pid"
+                stroke={activePidDef.color}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+                name={`${activePidDef.label} (${activePidDef.unit})`}
+                connectNulls={true}
+              />
+            )}
             {peakHp.rpm > 0 && (
               <ReferenceLine yAxisId="left" x={peakHp.rpm} stroke="#ff4d00"
                 strokeDasharray="4 4" strokeOpacity={0.4}
@@ -768,3 +958,164 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   );
 });
 MafFaultChart.displayName = 'MafFaultChart';
+
+// ─── BOOST EFFICIENCY CHART ───────────────────────────────────────────────────
+// Scatter plot: X = Turbo Vane Position (%), Y = Boost Pressure (PSIG)
+// Color-coded by RPM band to show how efficiently the VGT is building boost.
+interface BoostEfficiencyProps {
+  data: ProcessedMetrics;
+}
+
+export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyProps>(({ data }, ref) => {
+  const hasData = data.boost.some(v => v > 0) && data.turboVanePosition.some(v => v > 0);
+
+  const chartData = useMemo(() => {
+    if (!hasData) return [];
+    const step = Math.ceil(data.boost.length / 800);
+    const points: Array<{ vane: number; boost: number; rpm: number; fill: string }> = [];
+    for (let i = 0; i < data.boost.length; i += step) {
+      const boost = data.boost[i];
+      const vane = data.turboVanePosition[i];
+      const rpm = data.rpm[i] || 0;
+      if (boost > 0 && vane > 0 && rpm > 600) {
+        // Color by RPM band
+        let fill = '#555';
+        if (rpm < 1500)       fill = '#3b82f6'; // blue  — idle/low
+        else if (rpm < 2000)  fill = '#22d3ee'; // cyan
+        else if (rpm < 2500)  fill = '#34d399'; // green
+        else if (rpm < 3000)  fill = '#a3e635'; // lime
+        else if (rpm < 3500)  fill = '#facc15'; // yellow
+        else if (rpm < 4000)  fill = '#fb923c'; // orange
+        else                  fill = '#f87171'; // red — high RPM
+        points.push({ vane, boost, rpm: Math.round(rpm), fill });
+      }
+    }
+    return points;
+  }, [data, hasData]);
+
+  const maxBoost = chartData.length ? Math.max(...chartData.map(d => d.boost)) : 50;
+  const yMax = Math.ceil(maxBoost * 1.1 / 5) * 5;
+
+  // RPM band legend entries
+  const rpmBands = [
+    { label: '<1500', color: '#3b82f6' },
+    { label: '1500-2000', color: '#22d3ee' },
+    { label: '2000-2500', color: '#34d399' },
+    { label: '2500-3000', color: '#a3e635' },
+    { label: '3000-3500', color: '#facc15' },
+    { label: '3500-4000', color: '#fb923c' },
+    { label: '>4000', color: '#f87171' },
+  ];
+
+  return (
+    <div ref={ref} style={{
+      background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
+      border: '1px solid #1e2330',
+      borderRadius: '12px',
+      padding: '20px',
+      boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ color: '#a78bfa', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
+          BOOST EFFICIENCY
+        </div>
+        <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
+          Actual Boost (PSIG) vs Turbo Vane Position (%) — color coded by RPM band
+        </div>
+      </div>
+
+      {!hasData ? (
+        <div style={{ color: '#444', fontFamily: 'monospace', fontSize: 12, padding: '40px 0', textAlign: 'center' }}>
+          Boost pressure or turbo vane position not logged in this file.
+        </div>
+      ) : (
+        <>
+          {/* RPM Band Legend */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+            {rpmBands.map(b => (
+              <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 10, height: 10, borderRadius: '50%', background: b.color, flexShrink: 0 }} />
+                <span style={{ color: '#666', fontFamily: 'monospace', fontSize: 10 }}>{b.label} RPM</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ height: 340 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart margin={{ top: 10, right: 30, bottom: 30, left: 10 }}>
+                <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+                <XAxis
+                  dataKey="vane"
+                  type="number"
+                  domain={[0, 100]}
+                  stroke="#333"
+                  tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+                  tickFormatter={(v) => `${v}%`}
+                  label={{ value: 'VANE POSITION (%)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
+                />
+                <YAxis
+                  dataKey="boost"
+                  type="number"
+                  domain={[0, yMax]}
+                  stroke="#333"
+                  tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+                  label={{ value: 'BOOST (PSIG)', angle: -90, position: 'insideLeft', offset: 14, fill: '#a78bfa', fontSize: 10, fontFamily: 'monospace' }}
+                />
+                <ZAxis range={[12, 12]} />
+                <Tooltip
+                  cursor={{ strokeDasharray: '3 3', stroke: '#333' }}
+                  content={({ active, payload }: any) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0]?.payload;
+                    return (
+                      <div style={{
+                        background: 'rgba(13,15,20,0.97)',
+                        border: '1px solid #a78bfa',
+                        borderRadius: 6,
+                        padding: '8px 12px',
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: '#e0e0e0',
+                      }}>
+                        <div style={{ color: '#a78bfa', fontWeight: 'bold', marginBottom: 4 }}>{d?.rpm} RPM</div>
+                        <div>Vane: <strong>{d?.vane?.toFixed(1)}%</strong></div>
+                        <div>Boost: <strong>{d?.boost?.toFixed(1)} PSIG</strong></div>
+                      </div>
+                    );
+                  }}
+                />
+                {/* Efficiency reference lines */}
+                <ReferenceLine y={maxBoost * 0.9} stroke="#a78bfa" strokeDasharray="6 3" strokeOpacity={0.4}
+                  label={{ value: '90% MAX BOOST', position: 'insideTopRight', fill: '#a78bfa', fontSize: 9, fontFamily: 'monospace' }} />
+                <Scatter
+                  data={chartData}
+                  fill="#a78bfa"
+                  shape={(props: any) => {
+                    const { cx, cy, payload } = props;
+                    return <circle cx={cx} cy={cy} r={3} fill={payload.fill} fillOpacity={0.75} />;
+                  }}
+                />
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display: 'flex', gap: 20, marginTop: 12, flexWrap: 'wrap' }}>
+            {[
+              { label: 'Peak Boost', value: `${maxBoost.toFixed(1)} PSIG` },
+              { label: 'Max Vane Pos', value: `${Math.max(...chartData.map(d => d.vane)).toFixed(1)}%` },
+              { label: 'Data Points', value: chartData.length.toLocaleString() },
+            ].map(s => (
+              <div key={s.label} style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                <span style={{ color: '#444' }}>{s.label}: </span>
+                <span style={{ color: '#a78bfa', fontWeight: 'bold' }}>{s.value}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+});
+BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';

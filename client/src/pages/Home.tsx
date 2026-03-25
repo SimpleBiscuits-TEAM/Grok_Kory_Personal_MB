@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
-import { DynoHPChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, BoostEfficiencyChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
@@ -27,6 +27,7 @@ export default function Home() {
 
   // Refs for PDF export — dyno + fault charts
   const dynoRef = useRef<HTMLDivElement>(null);
+  const boostEffRef = useRef<HTMLDivElement>(null);
   const railFaultRef = useRef<HTMLDivElement>(null);
   const boostFaultRef = useRef<HTMLDivElement>(null);
   const egtFaultRef = useRef<HTMLDivElement>(null);
@@ -95,6 +96,7 @@ export default function Home() {
     if (!data || !fileName) return;
     const refs = {
       dynoRef,
+      boostEffRef,
       railFaultRef,
       boostFaultRef,
       egtFaultRef,
@@ -265,6 +267,11 @@ export default function Home() {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DYNO RESULTS</h2>
               <DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} />
+            </div>
+            {/* Boost Efficiency Chart */}
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>BOOST EFFICIENCY</h2>
+              <BoostEfficiencyChart ref={boostEffRef} data={data} />
             </div>
 
             {/* Fault Zone Charts — only shown when faults detected */}
