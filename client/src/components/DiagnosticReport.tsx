@@ -1,5 +1,10 @@
+/**
+ * PPEI Custom Tuning — DiagnosticReport Component
+ * Dark theme: black bg, red critical, amber warning, cyan info
+ * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for codes
+ */
+
 import { AlertCircle, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
-import { Card } from '@/components/ui/card';
 import { DiagnosticIssue, DiagnosticReport } from '@/lib/diagnostics';
 
 interface DiagnosticReportProps {
@@ -12,85 +17,127 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
   const infoIssues = report.issues.filter((i) => i.severity === 'info');
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* Summary Card */}
-      <Card className="p-6 border-l-4 border-l-blue-600 bg-blue-50">
-        <div className="flex items-start gap-3">
-          <CheckCircle2 className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <h3 className="font-semibold text-gray-900 mb-1">Diagnostic Summary</h3>
-            <p className="text-sm text-gray-700">{report.summary}</p>
-            <p className="text-xs text-gray-500 mt-2">
-              Generated: {report.timestamp.toLocaleString()}
-            </p>
-          </div>
+      <div style={{
+        background: 'oklch(0.13 0.006 260)',
+        border: '1px solid oklch(0.22 0.008 260)',
+        borderLeft: '4px solid oklch(0.70 0.18 200)',
+        borderRadius: '3px',
+        padding: '1rem 1.25rem',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '12px'
+      }}>
+        <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.70 0.18 200)', flexShrink: 0, marginTop: '2px' }} />
+        <div>
+          <h3 style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '1rem',
+            letterSpacing: '0.06em',
+            color: 'white',
+            margin: 0,
+            marginBottom: '4px'
+          }}>DIAGNOSTIC SUMMARY</h3>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
+            {report.summary}
+          </p>
+          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.45 0.008 260)', margin: 0, marginTop: '6px' }}>
+            Generated: {report.timestamp.toLocaleString()}
+          </p>
         </div>
-      </Card>
+      </div>
 
       {/* Critical Issues */}
       {criticalIssues.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-600" />
-            <h4 className="font-semibold text-gray-900">
-              Potential Fault Areas — Critical ({criticalIssues.length})
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <AlertCircle style={{ width: '16px', height: '16px', color: 'oklch(0.52 0.22 25)' }} />
+            <h4 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1rem',
+              letterSpacing: '0.06em',
+              color: 'oklch(0.75 0.18 25)',
+              margin: 0
+            }}>
+              POTENTIAL FAULT AREAS — CRITICAL ({criticalIssues.length})
             </h4>
           </div>
-          <div className="space-y-3">
-            {criticalIssues.map((issue, i) => (
-              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-            ))}
-          </div>
+          {criticalIssues.map((issue, i) => (
+            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+          ))}
         </div>
       )}
 
       {/* Warning Issues */}
       {warningIssues.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-yellow-600" />
-            <h4 className="font-semibold text-gray-900">
-              Potential Fault Areas — Warnings ({warningIssues.length})
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <AlertTriangle style={{ width: '16px', height: '16px', color: 'oklch(0.75 0.18 60)' }} />
+            <h4 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1rem',
+              letterSpacing: '0.06em',
+              color: 'oklch(0.80 0.18 60)',
+              margin: 0
+            }}>
+              POTENTIAL FAULT AREAS — WARNINGS ({warningIssues.length})
             </h4>
           </div>
-          <div className="space-y-3">
-            {warningIssues.map((issue, i) => (
-              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-            ))}
-          </div>
+          {warningIssues.map((issue, i) => (
+            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+          ))}
         </div>
       )}
 
       {/* Info Issues */}
       {infoIssues.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Info className="w-5 h-5 text-blue-600" />
-            <h4 className="font-semibold text-gray-900">
-              Potential Fault Areas — Information ({infoIssues.length})
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <Info style={{ width: '16px', height: '16px', color: 'oklch(0.70 0.18 200)' }} />
+            <h4 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1rem',
+              letterSpacing: '0.06em',
+              color: 'oklch(0.70 0.18 200)',
+              margin: 0
+            }}>
+              POTENTIAL FAULT AREAS — INFORMATION ({infoIssues.length})
             </h4>
           </div>
-          <div className="space-y-3">
-            {infoIssues.map((issue, i) => (
-              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-            ))}
-          </div>
+          {infoIssues.map((issue, i) => (
+            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+          ))}
         </div>
       )}
 
       {/* No Issues */}
       {report.issues.length === 0 && (
-        <Card className="p-6 border-l-4 border-l-green-600 bg-green-50">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <h3 className="font-semibold text-gray-900 mb-1">All Systems Normal</h3>
-              <p className="text-sm text-gray-700">
-                No potential fault areas detected. Engine parameters are within normal ranges.
-              </p>
-            </div>
+        <div style={{
+          background: 'oklch(0.13 0.006 260)',
+          border: '1px solid oklch(0.22 0.008 260)',
+          borderLeft: '4px solid oklch(0.65 0.20 145)',
+          borderRadius: '3px',
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '12px'
+        }}>
+          <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.65 0.20 145)', flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <h3 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1rem',
+              letterSpacing: '0.06em',
+              color: 'white',
+              margin: 0,
+              marginBottom: '4px'
+            }}>ALL SYSTEMS NORMAL</h3>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
+              No potential fault areas detected. Engine parameters are within normal operating ranges.
+            </p>
           </div>
-        </Card>
+        </div>
       )}
     </div>
   );
@@ -103,22 +150,22 @@ interface IssueCardProps {
 function IssueCard({ issue }: IssueCardProps) {
   const severityConfig = {
     critical: {
-      bg: 'bg-red-50',
-      border: 'border-l-red-600',
+      borderColor: 'oklch(0.52 0.22 25)',
+      iconColor: 'oklch(0.52 0.22 25)',
+      codeColor: 'oklch(0.75 0.18 25)',
       icon: AlertCircle,
-      iconColor: 'text-red-600',
     },
     warning: {
-      bg: 'bg-yellow-50',
-      border: 'border-l-yellow-600',
+      borderColor: 'oklch(0.75 0.18 60)',
+      iconColor: 'oklch(0.75 0.18 60)',
+      codeColor: 'oklch(0.80 0.18 60)',
       icon: AlertTriangle,
-      iconColor: 'text-yellow-600',
     },
     info: {
-      bg: 'bg-blue-50',
-      border: 'border-l-blue-600',
+      borderColor: 'oklch(0.70 0.18 200)',
+      iconColor: 'oklch(0.70 0.18 200)',
+      codeColor: 'oklch(0.70 0.18 200)',
       icon: Info,
-      iconColor: 'text-blue-600',
     },
   };
 
@@ -126,31 +173,65 @@ function IssueCard({ issue }: IssueCardProps) {
   const Icon = config.icon;
 
   return (
-    <Card className={`p-4 border-l-4 ${config.border} ${config.bg}`}>
-      <div className="flex gap-3">
-        <Icon className={`w-5 h-5 ${config.iconColor} flex-shrink-0 mt-0.5`} />
-        <div className="flex-1">
-          <div className="flex items-start justify-between gap-2 mb-2">
-            <div>
-              <h5 className="font-semibold text-gray-900">{issue.title}</h5>
-              <p className="text-xs text-gray-500 font-mono">{issue.code}</p>
-            </div>
-          </div>
-
-          <p className="text-sm text-gray-700 mb-3">{issue.description}</p>
-
-          <div className="bg-white rounded p-3 border border-gray-200">
-            <p className="text-xs font-semibold text-gray-600 mb-1">Recommendation:</p>
-            <p className="text-sm text-gray-700">{issue.recommendation}</p>
+    <div style={{
+      background: 'oklch(0.13 0.006 260)',
+      border: '1px solid oklch(0.22 0.008 260)',
+      borderLeft: `4px solid ${config.borderColor}`,
+      borderRadius: '3px',
+      padding: '1rem 1.25rem',
+      display: 'flex',
+      gap: '12px'
+    }}>
+      <Icon style={{ width: '18px', height: '18px', color: config.iconColor, flexShrink: 0, marginTop: '2px' }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '8px' }}>
+          <div>
+            <h5 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1rem',
+              letterSpacing: '0.05em',
+              color: 'white',
+              margin: 0
+            }}>{issue.title}</h5>
+            <p style={{
+              fontFamily: '"Share Tech Mono", monospace',
+              fontSize: '0.72rem',
+              color: config.codeColor,
+              margin: 0,
+              letterSpacing: '0.05em'
+            }}>{issue.code}</p>
           </div>
         </div>
+
+        <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.70 0.010 260)', margin: 0, marginBottom: '10px' }}>
+          {issue.description}
+        </p>
+
+        <div style={{
+          background: 'oklch(0.10 0.005 260)',
+          border: '1px solid oklch(0.20 0.008 260)',
+          borderRadius: '2px',
+          padding: '10px 12px'
+        }}>
+          <p style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '0.75rem',
+            letterSpacing: '0.08em',
+            color: 'oklch(0.50 0.010 260)',
+            margin: 0,
+            marginBottom: '4px'
+          }}>RECOMMENDATION:</p>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.88rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
+            {issue.recommendation}
+          </p>
+        </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
 /**
- * Exportable diagnostic report for PDF
+ * Exportable diagnostic report for PDF — keeps light styling for print
  */
 export function DiagnosticReportForPDF({ report }: DiagnosticReportProps) {
   return (

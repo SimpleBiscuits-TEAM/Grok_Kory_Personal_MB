@@ -1,7 +1,15 @@
+/**
+ * PPEI Custom Tuning — Duramax Performance Analyzer
+ * Design: Industrial Performance / Motorsport Dark
+ * Colors: Black (#0a0a0a bg) + PPEI Red (oklch 0.52 0.22 25) + White text
+ * Typography: Bebas Neue (headings) + Rajdhani (body) + Share Tech Mono (data)
+ * Layout: Full-width dark panels, red left-border accents, sharp corners
+ */
+
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3 } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
@@ -13,6 +21,8 @@ import { getVehicleInfoFromFilename, decodeVin } from '@/lib/vinLookup';
 import EcuReferencePanel from '@/components/EcuReferencePanel';
 import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
+
+const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
@@ -27,7 +37,7 @@ export default function Home() {
   const [vinFromFile, setVinFromFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Refs for PDF export — dyno + fault charts
+  // Refs for PDF export
   const dynoRef = useRef<DynoChartHandle>(null);
   const dynoContainerRef = useRef<HTMLDivElement>(null);
   const boostEffRef = useRef<HTMLDivElement>(null);
@@ -126,7 +136,6 @@ export default function Home() {
 
   const hasFaults = diagnostics && diagnostics.issues.length > 0;
 
-  // Apply manual VIN when user submits it
   const applyManualVin = useCallback(() => {
     if (!data || !manualVin.trim()) return;
     const vin = manualVin.trim().toUpperCase();
@@ -138,52 +147,140 @@ export default function Home() {
   }, [data, manualVin]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="container mx-auto px-4 py-5">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg flex items-center justify-center shadow">
-              <span className="text-white font-bold text-lg" style={{ fontFamily: 'monospace' }}>D</span>
+    <div className="min-h-screen" style={{ background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
+
+      {/* ── PPEI Header ── */}
+      <header style={{
+        background: 'oklch(0.08 0.004 260)',
+        borderBottom: '1px solid oklch(0.20 0.008 260)',
+        boxShadow: '0 2px 20px oklch(0 0 0 / 0.5)'
+      }}>
+              {/* Top accent bar */}
+        <div className="ppei-accent-animated" style={{ height: '3px' }} />
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* PPEI Logo */}
+              <img
+                src={PPEI_LOGO_URL}
+                alt="PPEI Custom Tuning"
+                className="ppei-logo"
+                style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
+              />
+              {/* Title block */}
+              <div style={{ borderLeft: '3px solid oklch(0.52 0.22 25)', paddingLeft: '1rem' }}>
+                <h1 style={{
+                  fontFamily: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
+                  fontSize: '1.6rem',
+                  letterSpacing: '0.08em',
+                  color: 'white',
+                  lineHeight: 1.1,
+                  margin: 0
+                }}>
+                  DURAMAX PERFORMANCE ANALYZER
+                </h1>
+                <p style={{
+                  fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
+                  fontSize: '0.8rem',
+                  color: 'oklch(0.60 0.010 260)',
+                  letterSpacing: '0.05em',
+                  margin: 0,
+                  marginTop: '2px'
+                }}>
+                  AI-POWERED DIAGNOSTICS · HP TUNERS · EFILIVE · BANKS POWER
+                </p>
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>
-              DURAMAX PERFORMANCE ANALYZER
-            </h1>
+            {/* Right side — version badge */}
+            <div style={{
+              background: 'oklch(0.52 0.22 25)',
+              color: 'white',
+              padding: '4px 12px',
+              borderRadius: '2px',
+              fontFamily: '"Bebas Neue", sans-serif',
+              fontSize: '0.85rem',
+              letterSpacing: '0.1em'
+            }}>
+              L5P DURAMAX
+            </div>
           </div>
-          <p className="text-gray-500 text-sm ml-13 pl-13" style={{ paddingLeft: '52px' }}>
-            Upload HP Tuners · EFILIVE · Banks Power datalogs for instant performance analysis and fault diagnostics
-          </p>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8">
         {!data ? (
           /* ── Upload Section ── */
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-3xl mx-auto">
+
+            {/* Hero text */}
+            <div className="text-center mb-8 ppei-anim-fade-up">
+              <h2 className="ppei-gradient-text" style={{
+                fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                fontSize: '3rem',
+                letterSpacing: '0.1em',
+                marginBottom: '0.5rem'
+              }}>
+                REDEFINING THE LIMITS
+              </h2>
+              <p style={{
+                fontFamily: '"Rajdhani", sans-serif',
+                fontSize: '1rem',
+                color: 'oklch(0.60 0.010 260)',
+                letterSpacing: '0.03em'
+              }}>
+                Upload your datalog to generate a full diagnostic analysis, dyno chart, and PDF report
+              </p>
+            </div>
+
+            {/* Drop zone */}
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
-              className={`rounded-xl border-2 border-dashed transition-all duration-200 cursor-pointer ${
-                isDragOver
-                  ? 'border-blue-500 bg-blue-50 scale-[1.01]'
-                  : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50/30'
-              }`}
+              className={`ppei-dropzone ppei-anim-scale-in ppei-delay-200${isDragOver ? ' active' : ''}${loading ? ' ppei-loading-scan' : ''}`}
+              style={{
+                border: isDragOver ? '2px dashed oklch(0.52 0.22 25)' : '2px dashed oklch(0.30 0.008 260)',
+                background: isDragOver ? 'oklch(0.14 0.012 25)' : 'oklch(0.11 0.005 260)',
+                borderRadius: '4px',
+                transition: 'all 0.2s',
+                boxShadow: isDragOver ? '0 0 30px oklch(0.52 0.22 25 / 0.2)' : 'none',
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
               onClick={() => !loading && fileInputRef.current?.click()}
             >
               <div className="p-14 flex flex-col items-center justify-center gap-5">
-                <div className={`w-20 h-20 rounded-full flex items-center justify-center transition-colors ${isDragOver ? 'bg-blue-200' : 'bg-blue-100'}`}>
-                  <Upload className={`w-10 h-10 transition-colors ${isDragOver ? 'text-blue-700' : 'text-blue-500'}`} />
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '4px',
+                  background: isDragOver ? 'oklch(0.52 0.22 25 / 0.2)' : 'oklch(0.16 0.008 260)',
+                  border: `2px solid ${isDragOver ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s'
+                }}>
+                  {loading ? (
+                    <Loader2 style={{ width: '36px', height: '36px', color: 'oklch(0.52 0.22 25)', animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <Upload style={{ width: '36px', height: '36px', color: isDragOver ? 'oklch(0.52 0.22 25)' : 'oklch(0.55 0.010 260)' }} />
+                  )}
                 </div>
                 <div className="text-center">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                    {isDragOver ? 'Drop to Analyze' : 'Upload Your Duramax Log'}
-                  </h2>
-                  <p className="text-gray-500 text-sm">
+                  <h3 style={{
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '1.8rem',
+                    letterSpacing: '0.06em',
+                    color: 'white',
+                    marginBottom: '0.4rem'
+                  }}>
+                    {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DURAMAX LOG'}
+                  </h3>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your CSV file here, or click to browse
                   </p>
-                  <p className="text-gray-400 text-xs mt-1">
-                    Supports HP Tuners · EFILIVE · Banks Power CSV formats
+                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.40 0.008 260)', fontSize: '0.75rem', marginTop: '4px' }}>
+                    HP TUNERS · EFILIVE · BANKS POWER CSV FORMATS
                   </p>
                 </div>
                 <input
@@ -194,161 +291,356 @@ export default function Home() {
                   disabled={loading}
                   className="hidden"
                 />
-                <Button
+                <button
                   onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
                   disabled={loading}
-                  size="lg"
-                  className="bg-blue-600 hover:bg-blue-700 text-white mt-2"
+                  style={{
+                    background: loading ? 'oklch(0.35 0.010 260)' : 'oklch(0.52 0.22 25)',
+                    color: 'white',
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '1.1rem',
+                    letterSpacing: '0.1em',
+                    padding: '10px 32px',
+                    borderRadius: '3px',
+                    border: 'none',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    transition: 'background 0.15s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
                 >
                   {loading ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Processing...</>
+                    <><Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} />PROCESSING...</>
                   ) : (
-                    <><Upload className="w-4 h-4 mr-2" />Select CSV File</>
+                    <><Upload style={{ width: '16px', height: '16px' }} />SELECT CSV FILE</>
                   )}
-                </Button>
+                </button>
               </div>
             </div>
 
-            <div className="mt-8 grid md:grid-cols-2 gap-6">
-              <Card className="p-6">
-                <h3 className="font-semibold text-gray-900 mb-3">What's Analyzed</h3>
-                <ul className="space-y-2 text-sm text-gray-600">
-                  <li>✓ Dynojet-style HP &amp; Torque graph</li>
-                  <li>✓ Fault-specific charts (actual vs desired + delta)</li>
-                  <li>✓ Automatic diagnostic checks (P0087, P0088, P0299, P0101, EGT)</li>
-                  <li>✓ Vehicle health report with VIN decode</li>
-                  <li>✓ Engine reference database with parameter definitions</li>
-                  <li>✓ Diagnostic code (DTC) lookup with causes &amp; remedies</li>
-                  <li>✓ Full PDF report export with all charts</li>
+            {/* Feature cards */}
+            <div className="mt-8 grid md:grid-cols-2 gap-4 ppei-anim-fade-up ppei-delay-400">
+              <div className="ppei-card-hover" style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderTop: '3px solid oklch(0.52 0.22 25)',
+                borderRadius: '3px',
+                padding: '1.25rem'
+              }}>
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1.1rem',
+                  letterSpacing: '0.08em',
+                  color: 'white',
+                  marginBottom: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <BarChart3 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />
+                  WHAT'S ANALYZED
+                </h3>
+                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Dynojet-style HP &amp; Torque graph
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Fault-specific charts (actual vs desired)
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> 34 diagnostic checks (P0087, P0088, P0299, EGT...)
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Vehicle health report with VIN decode
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> GM OBDG06C HD spec DTC lookup (293 codes)
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Full PDF report export with all charts
+                  </li>
                 </ul>
-              </Card>
-              <Card className="p-6">
-                <h3 className="font-semibold text-gray-900 mb-3">File Requirements</h3>
-                <ul className="space-y-2 text-sm text-gray-600">
-                  <li>• CSV format from OBD-II scanner</li>
-                  <li>• Must include: RPM, MAF, Torque</li>
-                  <li>• Optional: Boost, Rail Pressure, EGT, Speed</li>
-                  <li>• No file size limit — processed in your browser</li>
-                  <li>• VIN auto-detected from Banks Power filenames</li>
+              </div>
+              <div className="ppei-card-hover" style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderTop: '3px solid oklch(0.65 0.20 145)',
+                borderRadius: '3px',
+                padding: '1.25rem'
+              }}>
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1.1rem',
+                  letterSpacing: '0.08em',
+                  color: 'white',
+                  marginBottom: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
+                  FILE REQUIREMENTS
+                </h3>
+                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> CSV format from OBD-II scanner
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Must include: RPM, MAF, Torque
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Optional: Boost, Rail Pressure, EGT, Speed
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> No file size limit — processed in your browser
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> VIN auto-detected from Banks Power filenames
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Thresholds based on 2024 GM OBDG06C HD spec
+                  </li>
                 </ul>
-              </Card>
+              </div>
+            </div>
+
+            {/* Bottom brand tagline */}
+            <div className="mt-8 text-center ppei-anim-fade-in ppei-delay-600">
+              <p style={{
+                fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                fontSize: '0.9rem',
+                letterSpacing: '0.15em',
+                color: 'oklch(0.35 0.008 260)'
+              }}>
+                POWERED BY PPEI · CUSTOM TUNING · REDEFINING THE LIMITS
+              </p>
             </div>
           </div>
         ) : (
           /* ── Dashboard Section ── */
-          <div className="space-y-6">
+          <div className="space-y-6 ppei-anim-fade-in">
+
             {/* File info bar */}
-            <div className="flex items-center justify-between bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+            <div style={{
+              background: 'oklch(0.13 0.006 260)',
+              border: '1px solid oklch(0.22 0.008 260)',
+              borderLeft: hasFaults ? '4px solid oklch(0.52 0.22 25)' : '4px solid oklch(0.65 0.20 145)',
+              borderRadius: '3px',
+              padding: '1rem 1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.75rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <CheckCircle style={{ width: '20px', height: '20px', color: 'oklch(0.65 0.20 145)', flexShrink: 0 }} />
                 <div>
-                  <p className="font-semibold text-gray-900 text-sm">{fileName}</p>
-                  <p className="text-xs text-gray-500">
+                  <p style={{
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.85rem',
+                    color: 'white',
+                    fontWeight: 600,
+                    margin: 0
+                  }}>{fileName}</p>
+                  <p style={{
+                    fontFamily: '"Rajdhani", sans-serif',
+                    fontSize: '0.8rem',
+                    color: 'oklch(0.55 0.010 260)',
+                    margin: 0
+                  }}>
                     {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
-                    {hasFaults ? ` · ${diagnostics!.issues.length} fault(s) detected` : ' · No faults detected'}
+                    {hasFaults
+                      ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {diagnostics!.issues.length} potential fault area(s) detected</span>
+                      : <span style={{ color: 'oklch(0.65 0.20 145)' }}> · No fault areas detected</span>
+                    }
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
                   onClick={handleExportPdf}
                   disabled={isExporting}
-                  className="bg-green-600 hover:bg-green-700 text-white"
+                  style={{
+                    background: isExporting ? 'oklch(0.35 0.010 260)' : 'oklch(0.52 0.22 25)',
+                    color: 'white',
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.08em',
+                    padding: '8px 20px',
+                    borderRadius: '3px',
+                    border: 'none',
+                    cursor: isExporting ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'background 0.15s'
+                  }}
                 >
                   {isExporting ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating PDF...</>
+                    <><Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} />GENERATING PDF...</>
                   ) : (
-                    <><FileDown className="w-4 h-4 mr-2" />Export PDF Report</>
+                    <><FileDown style={{ width: '14px', height: '14px' }} />EXPORT PDF REPORT</>
                   )}
-                </Button>
-                <Button
+                </button>
+                <button
                   onClick={() => { setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setFileName(null); }}
-                  variant="outline"
+                  style={{
+                    background: 'transparent',
+                    color: 'oklch(0.65 0.010 260)',
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.08em',
+                    padding: '8px 16px',
+                    borderRadius: '3px',
+                    border: '1px solid oklch(0.28 0.008 260)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s'
+                  }}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.borderColor = 'oklch(0.52 0.22 25)'; (e.target as HTMLElement).style.color = 'white'; }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = 'oklch(0.28 0.008 260)'; (e.target as HTMLElement).style.color = 'oklch(0.65 0.010 260)'; }}
                 >
-                  New File
-                </Button>
+                  NEW FILE
+                </button>
               </div>
             </div>
 
-            {/* Manual VIN Entry — shown when no VIN was auto-detected */}
+            {/* Manual VIN Entry */}
             {!vinFromFile && (
-              <div className="bg-white rounded-lg border border-blue-200 p-4 shadow-sm">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                    <span className="text-blue-600 font-bold text-sm" style={{ fontFamily: 'monospace' }}>VIN</span>
-                  </div>
+              <div style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderLeft: '4px solid oklch(0.70 0.18 200)',
+                borderRadius: '3px',
+                padding: '1rem 1.25rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '0.75rem' }}>
+                  <div style={{
+                    background: 'oklch(0.70 0.18 200 / 0.15)',
+                    border: '1px solid oklch(0.70 0.18 200 / 0.4)',
+                    borderRadius: '3px',
+                    padding: '4px 8px',
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.75rem',
+                    color: 'oklch(0.70 0.18 200)',
+                    letterSpacing: '0.05em'
+                  }}>VIN</div>
                   <div>
-                    <p className="font-semibold text-gray-900 text-sm">No VIN Detected in Datalog</p>
-                    <p className="text-xs text-gray-500">Optionally enter your VIN to unlock vehicle identification and factory spec lookup</p>
+                    <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+                      NO VIN DETECTED IN DATALOG
+                    </p>
+                    <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>
+                      Optionally enter your VIN to unlock vehicle identification and factory spec lookup
+                    </p>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
                     value={manualVin}
                     onChange={(e) => setManualVin(e.target.value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '').slice(0, 17))}
                     placeholder="Enter 17-character VIN (e.g. 1GC4YPEY...)"
                     maxLength={17}
-                    className="flex-1 px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      fontFamily: '"Share Tech Mono", monospace',
+                      fontSize: '0.85rem',
+                      background: 'oklch(0.10 0.005 260)',
+                      border: '1px solid oklch(0.28 0.008 260)',
+                      borderRadius: '3px',
+                      color: 'white',
+                      outline: 'none',
+                      letterSpacing: '0.05em'
+                    }}
                     onKeyDown={(e) => e.key === 'Enter' && applyManualVin()}
                   />
-                  <Button
+                  <button
                     onClick={applyManualVin}
                     disabled={manualVin.length !== 17}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4"
-                    size="sm"
+                    style={{
+                      background: manualVin.length === 17 ? 'oklch(0.70 0.18 200)' : 'oklch(0.25 0.008 260)',
+                      color: 'white',
+                      fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                      fontSize: '0.95rem',
+                      letterSpacing: '0.08em',
+                      padding: '8px 20px',
+                      borderRadius: '3px',
+                      border: 'none',
+                      cursor: manualVin.length === 17 ? 'pointer' : 'not-allowed',
+                      transition: 'background 0.15s'
+                    }}
                   >
-                    Decode VIN
-                  </Button>
+                    DECODE VIN
+                  </button>
                 </div>
                 {manualVin.length > 0 && manualVin.length < 17 && (
-                  <p className="text-xs text-amber-600 mt-1">{17 - manualVin.length} more characters needed</p>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.75 0.18 60)', marginTop: '6px' }}>
+                    {17 - manualVin.length} more characters needed
+                  </p>
                 )}
               </div>
             )}
+
             {/* Vehicle Health Report */}
             {healthReport && (
-              <div ref={healthRef}>
-                <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>VEHICLE HEALTH REPORT</h2>
+              <div ref={healthRef} className="ppei-section-reveal">
+                <SectionHeader icon={<Activity style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="VEHICLE HEALTH REPORT" />
                 <HealthReport report={healthReport} />
               </div>
             )}
 
             {/* Diagnostic Analysis */}
             {diagnostics && (
-              <div>
-                <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DIAGNOSTIC ANALYSIS</h2>
+              <div className="ppei-section-reveal ppei-delay-100">
+                <SectionHeader icon={<Zap style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DIAGNOSTIC ANALYSIS" />
                 <DiagnosticReportComponent report={diagnostics} />
               </div>
             )}
 
             {/* Stats Summary */}
-            <div ref={statsRef}>
+            <div ref={statsRef} className="ppei-section-reveal ppei-delay-200">
               <StatsSummary data={data} />
             </div>
 
-            {/* Dynojet-Style HP/Torque Chart */}
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DYNO RESULTS</h2>
+            {/* Dyno Results */}
+            <div className="ppei-section-reveal ppei-delay-300">
+              <SectionHeader icon={<BarChart3 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DYNO RESULTS" />
               <div ref={dynoContainerRef}>
                 <DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} />
               </div>
             </div>
-            {/* Boost Efficiency Chart */}
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>BOOST EFFICIENCY</h2>
+
+            {/* Boost Efficiency */}
+            <div className="ppei-section-reveal ppei-delay-400">
+              <SectionHeader icon={<Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="BOOST EFFICIENCY" />
               <BoostEfficiencyChart ref={boostEffRef} data={data} />
             </div>
 
-            {/* Fault Zone Charts — only shown when faults detected */}
+            {/* Fault Zone Charts */}
             {hasFaults && (
               <div className="space-y-6">
-                <div className="flex items-center gap-3 py-2 border-b border-red-200">
-                  <AlertCircle className="w-5 h-5 text-red-500" />
-                  <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  paddingBottom: '0.75rem',
+                  borderBottom: '1px solid oklch(0.52 0.22 25 / 0.3)'
+                }}>
+                  <AlertCircle style={{ width: '20px', height: '20px', color: 'oklch(0.52 0.22 25)' }} />
+                  <h2 style={{
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '1.4rem',
+                    letterSpacing: '0.08em',
+                    color: 'white',
+                    margin: 0
+                  }}>
                     FAULT ZONE ANALYSIS
                   </h2>
-                  <span className="text-sm text-gray-500">— actual vs desired with shaded delta error</span>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.50 0.010 260)' }}>
+                    — actual vs desired with shaded delta error
+                  </span>
                 </div>
                 <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
                 <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
@@ -363,30 +655,37 @@ export default function Home() {
             )}
 
             {/* Methodology */}
-            <Card className="p-6 bg-slate-800 border-slate-700">
-              <h3 className="font-semibold text-slate-200 mb-2" style={{ fontFamily: 'monospace' }}>METHODOLOGY</h3>
-              <div className="text-sm text-slate-400 space-y-1" style={{ fontFamily: 'monospace' }}>
-                <p>• <span className="text-orange-400">HP (Torque Method):</span> HP = Torque(lb·ft) × RPM / 5252 — uses SAE J1979 actual torque % × reference torque</p>
-                <p>• <span className="text-cyan-400">Torque:</span> Derived from HP × 5252 / RPM for dyno graph display</p>
-                <p>• <span className="text-green-400">Fault Delta:</span> Shaded area between Desired (green) and Actual (red) curves — larger delta = greater fault severity</p>
+            <div style={{
+              background: 'oklch(0.13 0.006 260)',
+              border: '1px solid oklch(0.22 0.008 260)',
+              borderLeft: '4px solid oklch(0.55 0.010 260)',
+              borderRadius: '3px',
+              padding: '1.25rem'
+            }}>
+              <h3 style={{
+                fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                fontSize: '1rem',
+                letterSpacing: '0.08em',
+                color: 'oklch(0.65 0.010 260)',
+                marginBottom: '0.75rem'
+              }}>METHODOLOGY</h3>
+              <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.78rem', color: 'oklch(0.50 0.010 260)', lineHeight: 1.8 }}>
+                <p>• <span style={{ color: 'oklch(0.75 0.18 40)' }}>HP (Torque Method):</span> HP = Torque(lb·ft) × RPM / 5252 — uses SAE J1979 actual torque % × reference torque</p>
+                <p>• <span style={{ color: 'oklch(0.70 0.18 200)' }}>Torque:</span> Derived from HP × 5252 / RPM for dyno graph display</p>
+                <p>• <span style={{ color: 'oklch(0.65 0.20 145)' }}>Fault Delta:</span> Shaded area between Desired and Actual curves — larger delta = greater fault severity</p>
+                <p>• <span style={{ color: 'oklch(0.52 0.22 25)' }}>Thresholds:</span> Based on 2024 GM OBDG06C HD spec with 30% tolerance buffer to reduce false positives</p>
               </div>
-            </Card>
+            </div>
 
             {/* DTC Code Search */}
             <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Search className="w-5 h-5 text-orange-500" />
-                <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DIAGNOSTIC CODE LOOKUP</h2>
-              </div>
+              <SectionHeader icon={<Search style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DIAGNOSTIC CODE LOOKUP" />
               <DtcSearch />
             </div>
 
             {/* Engine Reference Panel */}
             <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Cpu className="w-5 h-5 text-blue-600" />
-                <h2 className="text-xl font-bold text-gray-900" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>ENGINE REFERENCE DATABASE</h2>
-              </div>
+              <SectionHeader icon={<Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="ENGINE REFERENCE DATABASE" />
               <EcuReferencePanel />
             </div>
           </div>
@@ -394,15 +693,83 @@ export default function Home() {
 
         {/* Error toast */}
         {(error || exportError) && (
-          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3 max-w-md z-50 shadow-lg">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div style={{
+            position: 'fixed',
+            bottom: '1rem',
+            right: '1rem',
+            background: 'oklch(0.13 0.006 260)',
+            border: '1px solid oklch(0.52 0.22 25)',
+            borderLeft: '4px solid oklch(0.52 0.22 25)',
+            borderRadius: '3px',
+            padding: '1rem 1.25rem',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            maxWidth: '420px',
+            zIndex: 50,
+            boxShadow: '0 4px 20px oklch(0 0 0 / 0.5)'
+          }}>
+            <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />
             <div>
-              <p className="font-semibold text-red-900">{error ? 'Error Processing File' : 'PDF Export Failed'}</p>
-              <p className="text-sm text-red-700">{error || exportError}</p>
+              <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+                {error ? 'ERROR PROCESSING FILE' : 'PDF EXPORT FAILED'}
+              </p>
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
+                {error || exportError}
+              </p>
             </div>
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer style={{
+        borderTop: '1px solid oklch(0.18 0.006 260)',
+        marginTop: '3rem',
+        padding: '1.5rem 0'
+      }}>
+        {/* Bottom accent bar */}
+        <div style={{
+          height: '2px',
+          background: 'linear-gradient(90deg, oklch(0.52 0.22 25) 0%, oklch(0.65 0.20 40) 40%, oklch(0.70 0.18 60) 60%, oklch(0.65 0.20 145) 80%, oklch(0.70 0.18 200) 100%)',
+          marginBottom: '1rem'
+        }} />
+        <div className="container mx-auto px-4 text-center">
+          <p style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '0.85rem',
+            letterSpacing: '0.12em',
+            color: 'oklch(0.35 0.008 260)'
+          }}>
+            PPEI CUSTOM TUNING · REDEFINING THE LIMITS · PPEI.COM
+          </p>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+/** Reusable PPEI section header with red left border accent */
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      paddingLeft: '1rem',
+      borderLeft: '4px solid oklch(0.52 0.22 25)',
+      marginBottom: '1rem'
+    }}>
+      {icon}
+      <h2 style={{
+        fontFamily: '"Bebas Neue", "Impact", sans-serif',
+        fontSize: '1.4rem',
+        letterSpacing: '0.08em',
+        color: 'white',
+        margin: 0
+      }}>
+        {title}
+      </h2>
     </div>
   );
 }

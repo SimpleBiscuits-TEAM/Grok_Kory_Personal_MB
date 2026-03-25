@@ -267,43 +267,78 @@ export function TimeSeriesChart({ data }: ChartProps) {
 }
 
 /**
- * Statistics summary card
+ * Statistics summary card — PPEI dark theme
  */
 export function StatsSummary({ data }: ChartProps) {
   const { stats } = data;
   const durationMin = (stats.duration / 60).toFixed(1);
 
+  const statCards = [
+    {
+      label: 'RPM RANGE',
+      value: `${stats.rpmMin.toFixed(0)} – ${stats.rpmMax.toFixed(0)}`,
+      sub: `Mean: ${stats.rpmMean.toFixed(0)} RPM`,
+      accent: 'oklch(0.52 0.22 25)',
+    },
+    {
+      label: 'MAF (LB/MIN)',
+      value: `${stats.mafMin.toFixed(1)} – ${stats.mafMax.toFixed(1)}`,
+      sub: `Mean: ${stats.mafMean.toFixed(1)} lb/min`,
+      accent: 'oklch(0.75 0.18 40)',
+    },
+    {
+      label: 'MAX BOOST',
+      value: stats.boostMax.toFixed(1),
+      unit: 'PSIG',
+      sub: 'Gauge pressure (above atmospheric)',
+      accent: 'oklch(0.70 0.18 200)',
+    },
+    {
+      label: 'SESSION DURATION',
+      value: durationMin,
+      unit: 'MIN',
+      sub: `Max Boost: ${stats.boostMax.toFixed(1)} PSIG`,
+      accent: 'oklch(0.65 0.20 145)',
+    },
+  ];
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <p className="text-sm text-gray-600 mb-1">RPM Range</p>
-        <p className="text-2xl font-bold text-gray-900">
-          {stats.rpmMin.toFixed(0)} - {stats.rpmMax.toFixed(0)}
-        </p>
-        <p className="text-xs text-gray-500 mt-1">Mean: {stats.rpmMean.toFixed(0)}</p>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <p className="text-sm text-gray-600 mb-1">MAF (lb/min)</p>
-        <p className="text-2xl font-bold text-gray-900">
-          {stats.mafMin.toFixed(1)} - {stats.mafMax.toFixed(1)}
-        </p>
-        <p className="text-xs text-gray-500 mt-1">Mean: {stats.mafMean.toFixed(1)}</p>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <p className="text-sm text-gray-600 mb-1">Max Boost</p>
-        <p className="text-2xl font-bold text-gray-900">
-          {stats.boostMax.toFixed(1)} <span className="text-base font-normal text-gray-500">PSIG</span>
-        </p>
-        <p className="text-xs text-gray-500 mt-1">Gauge pressure (above atmospheric)</p>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <p className="text-sm text-gray-600 mb-1">Session Duration</p>
-        <p className="text-2xl font-bold text-gray-900">{durationMin} min</p>
-        <p className="text-xs text-gray-500 mt-1">Max Boost: {stats.boostMax.toFixed(1)} PSIG</p>
-      </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+      {statCards.map((card) => (
+        <div key={card.label} style={{
+          background: 'oklch(0.13 0.006 260)',
+          border: '1px solid oklch(0.22 0.008 260)',
+          borderTop: `3px solid ${card.accent}`,
+          borderRadius: '3px',
+          padding: '1rem',
+        }}>
+          <p style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '0.72rem',
+            letterSpacing: '0.1em',
+            color: 'oklch(0.50 0.010 260)',
+            margin: 0,
+            marginBottom: '6px'
+          }}>{card.label}</p>
+          <p style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '1.6rem',
+            color: 'white',
+            margin: 0,
+            lineHeight: 1.1
+          }}>
+            {card.value}
+            {card.unit && <span style={{ fontSize: '0.9rem', color: card.accent, marginLeft: '4px' }}>{card.unit}</span>}
+          </p>
+          <p style={{
+            fontFamily: '"Share Tech Mono", monospace',
+            fontSize: '0.7rem',
+            color: 'oklch(0.45 0.008 260)',
+            margin: 0,
+            marginTop: '4px'
+          }}>{card.sub}</p>
+        </div>
+      ))}
     </div>
   );
 }

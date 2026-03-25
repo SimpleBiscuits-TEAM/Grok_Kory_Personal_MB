@@ -1,70 +1,38 @@
 /**
- * DTC Code Search Component
- * Allows users to search for any DTC code and get a full description,
- * causes, and remedies sourced from GM OBD documentation and Duramax engine management data.
+ * PPEI Custom Tuning — DTC Code Search Component
+ * Dark theme: black bg, red/amber/cyan severity indicators
+ * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for codes
  */
 
 import { useState, useMemo } from 'react';
-import { DTC_DEFINITIONS, DtcDefinition, ECU_PARAMETERS, EcuParameter, L5P_SPECS } from '@/lib/ecuReference';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { DTC_DEFINITIONS, DtcDefinition, ECU_PARAMETERS, EcuParameter } from '@/lib/ecuReference';
 import { Search, AlertTriangle, AlertCircle, Info, ChevronDown, ChevronRight, X, Cpu, Gauge } from 'lucide-react';
 
 const severityConfig = {
   critical: {
-    bg: 'bg-red-50',
-    border: 'border-red-200',
-    badge: 'bg-red-100 text-red-800 border-red-200',
-    icon: <AlertCircle className="w-4 h-4 text-red-600" />,
+    borderColor: 'oklch(0.52 0.22 25)',
+    badgeBg: 'oklch(0.52 0.22 25 / 0.15)',
+    badgeBorder: 'oklch(0.52 0.22 25 / 0.4)',
+    badgeColor: 'oklch(0.75 0.18 25)',
+    icon: <AlertCircle style={{ width: '16px', height: '16px', color: 'oklch(0.52 0.22 25)' }} />,
     label: 'Critical',
   },
   warning: {
-    bg: 'bg-yellow-50',
-    border: 'border-yellow-200',
-    badge: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-    icon: <AlertTriangle className="w-4 h-4 text-yellow-600" />,
+    borderColor: 'oklch(0.75 0.18 60)',
+    badgeBg: 'oklch(0.75 0.18 60 / 0.15)',
+    badgeBorder: 'oklch(0.75 0.18 60 / 0.4)',
+    badgeColor: 'oklch(0.80 0.18 60)',
+    icon: <AlertTriangle style={{ width: '16px', height: '16px', color: 'oklch(0.75 0.18 60)' }} />,
     label: 'Warning',
   },
   info: {
-    bg: 'bg-blue-50',
-    border: 'border-blue-200',
-    badge: 'bg-blue-100 text-blue-800 border-blue-200',
-    icon: <Info className="w-4 h-4 text-blue-600" />,
+    borderColor: 'oklch(0.70 0.18 200)',
+    badgeBg: 'oklch(0.70 0.18 200 / 0.15)',
+    badgeBorder: 'oklch(0.70 0.18 200 / 0.4)',
+    badgeColor: 'oklch(0.70 0.18 200)',
+    icon: <Info style={{ width: '16px', height: '16px', color: 'oklch(0.70 0.18 200)' }} />,
     label: 'Info',
   },
-};
-
-const systemColors: Record<string, string> = {
-  'Fuel System': 'bg-blue-100 text-blue-700',
-  'Fuel - Injectors': 'bg-blue-100 text-blue-700',
-  'Air System': 'bg-teal-100 text-teal-700',
-  'Engine - Air': 'bg-teal-100 text-teal-700',
-  'DPF System': 'bg-orange-100 text-orange-700',
-  'Emissions - DPF': 'bg-orange-100 text-orange-700',
-  'SCR / DEF System': 'bg-green-100 text-green-700',
-  'Emissions - DEF': 'bg-green-100 text-green-700',
-  'Emissions': 'bg-green-100 text-green-700',
-  'EGR System': 'bg-purple-100 text-purple-700',
-  'EGR': 'bg-purple-100 text-purple-700',
-  'EGT Sensors': 'bg-red-100 text-red-700',
-  'Exhaust': 'bg-red-100 text-red-700',
-  'Transmission': 'bg-indigo-100 text-indigo-700',
-  'Drivetrain': 'bg-indigo-100 text-indigo-700',
-  'Engine - Timing': 'bg-yellow-100 text-yellow-700',
-  'Engine - Sensors': 'bg-cyan-100 text-cyan-700',
-  'Engine - Cooling': 'bg-sky-100 text-sky-700',
-  'Engine - Combustion': 'bg-rose-100 text-rose-700',
-  'Engine - Lubrication': 'bg-amber-100 text-amber-700',
-  'Engine - Electrical': 'bg-violet-100 text-violet-700',
-  'Engine - Crankcase': 'bg-stone-100 text-stone-700',
-  'Engine - Idle': 'bg-slate-100 text-slate-700',
-  'Engine - Throttle': 'bg-lime-100 text-lime-700',
-  'Engine - Starting': 'bg-emerald-100 text-emerald-700',
-  'Electrical': 'bg-violet-100 text-violet-700',
-  'Network': 'bg-gray-100 text-gray-700',
-  'ECM': 'bg-gray-100 text-gray-700',
-  'NOx System': 'bg-green-100 text-green-700',
 };
 
 const categoryLabels: Record<string, string> = {
@@ -78,70 +46,110 @@ const categoryLabels: Record<string, string> = {
   thermal: 'Thermal',
 };
 
+function Pill({ label, color }: { label: string; color: string }) {
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: '2px',
+      fontFamily: '"Rajdhani", sans-serif',
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      letterSpacing: '0.04em',
+      background: `${color}22`,
+      border: `1px solid ${color}44`,
+      color
+    }}>{label}</span>
+  );
+}
+
 function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand?: boolean }) {
   const [expanded, setExpanded] = useState(autoExpand);
   const cfg = severityConfig[dtc.severity];
 
   return (
-    <div className={`rounded-xl border-2 ${cfg.border} overflow-hidden transition-all duration-200`}>
+    <div style={{
+      background: 'oklch(0.13 0.006 260)',
+      border: `1px solid oklch(0.22 0.008 260)`,
+      borderLeft: `3px solid ${cfg.borderColor}`,
+      borderRadius: '3px',
+      overflow: 'hidden',
+      transition: 'all 0.15s'
+    }}>
       {/* Header */}
       <div
-        className={`flex items-center justify-between p-4 cursor-pointer ${cfg.bg} hover:brightness-95 transition-all`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 14px',
+          cursor: 'pointer',
+          background: expanded ? 'oklch(0.15 0.007 260)' : 'transparent'
+        }}
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           {cfg.icon}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-lg font-bold text-gray-900 font-mono">{dtc.code}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${cfg.badge}`}>
-                {cfg.label}
-              </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${systemColors[dtc.system] || 'bg-gray-100 text-gray-700'}`}>
-                {dtc.system}
-              </span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.95rem', fontWeight: 'bold', color: 'white' }}>{dtc.code}</span>
+              <span style={{
+                padding: '1px 8px',
+                borderRadius: '2px',
+                fontFamily: '"Rajdhani", sans-serif',
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                letterSpacing: '0.05em',
+                background: cfg.badgeBg,
+                border: `1px solid ${cfg.badgeBorder}`,
+                color: cfg.badgeColor
+              }}>{cfg.label.toUpperCase()}</span>
+              <Pill label={dtc.system} color="oklch(0.70 0.18 200)" />
             </div>
-            <p className="text-sm font-semibold text-gray-800 mt-0.5">{dtc.title}</p>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', fontWeight: 600, color: 'oklch(0.75 0.010 260)', margin: 0, marginTop: '2px' }}>{dtc.title}</p>
           </div>
         </div>
-        <div className="shrink-0 ml-3">
-          {expanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
+        <div style={{ flexShrink: 0, marginLeft: '12px' }}>
+          {expanded
+            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+          }
         </div>
       </div>
 
       {/* Expanded Content */}
       {expanded && (
-        <div className="bg-white p-4 space-y-4 border-t border-gray-100">
+        <div style={{ background: 'oklch(0.11 0.005 260)', padding: '12px 14px', borderTop: '1px solid oklch(0.20 0.006 260)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div>
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Description</h4>
-            <p className="text-sm text-gray-700 leading-relaxed">{dtc.description}</p>
+            <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0, marginBottom: '6px' }}>DESCRIPTION</h4>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.88rem', color: 'oklch(0.70 0.010 260)', margin: 0, lineHeight: 1.6 }}>{dtc.description}</p>
           </div>
 
           {dtc.thresholds && (
-            <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-              <h4 className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1.5">Trigger Thresholds</h4>
-              <p className="text-sm text-blue-800">{dtc.thresholds}</p>
+            <div style={{ background: 'oklch(0.70 0.18 200 / 0.08)', border: '1px solid oklch(0.70 0.18 200 / 0.25)', borderRadius: '2px', padding: '10px 12px' }}>
+              <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.70 0.18 200)', margin: 0, marginBottom: '4px' }}>TRIGGER THRESHOLDS</h4>
+              <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>{dtc.thresholds}</p>
             </div>
           )}
 
           {dtc.enableCriteria && (
-            <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-              <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-1.5">Enable Criteria</h4>
-              <p className="text-sm text-gray-700">{dtc.enableCriteria}</p>
+            <div style={{ background: 'oklch(0.14 0.006 260)', border: '1px solid oklch(0.22 0.008 260)', borderRadius: '2px', padding: '10px 12px' }}>
+              <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.50 0.010 260)', margin: 0, marginBottom: '4px' }}>ENABLE CRITERIA</h4>
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>{dtc.enableCriteria}</p>
             </div>
           )}
 
-          <div className="grid md:grid-cols-2 gap-4">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             {dtc.causes && dtc.causes.length > 0 && (
               <div>
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3 h-3 text-orange-500" />
-                  Common Causes
+                <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.75 0.18 40)', margin: 0, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertTriangle style={{ width: '12px', height: '12px' }} />
+                  COMMON CAUSES
                 </h4>
-                <ul className="space-y-1.5">
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {dtc.causes.map((cause, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-gray-700">
-                      <span className="text-orange-400 shrink-0 mt-0.5">•</span>
+                    <li key={i} style={{ display: 'flex', gap: '8px', fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)' }}>
+                      <span style={{ color: 'oklch(0.75 0.18 40)', flexShrink: 0 }}>•</span>
                       <span>{cause}</span>
                     </li>
                   ))}
@@ -151,14 +159,13 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
 
             {dtc.remedies && dtc.remedies.length > 0 && (
               <div>
-                <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <span className="text-green-500">✓</span>
-                  Recommended Remedies
+                <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.65 0.20 145)', margin: 0, marginBottom: '8px' }}>
+                  RECOMMENDED REMEDIES
                 </h4>
-                <ul className="space-y-1.5">
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {dtc.remedies.map((remedy, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-gray-700">
-                      <span className="text-green-500 shrink-0 mt-0.5">✓</span>
+                    <li key={i} style={{ display: 'flex', gap: '8px', fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)' }}>
+                      <span style={{ color: 'oklch(0.65 0.20 145)', flexShrink: 0 }}>✓</span>
                       <span>{remedy}</span>
                     </li>
                   ))}
@@ -167,11 +174,10 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
             )}
           </div>
 
-          {/* ECU Internal ID */}
           {dtc.internalId && (
-            <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
-              <Cpu className="w-3 h-3 text-gray-400" />
-              <span className="text-xs text-gray-400 font-mono">ECU Fault ID: {dtc.internalId}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '8px', borderTop: '1px solid oklch(0.20 0.006 260)' }}>
+              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.40 0.008 260)' }} />
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)' }}>ECU Fault ID: {dtc.internalId}</span>
             </div>
           )}
         </div>
@@ -185,55 +191,59 @@ function EcuParamResult({ param }: { param: EcuParameter }) {
   const catLabel = categoryLabels[param.category] || param.category;
 
   return (
-    <div className="rounded-xl border-2 border-indigo-200 overflow-hidden transition-all duration-200">
+    <div style={{
+      background: 'oklch(0.13 0.006 260)',
+      border: '1px solid oklch(0.22 0.008 260)',
+      borderLeft: '3px solid oklch(0.70 0.20 300)',
+      borderRadius: '3px',
+      overflow: 'hidden'
+    }}>
       <div
-        className="flex items-center justify-between p-4 cursor-pointer bg-indigo-50 hover:brightness-95 transition-all"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', cursor: 'pointer', background: expanded ? 'oklch(0.15 0.007 260)' : 'transparent' }}
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-3 min-w-0">
-          <Gauge className="w-4 h-4 text-indigo-600 shrink-0" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-bold text-gray-900 font-mono">{param.internalName}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-100 text-indigo-700">
-                {catLabel}
-              </span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">
-                {param.unit}
-              </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+          <Gauge style={{ width: '16px', height: '16px', color: 'oklch(0.70 0.20 300)', flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.85rem', fontWeight: 'bold', color: 'white' }}>{param.internalName}</span>
+              <Pill label={catLabel} color="oklch(0.70 0.20 300)" />
+              <Pill label={param.unit} color="oklch(0.55 0.010 260)" />
             </div>
-            <p className="text-sm font-semibold text-gray-800 mt-0.5">{param.displayName}</p>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', fontWeight: 600, color: 'oklch(0.75 0.010 260)', margin: 0, marginTop: '2px' }}>{param.displayName}</p>
           </div>
         </div>
-        <div className="shrink-0 ml-3">
-          {expanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
+        <div style={{ flexShrink: 0, marginLeft: '12px' }}>
+          {expanded
+            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+          }
         </div>
       </div>
 
       {expanded && (
-        <div className="bg-white p-4 space-y-3 border-t border-gray-100">
-          <p className="text-sm text-gray-700 leading-relaxed">{param.description}</p>
+        <div style={{ background: 'oklch(0.11 0.005 260)', padding: '12px 14px', borderTop: '1px solid oklch(0.20 0.006 260)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.88rem', color: 'oklch(0.70 0.010 260)', margin: 0, lineHeight: 1.6 }}>{param.description}</p>
 
-          {/* Operating Ranges */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
             {param.normalMin !== undefined && param.normalMax !== undefined && (
-              <div className="bg-green-50 rounded-lg p-2.5 border border-green-100">
-                <p className="text-xs font-bold text-green-700 mb-0.5">Normal Range</p>
-                <p className="text-sm text-green-800 font-mono">{param.normalMin} – {param.normalMax} {param.unit}</p>
+              <div style={{ background: 'oklch(0.65 0.20 145 / 0.1)', border: '1px solid oklch(0.65 0.20 145 / 0.3)', borderRadius: '2px', padding: '8px 10px' }}>
+                <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.7rem', letterSpacing: '0.08em', color: 'oklch(0.65 0.20 145)', margin: 0, marginBottom: '4px' }}>NORMAL RANGE</p>
+                <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>{param.normalMin} – {param.normalMax} {param.unit}</p>
               </div>
             )}
             {(param.warnMin !== undefined || param.warnMax !== undefined) && (
-              <div className="bg-yellow-50 rounded-lg p-2.5 border border-yellow-100">
-                <p className="text-xs font-bold text-yellow-700 mb-0.5">Warning Threshold</p>
-                <p className="text-sm text-yellow-800 font-mono">
+              <div style={{ background: 'oklch(0.75 0.18 60 / 0.1)', border: '1px solid oklch(0.75 0.18 60 / 0.3)', borderRadius: '2px', padding: '8px 10px' }}>
+                <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.7rem', letterSpacing: '0.08em', color: 'oklch(0.75 0.18 60)', margin: 0, marginBottom: '4px' }}>WARNING</p>
+                <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
                   {param.warnMin !== undefined ? `${param.warnMin}` : '—'} / {param.warnMax !== undefined ? `${param.warnMax}` : '—'} {param.unit}
                 </p>
               </div>
             )}
             {(param.critMin !== undefined || param.critMax !== undefined) && (
-              <div className="bg-red-50 rounded-lg p-2.5 border border-red-100">
-                <p className="text-xs font-bold text-red-700 mb-0.5">Critical Threshold</p>
-                <p className="text-sm text-red-800 font-mono">
+              <div style={{ background: 'oklch(0.52 0.22 25 / 0.1)', border: '1px solid oklch(0.52 0.22 25 / 0.3)', borderRadius: '2px', padding: '8px 10px' }}>
+                <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.7rem', letterSpacing: '0.08em', color: 'oklch(0.75 0.18 25)', margin: 0, marginBottom: '4px' }}>CRITICAL</p>
+                <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
                   {param.critMin !== undefined ? `${param.critMin}` : '—'} / {param.critMax !== undefined ? `${param.critMax}` : '—'} {param.unit}
                 </p>
               </div>
@@ -241,9 +251,9 @@ function EcuParamResult({ param }: { param: EcuParameter }) {
           </div>
 
           {param.ecuAddress && (
-            <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
-              <Cpu className="w-3 h-3 text-gray-400" />
-              <span className="text-xs text-gray-400 font-mono">ECU Address: {param.ecuAddress}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '8px', borderTop: '1px solid oklch(0.20 0.006 260)' }}>
+              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.40 0.008 260)' }} />
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)' }}>ECU Address: {param.ecuAddress}</span>
             </div>
           )}
         </div>
@@ -297,104 +307,174 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
   const hasQuery = query.trim().length >= 2;
   const totalResults = dtcResults.length + paramResults.length;
 
-  return (
-    <Card className="border-gray-200 shadow-sm">
-      <CardHeader className="pb-3 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
-            <Search className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <CardTitle className="text-base font-bold text-gray-900">Diagnostic Code Lookup</CardTitle>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Search by fault code (P0087), keyword (fuel rail, boost), or browse by system
-            </p>
-          </div>
-        </div>
-      </CardHeader>
+  const modeBtn = (mode: 'all' | 'dtc' | 'params', label: string) => (
+    <button
+      key={mode}
+      onClick={() => setSearchMode(mode)}
+      style={{
+        padding: '5px 14px',
+        borderRadius: '2px',
+        fontFamily: '"Bebas Neue", "Impact", sans-serif',
+        fontSize: '0.8rem',
+        letterSpacing: '0.08em',
+        border: `1px solid ${searchMode === mode ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+        background: searchMode === mode ? 'oklch(0.52 0.22 25)' : 'transparent',
+        color: searchMode === mode ? 'white' : 'oklch(0.55 0.010 260)',
+        cursor: 'pointer',
+        transition: 'all 0.15s'
+      }}
+    >{label}</button>
+  );
 
-      <CardContent className="p-4 space-y-4">
+  return (
+    <div style={{
+      background: 'oklch(0.13 0.006 260)',
+      border: '1px solid oklch(0.22 0.008 260)',
+      borderRadius: '3px',
+      overflow: 'hidden'
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '1rem 1.25rem',
+        borderBottom: '1px solid oklch(0.20 0.006 260)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px'
+      }}>
+        <div style={{
+          width: '36px',
+          height: '36px',
+          background: 'oklch(0.52 0.22 25)',
+          borderRadius: '3px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          <Search style={{ width: '18px', height: '18px', color: 'white' }} />
+        </div>
+        <div>
+          <h3 style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+            DIAGNOSTIC CODE LOOKUP
+          </h3>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)', margin: 0 }}>
+            Search by code (P0087), keyword (fuel rail, boost), or browse by system
+          </p>
+        </div>
+      </div>
+
+      <div style={{ padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {/* Search Input */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
+        <div style={{ position: 'relative' }}>
+          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)' }} />
+          <input
             type="text"
             placeholder="Search by code (P0087), parameter name, or keyword (fuel rail, boost leak)..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 pr-9 h-11 text-sm border-gray-300 focus:border-blue-500"
+            style={{
+              width: '100%',
+              padding: '10px 36px',
+              fontFamily: '"Share Tech Mono", monospace',
+              fontSize: '0.85rem',
+              background: 'oklch(0.10 0.005 260)',
+              border: '1px solid oklch(0.28 0.008 260)',
+              borderRadius: '3px',
+              color: 'white',
+              outline: 'none',
+              boxSizing: 'border-box',
+              letterSpacing: '0.03em'
+            }}
           />
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
-              <X className="w-4 h-4" />
+              <X style={{ width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)' }} />
             </button>
           )}
         </div>
 
         {/* Search Mode Tabs */}
-        <div className="flex gap-2">
-          {(['all', 'dtc', 'params'] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setSearchMode(mode)}
-              className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                searchMode === mode
-                  ? 'bg-gray-900 text-white border-gray-900'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              {mode === 'all' ? 'All Results' : mode === 'dtc' ? 'Fault Codes Only' : 'ECU Parameters Only'}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {modeBtn('all', 'ALL RESULTS')}
+          {modeBtn('dtc', 'FAULT CODES')}
+          {modeBtn('params', 'ECU PARAMETERS')}
         </div>
 
-        {/* System Filter Pills (only for DTC mode) */}
+        {/* System Filter Pills */}
         {(searchMode === 'all' || searchMode === 'dtc') && (
-          <div className="flex flex-wrap gap-2">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             <button
               onClick={() => setActiveSystem(null)}
-              className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                !activeSystem
-                  ? 'bg-gray-900 text-white border-gray-900'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-              }`}
-            >
-              All Systems
-            </button>
+              style={{
+                padding: '3px 10px',
+                borderRadius: '2px',
+                fontFamily: '"Rajdhani", sans-serif',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                border: `1px solid ${!activeSystem ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+                background: !activeSystem ? 'oklch(0.52 0.22 25)' : 'transparent',
+                color: !activeSystem ? 'white' : 'oklch(0.55 0.010 260)',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+            >ALL SYSTEMS</button>
             {systems.map((sys) => (
               <button
                 key={sys}
                 onClick={() => setActiveSystem(activeSystem === sys ? null : sys)}
-                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                  activeSystem === sys
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-                }`}
-              >
-                {sys}
-              </button>
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: '2px',
+                  fontFamily: '"Rajdhani", sans-serif',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  border: `1px solid ${activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.28 0.008 260)'}`,
+                  background: activeSystem === sys ? 'oklch(0.70 0.18 200 / 0.15)' : 'transparent',
+                  color: activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.55 0.010 260)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s'
+                }}
+              >{sys}</button>
             ))}
           </div>
         )}
 
-        {/* Empty State — prompt user to type */}
+        {/* Empty State */}
         {!hasQuery && (
-          <div className="text-center py-10 text-gray-400">
-            <Search className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-            <p className="font-medium text-gray-500">Enter a fault code or keyword to search</p>
-            <p className="text-sm mt-1">Examples: <span className="font-mono text-blue-500">P0087</span>, <span className="font-mono text-blue-500">fuel rail</span>, <span className="font-mono text-blue-500">boost leak</span>, <span className="font-mono text-blue-500">VeFCBR</span></p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <div style={{ textAlign: 'center', padding: '2.5rem 0' }}>
+            <Search style={{ width: '40px', height: '40px', margin: '0 auto 12px', color: 'oklch(0.30 0.008 260)' }} />
+            <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)', margin: 0, marginBottom: '4px' }}>
+              ENTER A CODE OR KEYWORD TO SEARCH
+            </p>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.40 0.008 260)', margin: 0 }}>
+              Examples:{' '}
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>P0087</span>,{' '}
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>fuel rail</span>,{' '}
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>boost leak</span>,{' '}
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>VeFCBR</span>
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px', marginTop: '16px' }}>
               {['P0087', 'P0088', 'P0299', 'P0101', 'P0234', 'P20EE'].map((code) => (
                 <button
                   key={code}
                   onClick={() => setQuery(code)}
-                  className="text-xs px-3 py-1.5 rounded-full bg-gray-100 text-gray-600 hover:bg-blue-50 hover:text-blue-600 border border-gray-200 font-mono transition-colors"
-                >
-                  {code}
-                </button>
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: '2px',
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.8rem',
+                    background: 'oklch(0.16 0.007 260)',
+                    border: '1px solid oklch(0.28 0.008 260)',
+                    color: 'oklch(0.70 0.18 200)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s'
+                  }}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.borderColor = 'oklch(0.70 0.18 200)'; }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = 'oklch(0.28 0.008 260)'; }}
+                >{code}</button>
               ))}
             </div>
           </div>
@@ -403,57 +483,63 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
         {/* Results */}
         {hasQuery && (
           <>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">
-                {totalResults === 0 ? 'No results found' : `${totalResults} result${totalResults !== 1 ? 's' : ''} found`}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.50 0.010 260)', margin: 0 }}>
+                {totalResults === 0 ? 'NO RESULTS FOUND' : `${totalResults} RESULT${totalResults !== 1 ? 'S' : ''} FOUND`}
               </p>
               {(query || activeSystem) && (
                 <button
                   onClick={() => { setQuery(''); setActiveSystem(null); }}
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  Clear
-                </button>
+                  style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.8rem', letterSpacing: '0.06em', color: 'oklch(0.52 0.22 25)', background: 'none', border: 'none', cursor: 'pointer' }}
+                >CLEAR</button>
               )}
             </div>
 
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {totalResults === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <Search className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                  <p className="font-medium">No codes or parameters found</p>
-                  <p className="text-sm mt-1">Try a different code or keyword</p>
+                <div style={{ textAlign: 'center', padding: '2rem 0' }}>
+                  <Search style={{ width: '32px', height: '32px', margin: '0 auto 8px', color: 'oklch(0.30 0.008 260)' }} />
+                  <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>NO CODES OR PARAMETERS FOUND</p>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.40 0.008 260)', margin: 0 }}>Try a different code or keyword</p>
                 </div>
               ) : (
                 <>
-                  {/* DTC Results — grouped by subsystem */}
                   {(searchMode === 'all' || searchMode === 'dtc') && dtcResults.length > 0 && (() => {
-                    // Group by system
                     const grouped: Record<string, typeof dtcResults> = {};
                     dtcResults.forEach(dtc => {
                       if (!grouped[dtc.system]) grouped[dtc.system] = [];
                       grouped[dtc.system].push(dtc);
                     });
-                    const systemOrder = [
-                      'Fuel System', 'Air System', 'EGT Sensors', 'EGR System',
-                      'DPF System', 'SCR / DEF System',
-                    ];
+                    const systemOrder = ['Fuel System', 'Air System', 'EGT Sensors', 'EGR System', 'DPF System', 'SCR / DEF System'];
                     const sortedSystems = Object.keys(grouped).sort(
                       (a, b) => (systemOrder.indexOf(a) === -1 ? 99 : systemOrder.indexOf(a))
                                - (systemOrder.indexOf(b) === -1 ? 99 : systemOrder.indexOf(b))
                     );
                     return (
-                      <div className="space-y-5">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {searchMode === 'all' && paramResults.length > 0 && (
-                          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fault Codes ({dtcResults.length})</p>
+                          <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>
+                            FAULT CODES ({dtcResults.length})
+                          </p>
                         )}
                         {sortedSystems.map(sys => (
                           <div key={sys}>
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${systemColors[sys] || 'bg-gray-100 text-gray-700'}`}>{sys}</span>
-                              <span className="text-xs text-gray-400">{grouped[sys].length} code{grouped[sys].length !== 1 ? 's' : ''}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                              <span style={{
+                                padding: '2px 10px',
+                                borderRadius: '2px',
+                                fontFamily: '"Rajdhani", sans-serif',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                background: 'oklch(0.70 0.18 200 / 0.15)',
+                                border: '1px solid oklch(0.70 0.18 200 / 0.3)',
+                                color: 'oklch(0.70 0.18 200)'
+                              }}>{sys}</span>
+                              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.40 0.008 260)' }}>
+                                {grouped[sys].length} code{grouped[sys].length !== 1 ? 's' : ''}
+                              </span>
                             </div>
-                            <div className="space-y-2 pl-1">
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingLeft: '4px' }}>
                               {grouped[sys].map(dtc => (
                                 <DtcResult key={dtc.code} dtc={dtc} autoExpand={autoExpand} />
                               ))}
@@ -464,11 +550,12 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                     );
                   })()}
 
-                  {/* ECU Parameter Results */}
                   {(searchMode === 'all' || searchMode === 'params') && paramResults.length > 0 && (
-                    <div className="space-y-3">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {searchMode === 'all' && dtcResults.length > 0 && (
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mt-4">ECU Parameters ({paramResults.length})</p>
+                        <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>
+                          ECU PARAMETERS ({paramResults.length})
+                        </p>
                       )}
                       {paramResults.map((param) => (
                         <EcuParamResult key={param.internalName} param={param} />
@@ -482,12 +569,17 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
         )}
 
         {/* Disclaimer */}
-        <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 mt-2">
-          <p className="text-xs text-gray-500 leading-relaxed">
+        <div style={{
+          background: 'oklch(0.10 0.005 260)',
+          border: '1px solid oklch(0.20 0.008 260)',
+          borderRadius: '2px',
+          padding: '10px 12px'
+        }}>
+          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.40 0.008 260)', margin: 0, lineHeight: 1.6 }}>
             Covers 2017–2023 L5P 6.6L Duramax. Verify with live scan data before performing repairs.
           </p>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
