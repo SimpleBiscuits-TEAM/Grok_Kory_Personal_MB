@@ -12,7 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
-import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
@@ -58,7 +58,6 @@ export default function Home() {
   const vgtFaultRef = useRef<HTMLDivElement>(null);
   const regulatorFaultRef = useRef<HTMLDivElement>(null);
   const coolantFaultRef = useRef<HTMLDivElement>(null);
-  const idleRpmFaultRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const healthRef = useRef<HTMLDivElement>(null);
 
@@ -146,7 +145,6 @@ export default function Home() {
       vgtFaultRef,
       regulatorFaultRef,
       coolantFaultRef,
-      idleRpmFaultRef,
       statsRef,
       healthRef,
     };
@@ -701,32 +699,8 @@ export default function Home() {
                 <VgtFaultChart ref={vgtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
                 <RegulatorFaultChart ref={regulatorFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
                 <CoolantFaultChart ref={coolantFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <IdleRpmFaultChart ref={idleRpmFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
               </div>
             )}
-
-            {/* Methodology */}
-            <div style={{
-              background: 'oklch(0.13 0.006 260)',
-              border: '1px solid oklch(0.22 0.008 260)',
-              borderLeft: '4px solid oklch(0.55 0.010 260)',
-              borderRadius: '3px',
-              padding: '1.25rem'
-            }}>
-              <h3 style={{
-                fontFamily: '"Bebas Neue", "Impact", sans-serif',
-                fontSize: '1rem',
-                letterSpacing: '0.08em',
-                color: 'oklch(0.65 0.010 260)',
-                marginBottom: '0.75rem'
-              }}>METHODOLOGY</h3>
-              <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.78rem', color: 'oklch(0.50 0.010 260)', lineHeight: 1.8 }}>
-                <p>• <span style={{ color: 'oklch(0.75 0.18 40)' }}>HP (Torque Method):</span> HP = Torque(lb·ft) × RPM / 5252 — uses SAE J1979 actual torque % × reference torque</p>
-                <p>• <span style={{ color: 'oklch(0.70 0.18 200)' }}>Torque:</span> Derived from HP × 5252 / RPM for dyno graph display</p>
-                <p>• <span style={{ color: 'oklch(0.65 0.20 145)' }}>Fault Delta:</span> Shaded area between Desired and Actual curves — larger delta = greater fault severity</p>
-                <p>• <span style={{ color: 'oklch(0.52 0.22 25)' }}>Thresholds:</span> Based on 2024 GM OBDG06C HD spec with 30% tolerance buffer to reduce false positives</p>
-              </div>
-            </div>
 
             {/* DTC Code Search */}
             <div>

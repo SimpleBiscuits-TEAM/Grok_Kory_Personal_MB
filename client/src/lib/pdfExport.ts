@@ -277,7 +277,6 @@ doc.addPage();
       [refs.vgtFaultRef, 'VGT Turbo Vane Tracking Potential Fault Area (P0046)'],
       [refs.regulatorFaultRef, 'Fuel Pressure Regulator Potential Fault Area (P0089)'],
       [refs.coolantFaultRef, 'Coolant Temperature Potential Fault Area (P0116/P0128)'],
-      [refs.idleRpmFaultRef, 'Idle RPM Potential Fault Area (P0506/P0507)'],
     ];
     for (const [ref, label] of faultRefs) {
       if (ref.current) {
@@ -286,21 +285,6 @@ doc.addPage();
       }
     }
   }
-
-  // ── METHODOLOGY ────────────────────────────────────────────────────────────
-  checkBreak(60);
-  addText('ANALYSIS METHODOLOGY', 13, 'bold', [30, 58, 138]);
-  const methods = [
-    'HP (Torque Method): HP = Torque(lb·ft) × RPM / 5252 — uses SAE J1979 actual torque % × ECM reference torque',
-    'Torque: Derived from HP × 5252 / RPM for dyno graph display',
-    'Fault Delta: Shaded area between Desired (green) and Actual (red) curves — larger delta = greater fault severity',
-    'Rail Pressure P0087: Actual is ≥3,000 psi below desired for >2 seconds',
-    'Rail Pressure P0088: Actual is ≥1,500 psi above desired for >2 seconds',
-    'Boost P0299: Actual is ≥5 psi below desired for >3 seconds',
-    'EGT Warning: Exhaust gas temp exceeds 1,475°F for >5 seconds',
-    'MAF P0101: Idle MAF flow outside 2–6 lb/min range',
-  ];
-  methods.forEach(m => addText(`• ${m}`, 8, 'normal', [70, 70, 70]));
 
   // ── PAGE NUMBERS + PPEI WATERMARK ────────────────────────────────────────
   const pageCount = doc.getNumberOfPages();

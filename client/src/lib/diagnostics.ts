@@ -151,11 +151,6 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkCoolantTemp(coolantTemp, timeMinutes));
   }
 
-  // P0506/P0507 - Idle RPM
-  if (rpm.length > 0) {
-    issues.push(...checkIdleRpm(rpm));
-  }
-
   // P0741/P0742 - TCC Operation
   if (converterSlip.length > 0 && converterDutyCycle.length > 0) {
     issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm));
@@ -404,7 +399,8 @@ function checkLowBoostPressure(
     if (offset > threshold) {
       consecutiveViolations++;
 
-      if (consecutiveViolations >= minSamples) {
+      if (consecutiveViolations >= minSamples && issues.length === 0) {
+        // Only report the first boost fault — avoid repeating the same finding
         const vanePos = turboVane[i] || 0;
         const mafFlow = maf[i] || 0;
         const currentRpm = rpm[i] || 0;
