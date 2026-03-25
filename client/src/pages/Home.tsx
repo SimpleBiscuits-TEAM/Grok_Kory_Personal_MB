@@ -4,12 +4,12 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
-import { DynoHPChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, BoostEfficiencyChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
-import { getVehicleInfoFromFilename } from '@/lib/vinLookup';
+import { getVehicleInfoFromFilename, decodeVin } from '@/lib/vinLookup';
 import EcuReferencePanel from '@/components/EcuReferencePanel';
 import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
@@ -23,10 +23,13 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [manualVin, setManualVin] = useState('');
+  const [vinFromFile, setVinFromFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs for PDF export — dyno + fault charts
-  const dynoRef = useRef<HTMLDivElement>(null);
+  const dynoRef = useRef<DynoChartHandle>(null);
+  const dynoContainerRef = useRef<HTMLDivElement>(null);
   const boostEffRef = useRef<HTMLDivElement>(null);
   const railFaultRef = useRef<HTMLDivElement>(null);
   const boostFaultRef = useRef<HTMLDivElement>(null);
@@ -54,7 +57,9 @@ export default function Home() {
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
 
-      const vehicleInfo = getVehicleInfoFromFilename(file.name) || undefined;
+      const detectedVin = getVehicleInfoFromFilename(file.name);
+      setVinFromFile(detectedVin ? detectedVin.vin : null);
+      const vehicleInfo = detectedVin || undefined;
       const report = generateHealthReport(downsampled, vehicleInfo);
       setHealthReport(report);
     } catch (err) {
@@ -63,6 +68,8 @@ export default function Home() {
       setBinnedData(undefined);
       setDiagnostics(null);
       setHealthReport(null);
+      setVinFromFile(null);
+      setManualVin('');
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -95,7 +102,7 @@ export default function Home() {
   const handleExportPdf = () => {
     if (!data || !fileName) return;
     const refs = {
-      dynoRef,
+      dynoRef: dynoContainerRef,
       boostEffRef,
       railFaultRef,
       boostFaultRef,
@@ -108,6 +115,17 @@ export default function Home() {
   };
 
   const hasFaults = diagnostics && diagnostics.issues.length > 0;
+
+  // Apply manual VIN when user submits it
+  const applyManualVin = useCallback(() => {
+    if (!data || !manualVin.trim()) return;
+    const vin = manualVin.trim().toUpperCase();
+    if (vin.length !== 17) return;
+    const vehicleInfo = decodeVin(vin);
+    setVinFromFile(vin);
+    const report = generateHealthReport(data, vehicleInfo);
+    setHealthReport(report);
+  }, [data, manualVin]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -242,6 +260,42 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Manual VIN Entry — shown when no VIN was auto-detected */}
+            {!vinFromFile && (
+              <div className="bg-white rounded-lg border border-blue-200 p-4 shadow-sm">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                    <span className="text-blue-600 font-bold text-sm" style={{ fontFamily: 'monospace' }}>VIN</span>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">No VIN Detected in Datalog</p>
+                    <p className="text-xs text-gray-500">Optionally enter your VIN to unlock vehicle identification and factory spec lookup</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={manualVin}
+                    onChange={(e) => setManualVin(e.target.value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, '').slice(0, 17))}
+                    placeholder="Enter 17-character VIN (e.g. 1GC4YPEY...)"
+                    maxLength={17}
+                    className="flex-1 px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
+                    onKeyDown={(e) => e.key === 'Enter' && applyManualVin()}
+                  />
+                  <Button
+                    onClick={applyManualVin}
+                    disabled={manualVin.length !== 17}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4"
+                    size="sm"
+                  >
+                    Decode VIN
+                  </Button>
+                </div>
+                {manualVin.length > 0 && manualVin.length < 17 && (
+                  <p className="text-xs text-amber-600 mt-1">{17 - manualVin.length} more characters needed</p>
+                )}
+              </div>
+            )}
             {/* Vehicle Health Report */}
             {healthReport && (
               <div ref={healthRef}>
@@ -266,7 +320,9 @@ export default function Home() {
             {/* Dynojet-Style HP/Torque Chart */}
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-3" style={{ fontFamily: 'monospace', letterSpacing: 1 }}>DYNO RESULTS</h2>
-              <DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} />
+              <div ref={dynoContainerRef}>
+                <DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} />
+              </div>
             </div>
             {/* Boost Efficiency Chart */}
             <div>
@@ -284,10 +340,10 @@ export default function Home() {
                   </h2>
                   <span className="text-sm text-gray-500">— actual vs desired with shaded delta error</span>
                 </div>
-                <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} />
-                <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} />
-                <EgtFaultChart ref={egtFaultRef} data={data} diagnostics={diagnostics!} />
-                <MafFaultChart ref={mafFaultRef} data={data} diagnostics={diagnostics!} />
+                <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <EgtFaultChart ref={egtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <MafFaultChart ref={mafFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
               </div>
             )}
 

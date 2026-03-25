@@ -33,7 +33,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
           <div className="flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-red-600" />
             <h4 className="font-semibold text-gray-900">
-              Critical Issues ({criticalIssues.length})
+              Potential Fault Areas — Critical ({criticalIssues.length})
             </h4>
           </div>
           <div className="space-y-3">
@@ -50,7 +50,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-yellow-600" />
             <h4 className="font-semibold text-gray-900">
-              Warnings ({warningIssues.length})
+              Potential Fault Areas — Warnings ({warningIssues.length})
             </h4>
           </div>
           <div className="space-y-3">
@@ -67,7 +67,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
           <div className="flex items-center gap-2">
             <Info className="w-5 h-5 text-blue-600" />
             <h4 className="font-semibold text-gray-900">
-              Information ({infoIssues.length})
+              Potential Fault Areas — Information ({infoIssues.length})
             </h4>
           </div>
           <div className="space-y-3">
@@ -86,7 +86,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
             <div>
               <h3 className="font-semibold text-gray-900 mb-1">All Systems Normal</h3>
               <p className="text-sm text-gray-700">
-                No diagnostic issues detected. Engine parameters are within normal ranges.
+                No potential fault areas detected. Engine parameters are within normal ranges.
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export function DiagnosticReportForPDF({ report }: DiagnosticReportProps) {
   return (
     <div className="space-y-4 text-sm">
       <div>
-        <h3 className="font-bold text-base mb-2">Diagnostic Analysis</h3>
+        <h3 className="font-bold text-base mb-2">Potential Fault Area Analysis</h3>
         <p className="text-gray-700 mb-4">{report.summary}</p>
       </div>
 

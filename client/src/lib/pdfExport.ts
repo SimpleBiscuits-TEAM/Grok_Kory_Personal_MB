@@ -180,12 +180,12 @@ export async function generatePerformanceReport(
       });
     });
     y += 4;
-  }
-
-  // ── FAULT DIAGNOSTICS ──────────────────────────────────────────────────────
+  }  // ── POTENTIAL FAULT AREAS ─────────────────────────────────────────────────────
   if (diagnostics && diagnostics.issues.length > 0) {
     checkBreak(40);
-    addText('FAULT DIAGNOSTICS', 13, 'bold', [30, 58, 138]);
+    addText('POTENTIAL FAULT AREAS', 13, 'bold', [30, 58, 138]);
+    addText('NOTE: These are data-driven indicators only. A CEL or confirmed fault code may not be present.', 8, 'normal', [120, 80, 20]);
+    y += 2;
     diagnostics.issues.forEach(issue => {
       checkBreak(28);
       const sevColor: [number, number, number] = issue.severity === 'critical' ? [220, 38, 38] : [202, 138, 4];
@@ -203,8 +203,8 @@ export async function generatePerformanceReport(
     y += 4;
   } else {
     checkBreak(16);
-    addText('FAULT DIAGNOSTICS', 13, 'bold', [30, 58, 138]);
-    addText('✓ No fault conditions detected in this datalog.', 10, 'normal', [22, 163, 74]);
+    addText('POTENTIAL FAULT AREAS', 13, 'bold', [30, 58, 138]);
+    addText('\u2713 No potential fault areas detected in this datalog.', 10, 'normal', [22, 163, 74]);
     y += 4;
   }
 
@@ -224,10 +224,10 @@ export async function generatePerformanceReport(
   // ── FAULT ZONE CHARTS ──────────────────────────────────────────────────────
   if (diagnostics && diagnostics.issues.length > 0) {
     const faultRefs: Array<[React.RefObject<HTMLDivElement | null>, string]> = [
-      [refs.railFaultRef, 'Rail Pressure Fault Analysis (P0087 / P0088)'],
-      [refs.boostFaultRef, 'Boost Pressure Fault Analysis (P0299)'],
-      [refs.egtFaultRef, 'Exhaust Gas Temperature Fault Analysis'],
-      [refs.mafFaultRef, 'Mass Airflow Fault Analysis (P0101)'],
+      [refs.railFaultRef, 'Rail Pressure Potential Fault Area (P0087 / P0088)'],
+      [refs.boostFaultRef, 'Boost Pressure Potential Fault Area (P0299)'],
+      [refs.egtFaultRef, 'Exhaust Gas Temperature Potential Fault Area'],
+      [refs.mafFaultRef, 'Mass Airflow Potential Fault Area (P0101)'],
     ];
     for (const [ref, label] of faultRefs) {
       if (ref.current) {
@@ -266,3 +266,4 @@ export async function generatePerformanceReport(
   const timestamp = new Date().toISOString().slice(0, 10);
   doc.save(`Duramax_Report_${timestamp}.pdf`);
 }
+// cache bust Wed Mar 25 16:19:48 EDT 2026

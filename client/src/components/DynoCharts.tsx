@@ -14,7 +14,7 @@
  * 'P0087-RAIL-MAXED', 'P0088-OSCILLATION', 'P0299-BOOST-LEAK', etc.
  */
 
-import { useMemo, forwardRef, useState } from 'react';
+import { useMemo, forwardRef, useState, useImperativeHandle, useRef, useEffect } from 'react';
 import {
   ComposedChart,
   ScatterChart,
@@ -36,6 +36,10 @@ import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { DiagnosticReport } from '@/lib/diagnostics';
 import { AlertCircle } from 'lucide-react';
 
+export interface DynoChartHandle {
+  jumpToTime: (startMin: number, endMin: number) => void;
+}
+
 interface DynoChartProps {
   data: ProcessedMetrics;
   binnedData?: any[];
@@ -45,6 +49,7 @@ interface FaultChartsProps {
   data: ProcessedMetrics;
   diagnostics: DiagnosticReport;
   binnedData?: any[];
+  onJumpToTime?: (start: number, end: number) => void;
 }
 
 // ─── Custom Dynojet-style Tooltip ────────────────────────────────────────────
@@ -213,7 +218,7 @@ function computeFaultEvents(
   return events;
 }
 
-const FaultEventList = ({ events, isCritical }: { events: FaultEvent[]; isCritical: boolean }) => {
+const FaultEventList = ({ events, isCritical, onJumpToTime }: { events: FaultEvent[]; isCritical: boolean; onJumpToTime?: (start: number, end: number) => void }) => {
   if (events.length === 0) return null;
   const borderColor = isCritical ? 'rgba(255,34,34,0.25)' : 'rgba(255,153,0,0.25)';
   const headerColor = isCritical ? '#ff4444' : '#ffaa44';
@@ -243,7 +248,7 @@ const FaultEventList = ({ events, isCritical }: { events: FaultEvent[]; isCritic
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-            {['#', 'START', 'END', 'DURATION', 'PEAK DELTA'].map(h => (
+            {['#', 'START', 'END', 'DURATION', 'PEAK DELTA', ...(onJumpToTime ? [''] : [])].map(h => (
               <th key={h} style={{
                 padding: '5px 10px', textAlign: 'left', color: '#555',
                 fontSize: 9, fontWeight: 'bold', letterSpacing: 1,
@@ -267,6 +272,28 @@ const FaultEventList = ({ events, isCritical }: { events: FaultEvent[]; isCritic
               <td style={{ padding: '5px 10px', color: headerColor, fontSize: 10, fontWeight: 'bold' }}>
                 {ev.peakDelta.toFixed(ev.unit.includes('psi') ? 0 : 1)} {ev.unit}
               </td>
+              {onJumpToTime && (
+                <td style={{ padding: '5px 10px' }}>
+                  <button
+                    onClick={() => onJumpToTime(ev.start, ev.end)}
+                    style={{
+                      background: 'rgba(255,77,0,0.15)',
+                      border: '1px solid rgba(255,77,0,0.4)',
+                      borderRadius: 4,
+                      color: '#ff8844',
+                      fontSize: 9,
+                      fontFamily: 'monospace',
+                      fontWeight: 'bold',
+                      padding: '2px 7px',
+                      cursor: 'pointer',
+                      letterSpacing: 0.5,
+                    }}
+                    title={`Jump to ${ev.start.toFixed(2)}m–${ev.end.toFixed(2)}m in dyno chart`}
+                  >
+                    ▶ JUMP
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -368,11 +395,25 @@ const PID_OVERLAYS: Array<{
 ];
 
 // ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
-export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, binnedData }, ref) => {
+export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, binnedData }, ref) => {
+  const divRef = useRef<HTMLDivElement>(null);
   const [selectedPids, setSelectedPids] = useState<Set<string>>(new Set());
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [xMode, setXMode] = useState<'rpm' | 'time'>('rpm');
+  const [brushIndices, setBrushIndices] = useState<{ startIndex?: number; endIndex?: number }>({});
+
+  useImperativeHandle(ref, () => ({
+    jumpToTime: (startMin: number, endMin: number) => {
+      setXMode('time');
+      // Resolve indices after timeData is built; store pending range as a sentinel
+      // We use a small timeout to let the mode switch re-render first
+      setTimeout(() => {
+        setBrushIndices({ _startMin: startMin, _endMin: endMin } as any);
+      }, 50);
+      divRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+  }));
 
   // Determine which PIDs have data in this log
   const availablePids = useMemo(() => {
@@ -475,6 +516,19 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
     return rows;
   }, [data, activePidDefs]);
 
+  // Resolve pending jump-to-time sentinel into real brush indices
+  useEffect(() => {
+    const b = brushIndices as any;
+    if (typeof b._startMin === 'number' && timeData.length > 0) {
+      const startIdx = timeData.findIndex(d => (d.time as number) >= b._startMin);
+      const endIdx = timeData.findLastIndex(d => (d.time as number) <= b._endMin + 0.1);
+      setBrushIndices({
+        startIndex: Math.max(0, startIdx - 2),
+        endIndex: Math.min(timeData.length - 1, endIdx + 2),
+      });
+    }
+  }, [brushIndices, timeData]);
+
   const activeChartData = xMode === 'time' ? timeData : dynoData;
 
   const peakHp = dynoData.length ? dynoData.reduce((max, d) => (d.hp as number) > (max.hp as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
@@ -508,7 +562,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
 
   if (dynoData.length < 3) {
     return (
-      <div ref={ref} style={{
+      <div ref={divRef} style={{
         background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
         border: '1px solid #1e2330', borderRadius: '12px', padding: '40px 20px',
         textAlign: 'center', color: '#444', fontFamily: 'monospace', fontSize: 13,
@@ -521,7 +575,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
   }
 
   const chartContent = (
-    <div ref={ref} style={{
+    <div ref={divRef} style={{
       background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
       border: fullscreen ? 'none' : '1px solid #1e2330',
       borderRadius: fullscreen ? 0 : '12px',
@@ -913,7 +967,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
 DynoHPChart.displayName = 'DynoHPChart';
 
 // ─── RAIL PRESSURE FAULT CHART ────────────────────────────────────────────────
-export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
+export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   // Match suffixed codes: P0087-RAIL-MAXED, P0087-RAIL-TUNING, P0087-RELIEF-VALVE, P0088-*, P0088-OSCILLATION
   const p0087Issue = diagnostics.issues.find(i => i.code.startsWith('P0087'));
   const p0088Issue = diagnostics.issues.find(i => i.code.startsWith('P0088'));
@@ -1032,6 +1086,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
           d => isLow ? (d.deltaLow ?? 0) : (d.deltaHigh ?? 0),
           'psi'
         )}
+        onJumpToTime={onJumpToTime}
       />
     </FaultChartWrapper>
   );
@@ -1039,7 +1094,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
 RailPressureFaultChart.displayName = 'RailPressureFaultChart';
 
 // ─── BOOST PRESSURE FAULT CHART ───────────────────────────────────────────────
-export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
+export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   const issue = diagnostics.issues.find(i => i.code.startsWith('P0299'));
   if (!issue) return null;
 
@@ -1135,6 +1190,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
           d => (d.desired ?? 0) - (d.actual ?? 0),
           'psi'
         )}
+        onJumpToTime={onJumpToTime}
       />
     </FaultChartWrapper>
   );
@@ -1142,7 +1198,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
 BoostFaultChart.displayName = 'BoostFaultChart';
 
 // ─── EGT FAULT CHART ──────────────────────────────────────────────────────────
-export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
+export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   // Match suffixed codes: EGT-HIGH, EGT-SENSOR-FAULT
   const issue = diagnostics.issues.find(i => i.code.startsWith('EGT'));
   if (!issue) return null;
@@ -1248,6 +1304,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           d => (d.egt ?? 0) - 1475,
           '°F'
         )}
+        onJumpToTime={onJumpToTime}
       />
     </FaultChartWrapper>
   );
@@ -1255,7 +1312,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
 EgtFaultChart.displayName = 'EgtFaultChart';
 
 // ─── MAF FAULT CHART ──────────────────────────────────────────────────────────
-export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
+export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   const issue = diagnostics.issues.find(i => i.code.startsWith('P0101'));
   if (!issue) return null;
 
@@ -1355,6 +1412,7 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           d => (d.maf ?? 0) > 6 ? (d.maf ?? 0) - 6 : 2 - (d.maf ?? 0),
           'lb/min'
         )}
+        onJumpToTime={onJumpToTime}
       />
     </FaultChartWrapper>
   );
