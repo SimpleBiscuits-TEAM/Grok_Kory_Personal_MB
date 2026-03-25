@@ -21,6 +21,10 @@ export interface DuramaxData {
   converterSlip: number[];
   converterDutyCycle: number[];
   converterPressure: number[];
+  oilPressure: number[];
+  coolantTemp: number[];
+  oilTemp: number[];
+  transFluidTemp: number[];
   timestamp: string;
   duration: number;
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
@@ -43,6 +47,10 @@ export interface ProcessedMetrics {
   converterSlip: number[];
   converterDutyCycle: number[];
   converterPressure: number[];
+  oilPressure: number[];
+  coolantTemp: number[];
+  oilTemp: number[];
+  transFluidTemp: number[];
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -129,6 +137,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const converterSlipIdx = getColumnIndex(['Converter Slip', 'TCM.TCSLIP']);
   const converterDutyIdx = getColumnIndex(['Converter Duty', 'Converter PWM']);
   const converterPressureIdx = getColumnIndex(['Converter Pressure', 'TCC Pressure']);
+  const oilPressureIdx = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
+  const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temperature', 'ECT']);
+  const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
+  const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp', 'Trans Temp']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns: RPM, MAF, or Torque');
@@ -152,6 +164,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const oilPressure: number[] = [];
+  const coolantTemp: number[] = [];
+  const oilTemp: number[] = [];
+  const transFluidTemp: number[] = [];
   
   for (let i = dataStart; i < lines.length; i++) {
     const line = lines[i];
@@ -181,6 +197,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+    oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
+    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
+    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
+    transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -207,6 +227,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'hptuners',
@@ -252,6 +276,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const converterSlipIdx = getColumnIndex(['TCM.TCSLIP']);
   const converterDutyIdx = getColumnIndex(['TCM.TCCPCSCP']);
   const converterPressureIdx = getColumnIndex(['TCM.TCCP']);
+  const oilPressureIdx = getColumnIndex(['ECM.OILP', 'Oil Pressure']);
+  const coolantTempIdx = getColumnIndex(['ECM.ECT', 'Engine Coolant Temp']);
+  const oilTempIdx = getColumnIndex(['ECM.EOT', 'Engine Oil Temp']);
+  const transFluidTempIdx = getColumnIndex(['TCM.TFT', 'Transmission Fluid Temp']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns in EFILIVE format: ECM.RPM, ECM.MAF, or ECM.TQ_ACT');
@@ -274,6 +302,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const oilPressure: number[] = [];
+  const coolantTemp: number[] = [];
+  const oilTemp: number[] = [];
+  const transFluidTemp: number[] = [];
   
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
@@ -303,6 +335,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+    oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
+    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
+    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
+    transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -329,6 +365,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'efilive',
@@ -374,6 +414,10 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
   const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
   const converterPressureIdx = getColumnIndex(['Trans Line 1 Pressure']);
+  const oilPressureIdx = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
+  const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temp']);
+  const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temp']);
+  const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp']);
   
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns in Banks Power format: Engine RPM or Mass Air Flow');
@@ -396,6 +440,10 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const oilPressure: number[] = [];
+  const coolantTemp: number[] = [];
+  const oilTemp: number[] = [];
+  const transFluidTemp: number[] = [];
   
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
@@ -435,6 +483,10 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+    oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
+    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
+    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
+    transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -461,6 +513,10 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'bankspower',
@@ -533,6 +589,10 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     converterSlip: rawData.converterSlip,
     converterDutyCycle: rawData.converterDutyCycle,
     converterPressure: rawData.converterPressure,
+    oilPressure: rawData.oilPressure,
+    coolantTemp: rawData.coolantTemp,
+    oilTemp: rawData.oilTemp,
+    transFluidTemp: rawData.transFluidTemp,
     stats,
     fileFormat: rawData.fileFormat,
   };
@@ -565,6 +625,10 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     converterSlip: downsample(data.converterSlip),
     converterDutyCycle: downsample(data.converterDutyCycle),
     converterPressure: downsample(data.converterPressure),
+    oilPressure: downsample(data.oilPressure),
+    coolantTemp: downsample(data.coolantTemp),
+    oilTemp: downsample(data.oilTemp),
+    transFluidTemp: downsample(data.transFluidTemp),
   };
 }
 

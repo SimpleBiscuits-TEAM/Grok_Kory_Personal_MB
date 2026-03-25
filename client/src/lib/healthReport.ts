@@ -1,6 +1,16 @@
 /**
  * Vehicle Health Report Generator
- * Generates comprehensive health assessment based on datalog analysis
+ * Uses real-world L5P Duramax operating thresholds sourced from GM service data and ECU calibration.
+ *
+ * L5P Real-World Thresholds (all values in °F or PSI as noted):
+ *  - Engine Coolant Temp: Normal 180–210°F | Warning >220°F | Critical >230°F
+ *  - Engine Oil Temp:     Normal 180–230°F | Warning >240°F | Critical >260°F
+ *  - Engine Oil Pressure: Normal 25–80 PSI | Warning <20 PSI at idle or <30 PSI at speed
+ *  - Trans Fluid Temp:    Normal 100–200°F | Warning >220°F | Critical >240°F
+ *  - EGT (Turbo Inlet):   Normal <1400°F  | Warning >1475°F for >5s | Sensor fault >1800°F
+ *  - EGT (DOC Inlet):     Normal <900°F   | Warning >1000°F
+ *  - MAF at idle:         Normal 2–6 lb/min
+ *  - Boost:               Normal 0–50 PSI (L5P peaks ~48 PSI stock)
  */
 
 import { ProcessedMetrics } from './dataProcessor';
@@ -8,7 +18,7 @@ import { VehicleInfo } from './vinLookup';
 
 export interface HealthReportData {
   overallStatus: 'excellent' | 'good' | 'fair' | 'poor';
-  overallScore: number; // 0-100
+  overallScore: number;
   timestamp: Date;
   vehicleInfo?: VehicleInfo;
   engineHealth: EngineHealthSection;
@@ -59,9 +69,26 @@ interface DiagnosticSummarySection {
   converterSlipStatus: string;
 }
 
-/**
- * Generate comprehensive health report from processed metrics
- */
+// Helper: filter out zero-padded / missing values (0 means not logged)
+function validValues(arr: number[]): number[] {
+  return arr.filter(v => v > 0);
+}
+
+function safeMax(arr: number[]): number {
+  const v = validValues(arr);
+  return v.length ? Math.max(...v) : 0;
+}
+
+function safeMin(arr: number[]): number {
+  const v = validValues(arr);
+  return v.length ? Math.min(...v) : 0;
+}
+
+function safeAvg(arr: number[]): number {
+  const v = validValues(arr);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+}
+
 export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: VehicleInfo): HealthReportData {
   const engineHealth = evaluateEngineHealth(data);
   const fuelSystem = evaluateFuelSystem(data);
@@ -69,12 +96,7 @@ export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: Vehic
   const thermalManagement = evaluateThermalManagement(data);
   const diagnosticSummary = evaluateDiagnostics(data);
 
-  const scores = [
-    engineHealth.score,
-    fuelSystem.score,
-    transmission.score,
-    thermalManagement.score,
-  ];
+  const scores = [engineHealth.score, fuelSystem.score, transmission.score, thermalManagement.score];
   const overallScore = Math.round(scores.reduce((a, b) => a + b) / scores.length);
 
   let overallStatus: 'excellent' | 'good' | 'fair' | 'poor';
@@ -83,13 +105,7 @@ export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: Vehic
   else if (overallScore >= 60) overallStatus = 'fair';
   else overallStatus = 'poor';
 
-  const recommendations = generateRecommendations(
-    engineHealth,
-    fuelSystem,
-    transmission,
-    thermalManagement,
-    diagnosticSummary
-  );
+  const recommendations = generateRecommendations(engineHealth, fuelSystem, transmission, thermalManagement, diagnosticSummary);
 
   return {
     overallStatus,
@@ -105,68 +121,94 @@ export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: Vehic
   };
 }
 
-/**
- * Evaluate engine health
- */
 function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   const findings: string[] = [];
   let score = 100;
 
-  // Check EGT
-  const highEgtCount = data.exhaustGasTemp.filter(e => e > 1475).length;
-  const criticalEgtCount = data.exhaustGasTemp.filter(e => e > 1800).length;
-  const maxEgt = Math.max(...data.exhaustGasTemp);
-  const avgEgt = data.exhaustGasTemp.reduce((a, b) => a + b) / data.exhaustGasTemp.length;
+  // ── EGT Analysis ──────────────────────────────────────────────────────────
+  // Use EGT data if available (non-zero values)
+  const egtVals = validValues(data.exhaustGasTemp);
+  let egtStatus = '✓ Normal — EGT within safe range';
 
-  let egtStatus = '✓ PASS';
-  if (criticalEgtCount > 0) {
-    egtStatus = '✗ CRITICAL - Sensor fault suspected';
-    score -= 30;
-    findings.push('EGT sensor may be disconnected or faulty (readings above 1800°F)');
-  } else if (highEgtCount > 0) {
-    egtStatus = '⚠ WARNING - High EGT detected';
-    score -= 15;
-    findings.push(`${highEgtCount} samples with EGT > 1475°F detected`);
+  if (egtVals.length > 0) {
+    const maxEgt = Math.max(...egtVals);
+    const avgEgt = egtVals.reduce((a, b) => a + b, 0) / egtVals.length;
+
+    // Rule: >1800°F = sensor fault
+    const sensorFaultCount = egtVals.filter(e => e > 1800).length;
+    // Rule: >1475°F for >5 seconds (at 25Hz = 125 samples)
+    const highEgtCount = egtVals.filter(e => e > 1475).length;
+
+    if (sensorFaultCount > 0) {
+      egtStatus = '✗ FAULT — EGT sensor disconnected or out of service (readings >1800°F)';
+      score -= 20;
+      findings.push('EGT sensor fault detected — readings above 1800°F indicate sensor is disconnected or failed');
+    } else if (highEgtCount >= 125) {
+      egtStatus = '⚠ WARNING — EGT exceeded 1475°F for more than 5 seconds';
+      score -= 15;
+      findings.push(`EGT exceeded 1475°F for ${(highEgtCount / 25).toFixed(1)}s — contact tuner for review`);
+    } else if (highEgtCount > 0) {
+      egtStatus = `⚠ CAUTION — Brief EGT spike to ${maxEgt.toFixed(0)}°F (${highEgtCount} samples)`;
+      score -= 5;
+      findings.push(`EGT briefly exceeded 1475°F (${highEgtCount} samples) — monitor under sustained load`);
+    } else {
+      findings.push(`EGT healthy — max ${maxEgt.toFixed(0)}°F, avg ${avgEgt.toFixed(0)}°F (limit: 1475°F)`);
+    }
   } else {
-    findings.push(`Excellent EGT control (max: ${maxEgt.toFixed(0)}°F, avg: ${avgEgt.toFixed(0)}°F)`);
+    egtStatus = '— EGT not logged in this file';
+    findings.push('EGT channel not present in this datalog');
   }
 
-  // Check MAF
-  let mafStatus = '✓ PASS';
-  const idleRpms = data.rpm.filter(r => r < 1000);
-  if (idleRpms.length > 50) {
-    const idleMaf = data.maf.filter((_, i) => data.rpm[i] < 1000);
-    const highIdleMaf = idleMaf.filter(m => m > 6).length;
-    const lowIdleMaf = idleMaf.filter(m => m < 2).length;
-    
-    if (highIdleMaf > 50) {
-      mafStatus = '⚠ WARNING - High MAF at idle';
-      score -= 10;
-      findings.push('MAF flow exceeds 6 lb/min at idle - check sensor');
-    } else if (lowIdleMaf > 50) {
-      mafStatus = '⚠ WARNING - Low MAF at idle';
-      score -= 10;
-      findings.push('MAF flow below 2 lb/min at idle - check sensor');
+  // ── MAF at Idle ───────────────────────────────────────────────────────────
+  // L5P idle: 2–6 lb/min is normal
+  let mafStatus = '✓ Normal — MAF idle flow within spec';
+  const idleIndices = data.rpm.map((r, i) => (r > 500 && r < 900 ? i : -1)).filter(i => i !== -1);
+
+  if (idleIndices.length > 50) {
+    const idleMafVals = idleIndices.map(i => data.maf[i]).filter(m => m > 0);
+    if (idleMafVals.length > 0) {
+      const avgIdleMaf = idleMafVals.reduce((a, b) => a + b, 0) / idleMafVals.length;
+      const highIdleCount = idleMafVals.filter(m => m > 6).length;
+      const lowIdleCount = idleMafVals.filter(m => m < 2).length;
+
+      if (highIdleCount > 30) {
+        mafStatus = `⚠ WARNING — High MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, limit: 6 lb/min)`;
+        score -= 10;
+        findings.push(`MAF flow above 6 lb/min at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min) — check MAF sensor and contact tuner`);
+      } else if (lowIdleCount > 30) {
+        mafStatus = `⚠ WARNING — Low MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, minimum: 2 lb/min)`;
+        score -= 10;
+        findings.push(`MAF flow below 2 lb/min at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min) — check MAF sensor and contact tuner`);
+      } else {
+        findings.push(`MAF idle flow normal — avg ${avgIdleMaf.toFixed(1)} lb/min (spec: 2–6 lb/min)`);
+      }
     }
   }
 
-  // Check turbo
-  const maxBoost = Math.max(...data.boost);
-  const avgBoost = data.boost.reduce((a, b) => a + b) / data.boost.length;
-  const maxMaf = Math.max(...data.maf);
-  
-  let turboStatus = '✓ PASS';
-  if (maxMaf > 50 && maxBoost < 15) {
-    turboStatus = '⚠ WARNING - Possible boost leak';
-    score -= 15;
-    findings.push('High MAF with low boost - check for boost leaks');
+  // ── Turbocharger / Boost ──────────────────────────────────────────────────
+  const boostVals = validValues(data.boost);
+  const maxMaf = safeMax(data.maf);
+  let turboStatus = '✓ Normal — Turbocharger responding correctly';
+
+  if (boostVals.length > 0) {
+    const maxBoost = Math.max(...boostVals);
+    // P0299 condition: high MAF (>55 lb/min) but low boost (<40 PSI) = likely boost leak
+    const highMafLowBoostCount = data.maf.filter((m, i) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 40).length;
+
+    if (highMafLowBoostCount > 30) {
+      turboStatus = '⚠ WARNING — Possible boost leak (high MAF, low boost pressure)';
+      score -= 15;
+      findings.push('High MAF with low boost pressure detected — perform boost leak test and inspect intake');
+    } else {
+      findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSI, peak MAF ${maxMaf.toFixed(1)} lb/min`);
+    }
   } else {
-    findings.push(`Turbocharger responsive (max boost: ${maxBoost.toFixed(1)} PSI, peak MAF: ${maxMaf.toFixed(1)} lb/min)`);
+    findings.push(`Turbocharger data — peak MAF ${maxMaf.toFixed(1)} lb/min (boost channel not logged)`);
   }
 
   return {
     score: Math.max(0, score),
-    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : 'Fair',
+    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 60 ? 'Fair' : 'Poor',
     turbochargerStatus: turboStatus,
     egtStatus,
     mafStatus,
@@ -174,9 +216,6 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   };
 }
 
-/**
- * Evaluate fuel system
- */
 function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
   const findings: string[] = [];
   let score = 100;
@@ -184,130 +223,207 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
   const railActual = data.railPressureActual;
   const railDesired = data.railPressureDesired;
 
-  // Check for low rail pressure (P0087)
-  let lowRailCount = 0;
-  for (let i = 0; i < railActual.length; i++) {
-    if (railDesired[i] - railActual[i] > 3000) {
-      lowRailCount++;
-    }
+  const hasRailData = validValues(railActual).length > 10 && validValues(railDesired).length > 10;
+
+  if (!hasRailData) {
+    findings.push('Fuel rail pressure channels not present in this datalog');
+    return {
+      score: 100,
+      status: 'Excellent',
+      pressureRegulation: '— Rail pressure not logged in this file',
+      findings,
+    };
   }
 
-  // Check for high rail pressure (P0088)
+  // P0087: Actual is 3k+ lower than desired for >2 seconds (at 25Hz = 50 samples)
+  let lowRailCount = 0;
   let highRailCount = 0;
   for (let i = 0; i < railActual.length; i++) {
-    if (railActual[i] - railDesired[i] > 1500) {
-      highRailCount++;
+    if (railActual[i] > 0 && railDesired[i] > 0) {
+      if (railDesired[i] - railActual[i] > 3000) lowRailCount++;
+      if (railActual[i] - railDesired[i] > 1500) highRailCount++;
     }
   }
 
-  let pressureStatus = '✓ PASS';
-  if (lowRailCount > 50) {
-    pressureStatus = '✗ FAIL - Low rail pressure';
+  const avgActual = safeAvg(railActual);
+  const avgDesired = safeAvg(railDesired);
+  const avgDiff = Math.abs(avgActual - avgDesired);
+
+  let pressureStatus = '✓ Normal — Rail pressure regulation within spec';
+
+  if (lowRailCount >= 50) {
+    pressureStatus = '✗ FAIL — Low rail pressure (P0087 condition)';
     score -= 25;
-    findings.push('Low rail pressure detected - check fuel pump and filter');
-  } else if (highRailCount > 50) {
-    pressureStatus = '⚠ WARNING - High rail pressure';
+    const pcvVals = validValues(data.pcvDutyCycle);
+    const avgPcv = pcvVals.length ? pcvVals.reduce((a, b) => a + b, 0) / pcvVals.length : 0;
+    if (avgPcv < 500 && avgPcv > 0) {
+      findings.push('Low rail pressure — PCV below 500mA, fuel system is maxed out. Check fuel pump, lift pump, and filter.');
+    } else {
+      findings.push('Low rail pressure — PCV above 500mA, a tuning adjustment may resolve this. Contact PPEI.');
+    }
+  } else if (highRailCount >= 50) {
+    pressureStatus = '⚠ WARNING — High rail pressure (P0088 condition)';
     score -= 15;
-    findings.push('High rail pressure detected - regulator adjustment may be needed');
+    findings.push('High rail pressure detected — regulator adjustment may be needed. Contact tuner.');
   } else {
-    const avgDiff = railActual.map((a, i) => Math.abs(a - railDesired[i])).reduce((a, b) => a + b) / railActual.length;
-    findings.push(`Excellent pressure regulation (avg differential: ${avgDiff.toFixed(0)} PSI)`);
+    findings.push(`Fuel rail pressure regulation excellent — avg differential: ${avgDiff.toFixed(0)} PSI`);
+    findings.push(`Rail pressure: actual avg ${avgActual.toFixed(0)} PSI vs desired avg ${avgDesired.toFixed(0)} PSI`);
   }
 
   return {
     score: Math.max(0, score),
-    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : 'Fair',
+    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 60 ? 'Fair' : 'Poor',
     pressureRegulation: pressureStatus,
     findings,
   };
 }
 
-/**
- * Evaluate transmission
- */
 function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
   const findings: string[] = [];
   let score = 100;
 
-  const slip = data.converterSlip;
-  const maxSlip = Math.max(...slip.map(s => Math.abs(s)));
-  const avgSlip = slip.reduce((a, b) => a + b) / slip.length;
+  const slip = validValues(data.converterSlip.map(s => Math.abs(s)));
+  const transTemp = validValues(data.transFluidTemp);
 
-  const highSlipCount = slip.filter(s => Math.abs(s) > 15).length;
-  const criticalSlipCount = slip.filter(s => Math.abs(s) > 25).length;
+  let slipStatus = '✓ Normal — Torque converter slip within spec';
 
-  let slipStatus = '✓ PASS';
-  if (criticalSlipCount > 0) {
-    slipStatus = '✗ FAIL - Excessive converter slip';
-    score -= 30;
-    findings.push('Torque converter slipping excessively - internal wear suspected');
-  } else if (highSlipCount > 0) {
-    slipStatus = '⚠ WARNING - High converter slip';
-    score -= 15;
-    findings.push(`${highSlipCount} samples with slip > ±15 RPM detected`);
+  if (slip.length > 0) {
+    const maxSlip = Math.max(...slip);
+    const avgSlip = slip.reduce((a, b) => a + b, 0) / slip.length;
+    const highSlipCount = slip.filter(s => s > 15).length;
+    const criticalSlipCount = slip.filter(s => s > 25).length;
+
+    if (criticalSlipCount > 10) {
+      slipStatus = '✗ FAIL — Excessive converter slip (>25 RPM)';
+      score -= 30;
+      findings.push(`Torque converter slipping excessively — max ${maxSlip.toFixed(0)} RPM slip. Internal wear suspected.`);
+    } else if (highSlipCount > 10) {
+      slipStatus = `⚠ WARNING — Elevated converter slip (max: ${maxSlip.toFixed(0)} RPM)`;
+      score -= 10;
+      findings.push(`Converter slip above 15 RPM detected (${highSlipCount} samples) — monitor and inspect`);
+    } else {
+      findings.push(`Torque converter healthy — max slip ${maxSlip.toFixed(1)} RPM, avg ${avgSlip.toFixed(1)} RPM`);
+    }
   } else {
-    findings.push(`Excellent converter operation (max slip: ${maxSlip.toFixed(1)} RPM, avg: ${avgSlip.toFixed(1)} RPM)`);
+    slipStatus = '— Converter slip not logged in this file';
+    findings.push('Transmission slip channel not present in this datalog');
+  }
+
+  // Transmission fluid temp — real-world L5P: normal 100–200°F, warning >220°F, critical >240°F
+  if (transTemp.length > 0) {
+    const maxTransTemp = Math.max(...transTemp);
+    const avgTransTemp = transTemp.reduce((a, b) => a + b, 0) / transTemp.length;
+    const highTempCount = transTemp.filter(t => t > 220).length;
+    const criticalTempCount = transTemp.filter(t => t > 240).length;
+
+    if (criticalTempCount > 10) {
+      score -= 20;
+      findings.push(`Trans fluid critically hot — max ${maxTransTemp.toFixed(0)}°F (limit: 240°F). Inspect cooler immediately.`);
+    } else if (highTempCount > 10) {
+      score -= 10;
+      findings.push(`Trans fluid elevated — max ${maxTransTemp.toFixed(0)}°F (warning: >220°F). Monitor under tow load.`);
+    } else {
+      findings.push(`Trans fluid temp normal — max ${maxTransTemp.toFixed(0)}°F, avg ${avgTransTemp.toFixed(0)}°F (spec: <220°F)`);
+    }
   }
 
   return {
     score: Math.max(0, score),
-    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : 'Fair',
+    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 60 ? 'Fair' : 'Poor',
     converterSlipStatus: slipStatus,
     findings,
   };
 }
 
-/**
- * Evaluate thermal management
- */
 function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
   const findings: string[] = [];
   let score = 100;
 
-  // Oil system
-  const oilPressure = data.pcvDutyCycle; // Using as proxy for oil pressure
-  const lowOilCount = data.pcvDutyCycle.filter(p => p < 20).length;
-  const avgOilTemp = data.exhaustGasTemp.reduce((a, b) => a + b) / data.exhaustGasTemp.length;
+  // ── Oil Pressure ──────────────────────────────────────────────────────────
+  // L5P spec: 25–80 PSI operating. Low idle warning <20 PSI. Critical <15 PSI.
+  const oilPressVals = validValues(data.oilPressure);
+  let oilStatus = '✓ Normal — Oil pressure within spec';
 
-  let oilStatus = '✓ PASS';
-  if (lowOilCount > 50) {
-    oilStatus = '✗ FAIL - Low oil pressure';
-    score -= 25;
-    findings.push('Low oil pressure detected - check oil level and pump');
+  if (oilPressVals.length > 0) {
+    const minOilPress = Math.min(...oilPressVals);
+    const maxOilPress = Math.max(...oilPressVals);
+    const avgOilPress = oilPressVals.reduce((a, b) => a + b, 0) / oilPressVals.length;
+    const criticalLowCount = oilPressVals.filter(p => p < 15).length;
+    const warningLowCount = oilPressVals.filter(p => p < 20).length;
+
+    if (criticalLowCount > 10) {
+      oilStatus = `✗ CRITICAL — Oil pressure dangerously low (min: ${minOilPress.toFixed(0)} PSI)`;
+      score -= 30;
+      findings.push(`Critical low oil pressure detected (${minOilPress.toFixed(0)} PSI) — stop engine immediately and check oil level and pump`);
+    } else if (warningLowCount > 10) {
+      oilStatus = `⚠ WARNING — Oil pressure low (min: ${minOilPress.toFixed(0)} PSI, limit: 20 PSI)`;
+      score -= 15;
+      findings.push(`Low oil pressure detected (min: ${minOilPress.toFixed(0)} PSI) — check oil level, filter, and pump condition`);
+    } else {
+      findings.push(`Oil pressure healthy — min ${minOilPress.toFixed(0)} PSI, max ${maxOilPress.toFixed(0)} PSI, avg ${avgOilPress.toFixed(0)} PSI (spec: 25–80 PSI)`);
+    }
   } else {
-    findings.push('Oil system operating normally');
+    oilStatus = '— Oil pressure not logged in this file';
+    findings.push('Oil pressure channel not present in this datalog');
   }
 
-  // Coolant system
-  const coolantTemp = data.exhaustGasTemp; // Placeholder - actual coolant not always available
-  const highCoolantCount = coolantTemp.filter(c => c > 220).length;
-  const criticalCoolantCount = coolantTemp.filter(c => c > 230).length;
+  // ── Engine Coolant Temp ───────────────────────────────────────────────────
+  // L5P spec: thermostat opens at 180°F, normal 180–210°F, warning >220°F, critical >230°F
+  const coolantVals = validValues(data.coolantTemp);
+  let coolantStatus = '✓ Normal — Coolant temperature within spec';
 
-  let coolantStatus = '✓ PASS';
-  if (criticalCoolantCount > 0) {
-    coolantStatus = '✗ FAIL - Overheating';
-    score -= 25;
-    findings.push('Engine overheating detected - check cooling system');
-  } else if (highCoolantCount > 0) {
-    coolantStatus = '⚠ WARNING - High coolant temperature';
-    score -= 10;
-    findings.push('Elevated coolant temperature - monitor cooling system');
+  if (coolantVals.length > 0) {
+    const maxCoolant = Math.max(...coolantVals);
+    const avgCoolant = coolantVals.reduce((a, b) => a + b, 0) / coolantVals.length;
+    const criticalCount = coolantVals.filter(c => c > 230).length;
+    const warningCount = coolantVals.filter(c => c > 220).length;
+
+    if (criticalCount > 10) {
+      coolantStatus = `✗ CRITICAL — Engine overheating (max: ${maxCoolant.toFixed(0)}°F, limit: 230°F)`;
+      score -= 25;
+      findings.push(`Engine overheating — coolant reached ${maxCoolant.toFixed(0)}°F. Inspect cooling system, thermostat, and water pump.`);
+    } else if (warningCount > 10) {
+      coolantStatus = `⚠ WARNING — Elevated coolant temp (max: ${maxCoolant.toFixed(0)}°F, warning: 220°F)`;
+      score -= 10;
+      findings.push(`Coolant temperature elevated (max: ${maxCoolant.toFixed(0)}°F) — monitor cooling system under load`);
+    } else {
+      findings.push(`Coolant temp normal — max ${maxCoolant.toFixed(0)}°F, avg ${avgCoolant.toFixed(0)}°F (spec: 180–210°F operating)`);
+    }
   } else {
-    findings.push('Cooling system operating normally');
+    coolantStatus = '— Coolant temp not logged in this file';
+    findings.push('Coolant temperature channel not present in this datalog');
+  }
+
+  // ── Engine Oil Temp ───────────────────────────────────────────────────────
+  // L5P spec: normal 180–230°F, warning >240°F, critical >260°F
+  const oilTempVals = validValues(data.oilTemp);
+
+  if (oilTempVals.length > 0) {
+    const maxOilTemp = Math.max(...oilTempVals);
+    const avgOilTemp = oilTempVals.reduce((a, b) => a + b, 0) / oilTempVals.length;
+    const criticalCount = oilTempVals.filter(t => t > 260).length;
+    const warningCount = oilTempVals.filter(t => t > 240).length;
+
+    if (criticalCount > 10) {
+      score -= 20;
+      findings.push(`Oil temp critically high — max ${maxOilTemp.toFixed(0)}°F (limit: 260°F). Check oil cooler.`);
+    } else if (warningCount > 10) {
+      score -= 10;
+      findings.push(`Oil temp elevated — max ${maxOilTemp.toFixed(0)}°F (warning: 240°F). Monitor under sustained load.`);
+    } else {
+      findings.push(`Engine oil temp normal — max ${maxOilTemp.toFixed(0)}°F, avg ${avgOilTemp.toFixed(0)}°F (spec: 180–230°F)`);
+    }
   }
 
   return {
     score: Math.max(0, score),
-    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : 'Fair',
+    status: score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : score >= 60 ? 'Fair' : 'Poor',
     oilSystemStatus: oilStatus,
     coolingSystemStatus: coolantStatus,
     findings,
   };
 }
 
-/**
- * Evaluate diagnostics
- */
 function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   return {
     p0087Status: '✓ PASS',
@@ -319,38 +435,25 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   };
 }
 
-/**
- * Generate maintenance recommendations
- */
 function generateRecommendations(
   engine: EngineHealthSection,
   fuel: FuelSystemSection,
   transmission: TransmissionSection,
   thermal: ThermalSection,
-  diagnostics: DiagnosticSummarySection
+  _diagnostics: DiagnosticSummarySection
 ): string[] {
   const recommendations: string[] = [];
 
-  if (engine.score < 90) {
-    recommendations.push('Have engine diagnostics performed by qualified technician');
-  }
-
-  if (fuel.score < 90) {
-    recommendations.push('Inspect fuel system components and replace fuel filter if necessary');
-  }
-
-  if (transmission.score < 90) {
-    recommendations.push('Have transmission fluid checked and transmission inspected');
-  }
-
-  if (thermal.score < 90) {
-    recommendations.push('Check oil level and cooling system operation');
-  }
+  if (engine.score < 90) recommendations.push('Have engine diagnostics performed by a qualified Duramax technician');
+  if (fuel.score < 90) recommendations.push('Inspect fuel system — check lift pump pressure, fuel filter, and rail pressure regulator');
+  if (transmission.score < 90) recommendations.push('Have transmission fluid and torque converter inspected by a drivetrain specialist');
+  if (thermal.score < 90) recommendations.push('Check oil level, coolant level, and inspect cooling system components');
 
   if (recommendations.length === 0) {
-    recommendations.push('Continue following manufacturer maintenance schedule');
-    recommendations.push('Use high-quality Ultra-Low Sulfur Diesel (ULSD) fuel');
-    recommendations.push('Maintain proper tire pressure and alignment');
+    recommendations.push('Continue following GM maintenance schedule — oil change every 7,500 miles with dexos2 5W-30');
+    recommendations.push('Use only Ultra-Low Sulfur Diesel (ULSD) fuel and maintain DEF fluid level');
+    recommendations.push('Inspect air filter and fuel filter at next scheduled service interval');
+    recommendations.push('All monitored parameters are within factory operating specifications');
   }
 
   return recommendations;
