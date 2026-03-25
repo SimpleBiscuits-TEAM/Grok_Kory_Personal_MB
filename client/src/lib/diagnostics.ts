@@ -114,10 +114,9 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...lowBoostIssues);
   }
 
-  // Check Exhaust Gas Temperature
+  // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)
   if (exhaustGasTemp.length > 0) {
-    const egtIssues = checkExhaustGasTemp(exhaustGasTemp);
-    issues.push(...egtIssues);
+    issues.push(...checkAllEgtIssues(exhaustGasTemp));
   }
 
   // Check Mass Airflow (P0101)
@@ -167,10 +166,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkHighRailOnDecel(railPressureActual, railPressureDesired, rpm));
   }
 
-  // P2080/P2084 - EGT Sensor Performance
-  if (exhaustGasTemp.length > 0) {
-    issues.push(...checkEgtSensorPerformance(exhaustGasTemp));
-  }
+  // P2080/P2084 - EGT Sensor Performance is now handled inside checkAllEgtIssues above.
 
   const summary =
     issues.length === 0
@@ -454,48 +450,96 @@ function checkLowBoostPressure(
 }
 
 /**
- * Check Exhaust Gas Temperature - Updated thresholds
+ * Unified EGT diagnostic check.
+ * Merges sensor-fault detection (stuck, erratic, out-of-range) with high-temp detection.
+ * Priority: if the sensor is faulty, skip the high-temp check since readings are unreliable.
+ * Guarantees each code (EGT-HIGH, EGT-SENSOR-FAULT, P2080, P2084) appears at most once.
  */
-function checkExhaustGasTemp(egt: number[]): DiagnosticIssue[] {
+function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const highThreshold = 1750; // 1650F +~6% (already conservative, small bump)
-  const criticalThreshold = 1900; // 1800F +~6%
-  const minDuration = 5; // seconds
-  const sampleRate = 10;
-  const minSamples = minDuration * sampleRate;
+  if (!egt.length) return issues;
 
-  let consecutiveHighTemp = 0;
+  const HIGH_THRESHOLD = 1750;   // 1650F +~6%
+  const CRITICAL_THRESHOLD = 1900; // 1800F +~6%
+  const MIN_DURATION_SEC = 5;
+  const SAMPLE_RATE = 10;
+  const MIN_SAMPLES = MIN_DURATION_SEC * SAMPLE_RATE;
 
-  for (let i = 0; i < egt.length; i++) {
-    if (egt[i] > criticalThreshold) {
-      issues.push({
-        code: 'EGT-SENSOR-FAULT',
-        severity: 'critical',
-        title: 'Exhaust Gas Temperature Sensor Fault',
-        description: `EGT reading is stuck at ${egt[i].toFixed(0)}°F (above 1800°F threshold).`,
-        recommendation:
-          'The EGT sensor is likely disconnected or out of service. Check sensor connections and wiring. Replace sensor if faulty.',
-      });
-      break;
+  // ── Step 1: Sensor quality checks (stuck / erratic / out-of-range) ──────────
+  let sensorFaulty = false;
+
+  // Out-of-range: any single reading above 1900F is physically impossible
+  const maxEgt = Math.max(...egt);
+  if (maxEgt > CRITICAL_THRESHOLD) {
+    issues.push({
+      code: 'EGT-SENSOR-FAULT',
+      severity: 'critical',
+      title: 'Exhaust Gas Temperature Sensor Fault',
+      description: `EGT reading reached ${maxEgt.toFixed(0)}F, which exceeds the physically plausible limit of ${CRITICAL_THRESHOLD}F. The sensor is likely disconnected or out of range.`,
+      recommendation: 'Check EGT sensor connections and wiring. Replace sensor if faulty.',
+    });
+    sensorFaulty = true;
+  }
+
+  // Stuck sensor: >65 consecutive samples with <1F change
+  let maxStuck = 0;
+  let currentStuck = 0;
+  for (let i = 1; i < egt.length; i++) {
+    if (Math.abs(egt[i] - egt[i - 1]) < 1) {
+      currentStuck++;
+      maxStuck = Math.max(maxStuck, currentStuck);
+    } else {
+      currentStuck = 0;
     }
+  }
+  if (maxStuck > 65) {
+    issues.push({
+      code: 'P2080',
+      severity: 'warning',
+      title: 'EGT Sensor Stuck/Frozen (P2080)',
+      description: `EGT sensor reading was frozen (< 1F change) for ${maxStuck} consecutive samples. A stuck sensor cannot protect the DPF from overtemperature events.`,
+      recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
+    });
+    sensorFaulty = true;
+  }
 
-    if (egt[i] > highThreshold) {
-      consecutiveHighTemp++;
+  // Erratic sensor: >4 rapid jumps of >260F between consecutive samples
+  let erraticCount = 0;
+  for (let i = 1; i < egt.length; i++) {
+    if (Math.abs(egt[i] - egt[i - 1]) > 260) erraticCount++;
+  }
+  if (erraticCount > 4) {
+    issues.push({
+      code: 'P2084',
+      severity: 'warning',
+      title: 'EGT Sensor Erratic (P2084)',
+      description: `EGT sensor shows ${erraticCount} rapid jumps of >200F between samples. This indicates a failing sensor or wiring fault.`,
+      recommendation: 'Inspect EGT sensor connector and wiring for heat damage. Replace EGT sensor if erratic readings persist.',
+    });
+    sensorFaulty = true;
+  }
 
-      if (consecutiveHighTemp >= minSamples) {
-        issues.push({
-          code: 'EGT-HIGH',
-          severity: 'warning',
-          title: 'High Exhaust Gas Temperature',
-          description: `EGT exceeded ${highThreshold}°F for more than ${minDuration} seconds (peak: ${Math.max(...egt).toFixed(0)}°F).`,
-          recommendation:
-            'High EGT indicates aggressive tuning or fuel issues. Contact your tuner for further details. Ensure fuel quality and check for engine knock.',
-        });
-
+  // ── Step 2: High-temp check (only when sensor is trustworthy) ────────────────
+  // Skip if sensor is faulty -- readings cannot be trusted for thermal protection.
+  if (!sensorFaulty) {
+    let consecutiveHighTemp = 0;
+    let egtHighReported = false;
+    for (let i = 0; i < egt.length; i++) {
+      if (egt[i] > HIGH_THRESHOLD) {
+        consecutiveHighTemp++;
+        if (consecutiveHighTemp >= MIN_SAMPLES && !egtHighReported) {
+          issues.push({
+            code: 'EGT-HIGH',
+            severity: 'warning',
+            title: 'High Exhaust Gas Temperature',
+            description: `EGT exceeded ${HIGH_THRESHOLD}F for more than ${MIN_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}F).`,
+            recommendation: 'High EGT indicates aggressive tuning or fuel issues. Contact your tuner. Ensure fuel quality and check for engine knock.',
+          });
+          egtHighReported = true; // report once per analysis
+        }
+      } else {
         consecutiveHighTemp = 0;
       }
-    } else {
-      consecutiveHighTemp = 0;
     }
   }
 
@@ -932,51 +976,4 @@ export function checkHighRailOnDecel(
   return issues;
 }
 
-/**
- * P2080/P2084 - EGT Sensor Range/Performance
- */
-export function checkEgtSensorPerformance(egt: number[]): DiagnosticIssue[] {
-  const issues: DiagnosticIssue[] = [];
-  if (!egt.length) return issues;
-
-  // Check for stuck sensor
-  let maxStuck = 0;
-  let currentStuck = 0;
-  for (let i = 1; i < egt.length; i++) {
-    if (Math.abs(egt[i] - egt[i - 1]) < 1) {
-      currentStuck++;
-      maxStuck = Math.max(maxStuck, currentStuck);
-    } else {
-      currentStuck = 0;
-    }
-  }
-
-  if (maxStuck > 65) { // 50 +30%
-    issues.push({
-      code: 'P2080',
-      severity: 'warning',
-      title: 'EGT Sensor Stuck/Frozen (P2080)',
-      description: `EGT sensor reading was frozen (< 1F change) for ${maxStuck} consecutive samples. A stuck EGT sensor cannot protect the DPF from overtemperature events.`,
-      recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
-    });
-  }
-
-  // Check for erratic readings
-  let erraticCount = 0;
-  for (let i = 1; i < egt.length; i++) {
-    if (Math.abs(egt[i] - egt[i - 1]) > 260) { // 200F +30%
-      erraticCount++;
-    }
-  }
-  if (erraticCount > 4) { // 3 +30%
-    issues.push({
-      code: 'P2084',
-      severity: 'warning',
-      title: 'EGT Sensor Erratic (P2084)',
-      description: `EGT sensor shows ${erraticCount} rapid jumps of >200F between samples. This indicates a failing sensor or wiring fault.`,
-      recommendation: 'Inspect EGT sensor connector and wiring for heat damage. Replace EGT sensor if erratic readings persist.',
-    });
-  }
-
-  return issues;
-}
+// checkEgtSensorPerformance removed -- its logic is now part of checkAllEgtIssues above.
