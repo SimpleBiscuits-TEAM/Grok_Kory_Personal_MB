@@ -3,7 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
-import { RPMvMAFChart, HPvsRPMChart, TimeSeriesChart, StatsSummary } from '@/components/Charts';
+import { RPMvMAFChart, TimeSeriesChart, StatsSummary } from '@/components/Charts';
+import { DynoHPChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart } from '@/components/DynoCharts';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
@@ -238,19 +239,34 @@ export default function Home() {
             {/* Statistics Summary */}
             <StatsSummary data={data} />
 
+            {/* Dynojet-Style HP Chart — always shown */}
+            <div ref={hpVsRpmRef}>
+              <DynoHPChart data={data} binnedData={binnedData} />
+            </div>
+
+            {/* Fault-Specific Charts — only shown when fault detected */}
+            {diagnostics && diagnostics.issues.length > 0 && (
+              <div className="space-y-6">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5 text-red-500" />
+                  <h2 className="text-xl font-bold text-gray-900">Fault Zone Charts</h2>
+                  <span className="text-sm text-gray-500 ml-1">— annotated with fault location and delta analysis</span>
+                </div>
+                <RailPressureFaultChart data={data} diagnostics={diagnostics} binnedData={binnedData} />
+                <BoostFaultChart data={data} diagnostics={diagnostics} binnedData={binnedData} />
+                <EgtFaultChart data={data} diagnostics={diagnostics} />
+                <MafFaultChart data={data} diagnostics={diagnostics} />
+              </div>
+            )}
+
             {/* Charts */}
             <div className="grid lg:grid-cols-2 gap-6">
               <div ref={rpmVsMafRef}>
                 <RPMvMAFChart data={data} binnedData={binnedData} />
               </div>
-              <div ref={hpVsRpmRef}>
-                <HPvsRPMChart data={data} binnedData={binnedData} />
+              <div ref={timeSeriesRef}>
+                <TimeSeriesChart data={data} />
               </div>
-            </div>
-
-            {/* Full-width Time Series */}
-            <div ref={timeSeriesRef}>
-              <TimeSeriesChart data={data} />
             </div>
 
             {/* Methodology Footer */}
