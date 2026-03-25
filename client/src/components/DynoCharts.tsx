@@ -145,6 +145,136 @@ const ThresholdRow = ({ rule }: { rule: string }) => (
   </div>
 );
 
+// ─── Fault Event Timestamp List ─────────────────────────────────────────────
+interface FaultEvent {
+  start: number;   // minutes
+  end: number;     // minutes
+  duration: number; // seconds
+  peakDelta: number;
+  unit: string;
+}
+
+/**
+ * Scans an array of chart data points and groups consecutive violations
+ * into discrete fault events with start/end timestamps and peak delta.
+ */
+function computeFaultEvents(
+  points: Array<{ time: number; [key: string]: any }>,
+  isViolation: (d: any) => boolean,
+  getDelta: (d: any) => number,
+  unit: string,
+  minGapSec = 1.0   // merge windows separated by less than this
+): FaultEvent[] {
+  const events: FaultEvent[] = [];
+  let inFault = false;
+  let start = 0;
+  let peakDelta = 0;
+  let prevTime = 0;
+
+  for (let i = 0; i < points.length; i++) {
+    const d = points[i];
+    const t = d.time as number;
+    const violation = isViolation(d);
+
+    if (violation && !inFault) {
+      inFault = true;
+      start = t;
+      peakDelta = getDelta(d);
+    } else if (violation && inFault) {
+      peakDelta = Math.max(peakDelta, getDelta(d));
+    } else if (!violation && inFault) {
+      // Check if gap is small enough to merge
+      const gapSec = (t - prevTime) * 60;
+      if (gapSec < minGapSec && i < points.length - 1) {
+        // Keep fault open through small gap
+      } else {
+        events.push({
+          start,
+          end: prevTime,
+          duration: Math.round((prevTime - start) * 60),
+          peakDelta,
+          unit,
+        });
+        inFault = false;
+        peakDelta = 0;
+      }
+    }
+    prevTime = t;
+  }
+  if (inFault) {
+    events.push({
+      start,
+      end: prevTime,
+      duration: Math.round((prevTime - start) * 60),
+      peakDelta,
+      unit,
+    });
+  }
+  return events;
+}
+
+const FaultEventList = ({ events, isCritical }: { events: FaultEvent[]; isCritical: boolean }) => {
+  if (events.length === 0) return null;
+  const borderColor = isCritical ? 'rgba(255,34,34,0.25)' : 'rgba(255,153,0,0.25)';
+  const headerColor = isCritical ? '#ff4444' : '#ffaa44';
+  return (
+    <div style={{
+      marginTop: 14,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 6,
+      overflow: 'hidden',
+      fontFamily: 'monospace',
+      fontSize: 11,
+    }}>
+      <div style={{
+        background: isCritical ? 'rgba(255,34,34,0.12)' : 'rgba(255,153,0,0.1)',
+        padding: '6px 12px',
+        color: headerColor,
+        fontWeight: 'bold',
+        fontSize: 10,
+        letterSpacing: 1,
+        borderBottom: `1px solid ${borderColor}`,
+        display: 'flex',
+        justifyContent: 'space-between',
+      }}>
+        <span>FAULT EVENTS ({events.length})</span>
+        <span style={{ color: '#555', fontWeight: 'normal' }}>sorted by time</span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+            {['#', 'START', 'END', 'DURATION', 'PEAK DELTA'].map(h => (
+              <th key={h} style={{
+                padding: '5px 10px', textAlign: 'left', color: '#555',
+                fontSize: 9, fontWeight: 'bold', letterSpacing: 1,
+                borderBottom: `1px solid rgba(255,255,255,0.06)`,
+              }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {events.map((ev, i) => (
+            <tr key={i} style={{
+              background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+              borderBottom: '1px solid rgba(255,255,255,0.04)',
+            }}>
+              <td style={{ padding: '5px 10px', color: '#555', fontSize: 10 }}>{i + 1}</td>
+              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{ev.start.toFixed(2)} min</td>
+              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{ev.end.toFixed(2)} min</td>
+              <td style={{ padding: '5px 10px', color: '#ccc', fontSize: 10, fontWeight: 'bold' }}>
+                {ev.duration < 60 ? `${ev.duration}s` : `${(ev.duration / 60).toFixed(1)}m`}
+              </td>
+              <td style={{ padding: '5px 10px', color: headerColor, fontSize: 10, fontWeight: 'bold' }}>
+                {ev.peakDelta.toFixed(ev.unit.includes('psi') ? 0 : 1)} {ev.unit}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 // ─── Fault chart wrapper ──────────────────────────────────────────────────────
 const FaultChartWrapper = forwardRef<HTMLDivElement, {
   code: string;
@@ -894,6 +1024,15 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
           Rail pressure channels not logged — fault detected via other indicators.
         </div>
       )}
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => isLow ? (d.deltaLow ?? 0) > 3000 : (d.deltaHigh ?? 0) > 1500,
+          d => isLow ? (d.deltaLow ?? 0) : (d.deltaHigh ?? 0),
+          'psi'
+        )}
+      />
     </FaultChartWrapper>
   );
 });
@@ -988,6 +1127,15 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
           Boost pressure channels not logged — fault detected via other indicators.
         </div>
       )}
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => ((d.desired ?? 0) - (d.actual ?? 0)) > 5,
+          d => (d.desired ?? 0) - (d.actual ?? 0),
+          'psi'
+        )}
+      />
     </FaultChartWrapper>
   );
 });
@@ -1092,6 +1240,15 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           EGT channels not logged — fault detected via other indicators.
         </div>
       )}
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => (d.egt ?? 0) > 1475,
+          d => (d.egt ?? 0) - 1475,
+          '°F'
+        )}
+      />
     </FaultChartWrapper>
   );
 });
@@ -1190,6 +1347,15 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           MAF channels not logged — fault detected via other indicators.
         </div>
       )}
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => (d.maf ?? 0) > 6 || ((d.maf ?? 0) > 0 && (d.maf ?? 0) < 2),
+          d => (d.maf ?? 0) > 6 ? (d.maf ?? 0) - 6 : 2 - (d.maf ?? 0),
+          'lb/min'
+        )}
+      />
     </FaultChartWrapper>
   );
 });
