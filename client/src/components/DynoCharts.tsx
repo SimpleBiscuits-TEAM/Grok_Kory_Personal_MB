@@ -1616,3 +1616,305 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
   );
 });
 BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';
+
+// ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
+export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const issue = diagnostics.issues.find(i =>
+    i.code === 'CONVERTER-SLIP' || i.code === 'P0741' || i.code === 'P0742'
+  );
+  if (!issue) return null;
+
+  const chartData = data.timeMinutes.map((t, i) => ({
+    time: parseFloat(t.toFixed(3)),
+    slip: data.converterSlip[i] ?? 0,
+    dutyCycle: data.converterDutyCycle[i] ?? 0,
+  }));
+
+  const maxSlip = Math.max(...data.converterSlip.map(Math.abs));
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code={issue.code}
+      title={issue.title}
+      severity={issue.severity}
+      description={issue.description}
+      recommendation={issue.recommendation}
+      ruleEvaluated="TCC slip > 19.5 RPM for 3.9+ seconds while duty cycle > 90% (P0741) or slip < 7 RPM while duty cycle < 15% at RPM > 2000 (P0742)"
+      badges={undefined}
+    >
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => Math.abs(d.slip) > 19.5,
+          d => Math.abs(d.slip),
+          'RPM'
+        )}
+        onJumpToTime={onJumpToTime}
+      />
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+          <YAxis yAxisId="slip" stroke="#fb7185" tick={{ fill: '#fb7185', fontSize: 10 }}
+            label={{ value: 'Slip (RPM)', angle: -90, position: 'insideLeft', fill: '#fb7185', fontSize: 10 }} />
+          <YAxis yAxisId="duty" orientation="right" stroke="#fbbf24" tick={{ fill: '#fbbf24', fontSize: 10 }}
+            label={{ value: 'Duty (%)', angle: 90, position: 'insideRight', fill: '#fbbf24', fontSize: 10 }} domain={[0, 100]} />
+          <Tooltip content={<FaultTooltip xLabel="Time" />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
+          <ReferenceLine yAxisId="slip" y={19.5} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '+19.5 RPM', fill: '#ff4444', fontSize: 9, position: 'right' }} />
+          <ReferenceLine yAxisId="slip" y={-19.5} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '-19.5 RPM', fill: '#ff4444', fontSize: 9, position: 'right' }} />
+          <Line yAxisId="slip" type="monotone" dataKey="slip" stroke="#fb7185" dot={false} strokeWidth={1.5} name="Conv Slip (RPM)" />
+          <Line yAxisId="duty" type="monotone" dataKey="dutyCycle" stroke="#fbbf24" dot={false} strokeWidth={1} name="TCC Duty (%)" />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </FaultChartWrapper>
+  );
+});
+TccFaultChart.displayName = 'TccFaultChart';
+
+// ─── VGT TRACKING FAULT CHART ────────────────────────────────────────────────
+export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const issue = diagnostics.issues.find(i => i.code === 'P0046');
+  if (!issue) return null;
+
+  const hasVaneDesired = data.turboVaneDesired.some(v => v > 0);
+
+  const chartData = data.timeMinutes.map((t, i) => ({
+    time: parseFloat(t.toFixed(3)),
+    actual: data.turboVanePosition[i] ?? 0,
+    desired: hasVaneDesired ? (data.turboVaneDesired[i] ?? 0) : null,
+    delta: hasVaneDesired ? Math.abs((data.turboVaneDesired[i] ?? 0) - (data.turboVanePosition[i] ?? 0)) : null,
+  }));
+
+  const maxDelta = hasVaneDesired
+    ? Math.max(...data.turboVanePosition.map((a, i) => Math.abs((data.turboVaneDesired[i] ?? 0) - a)))
+    : 0;
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code={issue.code}
+      title={issue.title}
+      severity={issue.severity}
+      description={issue.description}
+      recommendation={issue.recommendation}
+      ruleEvaluated="VGT vane position error > 19.5% for 3.9+ seconds at RPM > 1200"
+      badges={undefined}
+    >
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => (d.delta ?? 0) > 19.5,
+          d => d.delta ?? 0,
+          '%'
+        )}
+        onJumpToTime={onJumpToTime}
+      />
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+          <YAxis yAxisId="vane" stroke="#fb923c" tick={{ fill: '#fb923c', fontSize: 10 }}
+            label={{ value: 'Vane (%)', angle: -90, position: 'insideLeft', fill: '#fb923c', fontSize: 10 }} domain={[0, 100]} />
+          <YAxis yAxisId="delta" orientation="right" stroke="#ff4444" tick={{ fill: '#ff4444', fontSize: 10 }}
+            label={{ value: 'Error (%)', angle: 90, position: 'insideRight', fill: '#ff4444', fontSize: 10 }} domain={[0, 'auto']} />
+          <Tooltip content={<FaultTooltip xLabel="Time" />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
+          <ReferenceLine yAxisId="delta" y={19.5} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '19.5% threshold', fill: '#ff4444', fontSize: 9 }} />
+          <Line yAxisId="vane" type="monotone" dataKey="actual" stroke="#fb923c" dot={false} strokeWidth={1.5} name="Vane Actual (%)" />
+          {hasVaneDesired && (
+            <Line yAxisId="vane" type="monotone" dataKey="desired" stroke="#fde68a" dot={false} strokeWidth={1} strokeDasharray="4 2" name="Vane Desired (%)" />
+          )}
+          {hasVaneDesired && (
+            <Line yAxisId="delta" type="monotone" dataKey="delta" stroke="#ff4444" dot={false} strokeWidth={1} name="Error (%)" />
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </FaultChartWrapper>
+  );
+});
+VgtFaultChart.displayName = 'VgtFaultChart';
+
+// ─── FUEL PRESSURE REGULATOR FAULT CHART (P0089) ─────────────────────────────
+export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const issue = diagnostics.issues.find(i => i.code === 'P0089');
+  if (!issue) return null;
+
+  const chartData = data.timeMinutes.map((t, i) => ({
+    time: parseFloat(t.toFixed(3)),
+    actual: data.railPressureActual[i] ?? 0,
+    desired: data.railPressureDesired[i] ?? 0,
+    delta: (data.railPressureActual[i] ?? 0) - (data.railPressureDesired[i] ?? 0),
+  }));
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code={issue.code}
+      title={issue.title}
+      severity={issue.severity}
+      description={issue.description}
+      recommendation={issue.recommendation}
+      ruleEvaluated="Rail pressure swing > 2600 psi per sample while desired is stable, or > 26 direction reversals in session"
+      badges={undefined}
+    >
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => Math.abs(d.delta) > 2600,
+          d => Math.abs(d.delta),
+          'psi'
+        )}
+        onJumpToTime={onJumpToTime}
+      />
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+          <YAxis yAxisId="psi" stroke="#f59e0b" tick={{ fill: '#f59e0b', fontSize: 10 }}
+            label={{ value: 'Rail Pressure (psi)', angle: -90, position: 'insideLeft', fill: '#f59e0b', fontSize: 10 }} domain={['auto', 'auto']} />
+          <YAxis yAxisId="delta" orientation="right" stroke="#ff4444" tick={{ fill: '#ff4444', fontSize: 10 }}
+            label={{ value: 'Delta (psi)', angle: 90, position: 'insideRight', fill: '#ff4444', fontSize: 10 }} />
+          <Tooltip content={<FaultTooltip xLabel="Time" />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
+          <ReferenceLine yAxisId="delta" y={2600} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '+2600 psi', fill: '#ff4444', fontSize: 9 }} />
+          <ReferenceLine yAxisId="delta" y={-2600} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '-2600 psi', fill: '#ff4444', fontSize: 9 }} />
+          <Line yAxisId="psi" type="monotone" dataKey="actual" stroke="#f59e0b" dot={false} strokeWidth={1.5} name="Rail Actual (psi)" />
+          <Line yAxisId="psi" type="monotone" dataKey="desired" stroke="#fde68a" dot={false} strokeWidth={1} strokeDasharray="4 2" name="Rail Desired (psi)" />
+          <Line yAxisId="delta" type="monotone" dataKey="delta" stroke="#ff4444" dot={false} strokeWidth={1} name="Delta (psi)" />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </FaultChartWrapper>
+  );
+});
+RegulatorFaultChart.displayName = 'RegulatorFaultChart';
+
+// ─── COOLANT TEMP FAULT CHART (P0116 / P0128) ────────────────────────────────
+export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const issue = diagnostics.issues.find(i => i.code === 'P0116' || i.code === 'P0128');
+  if (!issue) return null;
+
+  const chartData = data.timeMinutes.map((t, i) => ({
+    time: parseFloat(t.toFixed(3)),
+    coolant: data.coolantTemp[i] ?? 0,
+  }));
+
+  const maxTemp = Math.max(...data.coolantTemp);
+  const minTemp = Math.min(...data.coolantTemp.filter(v => v > 0));
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code={issue.code}
+      title={issue.title}
+      severity={issue.severity}
+      description={issue.description}
+      recommendation={issue.recommendation}
+      ruleEvaluated="P0128: coolant never reaches 185F after 6.5+ minutes. P0116: coolant sensor jumps >26F between samples."
+      badges={undefined}
+    >
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => d.coolant > 0 && d.coolant < 185,
+          d => 185 - d.coolant,
+          '°F'
+        )}
+        onJumpToTime={onJumpToTime}
+      />
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+          <YAxis stroke="#22d3ee" tick={{ fill: '#22d3ee', fontSize: 10 }}
+            label={{ value: 'Coolant (°F)', angle: -90, position: 'insideLeft', fill: '#22d3ee', fontSize: 10 }} domain={['auto', 'auto']} />
+          <Tooltip content={<FaultTooltip xLabel="Time" />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
+          <ReferenceLine y={185} stroke="#ff9900" strokeDasharray="4 2"
+            label={{ value: '185°F thermostat', fill: '#ff9900', fontSize: 9 }} />
+          <ReferenceLine y={210} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '210°F warning', fill: '#ff4444', fontSize: 9 }} />
+          <Line type="monotone" dataKey="coolant" stroke="#22d3ee" dot={false} strokeWidth={1.5} name="Coolant Temp (°F)" />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: 'flex', gap: 16, marginTop: 10, fontFamily: 'monospace', fontSize: 11 }}>
+        <span style={{ color: '#888' }}>Max: <strong style={{ color: '#22d3ee' }}>{maxTemp.toFixed(0)}°F</strong></span>
+        <span style={{ color: '#888' }}>Min: <strong style={{ color: '#38bdf8' }}>{minTemp.toFixed(0)}°F</strong></span>
+      </div>
+    </FaultChartWrapper>
+  );
+});
+CoolantFaultChart.displayName = 'CoolantFaultChart';
+
+// ─── IDLE RPM FAULT CHART (P0506 / P0507) ────────────────────────────────────
+export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const issue = diagnostics.issues.find(i => i.code === 'P0506' || i.code === 'P0507');
+  if (!issue) return null;
+
+  // Only show samples in the idle RPM range
+  const chartData = data.timeMinutes
+    .map((t, i) => ({ time: parseFloat(t.toFixed(3)), rpm: data.rpm[i] ?? 0 }))
+    .filter(d => d.rpm > 400 && d.rpm < 1400);
+
+  const minRpm = chartData.length ? Math.min(...chartData.map(d => d.rpm)) : 0;
+  const maxRpm = chartData.length ? Math.max(...chartData.map(d => d.rpm)) : 0;
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code={issue.code}
+      title={issue.title}
+      severity={issue.severity}
+      description={issue.description}
+      recommendation={issue.recommendation}
+      ruleEvaluated="P0506: idle RPM < 540 for 65+ samples. P0507: idle RPM > 1100 for 65+ samples."
+      badges={undefined}
+    >
+      <FaultEventList
+        isCritical={issue.severity === 'critical'}
+        events={computeFaultEvents(
+          chartData,
+          d => d.rpm < 540 || d.rpm > 1100,
+          d => d.rpm < 540 ? 540 - d.rpm : d.rpm - 1100,
+          'RPM'
+        )}
+        onJumpToTime={onJumpToTime}
+      />
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+          <YAxis stroke="#38bdf8" tick={{ fill: '#38bdf8', fontSize: 10 }}
+            label={{ value: 'RPM', angle: -90, position: 'insideLeft', fill: '#38bdf8', fontSize: 10 }} domain={[400, 1400]} />
+          <Tooltip content={<FaultTooltip xLabel="Time" />} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
+          <ReferenceLine y={540} stroke="#ff4444" strokeDasharray="4 2"
+            label={{ value: '540 RPM low', fill: '#ff4444', fontSize: 9 }} />
+          <ReferenceLine y={1100} stroke="#ff9900" strokeDasharray="4 2"
+            label={{ value: '1100 RPM high', fill: '#ff9900', fontSize: 9 }} />
+          <Line type="monotone" dataKey="rpm" stroke="#38bdf8" dot={false} strokeWidth={1.5} name="Idle RPM" />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{ display: 'flex', gap: 16, marginTop: 10, fontFamily: 'monospace', fontSize: 11 }}>
+        <span style={{ color: '#888' }}>Min Idle: <strong style={{ color: '#fb7185' }}>{minRpm} RPM</strong></span>
+        <span style={{ color: '#888' }}>Max Idle: <strong style={{ color: '#fb7185' }}>{maxRpm} RPM</strong></span>
+      </div>
+    </FaultChartWrapper>
+  );
+});
+IdleRpmFaultChart.displayName = 'IdleRpmFaultChart';

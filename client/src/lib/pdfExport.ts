@@ -231,6 +231,11 @@ doc.addPage();
       [refs.boostFaultRef, 'Boost Pressure Potential Fault Area (P0299)'],
       [refs.egtFaultRef, 'Exhaust Gas Temperature Potential Fault Area'],
       [refs.mafFaultRef, 'Mass Airflow Potential Fault Area (P0101)'],
+      [refs.tccFaultRef, 'Torque Converter Clutch Potential Fault Area (P0741/P0742)'],
+      [refs.vgtFaultRef, 'VGT Turbo Vane Tracking Potential Fault Area (P0046)'],
+      [refs.regulatorFaultRef, 'Fuel Pressure Regulator Potential Fault Area (P0089)'],
+      [refs.coolantFaultRef, 'Coolant Temperature Potential Fault Area (P0116/P0128)'],
+      [refs.idleRpmFaultRef, 'Idle RPM Potential Fault Area (P0506/P0507)'],
     ];
     for (const [ref, label] of faultRefs) {
       if (ref.current) {
