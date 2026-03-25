@@ -162,16 +162,22 @@ function checkLowRailPressure(
   const minDuration = 5; // seconds
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
-  // Decel detection: look back 3 samples (0.3s) for a sustained RPM drop
-  const decelLookback = 3;
-  const decelRpmDropPerSample = 30; // >30 RPM drop per sample = decel
+  // Pre-compute a decel flag for every sample using a wider 10-sample (1s) window.
+  // A sample is considered decel if:
+  //   1. RPM is actively dropping over the last 10 samples (>150 RPM total drop), OR
+  //   2. RPM is below 1200 (idle/coast-down), OR
+  //   3. RPM is lower than it was 5 samples ago by any amount (short-term downtrend)
+  const decelFlags: boolean[] = rpmArr.map((rpm, i) => {
+    if (rpm < 1200) return true; // idle / coast
+    const drop10 = i >= 10 ? rpmArr[i - 10] - rpm : 0;
+    const drop5  = i >= 5  ? rpmArr[i - 5]  - rpm : 0;
+    return drop10 > 150 || drop5 > 50;
+  });
+
   let consecutiveViolations = 0;
   for (let i = 0; i < actual.length; i++) {
     const offset = desired[i] - actual[i];
-    // Decel guard: if RPM is actively falling, skip this sample
-    const isDecel = i >= decelLookback &&
-      (rpmArr[i - decelLookback] - rpmArr[i]) > (decelRpmDropPerSample * decelLookback);
-    if (offset > threshold && !isDecel) {
+    if (offset > threshold && !decelFlags[i]) {
       consecutiveViolations++;
       if (consecutiveViolations >= minSamples) {
         const pcvValue = pcv[i] || 0;
@@ -212,8 +218,7 @@ function checkLowRailPressure(
       let consecutiveLowCount = 0;
       const minConsecutive = 2 * 10; // 2 seconds
       for (let i = 0; i < actual.length; i++) {
-        const decel = i >= 3 && (rpmArr[i - 3] - rpmArr[i]) > 90;
-        if (actual[i] >= 12000 && actual[i] <= 15000 && !decel) {
+        if (actual[i] >= 12000 && actual[i] <= 15000 && !decelFlags[i]) {
           consecutiveLowCount++;
           if (consecutiveLowCount >= minConsecutive) {
             lowPressureCount++;

@@ -30,6 +30,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
   ReferenceArea,
+  Brush,
 } from 'recharts';
 import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { DiagnosticReport } from '@/lib/diagnostics';
@@ -241,6 +242,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
   const [selectedPids, setSelectedPids] = useState<Set<string>>(new Set());
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [xMode, setXMode] = useState<'rpm' | 'time'>('rpm');
 
   // Determine which PIDs have data in this log
   const availablePids = useMemo(() => {
@@ -318,11 +320,38 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
     });
   }, [binnedData, data, activePidDefs]);
 
+  // TIME-SERIES data: raw samples downsampled to ~300 points
+  const timeData = useMemo(() => {
+    const n = data.rpm.length;
+    if (n === 0) return [];
+    const step = Math.max(1, Math.ceil(n / 300));
+    const rows: Array<Record<string, number | null>> = [];
+    for (let i = 0; i < n; i += step) {
+      const rpm = data.rpm[i] || 0;
+      const hpVal = data.hpTorque[i] || 0;
+      const row: Record<string, number | null> = {
+        time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
+        rpm,
+        hp: Math.round(hpVal),
+        torque: rpm > 100 ? Math.round(hpVal * 5252 / rpm) : 0,
+      };
+      for (const pidDef of activePidDefs) {
+        const pidArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
+        const v = pidArr[i];
+        row[`pid_${pidDef.key as string}`] = (v != null && v > 0) ? v : null;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }, [data, activePidDefs]);
+
+  const activeChartData = xMode === 'time' ? timeData : dynoData;
+
   const peakHp = dynoData.length ? dynoData.reduce((max, d) => (d.hp as number) > (max.hp as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
   const peakTorque = dynoData.length ? dynoData.reduce((max, d) => (d.torque as number) > (max.torque as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
   const maxY = dynoData.length ? Math.max(...dynoData.map(d => Math.max(d.hp as number, d.torque as number)), 500) * 1.12 : 700;
 
-  // Build per-PID axis domains (each PID gets its own right Y-axis)
+  // Build per-PID axis domains from raw data arrays (captures all spikes, not averaged buckets)
   const hasPids = activePidDefs.length > 0;
   const pidAxisDomains = useMemo(() => {
     const domains: Record<string, [number, number]> = {};
@@ -330,21 +359,20 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       if (pidDef.domain) {
         domains[pidDef.key as string] = pidDef.domain;
       } else {
-        const vals = dynoData
-          .map((d: any) => d[`pid_${pidDef.key as string}`])
-          .filter((v: any) => v != null) as number[];
+        const rawArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
+        const vals = Array.isArray(rawArr) ? rawArr.filter(v => v > 0) : [];
         if (vals.length) {
           const mn = Math.min(...vals);
           const mx = Math.max(...vals);
-          const pad = (mx - mn) * 0.15 || mx * 0.15 || 1;
-          domains[pidDef.key as string] = [Math.max(0, mn - pad), mx + pad];
+          const pad = (mx - mn) * 0.12 || mx * 0.12 || 1;
+          domains[pidDef.key as string] = [Math.max(0, mn - pad), mx + pad * 1.5];
         } else {
           domains[pidDef.key as string] = [0, 100];
         }
       }
     }
     return domains;
-  }, [activePidDefs, dynoData]);
+  }, [activePidDefs, data]);
   // Right margin grows with number of PID axes (60px each)
   const rightMargin = hasPids ? Math.max(60, activePidDefs.length * 60) : 40;
 
@@ -555,10 +583,29 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
         </div>
       )}
 
+      {/* X-axis mode toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ color: '#444', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>X-AXIS:</span>
+        {(['rpm', 'time'] as const).map(mode => (
+          <button key={mode} onClick={() => setXMode(mode)} style={{
+            padding: '3px 10px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10,
+            cursor: 'pointer', letterSpacing: 1,
+            background: xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : '#2a2e3a'}`,
+            color: xMode === mode ? '#0a0c10' : '#555',
+            fontWeight: xMode === mode ? 'bold' : 'normal',
+            transition: 'all 0.15s',
+          }}>{mode === 'rpm' ? 'RPM' : 'TIME'}</button>
+        ))}
+        {xMode === 'time' && (
+          <span style={{ color: '#333', fontSize: 9, fontFamily: 'monospace', marginLeft: 4 }}>DRAG BRUSH BELOW TO ZOOM</span>
+        )}
+      </div>
+
       {/* Chart */}
-      <div style={{ height: fullscreen ? 'calc(100vh - 260px)' : 360, flex: fullscreen ? '1 1 auto' : undefined }}>
+      <div style={{ height: fullscreen ? 'calc(100vh - 300px)' : 380, flex: fullscreen ? '1 1 auto' : undefined }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={dynoData} margin={{ top: 10, right: rightMargin, bottom: 30, left: 10 }}>
+          <ComposedChart data={activeChartData} margin={{ top: 10, right: rightMargin, bottom: xMode === 'time' ? 50 : 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
@@ -571,11 +618,19 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
             </defs>
             <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" vertical={true} horizontal={true} />
             <XAxis
-              dataKey="rpm"
+              dataKey={xMode === 'rpm' ? 'rpm' : 'time'}
               stroke="#333"
               tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
-              tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
-              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
+              tickFormatter={xMode === 'rpm'
+                ? (v) => `${(v / 1000).toFixed(1)}k`
+                : (v) => `${Number(v).toFixed(1)}m`
+              }
+              label={{
+                value: xMode === 'rpm' ? 'ENGINE RPM' : 'TIME (min)',
+                position: 'insideBottom',
+                offset: xMode === 'time' ? -36 : -12,
+                fill: '#555', fontSize: 10, fontFamily: 'monospace'
+              }}
             />
             <YAxis
               yAxisId="left"
@@ -676,10 +731,20 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
                 connectNulls={true}
               />
             ))}
-            {(peakHp.rpm as number) > 0 && (
+            {xMode === 'rpm' && (peakHp.rpm as number) > 0 && (
               <ReferenceLine yAxisId="left" x={peakHp.rpm as number} stroke="#ff4d00"
                 strokeDasharray="4 4" strokeOpacity={0.4}
                 label={{ value: `PEAK ${peakHp.hp}HP`, position: 'top', fill: '#ff4d00', fontSize: 9, fontFamily: 'monospace' }} />
+            )}
+            {xMode === 'time' && (
+              <Brush
+                dataKey="time"
+                height={22}
+                stroke="#ff4d00"
+                fill="#0d0f14"
+                travellerWidth={6}
+                tickFormatter={(v) => `${Number(v).toFixed(1)}m`}
+              />
             )}
           </ComposedChart>
         </ResponsiveContainer>
