@@ -3,6 +3,25 @@
  * Handles CSV parsing for both HP Tuners and EFILIVE formats
  */
 
+/**
+ * Audit record for the boost absolute-vs-gauge calibration pass.
+ * Stored on every processed log so the UI can explain what was corrected.
+ */
+export interface BoostCalibrationInfo {
+  /** Whether a correction was applied */
+  corrected: boolean;
+  /** Detected atmospheric offset subtracted from desired boost (psi) */
+  atmosphericOffsetPsi: number;
+  /** Method used to detect the offset */
+  method: 'idle_map_baseline' | 'barometric_pid' | 'none';
+  /** Idle MAP baseline value used (psia) */
+  idleBaselinePsia: number;
+  /** Number of idle samples used to compute baseline */
+  idleSampleCount: number;
+  /** Whether desired boost was already in gauge pressure (no correction needed) */
+  desiredAlreadyGauge: boolean;
+}
+
 export interface DuramaxData {
   rpm: number[];
   maf: number[];
@@ -35,6 +54,7 @@ export interface DuramaxData {
   timestamp: string;
   duration: number;
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
+  boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
 }
 
 export interface ProcessedMetrics {
@@ -65,6 +85,7 @@ export interface ProcessedMetrics {
   throttlePosition: number[];  // APP / TPS for drag detection
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
+  boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -281,6 +302,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     boostSource: hpBoostSource,
     pidSubstitutions: [],
     pidsMissing: [],
+    boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'hptuners',
@@ -564,6 +586,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     boostSource: mapIdx !== -1 ? 'map_derived' : 'none',
     pidSubstitutions: [],
     pidsMissing: [],
+    boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'efilive',
@@ -754,6 +777,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     boostSource: boostGaugeIdx !== -1 ? 'direct' : mapIdx !== -1 ? 'map_derived' : 'none',
     pidSubstitutions: [],
     pidsMissing: [],
+    boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'bankspower',
@@ -783,34 +807,53 @@ function calculateHPFromMAF(maf: number[]): number[] {
 }
 
 /**
- * Compute idle MAP baseline from the first 15 seconds at low RPM.
- * Returns average MAP psia during idle so we can zero-reference gauge pressure.
+ * Compute the atmospheric (idle) baseline for boost pressure calibration.
+ *
+ * Priority order:
+ *   1. Idle MAP samples (RPM 400-900, first 30s of log) → method: 'idle_map_baseline'
+ *   2. Barometric pressure PID if available and non-zero → method: 'barometric_pid'
+ *   3. Fallback: median of lowest-RPM MAP samples → method: 'idle_map_baseline'
+ *   4. Hard fallback: 14.696 psia (sea level)
  */
-function computeIdleMapBaseline(
+function computeBoostBaseline(
   rpm: number[],
   mapAbsolute: number[],
+  barometricPressure: number[],
   offset: number[]
-): number {
+): { baseline: number; sampleCount: number; method: BoostCalibrationInfo['method'] } {
   const logStart = offset[0] ?? 0;
+
+  // Try idle MAP samples first (most accurate for this specific log)
   const idleSamples: number[] = [];
   for (let i = 0; i < rpm.length; i++) {
-    if ((offset[i] - logStart) <= 15 && rpm[i] > 0 && rpm[i] < 900 && mapAbsolute[i] > 0) {
+    if ((offset[i] - logStart) <= 30 && rpm[i] > 400 && rpm[i] < 900 && mapAbsolute[i] > 5) {
       idleSamples.push(mapAbsolute[i]);
     }
   }
   if (idleSamples.length >= 3) {
-    return idleSamples.reduce((a, b) => a + b, 0) / idleSamples.length;
+    const baseline = idleSamples.reduce((a, b) => a + b, 0) / idleSamples.length;
+    return { baseline, sampleCount: idleSamples.length, method: 'idle_map_baseline' };
   }
-  // Fallback: median of lowest-RPM samples
-  const lowRpm = rpm
+
+  // Try barometric pressure PID
+  const validBaro = barometricPressure.filter(b => b > 10 && b < 16);
+  if (validBaro.length >= 5) {
+    const baseline = validBaro.reduce((a, b) => a + b, 0) / validBaro.length;
+    return { baseline, sampleCount: validBaro.length, method: 'barometric_pid' };
+  }
+
+  // Fallback: median of lowest-RPM MAP samples across entire log
+  const lowRpmMap = rpm
     .map((r, i) => ({ r, m: mapAbsolute[i] }))
-    .filter(x => x.r > 0 && x.r < 800 && x.m > 0)
+    .filter(x => x.r > 400 && x.r < 800 && x.m > 5)
     .map(x => x.m);
-  if (lowRpm.length > 0) {
-    lowRpm.sort((a, b) => a - b);
-    return lowRpm[Math.floor(lowRpm.length / 2)];
+  if (lowRpmMap.length > 0) {
+    lowRpmMap.sort((a, b) => a - b);
+    const baseline = lowRpmMap[Math.floor(lowRpmMap.length / 2)];
+    return { baseline, sampleCount: lowRpmMap.length, method: 'idle_map_baseline' };
   }
-  return 14.696; // sea-level standard atmosphere psia
+
+  return { baseline: 14.696, sampleCount: 0, method: 'none' };
 }
 
 /**
@@ -827,19 +870,59 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
   
   const timeMinutes = rawData.offset.map(o => o / 60);
 
-  // ── MAP-derived boost idle-baseline correction ────────────────────────────
-  // If boost was derived from MAP (absolute), subtract the idle MAP reading
-  // so that idle reads ~0 psig instead of ~14.5 psia.
-  // For 'direct' boost PIDs (already gauge pressure) this is a no-op.
+  // ── Universal boost absolute-vs-gauge calibration pass ──────────────────
+  // Runs on EVERY format. Detects whether boostDesired contains atmospheric
+  // pressure (absolute) or is already gauge pressure, then corrects both
+  // boost actual and boost desired to true gauge (psig).
   let boost = rawData.boost;
+  let boostDesired = rawData.boostDesired;
+  let boostCalibration: BoostCalibrationInfo = rawData.boostCalibration;
+
+  // Step 1: Compute idle MAP/baro baseline (psia) from the log itself
+  const { baseline: idleBaselinePsia, sampleCount: idleSampleCount, method: baselineMethod } =
+    computeBoostBaseline(rawData.rpm, rawData.mapAbsolute, rawData.barometricPressure, rawData.offset);
+
+  // Step 2: Correct actual boost if it came from MAP absolute
   if (rawData.boostSource === 'map_derived' && rawData.mapAbsolute.length > 0) {
-    const idleBaseline = computeIdleMapBaseline(
-      rawData.rpm,
-      rawData.mapAbsolute,
-      rawData.offset
-    );
-    // Re-derive boost as MAP_psia - idle_baseline_psia, floored at 0
-    boost = rawData.mapAbsolute.map(m => m > 0 ? Math.max(0, m - idleBaseline) : 0);
+    boost = rawData.mapAbsolute.map(m => m > 0 ? Math.max(0, m - idleBaselinePsia) : 0);
+  }
+
+  // Step 3: Detect if boostDesired is absolute (contains atmospheric).
+  // Heuristic: sample idle rows (RPM < 900). If desired boost at idle is
+  // consistently above 10 psi, it almost certainly has atmospheric in it.
+  const idleDesiredSamples: number[] = [];
+  for (let i = 0; i < rawData.rpm.length; i++) {
+    if (rawData.rpm[i] > 400 && rawData.rpm[i] < 900 && boostDesired[i] > 0) {
+      idleDesiredSamples.push(boostDesired[i]);
+      if (idleDesiredSamples.length >= 30) break;
+    }
+  }
+  const avgIdleDesired = idleDesiredSamples.length > 0
+    ? idleDesiredSamples.reduce((a, b) => a + b, 0) / idleDesiredSamples.length
+    : 0;
+
+  // If average desired boost at idle is above 10 psi, it contains atmospheric
+  const desiredHasAtmospheric = avgIdleDesired > 10;
+
+  if (desiredHasAtmospheric && idleBaselinePsia > 0) {
+    boostDesired = boostDesired.map(d => d > 0 ? Math.max(0, d - idleBaselinePsia) : 0);
+    boostCalibration = {
+      corrected: true,
+      atmosphericOffsetPsi: idleBaselinePsia,
+      method: baselineMethod,
+      idleBaselinePsia,
+      idleSampleCount,
+      desiredAlreadyGauge: false,
+    };
+  } else {
+    boostCalibration = {
+      corrected: rawData.boostSource === 'map_derived',
+      atmosphericOffsetPsi: rawData.boostSource === 'map_derived' ? idleBaselinePsia : 0,
+      method: rawData.boostSource === 'map_derived' ? baselineMethod : 'none',
+      idleBaselinePsia,
+      idleSampleCount,
+      desiredAlreadyGauge: true,
+    };
   }
 
   const stats = {
@@ -867,7 +950,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     railPressureActual: rawData.railPressureActual,
     railPressureDesired: rawData.railPressureDesired,
     pcvDutyCycle: rawData.pcvDutyCycle,
-    boostDesired: rawData.boostDesired,
+    boostDesired,
     turboVanePosition: rawData.turboVanePosition,
     turboVaneDesired: rawData.turboVaneDesired,
     exhaustGasTemp: rawData.exhaustGasTemp,
@@ -883,6 +966,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     throttlePosition: rawData.throttlePosition,
     pidSubstitutions: rawData.pidSubstitutions,
     pidsMissing: rawData.pidsMissing,
+    boostCalibration,
     stats,
     fileFormat: rawData.fileFormat,
   };

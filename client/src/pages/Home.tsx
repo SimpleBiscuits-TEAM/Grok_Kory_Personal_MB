@@ -628,6 +628,7 @@ export default function Home() {
                   substitutions={data.pidSubstitutions ?? []}
                   missing={data.pidsMissing ?? []}
                   fileFormat={data.fileFormat}
+                  boostCalibration={data.boostCalibration}
                 />
               </div>
             )}
