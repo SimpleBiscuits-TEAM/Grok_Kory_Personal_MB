@@ -445,9 +445,15 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
   
-  for (let i = 1; i < lines.length; i++) {
+  // Banks Power CSV has 3 header rows: column names (row 0), short names (row 1), units (row 2)
+  // Data starts at row 3 (index 3)
+  for (let i = 3; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
+    
+    // Skip any row that starts with non-numeric content (extra metadata rows)
+    const firstVal = line.split(',')[0].trim();
+    if (isNaN(parseFloat(firstVal)) && firstVal !== '') continue;
     
     const values = line.split(',').map(v => {
       const num = parseFloat(v.trim());

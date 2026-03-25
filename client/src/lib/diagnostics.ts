@@ -244,23 +244,27 @@ function checkHighRailPressure(
     }
   }
 
-  // Check for rapid oscillations
+  // Check for rapid oscillations — only flag when ACTUAL pressure swings wildly relative to DESIRED
+  // while desired itself is stable (i.e., it's not just a commanded step change)
   if (actual.length > 100) {
     let oscillationCount = 0;
     for (let i = 1; i < actual.length; i++) {
-      const delta = Math.abs(actual[i] - desired[i]) - Math.abs(actual[i - 1] - desired[i - 1]);
-      if (Math.abs(delta) > 2500) {
+      const desiredChange = Math.abs(desired[i] - desired[i - 1]);
+      const actualDeviation = actual[i] - desired[i];
+      const prevActualDeviation = actual[i - 1] - desired[i - 1];
+      // Only flag if desired is stable (< 1000 psi change) but actual swings > 2500 psi from desired
+      if (desiredChange < 1000 && Math.abs(actualDeviation - prevActualDeviation) > 2500) {
         oscillationCount++;
       }
     }
 
     const oscillationPercentage = (oscillationCount / actual.length) * 100;
-    if (oscillationPercentage > 10) {
+    if (oscillationPercentage > 5) {
       issues.push({
         code: 'P0088-OSCILLATION',
         severity: 'warning',
         title: 'Rail Pressure Oscillation',
-        description: `Rail pressure is jumping rapidly (over/undershooting by 2500+ psi) ${oscillationPercentage.toFixed(1)}% of the time.`,
+        description: `Rail pressure is jumping rapidly (over/undershooting by 2500+ psi while desired is stable) ${oscillationPercentage.toFixed(1)}% of the time.`,
         recommendation:
           'This is generally a regulator adjustment issue. Contact your tuner to fine-tune the fuel pressure regulator response.',
       });
