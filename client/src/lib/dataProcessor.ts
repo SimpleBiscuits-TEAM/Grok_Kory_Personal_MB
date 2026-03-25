@@ -7,6 +7,7 @@ export interface DuramaxData {
   rpm: number[];
   maf: number[];
   boost: number[];
+  mapAbsolute: number[];      // Raw MAP in psi absolute (for fallback use)
   torquePercent: number[];
   maxTorque: number[];
   vehicleSpeed: number[];
@@ -27,6 +28,10 @@ export interface DuramaxData {
   oilTemp: number[];
   transFluidTemp: number[];
   barometricPressure: number[];
+  boostSource: 'direct' | 'map_derived' | 'none'; // how boost was obtained
+  throttlePosition: number[];  // APP / TPS for drag detection
+  pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
+  pidsMissing: string[];       // channels that had no valid substitute
   timestamp: string;
   duration: number;
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
@@ -36,6 +41,7 @@ export interface ProcessedMetrics {
   rpm: number[];
   maf: number[];
   boost: number[];
+  mapAbsolute: number[];      // Raw MAP psi absolute (for reference)
   hpTorque: number[];
   hpMaf: number[];
   vehicleSpeed: number[];
@@ -55,6 +61,10 @@ export interface ProcessedMetrics {
   oilTemp: number[];
   transFluidTemp: number[];
   barometricPressure: number[];
+  boostSource: 'direct' | 'map_derived' | 'none'; // provenance label for UI
+  throttlePosition: number[];  // APP / TPS for drag detection
+  pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
+  pidsMissing: string[];
   stats: {
     rpmMin: number;
     rpmMax: number;
@@ -126,7 +136,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
   
   const offsetIdx = getColumnIndex(['Offset']);
   const mafIdx = getColumnIndex(['Mass Airflow']);
-  const boostIdx = getColumnIndex(['Intake Manifold Absolute Pressure']);
+  // HP Tuners: 'Intake Manifold Absolute Pressure' is MAP in PSIA
+  // Also try 'Boost Pressure' (PSIG) as a direct boost column
+  const boostGaugePsigIdx = getColumnIndex(['Boost Pressure', 'Boost (psi)']);
+  const boostIdx = getColumnIndex(['Intake Manifold Absolute Pressure', 'MAP']);
   const rpmIdx = getColumnIndex(['Engine RPM']);
   const torqueIdx = getColumnIndex(['Actual Engine Torque']);
   const maxTorqueIdx = getColumnIndex(['Maximum Engine Torque']);
@@ -147,6 +160,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
   const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp', 'Trans Temp']);
   const baroIdx = getColumnIndex(['Barometric Pressure', 'Baro Pressure', 'Ambient Pressure']);
+  const throttleIdx = getColumnIndex(['Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
   
   if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
     throw new Error('Missing required columns: RPM, MAF, or Torque');
@@ -156,6 +170,8 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
+  const mapAbsolute: number[] = [];
+  const throttlePosition: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -188,9 +204,21 @@ function parseHPTunersCSV(content: string): DuramaxData {
     
     if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
     
+    const baroVal = baroIdx !== -1 ? (values[baroIdx] || 14.7) : 14.7;
+    const mapPsia = boostIdx !== -1 ? values[boostIdx] : 0;
+    
     rpm.push(values[rpmIdx] || 0);
     maf.push(values[mafIdx] || 0);
-    boost.push(boostIdx !== -1 ? values[boostIdx] : 0);
+    // HP Tuners 'Intake Manifold Absolute Pressure' is PSIA; store raw for fallback
+    mapAbsolute.push(mapPsia);
+    // If a direct gauge boost PID exists, use it; otherwise MAP - baro = gauge
+    if (boostGaugePsigIdx !== -1) {
+      boost.push(Math.max(0, values[boostGaugePsigIdx]));
+    } else if (boostIdx !== -1) {
+      boost.push(Math.max(0, mapPsia - baroVal));
+    } else {
+      boost.push(0);
+    }
     torquePercent.push(values[torqueIdx] || 0);
     maxTorque.push(maxTorqueIdx !== -1 ? values[maxTorqueIdx] : 879.174);
     vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
@@ -210,7 +238,8 @@ function parseHPTunersCSV(content: string): DuramaxData {
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
-    barometricPressure.push(baroIdx !== -1 ? values[baroIdx] : 14.7);
+    barometricPressure.push(baroVal);
+    throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -218,11 +247,17 @@ function parseHPTunersCSV(content: string): DuramaxData {
   }
   
   const duration = offset[offset.length - 1] - offset[0];
+  // Determine boost source for HP Tuners
+  const hpBoostSource: DuramaxData['boostSource'] =
+    boostGaugePsigIdx !== -1 ? 'direct' :
+    boostIdx !== -1 ? 'map_derived' : 'none';
   
   return {
     rpm,
     maf,
     boost,
+    mapAbsolute,
+    throttlePosition,
     torquePercent,
     maxTorque,
     vehicleSpeed,
@@ -243,6 +278,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    boostSource: hpBoostSource,
+    pidSubstitutions: [],
+    pidsMissing: [],
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'hptuners',
@@ -340,6 +378,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const oilTempIdx        = getColumnIndex(['ECM.EOT']);
   const transFluidTempIdx = getColumnIndex(['TCM.TFT']);
   const baroIdx           = getColumnIndex(['ECM.BARO']);
+  const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'Accelerator Pedal Position', 'Throttle Position']);
 
   // ── Validate required columns ────────────────────────────────────────────
   // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
@@ -354,6 +393,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
+  const mapAbsolute: number[] = [];
+  const throttlePosition: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -413,6 +454,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // Standard atmosphere = 101.325 kPa; 1 kPa = 0.145038 psi
     const mapKpa = parseVal(mapIdx);
     const baroKpa = isNaN(parseVal(baroIdx)) ? 101.325 : parseVal(baroIdx);
+    const mapPsia = isNaN(mapKpa) ? 0 : mapKpa * 0.145038;
+    mapAbsolute.push(mapPsia);
     const boostPsig = isNaN(mapKpa) ? 0 : Math.max(0, (mapKpa - baroKpa) * 0.145038);
     boost.push(boostPsig);
 
@@ -483,6 +526,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     transFluidTemp.push(isNaN(tftC) || tftC <= -40 ? 0 : (tftC * 9/5) + 32);
 
     barometricPressure.push(isNaN(baroKpa) ? 14.7 : baroKpa * 0.145038);
+    throttlePosition.push(isNaN(parseVal(throttleIdx)) ? 0 : parseVal(throttleIdx));
   }
 
   if (rpm.length === 0) {
@@ -495,6 +539,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
     rpm,
     maf,
     boost,
+    mapAbsolute,
+    throttlePosition,
     torquePercent,
     maxTorque,
     vehicleSpeed,
@@ -515,6 +561,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    boostSource: mapIdx !== -1 ? 'map_derived' : 'none',
+    pidSubstitutions: [],
+    pidsMissing: [],
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'efilive',
@@ -569,6 +618,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temp']);
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temp']);
   const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp']);
+  const throttleIdx = getColumnIndex(['Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
   
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns in Banks Power format: Engine RPM or Mass Air Flow');
@@ -577,6 +627,8 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
+  const mapAbsolute: number[] = [];
+  const throttlePosition: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -623,10 +675,12 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     maf.push(values[mafIdx] || 0);
     // Use Boost Pressure (gauge, PSIG) if available; otherwise subtract ambient from MAP
     const ambientVal = ambientIdx !== -1 ? (values[ambientIdx] || 14.7) : 14.7;
+    const bpMapPsia = mapIdx !== -1 ? values[mapIdx] : 0;
+    mapAbsolute.push(bpMapPsia);
     if (boostGaugeIdx !== -1) {
-      boost.push(values[boostGaugeIdx]);
+      boost.push(Math.max(0, values[boostGaugeIdx]));
     } else if (mapIdx !== -1) {
-      boost.push(Math.max(0, values[mapIdx] - ambientVal));
+      boost.push(Math.max(0, bpMapPsia - ambientVal));
     } else {
       boost.push(0);
     }
@@ -662,6 +716,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
     barometricPressure.push(ambientVal);
+    throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -694,6 +749,11 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    mapAbsolute,
+    throttlePosition,
+    boostSource: boostGaugeIdx !== -1 ? 'direct' : mapIdx !== -1 ? 'map_derived' : 'none',
+    pidSubstitutions: [],
+    pidsMissing: [],
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'bankspower',
@@ -723,6 +783,37 @@ function calculateHPFromMAF(maf: number[]): number[] {
 }
 
 /**
+ * Compute idle MAP baseline from the first 15 seconds at low RPM.
+ * Returns average MAP psia during idle so we can zero-reference gauge pressure.
+ */
+function computeIdleMapBaseline(
+  rpm: number[],
+  mapAbsolute: number[],
+  offset: number[]
+): number {
+  const logStart = offset[0] ?? 0;
+  const idleSamples: number[] = [];
+  for (let i = 0; i < rpm.length; i++) {
+    if ((offset[i] - logStart) <= 15 && rpm[i] > 0 && rpm[i] < 900 && mapAbsolute[i] > 0) {
+      idleSamples.push(mapAbsolute[i]);
+    }
+  }
+  if (idleSamples.length >= 3) {
+    return idleSamples.reduce((a, b) => a + b, 0) / idleSamples.length;
+  }
+  // Fallback: median of lowest-RPM samples
+  const lowRpm = rpm
+    .map((r, i) => ({ r, m: mapAbsolute[i] }))
+    .filter(x => x.r > 0 && x.r < 800 && x.m > 0)
+    .map(x => x.m);
+  if (lowRpm.length > 0) {
+    lowRpm.sort((a, b) => a - b);
+    return lowRpm[Math.floor(lowRpm.length / 2)];
+  }
+  return 14.696; // sea-level standard atmosphere psia
+}
+
+/**
  * Process raw data into metrics
  */
 export function processData(rawData: DuramaxData): ProcessedMetrics {
@@ -735,7 +826,22 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
   const hpMaf = calculateHPFromMAF(rawData.maf);
   
   const timeMinutes = rawData.offset.map(o => o / 60);
-  
+
+  // ── MAP-derived boost idle-baseline correction ────────────────────────────
+  // If boost was derived from MAP (absolute), subtract the idle MAP reading
+  // so that idle reads ~0 psig instead of ~14.5 psia.
+  // For 'direct' boost PIDs (already gauge pressure) this is a no-op.
+  let boost = rawData.boost;
+  if (rawData.boostSource === 'map_derived' && rawData.mapAbsolute.length > 0) {
+    const idleBaseline = computeIdleMapBaseline(
+      rawData.rpm,
+      rawData.mapAbsolute,
+      rawData.offset
+    );
+    // Re-derive boost as MAP_psia - idle_baseline_psia, floored at 0
+    boost = rawData.mapAbsolute.map(m => m > 0 ? Math.max(0, m - idleBaseline) : 0);
+  }
+
   const stats = {
     rpmMin: Math.min(...rawData.rpm),
     rpmMax: Math.max(...rawData.rpm),
@@ -745,14 +851,15 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     mafMean: rawData.maf.reduce((a, b) => a + b, 0) / rawData.maf.length,
     hpTorqueMax: Math.max(...hpTorque),
     hpMafMax: Math.max(...hpMaf),
-    boostMax: Math.max(...rawData.boost),
+    boostMax: Math.max(...boost),
     duration: rawData.duration,
   };
   
   return {
     rpm: rawData.rpm,
     maf: rawData.maf,
-    boost: rawData.boost,
+    boost,
+    mapAbsolute: rawData.mapAbsolute,
     hpTorque,
     hpMaf,
     vehicleSpeed: rawData.vehicleSpeed,
@@ -772,6 +879,10 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     oilTemp: rawData.oilTemp,
     transFluidTemp: rawData.transFluidTemp,
     barometricPressure: rawData.barometricPressure,
+    boostSource: rawData.boostSource,
+    throttlePosition: rawData.throttlePosition,
+    pidSubstitutions: rawData.pidSubstitutions,
+    pidsMissing: rawData.pidsMissing,
     stats,
     fileFormat: rawData.fileFormat,
   };
@@ -791,6 +902,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     rpm: downsample(data.rpm),
     maf: downsample(data.maf),
     boost: downsample(data.boost),
+    mapAbsolute: downsample(data.mapAbsolute),
     hpTorque: downsample(data.hpTorque),
     hpMaf: downsample(data.hpMaf),
     vehicleSpeed: downsample(data.vehicleSpeed),

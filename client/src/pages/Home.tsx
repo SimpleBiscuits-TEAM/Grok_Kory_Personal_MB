@@ -9,7 +9,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
@@ -24,6 +24,9 @@ import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { FeedbackPanel, FeedbackTrigger } from '@/components/FeedbackPanel';
 import { ReasoningPanel } from '@/components/ReasoningPanel';
+import PidAuditPanel from '@/components/PidAuditPanel';
+import DragTimeslip from '@/components/DragTimeslip';
+import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -40,6 +43,7 @@ export default function Home() {
   const [vinFromFile, setVinFromFile] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
+  const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs for PDF export
@@ -81,6 +85,10 @@ export default function Home() {
       const reasoning = runReasoningEngine(downsampled, diagnosticReport);
       setReasoningReport(reasoning);
 
+      // Run drag racing analyzer
+      const drag = analyzeDragRuns(processed);
+      setDragAnalysis(drag);
+
       const detectedVin = getVehicleInfoFromFilename(file.name);
       setVinFromFile(detectedVin ? detectedVin.vin : null);
       const vehicleInfo = detectedVin || undefined;
@@ -95,6 +103,7 @@ export default function Home() {
       setVinFromFile(null);
       setManualVin('');
       setReasoningReport(null);
+      setDragAnalysis(null);
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -608,10 +617,43 @@ export default function Home() {
               </div>
             )}
 
+            {/* PID Audit Trail */}
+            {(data.pidSubstitutions?.length > 0 || data.pidsMissing?.length > 0) && (
+              <div className="ppei-section-reveal ppei-delay-175" style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderLeft: '4px solid oklch(0.70 0.18 200)',
+                borderRadius: '3px',
+                padding: '0'
+              }}>
+                <PidAuditPanel
+                  substitutions={data.pidSubstitutions ?? []}
+                  missing={data.pidsMissing ?? []}
+                  fileFormat={data.fileFormat}
+                />
+              </div>
+            )}
+
             {/* Stats Summary */}
             <div ref={statsRef} className="ppei-section-reveal ppei-delay-200">
               <StatsSummary data={data} />
             </div>
+
+            {/* Drag Racing Analyzer */}
+            {dragAnalysis && (
+              <div className="ppei-section-reveal ppei-delay-250">
+                <SectionHeader icon={<Flag style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DRAG RACING ANALYZER" />
+                <div style={{
+                  background: 'oklch(0.13 0.006 260)',
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderLeft: '4px solid oklch(0.52 0.22 25)',
+                  borderRadius: '3px',
+                  padding: '1.25rem'
+                }}>
+                  <DragTimeslip analysis={dragAnalysis} />
+                </div>
+              </div>
+            )}
 
             {/* Dyno Results */}
             <div className="ppei-section-reveal ppei-delay-300">
