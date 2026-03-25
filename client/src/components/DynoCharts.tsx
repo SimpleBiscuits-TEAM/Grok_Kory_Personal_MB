@@ -238,7 +238,8 @@ const PID_OVERLAYS: Array<{
 
 // ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
 export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, binnedData }, ref) => {
-  const [activePid, setActivePid] = useState<string | null>(null);
+  const [selectedPids, setSelectedPids] = useState<Set<string>>(new Set());
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   // Determine which PIDs have data in this log
   const availablePids = useMemo(() => {
@@ -248,11 +249,24 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
     });
   }, [data]);
 
-  const activePidDef = activePid ? PID_OVERLAYS.find(p => p.key === activePid) : null;
+  const activePidDefs = useMemo(
+    () => PID_OVERLAYS.filter(p => selectedPids.has(p.key as string)),
+    [selectedPids]
+  );
+
+  const togglePid = (key: string) => {
+    setSelectedPids(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
 
   const dynoData = useMemo(() => {
     // Build base dyno points binned by RPM
-    let base: Array<{ rpm: number; hp: number; torque: number }> = [];
+    let base: Array<Record<string, number | null>> = [];
+    const bucketSize = 100;
+
     if (!binnedData || binnedData.length === 0) {
       const step = Math.ceil(data.rpm.length / 80);
       base = data.rpm
@@ -262,8 +276,8 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
           torque: rpm > 100 ? Math.round((data.hpTorque[i] || 0) * 5252 / rpm) : 0,
         }))
         .filter((_, i) => i % step === 0)
-        .filter(d => d.rpm > 600 && d.hp > 10 && d.torque > 0 && d.torque < 2500)
-        .sort((a, b) => a.rpm - b.rpm);
+        .filter(d => (d.rpm as number) > 600 && (d.hp as number) > 10 && (d.torque as number) > 0 && (d.torque as number) < 2500)
+        .sort((a, b) => (a.rpm as number) - (b.rpm as number));
     } else {
       base = binnedData
         .filter(b => b.rpmBin > 600 && b.hpTorqueMean > 10)
@@ -272,14 +286,13 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
           hp: Math.round(b.hpTorqueMean),
           torque: b.rpmBin > 100 ? Math.round(b.hpTorqueMean * 5252 / b.rpmBin) : 0,
         }))
-        .filter(d => d.torque > 0 && d.torque < 2500);
+        .filter(d => (d.torque as number) > 0 && (d.torque as number) < 2500);
     }
 
-    // If a PID is selected, bin its values by RPM bucket and attach
-    if (activePid && activePidDef) {
-      const pidArr = data[activePidDef.key as keyof ProcessedMetrics] as number[];
-      // Build a map: rpmBucket -> avg pid value
-      const bucketSize = 100;
+    // Build per-PID bucket maps for all selected PIDs
+    const pidBuckets: Record<string, Record<number, { sum: number; count: number }>> = {};
+    for (const pidDef of activePidDefs) {
+      const pidArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
       const bucketMap: Record<number, { sum: number; count: number }> = {};
       data.rpm.forEach((rpm, i) => {
         const pidVal = pidArr[i];
@@ -290,31 +303,39 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
           bucketMap[bucket].count++;
         }
       });
-      return base.map(d => ({
-        ...d,
-        pid: bucketMap[Math.round(d.rpm / bucketSize) * bucketSize]
-          ? bucketMap[Math.round(d.rpm / bucketSize) * bucketSize].sum /
-            bucketMap[Math.round(d.rpm / bucketSize) * bucketSize].count
-          : null,
-      }));
+      pidBuckets[pidDef.key as string] = bucketMap;
     }
-    return base;
-  }, [binnedData, data, activePid, activePidDef]);
 
-  const peakHp = dynoData.length ? dynoData.reduce((max, d) => d.hp > max.hp ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
-  const peakTorque = dynoData.length ? dynoData.reduce((max, d) => d.torque > max.torque ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
-  const maxY = dynoData.length ? Math.max(...dynoData.map(d => Math.max(d.hp, d.torque)), 500) * 1.12 : 700;
+    return base.map(d => {
+      const row: Record<string, number | null> = { ...d };
+      for (const pidDef of activePidDefs) {
+        const bucket = Math.round((d.rpm as number) / bucketSize) * bucketSize;
+        const bkt = pidBuckets[pidDef.key as string]?.[bucket];
+        row[`pid_${pidDef.key as string}`] = bkt ? bkt.sum / bkt.count : null;
+      }
+      return row;
+    });
+  }, [binnedData, data, activePidDefs]);
 
-  // PID right-axis domain
-  const pidValues = activePid && activePidDef
-    ? (dynoData as any[]).map((d: any) => d.pid).filter((v: any) => v != null) as number[]
-    : [];
-  const pidMin = pidValues.length ? Math.min(...pidValues) : 0;
-  const pidMax = pidValues.length ? Math.max(...pidValues) : 100;
-  const pidDomain = activePidDef?.domain ?? [
-    Math.max(0, pidMin - (pidMax - pidMin) * 0.1),
-    pidMax + (pidMax - pidMin) * 0.15,
-  ];
+  const peakHp = dynoData.length ? dynoData.reduce((max, d) => (d.hp as number) > (max.hp as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
+  const peakTorque = dynoData.length ? dynoData.reduce((max, d) => (d.torque as number) > (max.torque as number) ? d : max, { rpm: 0, hp: 0, torque: 0 }) : { rpm: 0, hp: 0, torque: 0 };
+  const maxY = dynoData.length ? Math.max(...dynoData.map(d => Math.max(d.hp as number, d.torque as number)), 500) * 1.12 : 700;
+
+  // Build a unified right-axis domain across all selected PIDs
+  const hasPids = activePidDefs.length > 0;
+  const allPidValues: number[] = [];
+  for (const pidDef of activePidDefs) {
+    dynoData.forEach((d: any) => {
+      const v = d[`pid_${pidDef.key as string}`];
+      if (v != null) allPidValues.push(v);
+    });
+  }
+  const pidMin = allPidValues.length ? Math.min(...allPidValues) : 0;
+  const pidMax = allPidValues.length ? Math.max(...allPidValues) : 100;
+  // If all selected PIDs share the same domain hint, use it; otherwise auto-scale
+  const sharedDomain = activePidDefs.length === 1 && activePidDefs[0].domain
+    ? activePidDefs[0].domain
+    : ([Math.max(0, pidMin - (pidMax - pidMin) * 0.1), pidMax + (pidMax - pidMin) * 0.15] as [number, number]);
 
   if (dynoData.length < 3) {
     return (
@@ -337,6 +358,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
       borderRadius: '12px',
       padding: '20px',
       boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
+      position: 'relative',
     }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
@@ -348,7 +370,7 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
             Duramax L5P 6.6L Diesel — Estimated from OBD-II Torque Data
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 24 }}>
+        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ color: '#ff4d00', fontSize: 32, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
               {peakHp.hp}
@@ -364,69 +386,144 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
         </div>
       </div>
 
-      {/* PID Selector Tabs */}
+      {/* PID Overlay Dropdown */}
       {availablePids.length > 0 && (
-        <div style={{
-          marginBottom: 12,
-          padding: '8px 10px',
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px solid #1e2330',
-          borderRadius: 8,
-        }}>
-          <div style={{ color: '#444', fontSize: 9, fontFamily: 'monospace', marginBottom: 6, letterSpacing: 1 }}>
-            OVERLAY PID — click to plot on dyno graph
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {availablePids.map(pid => {
-              const isActive = activePid === pid.key;
-              return (
-                <button
-                  key={pid.key}
-                  onClick={() => setActivePid(isActive ? null : pid.key as string)}
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 5,
-                    border: `1px solid ${isActive ? pid.color : '#2a2e3a'}`,
-                    background: isActive ? `${pid.color}22` : 'transparent',
-                    color: isActive ? pid.color : '#555',
-                    fontFamily: 'monospace',
-                    fontSize: 10,
-                    cursor: 'pointer',
-                    fontWeight: isActive ? 'bold' : 'normal',
-                    transition: 'all 0.15s',
-                    letterSpacing: 0.5,
-                  }}
-                >
-                  {pid.label} <span style={{ opacity: 0.7 }}>{pid.unit}</span>
-                </button>
-              );
-            })}
-            {activePid && (
-              <button
-                onClick={() => setActivePid(null)}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 5,
-                  border: '1px solid #333',
-                  background: 'transparent',
-                  color: '#444',
-                  fontFamily: 'monospace',
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  marginLeft: 4,
-                }}
-              >
-                ✕ clear
-              </button>
-            )}
-          </div>
+        <div style={{ marginBottom: 12, position: 'relative' }}>
+          {/* Trigger button */}
+          <button
+            onClick={() => setDropdownOpen(o => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 14px',
+              background: dropdownOpen ? 'rgba(255,77,0,0.08)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${dropdownOpen ? '#ff4d0055' : '#1e2330'}`,
+              borderRadius: 7,
+              color: '#888',
+              fontFamily: 'monospace',
+              fontSize: 11,
+              cursor: 'pointer',
+              letterSpacing: 0.5,
+              transition: 'all 0.15s',
+              width: '100%',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>
+              <span style={{ color: '#444', marginRight: 6 }}>▶</span>
+              OVERLAY PIDs
+              {selectedPids.size > 0 && (
+                <span style={{
+                  marginLeft: 10, background: '#ff4d0033', color: '#ff4d00',
+                  borderRadius: 4, padding: '1px 7px', fontSize: 10, fontWeight: 'bold',
+                }}>
+                  {selectedPids.size} active
+                </span>
+              )}
+            </span>
+            <span style={{ color: '#444', fontSize: 10 }}>{dropdownOpen ? '▲' : '▼'}</span>
+          </button>
+
+          {/* Active PID chips shown below trigger */}
+          {selectedPids.size > 0 && !dropdownOpen && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+              {activePidDefs.map(pid => (
+                <span key={pid.key as string} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '3px 9px', borderRadius: 5,
+                  border: `1px solid ${pid.color}55`,
+                  background: `${pid.color}18`,
+                  color: pid.color, fontFamily: 'monospace', fontSize: 10,
+                }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: pid.color, display: 'inline-block' }} />
+                  {pid.label} <span style={{ opacity: 0.6 }}>({pid.unit})</span>
+                  <button onClick={() => togglePid(pid.key as string)} style={{
+                    background: 'none', border: 'none', color: pid.color,
+                    cursor: 'pointer', padding: 0, fontSize: 12, lineHeight: 1,
+                  }}>×</button>
+                </span>
+              ))}
+              <button onClick={() => setSelectedPids(new Set())} style={{
+                padding: '3px 9px', borderRadius: 5, border: '1px solid #333',
+                background: 'transparent', color: '#444', fontFamily: 'monospace',
+                fontSize: 10, cursor: 'pointer',
+              }}>✕ clear all</button>
+            </div>
+          )}
+
+          {/* Dropdown panel */}
+          {dropdownOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+              marginTop: 4,
+              background: '#0d0f14',
+              border: '1px solid #1e2330',
+              borderRadius: 8,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
+              padding: '10px 12px',
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginBottom: 8,
+              }}>
+                <span style={{ color: '#444', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1 }}>
+                  SELECT PIDs TO OVERLAY — multiple allowed
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setSelectedPids(new Set(availablePids.map(p => p.key as string)))} style={{
+                    padding: '2px 8px', borderRadius: 4, border: '1px solid #2a2e3a',
+                    background: 'transparent', color: '#555', fontFamily: 'monospace', fontSize: 9, cursor: 'pointer',
+                  }}>select all</button>
+                  <button onClick={() => setSelectedPids(new Set())} style={{
+                    padding: '2px 8px', borderRadius: 4, border: '1px solid #2a2e3a',
+                    background: 'transparent', color: '#555', fontFamily: 'monospace', fontSize: 9, cursor: 'pointer',
+                  }}>clear</button>
+                  <button onClick={() => setDropdownOpen(false)} style={{
+                    padding: '2px 8px', borderRadius: 4, border: '1px solid #2a2e3a',
+                    background: 'transparent', color: '#555', fontFamily: 'monospace', fontSize: 9, cursor: 'pointer',
+                  }}>close ▲</button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 4 }}>
+                {availablePids.map(pid => {
+                  const checked = selectedPids.has(pid.key as string);
+                  return (
+                    <label
+                      key={pid.key as string}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 10px', borderRadius: 6,
+                        border: `1px solid ${checked ? pid.color + '55' : '#1e2330'}`,
+                        background: checked ? `${pid.color}12` : 'transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.12s',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePid(pid.key as string)}
+                        style={{ accentColor: pid.color, width: 13, height: 13, cursor: 'pointer' }}
+                      />
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: pid.color, flexShrink: 0 }} />
+                      <span style={{ fontFamily: 'monospace', fontSize: 10, color: checked ? pid.color : '#666' }}>
+                        {pid.label}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#333', marginLeft: 'auto' }}>
+                        {pid.unit}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Chart */}
       <div style={{ height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={dynoData} margin={{ top: 10, right: activePid ? 60 : 40, bottom: 30, left: 10 }}>
+          <ComposedChart data={dynoData} margin={{ top: 10, right: hasPids ? 60 : 40, bottom: 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
@@ -457,15 +554,17 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
               orientation="right"
               stroke="#333"
               tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
-              domain={activePid && activePidDef ? pidDomain : [0, maxY]}
+              domain={hasPids ? sharedDomain : [0, maxY]}
               label={{
-                value: activePid && activePidDef
-                  ? `${activePidDef.label.toUpperCase()} (${activePidDef.unit})`
+                value: hasPids
+                  ? activePidDefs.length === 1
+                    ? `${activePidDefs[0].label.toUpperCase()} (${activePidDefs[0].unit})`
+                    : 'PID OVERLAY'
                   : 'TORQUE (LB·FT)',
                 angle: 90,
                 position: 'insideRight',
                 offset: 14,
-                fill: activePid && activePidDef ? activePidDef.color : '#00c8ff',
+                fill: hasPids ? (activePidDefs[0]?.color ?? '#aaa') : '#00c8ff',
                 fontSize: 10,
                 fontFamily: 'monospace',
               }}
@@ -499,11 +598,9 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
             <Legend
               wrapperStyle={{ fontFamily: 'monospace', fontSize: 11, paddingTop: 8 }}
               formatter={(value) => (
-                <span style={{
-                  color: value === 'Horsepower' ? '#ff4d00'
-                    : value === 'Torque (lb·ft)' ? '#00c8ff'
-                    : activePidDef?.color ?? '#aaa'
-                }}>{value}</span>
+                <span style={{ color: value === 'Horsepower' ? '#ff4d00' : value === 'Torque (lb·ft)' ? '#00c8ff' : '#aaa' }}>
+                  {value}
+                </span>
               )}
             />
             <ReferenceLine yAxisId="left" y={445} stroke="#333" strokeDasharray="6 3"
@@ -511,26 +608,28 @@ export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, b
             <Area yAxisId="left" type="monotone" dataKey="hp"
               stroke="#ff4d00" strokeWidth={3} fill="url(#hpGrad)"
               dot={false} isAnimationActive={false} name="Horsepower" />
-            {!activePid && (
+            {!hasPids && (
               <Area yAxisId="right" type="monotone" dataKey="torque"
                 stroke="#00c8ff" strokeWidth={2.5} fill="url(#torqueGrad)"
                 dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
             )}
-            {activePid && activePidDef && (
+            {/* Render one Line per selected PID */}
+            {activePidDefs.map(pidDef => (
               <Line
+                key={pidDef.key as string}
                 yAxisId="right"
                 type="monotone"
-                dataKey="pid"
-                stroke={activePidDef.color}
+                dataKey={`pid_${pidDef.key as string}`}
+                stroke={pidDef.color}
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
-                name={`${activePidDef.label} (${activePidDef.unit})`}
+                name={`${pidDef.label} (${pidDef.unit})`}
                 connectNulls={true}
               />
-            )}
-            {peakHp.rpm > 0 && (
-              <ReferenceLine yAxisId="left" x={peakHp.rpm} stroke="#ff4d00"
+            ))}
+            {(peakHp.rpm as number) > 0 && (
+              <ReferenceLine yAxisId="left" x={peakHp.rpm as number} stroke="#ff4d00"
                 strokeDasharray="4 4" strokeOpacity={0.4}
                 label={{ value: `PEAK ${peakHp.hp}HP`, position: 'top', fill: '#ff4d00', fontSize: 9, fontFamily: 'monospace' }} />
             )}
