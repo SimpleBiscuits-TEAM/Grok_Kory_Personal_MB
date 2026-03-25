@@ -9,11 +9,12 @@
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3 } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
+import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
@@ -22,6 +23,7 @@ import EcuReferencePanel from '@/components/EcuReferencePanel';
 import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { FeedbackPanel, FeedbackTrigger } from '@/components/FeedbackPanel';
+import { ReasoningPanel } from '@/components/ReasoningPanel';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -37,6 +39,7 @@ export default function Home() {
   const [manualVin, setManualVin] = useState('');
   const [vinFromFile, setVinFromFile] = useState<string | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs for PDF export
@@ -74,6 +77,10 @@ export default function Home() {
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
 
+      // Run the PPEI AI reasoning engine for context-aware analysis
+      const reasoning = runReasoningEngine(downsampled, diagnosticReport);
+      setReasoningReport(reasoning);
+
       const detectedVin = getVehicleInfoFromFilename(file.name);
       setVinFromFile(detectedVin ? detectedVin.vin : null);
       const vehicleInfo = detectedVin || undefined;
@@ -87,6 +94,7 @@ export default function Home() {
       setHealthReport(null);
       setVinFromFile(null);
       setManualVin('');
+      setReasoningReport(null);
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -581,6 +589,22 @@ export default function Home() {
               <div className="ppei-section-reveal ppei-delay-100">
                 <SectionHeader icon={<Zap style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DIAGNOSTIC ANALYSIS" />
                 <DiagnosticReportComponent report={diagnostics} />
+              </div>
+            )}
+
+            {/* PPEI AI Reasoning Engine */}
+            {reasoningReport && (
+              <div className="ppei-section-reveal ppei-delay-150">
+                <SectionHeader icon={<Brain style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="PPEI AI REASONING ENGINE" />
+                <div style={{
+                  background: 'oklch(0.13 0.006 260)',
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderLeft: '4px solid oklch(0.52 0.22 25)',
+                  borderRadius: '3px',
+                  padding: '1.25rem'
+                }}>
+                  <ReasoningPanel report={reasoningReport} />
+                </div>
               </div>
             )}
 

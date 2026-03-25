@@ -607,7 +607,15 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
 }
 
 /**
- * Check Torque Converter Slip - NEW
+ * Check Torque Converter Slip
+ *
+ * Context-aware logic:
+ * - EFILive LML/L5P: TCM.TCCPCSCP = TCC PCS commanded pressure in kPa
+ *   1050 kPa = full lock command (zero slip target). Any slip >20 RPM
+ *   while TCCPCSCP = 1050 is a confirmed slip under full lock.
+ * - HP Tuners / Banks: duty cycle 0-100%; >90% = full lock command.
+ * - The check is ONLY meaningful when the TCM is commanding full lock.
+ *   Slip during partial apply or open converter is normal and expected.
  */
 function checkConverterSlip(
   slip: number[],
@@ -616,47 +624,89 @@ function checkConverterSlip(
   rpm: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
+  if (slip.length === 0) return issues;
 
-  if (slip.length === 0) {
-    return issues;
-  }
+  // Detect whether this is an EFILive log (TCCPCSCP in kPa, max ~1050)
+  // vs HP Tuners / Banks (duty cycle 0-100%)
+  const maxDuty = Math.max(...dutyCycle.filter(v => v > 0));
+  const isEFILiveKpa = maxDuty > 200; // kPa values will be 400-1050, duty% max 100
 
-  // Look for patterns: duty cycle and pressure maxed out but slip is not controlled
-  let slipViolationCount = 0;
-  let maxDutyCycleCount = 0;
-  let maxPressureCount = 0;
+  // Full lock threshold varies by format:
+  // EFILive: 1050 kPa = full lock (allow ±30 kPa tolerance for sensor noise)
+  // HP Tuners / Banks: 90% duty = full lock
+  const FULL_LOCK_THRESHOLD = isEFILiveKpa ? 1000 : 90;
+
+  // Slip threshold: >20 RPM while fully locked = confirmed slip
+  const SLIP_THRESHOLD = 20;
+
+  // Minimum consecutive samples to confirm a slip event (not just sensor noise)
+  // At ~10 Hz sample rate, 3 samples = 300ms minimum duration
+  const MIN_CONSECUTIVE = 3;
+
+  let slipEventCount = 0;
+  let maxSlipObserved = 0;
+  let consecutiveSlip = 0;
+  let slipWhileLockedCount = 0;
+  let totalLockedSamples = 0;
 
   for (let i = 0; i < slip.length; i++) {
-    // Check if slip is fluctuating more than ±15 RPM
-    if (Math.abs(slip[i]) > 19.5) { // 15 RPM +30%
-      slipViolationCount++;
-    }
+    const isFullyLocked = dutyCycle[i] >= FULL_LOCK_THRESHOLD;
+    const absSlip = Math.abs(slip[i]);
 
-    // Check if duty cycle is maxed (near 100%)
-    if (dutyCycle[i] > 95) {
-      maxDutyCycleCount++;
-    }
-
-    // Check if pressure is maxed
-    if (pressure[i] > 200) {
-      // Assuming max pressure is around 200 PSI
-      maxPressureCount++;
+    if (isFullyLocked) {
+      totalLockedSamples++;
+      if (absSlip > SLIP_THRESHOLD) {
+        consecutiveSlip++;
+        slipWhileLockedCount++;
+        maxSlipObserved = Math.max(maxSlipObserved, absSlip);
+        if (consecutiveSlip >= MIN_CONSECUTIVE) {
+          slipEventCount++;
+        }
+      } else {
+        consecutiveSlip = 0;
+      }
+    } else {
+      consecutiveSlip = 0;
     }
   }
 
-  const slipPercentage = (slipViolationCount / slip.length) * 100;
-  const dutyPercentage = (maxDutyCycleCount / slip.length) * 100;
-  const pressurePercentage = (maxPressureCount / slip.length) * 100;
+  if (totalLockedSamples === 0) return issues;
 
-  // If duty cycle and pressure are maxed but slip is still high, converter is slipping
-  if (dutyPercentage > 39 && pressurePercentage > 39 && slipPercentage > 26) { // 30/30/20 +30%
+  const slipRate = (slipWhileLockedCount / totalLockedSamples) * 100;
+
+  // Critical: frequent slip events under full lock command
+  if (slipEventCount >= 5 || slipRate > 15) {
+    const lockDesc = isEFILiveKpa
+      ? `TCC PCS commanded pressure at full lock (≥1050 kPa)`
+      : `TCC commanded at ≥90% duty cycle (full lock)`;
     issues.push({
       code: 'CONVERTER-SLIP',
       severity: 'critical',
-      title: 'Torque Converter Slip Detected',
-      description: `Converter duty cycle and pressure are maxed out (${dutyPercentage.toFixed(1)}% and ${pressurePercentage.toFixed(1)}% respectively), but converter slip is fluctuating by more than ±15 RPM (${slipPercentage.toFixed(1)}% of session).`,
+      title: 'Torque Converter Slip Under Full Lock Command',
+      description:
+        `${lockDesc}, yet the converter shows slip events exceeding ${SLIP_THRESHOLD} RPM ` +
+        `(${slipEventCount} confirmed events, peak slip: ${maxSlipObserved.toFixed(0)} RPM, ` +
+        `${slipRate.toFixed(1)}% of locked samples). ` +
+        `This is a confirmed TCC clutch slip — the converter is not holding under load.`,
       recommendation:
-        'The torque converter is slipping excessively. This indicates internal converter wear or damage. Have the converter inspected and possibly rebuilt or replaced. Contact your transmission specialist.',
+        'The torque converter clutch is slipping under full lock command. This indicates internal ' +
+        'converter wear, a faulty TCC solenoid, or degraded transmission fluid. Have the converter ' +
+        'and TCC solenoid inspected. Consider a transmission fluid service. Contact your transmission specialist.',
+    });
+  } else if (slipEventCount >= 2 || slipRate > 5) {
+    // Warning: occasional slip events
+    const lockDesc = isEFILiveKpa ? `TCC PCS at full lock (≥1050 kPa)` : `TCC at ≥90% duty`;
+    issues.push({
+      code: 'CONVERTER-SLIP-WARN',
+      severity: 'warning',
+      title: 'Intermittent TCC Slip Under Lock Command',
+      description:
+        `${lockDesc}, the converter shows intermittent slip above ${SLIP_THRESHOLD} RPM ` +
+        `(${slipEventCount} events, peak: ${maxSlipObserved.toFixed(0)} RPM, ${slipRate.toFixed(1)}% of locked samples). ` +
+        `May indicate early converter wear or a marginal TCC apply circuit.`,
+      recommendation:
+        'Monitor converter slip closely. Check transmission fluid level and condition. ' +
+        'If slip events increase under load, have the TCC solenoid and converter inspected.',
     });
   }
 
@@ -773,8 +823,20 @@ export function checkFuelPressureRegulatorPerformance(
 
 /**
  * P0116/P0128 - Coolant Temperature Performance
- * P0116: Coolant temp sensor erratic
- * P0128: Coolant temp below thermostat regulating temperature
+ *
+ * Context-aware rules:
+ * 1. Cold-start exclusion: Engines MUST warm up from ambient (which can be -40°C / -40°F).
+ *    Low coolant temp during warmup is NORMAL and EXPECTED. Never flag a cold-start reading
+ *    as a fault. Only evaluate thermostat performance AFTER the engine has had sufficient
+ *    time to reach operating temperature.
+ *
+ * 2. P0128 (thermostat stuck open): Only flag if the engine has been running for >10 minutes
+ *    AND coolant NEVER exceeded 185°F. A log that starts cold and ends at 170°F after 8 minutes
+ *    is still warming up — not a thermostat fault.
+ *
+ * 3. P0116 (sensor erratic): Exclude the warmup phase from erratic detection because
+ *    rapid but smooth temperature rise during warmup can look like "jumps" if the sample
+ *    rate is low. Only flag if jumps occur after the engine is warm (>160°F).
  */
 export function checkCoolantTemp(
   coolantTemp: number[],
@@ -783,35 +845,73 @@ export function checkCoolantTemp(
   const issues: DiagnosticIssue[] = [];
   if (!coolantTemp.length) return issues;
 
-  const maxTemp = Math.max(...coolantTemp);
+  // Filter out -40°F startup sensor default values (EFILive logs -40°C = -40°F at startup)
+  const validTemps = coolantTemp.filter(t => t > -39);
+  if (validTemps.length === 0) return issues;
+
+  const maxTemp = Math.max(...validTemps);
+  const minTemp = Math.min(...validTemps);
   const runTime = timeMinutes.length > 1 ? timeMinutes[timeMinutes.length - 1] - timeMinutes[0] : 0;
 
-  // P0128: Coolant never reaches thermostat operating temp (195F)
-  if (runTime > 6.5 && maxTemp < 185) { // 5 min +30%, 190F tightened slightly
+  // Determine warmup phase: find the index where coolant first exceeds 160°F
+  // Everything before this index is the cold-start warmup phase — exclude from fault detection
+  const WARMUP_COMPLETE_THRESHOLD = 160; // °F — engine is considered warm above this
+  let warmupCompleteIdx = coolantTemp.length; // default: never warmed up
+  for (let i = 0; i < coolantTemp.length; i++) {
+    if (coolantTemp[i] > WARMUP_COMPLETE_THRESHOLD) {
+      warmupCompleteIdx = i;
+      break;
+    }
+  }
+  const engineWarmedUp = warmupCompleteIdx < coolantTemp.length;
+
+  // P0128: Coolant never reaches thermostat operating temp (195°F)
+  // Only flag if:
+  //   a) Log ran for >10 minutes (engine had time to warm up), AND
+  //   b) Coolant NEVER exceeded 185°F in the entire log
+  // This correctly ignores logs that start cold and are still warming up.
+  if (runTime > 10 && maxTemp < 185) {
     issues.push({
       code: 'P0128',
       severity: 'warning',
       title: 'Coolant Below Thermostat Regulating Temp (P0128)',
-      description: `Coolant temperature only reached ${maxTemp.toFixed(0)}F over a ${runTime.toFixed(1)}-minute log. The thermostat should regulate at 195F. A stuck-open thermostat causes reduced fuel economy, increased emissions, and potential engine wear.`,
-      recommendation: 'Replace the thermostat. Verify the coolant temperature sensor is accurate. Check for air pockets in the cooling system.',
+      description:
+        `After ${runTime.toFixed(1)} minutes of operation, coolant temperature only reached ` +
+        `${maxTemp.toFixed(0)}°F (started at ${minTemp.toFixed(0)}°F). ` +
+        `The thermostat should regulate at 195°F. A stuck-open thermostat causes reduced fuel ` +
+        `economy, increased emissions, and potential engine wear.`,
+      recommendation:
+        'Replace the thermostat. Verify the coolant temperature sensor is accurate. ' +
+        'Check for air pockets in the cooling system.',
     });
   }
 
   // P0116: Coolant temp sensor erratic (large rapid swings)
-  let erraticCount = 0;
-  for (let i = 1; i < coolantTemp.length; i++) {
-    if (Math.abs(coolantTemp[i] - coolantTemp[i - 1]) > 26) { // 20F +30%
-      erraticCount++;
+  // Only check AFTER warmup is complete to avoid flagging normal warmup temperature rise.
+  // A jump of >20°F between consecutive samples is physically impossible once the engine
+  // is at operating temperature — this indicates a sensor or wiring fault.
+  if (engineWarmedUp) {
+    let erraticCount = 0;
+    for (let i = Math.max(1, warmupCompleteIdx); i < coolantTemp.length; i++) {
+      const delta = Math.abs(coolantTemp[i] - coolantTemp[i - 1]);
+      // Skip transitions from -40°F startup default to real values
+      if (coolantTemp[i - 1] < -38 || coolantTemp[i] < -38) continue;
+      if (delta > 20) { // 20°F jump between samples at operating temp = sensor fault
+        erraticCount++;
+      }
     }
-  }
-  if (erraticCount > 6.5) { // 5 +30%
-    issues.push({
-      code: 'P0116',
-      severity: 'warning',
-      title: 'Coolant Temperature Sensor Erratic (P0116)',
-      description: `Coolant temperature sensor shows ${erraticCount} rapid jumps of >20F between samples. This indicates a failing sensor, loose connector, or wiring fault.`,
-      recommendation: 'Inspect coolant temperature sensor connector and wiring. Replace coolant temperature sensor if erratic readings persist.',
-    });
+    if (erraticCount > 5) {
+      issues.push({
+        code: 'P0116',
+        severity: 'warning',
+        title: 'Coolant Temperature Sensor Erratic (P0116)',
+        description:
+          `After warmup, coolant temperature sensor shows ${erraticCount} rapid jumps of >20°F ` +
+          `between samples. This indicates a failing sensor, loose connector, or wiring fault.`,
+        recommendation:
+          'Inspect coolant temperature sensor connector and wiring. Replace coolant temperature sensor if erratic readings persist.',
+      });
+    }
   }
 
   return issues;
@@ -873,6 +973,16 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
 
 /**
  * P0741/P0742 - TCC Stuck Off / Stuck On
+ *
+ * Context-aware logic for EFILive LML/L5P:
+ * - TCM.TCCPCSCP (stored in dutyCycle field) is in kPa, not percent.
+ *   1050 kPa = full lock command. 0 kPa = open converter.
+ * - P0741 (stuck off): commanded full lock (≥1050 kPa) but sustained slip >50 RPM
+ * - P0742 (stuck on): commanded open (<200 kPa) but near-zero slip at cruise speed
+ *
+ * For HP Tuners / Banks (duty cycle 0-100%):
+ * - P0741: duty >90% but slip >50 RPM
+ * - P0742: duty <15% but slip <10 RPM at cruise
  */
 export function checkTccOperation(
   slip: number[],
@@ -882,22 +992,21 @@ export function checkTccOperation(
   const issues: DiagnosticIssue[] = [];
   if (!slip.length || !dutyCycle.length) return issues;
 
-  // PID quality guard: if dutyCycle is all zeros (not logged by this logger format),
-  // disable the stuck-on check — duty cycle = 0 is indistinguishable from "not logged".
-  // A logger that doesn't capture TCC duty cycle will always read 0%, which would
-  // falsely satisfy the "commanded off" condition for P0742.
-  const dutyCycleHasData = dutyCycle.some(v => v > 5);
-
-  // PID quality guard: if slip has no meaningful variation (all near-zero),
-  // the sensor is not logging — skip both checks.
+  // PID quality guard: if slip has no meaningful variation, sensor not logging
   const slipHasData = slip.some(v => Math.abs(v) > 5);
   if (!slipHasData) return issues;
 
+  // Detect EFILive kPa format vs HP Tuners % format
+  const maxDuty = Math.max(...dutyCycle.filter(v => v > 0));
+  const isEFILiveKpa = maxDuty > 200;
+  const dutyCycleHasData = dutyCycle.some(v => v > 5);
+
+  // Thresholds vary by format
+  const FULL_LOCK_THRESHOLD  = isEFILiveKpa ? 1000 : 90;  // kPa or %
+  const OPEN_CONV_THRESHOLD  = isEFILiveKpa ? 200  : 15;  // kPa or %
+  const SLIP_THRESHOLD_LOCKED = 50;  // RPM — sustained slip while fully locked
+  const SLIP_THRESHOLD_OPEN   = 10;  // RPM — near-zero slip while commanded open
   const MIN_RPM = 1500;
-  const HIGH_DUTY_THRESHOLD = 90; // 80 +10% (harder to trigger)
-  const SLIP_THRESHOLD_LOCKED = 65; // 50 RPM +30%
-  const LOW_DUTY_THRESHOLD = 15; // 20 -25% (harder to trigger stuck-on)
-  const SLIP_THRESHOLD_OPEN = 7; // 10 -30% (harder to trigger stuck-on)
 
   let stuckOffCount = 0;
   let stuckOnCount = 0;
@@ -905,34 +1014,43 @@ export function checkTccOperation(
   for (let i = 0; i < slip.length; i++) {
     if (rpm[i] < MIN_RPM) continue;
     const absSlip = Math.abs(slip[i]);
-    // P0741 stuck-off: only run when duty cycle data is present
-    if (dutyCycleHasData && dutyCycle[i] > HIGH_DUTY_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
+
+    // P0741: commanded full lock but sustained slip
+    if (dutyCycleHasData && dutyCycle[i] >= FULL_LOCK_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
       stuckOffCount++;
     }
-    // P0742 stuck-on: only run when duty cycle data is present
-    // Without duty cycle data, near-zero slip at cruise is normal TCC lock, not a fault.
-    if (dutyCycleHasData && dutyCycle[i] < LOW_DUTY_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
+    // P0742: commanded open but near-zero slip at cruise (converter stuck applied)
+    if (dutyCycleHasData && dutyCycle[i] < OPEN_CONV_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
       stuckOnCount++;
     }
   }
 
-  if (dutyCycleHasData && stuckOffCount > 39) { // 30 +30%
+  const lockLabel = isEFILiveKpa ? `≥${FULL_LOCK_THRESHOLD} kPa (full lock)` : `>${FULL_LOCK_THRESHOLD}% duty cycle`;
+  const openLabel = isEFILiveKpa ? `<${OPEN_CONV_THRESHOLD} kPa (open)` : `<${OPEN_CONV_THRESHOLD}% duty cycle`;
+
+  if (dutyCycleHasData && stuckOffCount > 30) {
     issues.push({
       code: 'P0741',
       severity: 'critical',
       title: 'Torque Converter Clutch Stuck Off (P0741)',
-      description: `TCC was commanded locked (duty cycle >${HIGH_DUTY_THRESHOLD}%) but showed >${SLIP_THRESHOLD_LOCKED} RPM slip for ${stuckOffCount} samples. The converter clutch is not engaging properly.`,
-      recommendation: 'Check transmission fluid level and condition. Test TCC solenoid. Inspect torque converter for internal wear. Consider transmission service.',
+      description:
+        `TCC commanded at ${lockLabel} but showed >${SLIP_THRESHOLD_LOCKED} RPM slip for ` +
+        `${stuckOffCount} samples. The converter clutch is not engaging properly.`,
+      recommendation:
+        'Check transmission fluid level and condition. Test TCC solenoid. Inspect torque converter for internal wear. Consider transmission service.',
     });
   }
 
-  if (dutyCycleHasData && stuckOnCount > 65) { // 50 +30%
+  if (dutyCycleHasData && stuckOnCount > 50) {
     issues.push({
       code: 'P0742',
       severity: 'warning',
       title: 'Torque Converter Clutch Stuck On (P0742)',
-      description: `TCC showed near-zero slip (<${SLIP_THRESHOLD_OPEN} RPM) even when commanded off for ${stuckOnCount} samples. The converter clutch may be stuck applied.`,
-      recommendation: 'Inspect TCC solenoid and hydraulic circuit. Check transmission fluid for contamination. Have transmission inspected for stuck TCC apply circuit.',
+      description:
+        `TCC commanded ${openLabel} but showed near-zero slip (<${SLIP_THRESHOLD_OPEN} RPM) ` +
+        `for ${stuckOnCount} samples at cruise. The converter clutch may be stuck applied.`,
+      recommendation:
+        'Inspect TCC solenoid and hydraulic circuit. Check transmission fluid for contamination. Have transmission inspected for stuck TCC apply circuit.',
     });
   }
 

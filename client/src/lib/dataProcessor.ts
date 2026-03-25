@@ -251,54 +251,106 @@ function parseHPTunersCSV(content: string): DuramaxData {
 
 /**
  * Parse EFILIVE CSV format
+ *
+ * EFILive exports have a 3-row header:
+ *   Row 0: PID codes  (e.g. "ECM.RPM", "TCM.TCCSLIP")  ← authoritative
+ *   Row 1: Descriptions (human-readable labels)          ← informational
+ *   Row 2: Units       (e.g. "rpm", "kPa")               ← informational
+ *   Row 3+: Data rows
+ *
+ * IMPORTANT: The description row (row 1) is offset by 3 columns from the PID
+ * row because EFILive inserts Frame/Time/Flags as the first 3 columns with no
+ * description. Always use PID codes (row 0) for column mapping, never descriptions.
  */
 function parseEFILiveCSV(content: string): DuramaxData {
   const lines = content.split('\n').map(line => line.trim());
-  
-  if (lines.length < 2) {
-    throw new Error('Invalid EFILIVE CSV format');
+
+  if (lines.length < 4) {
+    throw new Error('Invalid EFILive CSV: expected at least 4 rows (PID codes, descriptions, units, data)');
   }
-  
-  // EFILIVE format: first line is header
-  const headers = lines[0].split(',').map(h => h.trim());
-  
-  const getColumnIndex = (keywords: string[]): number => {
-    for (const keyword of keywords) {
-      const idx = headers.findIndex(h => h.includes(keyword));
-      if (idx !== -1) return idx;
+
+  // Row 0 = PID codes (authoritative column identifiers)
+  const pidHeaders = lines[0].split(',').map(h => h.trim());
+
+  /**
+   * Find column index by exact PID code match first, then fallback to substring.
+   * This prevents false matches (e.g. "ECM.EGTS1" matching "ECM.EGTS").
+   */
+  const getColumnIndex = (candidates: string[]): number => {
+    for (const candidate of candidates) {
+      // Exact match first
+      const exact = pidHeaders.indexOf(candidate);
+      if (exact !== -1) return exact;
+    }
+    for (const candidate of candidates) {
+      // Substring fallback
+      const sub = pidHeaders.findIndex(h => h.includes(candidate));
+      if (sub !== -1) return sub;
     }
     return -1;
   };
-  
-  // EFILIVE column mappings
-  const timeIdx = getColumnIndex(['Time']);
-  const rpmIdx = getColumnIndex(['ECM.RPM']);
-  const mafIdx = getColumnIndex(['ECM.MAF']);
-  const mapIdx = getColumnIndex(['ECM.MAP']);
-  const torqueIdx = getColumnIndex(['ECM.TQ_ACT']);
-  const maxTorqueIdx = getColumnIndex(['ECM.TQ_REF']);
-  const speedIdx = getColumnIndex(['ECM.VSS']);
-  const fuelRateIdx = getColumnIndex(['ECM.FUEL_RATE']);
-  const railActualIdx = getColumnIndex(['ECM.FRP_A']);
-  const railDesiredIdx = getColumnIndex(['ECM.FRPDI']);
-  const pcvIdx = getColumnIndex(['ECM.FRPVDC']);
-  const boostDesiredIdx = getColumnIndex(['ECM.DESTQ']);
-  const turboVaneIdx = getColumnIndex(['ECM.TCVPOS']);
-  const turboVaneDesiredIdx = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD', 'Desired Turbo Vane Position']);
-  const egtIdx = getColumnIndex(['ECM.EGTS1', 'ECM.EGTS']);
-  const converterSlipIdx = getColumnIndex(['TCM.TCSLIP']);
-  const converterDutyIdx = getColumnIndex(['TCM.TCCPCSCP']);
-  const converterPressureIdx = getColumnIndex(['TCM.TCCP']);
-  const oilPressureIdx = getColumnIndex(['ECM.OILP', 'Oil Pressure']);
-  const coolantTempIdx = getColumnIndex(['ECM.ECT', 'Engine Coolant Temp']);
-  const oilTempIdx = getColumnIndex(['ECM.EOT', 'Engine Oil Temp']);
-  const transFluidTempIdx = getColumnIndex(['TCM.TFT', 'Transmission Fluid Temp']);
-  const baroIdx = getColumnIndex(['ECM.BARO', 'Barometric Pressure', 'Baro']);
-  
-  if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
-    throw new Error('Missing required columns in EFILIVE format: ECM.RPM, ECM.MAF, or ECM.TQ_ACT');
+
+  // ── Core engine PIDs ──────────────────────────────────────────────────────
+  const timeIdx          = getColumnIndex(['Time']);
+  const rpmIdx           = getColumnIndex(['ECM.RPM']);
+  const mafIdx           = getColumnIndex(['ECM.MAF']);
+  // MAP (Manifold Absolute Pressure) used as boost proxy for LML/L5P
+  const mapIdx           = getColumnIndex(['ECM.MAP']);
+  // Boost desired: LML uses ECM.TCDBPR (Turbocharger Desired Boost Pressure)
+  const boostDesiredIdx  = getColumnIndex(['ECM.TCDBPR', 'ECM.DESTQ', 'ECM.MAPDES']);
+  // Torque: LML logs ECM.TQ_DD (Driver Demanded) or ECM.TQ_ACT
+  const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD']);
+  const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF']);
+  const speedIdx         = getColumnIndex(['ECM.VSS']);
+  const fuelRateIdx      = getColumnIndex(['ECM.FUEL_RATE', 'ECM.FUELRCALC']);
+
+  // ── Fuel rail PIDs ────────────────────────────────────────────────────────
+  const railActualIdx    = getColumnIndex(['ECM.FRP_A']);
+  const railDesiredIdx   = getColumnIndex(['ECM.FRPDI']);
+  // PCV desired current (mA) — what the ECM commands the PCV solenoid
+  const pcvIdx           = getColumnIndex(['ECM.FRPVDC']);
+  // PCV measured current (mA) — actual solenoid feedback
+  const pcvMeasIdx       = getColumnIndex(['ECM.FRPVAC']);
+
+  // ── Turbo / VGT PIDs ─────────────────────────────────────────────────────
+  const turboVaneIdx         = getColumnIndex(['ECM.TCVPOS']);
+  const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD']);
+
+  // ── EGT PIDs — LML has up to 5 sensors ───────────────────────────────────
+  // Use EGTS1 (pre-DPF) as primary; fall back to any EGTS
+  const egtIdx = getColumnIndex(['ECM.EGTS1']);
+
+  // ── Transmission / TCC PIDs ───────────────────────────────────────────────
+  // TCM.TCCSLIP = actual TCC slip in RPM (the real slip value)
+  // TCM.TCSLIP  = TCC reference slip target (what the TCM wants)
+  // TCM.TCCPCSCP = TCC PCS commanded pressure (kPa) — 1050 kPa = full lock
+  // TCM.TCCP    = TCC commanded pressure (older naming)
+  const tccActualSlipIdx   = getColumnIndex(['TCM.TCCSLIP']);
+  const tccRefSlipIdx      = getColumnIndex(['TCM.TCSLIP']);
+  const tccPcsIdx          = getColumnIndex(['TCM.TCCPCSCP']);
+  const tccPressureIdx     = getColumnIndex(['TCM.TCCP']);
+  // Use TCCPCSCP as the primary duty/pressure signal; fall back to TCCP
+  const converterDutyIdx   = tccPcsIdx !== -1 ? tccPcsIdx : tccPressureIdx;
+  // Actual slip = TCCSLIP; reference slip = TCSLIP (used as fallback)
+  const converterSlipIdx   = tccActualSlipIdx !== -1 ? tccActualSlipIdx : tccRefSlipIdx;
+
+  // ── Other sensor PIDs ────────────────────────────────────────────────────
+  const oilPressureIdx    = getColumnIndex(['ECM.OILP']);
+  const coolantTempIdx    = getColumnIndex(['ECM.ECT']);
+  const oilTempIdx        = getColumnIndex(['ECM.EOT']);
+  const transFluidTempIdx = getColumnIndex(['TCM.TFT']);
+  const baroIdx           = getColumnIndex(['ECM.BARO']);
+
+  // ── Validate required columns ────────────────────────────────────────────
+  // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
+  // so we only require RPM and MAF as hard requirements.
+  if (rpmIdx === -1 || mafIdx === -1) {
+    throw new Error(
+      'Missing required EFILive columns: ECM.RPM and/or ECM.MAF. ' +
+      'Ensure your EFILive scan tool logged these PIDs.'
+    );
   }
-  
+
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -322,49 +374,123 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
   const barometricPressure: number[] = [];
-  
-  for (let i = 1; i < lines.length; i++) {
+
+  // EFILive data starts at row 3 (after PID codes, descriptions, units)
+  const dataStartRow = 3;
+
+  for (let i = dataStartRow; i < lines.length; i++) {
     const line = lines[i];
     if (!line) continue;
-    
-    const values = line.split(',').map(v => {
-      const num = parseFloat(v.trim());
-      return isNaN(num) ? 0 : num;
-    });
-    
-    if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
-    
-    rpm.push(values[rpmIdx] || 0);
-    maf.push(values[mafIdx] || 0);
-    boost.push(mapIdx !== -1 ? values[mapIdx] : 0);
-    torquePercent.push(values[torqueIdx] || 0);
-    maxTorque.push(maxTorqueIdx !== -1 ? values[maxTorqueIdx] : 879.174);
-    vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
-    fuelRate.push(fuelRateIdx !== -1 ? values[fuelRateIdx] : 0);
-    offset.push(timeIdx !== -1 ? values[timeIdx] : i);
-    railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
-    railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
-    pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
-    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
-    turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
-    turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
-    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
-    converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
-    converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
-    converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
-    oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
-    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
-    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
-    transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
-    barometricPressure.push(baroIdx !== -1 ? values[baroIdx] : 14.7);
+
+    const rawCols = line.split(',');
+
+    // Skip non-data rows (description/unit rows that slipped through)
+    const firstVal = rawCols[0]?.trim();
+    // Frame column is always a non-negative integer; skip if not numeric
+    if (firstVal && isNaN(Number(firstVal))) continue;
+
+    /**
+     * Smart value parser:
+     * - Returns the numeric value for numeric strings
+     * - Returns NaN for "N/A", "None", empty, or non-numeric strings
+     *   so callers can distinguish "not logged" from a real zero.
+     */
+    const parseVal = (idx: number): number => {
+      if (idx === -1 || idx >= rawCols.length) return NaN;
+      const raw = rawCols[idx].trim();
+      if (raw === '' || raw === 'N/A' || raw === 'None' || raw === 'N/A\r') return NaN;
+      const n = parseFloat(raw);
+      return isNaN(n) ? NaN : n;
+    };
+
+    const rpmVal = parseVal(rpmIdx);
+    if (isNaN(rpmVal)) continue; // skip rows with no RPM data
+
+    rpm.push(rpmVal);
+    maf.push(isNaN(parseVal(mafIdx)) ? 0 : parseVal(mafIdx));
+
+    // MAP for LML is in kPa absolute; convert to PSIG gauge for consistency with HP Tuners
+    // Standard atmosphere = 101.325 kPa; 1 kPa = 0.145038 psi
+    const mapKpa = parseVal(mapIdx);
+    const baroKpa = isNaN(parseVal(baroIdx)) ? 101.325 : parseVal(baroIdx);
+    const boostPsig = isNaN(mapKpa) ? 0 : Math.max(0, (mapKpa - baroKpa) * 0.145038);
+    boost.push(boostPsig);
+
+    // Boost desired: ECM.TCDBPR is in kPa absolute
+    const boostDesKpa = parseVal(boostDesiredIdx);
+    const boostDesPsig = isNaN(boostDesKpa) ? 0 : Math.max(0, (boostDesKpa - baroKpa) * 0.145038);
+    boostDesired.push(boostDesPsig);
+
+    // Torque: LML ECM.TQ_DD is in Nm; convert to % using 1200 Nm reference
+    // If ECM.TQ_ACT is present use it directly as a percentage
+    const torqueVal = parseVal(torqueIdx);
+    if (!isNaN(torqueVal)) {
+      // If value > 200 it's likely Nm, convert to %
+      if (torqueVal > 200) {
+        torquePercent.push((torqueVal / 1200) * 100);
+      } else {
+        torquePercent.push(torqueVal);
+      }
+    } else {
+      torquePercent.push(0);
+    }
+    maxTorque.push(isNaN(parseVal(maxTorqueIdx)) ? 879.174 : parseVal(maxTorqueIdx));
+
+    vehicleSpeed.push(isNaN(parseVal(speedIdx)) ? 0 : parseVal(speedIdx));
+    fuelRate.push(isNaN(parseVal(fuelRateIdx)) ? 0 : parseVal(fuelRateIdx));
+    offset.push(isNaN(parseVal(timeIdx)) ? i - dataStartRow : parseVal(timeIdx));
+
+    // Rail pressure: EFILive logs in kPa; convert to psi for consistency
+    // 1 kPa = 0.145038 psi
+    const railActKpa = parseVal(railActualIdx);
+    const railDesKpa = parseVal(railDesiredIdx);
+    railPressureActual.push(isNaN(railActKpa) ? 0 : railActKpa * 0.145038);
+    railPressureDesired.push(isNaN(railDesKpa) ? 0 : railDesKpa * 0.145038);
+
+    // PCV: EFILive logs in mA; store raw mA (diagnostics engine handles unit awareness)
+    pcvDutyCycle.push(isNaN(parseVal(pcvIdx)) ? 0 : parseVal(pcvIdx));
+
+    turboVanePosition.push(isNaN(parseVal(turboVaneIdx)) ? 0 : parseVal(turboVaneIdx));
+    turboVaneDesired.push(isNaN(parseVal(turboVaneDesiredIdx)) ? 0 : parseVal(turboVaneDesiredIdx));
+
+    // EGT: EFILive logs in °C; convert to °F for consistency with HP Tuners
+    const egtC = parseVal(egtIdx);
+    exhaustGasTemp.push(isNaN(egtC) || egtC <= -40 ? 0 : (egtC * 9/5) + 32);
+
+    // TCC slip: EFILive TCM.TCCSLIP is in RPM (positive = engine faster than turbine = slipping)
+    const slipVal = parseVal(converterSlipIdx);
+    converterSlip.push(isNaN(slipVal) ? 0 : slipVal);
+
+    // TCC PCS commanded pressure in kPa (1050 kPa = full lock command on LML/L5P)
+    const tccPcsVal = parseVal(converterDutyIdx);
+    converterDutyCycle.push(isNaN(tccPcsVal) ? 0 : tccPcsVal);
+
+    // TCC pressure (legacy field — use PCS pressure if available)
+    const tccPresVal = parseVal(tccPressureIdx);
+    converterPressure.push(isNaN(tccPresVal) ? (isNaN(tccPcsVal) ? 0 : tccPcsVal) : tccPresVal);
+
+    oilPressure.push(isNaN(parseVal(oilPressureIdx)) ? 0 : parseVal(oilPressureIdx));
+
+    // Coolant temp: EFILive logs in °C; convert to °F
+    // -40°C is the sensor default/startup value — treat as "not yet valid"
+    const ectC = parseVal(coolantTempIdx);
+    coolantTemp.push(isNaN(ectC) || ectC <= -40 ? 0 : (ectC * 9/5) + 32);
+
+    const eotC = parseVal(oilTempIdx);
+    oilTemp.push(isNaN(eotC) || eotC <= -40 ? 0 : (eotC * 9/5) + 32);
+
+    const tftC = parseVal(transFluidTempIdx);
+    transFluidTemp.push(isNaN(tftC) || tftC <= -40 ? 0 : (tftC * 9/5) + 32);
+
+    barometricPressure.push(isNaN(baroKpa) ? 14.7 : baroKpa * 0.145038);
   }
-  
+
   if (rpm.length === 0) {
-    throw new Error('No valid data rows found in EFILIVE CSV');
+    throw new Error('No valid data rows found in EFILive CSV. Check that the file is a valid EFILive datalog export.');
   }
-  
+
   const duration = offset[offset.length - 1] - offset[0];
-  
+
   return {
     rpm,
     maf,
