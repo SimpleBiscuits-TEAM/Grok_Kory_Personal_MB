@@ -211,8 +211,8 @@ export async function generatePerformanceReport(
     y += 4;
   }
 
-  // ── DYNO CHART ─────────────────────────────────────────────────────────────
-  doc.addPage();
+  // ===== DYNO CHART =====
+doc.addPage();
   y = margin + 5;
   addText('DYNO RESULTS — HP & TORQUE', 13, 'bold', [30, 58, 138]);
   await addImg(refs.dynoRef.current, '', true);
