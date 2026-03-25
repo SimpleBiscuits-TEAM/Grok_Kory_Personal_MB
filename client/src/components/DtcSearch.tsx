@@ -284,7 +284,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
           <div>
             <CardTitle className="text-base font-bold text-gray-900">Diagnostic Code Lookup</CardTitle>
             <p className="text-xs text-gray-500 mt-0.5">
-              Search DTC codes, ECU parameters, or keywords — sourced from GM OBD documentation and engine calibration data
+              Search by fault code (P0087), keyword (fuel rail, boost), or browse by system
             </p>
           </div>
         </div>
@@ -394,7 +394,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
               )}
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {totalResults === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <Search className="w-8 h-8 mx-auto mb-2 text-gray-300" />
@@ -403,17 +403,43 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                 </div>
               ) : (
                 <>
-                  {/* DTC Results */}
-                  {(searchMode === 'all' || searchMode === 'dtc') && dtcResults.length > 0 && (
-                    <div className="space-y-3">
-                      {searchMode === 'all' && paramResults.length > 0 && (
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fault Codes ({dtcResults.length})</p>
-                      )}
-                      {dtcResults.map((dtc) => (
-                        <DtcResult key={dtc.code} dtc={dtc} autoExpand={autoExpand} />
-                      ))}
-                    </div>
-                  )}
+                  {/* DTC Results — grouped by subsystem */}
+                  {(searchMode === 'all' || searchMode === 'dtc') && dtcResults.length > 0 && (() => {
+                    // Group by system
+                    const grouped: Record<string, typeof dtcResults> = {};
+                    dtcResults.forEach(dtc => {
+                      if (!grouped[dtc.system]) grouped[dtc.system] = [];
+                      grouped[dtc.system].push(dtc);
+                    });
+                    const systemOrder = [
+                      'Fuel System', 'Air System', 'EGT Sensors', 'EGR System',
+                      'DPF System', 'SCR / DEF System',
+                    ];
+                    const sortedSystems = Object.keys(grouped).sort(
+                      (a, b) => (systemOrder.indexOf(a) === -1 ? 99 : systemOrder.indexOf(a))
+                               - (systemOrder.indexOf(b) === -1 ? 99 : systemOrder.indexOf(b))
+                    );
+                    return (
+                      <div className="space-y-5">
+                        {searchMode === 'all' && paramResults.length > 0 && (
+                          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fault Codes ({dtcResults.length})</p>
+                        )}
+                        {sortedSystems.map(sys => (
+                          <div key={sys}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${systemColors[sys] || 'bg-gray-100 text-gray-700'}`}>{sys}</span>
+                              <span className="text-xs text-gray-400">{grouped[sys].length} code{grouped[sys].length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div className="space-y-2 pl-1">
+                              {grouped[sys].map(dtc => (
+                                <DtcResult key={dtc.code} dtc={dtc} autoExpand={autoExpand} />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* ECU Parameter Results */}
                   {(searchMode === 'all' || searchMode === 'params') && paramResults.length > 0 && (
@@ -432,11 +458,9 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
           </>
         )}
 
-        {/* Footer Note */}
+        {/* Disclaimer */}
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200 mt-2">
           <p className="text-xs text-gray-500 leading-relaxed">
-            <strong className="text-gray-600">Sources:</strong> GM 24OBDG06C HD ECM Summary Tables (703 sections),
-            Duramax L5P engine management data (57,215+ parameters), and PPEI diagnostic guidelines.
             Covers 2017–2023 L5P 6.6L Duramax. Verify with live scan data before performing repairs.
           </p>
         </div>
