@@ -37,8 +37,8 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
             </h4>
           </div>
           <div className="space-y-3">
-            {criticalIssues.map((issue) => (
-              <IssueCard key={issue.code} issue={issue} />
+            {criticalIssues.map((issue, i) => (
+              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
             ))}
           </div>
         </div>
@@ -54,8 +54,8 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
             </h4>
           </div>
           <div className="space-y-3">
-            {warningIssues.map((issue) => (
-              <IssueCard key={issue.code} issue={issue} />
+            {warningIssues.map((issue, i) => (
+              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
             ))}
           </div>
         </div>
@@ -71,8 +71,8 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
             </h4>
           </div>
           <div className="space-y-3">
-            {infoIssues.map((issue) => (
-              <IssueCard key={issue.code} issue={issue} />
+            {infoIssues.map((issue, i) => (
+              <IssueCard key={`${issue.code}-${i}`} issue={issue} />
             ))}
           </div>
         </div>
@@ -160,8 +160,8 @@ export function DiagnosticReportForPDF({ report }: DiagnosticReportProps) {
         <p className="text-gray-700 mb-4">{report.summary}</p>
       </div>
 
-      {report.issues.map((issue) => (
-        <div key={issue.code} className="border-l-4 pl-3 py-2">
+      {report.issues.map((issue, i) => (
+        <div key={`${issue.code}-${i}`} className="border-l-4 pl-3 py-2">
           <p className="font-bold text-gray-900">{issue.title}</p>
           <p className="text-xs text-gray-500 mb-1">{issue.code}</p>
           <p className="text-gray-700 mb-2">{issue.description}</p>
