@@ -1,22 +1,25 @@
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+// @ts-ignore — dom-to-image-more has no @types package; supports OKLCH unlike html2canvas
+import domtoimage from 'dom-to-image-more';
 import { ProcessedMetrics } from './dataProcessor';
 import { DiagnosticReport } from './diagnostics';
 import { HealthReportData } from './healthReport';
 import { PdfExportRefs } from '@/hooks/usePdfExport';
 
 /**
- * Convert a DOM element to a base64 PNG image
+ * Convert a DOM element to a base64 PNG image.
+ * Uses dom-to-image-more which supports OKLCH colors (Tailwind CSS 4).
  */
 export async function elementToImage(element: HTMLElement, darkBg = false): Promise<string> {
-  const canvas = await html2canvas(element, {
+  const dataUrl = await domtoimage.toPng(element, {
     scale: 2,
-    backgroundColor: darkBg ? '#0d0f14' : '#ffffff',
-    logging: false,
-    useCORS: true,
-    allowTaint: true,
+    bgcolor: darkBg ? '#0d0f14' : '#ffffff',
+    style: {
+      // Force a concrete background so oklch vars on parent don't bleed in
+      background: darkBg ? '#0d0f14' : '#ffffff',
+    },
   });
-  return canvas.toDataURL('image/png');
+  return dataUrl;
 }
 
 export async function renderChartToImage(element: HTMLElement): Promise<string> {
