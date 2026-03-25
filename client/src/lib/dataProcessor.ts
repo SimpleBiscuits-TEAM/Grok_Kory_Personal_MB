@@ -470,7 +470,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
     if (isNaN(rpmVal)) continue; // skip rows with no RPM data
 
     rpm.push(rpmVal);
-    maf.push(isNaN(parseVal(mafIdx)) ? 0 : parseVal(mafIdx));
+    // ECM.MAF is in g/s — convert to lb/min (imperial) for consistency with HP Tuners
+    // 1 g/s = 0.132277 lb/min
+    const mafGps = parseVal(mafIdx);
+    maf.push(isNaN(mafGps) ? 0 : mafGps * 0.132277);
 
     // MAP for LML is in kPa absolute; convert to PSIG gauge for consistency with HP Tuners
     // Standard atmosphere = 101.325 kPa; 1 kPa = 0.145038 psi
@@ -486,8 +489,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
     const boostDesPsig = isNaN(boostDesKpa) ? 0 : Math.max(0, (boostDesKpa - baroKpa) * 0.145038);
     boostDesired.push(boostDesPsig);
 
-    // Torque: LML ECM.TQ_DD is in Nm; convert to % using 1200 Nm reference
-    // If ECM.TQ_ACT is present use it directly as a percentage
+    // Torque: ECM.TQ_ACT / ECM.TQ_DD are in % (0-100)
+    // ECM.TQ_REF is the reference torque in Nm — convert to lb-ft for HP calc
+    // 1 Nm = 0.737562 lb-ft
     const torqueVal = parseVal(torqueIdx);
     if (!isNaN(torqueVal)) {
       // If value > 200 it's likely Nm, convert to %
@@ -499,13 +503,21 @@ function parseEFILiveCSV(content: string): DuramaxData {
     } else {
       torquePercent.push(0);
     }
-    maxTorque.push(isNaN(parseVal(maxTorqueIdx)) ? 879.174 : parseVal(maxTorqueIdx));
+    // ECM.TQ_REF in Nm — convert to lb-ft for HP calculation
+    const maxTqNm = parseVal(maxTorqueIdx);
+    maxTorque.push(isNaN(maxTqNm) ? 648.5 : maxTqNm * 0.737562); // 879 Nm = 648.5 lb-ft
 
-    vehicleSpeed.push(isNaN(parseVal(speedIdx)) ? 0 : parseVal(speedIdx));
-    fuelRate.push(isNaN(parseVal(fuelRateIdx)) ? 0 : parseVal(fuelRateIdx));
-    offset.push(isNaN(parseVal(timeIdx)) ? i - dataStartRow : parseVal(timeIdx));
+    // ECM.VSS is in km/h — convert to mph
+    const speedKmh = parseVal(speedIdx);
+    vehicleSpeed.push(isNaN(speedKmh) ? 0 : speedKmh * 0.621371);
+    // ECM.FUEL_RATE is in l/h — convert to gal/hr
+    const fuelLph = parseVal(fuelRateIdx);
+    fuelRate.push(isNaN(fuelLph) ? 0 : fuelLph * 0.264172);
+    // EFILive Time column is in milliseconds — convert to seconds
+    const timeMs = parseVal(timeIdx);
+    offset.push(isNaN(timeMs) ? i - dataStartRow : timeMs / 1000);
 
-    // Rail pressure: EFILive logs in kPa; convert to psi for consistency
+    // Rail pressure: EFILive logs in kPa; convert to psi
     // 1 kPa = 0.145038 psi
     const railActKpa = parseVal(railActualIdx);
     const railDesKpa = parseVal(railDesiredIdx);
@@ -534,7 +546,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
     const tccPresVal = parseVal(tccPressureIdx);
     converterPressure.push(isNaN(tccPresVal) ? (isNaN(tccPcsVal) ? 0 : tccPcsVal) : tccPresVal);
 
-    oilPressure.push(isNaN(parseVal(oilPressureIdx)) ? 0 : parseVal(oilPressureIdx));
+    // Oil pressure: EFILive may log in kPa — convert to psi if value looks like kPa (>100)
+    const oilPresRaw = parseVal(oilPressureIdx);
+    const oilPresPsi = isNaN(oilPresRaw) ? 0 : (oilPresRaw > 100 ? oilPresRaw * 0.145038 : oilPresRaw);
+    oilPressure.push(oilPresPsi);
 
     // Coolant temp: EFILive logs in °C; convert to °F
     // -40°C is the sensor default/startup value — treat as "not yet valid"
