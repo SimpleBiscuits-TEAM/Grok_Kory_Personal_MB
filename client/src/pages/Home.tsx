@@ -11,7 +11,8 @@ import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
 import { getVehicleInfoFromFilename } from '@/lib/vinLookup';
 import EcuReferencePanel from '@/components/EcuReferencePanel';
-import { Cpu } from 'lucide-react';
+import DtcSearch from '@/components/DtcSearch';
+import { Cpu, Search } from 'lucide-react';
 
 export default function Home() {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
@@ -149,7 +150,8 @@ export default function Home() {
                   <li>✓ Automatic diagnostic checks (P0087, P0088, P0299, P0101)</li>
                   <li>✓ Peak performance statistics</li>
                   <li>✓ Vehicle health report with VIN lookup</li>
-                  <li>✓ ECU reference database (A2L-sourced)</li>
+                  <li>✓ Engine reference database with parameter definitions</li>
+                  <li>✓ Diagnostic code (DTC) lookup with causes &amp; remedies</li>
                 </ul>
               </Card>
 
@@ -267,12 +269,20 @@ export default function Home() {
               </ul>
             </Card>
 
-            {/* ECU Reference Panel */}
+            {/* DTC Code Search */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Search className="w-5 h-5 text-orange-500" />
+                <h2 className="text-2xl font-bold text-gray-900">Diagnostic Code Lookup</h2>
+              </div>
+              <DtcSearch />
+            </div>
+
+            {/* Engine Reference Panel */}
             <div>
               <div className="flex items-center gap-2 mb-4">
                 <Cpu className="w-5 h-5 text-blue-600" />
-                <h2 className="text-2xl font-bold text-gray-900">ECU Reference Database</h2>
-                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium border border-blue-200">A2L-Sourced</span>
+                <h2 className="text-2xl font-bold text-gray-900">Engine Reference Database</h2>
               </div>
               <EcuReferencePanel />
             </div>

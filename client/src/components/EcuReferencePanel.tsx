@@ -1,26 +1,23 @@
 /**
- * ECU Reference Panel
- * Displays A2L-derived engine specifications, parameter definitions,
- * and DTC descriptions for the Duramax L5P ECU (ECM_E41 Series_11).
+ * Engine Reference Panel
+ * Displays Duramax L5P engine specifications, parameter definitions,
+ * and DTC descriptions sourced from the ECM_E41 Series_11 calibration database.
  */
 
 import { useState } from 'react';
-import { L5P_SPECS, ECU_PARAMETERS, DTC_DEFINITIONS, PARAM_TOOLTIPS } from '@/lib/ecuReference';
+import { L5P_SPECS, ECU_PARAMETERS, DTC_DEFINITIONS } from '@/lib/ecuReference';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Cpu,
   Gauge,
   Zap,
-  Thermometer,
-  Wind,
-  AlertTriangle,
-  Info,
   ChevronDown,
   ChevronRight,
   BookOpen,
   Settings2,
+  AlertTriangle,
+  Info,
 } from 'lucide-react';
 
 interface EcuReferencePanelProps {
@@ -96,8 +93,8 @@ function ParameterCard({ paramKey }: { paramKey: string }) {
           <p className="text-xs text-gray-600 leading-relaxed">{param.description}</p>
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-gray-50 rounded p-2">
-              <div className="text-xs text-gray-400 mb-1">A2L Variable</div>
-              <div className="text-xs font-mono text-blue-700 break-all">{param.a2lName}</div>
+              <div className="text-xs text-gray-400 mb-1">Internal Variable</div>
+              <div className="text-xs font-mono text-blue-700 break-all">{param.internalName}</div>
             </div>
             {param.ecuAddress && (
               <div className="bg-gray-50 rounded p-2">
@@ -153,7 +150,7 @@ function DtcCard({ dtc }: { dtc: (typeof DTC_DEFINITIONS)[0] }) {
           >
             {dtc.severity}
           </span>
-          <span className="text-xs text-gray-500">{dtc.system}</span>
+          <span className="text-xs text-gray-500 hidden sm:block">{dtc.system}</span>
         </div>
         {expanded ? (
           <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
@@ -162,11 +159,44 @@ function DtcCard({ dtc }: { dtc: (typeof DTC_DEFINITIONS)[0] }) {
         )}
       </div>
       {expanded && (
-        <div className="p-3 bg-white border-t border-gray-100 space-y-2">
+        <div className="p-3 bg-white border-t border-gray-100 space-y-3">
+          <h4 className="text-sm font-semibold text-gray-800">{dtc.title}</h4>
           <p className="text-xs text-gray-600 leading-relaxed">{dtc.description}</p>
+          {dtc.thresholds && (
+            <div className="bg-blue-50 rounded p-2 border border-blue-100">
+              <div className="text-xs font-semibold text-blue-700 mb-1">Trigger Thresholds</div>
+              <div className="text-xs text-blue-800">{dtc.thresholds}</div>
+            </div>
+          )}
+          {dtc.causes && dtc.causes.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Common Causes</div>
+              <ul className="space-y-1">
+                {dtc.causes.map((c, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex gap-1.5">
+                    <span className="text-orange-400 shrink-0">•</span>
+                    {c}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {dtc.remedies && dtc.remedies.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Recommended Remedies</div>
+              <ul className="space-y-1">
+                {dtc.remedies.map((r, i) => (
+                  <li key={i} className="text-xs text-gray-600 flex gap-1.5">
+                    <span className="text-green-500 shrink-0">✓</span>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="bg-gray-50 rounded p-2">
-            <div className="text-xs text-gray-400 mb-1">A2L Fault ID</div>
-            <div className="text-xs font-mono text-blue-700">{dtc.a2lId}</div>
+            <div className="text-xs text-gray-400 mb-1">Internal ID</div>
+            <div className="text-xs font-mono text-gray-600">{dtc.internalId}</div>
           </div>
         </div>
       )}
@@ -183,9 +213,9 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
             <Cpu className="w-4 h-4 text-white" />
           </div>
           <div>
-            <CardTitle className="text-base font-bold text-gray-900">ECU Reference Database</CardTitle>
+            <CardTitle className="text-base font-bold text-gray-900">Engine Reference Database</CardTitle>
             <p className="text-xs text-gray-500 mt-0.5">
-              Sourced from A2L: ECM_E41 Series_11 — 57,215 measurements · 24,968 calibrations
+              ECM_E41 Series_11 · 2017–2023 Duramax L5P · Cross-referenced with GM TechLink &amp; TSBs
             </p>
           </div>
         </div>
@@ -244,7 +274,6 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                   <SpecRow label="Turbocharger" value={L5P_SPECS.engine.turbocharger} />
                   <SpecRow label="Intercooler" value={L5P_SPECS.engine.intercooler} />
                   <SpecRow label="Aftertreatment" value={L5P_SPECS.engine.aftertreatment} />
-                  <SpecRow label="ECU Part" value={L5P_SPECS.engine.ecuPart} />
                 </div>
               </div>
 
@@ -263,24 +292,26 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                   <SpecRow label="EGT Warning" value={`>${L5P_SPECS.operatingLimits.maxEgt1_F}°F (sustained >5s)`} />
                   <SpecRow label="EGT Sensor Fail" value={`>${L5P_SPECS.operatingLimits.maxEgt1_stuck_F}°F (stuck = disconnected)`} />
                   <SpecRow label="Max Rail Pressure" value={`${L5P_SPECS.operatingLimits.maxRailPressure_psi.toLocaleString()} psi`} />
-                  <SpecRow label="MAF at Idle" value={`${L5P_SPECS.operatingLimits.mafIdleMin_lbMin}–${L5P_SPECS.operatingLimits.mafIdleMax_lbMin} lb/min`} />
+                  <SpecRow label="MAF Idle (Normal)" value={`~${L5P_SPECS.operatingLimits.mafIdleNormal_gs} g/s (clean filter)`} />
+                  <SpecRow label="MAF Idle (Range)" value={`${L5P_SPECS.operatingLimits.mafIdleMin_lbMin}–${L5P_SPECS.operatingLimits.mafIdleMax_lbMin} lb/min`} />
                   <SpecRow label="MAF at WOT (Stock)" value={`~${L5P_SPECS.operatingLimits.mafMaxLoad_lbMin} lb/min`} />
                   <SpecRow label="TCC Slip Warning" value={`>±${L5P_SPECS.operatingLimits.tccSlipWarning_rpm} RPM`} />
+                  <SpecRow label="DPF Regen Trigger" value={`~${L5P_SPECS.operatingLimits.dpfRegenTrigger_pct}% soot`} />
+                  <SpecRow label="DPF Service Regen" value={`${L5P_SPECS.operatingLimits.dpfServiceRegen_pct}% soot`} />
                 </div>
               </div>
             </div>
 
-            {/* Performance reference chart */}
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-2">
                 <Info className="w-4 h-4 text-blue-600" />
-                <span className="text-xs font-bold text-blue-800">A2L Source Note</span>
+                <span className="text-xs font-bold text-blue-800">Data Source</span>
               </div>
               <p className="text-xs text-blue-700 leading-relaxed">
-                All parameter definitions, operating limits, and diagnostic thresholds in this panel are derived
-                directly from the Duramax ECU calibration file <strong>E41a182115101_D_quasi.a2l</strong> (ASAP2 v1.61,
-                Series_11). This file contains the complete ECM software architecture for the 2017–2023 L5P Duramax,
-                including 57,215 measurement variable definitions and 24,968 calibration constants.
+                All parameter definitions, operating limits, and diagnostic thresholds are derived from the
+                Duramax ECM calibration database (ECM_E41 Series_11), cross-referenced with official GM TechLink
+                bulletins, GDS2 service data, TSBs, and real-world scan logs from DuramaxForum. Thresholds
+                may vary slightly by calibration year and software update.
               </p>
             </div>
           </TabsContent>
@@ -288,7 +319,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           {/* PARAMETERS TAB */}
           <TabsContent value="parameters" className="p-4 mt-0">
             <p className="text-xs text-gray-500 mb-3">
-              Click any parameter to expand its A2L definition, ECU address, and operating thresholds.
+              Click any parameter to expand its definition, internal variable name, ECU address, and operating thresholds.
             </p>
             <div className="space-y-2">
               {Object.keys(ECU_PARAMETERS).map((key) => (
@@ -300,7 +331,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           {/* FAULT CODES TAB */}
           <TabsContent value="dtcs" className="p-4 mt-0">
             <p className="text-xs text-gray-500 mb-3">
-              Fault code definitions sourced from A2L <code className="bg-gray-100 px-1 rounded">KaDFIR_FaultInfo</code> characteristic blocks.
+              Click any fault code to expand its description, causes, and recommended remedies.
             </p>
             <div className="space-y-2">
               {DTC_DEFINITIONS.map((dtc) => (
@@ -312,7 +343,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           {/* SUBSYSTEMS TAB */}
           <TabsContent value="subsystems" className="p-4 mt-0">
             <p className="text-xs text-gray-500 mb-3">
-              ECU software subsystem descriptions from A2L FUNCTION blocks.
+              ECU software subsystem descriptions from the engine management calibration database.
             </p>
             <div className="space-y-3">
               {Object.entries(L5P_SPECS.subsystems).map(([key, desc]) => (
@@ -328,7 +359,8 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                       {key === 'MAFR' && 'Mass Airflow Regulation'}
                       {key === 'SPDR' && 'Speed / Idle Control'}
                       {key === 'AICR' && 'Air Intake Control'}
-                      {key === 'FULR' && 'Fuel Injection Control'}
+                      {key === 'DPFR' && 'DPF Regeneration Control'}
+                      {key === 'SCRR' && 'SCR / DEF System'}
                     </span>
                   </div>
                   <p className="text-xs text-gray-600 leading-relaxed">{desc}</p>
