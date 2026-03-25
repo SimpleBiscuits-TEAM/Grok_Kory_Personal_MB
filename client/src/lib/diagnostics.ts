@@ -633,6 +633,22 @@ export function checkVgtTracking(
   const issues: DiagnosticIssue[] = [];
   if (!vaneActual.length || !vaneDesired.length) return issues;
 
+  // PID quality guard: if vaneDesired is all zeros (not logged by this logger format),
+  // skip entirely — comparing actual against a flat-zero desired always shows 100% error.
+  const desiredHasData = vaneDesired.some(v => v > 1);
+  if (!desiredHasData) return issues;
+
+  // PID quality guard: if vaneActual has no meaningful data, skip.
+  const actualHasData = vaneActual.some(v => v > 1);
+  if (!actualHasData) return issues;
+
+  // PID quality guard: require >20% of samples to be non-zero in both channels.
+  // If coverage is too low the PID was not reliably logged.
+  const minCoverage = vaneActual.length * 0.20;
+  const nonZeroActual = vaneActual.filter(v => v > 1).length;
+  const nonZeroDesired = vaneDesired.filter(v => v > 1).length;
+  if (nonZeroActual < minCoverage || nonZeroDesired < minCoverage) return issues;
+
   const TRACKING_THRESHOLD = 19.5; // 15% +30%
   const MIN_SAMPLES = 39; // ~3 seconds +30%
   const MIN_RPM = 1200;
@@ -822,6 +838,17 @@ export function checkTccOperation(
   const issues: DiagnosticIssue[] = [];
   if (!slip.length || !dutyCycle.length) return issues;
 
+  // PID quality guard: if dutyCycle is all zeros (not logged by this logger format),
+  // disable the stuck-on check — duty cycle = 0 is indistinguishable from "not logged".
+  // A logger that doesn't capture TCC duty cycle will always read 0%, which would
+  // falsely satisfy the "commanded off" condition for P0742.
+  const dutyCycleHasData = dutyCycle.some(v => v > 5);
+
+  // PID quality guard: if slip has no meaningful variation (all near-zero),
+  // the sensor is not logging — skip both checks.
+  const slipHasData = slip.some(v => Math.abs(v) > 5);
+  if (!slipHasData) return issues;
+
   const MIN_RPM = 1500;
   const HIGH_DUTY_THRESHOLD = 90; // 80 +10% (harder to trigger)
   const SLIP_THRESHOLD_LOCKED = 65; // 50 RPM +30%
@@ -834,15 +861,18 @@ export function checkTccOperation(
   for (let i = 0; i < slip.length; i++) {
     if (rpm[i] < MIN_RPM) continue;
     const absSlip = Math.abs(slip[i]);
-    if (dutyCycle[i] > HIGH_DUTY_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
+    // P0741 stuck-off: only run when duty cycle data is present
+    if (dutyCycleHasData && dutyCycle[i] > HIGH_DUTY_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
       stuckOffCount++;
     }
-    if (dutyCycle[i] < LOW_DUTY_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
+    // P0742 stuck-on: only run when duty cycle data is present
+    // Without duty cycle data, near-zero slip at cruise is normal TCC lock, not a fault.
+    if (dutyCycleHasData && dutyCycle[i] < LOW_DUTY_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
       stuckOnCount++;
     }
   }
 
-  if (stuckOffCount > 39) { // 30 +30%
+  if (dutyCycleHasData && stuckOffCount > 39) { // 30 +30%
     issues.push({
       code: 'P0741',
       severity: 'critical',
@@ -852,7 +882,7 @@ export function checkTccOperation(
     });
   }
 
-  if (stuckOnCount > 65) { // 50 +30%
+  if (dutyCycleHasData && stuckOnCount > 65) { // 50 +30%
     issues.push({
       code: 'P0742',
       severity: 'warning',
