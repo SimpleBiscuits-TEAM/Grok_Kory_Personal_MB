@@ -163,13 +163,25 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
 
   // P2080/P2084 - EGT Sensor Performance is now handled inside checkAllEgtIssues above.
 
+  // ── Global deduplication: one entry per fault code, keep the most severe ──
+  // If the same code appears multiple times (e.g. P0088 triggered on multiple
+  // segments), keep only the first occurrence. This prevents the same fault
+  // from cluttering the results list regardless of how many times it fires.
+  const seenCodes = new Set<string>();
+  const dedupedIssues = issues.filter(issue => {
+    const key = issue.code ?? issue.title; // fall back to title if no code
+    if (seenCodes.has(key)) return false;
+    seenCodes.add(key);
+    return true;
+  });
+
   const summary =
-    issues.length === 0
+    dedupedIssues.length === 0
       ? 'No diagnostic issues detected. Engine parameters are within normal ranges.'
-      : `Found ${issues.length} diagnostic issue(s). Review recommendations below.`;
+      : `Found ${dedupedIssues.length} diagnostic issue(s). Review recommendations below.`;
 
   return {
-    issues,
+    issues: dedupedIssues,
     summary,
     timestamp: new Date(),
   };
