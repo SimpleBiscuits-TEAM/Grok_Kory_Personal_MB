@@ -81,23 +81,65 @@ export async function generatePerformanceReport(
   };
 
   // ── COVER ──────────────────────────────────────────────────────────────────
+  // Dark header band
   doc.setFillColor(13, 15, 20);
-  doc.rect(0, 0, pageWidth, 55, 'F');
-  doc.setFillColor(255, 77, 0);
-  doc.rect(0, 55, pageWidth, 2, 'F');
+  doc.rect(0, 0, pageWidth, 62, 'F');
+  // Animated-style rainbow accent bar (static in PDF)
+  const barColors: Array<[number, number, number]> = [
+    [220, 38, 38],   // red
+    [234, 88, 12],   // orange
+    [202, 138, 4],   // amber
+    [22, 163, 74],   // green
+    [6, 182, 212],   // cyan
+  ];
+  const barSegW = pageWidth / barColors.length;
+  barColors.forEach((c, i) => {
+    doc.setFillColor(...c);
+    doc.rect(i * barSegW, 62, barSegW, 2.5, 'F');
+  });
 
+  // PPEI logo text (white bold)
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
+  doc.setFontSize(28);
   doc.setFont('helvetica', 'bold');
-  doc.text('DURAMAX PERFORMANCE ANALYZER', margin, 22);
-  doc.setFontSize(12);
+  doc.text('PPEI', margin, 20);
+
+  // Vertical divider
+  doc.setDrawColor(220, 38, 38);
+  doc.setLineWidth(0.8);
+  doc.line(margin + 22, 10, margin + 22, 56);
+
+  // Title
+  doc.setFontSize(18);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('DURAMAX PERFORMANCE ANALYZER', margin + 27, 22);
+
+  // Subtitle
+  doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(180, 180, 180);
-  doc.text('OBD-II Datalog Analysis Report', margin, 32);
-  doc.setFontSize(9);
+  doc.text('OBD-II Datalog Analysis Report', margin + 27, 31);
+
+  // File + date
+  doc.setFontSize(8);
   doc.setTextColor(120, 120, 120);
-  doc.text(`File: ${fileName}`, margin, 42);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, margin, 48);
+  doc.text(`File: ${fileName}`, margin + 27, 41);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, margin + 27, 48);
+
+  // PPEI AI BETA badge — top right corner
+  doc.setFillColor(220, 38, 38);
+  doc.roundedRect(pageWidth - margin - 34, 8, 34, 10, 1, 1, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text('PPEI AI BETA', pageWidth - margin - 17, 14.5, { align: 'center' });
+
+  // Custom Tuning tagline
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 100, 100);
+  doc.text('PPEI CUSTOM TUNING · REDEFINING THE LIMITS · PPEI.COM', pageWidth / 2, 57.5, { align: 'center' });
 
   y = 65;
 
@@ -260,15 +302,43 @@ doc.addPage();
   ];
   methods.forEach(m => addText(`• ${m}`, 8, 'normal', [70, 70, 70]));
 
-  // ── PAGE NUMBERS ───────────────────────────────────────────────────────────
+  // ── PAGE NUMBERS + PPEI WATERMARK ────────────────────────────────────────
   const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
+
+    // Footer bar
+    doc.setFillColor(13, 15, 20);
+    doc.rect(0, pageHeight - 14, pageWidth, 14, 'F');
+
+    // PPEI AI BETA watermark — left footer
     doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(220, 38, 38);
+    doc.text('PPEI AI BETA', margin, pageHeight - 6);
+
+    // Page number — center
+    doc.setFont('helvetica', 'normal');
     doc.setTextColor(150, 150, 150);
-    doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
-    doc.text('Duramax Performance Analyzer', margin, pageHeight - 8);
-    doc.text(new Date().toLocaleDateString(), pageWidth - margin, pageHeight - 8, { align: 'right' });
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 6, { align: 'center' });
+
+    // Date — right
+    doc.text(new Date().toLocaleDateString(), pageWidth - margin, pageHeight - 6, { align: 'right' });
+
+    // Subtle diagonal watermark on every page (except cover)
+    if (i > 1) {
+      doc.saveGraphicsState();
+      doc.setTextColor(230, 230, 230);
+      doc.setFontSize(42);
+      doc.setFont('helvetica', 'bold');
+      // @ts-ignore — jsPDF supports opacity via GState
+      doc.setGState(new (doc as any).GState({ opacity: 0.04 }));
+      doc.text('PPEI AI BETA', pageWidth / 2, pageHeight / 2, {
+        align: 'center',
+        angle: 45,
+      });
+      doc.restoreGraphicsState();
+    }
   }
 
   const timestamp = new Date().toISOString().slice(0, 10);

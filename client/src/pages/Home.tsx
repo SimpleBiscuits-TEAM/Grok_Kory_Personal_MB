@@ -21,6 +21,7 @@ import { getVehicleInfoFromFilename, decodeVin } from '@/lib/vinLookup';
 import EcuReferencePanel from '@/components/EcuReferencePanel';
 import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
+import { FeedbackPanel, FeedbackTrigger } from '@/components/FeedbackPanel';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -35,6 +36,7 @@ export default function Home() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [manualVin, setManualVin] = useState('');
   const [vinFromFile, setVinFromFile] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs for PDF export
@@ -343,22 +345,17 @@ export default function Home() {
                 </h3>
                 <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
                   <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Dynojet-style HP &amp; Torque graph
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> VIN Decoder
                   </li>
                   <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Fault-specific charts (actual vs desired)
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span>
+                    <span>AI Diagnostics <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.75 0.18 40)', background: 'oklch(0.75 0.18 40 / 0.12)', border: '1px solid oklch(0.75 0.18 40 / 0.3)', borderRadius: '2px', padding: '1px 5px', marginLeft: '4px' }}>BETA</span></span>
                   </li>
                   <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> 34 diagnostic checks (P0087, P0088, P0299, EGT...)
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> DTC Lookup
                   </li>
                   <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Vehicle health report with VIN decode
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> GM OBDG06C HD spec DTC lookup (293 codes)
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Full PDF report export with all charts
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Full PDF Report Export
                   </li>
                 </ul>
               </div>
@@ -382,26 +379,14 @@ export default function Home() {
                   <Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
                   FILE REQUIREMENTS
                 </h3>
-                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> CSV format from OBD-II scanner
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Must include: RPM, MAF, Torque
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Optional: Boost, Rail Pressure, EGT, Speed
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> No file size limit — processed in your browser
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> VIN auto-detected from Banks Power filenames
-                  </li>
-                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Thresholds based on 2024 GM OBDG06C HD spec
-                  </li>
-                </ul>
+                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8, margin: 0 }}>
+                  Currently testing CSV datalog exports for L5P Duramax.
+                </p>
+                <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', lineHeight: 1.7, marginTop: '0.75rem' }}>
+                  Supported: HP Tuners · EFILive · Banks Power<br />
+                  Required columns: RPM, MAF, Torque<br />
+                  Optional: Boost, Rail Pressure, EGT, Speed
+                </p>
               </div>
             </div>
 
@@ -745,6 +730,14 @@ export default function Home() {
           </p>
         </div>
       </footer>
+
+      {/* Feedback / Error Report floating button and panel */}
+      <FeedbackTrigger onClick={() => setFeedbackOpen(true)} />
+      <FeedbackPanel
+        isOpen={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        context={fileName ?? undefined}
+      />
     </div>
   );
 }
