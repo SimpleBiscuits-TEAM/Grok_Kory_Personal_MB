@@ -2,19 +2,20 @@
  * DynoCharts.tsx
  * Dynojet-style HP/Torque chart + fault-annotated charts.
  *
- * Design philosophy: Dark cockpit aesthetic matching Dynojet WinPEP software.
+ * Design: Dark cockpit aesthetic matching Dynojet WinPEP software.
  * - Background: #0d0f14 (near-black)
- * - Grid: subtle #1e2330 lines
  * - HP curve: #ff4d00 (Dynojet orange-red)
  * - Torque curve: #00c8ff (cyan)
- * - Fault highlight: #ff2222 circle annotation with pulsing glow
- * - Delta panel: side-by-side actual vs expected with red delta
+ * - Desired/expected: #44ff88 (green)
+ * - Actual (fault): #ff4444 (red)
+ * - Delta shaded area: rgba(255,34,34,0.15)
  */
 
-import { useMemo } from 'react';
+import { useMemo, forwardRef } from 'react';
 import {
   ComposedChart,
   Line,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -23,11 +24,10 @@ import {
   ResponsiveContainer,
   ReferenceLine,
   ReferenceArea,
-  Area,
 } from 'recharts';
 import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { DiagnosticReport } from '@/lib/diagnostics';
-import { AlertCircle, TrendingDown, TrendingUp, Gauge, Wind, Thermometer, Activity } from 'lucide-react';
+import { AlertCircle, Gauge, Wind, Thermometer, Activity } from 'lucide-react';
 
 interface DynoChartProps {
   data: ProcessedMetrics;
@@ -45,7 +45,7 @@ const DynoTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'rgba(13,15,20,0.95)',
+      background: 'rgba(13,15,20,0.97)',
       border: '1px solid #ff4d00',
       borderRadius: '6px',
       padding: '10px 14px',
@@ -58,147 +58,168 @@ const DynoTooltip = ({ active, payload, label }: any) => {
         {label ? `${Number(label).toFixed(0)} RPM` : ''}
       </div>
       {payload.map((p: any, i: number) => (
-        <div key={i} style={{ color: p.color, marginBottom: 2 }}>
-          {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
-        </div>
+        p.value != null && (
+          <div key={i} style={{ color: p.color, marginBottom: 2 }}>
+            {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
+          </div>
+        )
       ))}
     </div>
   );
 };
 
 // ─── Custom Fault Tooltip ─────────────────────────────────────────────────────
-const FaultTooltip = ({ active, payload, label, faultLabel }: any) => {
+const FaultTooltip = ({ active, payload, label, xLabel }: any) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'rgba(13,15,20,0.95)',
-      border: '1px solid #ff2222',
+      background: 'rgba(13,15,20,0.97)',
+      border: '1px solid #ff4444',
       borderRadius: '6px',
       padding: '10px 14px',
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#e0e0e0',
-      boxShadow: '0 0 12px rgba(255,34,34,0.3)',
+      boxShadow: '0 0 12px rgba(255,68,68,0.3)',
     }}>
-      <div style={{ color: '#ff6666', fontWeight: 'bold', marginBottom: 6 }}>
-        {faultLabel || (label ? `${Number(label).toFixed(0)} RPM` : '')}
+      <div style={{ color: '#ff8888', fontWeight: 'bold', marginBottom: 6 }}>
+        {xLabel || (label ? `${Number(label).toFixed(0)} RPM` : '')}
       </div>
       {payload.map((p: any, i: number) => (
-        <div key={i} style={{ color: p.color, marginBottom: 2 }}>
-          {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
-        </div>
+        p.value != null && (
+          <div key={i} style={{ color: p.color, marginBottom: 2 }}>
+            {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
+          </div>
+        )
       ))}
     </div>
   );
 };
 
-// ─── Custom dot for fault zone annotation ────────────────────────────────────
-const FaultAnnotationDot = (props: any) => {
-  const { cx, cy, payload, faultMin, faultMax } = props;
-  if (!payload || payload.rpm === undefined) return null;
-  const inFault = payload.rpm >= faultMin && payload.rpm <= faultMax;
-  if (!inFault) return null;
-  return (
-    <g>
-      <circle cx={cx} cy={cy} r={6} fill="none" stroke="#ff2222" strokeWidth={2} opacity={0.9} />
-      <circle cx={cx} cy={cy} r={10} fill="none" stroke="#ff2222" strokeWidth={1} opacity={0.4} />
-    </g>
-  );
-};
-
-// ─── Fault zone circle SVG overlay (drawn via recharts customized label) ─────
-const FaultZoneLabel = ({ viewBox, label }: any) => {
-  if (!viewBox) return null;
-  const { x, y, width, height } = viewBox;
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const r = Math.max(Math.abs(width / 2) + 18, 28);
-  return (
-    <g>
-      {/* Pulsing circle */}
-      <circle cx={cx} cy={cy} r={r} fill="rgba(255,34,34,0.08)" stroke="#ff2222" strokeWidth={2} strokeDasharray="6 3" />
-      <circle cx={cx} cy={cy} r={r + 8} fill="none" stroke="#ff2222" strokeWidth={1} strokeDasharray="3 6" opacity={0.4} />
-      {/* Arrow pointing down to fault zone */}
-      <line x1={cx} y1={cy - r - 24} x2={cx} y2={cy - r - 4} stroke="#ff2222" strokeWidth={2} markerEnd="url(#arrowhead)" />
-      {/* Label */}
-      <rect x={cx - 44} y={cy - r - 44} width={88} height={20} rx={4} fill="rgba(255,34,34,0.85)" />
-      <text x={cx} y={cy - r - 30} textAnchor="middle" fill="#fff" fontSize={10} fontWeight="bold" fontFamily="monospace">
-        ⚠ FAULT ZONE
-      </text>
-    </g>
-  );
-};
-
-// ─── Delta comparison panel ───────────────────────────────────────────────────
-function DeltaPanel({
-  title,
-  icon: Icon,
-  iconColor,
-  rows,
-}: {
-  title: string;
-  icon: any;
-  iconColor: string;
-  rows: { label: string; actual: string; expected: string; delta: string; deltaColor: string }[];
+// ─── Delta stat badge ─────────────────────────────────────────────────────────
+function DeltaBadge({ label, actual, expected, delta, unit, isCritical }: {
+  label: string; actual: string; expected: string; delta: string; unit: string; isCritical: boolean;
 }) {
   return (
     <div style={{
-      background: '#0d0f14',
-      border: '1px solid #2a2e3d',
-      borderRadius: '8px',
-      padding: '16px',
+      background: '#111520',
+      border: `1px solid ${isCritical ? '#ff2222' : '#ff9900'}`,
+      borderRadius: 8,
+      padding: '12px 16px',
       fontFamily: 'monospace',
+      minWidth: 140,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <Icon size={16} color={iconColor} />
-        <span style={{ color: '#e0e0e0', fontWeight: 'bold', fontSize: 13 }}>{title}</span>
+      <div style={{ color: '#888', fontSize: 10, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ color: '#ff6666', fontSize: 11 }}>Actual</span>
+          <span style={{ color: '#ff6666', fontWeight: 'bold', fontSize: 13 }}>{actual} <span style={{ fontSize: 10 }}>{unit}</span></span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ color: '#44ff88', fontSize: 11 }}>Expected</span>
+          <span style={{ color: '#44ff88', fontWeight: 'bold', fontSize: 13 }}>{expected} <span style={{ fontSize: 10 }}>{unit}</span></span>
+        </div>
+        <div style={{ borderTop: '1px solid #1e2330', paddingTop: 4, marginTop: 2, display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ color: '#ffaa00', fontSize: 11 }}>Δ Delta</span>
+          <span style={{ color: isCritical ? '#ff2222' : '#ffaa00', fontWeight: 'bold', fontSize: 14 }}>{delta} <span style={{ fontSize: 10 }}>{unit}</span></span>
+        </div>
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-        <thead>
-          <tr>
-            <th style={{ color: '#666', textAlign: 'left', paddingBottom: 6, borderBottom: '1px solid #1e2330' }}>Parameter</th>
-            <th style={{ color: '#ff4444', textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid #1e2330' }}>Actual</th>
-            <th style={{ color: '#44ff88', textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid #1e2330' }}>Expected</th>
-            <th style={{ color: '#ffaa00', textAlign: 'right', paddingBottom: 6, borderBottom: '1px solid #1e2330' }}>Δ Delta</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <td style={{ color: '#aaa', padding: '5px 0' }}>{r.label}</td>
-              <td style={{ color: '#ff6666', textAlign: 'right', padding: '5px 0' }}>{r.actual}</td>
-              <td style={{ color: '#66ff99', textAlign: 'right', padding: '5px 0' }}>{r.expected}</td>
-              <td style={{ color: r.deltaColor, textAlign: 'right', padding: '5px 0', fontWeight: 'bold' }}>{r.delta}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
 
-// ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
-export function DynoHPChart({ data, binnedData }: DynoChartProps) {
-  // Build binned smooth curve data for dyno-style display
-  const dynoData = useMemo(() => {
-    if (!binnedData || binnedData.length === 0) return [];
-    return binnedData
-      .filter(b => b.rpmMid > 600 && b.hpTorqueMean > 0)
-      .map(b => ({
-        rpm: Math.round(b.rpmMid),
-        hp: Math.round(b.hpTorqueMean),
-        torque: Math.round(b.hpTorqueMean > 0 ? (b.hpTorqueMean * 5252) / b.rpmMid : 0),
-        hpMaf: Math.round(b.hpMafMean || 0),
-      }))
-      .filter(d => d.hp > 0 && d.torque > 0 && d.torque < 2000);
-  }, [binnedData]);
-
-  const peakHp = dynoData.reduce((max, d) => d.hp > max.hp ? d : max, { rpm: 0, hp: 0, torque: 0, hpMaf: 0 });
-  const peakTorque = dynoData.reduce((max, d) => d.torque > max.torque ? d : max, { rpm: 0, hp: 0, torque: 0, hpMaf: 0 });
-  const maxY = Math.max(...dynoData.map(d => Math.max(d.hp, d.torque))) * 1.15;
+// ─── Fault chart wrapper ──────────────────────────────────────────────────────
+const FaultChartWrapper = forwardRef<HTMLDivElement, {
+  code: string;
+  title: string;
+  severity: string;
+  recommendation: string;
+  children: React.ReactNode;
+  badges?: React.ReactNode;
+}>(({ code, title, severity, recommendation, children, badges }, ref) => {
+  const borderColor = severity === 'critical' ? '#ff2222' : '#ff9900';
+  const badgeColor = severity === 'critical' ? 'rgba(255,34,34,0.2)' : 'rgba(255,153,0,0.2)';
+  const badgeText = severity === 'critical' ? '#ff6666' : '#ffcc44';
 
   return (
-    <div style={{
+    <div ref={ref} style={{
+      background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
+      border: `1px solid ${borderColor}`,
+      borderRadius: '12px',
+      padding: '20px',
+      boxShadow: `0 4px 24px rgba(${severity === 'critical' ? '255,34,34' : '255,153,0'},0.15)`,
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <AlertCircle size={18} color={borderColor} />
+        <span style={{
+          background: badgeColor, color: badgeText, padding: '2px 8px', borderRadius: 4,
+          fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold', border: `1px solid ${borderColor}`,
+        }}>{code}</span>
+        <span style={{ color: '#e0e0e0', fontWeight: 'bold', fontSize: 13, fontFamily: 'monospace', flex: 1 }}>{title}</span>
+        <span style={{
+          background: badgeColor, color: badgeText, padding: '2px 10px', borderRadius: 4,
+          fontSize: 10, fontFamily: 'monospace', border: `1px solid ${borderColor}`, textTransform: 'uppercase',
+        }}>{severity}</span>
+      </div>
+
+      {/* Chart */}
+      {children}
+
+      {/* Delta badges */}
+      {badges && (
+        <div style={{ display: 'flex', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+          {badges}
+        </div>
+      )}
+
+      {/* Recommendation */}
+      <div style={{
+        marginTop: 14, padding: '10px 14px',
+        background: 'rgba(255,153,0,0.06)', border: '1px solid rgba(255,153,0,0.2)',
+        borderRadius: 6, fontSize: 11, color: '#ccaa66', fontFamily: 'monospace', lineHeight: 1.6,
+      }}>
+        <span style={{ color: '#ffcc44', fontWeight: 'bold' }}>→ RECOMMENDATION: </span>
+        {recommendation}
+      </div>
+    </div>
+  );
+});
+FaultChartWrapper.displayName = 'FaultChartWrapper';
+
+// ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
+export const DynoHPChart = forwardRef<HTMLDivElement, DynoChartProps>(({ data, binnedData }, ref) => {
+  const dynoData = useMemo(() => {
+    if (!binnedData || binnedData.length === 0) {
+      // Fallback: build from raw data if no binned data
+      const step = Math.ceil(data.rpm.length / 80);
+      const raw = data.rpm
+        .map((rpm, i) => ({
+          rpm: Math.round(rpm),
+          hp: Math.round(data.hpTorque[i] || 0),
+          torque: rpm > 100 ? Math.round((data.hpTorque[i] || 0) * 5252 / rpm) : 0,
+        }))
+        .filter((_, i) => i % step === 0)
+        .filter(d => d.rpm > 600 && d.hp > 10 && d.torque > 0 && d.torque < 2500)
+        .sort((a, b) => a.rpm - b.rpm);
+      return raw;
+    }
+    return binnedData
+      .filter(b => b.rpmBin > 600 && b.hpTorqueMean > 10)
+      .map(b => ({
+        rpm: Math.round(b.rpmBin),
+        hp: Math.round(b.hpTorqueMean),
+        torque: b.rpmBin > 100 ? Math.round(b.hpTorqueMean * 5252 / b.rpmBin) : 0,
+      }))
+      .filter(d => d.torque > 0 && d.torque < 2500);
+  }, [binnedData, data]);
+
+  const peakHp = dynoData.reduce((max, d) => d.hp > max.hp ? d : max, { rpm: 0, hp: 0, torque: 0 });
+  const peakTorque = dynoData.reduce((max, d) => d.torque > max.torque ? d : max, { rpm: 0, hp: 0, torque: 0 });
+  const maxY = Math.max(...dynoData.map(d => Math.max(d.hp, d.torque)), 500) * 1.12;
+
+  return (
+    <div ref={ref} style={{
       background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
       border: '1px solid #1e2330',
       borderRadius: '12px',
@@ -206,24 +227,24 @@ export function DynoHPChart({ data, binnedData }: DynoChartProps) {
       boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ color: '#ff4d00', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
             DYNO RESULTS
           </div>
-          <div style={{ color: '#666', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
-            Duramax L5P 6.6L Diesel — Estimated from OBD-II Data
+          <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
+            Duramax L5P 6.6L Diesel — Estimated from OBD-II Torque Data
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ display: 'flex', gap: 24 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ color: '#ff4d00', fontSize: 28, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
+            <div style={{ color: '#ff4d00', fontSize: 32, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
               {peakHp.hp}
             </div>
             <div style={{ color: '#ff4d00', fontSize: 10, fontFamily: 'monospace' }}>HP @ {peakHp.rpm} RPM</div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ color: '#00c8ff', fontSize: 28, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
+            <div style={{ color: '#00c8ff', fontSize: 32, fontWeight: 'bold', fontFamily: 'monospace', lineHeight: 1 }}>
               {peakTorque.torque}
             </div>
             <div style={{ color: '#00c8ff', fontSize: 10, fontFamily: 'monospace' }}>LB·FT @ {peakTorque.rpm} RPM</div>
@@ -232,527 +253,429 @@ export function DynoHPChart({ data, binnedData }: DynoChartProps) {
       </div>
 
       {/* Chart */}
-      <div style={{ height: 340 }}>
+      <div style={{ height: 360 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={dynoData} margin={{ top: 10, right: 30, bottom: 20, left: 10 }}>
+          <ComposedChart data={dynoData} margin={{ top: 10, right: 40, bottom: 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#ff4d00" stopOpacity={0.02} />
+                <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
+                <stop offset="95%" stopColor="#ff4d00" stopOpacity={0.03} />
               </linearGradient>
               <linearGradient id="torqueGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#00c8ff" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="#00c8ff" stopOpacity={0.02} />
+                <stop offset="5%" stopColor="#00c8ff" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#00c8ff" stopOpacity={0.03} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="2 4" stroke="#1e2330" vertical={true} horizontal={true} />
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" vertical={true} horizontal={true} />
             <XAxis
               dataKey="rpm"
-              stroke="#444"
-              tick={{ fill: '#888', fontSize: 11, fontFamily: 'monospace' }}
-              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -8, fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              stroke="#333"
+              tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
               tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
+              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
             />
             <YAxis
               yAxisId="left"
-              stroke="#444"
-              tick={{ fill: '#888', fontSize: 11, fontFamily: 'monospace' }}
-              label={{ value: 'HORSEPOWER', angle: -90, position: 'insideLeft', offset: 10, fill: '#ff4d00', fontSize: 10, fontFamily: 'monospace' }}
+              stroke="#333"
+              tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
               domain={[0, maxY]}
+              label={{ value: 'HORSEPOWER', angle: -90, position: 'insideLeft', offset: 14, fill: '#ff4d00', fontSize: 10, fontFamily: 'monospace' }}
             />
             <YAxis
               yAxisId="right"
               orientation="right"
-              stroke="#444"
-              tick={{ fill: '#888', fontSize: 11, fontFamily: 'monospace' }}
-              label={{ value: 'TORQUE (LB·FT)', angle: 90, position: 'insideRight', offset: 10, fill: '#00c8ff', fontSize: 10, fontFamily: 'monospace' }}
+              stroke="#333"
+              tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
               domain={[0, maxY]}
+              label={{ value: 'TORQUE (LB·FT)', angle: 90, position: 'insideRight', offset: 14, fill: '#00c8ff', fontSize: 10, fontFamily: 'monospace' }}
             />
             <Tooltip content={<DynoTooltip />} />
             <Legend
-              wrapperStyle={{ fontFamily: 'monospace', fontSize: 11, color: '#888', paddingTop: 8 }}
-              formatter={(value) => <span style={{ color: value === 'HP (Torque)' ? '#ff4d00' : value === 'Torque (lb·ft)' ? '#00c8ff' : '#888' }}>{value}</span>}
+              wrapperStyle={{ fontFamily: 'monospace', fontSize: 11, paddingTop: 8 }}
+              formatter={(value) => (
+                <span style={{ color: value === 'Horsepower' ? '#ff4d00' : '#00c8ff' }}>{value}</span>
+              )}
             />
-            {/* Factory HP reference line */}
-            <ReferenceLine yAxisId="left" y={445} stroke="#555" strokeDasharray="6 3"
-              label={{ value: 'STOCK 445HP', position: 'insideTopRight', fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
-            {/* HP area fill */}
-            <Area
-              yAxisId="left"
-              type="monotone"
-              dataKey="hp"
-              stroke="#ff4d00"
-              strokeWidth={3}
-              fill="url(#hpGrad)"
-              dot={false}
-              isAnimationActive={false}
-              name="HP (Torque)"
-            />
-            {/* Torque area fill */}
-            <Area
-              yAxisId="right"
-              type="monotone"
-              dataKey="torque"
-              stroke="#00c8ff"
-              strokeWidth={2.5}
-              fill="url(#torqueGrad)"
-              dot={false}
-              isAnimationActive={false}
-              name="Torque (lb·ft)"
-            />
+            {/* Factory HP reference */}
+            <ReferenceLine yAxisId="left" y={445} stroke="#333" strokeDasharray="6 3"
+              label={{ value: 'STOCK 445HP', position: 'insideTopRight', fill: '#444', fontSize: 9, fontFamily: 'monospace' }} />
+            {/* HP area */}
+            <Area yAxisId="left" type="monotone" dataKey="hp"
+              stroke="#ff4d00" strokeWidth={3} fill="url(#hpGrad)"
+              dot={false} isAnimationActive={false} name="Horsepower" />
+            {/* Torque area */}
+            <Area yAxisId="right" type="monotone" dataKey="torque"
+              stroke="#00c8ff" strokeWidth={2.5} fill="url(#torqueGrad)"
+              dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
             {/* Peak HP marker */}
             {peakHp.rpm > 0 && (
-              <ReferenceLine
-                yAxisId="left"
-                x={peakHp.rpm}
-                stroke="#ff4d00"
-                strokeDasharray="4 4"
-                strokeOpacity={0.5}
-                label={{ value: `PEAK ${peakHp.hp}HP`, position: 'top', fill: '#ff4d00', fontSize: 9, fontFamily: 'monospace' }}
-              />
+              <ReferenceLine yAxisId="left" x={peakHp.rpm} stroke="#ff4d00"
+                strokeDasharray="4 4" strokeOpacity={0.4}
+                label={{ value: `PEAK ${peakHp.hp}HP`, position: 'top', fill: '#ff4d00', fontSize: 9, fontFamily: 'monospace' }} />
             )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Footer watermark */}
-      <div style={{ textAlign: 'right', marginTop: 8, color: '#2a2e3d', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
+      {/* Footer */}
+      <div style={{ textAlign: 'right', marginTop: 8, color: '#222', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
         DURAMAX PERFORMANCE ANALYZER · OBD-II ESTIMATED
       </div>
     </div>
   );
-}
+});
+DynoHPChart.displayName = 'DynoHPChart';
 
-// ─── FAULT-SPECIFIC CHARTS ────────────────────────────────────────────────────
-
-/** Rail Pressure fault chart — P0087 / P0088 */
-export function RailPressureFaultChart({ data, diagnostics, binnedData }: FaultChartsProps) {
+// ─── RAIL PRESSURE FAULT CHART ────────────────────────────────────────────────
+export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
   const hasP0087 = diagnostics.issues.some(i => i.code === 'P0087');
   const hasP0088 = diagnostics.issues.some(i => i.code === 'P0088');
   if (!hasP0087 && !hasP0088) return null;
 
-  const railData = useMemo(() => {
-    const step = Math.ceil(data.rpm.length / 600);
+  const chartData = useMemo(() => {
+    const step = Math.ceil(data.rpm.length / 500);
     return data.rpm
-      .map((rpm, i) => ({
-        rpm,
-        actual: data.railPressureActual[i] || 0,
-        desired: data.railPressureDesired[i] || 0,
-        delta: (data.railPressureDesired[i] || 0) - (data.railPressureActual[i] || 0),
-      }))
+      .map((rpm, i) => {
+        const actual = data.railPressureActual?.[i] ?? 0;
+        const desired = data.railPressureDesired?.[i] ?? 0;
+        return {
+          rpm: Math.round(rpm),
+          actual: actual > 0 ? actual : null,
+          desired: desired > 0 ? desired : null,
+          // delta: positive means actual is BELOW desired (P0087), negative means above (P0088)
+          deltaLow: (desired > 0 && actual > 0 && desired > actual) ? desired - actual : 0,
+          deltaHigh: (desired > 0 && actual > 0 && actual > desired) ? actual - desired : 0,
+        };
+      })
       .filter((_, i) => i % step === 0)
-      .filter(d => d.actual > 0 && d.desired > 0)
+      .filter(d => d.actual !== null && d.desired !== null)
       .sort((a, b) => a.rpm - b.rpm);
   }, [data]);
 
-  // Find fault zone RPM range
-  const faultPoints = railData.filter(d =>
-    hasP0087 ? (d.desired - d.actual) > 3000 : (d.actual - d.desired) > 1500
+  const peakActual = Math.max(...chartData.map(d => d.actual ?? 0));
+  const peakDesired = Math.max(...chartData.map(d => d.desired ?? 0));
+  const maxDeltaLow = Math.max(...chartData.map(d => d.deltaLow));
+  const maxDeltaHigh = Math.max(...chartData.map(d => d.deltaHigh));
+  const avgActual = chartData.reduce((s, d) => s + (d.actual ?? 0), 0) / chartData.length;
+  const avgDesired = chartData.reduce((s, d) => s + (d.desired ?? 0), 0) / chartData.length;
+
+  // Find fault zone
+  const faultPoints = chartData.filter(d =>
+    hasP0087 ? (d.deltaLow > 3000) : (d.deltaHigh > 1500)
   );
   const faultRpmMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.rpm)) : 0;
   const faultRpmMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.rpm)) : 0;
 
-  // Delta stats
-  const avgActual = railData.length ? railData.reduce((s, d) => s + d.actual, 0) / railData.length : 0;
-  const avgDesired = railData.length ? railData.reduce((s, d) => s + d.desired, 0) / railData.length : 0;
-  const maxDelta = faultPoints.length ? Math.max(...faultPoints.map(d => Math.abs(d.delta))) : 0;
-  const peakActual = Math.max(...railData.map(d => d.actual));
-  const peakDesired = Math.max(...railData.map(d => d.desired));
-
   const issue = diagnostics.issues.find(i => i.code === 'P0087' || i.code === 'P0088')!;
+  const code = hasP0087 ? 'P0087' : 'P0088';
+  const maxDelta = hasP0087 ? maxDeltaLow : maxDeltaHigh;
 
   return (
     <FaultChartWrapper
-      code={issue.code}
-      title={`${issue.code} — ${issue.title}`}
+      ref={ref}
+      code={code}
+      title={`${code} — ${issue.title}`}
       severity={issue.severity}
       recommendation={issue.recommendation}
+      badges={<>
+        <DeltaBadge label="Peak Rail Pressure" actual={peakActual.toFixed(0)} expected={peakDesired.toFixed(0)} delta={(hasP0087 ? peakDesired - peakActual : peakActual - peakDesired).toFixed(0)} unit="psi" isCritical={true} />
+        <DeltaBadge label="Avg Rail Pressure" actual={avgActual.toFixed(0)} expected={avgDesired.toFixed(0)} delta={(hasP0087 ? avgDesired - avgActual : avgActual - avgDesired).toFixed(0)} unit="psi" isCritical={false} />
+        <DeltaBadge label="Max Fault Delta" actual="Detected" expected={hasP0087 ? '<3,000' : '<1,500'} delta={maxDelta.toFixed(0)} unit="psi" isCritical={true} />
+      </>}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        {/* Chart */}
-        <div style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={railData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-              <defs>
-                <linearGradient id="desiredGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#44ff88" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#44ff88" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2330" />
-              <XAxis dataKey="rpm" stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
-                label={{ value: 'RPM', position: 'insideBottom', offset: -8, fill: '#666', fontSize: 9, fontFamily: 'monospace' }} />
-              <YAxis stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: 'PSI', angle: -90, position: 'insideLeft', fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip faultLabel="Rail Pressure" />} />
-              <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, color: '#888' }} />
-              {/* Fault zone highlight */}
-              {faultRpmMin > 0 && (
-                <ReferenceArea
-                  x1={faultRpmMin - 100}
-                  x2={faultRpmMax + 100}
-                  fill="rgba(255,34,34,0.12)"
-                  stroke="#ff2222"
-                  strokeWidth={1}
-                  strokeDasharray="4 2"
-                  label={<FaultZoneLabel />}
-                />
-              )}
-              <Area type="monotone" dataKey="desired" stroke="#44ff88" strokeWidth={2}
-                fill="url(#desiredGrad)" dot={false} isAnimationActive={false} name="Desired PSI" />
-              <Line type="monotone" dataKey="actual" stroke="#ff4444" strokeWidth={2.5}
-                dot={false} isAnimationActive={false} name="Actual PSI" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        {/* Delta panel */}
-        <DeltaPanel
-          title="Rail Pressure Analysis"
-          icon={Gauge}
-          iconColor="#ff4444"
-          rows={[
-            { label: 'Peak Actual', actual: `${peakActual.toFixed(0)} psi`, expected: `${peakDesired.toFixed(0)} psi`, delta: `${(peakDesired - peakActual).toFixed(0)} psi`, deltaColor: hasP0087 ? '#ff4444' : '#ffaa00' },
-            { label: 'Avg Actual', actual: `${avgActual.toFixed(0)} psi`, expected: `${avgDesired.toFixed(0)} psi`, delta: `${(avgDesired - avgActual).toFixed(0)} psi`, deltaColor: '#ffaa00' },
-            { label: 'Max Fault Δ', actual: '—', expected: `${hasP0087 ? '3,000' : '1,500'} psi`, delta: `${maxDelta.toFixed(0)} psi`, deltaColor: '#ff2222' },
-            { label: 'Fault RPM', actual: `${faultRpmMin.toFixed(0)}`, expected: `${faultRpmMax.toFixed(0)}`, delta: 'Range', deltaColor: '#ff6666' },
-          ]}
-        />
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <defs>
+              <linearGradient id="deltaLowGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff2222" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#ff2222" stopOpacity={0.05} />
+              </linearGradient>
+              <linearGradient id="deltaHighGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff9900" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#ff9900" stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+            <XAxis dataKey="rpm" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
+              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+            <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              label={{ value: 'RAIL PRESSURE (PSI)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
+            <Tooltip content={<FaultTooltip xLabel="Rail Pressure vs RPM" />} />
+            <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
+              formatter={(v) => <span style={{ color: v === 'Desired PSI' ? '#44ff88' : v === 'Actual PSI' ? '#ff4444' : v.includes('Low') ? '#ff2222' : '#ff9900' }}>{v}</span>} />
+            {/* Fault zone highlight */}
+            {faultRpmMin > 0 && (
+              <ReferenceArea x1={faultRpmMin - 50} x2={faultRpmMax + 50}
+                fill="rgba(255,34,34,0.08)" stroke="#ff2222" strokeWidth={1.5} strokeDasharray="5 3" />
+            )}
+            {/* Desired (green) */}
+            <Line type="monotone" dataKey="desired" stroke="#44ff88" strokeWidth={2.5}
+              dot={false} isAnimationActive={false} name="Desired PSI" />
+            {/* Actual (red) */}
+            <Line type="monotone" dataKey="actual" stroke="#ff4444" strokeWidth={2.5}
+              dot={false} isAnimationActive={false} name="Actual PSI" />
+            {/* Delta shaded area — fills the gap between actual and desired */}
+            {hasP0087 && (
+              <Area type="monotone" dataKey="deltaLow" stroke="none"
+                fill="url(#deltaLowGrad)" isAnimationActive={false} name="Δ Low Delta (fault)" />
+            )}
+            {hasP0088 && (
+              <Area type="monotone" dataKey="deltaHigh" stroke="none"
+                fill="url(#deltaHighGrad)" isAnimationActive={false} name="Δ High Delta (fault)" />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </FaultChartWrapper>
   );
-}
+});
+RailPressureFaultChart.displayName = 'RailPressureFaultChart';
 
-/** Boost pressure fault chart — P0299 Underboost */
-export function BoostFaultChart({ data, diagnostics, binnedData }: FaultChartsProps) {
+// ─── BOOST PRESSURE FAULT CHART ───────────────────────────────────────────────
+export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
   const hasP0299 = diagnostics.issues.some(i => i.code === 'P0299');
   if (!hasP0299) return null;
 
-  const boostData = useMemo(() => {
-    const step = Math.ceil(data.rpm.length / 600);
+  const chartData = useMemo(() => {
+    const step = Math.ceil(data.rpm.length / 500);
     return data.rpm
-      .map((rpm, i) => ({
-        rpm,
-        actual: data.boost[i] || 0,
-        desired: data.boostDesired?.[i] || 0,
-        maf: data.maf[i] || 0,
-        vane: data.turboVanePosition?.[i] || 0,
-      }))
+      .map((rpm, i) => {
+        const actual = data.boost?.[i] ?? 0;
+        const desired = data.boostDesired?.[i] ?? 0;
+        return {
+          rpm: Math.round(rpm),
+          actual: actual > 0 ? actual : null,
+          desired: desired > 0 ? desired : null,
+          delta: (desired > 0 && actual > 0 && desired > actual) ? desired - actual : 0,
+        };
+      })
       .filter((_, i) => i % step === 0)
-      .filter(d => d.actual > 0)
+      .filter(d => d.actual !== null)
       .sort((a, b) => a.rpm - b.rpm);
   }, [data]);
 
-  const faultPoints = boostData.filter(d => d.maf > 55 && d.actual < 40);
+  const peakActual = Math.max(...chartData.map(d => d.actual ?? 0));
+  const peakDesired = Math.max(...chartData.map(d => d.desired ?? 0));
+  const maxDelta = Math.max(...chartData.map(d => d.delta));
+  const faultPoints = chartData.filter(d => (d.desired ?? 0) - (d.actual ?? 0) > 5);
   const faultRpmMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.rpm)) : 0;
   const faultRpmMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.rpm)) : 0;
-
-  const peakBoost = Math.max(...boostData.map(d => d.actual));
-  const avgBoostFault = faultPoints.length ? faultPoints.reduce((s, d) => s + d.actual, 0) / faultPoints.length : 0;
-  const expectedBoost = 40;
 
   const issue = diagnostics.issues.find(i => i.code === 'P0299')!;
 
   return (
     <FaultChartWrapper
-      code={issue.code}
+      ref={ref}
+      code="P0299"
       title={`P0299 — ${issue.title}`}
       severity={issue.severity}
       recommendation={issue.recommendation}
+      badges={<>
+        <DeltaBadge label="Peak Boost" actual={peakActual.toFixed(1)} expected={peakDesired > 0 ? peakDesired.toFixed(1) : '48.0'} delta={(peakDesired > 0 ? peakDesired - peakActual : 48 - peakActual).toFixed(1)} unit="psi" isCritical={true} />
+        <DeltaBadge label="Max Fault Delta" actual="Detected" expected="<5 psi" delta={maxDelta.toFixed(1)} unit="psi" isCritical={true} />
+        <DeltaBadge label="Fault RPM Range" actual={`${faultRpmMin}`} expected={`${faultRpmMax}`} delta={`${faultPoints.length} pts`} unit="" isCritical={false} />
+      </>}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        <div style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={boostData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-              <defs>
-                <linearGradient id="boostGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00c8ff" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#00c8ff" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2330" />
-              <XAxis dataKey="rpm" stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
-                label={{ value: 'RPM', position: 'insideBottom', offset: -8, fill: '#666', fontSize: 9, fontFamily: 'monospace' }} />
-              <YAxis stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: 'PSI', angle: -90, position: 'insideLeft', fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip faultLabel="Boost Pressure" />} />
-              <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, color: '#888' }} />
-              {/* Fault zone */}
-              {faultRpmMin > 0 && (
-                <ReferenceArea
-                  x1={faultRpmMin - 100}
-                  x2={faultRpmMax + 100}
-                  fill="rgba(255,34,34,0.12)"
-                  stroke="#ff2222"
-                  strokeWidth={1}
-                  strokeDasharray="4 2"
-                  label={<FaultZoneLabel />}
-                />
-              )}
-              {/* Expected minimum boost line */}
-              <ReferenceLine y={40} stroke="#44ff88" strokeDasharray="6 3"
-                label={{ value: 'MIN 40 PSI', position: 'insideTopRight', fill: '#44ff88', fontSize: 9, fontFamily: 'monospace' }} />
-              <Area type="monotone" dataKey="actual" stroke="#00c8ff" strokeWidth={2.5}
-                fill="url(#boostGrad)" dot={false} isAnimationActive={false} name="Boost (psi)" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <DeltaPanel
-          title="Boost Pressure Analysis"
-          icon={Wind}
-          iconColor="#00c8ff"
-          rows={[
-            { label: 'Peak Boost', actual: `${peakBoost.toFixed(1)} psi`, expected: '48 psi (stock)', delta: `${(48 - peakBoost).toFixed(1)} psi`, deltaColor: peakBoost < 40 ? '#ff4444' : '#44ff88' },
-            { label: 'Fault Avg', actual: `${avgBoostFault.toFixed(1)} psi`, expected: `${expectedBoost} psi`, delta: `${(expectedBoost - avgBoostFault).toFixed(1)} psi`, deltaColor: '#ff2222' },
-            { label: 'Fault RPM', actual: `${faultRpmMin.toFixed(0)}`, expected: `${faultRpmMax.toFixed(0)}`, delta: 'Range', deltaColor: '#ff6666' },
-            { label: 'Fault Count', actual: `${faultPoints.length} pts`, expected: '0 pts', delta: `+${faultPoints.length}`, deltaColor: '#ff4444' },
-          ]}
-        />
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <defs>
+              <linearGradient id="boostDeltaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff2222" stopOpacity={0.35} />
+                <stop offset="100%" stopColor="#ff2222" stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+            <XAxis dataKey="rpm" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
+              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+            <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              label={{ value: 'BOOST PRESSURE (PSI)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
+            <Tooltip content={<FaultTooltip xLabel="Boost Pressure vs RPM" />} />
+            <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
+              formatter={(v) => <span style={{ color: v === 'Desired PSI' ? '#44ff88' : v === 'Actual PSI' ? '#00c8ff' : '#ff2222' }}>{v}</span>} />
+            {faultRpmMin > 0 && (
+              <ReferenceArea x1={faultRpmMin - 50} x2={faultRpmMax + 50}
+                fill="rgba(255,34,34,0.08)" stroke="#ff2222" strokeWidth={1.5} strokeDasharray="5 3" />
+            )}
+            <ReferenceLine y={40} stroke="#ff9900" strokeDasharray="6 3"
+              label={{ value: 'MIN 40 PSI', position: 'insideTopRight', fill: '#ff9900', fontSize: 9, fontFamily: 'monospace' }} />
+            <Line type="monotone" dataKey="desired" stroke="#44ff88" strokeWidth={2.5}
+              dot={false} isAnimationActive={false} name="Desired PSI" />
+            <Line type="monotone" dataKey="actual" stroke="#00c8ff" strokeWidth={2.5}
+              dot={false} isAnimationActive={false} name="Actual PSI" />
+            <Area type="monotone" dataKey="delta" stroke="none"
+              fill="url(#boostDeltaGrad)" isAnimationActive={false} name="Δ Underboost Delta" />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </FaultChartWrapper>
   );
-}
+});
+BoostFaultChart.displayName = 'BoostFaultChart';
 
-/** EGT fault chart */
-export function EgtFaultChart({ data, diagnostics }: FaultChartsProps) {
+// ─── EGT FAULT CHART ──────────────────────────────────────────────────────────
+export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
   const hasEgtFault = diagnostics.issues.some(i => i.code === 'EGT_HIGH' || i.code === 'EGT_SENSOR');
   if (!hasEgtFault) return null;
 
-  const egtData = useMemo(() => {
-    const step = Math.ceil(data.timeMinutes.length / 600);
+  const chartData = useMemo(() => {
+    const step = Math.ceil(data.timeMinutes.length / 500);
     return data.timeMinutes
-      .map((t, i) => ({
-        time: t,
-        egt: data.exhaustGasTemp[i] || 0,
-        rpm: data.rpm[i] || 0,
-      }))
+      .map((t, i) => {
+        const egt = data.exhaustGasTemp?.[i] ?? 0;
+        return {
+          time: parseFloat(t.toFixed(2)),
+          egt: egt > 0 ? egt : null,
+          limit: 1475,
+          delta: egt > 1475 ? egt - 1475 : 0,
+        };
+      })
       .filter((_, i) => i % step === 0)
-      .filter(d => d.egt > 0);
+      .filter(d => d.egt !== null);
   }, [data]);
 
-  const faultPoints = egtData.filter(d => d.egt > 1475);
-  const faultTimeMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.time)) : 0;
-  const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
-  const maxEgt = Math.max(...egtData.map(d => d.egt));
-  const avgEgt = egtData.reduce((s, d) => s + d.egt, 0) / egtData.length;
+  const maxEgt = Math.max(...chartData.map(d => d.egt ?? 0));
+  const avgEgt = chartData.reduce((s, d) => s + (d.egt ?? 0), 0) / chartData.length;
+  const faultPoints = chartData.filter(d => (d.egt ?? 0) > 1475);
+  const faultDuration = faultPoints.length * (data.timeMinutes[data.timeMinutes.length - 1] / data.timeMinutes.length) * 60;
 
   const issue = diagnostics.issues.find(i => i.code === 'EGT_HIGH' || i.code === 'EGT_SENSOR')!;
 
   return (
     <FaultChartWrapper
+      ref={ref}
       code="EGT"
       title="Exhaust Gas Temperature — High EGT Warning"
       severity={issue.severity}
       recommendation={issue.recommendation}
+      badges={<>
+        <DeltaBadge label="Peak EGT" actual={maxEgt.toFixed(0)} expected="<1475" delta={(maxEgt - 1475).toFixed(0)} unit="°F" isCritical={true} />
+        <DeltaBadge label="Avg EGT" actual={avgEgt.toFixed(0)} expected="<1200" delta={(avgEgt - 1200).toFixed(0)} unit="°F" isCritical={avgEgt > 1200} />
+        <DeltaBadge label="Fault Duration" actual={faultDuration.toFixed(1)} expected="0" delta={`+${faultDuration.toFixed(1)}`} unit="sec" isCritical={true} />
+      </>}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        <div style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={egtData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-              <defs>
-                <linearGradient id="egtGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ff9900" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#ff9900" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2330" />
-              <XAxis dataKey="time" stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${v.toFixed(1)}m`}
-                label={{ value: 'TIME (min)', position: 'insideBottom', offset: -8, fill: '#666', fontSize: 9, fontFamily: 'monospace' }} />
-              <YAxis stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: '°F', angle: -90, position: 'insideLeft', fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip faultLabel="EGT" />} />
-              {/* Fault zone */}
-              {faultTimeMin > 0 && (
-                <ReferenceArea
-                  x1={faultTimeMin - 0.05}
-                  x2={faultTimeMax + 0.05}
-                  fill="rgba(255,34,34,0.15)"
-                  stroke="#ff2222"
-                  strokeWidth={1}
-                  strokeDasharray="4 2"
-                  label={<FaultZoneLabel />}
-                />
-              )}
-              {/* Warning threshold line */}
-              <ReferenceLine y={1475} stroke="#ff6600" strokeDasharray="6 3"
-                label={{ value: 'WARN 1475°F', position: 'insideTopRight', fill: '#ff6600', fontSize: 9, fontFamily: 'monospace' }} />
-              <ReferenceLine y={1800} stroke="#ff2222" strokeDasharray="4 2"
-                label={{ value: 'SENSOR FAULT 1800°F', position: 'insideTopRight', fill: '#ff2222', fontSize: 9, fontFamily: 'monospace' }} />
-              <Area type="monotone" dataKey="egt" stroke="#ff9900" strokeWidth={2.5}
-                fill="url(#egtGrad)" dot={false} isAnimationActive={false} name="EGT (°F)" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <DeltaPanel
-          title="EGT Analysis"
-          icon={Thermometer}
-          iconColor="#ff9900"
-          rows={[
-            { label: 'Peak EGT', actual: `${maxEgt.toFixed(0)}°F`, expected: '<1475°F', delta: `+${(maxEgt - 1475).toFixed(0)}°F`, deltaColor: '#ff2222' },
-            { label: 'Avg EGT', actual: `${avgEgt.toFixed(0)}°F`, expected: '<1200°F', delta: `+${(avgEgt - 1200).toFixed(0)}°F`, deltaColor: avgEgt > 1200 ? '#ffaa00' : '#44ff88' },
-            { label: 'Fault Duration', actual: `${((faultTimeMax - faultTimeMin) * 60).toFixed(1)}s`, expected: '0s', delta: `+${((faultTimeMax - faultTimeMin) * 60).toFixed(1)}s`, deltaColor: '#ff4444' },
-            { label: 'Fault Points', actual: `${faultPoints.length}`, expected: '0', delta: `+${faultPoints.length}`, deltaColor: '#ff4444' },
-          ]}
-        />
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <defs>
+              <linearGradient id="egtDeltaGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff2222" stopOpacity={0.5} />
+                <stop offset="100%" stopColor="#ff2222" stopOpacity={0.05} />
+              </linearGradient>
+              <linearGradient id="egtGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#ff9900" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#ff9900" stopOpacity={0.03} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+            <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              tickFormatter={(v) => `${v.toFixed(1)}m`}
+              label={{ value: 'TIME (min)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+            <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              label={{ value: 'EGT (°F)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
+            <Tooltip content={<FaultTooltip xLabel="Exhaust Gas Temp" />} />
+            <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
+              formatter={(v) => <span style={{ color: v === 'EGT Limit (1475°F)' ? '#44ff88' : v === 'EGT (°F)' ? '#ff9900' : '#ff2222' }}>{v}</span>} />
+            <ReferenceLine y={1475} stroke="#ff6600" strokeDasharray="6 3"
+              label={{ value: 'WARN 1475°F', position: 'insideTopRight', fill: '#ff6600', fontSize: 9, fontFamily: 'monospace' }} />
+            <ReferenceLine y={1800} stroke="#ff2222" strokeDasharray="4 2"
+              label={{ value: 'SENSOR FAULT 1800°F', position: 'insideTopRight', fill: '#ff2222', fontSize: 9, fontFamily: 'monospace' }} />
+            <Area type="monotone" dataKey="egt" stroke="#ff9900" strokeWidth={2.5}
+              fill="url(#egtGrad)" dot={false} isAnimationActive={false} name="EGT (°F)" />
+            <Line type="monotone" dataKey="limit" stroke="#44ff88" strokeWidth={1.5}
+              strokeDasharray="6 3" dot={false} isAnimationActive={false} name="EGT Limit (1475°F)" />
+            <Area type="monotone" dataKey="delta" stroke="none"
+              fill="url(#egtDeltaGrad)" isAnimationActive={false} name="Δ Over-Limit Delta" />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </FaultChartWrapper>
   );
-}
+});
+EgtFaultChart.displayName = 'EgtFaultChart';
 
-/** MAF fault chart — P0101 */
-export function MafFaultChart({ data, diagnostics }: FaultChartsProps) {
+// ─── MAF FAULT CHART ──────────────────────────────────────────────────────────
+export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics }, ref) => {
   const hasP0101 = diagnostics.issues.some(i => i.code === 'P0101');
   if (!hasP0101) return null;
 
-  const mafData = useMemo(() => {
-    const step = Math.ceil(data.rpm.length / 600);
+  const chartData = useMemo(() => {
+    const step = Math.ceil(data.rpm.length / 500);
     return data.rpm
-      .map((rpm, i) => ({
-        rpm,
-        maf: data.maf[i] || 0,
-      }))
+      .map((rpm, i) => {
+        const maf = data.maf?.[i] ?? 0;
+        return {
+          rpm: Math.round(rpm),
+          maf: maf > 0 ? maf : null,
+          maxIdle: 6,
+          minIdle: 2,
+          deltaHigh: (rpm < 1000 && maf > 6) ? maf - 6 : 0,
+          deltaLow: (rpm < 1000 && maf > 0 && maf < 2) ? 2 - maf : 0,
+        };
+      })
       .filter((_, i) => i % step === 0)
-      .filter(d => d.maf > 0 && d.rpm > 400 && d.rpm < 1000)
+      .filter(d => d.maf !== null && d.rpm < 1500)
       .sort((a, b) => a.rpm - b.rpm);
   }, [data]);
 
-  const idlePoints = mafData.filter(d => d.rpm > 500 && d.rpm < 900);
-  const avgIdleMaf = idlePoints.length ? idlePoints.reduce((s, d) => s + d.maf, 0) / idlePoints.length : 0;
+  const idlePoints = chartData.filter(d => d.rpm > 500 && d.rpm < 900);
+  const avgIdleMaf = idlePoints.length ? idlePoints.reduce((s, d) => s + (d.maf ?? 0), 0) / idlePoints.length : 0;
   const isHigh = avgIdleMaf > 6;
-  const expectedIdle = isHigh ? 6 : 2;
 
   const issue = diagnostics.issues.find(i => i.code === 'P0101')!;
 
   return (
     <FaultChartWrapper
+      ref={ref}
       code="P0101"
-      title="P0101 — MAF Out of Range at Idle"
+      title="P0101 — MAF Sensor Out of Range at Idle"
       severity={issue.severity}
       recommendation={issue.recommendation}
+      badges={<>
+        <DeltaBadge label="Avg Idle MAF" actual={avgIdleMaf.toFixed(2)} expected={isHigh ? '≤6.00' : '≥2.00'} delta={(isHigh ? avgIdleMaf - 6 : 2 - avgIdleMaf).toFixed(2)} unit="lb/min" isCritical={true} />
+        <DeltaBadge label="Fault Type" actual={isHigh ? 'HIGH' : 'LOW'} expected="2–6 lb/min" delta={isHigh ? 'Too High' : 'Too Low'} unit="" isCritical={true} />
+      </>}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16 }}>
-        <div style={{ height: 280 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={mafData} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
-              <CartesianGrid strokeDasharray="2 4" stroke="#1e2330" />
-              <XAxis dataKey="rpm" stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: 'RPM', position: 'insideBottom', offset: -8, fill: '#666', fontSize: 9, fontFamily: 'monospace' }} />
-              <YAxis stroke="#444" tick={{ fill: '#888', fontSize: 10, fontFamily: 'monospace' }}
-                label={{ value: 'lb/min', angle: -90, position: 'insideLeft', fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip faultLabel="MAF Flow" />} />
-              {/* Fault zone — idle RPM band */}
-              <ReferenceArea
-                x1={500}
-                x2={900}
-                fill="rgba(255,34,34,0.12)"
-                stroke="#ff2222"
-                strokeWidth={1}
-                strokeDasharray="4 2"
-                label={<FaultZoneLabel />}
-              />
-              {/* Normal range band */}
-              <ReferenceArea y1={2} y2={6} fill="rgba(68,255,136,0.06)" stroke="#44ff88" strokeWidth={1} strokeDasharray="3 3" />
-              <ReferenceLine y={6} stroke="#44ff88" strokeDasharray="6 3"
-                label={{ value: 'MAX 6 lb/min', position: 'insideTopRight', fill: '#44ff88', fontSize: 9, fontFamily: 'monospace' }} />
-              <ReferenceLine y={2} stroke="#44ff88" strokeDasharray="6 3"
-                label={{ value: 'MIN 2 lb/min', position: 'insideTopRight', fill: '#44ff88', fontSize: 9, fontFamily: 'monospace' }} />
-              <Line type="monotone" dataKey="maf" stroke="#ffaa00" strokeWidth={2.5}
-                dot={false} isAnimationActive={false} name="MAF (lb/min)" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <DeltaPanel
-          title="MAF Idle Analysis"
-          icon={Activity}
-          iconColor="#ffaa00"
-          rows={[
-            { label: 'Avg Idle MAF', actual: `${avgIdleMaf.toFixed(2)} lb/min`, expected: `${expectedIdle} lb/min`, delta: `${(avgIdleMaf - expectedIdle).toFixed(2)} lb/min`, deltaColor: '#ff4444' },
-            { label: 'Idle RPM Band', actual: '500–900 RPM', expected: '600–750 RPM', delta: 'Check', deltaColor: '#ffaa00' },
-            { label: 'Fault Type', actual: isHigh ? 'HIGH MAF' : 'LOW MAF', expected: '2–6 lb/min', delta: isHigh ? 'Too High' : 'Too Low', deltaColor: '#ff4444' },
-            { label: 'Idle Samples', actual: `${idlePoints.length}`, expected: '—', delta: 'analyzed', deltaColor: '#888' },
-          ]}
-        />
+      <div style={{ height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <defs>
+              <linearGradient id="mafDeltaHighGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff2222" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="#ff2222" stopOpacity={0.05} />
+              </linearGradient>
+              <linearGradient id="mafDeltaLowGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff9900" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="#ff9900" stopOpacity={0.05} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+            <XAxis dataKey="rpm" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+            <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              label={{ value: 'MAF (lb/min)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
+            <Tooltip content={<FaultTooltip xLabel="MAF Flow vs RPM" />} />
+            <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
+              formatter={(v) => <span style={{ color: v === 'Max Idle (6)' ? '#44ff88' : v === 'Min Idle (2)' ? '#44ff88' : v === 'MAF (lb/min)' ? '#ffaa00' : '#ff2222' }}>{v}</span>} />
+            {/* Normal band */}
+            <ReferenceArea y1={2} y2={6} fill="rgba(68,255,136,0.05)" stroke="none" />
+            <ReferenceLine y={6} stroke="#44ff88" strokeDasharray="6 3"
+              label={{ value: 'MAX IDLE 6 lb/min', position: 'insideTopRight', fill: '#44ff88', fontSize: 9, fontFamily: 'monospace' }} />
+            <ReferenceLine y={2} stroke="#44ff88" strokeDasharray="6 3"
+              label={{ value: 'MIN IDLE 2 lb/min', position: 'insideTopRight', fill: '#44ff88', fontSize: 9, fontFamily: 'monospace' }} />
+            <Line type="monotone" dataKey="maf" stroke="#ffaa00" strokeWidth={2.5}
+              dot={false} isAnimationActive={false} name="MAF (lb/min)" />
+            <Area type="monotone" dataKey="deltaHigh" stroke="none"
+              fill="url(#mafDeltaHighGrad)" isAnimationActive={false} name="Δ High Fault Delta" />
+            <Area type="monotone" dataKey="deltaLow" stroke="none"
+              fill="url(#mafDeltaLowGrad)" isAnimationActive={false} name="Δ Low Fault Delta" />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </FaultChartWrapper>
   );
-}
-
-// ─── Fault chart wrapper with header ─────────────────────────────────────────
-function FaultChartWrapper({
-  code,
-  title,
-  severity,
-  recommendation,
-  children,
-}: {
-  code: string;
-  title: string;
-  severity: string;
-  recommendation: string;
-  children: React.ReactNode;
-}) {
-  const borderColor = severity === 'critical' ? '#ff2222' : '#ff9900';
-  const badgeColor = severity === 'critical' ? 'rgba(255,34,34,0.2)' : 'rgba(255,153,0,0.2)';
-  const badgeText = severity === 'critical' ? '#ff6666' : '#ffcc44';
-
-  return (
-    <div style={{
-      background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
-      border: `1px solid ${borderColor}`,
-      borderRadius: '12px',
-      padding: '20px',
-      boxShadow: `0 4px 24px rgba(${severity === 'critical' ? '255,34,34' : '255,153,0'},0.15)`,
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-        <AlertCircle size={18} color={borderColor} />
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              background: badgeColor,
-              color: badgeText,
-              padding: '2px 8px',
-              borderRadius: 4,
-              fontSize: 11,
-              fontFamily: 'monospace',
-              fontWeight: 'bold',
-              border: `1px solid ${borderColor}`,
-            }}>{code}</span>
-            <span style={{ color: '#e0e0e0', fontWeight: 'bold', fontSize: 13, fontFamily: 'monospace' }}>{title}</span>
-          </div>
-        </div>
-        <span style={{
-          background: badgeColor,
-          color: badgeText,
-          padding: '2px 10px',
-          borderRadius: 4,
-          fontSize: 10,
-          fontFamily: 'monospace',
-          border: `1px solid ${borderColor}`,
-          textTransform: 'uppercase',
-        }}>{severity}</span>
-      </div>
-
-      {/* Chart + Delta */}
-      {children}
-
-      {/* Recommendation */}
-      <div style={{
-        marginTop: 14,
-        padding: '10px 14px',
-        background: 'rgba(255,153,0,0.06)',
-        border: '1px solid rgba(255,153,0,0.2)',
-        borderRadius: 6,
-        fontSize: 11,
-        color: '#ccaa66',
-        fontFamily: 'monospace',
-        lineHeight: 1.5,
-      }}>
-        <span style={{ color: '#ffcc44', fontWeight: 'bold' }}>→ RECOMMENDATION: </span>
-        {recommendation}
-      </div>
-    </div>
-  );
-}
+});
+MafFaultChart.displayName = 'MafFaultChart';
