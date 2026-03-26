@@ -10,6 +10,7 @@
  */
 
 import { KBDocument, KBCategory, buildSearchDocuments } from './knowledgeBase';
+import { buildVehicleSearchDocuments } from './vehicleKnowledgeBase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -89,8 +90,21 @@ export class PPEISearchEngine {
   private totalDocs = 0;
 
   constructor() {
-    this.documents = buildSearchDocuments();
+    this.documents = [
+      ...buildSearchDocuments(),
+      ...buildVehicleSearchDocuments(),
+    ];
     this.totalDocs = this.documents.length;
+    this.buildIndex();
+  }
+
+  /** Add documents dynamically (e.g. from a2L uploads) and rebuild index */
+  addDocuments(docs: KBDocument[]): void {
+    this.documents.push(...docs);
+    this.totalDocs = this.documents.length;
+    this.invertedIndex.clear();
+    this.documentFrequency.clear();
+    this.documentTermCounts.clear();
     this.buildIndex();
   }
 
