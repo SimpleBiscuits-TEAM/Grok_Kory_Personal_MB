@@ -622,6 +622,11 @@ export class OBDConnection {
     return 'serial' in navigator;
   }
 
+  // Baud rates to try during auto-detection.
+  // OBDLink EX USB typically uses 115200 or 500000.
+  // Other ELM327 clones may use 38400 or 9600.
+  private static readonly BAUD_RATES = [115200, 500000, 38400, 9600, 230400, 1000000];
+
   async connect(): Promise<boolean> {
     if (!OBDConnection.isSupported()) {
       this.emit('error', null, 'WebSerial API is not supported in this browser. Use Chrome or Edge.');
@@ -633,10 +638,6 @@ export class OBDConnection {
       this.emit('log', null, 'Requesting serial port... (select your OBDLink device)');
 
       // Show ALL available serial ports — no vendor ID filtering.
-      // OBDLink EX/SX/MX+ devices use various USB-to-serial bridge chips
-      // (FTDI, CH340, CP210x, STN2120 native USB, etc.) whose VIDs vary
-      // by hardware revision. Removing filters ensures the device always
-      // appears in Chrome's serial port picker dialog.
       this.port = await navigator.serial.requestPort();
 
       // Log USB device info if available for debugging
@@ -644,37 +645,29 @@ export class OBDConnection {
       if (info.usbVendorId !== undefined) {
         this.emit('log', null, `USB device: VID=0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, '0')} PID=0x${(info.usbProductId ?? 0).toString(16).toUpperCase().padStart(4, '0')}`);
       } else {
-        this.emit('log', null, 'Serial port selected (no USB info available — may be a Bluetooth or platform serial port)');
+        this.emit('log', null, 'Serial port selected (no USB info — may be Bluetooth or platform port)');
       }
 
-      // Try opening at configured baud rate (default 115200 for OBDLink EX USB)
-      try {
-        await this.port.open({
-          baudRate: this.config.baudRate,
-          dataBits: 8,
-          stopBits: 1,
-          parity: 'none',
-          flowControl: 'none',
-        });
-      } catch (openErr) {
-        // Port may already be open in another tab or application
-        const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
-        if (openMsg.includes('already open') || openMsg.includes('already been opened')) {
-          this.emit('log', null, 'Port appears already open — attempting to use existing connection');
-        } else {
-          throw new Error(`Failed to open port: ${openMsg}. Make sure no other app (OBDwiz, FORScan, etc.) is using the device.`);
+      // Try auto-detecting baud rate
+      const baudOrder = [
+        this.config.baudRate,
+        ...OBDConnection.BAUD_RATES.filter(b => b !== this.config.baudRate)
+      ];
+
+      let connected = false;
+      for (const baud of baudOrder) {
+        this.emit('log', null, `Trying ${baud} baud...`);
+        const ok = await this.tryBaudRate(baud);
+        if (ok) {
+          connected = true;
+          break;
         }
       }
 
-      this.emit('log', null, `Serial port opened at ${this.config.baudRate} baud`);
-
-      // Set up reader and writer
-      if (this.port.readable && this.port.writable) {
-        this.reader = this.port.readable.getReader();
-        this.writer = this.port.writable.getWriter();
-        this.startReadLoop();
-      } else {
-        throw new Error('Port is not readable/writable. Try unplugging and re-plugging the device.');
+      if (!connected) {
+        this.setState('error');
+        this.emit('error', null, 'Could not communicate with device at any baud rate. Try: 1) Unplug and re-plug USB, 2) Turn ignition OFF then ON, 3) Close other apps using the port (OBDwiz, FORScan, etc.)');
+        return false;
       }
 
       // Initialize the ELM327/STN device
@@ -700,6 +693,184 @@ export class OBDConnection {
       this.setState('error');
       return false;
     }
+  }
+
+  /**
+   * Attempt to open the port at a given baud rate, send a test command,
+   * and check if we get a valid response. Returns true if the device talks.
+   */
+  private async tryBaudRate(baud: number): Promise<boolean> {
+    // Close port if it was previously opened
+    await this.closePort();
+
+    try {
+      await this.port!.open({
+        baudRate: baud,
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none',
+      });
+    } catch (openErr) {
+      const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
+      if (openMsg.includes('already open') || openMsg.includes('already been opened')) {
+        this.emit('log', null, `Port already open — reusing at ${baud} baud`);
+      } else {
+        this.emit('log', null, `Failed to open at ${baud}: ${openMsg}`);
+        return false;
+      }
+    }
+
+    // Set up reader/writer
+    if (!this.port!.readable || !this.port!.writable) {
+      this.emit('log', null, `Port not readable/writable at ${baud}`);
+      return false;
+    }
+
+    this.reader = this.port!.readable.getReader();
+    this.writer = this.port!.writable.getWriter();
+    this.buffer = '';
+    this.readLoopActive = true;
+
+    // Start a temporary read loop with raw byte logging
+    const rawChunks: string[] = [];
+    let tempResolve: ((value: string) => void) | null = null;
+    let tempTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const tempReadLoop = async () => {
+      while (this.readLoopActive && this.reader) {
+        try {
+          const { value, done } = await this.reader.read();
+          if (done) break;
+          if (value) {
+            // Log raw bytes for debugging
+            const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            const ascii = this.decoder.decode(value, { stream: true });
+            rawChunks.push(ascii);
+            this.emit('log', null, `[RAW ${baud}] hex: ${hex}`);
+            this.emit('log', null, `[RAW ${baud}] ascii: ${JSON.stringify(ascii)}`);
+
+            this.buffer += ascii;
+
+            // Check for prompt character
+            if (this.buffer.includes('>')) {
+              const response = this.buffer.substring(0, this.buffer.indexOf('>')).replace(/[\r\n]+/g, '\n').trim();
+              this.buffer = this.buffer.substring(this.buffer.indexOf('>') + 1);
+              if (tempResolve) {
+                if (tempTimeout) { clearTimeout(tempTimeout); tempTimeout = null; }
+                tempResolve(response);
+                tempResolve = null;
+              }
+            }
+          }
+        } catch {
+          break;
+        }
+      }
+    };
+
+    const readPromise = tempReadLoop();
+
+    // Helper to send a command and wait for response with raw logging
+    const testCommand = (cmd: string, ms: number): Promise<string> => {
+      return new Promise<string>((resolve, reject) => {
+        tempResolve = resolve;
+        tempTimeout = setTimeout(() => {
+          tempResolve = null;
+          reject(new Error(`Timeout at ${baud}`));
+        }, ms);
+
+        const data = this.encoder.encode(cmd + '\r');
+        this.writer!.write(data).catch(reject);
+      });
+    };
+
+    try {
+      // Send a bare CR first to flush/wake the device
+      await this.writer.write(this.encoder.encode('\r'));
+      await new Promise(r => setTimeout(r, 300));
+      this.buffer = '';
+
+      // Try ATI first (lightweight identify, no full reset)
+      let response = '';
+      try {
+        response = await testCommand('ATI', 4000);
+      } catch {
+        // ATI timed out — try a bare CR to see if we get a prompt
+        this.buffer = '';
+        try {
+          response = await testCommand('', 3000);
+        } catch {
+          // Nothing at this baud rate
+        }
+      }
+
+      this.emit('log', null, `Response at ${baud}: "${response}"`);
+
+      // Check if we got a meaningful response
+      const lower = response.toLowerCase();
+      if (lower.includes('elm327') || lower.includes('stn') || lower.includes('obdlink') || lower.includes('v1.') || lower.includes('v2.') || lower.includes('ok')) {
+        this.emit('log', null, `Device detected at ${baud} baud!`);
+        // Stop the temp read loop and switch to the normal one
+        this.readLoopActive = false;
+        await this.cleanupReaderWriter();
+        // Reopen with the working baud rate using the normal flow
+        await this.closePort();
+        await this.port!.open({
+          baudRate: baud,
+          dataBits: 8,
+          stopBits: 1,
+          parity: 'none',
+          flowControl: 'none',
+        });
+        this.reader = this.port!.readable!.getReader();
+        this.writer = this.port!.writable!.getWriter();
+        this.buffer = '';
+        this.startReadLoop();
+        this.emit('log', null, `Serial port opened at ${baud} baud`);
+        return true;
+      }
+
+      // If we got raw garbage (baud mismatch), log it
+      if (rawChunks.length > 0 && !response) {
+        this.emit('log', null, `Got data at ${baud} but no valid response — likely baud mismatch`);
+      } else if (rawChunks.length === 0) {
+        this.emit('log', null, `No data received at ${baud}`);
+      }
+
+    } catch (err) {
+      this.emit('log', null, `Error testing ${baud}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Clean up for next attempt
+    this.readLoopActive = false;
+    await this.cleanupReaderWriter();
+    return false;
+  }
+
+  private async cleanupReaderWriter(): Promise<void> {
+    try {
+      if (this.reader) {
+        await this.reader.cancel().catch(() => {});
+        this.reader.releaseLock();
+        this.reader = null;
+      }
+    } catch { /* ignore */ }
+    try {
+      if (this.writer) {
+        this.writer.releaseLock();
+        this.writer = null;
+      }
+    } catch { /* ignore */ }
+  }
+
+  private async closePort(): Promise<void> {
+    await this.cleanupReaderWriter();
+    try {
+      if (this.port && this.port.readable !== null) {
+        await this.port.close();
+      }
+    } catch { /* ignore close errors — port may not be open */ }
   }
 
   async disconnect(): Promise<void> {
