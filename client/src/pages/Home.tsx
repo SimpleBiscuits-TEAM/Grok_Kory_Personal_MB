@@ -7,6 +7,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
@@ -217,17 +218,38 @@ export default function Home() {
                 </p>
               </div>
             </div>
-            {/* Right side — version badge */}
-            <div style={{
-              background: 'oklch(0.52 0.22 25)',
-              color: 'white',
-              padding: '4px 12px',
-              borderRadius: '2px',
-              fontFamily: '"Bebas Neue", sans-serif',
-              fontSize: '0.85rem',
-              letterSpacing: '0.1em'
-            }}>
-              L5P DURAMAX
+            {/* Right side — version badge + advanced mode */}
+            <div className="flex items-center gap-3">
+              <Link href="/advanced" style={{ textDecoration: 'none' }}>
+                <div className="ppei-btn-hover" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'oklch(0.16 0.008 260)',
+                  border: '1px solid oklch(0.28 0.008 260)',
+                  color: 'oklch(0.65 0.010 260)',
+                  padding: '4px 12px',
+                  borderRadius: '2px',
+                  fontFamily: '"Bebas Neue", sans-serif',
+                  fontSize: '0.8rem',
+                  letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}>
+                  ADVANCED
+                </div>
+              </Link>
+              <div style={{
+                background: 'oklch(0.52 0.22 25)',
+                color: 'white',
+                padding: '4px 12px',
+                borderRadius: '2px',
+                fontFamily: '"Bebas Neue", sans-serif',
+                fontSize: '0.85rem',
+                letterSpacing: '0.1em'
+              }}>
+                L5P DURAMAX
+              </div>
             </div>
           </div>
         </div>

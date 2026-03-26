@@ -389,6 +389,18 @@
     opacity: 1;
   }
 
+  /* Shake animation for invalid code */
+  @keyframes ppei-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+  .ppei-shake {
+    animation: ppei-shake 0.4s ease-in-out;
+  }
+
   /* Glowing red border on focus/active states */
   .ppei-input-focus:focus {
     border-color: oklch(0.52 0.22 25) !important;
