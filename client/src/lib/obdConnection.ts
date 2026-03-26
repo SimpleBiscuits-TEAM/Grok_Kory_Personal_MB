@@ -807,14 +807,68 @@ export class OBDConnection {
     this.setState('initializing');
 
     try {
-      // Step 1: Reset device
-      this.emit('log', null, 'Resetting device (ATZ)...');
-      const resetResponse = await this.sendCommand('ATZ', 8000);
-      this.emit('log', null, `Device: ${resetResponse}`);
+      // Step 0: Flush any stale data in the device buffer.
+      // Send a bare carriage return to cancel any in-progress command,
+      // then wait briefly for the device to settle.
+      this.emit('log', null, 'Flushing device buffer...');
+      try {
+        const flush = this.encoder.encode('\r');
+        await this.writer!.write(flush);
+        await new Promise(r => setTimeout(r, 500));
+        // Drain anything sitting in the read buffer
+        this.buffer = '';
+      } catch { /* ignore flush errors */ }
 
-      if (!resetResponse.toLowerCase().includes('elm327')) {
-        this.emit('error', null, 'Device did not respond with ELM327 identifier');
-        return false;
+      // Step 1: Reset device — ATZ causes a full reset which takes time.
+      // The OBDLink EX / STN chips can take 2-4 seconds to reset and
+      // send back the "ELM327 v..." banner followed by the ">" prompt.
+      this.emit('log', null, 'Resetting device (ATZ)...');
+      let resetResponse = '';
+      try {
+        resetResponse = await this.sendCommand('ATZ', 12000);
+      } catch (atzErr) {
+        // ATZ timed out — the device may need a nudge.
+        // Some OBDLink devices don't echo the > prompt after ATZ
+        // until they receive another character. Send a bare CR and wait.
+        this.emit('log', null, 'ATZ timed out, retrying with line break...');
+        this.buffer = '';
+        try {
+          const nudge = this.encoder.encode('\r');
+          await this.writer!.write(nudge);
+          await new Promise(r => setTimeout(r, 2000));
+          // Check if anything arrived in the buffer
+          if (this.buffer.includes('>')) {
+            resetResponse = this.buffer.substring(0, this.buffer.indexOf('>')).replace(/[\r\n]+/g, '\n').trim();
+            this.buffer = this.buffer.substring(this.buffer.indexOf('>') + 1);
+          }
+        } catch { /* ignore */ }
+
+        // Still nothing? Try sending ATZ again
+        if (!resetResponse) {
+          this.emit('log', null, 'Sending ATZ again...');
+          try {
+            resetResponse = await this.sendCommand('ATZ', 12000);
+          } catch {
+            // Last resort: try ATI (identify) instead of full reset
+            this.emit('log', null, 'ATZ failed again, trying ATI...');
+            try {
+              resetResponse = await this.sendCommand('ATI', 5000);
+            } catch {
+              this.emit('error', null, 'Device not responding to any commands. Try: 1) Unplug and re-plug USB, 2) Turn ignition OFF then ON, 3) Close other apps using the port.');
+              return false;
+            }
+          }
+        }
+      }
+
+      this.emit('log', null, `Device response: ${resetResponse}`);
+
+      // Accept ELM327 or STN identifiers (OBDLink uses STN chips that report as ELM327)
+      const lowerResp = resetResponse.toLowerCase();
+      if (!lowerResp.includes('elm327') && !lowerResp.includes('stn') && !lowerResp.includes('obdlink')) {
+        // The device responded but didn't identify itself — might still work.
+        // Log a warning but continue instead of failing hard.
+        this.emit('log', null, `Warning: unexpected device ID: "${resetResponse}". Continuing anyway...`);
       }
 
       // Step 2: Echo off
