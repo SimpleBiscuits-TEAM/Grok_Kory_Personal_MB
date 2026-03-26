@@ -21,7 +21,7 @@ export interface OBDConnectionConfig {
 }
 
 export interface PIDDefinition {
-  pid: number;
+  pid: number;             // 1-byte PID for Mode 01, or 2-byte DID for Mode 22
   name: string;
   shortName: string;
   unit: string;
@@ -29,8 +29,8 @@ export interface PIDDefinition {
   max: number;
   formula: (bytes: number[]) => number;
   bytes: number;           // Expected response byte count (A, B, C, D)
-  service?: number;        // Default: 0x01
-  category: 'engine' | 'turbo' | 'transmission' | 'emissions' | 'fuel' | 'electrical' | 'other';
+  service?: number;        // Default: 0x01. Use 0x22 for GM extended PIDs
+  category: 'engine' | 'turbo' | 'transmission' | 'emissions' | 'fuel' | 'electrical' | 'exhaust' | 'def' | 'other';
 }
 
 export interface PIDReading {
@@ -192,9 +192,12 @@ export const STANDARD_PIDS: PIDDefinition[] = [
 // ─── PID Preset Groups ──────────────────────────────────────────────────────
 
 export interface PIDPreset {
+  id?: string;             // Unique ID for custom presets (undefined for built-in)
   name: string;
   description: string;
   pids: number[];
+  isCustom?: boolean;      // true for user-created presets
+  createdAt?: number;      // timestamp for custom presets
 }
 
 export const PID_PRESETS: PIDPreset[] = [
@@ -229,6 +232,330 @@ export const PID_PRESETS: PIDPreset[] = [
     pids: [0x0C, 0x0D, 0xA4, 0x05, 0x42],
   },
 ];
+
+// ─── GM Mode 22 Extended PIDs (Diesel-Specific) ────────────────────────────
+// These use UDS ReadDataByIdentifier (Service 0x22) with 2-byte DIDs.
+// GM Duramax-specific parameters not available via standard OBD-II Mode 01.
+
+export const GM_EXTENDED_PIDS: PIDDefinition[] = [
+  // ── Fuel System ──
+  {
+    pid: 0x0564, name: 'Commanded Fuel Rail Pressure', shortName: 'FRP_CMD',
+    unit: 'MPa', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00390625,
+  },
+  {
+    pid: 0x0565, name: 'Actual Fuel Rail Pressure', shortName: 'FRP_ACT',
+    unit: 'MPa', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00390625,
+  },
+  {
+    pid: 0x054A, name: 'Fuel Rail Pressure Deviation', shortName: 'FRP_DEV',
+    unit: 'MPa', min: -50, max: 50, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.00390625,
+  },
+  {
+    pid: 0x056C, name: 'Fuel Injection Timing', shortName: 'INJ_TMG',
+    unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.0078125,
+  },
+  {
+    pid: 0x056D, name: 'Fuel Injection Quantity', shortName: 'INJ_QTY',
+    unit: 'mm³/stroke', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x0549, name: 'Pressure Control Valve (PCV) Duty', shortName: 'PCV_DUTY',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x1940, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1941, name: 'Injector Balance Rate Cyl 2', shortName: 'IBR_2',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1942, name: 'Injector Balance Rate Cyl 3', shortName: 'IBR_3',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1943, name: 'Injector Balance Rate Cyl 4', shortName: 'IBR_4',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1944, name: 'Injector Balance Rate Cyl 5', shortName: 'IBR_5',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1945, name: 'Injector Balance Rate Cyl 6', shortName: 'IBR_6',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1946, name: 'Injector Balance Rate Cyl 7', shortName: 'IBR_7',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  {
+    pid: 0x1947, name: 'Injector Balance Rate Cyl 8', shortName: 'IBR_8',
+    unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+  },
+  // ── Turbo / Boost ──
+  {
+    pid: 0x0572, name: 'Commanded Boost Pressure', shortName: 'BOOST_CMD',
+    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'turbo',
+    formula: ([a, b]) => ((a * 256) + b) * 0.0078125,
+  },
+  {
+    pid: 0x0573, name: 'Actual Boost Pressure', shortName: 'BOOST_ACT',
+    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'turbo',
+    formula: ([a, b]) => ((a * 256) + b) * 0.0078125,
+  },
+  {
+    pid: 0x0574, name: 'VGT Turbo Vane Position Commanded', shortName: 'VGT_CMD',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x0575, name: 'VGT Turbo Vane Position Actual', shortName: 'VGT_ACT',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x0576, name: 'Turbo Speed', shortName: 'TURBO_RPM',
+    unit: 'rpm', min: 0, max: 300000, bytes: 2, service: 0x22, category: 'turbo',
+    formula: ([a, b]) => ((a * 256) + b) * 4,
+  },
+  {
+    pid: 0x057A, name: 'Charge Air Cooler Outlet Temp', shortName: 'CAC_OUT',
+    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'turbo',
+    formula: ([a]) => a - 40,
+  },
+  // ── Exhaust / DPF ──
+  {
+    pid: 0x1A10, name: 'DPF Soot Load', shortName: 'DPF_SOOT',
+    unit: 'g', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x1A11, name: 'DPF Differential Pressure', shortName: 'DPF_DP',
+    unit: 'kPa', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x1A12, name: 'DPF Inlet Temperature', shortName: 'DPF_IN_T',
+    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+  },
+  {
+    pid: 0x1A13, name: 'DPF Outlet Temperature', shortName: 'DPF_OUT_T',
+    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+  },
+  {
+    pid: 0x1A14, name: 'DPF Regen Status', shortName: 'DPF_REGEN',
+    unit: '', min: 0, max: 3, bytes: 1, service: 0x22, category: 'exhaust',
+    formula: ([a]) => a,  // 0=Not Active, 1=Requested, 2=Active, 3=Forced
+  },
+  {
+    pid: 0x1A15, name: 'DPF Regen Count (lifetime)', shortName: 'DPF_REGEN_CT',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1A16, name: 'Distance Since Last DPF Regen', shortName: 'DPF_DIST',
+    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x0580, name: 'EGT Bank 1 Sensor 1 (Pre-Turbo)', shortName: 'EGT_PRE',
+    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+  },
+  {
+    pid: 0x0581, name: 'EGT Bank 1 Sensor 2 (Post-Turbo)', shortName: 'EGT_POST',
+    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+  },
+  // ── DEF / SCR ──
+  {
+    pid: 0x1A20, name: 'DEF Tank Level', shortName: 'DEF_LVL',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x1A21, name: 'DEF Tank Temperature', shortName: 'DEF_TEMP',
+    unit: '°C', min: -40, max: 120, bytes: 1, service: 0x22, category: 'def',
+    formula: ([a]) => a - 40,
+  },
+  {
+    pid: 0x1A22, name: 'DEF Dosing Rate', shortName: 'DEF_DOSE',
+    unit: 'mL/min', min: 0, max: 500, bytes: 2, service: 0x22, category: 'def',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x1A23, name: 'SCR Inlet NOx', shortName: 'NOX_IN',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'def',
+    formula: ([a, b]) => ((a * 256) + b) * 0.05,
+  },
+  {
+    pid: 0x1A24, name: 'SCR Outlet NOx', shortName: 'NOX_OUT',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'def',
+    formula: ([a, b]) => ((a * 256) + b) * 0.05,
+  },
+  {
+    pid: 0x1A25, name: 'SCR Catalyst Temperature', shortName: 'SCR_TEMP',
+    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'def',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+  },
+  {
+    pid: 0x1A26, name: 'DEF Quality', shortName: 'DEF_QUAL',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── EGR Extended ──
+  {
+    pid: 0x0590, name: 'EGR Mass Flow Rate', shortName: 'EGR_FLOW',
+    unit: 'kg/h', min: 0, max: 500, bytes: 2, service: 0x22, category: 'emissions',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x0591, name: 'EGR Cooler Bypass Position', shortName: 'EGR_BYP',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── Transmission Extended ──
+  {
+    pid: 0x05A0, name: 'Transmission Fluid Temperature', shortName: 'TFT',
+    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'transmission',
+    formula: ([a]) => a - 40,
+  },
+  {
+    pid: 0x05A1, name: 'TCC Slip Speed', shortName: 'TCC_SLIP',
+    unit: 'rpm', min: -1000, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    formula: ([a, b]) => (((a * 256) + b) - 32768),
+  },
+  {
+    pid: 0x05A2, name: 'Commanded TCC Pressure', shortName: 'TCC_CMD',
+    unit: 'kPa', min: 0, max: 2500, bytes: 2, service: 0x22, category: 'transmission',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x05A3, name: 'Transmission Output Speed', shortName: 'TRANS_OUT',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x05A4, name: 'Transmission Input Speed', shortName: 'TRANS_IN',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  // ── Engine Extended ──
+  {
+    pid: 0x05B0, name: 'Engine Oil Temperature', shortName: 'EOT',
+    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'engine',
+    formula: ([a]) => a - 40,
+  },
+  {
+    pid: 0x05B1, name: 'Engine Oil Pressure', shortName: 'EOP',
+    unit: 'kPa', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x05B2, name: 'Engine Oil Life Remaining', shortName: 'OIL_LIFE',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x05B3, name: 'Fuel Filter Life Remaining', shortName: 'FUEL_FILT',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    formula: ([a]) => (a * 100) / 255,
+  },
+];
+
+// ─── Combined PID List (all available PIDs) ─────────────────────────────────
+
+export const ALL_PIDS: PIDDefinition[] = [...STANDARD_PIDS, ...GM_EXTENDED_PIDS];
+
+// ─── Custom Preset Management ───────────────────────────────────────────────
+
+const CUSTOM_PRESETS_KEY = 'ppei_custom_presets';
+
+export function loadCustomPresets(): PIDPreset[] {
+  try {
+    const stored = localStorage.getItem(CUSTOM_PRESETS_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.map((p: PIDPreset) => ({ ...p, isCustom: true })) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomPresets(presets: PIDPreset[]): void {
+  localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+}
+
+export function createCustomPreset(name: string, description: string, pids: number[]): PIDPreset {
+  return {
+    id: `custom_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    name,
+    description,
+    pids,
+    isCustom: true,
+    createdAt: Date.now(),
+  };
+}
+
+export function deleteCustomPreset(presets: PIDPreset[], presetId: string): PIDPreset[] {
+  const updated = presets.filter(p => p.id !== presetId);
+  saveCustomPresets(updated);
+  return updated;
+}
+
+export function updateCustomPreset(
+  presets: PIDPreset[],
+  presetId: string,
+  updates: Partial<Pick<PIDPreset, 'name' | 'description' | 'pids'>>
+): PIDPreset[] {
+  const updated = presets.map(p => {
+    if (p.id !== presetId) return p;
+    return { ...p, ...updates };
+  });
+  saveCustomPresets(updated);
+  return updated;
+}
+
+export function getAllPresets(): PIDPreset[] {
+  return [...PID_PRESETS, ...loadCustomPresets()];
+}
+
+// ─── PID Lookup Helpers ─────────────────────────────────────────────────────
+
+export function findPidByNumber(pid: number): PIDDefinition | undefined {
+  return ALL_PIDS.find(p => p.pid === pid);
+}
+
+export function getPidsByCategory(category: PIDDefinition['category']): PIDDefinition[] {
+  return ALL_PIDS.filter(p => p.category === category);
+}
+
+export function getMode22Pids(): PIDDefinition[] {
+  return GM_EXTENDED_PIDS;
+}
+
+export function getMode01Pids(): PIDDefinition[] {
+  return STANDARD_PIDS;
+}
 
 // ─── OBD Connection Class ────────────────────────────────────────────────────
 
@@ -610,11 +937,22 @@ export class OBDConnection {
     return STANDARD_PIDS.filter(p => this.supportedPids.has(p.pid));
   }
 
+  // Mode 22 PIDs are always "available" since we can't query support via Mode 01
+  getAvailableExtendedPids(): PIDDefinition[] {
+    return GM_EXTENDED_PIDS;
+  }
+
+  getAllAvailablePids(): PIDDefinition[] {
+    return [...this.getAvailablePids(), ...this.getAvailableExtendedPids()];
+  }
+
   // ─── Single PID Request ──────────────────────────────────────────────────
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     const service = pid.service ?? 0x01;
-    const command = `${service.toString(16).padStart(2, '0')}${pid.pid.toString(16).padStart(2, '0')}`;
+    // Mode 22 uses 2-byte DIDs, Mode 01 uses 1-byte PIDs
+    const pidHexLen = service === 0x22 ? 4 : 2;
+    const command = `${service.toString(16).padStart(2, '0')}${pid.pid.toString(16).padStart(pidHexLen, '0')}`;
     
     try {
       const response = await this.sendCommand(command, 3000);
@@ -630,13 +968,18 @@ export class OBDConnection {
     const results: PIDReading[] = [];
     
     // CAN supports up to 6 PIDs per request in Service 01
-    // Batch them for maximum throughput
+    // Mode 22 PIDs must be requested individually (2-byte DID)
     const batches: PIDDefinition[][] = [];
     let currentBatch: PIDDefinition[] = [];
     
     for (const pid of pids) {
+      if ((pid.service ?? 0x01) === 0x22) {
+        // Mode 22 PIDs use 2-byte DIDs, request individually
+        batches.push([pid]);
+        continue;
+      }
       if ((pid.service ?? 0x01) !== 0x01) {
-        // Non-service-01 PIDs must be requested individually
+        // Other non-service-01 PIDs also individually
         batches.push([pid]);
         continue;
       }
@@ -685,7 +1028,9 @@ export class OBDConnection {
 
     const service = pid.service ?? 0x01;
     const responseService = (service + 0x40).toString(16).padStart(2, '0').toUpperCase();
-    const pidHex = pid.pid.toString(16).padStart(2, '0').toUpperCase();
+    // Mode 22 response uses 2-byte DID (62 XXYY), Mode 01 uses 1-byte (41 XX)
+    const pidHexLen = service === 0x22 ? 4 : 2;
+    const pidHex = pid.pid.toString(16).padStart(pidHexLen, '0').toUpperCase();
     const marker = `${responseService}${pidHex}`;
     
     const idx = cleaned.toUpperCase().indexOf(marker);

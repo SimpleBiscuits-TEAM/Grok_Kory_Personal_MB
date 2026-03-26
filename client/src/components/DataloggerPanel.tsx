@@ -3,7 +3,8 @@
  * 
  * Features:
  * - WebSerial connection to OBDLink EX (ELM327/STN2xx protocol)
- * - PID selection with preset groups (Engine, Turbo, Fuel, Emissions, etc.)
+ * - Standard Mode 01 + GM Mode 22 extended PIDs (diesel-specific)
+ * - PID selection with built-in and user-customizable preset groups
  * - Real-time gauge display with live values
  * - Real-time scrolling chart
  * - Session recording with CSV export
@@ -15,12 +16,16 @@ import {
   Wifi, WifiOff, Play, Square, Download, BarChart3,
   Settings, AlertCircle, CheckCircle, Loader2, Gauge,
   Activity, Zap, ChevronDown, ChevronRight, RefreshCw,
-  Trash2, Terminal, Radio, Cpu
+  Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
+  Flame, Droplets, Wind, Thermometer, Star
 } from 'lucide-react';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
-  LogSession, STANDARD_PIDS, PID_PRESETS, PIDPreset,
-  exportSessionToCSV, sessionToAnalyzerCSV
+  LogSession, STANDARD_PIDS, GM_EXTENDED_PIDS, ALL_PIDS,
+  PID_PRESETS, PIDPreset,
+  exportSessionToCSV, sessionToAnalyzerCSV,
+  loadCustomPresets, saveCustomPresets, createCustomPreset,
+  deleteCustomPreset, updateCustomPreset, getAllPresets
 } from '@/lib/obdConnection';
 
 // ─── Styles ────────────────────────────────────────────────────────────────
@@ -30,8 +35,9 @@ const sColor = {
   bg: 'oklch(0.10 0.005 260)', bgCard: 'oklch(0.13 0.006 260)',
   border: 'oklch(0.22 0.008 260)', borderLight: 'oklch(0.18 0.006 260)',
   red: 'oklch(0.52 0.22 25)', green: 'oklch(0.65 0.20 145)', blue: 'oklch(0.70 0.18 200)',
-  yellow: 'oklch(0.75 0.18 60)', text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  yellow: 'oklch(0.75 0.18 60)', orange: 'oklch(0.65 0.20 55)',
+  text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.55 0.010 260)',
+  textMuted: 'oklch(0.45 0.008 260)', purple: 'oklch(0.60 0.20 300)',
 };
 
 // ─── Gauge Component ───────────────────────────────────────────────────────
@@ -40,8 +46,8 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
   const value = reading?.value ?? 0;
   const range = pid.max - pid.min;
   const pct = Math.max(0, Math.min(100, ((value - pid.min) / range) * 100));
+  const isMode22 = (pid.service ?? 0x01) === 0x22;
   
-  // Color based on percentage
   const getColor = (p: number) => {
     if (p < 25) return sColor.blue;
     if (p < 50) return sColor.green;
@@ -52,11 +58,18 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
   return (
     <div style={{
       background: sColor.bgCard, border: `1px solid ${sColor.border}`,
-      borderLeft: `3px solid ${getColor(pct)}`, borderRadius: '3px',
+      borderLeft: `3px solid ${isMode22 ? sColor.orange : getColor(pct)}`, borderRadius: '3px',
       padding: '12px 16px', minWidth: '180px',
     }}>
-      <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, letterSpacing: '0.08em', marginBottom: '4px', textTransform: 'uppercase' }}>
-        {pid.shortName}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+        {isMode22 && (
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'oklch(0.15 0.02 55 / 0.4)', padding: '1px 4px', borderRadius: '2px' }}>
+            M22
+          </span>
+        )}
+        <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          {pid.shortName}
+        </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
         <span style={{ fontFamily: sFont.mono, fontSize: '1.8rem', fontWeight: 700, color: sColor.text, lineHeight: 1 }}>
@@ -66,7 +79,6 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
           {pid.unit}
         </span>
       </div>
-      {/* Mini bar */}
       <div style={{ marginTop: '6px', height: '3px', background: 'oklch(0.15 0.005 260)', borderRadius: '2px', overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.15s ease-out' }} />
       </div>
@@ -97,16 +109,18 @@ function MiniChart({ readings, pid, maxPoints = 100 }: { readings: PIDReading[];
     return `${x},${y}`;
   }).join(' ');
 
+  const isMode22 = (pid.service ?? 0x01) === 0x22;
+
   return (
     <div style={{ background: 'oklch(0.08 0.004 260)', borderRadius: '3px', padding: '4px', overflow: 'hidden' }}>
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', width: '100%', height: 'auto' }}>
-        <polyline points={points} fill="none" stroke={sColor.red} strokeWidth="1.5" strokeLinejoin="round" />
+        <polyline points={points} fill="none" stroke={isMode22 ? sColor.orange : sColor.red} strokeWidth="1.5" strokeLinejoin="round" />
       </svg>
       <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px 0' }}>
         <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>
           min: {min.toFixed(1)}
         </span>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim }}>
+        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: isMode22 ? sColor.orange : sColor.textDim }}>
           {pid.shortName}
         </span>
         <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>
@@ -137,54 +151,336 @@ function StatusBadge({ state }: { state: ConnectionState }) {
   );
 }
 
-// ─── PID Selector ──────────────────────────────────────────────────────────
+// ─── Custom Preset Dialog ─────────────────────────────────────────────────
+
+function CustomPresetDialog({
+  open, onClose, onSave, editPreset, selectedPids
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSave: (name: string, description: string, pids: number[]) => void;
+  editPreset?: PIDPreset | null;
+  selectedPids: Set<number>;
+}) {
+  const [name, setName] = useState(editPreset?.name || '');
+  const [description, setDescription] = useState(editPreset?.description || '');
+  const [presetPids, setPresetPids] = useState<Set<number>>(
+    new Set(editPreset?.pids || Array.from(selectedPids))
+  );
+  const [pidFilter, setPidFilter] = useState('');
+  const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'mode22'>('all');
+
+  useEffect(() => {
+    if (open) {
+      setName(editPreset?.name || '');
+      setDescription(editPreset?.description || '');
+      setPresetPids(new Set(editPreset?.pids || Array.from(selectedPids)));
+      setPidFilter('');
+    }
+  }, [open, editPreset, selectedPids]);
+
+  if (!open) return null;
+
+  const filteredPids = ALL_PIDS.filter(p => {
+    if (pidSource === 'mode01' && (p.service ?? 0x01) !== 0x01) return false;
+    if (pidSource === 'mode22' && (p.service ?? 0x01) !== 0x22) return false;
+    if (pidFilter) {
+      const q = pidFilter.toLowerCase();
+      return p.name.toLowerCase().includes(q) || p.shortName.toLowerCase().includes(q) ||
+             p.category.toLowerCase().includes(q) || p.unit.toLowerCase().includes(q) ||
+             `0x${p.pid.toString(16)}`.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const groupedPids = new Map<string, PIDDefinition[]>();
+  for (const p of filteredPids) {
+    const key = p.category;
+    const list = groupedPids.get(key) || [];
+    list.push(p);
+    groupedPids.set(key, list);
+  }
+
+  const handleSave = () => {
+    if (!name.trim()) return;
+    onSave(name.trim(), description.trim(), Array.from(presetPids));
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
+    }} onClick={onClose}>
+      <div
+        style={{
+          background: sColor.bg, border: `1px solid ${sColor.border}`,
+          borderRadius: '6px', width: '100%', maxWidth: '700px', maxHeight: '80vh',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: `1px solid ${sColor.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.text, letterSpacing: '0.1em' }}>
+            {editPreset ? 'EDIT PRESET' : 'CREATE CUSTOM PRESET'}
+          </span>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: sColor.textDim, cursor: 'pointer' }}>
+            <X style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        {/* Form */}
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${sColor.border}` }}>
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>
+                Preset Name *
+              </label>
+              <input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="My Duramax Tune"
+                style={{
+                  width: '100%', padding: '8px 12px', background: 'oklch(0.08 0.004 260)',
+                  border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                  fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.text,
+                  outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: '4px' }}>
+                Description
+              </label>
+              <input
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="FRP + Boost + EGT monitoring"
+                style={{
+                  width: '100%', padding: '8px 12px', background: 'oklch(0.08 0.004 260)',
+                  border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                  fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.text,
+                  outline: 'none',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* PID Selector */}
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '12px 20px', borderBottom: `1px solid ${sColor.borderLight}`, display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              value={pidFilter}
+              onChange={e => setPidFilter(e.target.value)}
+              placeholder="Search PIDs..."
+              style={{
+                flex: 1, padding: '6px 10px', background: 'oklch(0.08 0.004 260)',
+                border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.text, outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {(['all', 'mode01', 'mode22'] as const).map(src => (
+                <button
+                  key={src}
+                  onClick={() => setPidSource(src)}
+                  style={{
+                    padding: '4px 8px', borderRadius: '3px',
+                    fontFamily: sFont.mono, fontSize: '0.65rem',
+                    background: pidSource === src ? (src === 'mode22' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
+                    border: `1px solid ${pidSource === src ? (src === 'mode22' ? sColor.orange : sColor.red) : sColor.border}`,
+                    color: pidSource === src ? sColor.text : sColor.textDim,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {src === 'all' ? 'ALL' : src === 'mode01' ? 'STD' : 'GM EXT'}
+                </button>
+              ))}
+            </div>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.red }}>
+              {presetPids.size} selected
+            </span>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 20px' }}>
+            {Array.from(groupedPids.entries()).map(([category, pids]) => (
+              <div key={category} style={{ marginBottom: '8px' }}>
+                <div style={{
+                  fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.textDim,
+                  letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px',
+                  borderBottom: `1px solid ${sColor.borderLight}`, paddingBottom: '2px',
+                }}>
+                  {category} ({pids.filter(p => presetPids.has(p.pid)).length}/{pids.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                  {pids.map(pid => {
+                    const isMode22 = (pid.service ?? 0x01) === 0x22;
+                    const isSelected = presetPids.has(pid.pid);
+                    return (
+                      <label
+                        key={`${pid.service}-${pid.pid}`}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '8px', padding: '3px 6px',
+                          cursor: 'pointer', borderRadius: '2px',
+                          background: isSelected ? 'oklch(0.15 0.01 25 / 0.3)' : 'transparent',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            const next = new Set(presetPids);
+                            if (next.has(pid.pid)) next.delete(pid.pid);
+                            else next.add(pid.pid);
+                            setPresetPids(next);
+                          }}
+                          style={{ accentColor: isMode22 ? sColor.orange : sColor.red }}
+                        />
+                        {isMode22 && (
+                          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'oklch(0.15 0.02 55 / 0.4)', padding: '1px 3px', borderRadius: '2px' }}>
+                            M22
+                          </span>
+                        )}
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, minWidth: '40px' }}>
+                          0x{pid.pid.toString(16).toUpperCase().padStart(isMode22 ? 4 : 2, '0')}
+                        </span>
+                        <span style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.text, flex: 1 }}>
+                          {pid.name}
+                        </span>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }}>
+                          {pid.unit}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 20px', borderTop: `1px solid ${sColor.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>
+            {presetPids.size} PIDs ({Array.from(presetPids).filter(p => GM_EXTENDED_PIDS.some(e => e.pid === p)).length} Mode 22)
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '8px 16px', background: 'oklch(0.15 0.008 260)',
+                border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                color: sColor.text, fontFamily: sFont.body, fontSize: '0.8rem', cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!name.trim() || presetPids.size === 0}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '8px 16px', background: sColor.red, border: 'none',
+                borderRadius: '3px', color: 'white',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
+                cursor: name.trim() && presetPids.size > 0 ? 'pointer' : 'not-allowed',
+                opacity: name.trim() && presetPids.size > 0 ? 1 : 0.5,
+              }}
+            >
+              <Save style={{ width: 14, height: 14 }} />
+              {editPreset ? 'UPDATE' : 'SAVE PRESET'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PID Selector (with Mode 22 + Custom Presets) ──────────────────────────
 
 function PIDSelector({
-  selectedPids, onTogglePid, onApplyPreset, supportedPids, disabled
+  selectedPids, onTogglePid, onApplyPreset, supportedPids, disabled,
+  customPresets, onCreatePreset, onEditPreset, onDeletePreset
 }: {
   selectedPids: Set<number>;
   onTogglePid: (pid: number) => void;
   onApplyPreset: (preset: PIDPreset) => void;
   supportedPids: Set<number> | null;
   disabled: boolean;
+  customPresets: PIDPreset[];
+  onCreatePreset: () => void;
+  onEditPreset: (preset: PIDPreset) => void;
+  onDeletePreset: (presetId: string) => void;
 }) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>('engine');
+  const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'mode22'>('all');
 
   const categories = useMemo(() => {
     const cats = new Map<string, PIDDefinition[]>();
-    for (const pid of STANDARD_PIDS) {
+    const pidsToShow = pidSource === 'mode01' ? STANDARD_PIDS : pidSource === 'mode22' ? GM_EXTENDED_PIDS : ALL_PIDS;
+    for (const pid of pidsToShow) {
       const list = cats.get(pid.category) || [];
       list.push(pid);
       cats.set(pid.category, list);
     }
     return cats;
-  }, []);
+  }, [pidSource]);
 
   const categoryIcons: Record<string, React.ReactNode> = {
     engine: <Cpu style={{ width: 14, height: 14 }} />,
-    turbo: <Zap style={{ width: 14, height: 14 }} />,
-    fuel: <Activity style={{ width: 14, height: 14 }} />,
+    turbo: <Wind style={{ width: 14, height: 14 }} />,
+    fuel: <Flame style={{ width: 14, height: 14 }} />,
     emissions: <AlertCircle style={{ width: 14, height: 14 }} />,
     transmission: <Settings style={{ width: 14, height: 14 }} />,
     electrical: <Zap style={{ width: 14, height: 14 }} />,
+    exhaust: <Thermometer style={{ width: 14, height: 14 }} />,
+    def: <Droplets style={{ width: 14, height: 14 }} />,
     other: <BarChart3 style={{ width: 14, height: 14 }} />,
   };
 
   return (
     <div>
-      {/* Presets */}
+      {/* Source Filter */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+        {(['all', 'mode01', 'mode22'] as const).map(src => (
+          <button
+            key={src}
+            onClick={() => setPidSource(src)}
+            style={{
+              flex: 1, padding: '4px 6px', borderRadius: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem', letterSpacing: '0.05em',
+              background: pidSource === src ? (src === 'mode22' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
+              border: `1px solid ${pidSource === src ? (src === 'mode22' ? sColor.orange : sColor.red) : sColor.borderLight}`,
+              color: pidSource === src ? sColor.text : sColor.textMuted,
+              cursor: 'pointer',
+            }}
+          >
+            {src === 'all' ? 'ALL' : src === 'mode01' ? 'STD (01)' : 'GM EXT (22)'}
+          </button>
+        ))}
+      </div>
+
+      {/* Built-in Presets */}
       <div style={{ marginBottom: '12px' }}>
-        <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.textDim, letterSpacing: '0.1em', marginBottom: '8px' }}>
-          QUICK PRESETS
+        <div style={{ fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.textDim, letterSpacing: '0.1em', marginBottom: '6px' }}>
+          BUILT-IN PRESETS
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
           {PID_PRESETS.map(preset => (
             <button
               key={preset.name}
               onClick={() => onApplyPreset(preset)}
               disabled={disabled}
               style={{
-                fontFamily: sFont.body, fontSize: '0.75rem', padding: '4px 10px',
+                fontFamily: sFont.body, fontSize: '0.7rem', padding: '3px 8px',
                 background: 'oklch(0.15 0.008 260)', border: `1px solid ${sColor.border}`,
                 borderRadius: '3px', color: sColor.text, cursor: disabled ? 'not-allowed' : 'pointer',
                 opacity: disabled ? 0.5 : 1, transition: 'all 0.15s',
@@ -199,6 +495,77 @@ function PIDSelector({
         </div>
       </div>
 
+      {/* Custom Presets */}
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <span style={{ fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.orange, letterSpacing: '0.1em' }}>
+            MY PRESETS
+          </span>
+          <button
+            onClick={onCreatePreset}
+            disabled={disabled}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '3px',
+              padding: '2px 6px', background: 'oklch(0.15 0.02 55 / 0.3)',
+              border: `1px solid ${sColor.orange}`, borderRadius: '3px',
+              color: sColor.orange, fontFamily: sFont.mono, fontSize: '0.6rem',
+              cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+            }}
+          >
+            <Plus style={{ width: 10, height: 10 }} /> NEW
+          </button>
+        </div>
+        {customPresets.length === 0 ? (
+          <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, padding: '6px 0' }}>
+            No custom presets yet. Click + NEW to create one.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {customPresets.map(preset => (
+              <div
+                key={preset.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px',
+                  background: 'oklch(0.12 0.01 55 / 0.15)', border: `1px solid ${sColor.borderLight}`,
+                  borderRadius: '3px',
+                }}
+              >
+                <Star style={{ width: 12, height: 12, color: sColor.orange, flexShrink: 0 }} />
+                <button
+                  onClick={() => onApplyPreset(preset)}
+                  disabled={disabled}
+                  style={{
+                    flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
+                    color: sColor.text, fontFamily: sFont.body, fontSize: '0.75rem',
+                    cursor: disabled ? 'not-allowed' : 'pointer', padding: 0,
+                  }}
+                  title={preset.description || `${preset.pids.length} PIDs`}
+                >
+                  {preset.name}
+                  <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, marginLeft: '6px' }}>
+                    ({preset.pids.length})
+                  </span>
+                </button>
+                <button
+                  onClick={() => onEditPreset(preset)}
+                  style={{ background: 'transparent', border: 'none', color: sColor.textDim, cursor: 'pointer', padding: '2px' }}
+                  title="Edit preset"
+                >
+                  <Edit2 style={{ width: 11, height: 11 }} />
+                </button>
+                <button
+                  onClick={() => { if (preset.id) onDeletePreset(preset.id); }}
+                  style={{ background: 'transparent', border: 'none', color: sColor.textMuted, cursor: 'pointer', padding: '2px' }}
+                  title="Delete preset"
+                >
+                  <Trash2 style={{ width: 11, height: 11 }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Category groups */}
       {Array.from(categories.entries()).map(([category, pids]) => (
         <div key={category} style={{ marginBottom: '4px' }}>
@@ -206,28 +573,29 @@ function PIDSelector({
             onClick={() => setExpandedCategory(expandedCategory === category ? null : category)}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
-              padding: '6px 8px', background: 'transparent', border: 'none',
-              color: sColor.text, cursor: 'pointer', fontFamily: sFont.body, fontSize: '0.8rem',
+              padding: '5px 6px', background: 'transparent', border: 'none',
+              color: sColor.text, cursor: 'pointer', fontFamily: sFont.body, fontSize: '0.75rem',
               textTransform: 'uppercase', letterSpacing: '0.06em',
             }}
           >
             {expandedCategory === category ? <ChevronDown style={{ width: 12, height: 12 }} /> : <ChevronRight style={{ width: 12, height: 12 }} />}
             {categoryIcons[category] || null}
             {category}
-            <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginLeft: 'auto' }}>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginLeft: 'auto' }}>
               {pids.filter(p => selectedPids.has(p.pid)).length}/{pids.length}
             </span>
           </button>
           {expandedCategory === category && (
-            <div style={{ paddingLeft: '24px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
               {pids.map(pid => {
-                const isSupported = supportedPids === null || supportedPids.has(pid.pid);
+                const isMode22 = (pid.service ?? 0x01) === 0x22;
+                const isSupported = isMode22 || supportedPids === null || supportedPids.has(pid.pid);
                 const isSelected = selectedPids.has(pid.pid);
                 return (
                   <label
-                    key={pid.pid}
+                    key={`${pid.service}-${pid.pid}`}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 6px',
+                      display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 4px',
                       cursor: disabled ? 'not-allowed' : 'pointer',
                       opacity: isSupported ? 1 : 0.4,
                       borderRadius: '2px', background: isSelected ? 'oklch(0.15 0.01 25 / 0.3)' : 'transparent',
@@ -238,19 +606,24 @@ function PIDSelector({
                       checked={isSelected}
                       onChange={() => onTogglePid(pid.pid)}
                       disabled={disabled || !isSupported}
-                      style={{ accentColor: sColor.red }}
+                      style={{ accentColor: isMode22 ? sColor.orange : sColor.red }}
                     />
-                    <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, minWidth: '32px' }}>
-                      0x{pid.pid.toString(16).toUpperCase().padStart(2, '0')}
+                    {isMode22 && (
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.orange, background: 'oklch(0.15 0.02 55 / 0.4)', padding: '0px 3px', borderRadius: '2px' }}>
+                        M22
+                      </span>
+                    )}
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, minWidth: isMode22 ? '40px' : '28px' }}>
+                      0x{pid.pid.toString(16).toUpperCase().padStart(isMode22 ? 4 : 2, '0')}
                     </span>
-                    <span style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.text, flex: 1 }}>
+                    <span style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.text, flex: 1 }}>
                       {pid.name}
                     </span>
-                    <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }}>
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim }}>
                       {pid.unit}
                     </span>
                     {!isSupported && (
-                      <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>N/A</span>
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textMuted }}>N/A</span>
                     )}
                   </label>
                 );
@@ -318,10 +691,12 @@ function SessionList({
           const duration = ((session.endTime || Date.now()) - session.startTime) / 1000;
           let totalSamples = 0;
           session.readings.forEach(arr => { totalSamples += arr.length; });
+          const hasMode22 = session.pids.some(p => (p.service ?? 0x01) === 0x22);
 
           return (
             <div key={session.id} style={{
               background: sColor.bgCard, border: `1px solid ${sColor.border}`,
+              borderLeft: hasMode22 ? `3px solid ${sColor.orange}` : undefined,
               borderRadius: '3px', padding: '10px 14px',
               display: 'flex', alignItems: 'center', gap: '12px',
             }}>
@@ -331,6 +706,7 @@ function SessionList({
                 </div>
                 <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, marginTop: '2px' }}>
                   {session.pids.map(p => p.shortName).join(', ')} · {duration.toFixed(1)}s · {totalSamples} samples
+                  {hasMode22 && <span style={{ color: sColor.orange, marginLeft: '4px' }}>(+Mode 22)</span>}
                 </div>
               </div>
               <button
@@ -391,7 +767,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
   const connectionRef = useRef<OBDConnection | null>(null);
 
   // PID selection
-  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11])); // Engine Basics default
+  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
+
+  // Custom presets
+  const [customPresets, setCustomPresets] = useState<PIDPreset[]>(() => loadCustomPresets());
+  const [presetDialogOpen, setPresetDialogOpen] = useState(false);
+  const [editingPreset, setEditingPreset] = useState<PIDPreset | null>(null);
 
   // Logging state
   const [isLogging, setIsLogging] = useState(false);
@@ -426,8 +807,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
 
   const handleConnect = useCallback(async () => {
     const conn = new OBDConnection({
-      protocol: '6',        // ISO 15765-4 CAN 11bit/500k (GM)
-      adaptiveTiming: 2,    // Aggressive for fast logging
+      protocol: '6',
+      adaptiveTiming: 2,
       echo: false,
       headers: false,
       spaces: false,
@@ -457,7 +838,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     const success = await conn.connect();
     if (success) {
       setSupportedPids(conn.getSupportedPids());
-      addLog(`Connected! ${conn.getAvailablePids().length} PIDs available`);
+      const stdCount = conn.getAvailablePids().length;
+      const extCount = GM_EXTENDED_PIDS.length;
+      addLog(`Connected! ${stdCount} standard PIDs + ${extCount} GM extended PIDs available`);
     }
   }, [addLog]);
 
@@ -480,11 +863,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     const conn = connectionRef.current;
     if (!conn || connectionState !== 'ready') return;
 
-    const pidsToLog = STANDARD_PIDS.filter(p => selectedPids.has(p.pid));
+    // Resolve selected PIDs from both standard and extended
+    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
     if (pidsToLog.length === 0) {
       addLog('ERROR: No PIDs selected for logging');
       return;
     }
+
+    const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
+    const mode01Count = pidsToLog.length - mode22Count;
 
     // Reset live data
     setLiveReadings(new Map());
@@ -499,24 +886,21 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     }, 1000);
 
     setIsLogging(true);
-    addLog(`Starting log: ${pidsToLog.map(p => p.shortName).join(', ')} @ ${sampleRateMs}ms`);
+    addLog(`Starting log: ${pidsToLog.map(p => p.shortName).join(', ')} (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms`);
 
     try {
       await conn.startLogging(pidsToLog, sampleRateMs, (readings) => {
-        // Update live readings
         const newLive = new Map<number, PIDReading>();
         for (const r of readings) {
           newLive.set(r.pid, r);
         }
         setLiveReadings(newLive);
 
-        // Append to history
         setReadingHistory(prev => {
           const next = new Map(prev);
           for (const r of readings) {
             const arr = next.get(r.pid) || [];
             arr.push(r);
-            // Keep last 1000 readings per PID for chart display
             if (arr.length > 1000) arr.shift();
             next.set(r.pid, [...arr]);
           }
@@ -565,6 +949,40 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     addLog(`Applied preset: ${preset.name}`);
   }, [addLog]);
 
+  // ─── Custom Preset handlers ─────────────────────────────────────────
+
+  const handleCreatePreset = useCallback(() => {
+    setEditingPreset(null);
+    setPresetDialogOpen(true);
+  }, []);
+
+  const handleEditPreset = useCallback((preset: PIDPreset) => {
+    setEditingPreset(preset);
+    setPresetDialogOpen(true);
+  }, []);
+
+  const handleDeletePreset = useCallback((presetId: string) => {
+    const updated = deleteCustomPreset(customPresets, presetId);
+    setCustomPresets(updated);
+    addLog(`Deleted custom preset`);
+  }, [customPresets, addLog]);
+
+  const handleSavePreset = useCallback((name: string, description: string, pids: number[]) => {
+    if (editingPreset?.id) {
+      const updated = updateCustomPreset(customPresets, editingPreset.id, { name, description, pids });
+      setCustomPresets(updated);
+      addLog(`Updated preset: ${name}`);
+    } else {
+      const newPreset = createCustomPreset(name, description, pids);
+      const updated = [...customPresets, newPreset];
+      saveCustomPresets(updated);
+      setCustomPresets(updated);
+      addLog(`Created preset: ${name} (${pids.length} PIDs)`);
+    }
+    setPresetDialogOpen(false);
+    setEditingPreset(null);
+  }, [editingPreset, customPresets, addLog]);
+
   // ─── Export handlers ─────────────────────────────────────────────────
 
   const handleExportCSV = useCallback((session: LogSession) => {
@@ -585,7 +1003,6 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     if (onOpenInAnalyzer) {
       onOpenInAnalyzer(csv, filename);
     } else {
-      // Fallback: download the analyzer-compatible CSV
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -614,10 +1031,19 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
 
   // ─── Render ──────────────────────────────────────────────────────────
 
-  const activePids = STANDARD_PIDS.filter(p => selectedPids.has(p.pid));
+  const activePids = ALL_PIDS.filter(p => selectedPids.has(p.pid));
 
   return (
     <div>
+      {/* Custom Preset Dialog */}
+      <CustomPresetDialog
+        open={presetDialogOpen}
+        onClose={() => { setPresetDialogOpen(false); setEditingPreset(null); }}
+        onSave={handleSavePreset}
+        editPreset={editingPreset}
+        selectedPids={selectedPids}
+      />
+
       {/* Header Bar */}
       <div style={{
         background: sColor.bgCard, border: `1px solid ${sColor.border}`,
@@ -632,6 +1058,17 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
         </div>
 
         <StatusBadge state={connectionState} />
+
+        {/* Mode 22 indicator */}
+        {activePids.some(p => (p.service ?? 0x01) === 0x22) && (
+          <span style={{
+            fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.orange,
+            background: 'oklch(0.15 0.02 55 / 0.3)', padding: '2px 6px', borderRadius: '3px',
+            border: `1px solid oklch(0.30 0.10 55)`,
+          }}>
+            GM MODE 22 ACTIVE
+          </span>
+        )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
           {/* Sample Rate */}
@@ -759,19 +1196,23 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{vehicleInfo.voltage || '---'}</div>
           </div>
           <div>
-            <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Supported PIDs</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Standard PIDs</span>
             <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{supportedPids?.size || 0}</div>
+          </div>
+          <div>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.orange, textTransform: 'uppercase', letterSpacing: '0.08em' }}>GM Extended</span>
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.orange }}>{GM_EXTENDED_PIDS.length}</div>
           </div>
         </div>
       )}
 
       {/* Main Content: PID Selector + Live Data */}
-      <div style={{ display: 'grid', gridTemplateColumns: showPidSelector ? '280px 1fr' : '1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: showPidSelector ? '300px 1fr' : '1fr', gap: '16px' }}>
         {/* Left: PID Selector */}
         {showPidSelector && (
           <div style={{
             background: sColor.bgCard, border: `1px solid ${sColor.border}`,
-            borderRadius: '3px', padding: '12px', maxHeight: '600px', overflowY: 'auto',
+            borderRadius: '3px', padding: '12px', maxHeight: '700px', overflowY: 'auto',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
               <span style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em' }}>
@@ -787,6 +1228,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               onApplyPreset={handleApplyPreset}
               supportedPids={supportedPids}
               disabled={isLogging}
+              customPresets={customPresets}
+              onCreatePreset={handleCreatePreset}
+              onEditPreset={handleEditPreset}
+              onDeletePreset={handleDeletePreset}
             />
           </div>
         )}
@@ -814,7 +1259,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {activePids.map(pid => (
-                  <LiveGauge key={pid.pid} pid={pid} reading={liveReadings.get(pid.pid) || null} />
+                  <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
                 ))}
               </div>
             </div>
@@ -830,7 +1275,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                 {activePids.map(pid => {
                   const history = readingHistory.get(pid.pid) || [];
                   if (history.length < 2) return null;
-                  return <MiniChart key={pid.pid} readings={history} pid={pid} />;
+                  return <MiniChart key={`${pid.service}-${pid.pid}`} readings={history} pid={pid} />;
                 })}
               </div>
             </div>
@@ -852,11 +1297,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.5 }}>
                 Supported: OBDLink EX, OBDLink MX+, OBDLink SX, and other ELM327-compatible adapters via USB.
                 <br />Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
+                <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
               </div>
             </div>
           )}
 
-          {/* Ready state - no logging yet */}
+          {/* Ready state */}
           {connectionState === 'ready' && !isLogging && liveReadings.size === 0 && (
             <div style={{
               background: 'oklch(0.12 0.01 145 / 0.15)', border: `1px solid oklch(0.30 0.10 145)`,
@@ -868,6 +1314,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               </div>
               <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.5 }}>
                 Select your PIDs from the panel on the left (or use a preset), then click <strong style={{ color: sColor.red }}>START LOG</strong> to begin recording.
+                <br /><span style={{ color: sColor.orange }}>Tip: Use the GM EXT (22) filter to see diesel-specific parameters like FRP, DPF soot, DEF level, and turbo vane position.</span>
               </div>
             </div>
           )}
