@@ -45,6 +45,7 @@ import { ReasoningPanel } from '@/components/ReasoningPanel';
 import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { usePdfExport } from '@/hooks/usePdfExport';
+import DataloggerPanel from '@/components/DataloggerPanel';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const ACCESS_CODE = 'PPEIROCKS';
@@ -1033,10 +1034,11 @@ function AnalyzerPanel() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services';
+type TabId = 'analyzer' | 'datalogger' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
+  { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 16, height: 16 }} /> },
   { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 16, height: 16 }} /> },
@@ -1192,6 +1194,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'mode6' && <div className="ppei-anim-fade-up"><Mode6Panel /></div>}
         {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
         {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
+        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setActiveTab('analyzer'); /* TODO: auto-load CSV into analyzer */ }} /></div>}
       </main>
 
       {/* Footer */}
