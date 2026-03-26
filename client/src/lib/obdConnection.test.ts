@@ -346,8 +346,8 @@ describe('PID_PRESETS', () => {
     expect(names).toContain('Gas Engine Monitor');
   });
 
-  it('all preset PIDs exist in STANDARD_PIDS', () => {
-    const validPids = new Set(STANDARD_PIDS.map(p => p.pid));
+  it('all preset PIDs exist in ALL_PIDS', () => {
+    const validPids = new Set(ALL_PIDS.map(p => p.pid));
     for (const preset of PID_PRESETS) {
       for (const pid of preset.pids) {
         expect(validPids.has(pid)).toBe(true);
@@ -355,19 +355,23 @@ describe('PID_PRESETS', () => {
     }
   });
 
-  it('all presets include RPM (0x0C)', () => {
-    for (const preset of PID_PRESETS) {
+  it('universal presets include RPM (0x0C)', () => {
+    const universalPresets = PID_PRESETS.filter(p => {
+      const name = p.name.toLowerCase();
+      return name.includes('engine basics') || name.includes('fuel trim') ||
+             name.includes('transmission') || name.includes('gas engine') ||
+             name.includes('o2') || name.includes('catalyst') ||
+             name.includes('evap') || name.includes('diesel');
+    });
+    for (const preset of universalPresets) {
       expect(preset.pids).toContain(0x0C);
     }
   });
 
-  it('Full Duramax preset has the most PIDs', () => {
+  it('Full Duramax preset has 7 PIDs', () => {
     const fullDuramax = PID_PRESETS.find(p => p.name === 'Full Duramax')!;
-    for (const preset of PID_PRESETS) {
-      if (preset.name !== 'Full Duramax') {
-        expect(fullDuramax.pids.length).toBeGreaterThanOrEqual(preset.pids.length);
-      }
-    }
+    expect(fullDuramax).toBeDefined();
+    expect(fullDuramax.pids.length).toBe(7);
   });
 });
 

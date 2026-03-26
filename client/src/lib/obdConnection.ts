@@ -544,6 +544,63 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'RPM, Boost, Rail Pressure, MAF, ECT, EGT, Load',
     pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04],
   },
+  // ── Ford 6.2L Boss V8 (Raptor) Presets ──
+  {
+    name: 'Raptor 6.2L Boss Engine',
+    description: 'RPM, Oil Temp/Press, CHT, Torque, Knock, VCT',
+    pids: [0x0C, 0xF480, 0xF481, 0xF483, 0xF484, 0xF487, 0xF491],
+  },
+  {
+    name: 'Raptor Knock & Misfire',
+    description: 'RPM, Knock Retard Cyl 1-8, Misfire Counts',
+    pids: [0x0C, 0xF489, 0xF48A, 0xF48B, 0xF48C, 0xF48D, 0xF48E, 0xF48F, 0xF490],
+  },
+  {
+    name: 'Raptor 6R80 Transmission',
+    description: 'RPM, Trans Temp, TC Slip, Gear, TCC Duty, Line Press',
+    pids: [0x0C, 0xF4C0, 0xF4C1, 0xF4C5, 0xF4C7, 0xF4C4],
+  },
+  {
+    name: 'Raptor VCT / Cam Timing',
+    description: 'RPM, Intake/Exhaust Cam B1 & B2, Spark Advance',
+    pids: [0x0C, 0xF491, 0xF492, 0xF493, 0xF494, 0xF486],
+  },
+  {
+    name: 'Raptor Fuel System',
+    description: 'RPM, Fuel Rail Press, Fuel Pump Duty, Pulse Width, ETC',
+    pids: [0x0C, 0xF4B0, 0xF4B1, 0xF4B2, 0xF4B5, 0xF4B6],
+  },
+  // ── BMW XM Presets ──
+  {
+    name: 'BMW XM S68 Engine',
+    description: 'RPM, Boost, Oil Temp/Press, Torque, VANOS, Knock',
+    pids: [0xD00C, 0x11B1, 0x110A, 0x110B, 0x1124, 0x112C, 0x1140],
+  },
+  {
+    name: 'BMW XM Hybrid System',
+    description: 'HV SOC, HV Voltage/Current/Temp, Motor Torque/Speed, System Power',
+    pids: [0x1400, 0x1401, 0x1402, 0x1403, 0x1405, 0x1406, 0x140B],
+  },
+  {
+    name: 'BMW XM xDrive',
+    description: 'Front/Rear Torque Split, Yaw Rate, Lat/Lon G, Steering Angle',
+    pids: [0x1300, 0x1301, 0x1303, 0x1304, 0x1305, 0x130B],
+  },
+  {
+    name: 'BMW XM ZF 8HP Trans',
+    description: 'Trans Temp, TC Slip, Gear, Line Pressure, Mechatronic Temp',
+    pids: [0x1200, 0x1201, 0x1205, 0x1204, 0x1207],
+  },
+  {
+    name: 'BMW XM Suspension',
+    description: 'Damper Currents FL/FR/RL/RR, Ride Heights, Roll/Pitch',
+    pids: [0x1500, 0x1501, 0x1502, 0x1503, 0x1504, 0x1509, 0x150A],
+  },
+  {
+    name: 'BMW XM Charging',
+    description: 'SOC, Charging Status/Power, DC-DC Output, Cell Delta, EV Range',
+    pids: [0x1400, 0x140D, 0x140E, 0x1408, 0x140F, 0x140C],
+  },
 ];
 
 // ─── GM Mode 22 Extended PIDs ─────────────────────────────────────────────
@@ -846,7 +903,9 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
 // Ford/Lincoln/Mercury vehicles (Powerstroke diesel + EcoBoost + Coyote/Modular)
 
 export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
-  // ── Powerstroke Diesel ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // Powerstroke Diesel (6.0L, 6.4L, 6.7L, 7.3L)
+  // ══════════════════════════════════════════════════════════════════════════
   {
     pid: 0xF441, name: 'Injection Control Pressure', shortName: 'ICP',
     unit: 'psi', min: 0, max: 4000, bytes: 2, service: 0x22, category: 'fuel',
@@ -895,7 +954,348 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'ford', fuelType: 'diesel',
     formula: ([a]) => (a * 100) / 255,
   },
-  // ── EcoBoost / Gas ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // Ford 6.2L Boss V8 (2011-2014 F-150 Raptor, Super Duty)
+  // PCM: 0x7E0/0x7E8, TCM: 0x7E1/0x7E9
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── Engine Management ──
+  {
+    pid: 0xF480, name: 'Engine Oil Temperature (Boss)', shortName: 'EOT_BOSS',
+    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF481, name: 'Engine Oil Pressure (Boss)', shortName: 'EOP_BOSS',
+    unit: 'psi', min: 0, max: 150, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038, // kPa to psi
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF482, name: 'Oil Pressure Control Duty Cycle', shortName: 'OPC_DUTY',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF483, name: 'Cylinder Head Temperature (Boss)', shortName: 'CHT_BOSS',
+    unit: '°C', min: -40, max: 250, bytes: 2, service: 0x22, category: 'cooling',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF484, name: 'Calculated Engine Torque', shortName: 'TRQ_CALC',
+    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF485, name: 'Desired Engine Torque', shortName: 'TRQ_DES',
+    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF486, name: 'Spark Advance (Additional)', shortName: 'SPK_ADD',
+    unit: '°', min: -20, max: 60, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a - 64,
+    ecuHeader: '7E0',
+  },
+  // ── Knock Sensors (per-cylinder) ──
+  {
+    pid: 0xF487, name: 'Knock Sensor 1 (Boss)', shortName: 'KNK1_BOSS',
+    unit: 'counts', min: 0, max: 255, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF488, name: 'Knock Sensor 2 (Boss)', shortName: 'KNK2_BOSS',
+    unit: 'counts', min: 0, max: 255, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF489, name: 'Knock Retard Cyl 1', shortName: 'KR_C1',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48A, name: 'Knock Retard Cyl 2', shortName: 'KR_C2',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48B, name: 'Knock Retard Cyl 3', shortName: 'KR_C3',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48C, name: 'Knock Retard Cyl 4', shortName: 'KR_C4',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48D, name: 'Knock Retard Cyl 5', shortName: 'KR_C5',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48E, name: 'Knock Retard Cyl 6', shortName: 'KR_C6',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF48F, name: 'Knock Retard Cyl 7', shortName: 'KR_C7',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF490, name: 'Knock Retard Cyl 8', shortName: 'KR_C8',
+    unit: '°', min: 0, max: 25, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => a * 0.25,
+    ecuHeader: '7E0',
+  },
+  // ── VCT (Variable Cam Timing) ──
+  {
+    pid: 0xF491, name: 'Intake Cam Position Bank 1', shortName: 'ICAM_B1',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF492, name: 'Intake Cam Position Bank 2', shortName: 'ICAM_B2',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF493, name: 'Exhaust Cam Position Bank 1', shortName: 'ECAM_B1',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF494, name: 'Exhaust Cam Position Bank 2', shortName: 'ECAM_B2',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  // ── Misfire Counters (per-cylinder) ──
+  {
+    pid: 0xF4A0, name: 'Misfire Count Cyl 1', shortName: 'MIS_C1',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A1, name: 'Misfire Count Cyl 2', shortName: 'MIS_C2',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A2, name: 'Misfire Count Cyl 3', shortName: 'MIS_C3',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A3, name: 'Misfire Count Cyl 4', shortName: 'MIS_C4',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A4, name: 'Misfire Count Cyl 5', shortName: 'MIS_C5',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A5, name: 'Misfire Count Cyl 6', shortName: 'MIS_C6',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A6, name: 'Misfire Count Cyl 7', shortName: 'MIS_C7',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4A7, name: 'Misfire Count Cyl 8', shortName: 'MIS_C8',
+    unit: 'counts', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E0',
+  },
+  // ── Fuel System ──
+  {
+    pid: 0xF4B0, name: 'Commanded Fuel Rail Pressure (Boss)', shortName: 'FRP_CMD_B',
+    unit: 'bar', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4B1, name: 'Fuel Pump Duty Cycle (Boss)', shortName: 'FP_DUTY_B',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4B2, name: 'Fuel Pulse Width Cyl 1', shortName: 'FPW_C1',
+    unit: 'ms', min: 0, max: 50, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E0',
+  },
+  // ── Throttle / ETC ──
+  {
+    pid: 0xF4B5, name: 'ETC Actual Position', shortName: 'ETC_ACT',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4B6, name: 'ETC Desired Position', shortName: 'ETC_DES',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+    ecuHeader: '7E0',
+  },
+  // ── Transmission (6R80 in Raptor) ──
+  {
+    pid: 0xF4C0, name: 'Transmission Fluid Temp (6R80)', shortName: 'TFT_6R80',
+    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C1, name: 'Torque Converter Slip (6R80)', shortName: 'TCS_6R80',
+    unit: 'rpm', min: -1000, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) - 32768,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C2, name: 'Turbine Shaft Speed', shortName: 'TSS_F',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C3, name: 'Output Shaft Speed', shortName: 'OSS_F',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C4, name: 'Line Pressure (6R80)', shortName: 'LP_6R80',
+    unit: 'psi', min: 0, max: 400, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C5, name: 'Current Gear (6R80)', shortName: 'GEAR_6R80',
+    unit: '', min: 0, max: 6, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => a,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C6, name: 'Commanded Gear (6R80)', shortName: 'GCMD_6R80',
+    unit: '', min: 0, max: 6, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => a,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C7, name: 'TCC Solenoid Duty Cycle', shortName: 'TCC_DUTY_F',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C8, name: 'Shift Solenoid A State', shortName: 'SS_A',
+    unit: '', min: 0, max: 1, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => a & 0x01,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4C9, name: 'Shift Solenoid B State', shortName: 'SS_B',
+    unit: '', min: 0, max: 1, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => a & 0x01,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0xF4CA, name: 'Transmission Input Torque', shortName: 'TRQ_IN_F',
+    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E1',
+  },
+  // ── Electrical / Charging ──
+  {
+    pid: 0xF4D0, name: 'Alternator Field Duty Cycle', shortName: 'ALT_DUTY',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'electrical',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xF4D1, name: 'Alternator Current', shortName: 'ALT_AMP',
+    unit: 'A', min: 0, max: 250, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  // ── EcoBoost / Gas Turbo ──
   {
     pid: 0xF450, name: 'Boost Pressure (EcoBoost)', shortName: 'BOOST_EB',
     unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
@@ -914,6 +1314,7 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'ford', fuelType: 'gasoline',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
+  // ── Common Ford (all engines) ──
   {
     pid: 0xF460, name: 'Transmission Fluid Temp', shortName: 'TFT_F',
     unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'transmission',
@@ -1086,6 +1487,591 @@ export const HONDA_EXTENDED_PIDS: PIDDefinition[] = [
   },
 ];
 
+// ─── BMW UDS Extended PIDs ────────────────────────────────────────────────
+// BMW vehicles using UDS (Unified Diagnostic Services) protocol
+// Multi-ECU addressing: DME/DDE (0x7E0), EGS (0x7E1), DSC (0x7B0),
+// ICM (0x720), EME (0x7E2), SME (0x607)
+
+export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
+  // ══════════════════════════════════════════════════════════════════════════
+  // DME/DDE Engine Management (ECU: 0x7E0/0x7E8)
+  // S68 4.4L V8 Twin-Turbo (XM), B58 3.0L I6 (M340i), S58 (X3M/X4M)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    pid: 0xD004, name: 'Engine Load (BMW)', shortName: 'LOAD_BMW',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD005, name: 'Engine Coolant Temp (BMW)', shortName: 'ECT_BMW',
+    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'cooling',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD00B, name: 'Intake Manifold Pressure (BMW)', shortName: 'MAP_BMW',
+    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD00C, name: 'Engine RPM (BMW Enhanced)', shortName: 'RPM_BMW',
+    unit: 'rpm', min: 0, max: 8000, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) / 4,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD00E, name: 'Ignition Timing Advance (BMW)', shortName: 'IGN_BMW',
+    unit: '°', min: -20, max: 60, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a]) => (a / 2) - 64,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD00F, name: 'Intake Air Temperature (BMW)', shortName: 'IAT_BMW',
+    unit: '°C', min: -40, max: 100, bytes: 1, service: 0x22, category: 'intake',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD010, name: 'Mass Air Flow (BMW)', shortName: 'MAF_BMW',
+    unit: 'g/s', min: 0, max: 700, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) / 100,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0xD011, name: 'Throttle Position (BMW)', shortName: 'TPS_BMW',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  // ── Engine Oil & Cooling ──
+  {
+    pid: 0x110A, name: 'Engine Oil Temperature (BMW)', shortName: 'EOT_BMW',
+    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x110B, name: 'Engine Oil Pressure (BMW)', shortName: 'EOP_BMW',
+    unit: 'bar', min: 0, max: 10, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1109, name: 'Cylinder Head Temperature (BMW)', shortName: 'CHT_BMW',
+    unit: '°C', min: -40, max: 250, bytes: 2, service: 0x22, category: 'cooling',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1105, name: 'Engine Coolant Temp Enhanced (BMW)', shortName: 'ECT_ENH_BMW',
+    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'cooling',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E0',
+  },
+  // ── Torque ──
+  {
+    pid: 0x1124, name: 'Actual Engine Torque (BMW)', shortName: 'TRQ_ACT_BMW',
+    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1125, name: 'Desired Engine Torque (BMW)', shortName: 'TRQ_DES_BMW',
+    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  // ── VANOS (Variable Valve Timing) ──
+  {
+    pid: 0x112C, name: 'VANOS Intake Position Bank 1', shortName: 'VAN_IN_B1',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x112D, name: 'VANOS Intake Position Bank 2', shortName: 'VAN_IN_B2',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x112E, name: 'VANOS Exhaust Position Bank 1', shortName: 'VAN_EX_B1',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x112F, name: 'VANOS Exhaust Position Bank 2', shortName: 'VAN_EX_B2',
+    unit: '°CA', min: -50, max: 50, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.02,
+    ecuHeader: '7E0',
+  },
+  // ── Valvetronic ──
+  {
+    pid: 0x11A0, name: 'Valvetronic Lift', shortName: 'VLIFT_BMW',
+    unit: 'mm', min: 0, max: 10, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x11A1, name: 'Valvetronic Motor Position', shortName: 'VMOT_BMW',
+    unit: 'steps', min: 0, max: 255, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a]) => a,
+    ecuHeader: '7E0',
+  },
+  // ── Turbo (S68 Twin-Turbo / B58 Single-Turbo) ──
+  {
+    pid: 0x11B0, name: 'Wastegate Position (BMW)', shortName: 'WG_BMW',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x11B1, name: 'Actual Boost Pressure (BMW)', shortName: 'BOOST_ACT_BMW',
+    unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) * 0.296 - 1000) / 1000 * 14.5038,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x11B2, name: 'Target Boost Pressure (BMW)', shortName: 'BOOST_TGT_BMW',
+    unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) * 0.296 - 1000) / 1000 * 14.5038,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x11B3, name: 'Charge Air Cooler Temp (BMW)', shortName: 'CAC_BMW',
+    unit: '°C', min: -40, max: 120, bytes: 1, service: 0x22, category: 'intake',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a - 40,
+    ecuHeader: '7E0',
+  },
+  // ── Knock Sensors ──
+  {
+    pid: 0x1140, name: 'Knock Sensor 1 (BMW)', shortName: 'KNK1_BMW',
+    unit: 'counts', min: 0, max: 255, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a]) => a,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1141, name: 'Knock Sensor 2 (BMW)', shortName: 'KNK2_BMW',
+    unit: 'counts', min: 0, max: 255, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a]) => a,
+    ecuHeader: '7E0',
+  },
+  // ── Fuel System (Direct Injection) ──
+  {
+    pid: 0x1160, name: 'Fuel Rail Pressure (BMW)', shortName: 'FRP_BMW',
+    unit: 'bar', min: 0, max: 350, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1161, name: 'Commanded Fuel Rail Pressure (BMW)', shortName: 'FRP_CMD_BMW',
+    unit: 'bar', min: 0, max: 350, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1190, name: 'Fuel Pump Duty Cycle (BMW)', shortName: 'FP_DUTY_BMW',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7E0',
+  },
+  {
+    pid: 0x1170, name: 'Spark Advance (BMW)', shortName: 'SPK_BMW',
+    unit: '°', min: -20, max: 60, bytes: 1, service: 0x22, category: 'ignition',
+    manufacturer: 'bmw', fuelType: 'gasoline',
+    formula: ([a]) => (a / 2) - 64,
+    ecuHeader: '7E0',
+  },
+  // ── Ambient ──
+  {
+    pid: 0xD146, name: 'Ambient Air Temperature (BMW)', shortName: 'AAT_BMW',
+    unit: '°C', min: -40, max: 60, bytes: 1, service: 0x22, category: 'intake',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a - 40,
+    ecuHeader: '7E0',
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // EGS Transmission (ZF 8HP) (ECU: 0x7E1/0x7E9)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x1200, name: 'Transmission Fluid Temp (BMW)', shortName: 'TFT_BMW',
+    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1201, name: 'Torque Converter Slip (BMW)', shortName: 'TCS_BMW',
+    unit: 'rpm', min: -1000, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) - 32768,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1202, name: 'Turbine Speed (BMW)', shortName: 'TSS_BMW',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1203, name: 'Output Shaft Speed (BMW)', shortName: 'OSS_BMW',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1204, name: 'Line Pressure (ZF 8HP)', shortName: 'LP_ZF8HP',
+    unit: 'bar', min: 0, max: 30, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1205, name: 'Current Gear (BMW)', shortName: 'GEAR_BMW',
+    unit: '', min: 0, max: 8, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1206, name: 'Target Gear (BMW)', shortName: 'GTGT_BMW',
+    unit: '', min: 0, max: 8, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1207, name: 'Mechatronic Temperature (BMW)', shortName: 'MECH_T_BMW',
+    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x1208, name: 'Transmission Input Torque (BMW)', shortName: 'TRQ_IN_BMW',
+    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E1',
+  },
+  {
+    pid: 0x120A, name: 'Adaptive Shift Quality Index', shortName: 'SQ_IDX_BMW',
+    unit: '', min: 0, max: 100, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a,
+    ecuHeader: '7E1',
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // DSC / xDrive (ECU: 0x7B0/0x7B8)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x1300, name: 'Front Axle Torque Distribution', shortName: 'FAXLE_TRQ',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1301, name: 'Rear Axle Torque Distribution', shortName: 'RAXLE_TRQ',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1302, name: 'Transfer Case Clutch Engagement', shortName: 'XFER_CLT',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => (a * 100) / 255,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1303, name: 'Yaw Rate (BMW)', shortName: 'YAW_BMW',
+    unit: '°/s', min: -100, max: 100, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1304, name: 'Lateral Acceleration (BMW)', shortName: 'LAT_G_BMW',
+    unit: 'g', min: -2, max: 2, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1305, name: 'Longitudinal Acceleration (BMW)', shortName: 'LON_G_BMW',
+    unit: 'g', min: -2, max: 2, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1306, name: 'Wheel Speed FL (BMW)', shortName: 'WS_FL_BMW',
+    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1307, name: 'Wheel Speed FR (BMW)', shortName: 'WS_FR_BMW',
+    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1308, name: 'Wheel Speed RL (BMW)', shortName: 'WS_RL_BMW',
+    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1309, name: 'Wheel Speed RR (BMW)', shortName: 'WS_RR_BMW',
+    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x130A, name: 'Brake Pressure (BMW)', shortName: 'BRK_P_BMW',
+    unit: 'bar', min: 0, max: 200, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x130B, name: 'Steering Angle (BMW)', shortName: 'STR_ANG_BMW',
+    unit: '°', min: -720, max: 720, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7B0',
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // EME/SME Hybrid System (XM PHEV) (ECU: 0x7E2/0x7EA, 0x607/0x60F)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x1400, name: 'HV Battery State of Charge', shortName: 'HV_SOC',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x1401, name: 'HV Battery Voltage', shortName: 'HV_VOLT_BMW',
+    unit: 'V', min: 0, max: 500, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x1402, name: 'HV Battery Current', shortName: 'HV_AMP_BMW',
+    unit: 'A', min: -500, max: 500, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x1403, name: 'HV Battery Temperature', shortName: 'HV_TEMP_BMW',
+    unit: '°C', min: -40, max: 80, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x1404, name: 'Electric Motor Temperature', shortName: 'EMOT_T_BMW',
+    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x1405, name: 'Electric Motor Torque', shortName: 'EMOT_TRQ',
+    unit: 'Nm', min: -500, max: 500, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x1406, name: 'Electric Motor Speed', shortName: 'EMOT_RPM',
+    unit: 'rpm', min: 0, max: 20000, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x1407, name: 'Inverter Temperature', shortName: 'INV_T_BMW',
+    unit: '°C', min: -40, max: 150, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x1408, name: 'DC-DC Converter Output Voltage', shortName: 'DCDC_V_BMW',
+    unit: 'V', min: 0, max: 16, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x1409, name: 'DC-DC Converter Output Current', shortName: 'DCDC_A_BMW',
+    unit: 'A', min: 0, max: 250, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x140A, name: 'Regenerative Braking Torque', shortName: 'REGEN_TRQ',
+    unit: 'Nm', min: 0, max: 300, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x140B, name: 'Combined System Power', shortName: 'SYS_PWR_BMW',
+    unit: 'kW', min: 0, max: 750, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '7E2',
+  },
+  {
+    pid: 0x140C, name: 'Electric Range Remaining', shortName: 'EV_RANGE',
+    unit: 'km', min: 0, max: 100, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x140D, name: 'Charging Status', shortName: 'CHG_STAT',
+    unit: '', min: 0, max: 5, bytes: 1, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a]) => a,  // 0=Not charging, 1=AC L1, 2=AC L2, 3=DC Fast, 4=Complete
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x140E, name: 'Charging Power', shortName: 'CHG_PWR',
+    unit: 'kW', min: 0, max: 200, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    ecuHeader: '607',
+  },
+  {
+    pid: 0x140F, name: 'Cell Voltage Min/Max Delta', shortName: 'CELL_DELTA',
+    unit: 'mV', min: 0, max: 500, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (a * 256) + b,
+    ecuHeader: '607',
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // Active Suspension (Adaptive M Suspension / Air Suspension)
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x1500, name: 'Front Left Damper Current', shortName: 'DAMP_FL',
+    unit: 'A', min: 0, max: 5, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1501, name: 'Front Right Damper Current', shortName: 'DAMP_FR',
+    unit: 'A', min: 0, max: 5, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1502, name: 'Rear Left Damper Current', shortName: 'DAMP_RL',
+    unit: 'A', min: 0, max: 5, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1503, name: 'Rear Right Damper Current', shortName: 'DAMP_RR',
+    unit: 'A', min: 0, max: 5, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1504, name: 'Ride Height FL', shortName: 'RH_FL_BMW',
+    unit: 'mm', min: -50, max: 50, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1505, name: 'Ride Height FR', shortName: 'RH_FR_BMW',
+    unit: 'mm', min: -50, max: 50, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1506, name: 'Ride Height RL', shortName: 'RH_RL_BMW',
+    unit: 'mm', min: -50, max: 50, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1507, name: 'Ride Height RR', shortName: 'RH_RR_BMW',
+    unit: 'mm', min: -50, max: 50, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x1509, name: 'Body Roll Angle', shortName: 'ROLL_BMW',
+    unit: '°', min: -10, max: 10, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
+    ecuHeader: '7B0',
+  },
+  {
+    pid: 0x150A, name: 'Body Pitch Angle', shortName: 'PITCH_BMW',
+    unit: '°', min: -10, max: 10, bytes: 2, service: 0x22, category: 'other',
+    manufacturer: 'bmw', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
+    ecuHeader: '7B0',
+  },
+];
+
 // ─── Manufacturer PID Collections ─────────────────────────────────────
 
 export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
@@ -1097,7 +2083,7 @@ export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
   honda: HONDA_EXTENDED_PIDS,
   nissan: [],  // Placeholder for future expansion
   hyundai: [],  // Placeholder for future expansion
-  bmw: [],  // BMW uses standard OBD-II PIDs, no extended PIDs needed
+  bmw: BMW_EXTENDED_PIDS,
 };
 
 // ─── Combined PID List (all available PIDs) ───────────────────────────────
@@ -1109,6 +2095,7 @@ export const ALL_PIDS: PIDDefinition[] = [
   ...CHRYSLER_EXTENDED_PIDS,
   ...TOYOTA_EXTENDED_PIDS,
   ...HONDA_EXTENDED_PIDS,
+  ...BMW_EXTENDED_PIDS,
 ];
 
 // ─── Custom Preset Management ───────────────────────────────────────────────
@@ -1209,9 +2196,19 @@ export function getPidsForVehicle(manufacturer: PIDManufacturer, fuelType: FuelT
 
 export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: FuelType): PIDPreset[] {
   return PID_PRESETS.filter(preset => {
-    // Universal presets always show
     const name = preset.name.toLowerCase();
-    if (name.includes('engine basics') || name.includes('transmission')) return true;
+    // Universal presets always show
+    if (name.includes('engine basics') || name.includes('transmission') || name.includes('fuel trims')) return true;
+    // Manufacturer-specific presets
+    if (manufacturer === 'ford' || manufacturer === 'universal') {
+      if (name.includes('raptor')) return true;
+    }
+    if (manufacturer === 'bmw' || manufacturer === 'universal') {
+      if (name.includes('bmw') || name.includes('xm')) return true;
+    }
+    if (manufacturer === 'gm' || manufacturer === 'universal') {
+      if (name.includes('duramax')) return true;
+    }
     // Gas-specific presets
     if (fuelType === 'gasoline' || fuelType === 'any') {
       if (name.includes('gas') || name.includes('o2') || name.includes('lambda') ||

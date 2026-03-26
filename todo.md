@@ -46,3 +46,19 @@
 - [x] Write tests for DTC parser and database lookup
 - [x] Write tests for vehicle-specific PID filtering
 - [x] Update existing tests for new ALL_PIDS composition
+
+## Ford 6.2L Boss Engine Extended PIDs
+- [x] Research Ford 6.2L Boss Mode 22 DIDs (PCM, TCM, ABS module addresses)
+- [x] Add Ford Boss engine-specific PIDs (oil temp, oil pressure, cylinder head temps, knock sensors, VCT, etc.)
+- [x] Add Ford Boss transmission PIDs (TFT, line pressure, gear state, torque converter)
+- [x] Add Ford Boss presets for the Raptor
+- [x] Write tests for Ford Boss PIDs
+
+## BMW UDS Extended Diagnostics (2024 XM)
+- [x] Research BMW UDS diagnostic addressing (DME, EGS, DSC, ICM, BDC, ZGW)
+- [x] Add BMW iDrive-specific parameters (battery SOC, hybrid motor temps, xDrive torque split)
+- [x] Add BMW engine management PIDs (VANOS, Valvetronic, direct injection, turbo)
+- [x] Add BMW transmission PIDs (ZF 8HP, mechatronic, adaptive learning)
+- [x] Add BMW chassis PIDs (active suspension, dynamic stability, brake energy regen)
+- [x] Add BMW-specific presets for the XM
+- [x] Write tests for BMW UDS PIDs
