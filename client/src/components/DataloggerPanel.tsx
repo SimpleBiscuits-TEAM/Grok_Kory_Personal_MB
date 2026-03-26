@@ -1296,6 +1296,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                 <br />Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
                 <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
               </div>
+              <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.5, padding: '10px', border: `1px solid ${sColor.borderLight}`, borderRadius: '4px', textAlign: 'left', maxWidth: '500px', margin: '12px auto 0' }}>
+                <strong style={{ color: sColor.yellow }}>TROUBLESHOOTING:</strong>
+                <br />{'\u2022'} Close any other apps using the device (OBDwiz, FORScan, etc.)
+                <br />{'\u2022'} Try unplugging and re-plugging the USB cable
+                <br />{'\u2022'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
+                <br />{'\u2022'} On Windows, check Device Manager {'\u2192'} Ports (COM & LPT) to confirm the device is recognized
+                <br />{'\u2022'} Ensure you are using Chrome or Edge (WebSerial is not supported in Firefox/Safari)
+              </div>
             </div>
           )}
 

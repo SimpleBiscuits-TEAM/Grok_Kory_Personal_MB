@@ -630,24 +630,41 @@ export class OBDConnection {
 
     try {
       this.setState('connecting');
-      this.emit('log', null, 'Requesting serial port...');
+      this.emit('log', null, 'Requesting serial port... (select your OBDLink device)');
 
-      // Request port with OBDLink USB vendor/product IDs
-      this.port = await navigator.serial.requestPort({
-        filters: [
-          { usbVendorId: 0x0403 },  // FTDI (common for OBDLink)
-          { usbVendorId: 0x1A86 },  // CH340
-          { usbVendorId: 0x10C4 },  // Silicon Labs CP210x
-        ],
-      });
+      // Show ALL available serial ports — no vendor ID filtering.
+      // OBDLink EX/SX/MX+ devices use various USB-to-serial bridge chips
+      // (FTDI, CH340, CP210x, STN2120 native USB, etc.) whose VIDs vary
+      // by hardware revision. Removing filters ensures the device always
+      // appears in Chrome's serial port picker dialog.
+      this.port = await navigator.serial.requestPort();
 
-      await this.port.open({
-        baudRate: this.config.baudRate,
-        dataBits: 8,
-        stopBits: 1,
-        parity: 'none',
-        flowControl: 'none',
-      });
+      // Log USB device info if available for debugging
+      const info = this.port.getInfo();
+      if (info.usbVendorId !== undefined) {
+        this.emit('log', null, `USB device: VID=0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, '0')} PID=0x${(info.usbProductId ?? 0).toString(16).toUpperCase().padStart(4, '0')}`);
+      } else {
+        this.emit('log', null, 'Serial port selected (no USB info available — may be a Bluetooth or platform serial port)');
+      }
+
+      // Try opening at configured baud rate (default 115200 for OBDLink EX USB)
+      try {
+        await this.port.open({
+          baudRate: this.config.baudRate,
+          dataBits: 8,
+          stopBits: 1,
+          parity: 'none',
+          flowControl: 'none',
+        });
+      } catch (openErr) {
+        // Port may already be open in another tab or application
+        const openMsg = openErr instanceof Error ? openErr.message : String(openErr);
+        if (openMsg.includes('already open') || openMsg.includes('already been opened')) {
+          this.emit('log', null, 'Port appears already open — attempting to use existing connection');
+        } else {
+          throw new Error(`Failed to open port: ${openMsg}. Make sure no other app (OBDwiz, FORScan, etc.) is using the device.`);
+        }
+      }
 
       this.emit('log', null, `Serial port opened at ${this.config.baudRate} baud`);
 
@@ -657,21 +674,28 @@ export class OBDConnection {
         this.writer = this.port.writable.getWriter();
         this.startReadLoop();
       } else {
-        throw new Error('Port is not readable/writable');
+        throw new Error('Port is not readable/writable. Try unplugging and re-plugging the device.');
       }
 
       // Initialize the ELM327/STN device
       const initialized = await this.initialize();
       if (initialized) {
         this.setState('ready');
-        this.emit('log', null, 'OBDLink device ready');
+        this.emit('log', null, 'OBDLink device ready — connected and initialized successfully');
         return true;
       } else {
         this.setState('error');
+        this.emit('error', null, 'Device did not respond to initialization commands. Ensure ignition is ON (engine running or KOEO).');
         return false;
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown connection error';
+      // User cancelled the port picker dialog
+      if (msg.includes('No port selected') || msg.includes('user cancelled') || msg.includes('NotFoundError')) {
+        this.emit('log', null, 'Connection cancelled — no port selected');
+        this.setState('disconnected');
+        return false;
+      }
       this.emit('error', err, msg);
       this.setState('error');
       return false;
