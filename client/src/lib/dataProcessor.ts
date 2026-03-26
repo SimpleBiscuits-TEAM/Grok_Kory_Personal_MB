@@ -134,62 +134,126 @@ export function parseCSV(content: string): DuramaxData {
  */
 function parseHPTunersCSV(content: string): DuramaxData {
   const lines = content.split('\n').map(line => line.trim());
-  
+
+  // ── Header row detection ──────────────────────────────────────────────────
+  // HP Tuners logs have a metadata block at the top before the column headers.
+  // The header row contains 'Offset' (time column) and an RPM-related column.
+  // We look for 'Offset' + ('Engine RPM' OR 'Mass Airflow' OR 'RPM') to be flexible.
   let headerIndex = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('Offset') && lines[i].includes('Mass Airflow')) {
+  for (let i = 0; i < Math.min(lines.length, 30); i++) {
+    const l = lines[i];
+    if (l.includes('Offset') && (l.includes('Engine RPM') || l.includes('Mass Airflow') || l.includes('RPM'))) {
       headerIndex = i;
       break;
     }
   }
-  
+  // Fallback: find the first row with 10+ comma-separated fields that starts with 'Offset'
+  if (headerIndex === -1) {
+    for (let i = 0; i < Math.min(lines.length, 30); i++) {
+      const parts = lines[i].split(',');
+      if (parts.length > 10 && parts[0].trim() === 'Offset') {
+        headerIndex = i;
+        break;
+      }
+    }
+  }
+
   if (headerIndex === -1) {
     throw new Error('Could not find CSV header in HP Tuners log file');
   }
-  
+
   const headers = lines[headerIndex].split(',').map(h => h.trim());
-  
+
+  // ── Column index helper — exact match first, then substring ──────────────
   const getColumnIndex = (keywords: string[]): number => {
+    // Exact match pass
+    for (const keyword of keywords) {
+      const idx = headers.findIndex(h => h === keyword);
+      if (idx !== -1) return idx;
+    }
+    // Substring match pass
     for (const keyword of keywords) {
       const idx = headers.findIndex(h => h.includes(keyword));
       if (idx !== -1) return idx;
     }
     return -1;
   };
-  
+
+  // ── Column mapping ────────────────────────────────────────────────────────
   const offsetIdx = getColumnIndex(['Offset']);
-  const mafIdx = getColumnIndex(['Mass Airflow']);
-  // HP Tuners: 'Intake Manifold Absolute Pressure' is MAP in PSIA
-  // Also try 'Boost Pressure' (PSIG) as a direct boost column
-  const boostGaugePsigIdx = getColumnIndex(['Boost Pressure', 'Boost (psi)']);
-  const boostIdx = getColumnIndex(['Intake Manifold Absolute Pressure', 'MAP']);
-  const rpmIdx = getColumnIndex(['Engine RPM']);
-  const torqueIdx = getColumnIndex(['Actual Engine Torque']);
-  const maxTorqueIdx = getColumnIndex(['Maximum Engine Torque']);
-  const speedIdx = getColumnIndex(['Vehicle Speed']);
-  const fuelRateIdx = getColumnIndex(['Engine Fuel Rate']);
-  const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
-  const railDesiredIdx = getColumnIndex(['Desired Fuel Pressure']);
-  const pcvIdx = getColumnIndex(['PCV', 'Pressure Regulator']);
-  const boostDesiredIdx = getColumnIndex(['Desired Boost']);
-  const turboVaneIdx = getColumnIndex(['Turbo Vane Position', 'Turbo A Vane Position']);
+  const rpmIdx    = getColumnIndex(['Engine RPM (SAE)', 'Engine RPM', 'RPM']);
+
+  // MAF: prefer the SAE lb/min channel; avoid raw Hz frequency channels
+  // 'Mass Airflow (SAE)' = lb/min (correct)
+  // 'Mass Airflow Sensor' = Hz (wrong — raw sensor frequency)
+  const mafIdx = (() => {
+    // Priority 1: exact SAE lb/min channel
+    const sae = headers.findIndex(h => h === 'Mass Airflow (SAE)');
+    if (sae !== -1) return sae;
+    // Priority 2: any column with 'Mass Airflow' that is NOT 'Sensor' (Hz)
+    const nonSensor = headers.findIndex(h => h.includes('Mass Airflow') && !h.includes('Sensor'));
+    if (nonSensor !== -1) return nonSensor;
+    // Priority 3: fallback to any Mass Airflow column
+    return headers.findIndex(h => h.includes('Mass Airflow'));
+  })();
+
+  // Boost actual: prefer direct gauge psi channels
+  // 'Boost/Vacuum' = gauge psi (HP Tuners full-description export)
+  // 'Boost Pressure' = gauge psi (HP Tuners short-name export)
+  const boostGaugePsigIdx = getColumnIndex(['Boost/Vacuum', 'Boost Pressure', 'Boost (psi)', 'Boost Gauge']);
+
+  // MAP absolute: used as fallback when no direct boost gauge channel exists
+  // Prefer Hi-Res A channel, then standard SAE MAP
+  const boostIdx = (() => {
+    const hiResA = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure A (SAE) (Hi Res)');
+    if (hiResA !== -1) return hiResA;
+    const sae = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure (SAE)');
+    if (sae !== -1) return sae;
+    return headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') || h.includes('MAP'));
+  })();
+
+  const torqueIdx         = getColumnIndex(['Actual Engine Torque (SAE)', 'Actual Engine Torque']);
+  const maxTorqueIdx      = getColumnIndex(['Maximum Engine Torque']);
+  const speedIdx          = getColumnIndex(['Vehicle Speed (SAE)', 'Vehicle Speed']);
+  const fuelRateIdx       = getColumnIndex(['Engine Fuel Rate (SAE)', 'Engine Fuel Rate']);
+  const railActualIdx     = getColumnIndex(['Fuel Rail Pressure (SAE)', 'Fuel Rail Pressure']);
+  const railDesiredIdx    = getColumnIndex(['Desired Fuel Pressure']);
+  const pcvIdx            = getColumnIndex(['PCV', 'Pressure Regulator', 'High Pressure Fuel Pump Hold DC']);
+  const boostDesiredIdx   = getColumnIndex(['Desired Boost']);
+  const turboVaneIdx      = getColumnIndex(['Turbo A Vane Position (SAE)', 'Turbo Vane Position', 'Turbo A Vane Position']);
   const turboVaneDesiredIdx = getColumnIndex(['Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo A Vane Desired']);
-  const egtIdx = getColumnIndex(['Exhaust Gas Temperature', 'EGT']);
-  const converterSlipIdx = getColumnIndex(['Converter Slip', 'TCM.TCSLIP']);
-  const converterDutyIdx = getColumnIndex(['Converter Duty', 'Converter PWM']);
-  const converterPressureIdx = getColumnIndex(['Converter Pressure', 'TCC Pressure']);
-  const oilPressureIdx = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
-  const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temperature', 'ECT']);
-  const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
-  const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp', 'Trans Temp']);
-  const baroIdx = getColumnIndex(['Barometric Pressure', 'Baro Pressure', 'Ambient Pressure']);
-  const throttleIdx = getColumnIndex(['Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
-  
-  if (rpmIdx === -1 || mafIdx === -1 || torqueIdx === -1) {
-    throw new Error('Missing required columns: RPM, MAF, or Torque');
+  // EGT: prefer B1S1 (pre-DPF, most representative), then any EGT channel
+  const egtIdx = (() => {
+    const b1s1 = headers.findIndex(h => h === 'Exhaust Gas Temperature B1S1');
+    if (b1s1 !== -1) return b1s1;
+    return headers.findIndex(h => h.includes('Exhaust Gas Temperature') || h.includes('EGT'));
+  })();
+  // TCC Slip: 'TCC Slip' (HP Tuners full-description) or legacy names
+  const converterSlipIdx  = getColumnIndex(['TCC Slip', 'Converter Slip', 'TCM.TCSLIP']);
+  const converterDutyIdx  = getColumnIndex(['Converter Duty', 'Converter PWM']);
+  const converterPressureIdx = getColumnIndex(['TCC Line Pressure', 'Converter Pressure', 'TCC Pressure']);
+  const oilPressureIdx    = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
+  const coolantTempIdx    = getColumnIndex(['Engine Coolant Temp (SAE)', 'Engine Coolant Temp', 'Coolant Temperature', 'ECT']);
+  const oilTempIdx        = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
+  const transFluidTempIdx = getColumnIndex(['Trans Fluid Temp', 'Transmission Fluid Temp', 'Trans Temp']);
+  const baroIdx           = getColumnIndex(['Barometric Pressure (SAE)', 'Barometric Pressure', 'Baro Pressure', 'Ambient Pressure']);
+  const throttleIdx       = getColumnIndex(['Accelerator Position D (SAE)', 'Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
+
+  if (rpmIdx === -1 || mafIdx === -1) {
+    throw new Error('Missing required columns: RPM or MAF');
   }
-  
-  const dataStart = headerIndex + 4;
+
+  // ── Data start: skip units row, blank lines, and section markers ──────────
+  // After the header row there may be: units row, blank line, '[Channel Data]' marker.
+  // Scan forward from headerIndex+1 to find the first row that looks like numeric data.
+  let dataStart = headerIndex + 1;
+  for (let i = headerIndex + 1; i < Math.min(headerIndex + 6, lines.length); i++) {
+    const firstVal = parseFloat(lines[i].split(',')[0]);
+    if (!isNaN(firstVal)) {
+      dataStart = i;
+      break;
+    }
+  }
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
