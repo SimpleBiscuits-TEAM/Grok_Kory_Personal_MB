@@ -165,8 +165,9 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // P0741/P0742 - TCC Operation
-  if (converterSlip.length > 0 && converterDutyCycle.length > 0) {
-    issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm));
+  // Run when slip data is present; checkTccOperation handles missing duty cycle gracefully
+  if (converterSlip.length > 0) {
+    issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm, converterPressure));
   }
 
   // P1089 - Rail Pressure High on Decel
@@ -647,31 +648,41 @@ function checkConverterSlip(
   const issues: DiagnosticIssue[] = [];
   if (slip.length === 0) return issues;
 
-  // Detect whether this is an EFILive log (TCCPCSCP in kPa, max ~1050)
-  // vs HP Tuners / Banks (duty cycle 0-100%)
-  const maxDuty = Math.max(...dutyCycle.filter(v => v > 0));
+  // ── Determine which signal to use for "full lock" detection ──────────────
+  // Priority 1: EFILive kPa format (TCCPCSCP, values 400-1050 kPa)
+  // Priority 2: HP Tuners duty cycle % (0-100%)
+  // Priority 3: HP Tuners TCC Line Pressure psi (0-150 psi) — used when duty cycle is all zeros
+  const maxDuty = dutyCycle.length > 0 ? Math.max(...dutyCycle.filter(v => v > 0)) : 0;
+  const maxPressure = pressure.length > 0 ? Math.max(...pressure.filter(v => v > 0)) : 0;
+  const dutyHasData = maxDuty > 5;
   const isEFILiveKpa = maxDuty > 200; // kPa values will be 400-1050, duty% max 100
+  // When duty cycle is absent but TCC Line Pressure (psi) is present, use pressure as lock signal
+  // HP Tuners TCC Line Pressure: 0 psi = open, ~90-150 psi = full lock
+  const usePressureAsLock = !dutyHasData && maxPressure > 10;
 
-  // Full lock threshold varies by format:
-  // EFILive: 1050 kPa = full lock (allow ±30 kPa tolerance for sensor noise)
-  // HP Tuners / Banks: 90% duty = full lock
-  const FULL_LOCK_THRESHOLD = isEFILiveKpa ? 1000 : 90;
+  // Full lock threshold varies by signal type:
+  // EFILive kPa: 1000+ kPa = full lock
+  // HP Tuners duty %: 90%+ = full lock
+  // HP Tuners line pressure psi: 80+ psi = full lock
+  const FULL_LOCK_THRESHOLD = isEFILiveKpa ? 1000 : (usePressureAsLock ? 80 : 90);
+  const lockSignal = (i: number) => {
+    if (isEFILiveKpa || dutyHasData) return dutyCycle[i] ?? 0;
+    if (usePressureAsLock) return pressure[i] ?? 0;
+    return 0;
+  };
 
   // Slip threshold: >20 RPM while fully locked = confirmed slip
   const SLIP_THRESHOLD = 20;
-
   // Minimum consecutive samples to confirm a slip event (not just sensor noise)
   // At ~10 Hz sample rate, 3 samples = 300ms minimum duration
   const MIN_CONSECUTIVE = 3;
-
   let slipEventCount = 0;
   let maxSlipObserved = 0;
   let consecutiveSlip = 0;
   let slipWhileLockedCount = 0;
   let totalLockedSamples = 0;
-
   for (let i = 0; i < slip.length; i++) {
-    const isFullyLocked = dutyCycle[i] >= FULL_LOCK_THRESHOLD;
+    const isFullyLocked = lockSignal(i) >= FULL_LOCK_THRESHOLD;
     const absSlip = Math.abs(slip[i]);
 
     if (isFullyLocked) {
@@ -1008,23 +1019,24 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
 export function checkTccOperation(
   slip: number[],
   dutyCycle: number[],
-  rpm: number[]
+  rpm: number[],
+  pressure: number[] = []
 ): DiagnosticIssue[] {
-  const issues: DiagnosticIssue[] = [];
-  if (!slip.length || !dutyCycle.length) return issues;
-
+   const issues: DiagnosticIssue[] = [];
+  if (!slip.length) return issues;
   // PID quality guard: if slip has no meaningful variation, sensor not logging
   const slipHasData = slip.some(v => Math.abs(v) > 5);
   if (!slipHasData) return issues;
-
-  // Detect EFILive kPa format vs HP Tuners % format
-  const maxDuty = Math.max(...dutyCycle.filter(v => v > 0));
+  // Detect EFILive kPa format vs HP Tuners % format vs HP Tuners line pressure psi
+  const maxDuty = dutyCycle.length > 0 ? Math.max(...dutyCycle.filter(v => v > 0)) : 0;
+  const maxPressure = pressure.length > 0 ? Math.max(...pressure.filter(v => v > 0)) : 0;
   const isEFILiveKpa = maxDuty > 200;
   const dutyCycleHasData = dutyCycle.some(v => v > 5);
-
+  const usePressureAsLock = !dutyCycleHasData && maxPressure > 10;
   // Thresholds vary by format
-  const FULL_LOCK_THRESHOLD  = isEFILiveKpa ? 1000 : 90;  // kPa or %
-  const OPEN_CONV_THRESHOLD  = isEFILiveKpa ? 200  : 15;  // kPa or %
+  const FULL_LOCK_THRESHOLD  = isEFILiveKpa ? 1000 : (usePressureAsLock ? 80 : 90);  // kPa, psi, or %
+  const OPEN_CONV_THRESHOLD  = isEFILiveKpa ? 200  : (usePressureAsLock ? 15 : 15);  // kPa, psi, or %
+  const lockVal = (i: number) => usePressureAsLock ? (pressure[i] ?? 0) : (dutyCycle[i] ?? 0);
   const SLIP_THRESHOLD_LOCKED = 50;  // RPM — sustained slip while fully locked
   const SLIP_THRESHOLD_OPEN   = 10;  // RPM — near-zero slip while commanded open
   const MIN_RPM = 1500;
@@ -1036,20 +1048,19 @@ export function checkTccOperation(
     if (rpm[i] < MIN_RPM) continue;
     const absSlip = Math.abs(slip[i]);
 
+    const lv = lockVal(i);
     // P0741: commanded full lock but sustained slip
-    if (dutyCycleHasData && dutyCycle[i] >= FULL_LOCK_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
+    if ((dutyCycleHasData || usePressureAsLock) && lv >= FULL_LOCK_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
       stuckOffCount++;
     }
     // P0742: commanded open but near-zero slip at cruise (converter stuck applied)
-    if (dutyCycleHasData && dutyCycle[i] < OPEN_CONV_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
+    if ((dutyCycleHasData || usePressureAsLock) && lv < OPEN_CONV_THRESHOLD && absSlip < SLIP_THRESHOLD_OPEN && rpm[i] > 2000) {
       stuckOnCount++;
     }
   }
-
-  const lockLabel = isEFILiveKpa ? `≥${FULL_LOCK_THRESHOLD} kPa (full lock)` : `>${FULL_LOCK_THRESHOLD}% duty cycle`;
-  const openLabel = isEFILiveKpa ? `<${OPEN_CONV_THRESHOLD} kPa (open)` : `<${OPEN_CONV_THRESHOLD}% duty cycle`;
-
-  if (dutyCycleHasData && stuckOffCount > 30) {
+  const lockLabel = isEFILiveKpa ? `≥${FULL_LOCK_THRESHOLD} kPa (full lock)` : (usePressureAsLock ? `≥${FULL_LOCK_THRESHOLD} psi line pressure` : `>${FULL_LOCK_THRESHOLD}% duty cycle`);
+  const openLabel = isEFILiveKpa ? `<${OPEN_CONV_THRESHOLD} kPa (open)` : (usePressureAsLock ? `<${OPEN_CONV_THRESHOLD} psi line pressure` : `<${OPEN_CONV_THRESHOLD}% duty cycle`);
+  if ((dutyCycleHasData || usePressureAsLock) && stuckOffCount > 30) {
     issues.push({
       code: 'P0741',
       severity: 'critical',

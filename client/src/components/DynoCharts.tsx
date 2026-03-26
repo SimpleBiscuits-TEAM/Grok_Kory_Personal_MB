@@ -1620,17 +1620,28 @@ BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';
 // ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
 export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   const issue = diagnostics.issues.find(i =>
-    i.code === 'CONVERTER-SLIP' || i.code === 'P0741' || i.code === 'P0742'
+    i.code === 'CONVERTER-SLIP' || i.code === 'CONVERTER-SLIP-WARN' || i.code === 'P0741' || i.code === 'P0742'
   );
   if (!issue) return null;
+
+  // Determine whether to use duty cycle % or TCC line pressure psi as the lock signal
+  const maxDuty = Math.max(...(data.converterDutyCycle || []).filter(v => v > 0));
+  const maxPressure = Math.max(...(data.converterPressure || []).filter(v => v > 0));
+  const usePressure = maxDuty < 5 && maxPressure > 10;
 
   const chartData = data.timeMinutes.map((t, i) => ({
     time: parseFloat(t.toFixed(3)),
     slip: data.converterSlip[i] ?? 0,
-    dutyCycle: data.converterDutyCycle[i] ?? 0,
+    lockSignal: usePressure
+      ? (data.converterPressure?.[i] ?? 0)
+      : (data.converterDutyCycle?.[i] ?? 0),
   }));
 
-  const maxSlip = Math.max(...data.converterSlip.map(Math.abs));
+  const lockLabel = usePressure ? 'Line Pressure (psi)' : 'TCC Duty (%)';
+  const lockColor = '#fbbf24';
+  const lockDomain = usePressure ? [0, 160] : [0, 100];
+  const lockThreshold = usePressure ? 80 : 90;
+  const lockThresholdLabel = usePressure ? '80 psi (lock)' : '90% (lock)';
 
   return (
     <FaultChartWrapper
@@ -1640,7 +1651,9 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
-      ruleEvaluated="TCC slip > 19.5 RPM for 3.9+ seconds while duty cycle > 90% (P0741) or slip < 7 RPM while duty cycle < 15% at RPM > 2000 (P0742)"
+      ruleEvaluated={usePressure
+        ? 'TCC slip > 20 RPM while line pressure >= 80 psi (full lock command)'
+        : 'TCC slip > 19.5 RPM while duty cycle > 90% (P0741) or slip < 7 RPM while duty cycle < 15% at RPM > 2000 (P0742)'}
       badges={undefined}
     >
       <FaultEventList
@@ -1660,16 +1673,18 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis yAxisId="slip" stroke="#fb7185" tick={{ fill: '#fb7185', fontSize: 10 }}
             label={{ value: 'Slip (RPM)', angle: -90, position: 'insideLeft', fill: '#fb7185', fontSize: 10 }} />
-          <YAxis yAxisId="duty" orientation="right" stroke="#fbbf24" tick={{ fill: '#fbbf24', fontSize: 10 }}
-            label={{ value: 'Duty (%)', angle: 90, position: 'insideRight', fill: '#fbbf24', fontSize: 10 }} domain={[0, 100]} />
+          <YAxis yAxisId="lock" orientation="right" stroke={lockColor} tick={{ fill: lockColor, fontSize: 10 }}
+            label={{ value: lockLabel, angle: 90, position: 'insideRight', fill: lockColor, fontSize: 10 }} domain={lockDomain} />
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
           <ReferenceLine yAxisId="slip" y={19.5} stroke="#ff4444" strokeDasharray="4 2"
             label={{ value: '+19.5 RPM', fill: '#ff4444', fontSize: 9, position: 'right' }} />
           <ReferenceLine yAxisId="slip" y={-19.5} stroke="#ff4444" strokeDasharray="4 2"
             label={{ value: '-19.5 RPM', fill: '#ff4444', fontSize: 9, position: 'right' }} />
+          <ReferenceLine yAxisId="lock" y={lockThreshold} stroke="#fbbf24" strokeDasharray="4 2"
+            label={{ value: lockThresholdLabel, fill: '#fbbf24', fontSize: 9, position: 'left' }} />
           <Line yAxisId="slip" type="monotone" dataKey="slip" stroke="#fb7185" dot={false} strokeWidth={1.5} name="Conv Slip (RPM)" />
-          <Line yAxisId="duty" type="monotone" dataKey="dutyCycle" stroke="#fbbf24" dot={false} strokeWidth={1} name="TCC Duty (%)" />
+          <Line yAxisId="lock" type="monotone" dataKey="lockSignal" stroke={lockColor} dot={false} strokeWidth={1} name={lockLabel} />
         </ComposedChart>
       </ResponsiveContainer>
     </FaultChartWrapper>
