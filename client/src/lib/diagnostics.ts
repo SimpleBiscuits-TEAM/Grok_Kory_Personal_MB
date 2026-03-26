@@ -103,7 +103,11 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // Check for Low Boost Pressure (P0299)
-  if (boostActual.length > 0) {
+  // Only run if actual boost data is confirmed available (MAP was in the scan list and non-zero).
+  // When MAP is N/A (not logged), boostActualAvailable = false and we skip the comparison
+  // entirely to prevent a false underboost fault from comparing zero against a valid desired signal.
+  const boostActualAvailable = data.boostActualAvailable !== false; // default true for legacy data
+  if (boostActual.length > 0 && boostActualAvailable) {
     const lowBoostIssues = checkLowBoostPressure(
       boostActual,
       boostDesired,
@@ -112,6 +116,15 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
       rpm
     );
     issues.push(...lowBoostIssues);
+  } else if (boostDesired.length > 0 && !boostActualAvailable && boostDesired.some((v: number) => v > 0)) {
+    // MAP not logged — inform the user that boost comparison is unavailable
+    issues.push({
+      code: 'INFO-MAP-NOT-LOGGED',
+      severity: 'info',
+      title: 'Actual Boost Not Available — MAP Not in Scan List',
+      description: `Desired boost data is present (peak: ${Math.max(...boostDesired).toFixed(1)} psi) but the MAP sensor (ECM.MAP) was not included in the EFILive scan list. Actual vs. desired boost comparison cannot be performed.`,
+      recommendation: 'Add ECM.MAP to your EFILive scan list to enable boost efficiency analysis and underboost detection.',
+    });
   }
 
   // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)

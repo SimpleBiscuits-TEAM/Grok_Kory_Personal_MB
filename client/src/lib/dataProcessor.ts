@@ -48,6 +48,7 @@ export interface DuramaxData {
   transFluidTemp: number[];
   barometricPressure: number[];
   boostSource: 'direct' | 'map_derived' | 'none'; // how boost was obtained
+  boostActualAvailable: boolean; // false when MAP is all N/A — suppresses boost fault checks
   throttlePosition: number[];  // APP / TPS for drag detection
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
   pidsMissing: string[];       // channels that had no valid substitute
@@ -82,6 +83,7 @@ export interface ProcessedMetrics {
   transFluidTemp: number[];
   barometricPressure: number[];
   boostSource: 'direct' | 'map_derived' | 'none'; // provenance label for UI
+  boostActualAvailable: boolean; // false when MAP was all N/A — suppresses boost fault checks
   throttlePosition: number[];  // APP / TPS for drag detection
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
@@ -300,6 +302,8 @@ function parseHPTunersCSV(content: string): DuramaxData {
     transFluidTemp,
     barometricPressure,
     boostSource: hpBoostSource,
+    // HP Tuners: boost is direct or MAP-derived; actual is available if any non-zero values exist
+    boostActualAvailable: boost.some(v => v > 0),
     pidSubstitutions: [],
     pidsMissing: [],
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
@@ -599,6 +603,10 @@ function parseEFILiveCSV(content: string): DuramaxData {
     transFluidTemp,
     barometricPressure,
     boostSource: mapIdx !== -1 ? 'map_derived' : 'none',
+    // EFILive: MAP is the actual boost source. If MAP was all N/A the boost array is all zeros.
+    // Detect this by checking if any boost value is non-zero AND mapIdx was found.
+    // A log where MAP is not in the scan list will have mapIdx === -1 OR all-zero boost.
+    boostActualAvailable: mapIdx !== -1 && boost.some(v => v > 0),
     pidSubstitutions: [],
     pidsMissing: [],
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
@@ -790,6 +798,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     mapAbsolute,
     throttlePosition,
     boostSource: boostGaugeIdx !== -1 ? 'direct' : mapIdx !== -1 ? 'map_derived' : 'none',
+    boostActualAvailable: boost.some(v => v > 0),
     pidSubstitutions: [],
     pidsMissing: [],
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
@@ -978,6 +987,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     transFluidTemp: rawData.transFluidTemp,
     barometricPressure: rawData.barometricPressure,
     boostSource: rawData.boostSource,
+    boostActualAvailable: rawData.boostActualAvailable,
     throttlePosition: rawData.throttlePosition,
     pidSubstitutions: rawData.pidSubstitutions,
     pidsMissing: rawData.pidsMissing,

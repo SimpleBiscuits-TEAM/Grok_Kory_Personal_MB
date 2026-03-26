@@ -192,11 +192,13 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   const boostVals = validValues(data.boost);
   const maxMaf = safeMax(data.maf);
   let turboStatus = '✓ Normal — Turbocharger responding correctly';
+  // boostActualAvailable: false means MAP was not in the scan list — all boost values are zero/invalid
+  const boostAvail = data.boostActualAvailable !== false;
 
-  if (boostVals.length > 0) {
+  if (boostAvail && boostVals.length > 0) {
     const maxBoost = Math.max(...boostVals);
     // P0299 condition: high MAF (>55 lb/min) but low boost (<25 PSIG gauge) = likely boost leak
-    const highMafLowBoostCount = data.maf.filter((m, i) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 25).length;
+    const highMafLowBoostCount = data.maf.filter((m: number, i: number) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 25).length;
 
     if (highMafLowBoostCount > 30) {
       turboStatus = '⚠ WARNING — Possible boost leak (high MAF, low boost pressure)';
@@ -205,6 +207,9 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
     } else {
       findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSIG, peak MAF ${maxMaf.toFixed(1)} lb/min`);
     }
+  } else if (!boostAvail) {
+    turboStatus = '— MAP not logged (add ECM.MAP to scan list for boost analysis)';
+    findings.push(`Turbocharger — peak MAF ${maxMaf.toFixed(1)} lb/min (actual boost unavailable: ECM.MAP not in scan list)`);
   } else {
     findings.push(`Turbocharger data — peak MAF ${maxMaf.toFixed(1)} lb/min (boost channel not logged)`);
   }
@@ -461,11 +466,15 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
 
   // ── P0299: Underboost ─────────────────────────────────────────────────────
   // Actual boost 5+ PSI below desired for >3 seconds (75 samples at 25Hz)
+  // Skip entirely when boostActualAvailable is false — MAP was not logged, zero values are invalid
   let p0299Status = '✓ PASS';
   const boostActual = validValues(data.boost);
-  if (boostActual.length > 0) {
+  const boostAvailForP0299 = data.boostActualAvailable !== false;
+  if (!boostAvailForP0299) {
+    p0299Status = '— Actual boost not available (ECM.MAP not in scan list)';
+  } else if (boostActual.length > 0) {
     // Check for high MAF but low boost (boost leak indicator)
-    const highMafLowBoost = data.maf.filter((m, i) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;
+    const highMafLowBoost = data.maf.filter((m: number, i: number) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;
     if (highMafLowBoost >= 75) {
       p0299Status = '✗ DETECTED — P0299 Underboost (possible boost leak)';
       detectedCodes.push('P0299');

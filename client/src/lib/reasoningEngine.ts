@@ -489,6 +489,33 @@ function analyzeBoostSystem(
 ): ReasoningFinding[] {
   const findings: ReasoningFinding[] = [];
 
+  // When boostActualAvailable is false, MAP was not in the scan list.
+  // Emit an informational finding and skip all boost comparisons to prevent false analysis.
+  const boostAvail = data.boostActualAvailable !== false;
+  if (!boostAvail) {
+    const maxDesired = data.boostDesired.length > 0 ? Math.max(...data.boostDesired) : 0;
+    if (maxDesired > 0) {
+      findings.push({
+        id: 'boost-map-not-logged',
+        category: 'boost',
+        confidence: 'high',
+        type: 'info',
+        title: 'Actual Boost Not Available — ECM.MAP Not in Scan List',
+        reasoning:
+          `Desired boost data is present (peak ${maxDesired.toFixed(1)} psi) but the MAP sensor ` +
+          `(ECM.MAP) was not included in the EFILive scan list. Without actual MAP readings, ` +
+          `boost efficiency, underboost detection, and VGT tracking analysis cannot be performed. ` +
+          `This is a data collection gap, not a vehicle fault.`,
+        evidence: [
+          `Peak desired boost: ${maxDesired.toFixed(1)} psi`,
+          `ECM.MAP: not present in scan list`,
+        ],
+        suggestion: 'Add ECM.MAP to your EFILive scan list and re-log to enable full boost analysis.',
+      });
+    }
+    return findings;
+  }
+
   const boost = data.boost.filter(v => v > 0);
   const boostDesired = data.boostDesired.filter(v => v > 0);
   const vane = data.turboVanePosition.filter(v => v > 0);
