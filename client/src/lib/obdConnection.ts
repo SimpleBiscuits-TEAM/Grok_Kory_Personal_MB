@@ -1349,18 +1349,62 @@ export class OBDConnection {
     this.setState('logging');
     this.emit('log', null, `Logging started: ${pids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms`);
 
+    // Track per-PID failures so we can auto-prune unsupported PIDs
+    const pidFailCount = new Map<number, number>();
+    const pidDisabled = new Set<number>();
+    const MAX_CONSECUTIVE_FAILS = 5;
+    let activePids = [...pids];
+    let loopCount = 0;
+
     // Logging loop
     const logLoop = async () => {
       while (this.loggingActive) {
         const startTime = Date.now();
+        loopCount++;
         
         try {
-          const readings = await this.readPids(pids);
+          // Only poll PIDs that haven't been disabled
+          const readings = await this.readPids(activePids);
+          
+          // Track which PIDs responded
+          const respondedPids = new Set(readings.map(r => r.pid));
           
           // Store readings
           for (const reading of readings) {
             const arr = session.readings.get(reading.pid);
             if (arr) arr.push(reading);
+            // Reset fail count on success
+            pidFailCount.set(reading.pid, 0);
+          }
+          
+          // Track failures for PIDs that didn't respond
+          for (const pid of activePids) {
+            if (!respondedPids.has(pid.pid)) {
+              const fails = (pidFailCount.get(pid.pid) || 0) + 1;
+              pidFailCount.set(pid.pid, fails);
+              
+              if (fails >= MAX_CONSECUTIVE_FAILS && !pidDisabled.has(pid.pid)) {
+                pidDisabled.add(pid.pid);
+                this.emit('log', null, `PID ${pid.shortName} (0x${pid.pid.toString(16)}) not responding — disabled after ${MAX_CONSECUTIVE_FAILS} failures`);
+              }
+            }
+          }
+          
+          // Prune disabled PIDs from active list
+          if (pidDisabled.size > 0) {
+            activePids = activePids.filter(p => !pidDisabled.has(p.pid));
+          }
+          
+          // Log status on first loop
+          if (loopCount === 1) {
+            this.emit('log', null, `First poll: ${readings.length}/${activePids.length + pidDisabled.size} PIDs responded`);
+            if (readings.length > 0) {
+              this.emit('log', null, `Active PIDs: ${readings.map(r => r.name).join(', ')}`);
+            }
+            if (pidDisabled.size > 0) {
+              const disabledNames = pids.filter(p => pidDisabled.has(p.pid)).map(p => p.shortName);
+              this.emit('log', null, `No response: ${disabledNames.join(', ')}`);
+            }
           }
 
           // Emit data event
@@ -1474,40 +1518,63 @@ export function exportSessionToCSV(session: LogSession): string {
   const header = ['Timestamp (ms)', 'Elapsed (s)', ...pids.map(p => `${p.shortName} (${p.unit})`)];
   const rows: string[] = [header.join(',')];
 
-  // Find the maximum number of samples
-  let maxSamples = 0;
-  for (const pid of pids) {
-    const readings = session.readings.get(pid.pid) || [];
-    maxSamples = Math.max(maxSamples, readings.length);
+  // Collect ALL readings across all PIDs and sort by timestamp.
+  // This handles the fact that PIDs are polled sequentially, so each
+  // PID's readings arrive at slightly different timestamps.
+  // We group readings into "samples" by rounding timestamps to the
+  // nearest polling interval.
+  interface SampleRow {
+    timestamp: number;
+    values: Map<number, number>; // pid -> value
   }
 
-  // Build rows - align by sample index
-  for (let i = 0; i < maxSamples; i++) {
-    const values: (string | number)[] = [];
-    let timestamp = 0;
+  const sampleMap = new Map<number, SampleRow>();
+  const halfInterval = Math.max(session.sampleRate / 2, 100);
+
+  for (const pid of pids) {
+    const readings = session.readings.get(pid.pid) || [];
+    for (const reading of readings) {
+      // Round timestamp to nearest interval bucket
+      const bucket = Math.round((reading.timestamp - session.startTime) / halfInterval) * halfInterval + session.startTime;
+      
+      let sample = sampleMap.get(bucket);
+      if (!sample) {
+        sample = { timestamp: reading.timestamp, values: new Map() };
+        sampleMap.set(bucket, sample);
+      }
+      // Use the actual timestamp from the first reading in this bucket
+      if (reading.timestamp < sample.timestamp) {
+        sample.timestamp = reading.timestamp;
+      }
+      sample.values.set(pid.pid, reading.value);
+    }
+  }
+
+  // Sort samples by timestamp
+  const samples = Array.from(sampleMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+  // Build rows with last-known-value fill for missing PIDs
+  const lastKnown = new Map<number, number>();
+  
+  for (const sample of samples) {
+    const values: (string | number)[] = [
+      sample.timestamp,
+      ((sample.timestamp - session.startTime) / 1000).toFixed(3),
+    ];
 
     for (const pid of pids) {
-      const readings = session.readings.get(pid.pid) || [];
-      const reading = readings[i];
-      if (reading) {
-        if (values.length === 0) {
-          timestamp = reading.timestamp;
-          values.push(timestamp);
-          values.push(((timestamp - session.startTime) / 1000).toFixed(3));
-        }
-        values.push(reading.value);
+      const val = sample.values.get(pid.pid);
+      if (val !== undefined) {
+        lastKnown.set(pid.pid, val);
+        values.push(val);
       } else {
-        if (values.length === 0) {
-          values.push('');
-          values.push('');
-        }
-        values.push('');
+        // Use last known value if available, otherwise empty
+        const last = lastKnown.get(pid.pid);
+        values.push(last !== undefined ? last : '');
       }
     }
 
-    if (values.length > 0) {
-      rows.push(values.join(','));
-    }
+    rows.push(values.join(','));
   }
 
   return rows.join('\n');
@@ -1524,28 +1591,48 @@ export function sessionToAnalyzerCSV(session: LogSession): string {
   const unitRow = ['s', ...pids.map(p => p.unit)];
   const rows: string[] = [header.join(','), unitRow.join(',')];
 
-  let maxSamples = 0;
-  for (const pid of pids) {
-    const readings = session.readings.get(pid.pid) || [];
-    maxSamples = Math.max(maxSamples, readings.length);
+  // Use the same timestamp-bucketing approach as exportSessionToCSV
+  interface SampleRow {
+    timestamp: number;
+    values: Map<number, number>;
   }
 
-  for (let i = 0; i < maxSamples; i++) {
-    const values: (string | number)[] = [];
-    let hasTimestamp = false;
+  const sampleMap = new Map<number, SampleRow>();
+  const halfInterval = Math.max(session.sampleRate / 2, 100);
+
+  for (const pid of pids) {
+    const readings = session.readings.get(pid.pid) || [];
+    for (const reading of readings) {
+      const bucket = Math.round((reading.timestamp - session.startTime) / halfInterval) * halfInterval + session.startTime;
+      let sample = sampleMap.get(bucket);
+      if (!sample) {
+        sample = { timestamp: reading.timestamp, values: new Map() };
+        sampleMap.set(bucket, sample);
+      }
+      if (reading.timestamp < sample.timestamp) {
+        sample.timestamp = reading.timestamp;
+      }
+      sample.values.set(pid.pid, reading.value);
+    }
+  }
+
+  const samples = Array.from(sampleMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+  const lastKnown = new Map<number, number>();
+
+  for (const sample of samples) {
+    const values: (string | number)[] = [
+      ((sample.timestamp - session.startTime) / 1000).toFixed(3),
+    ];
 
     for (const pid of pids) {
-      const readings = session.readings.get(pid.pid) || [];
-      const reading = readings[i];
-      if (reading && !hasTimestamp) {
-        values.push(((reading.timestamp - session.startTime) / 1000).toFixed(3));
-        hasTimestamp = true;
+      const val = sample.values.get(pid.pid);
+      if (val !== undefined) {
+        lastKnown.set(pid.pid, val);
+        values.push(val);
+      } else {
+        const last = lastKnown.get(pid.pid);
+        values.push(last !== undefined ? last : '');
       }
-      values.push(reading ? reading.value : '');
-    }
-
-    if (!hasTimestamp) {
-      values.unshift(((i * session.sampleRate) / 1000).toFixed(3));
     }
 
     rows.push(values.join(','));

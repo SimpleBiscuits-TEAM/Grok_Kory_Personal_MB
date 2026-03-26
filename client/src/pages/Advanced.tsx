@@ -784,7 +784,7 @@ function VehiclePanel() {
 
 // ─── Analyzer Panel (Merged Normal Mode) ────────────────────────────────────
 
-function AnalyzerPanel() {
+function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void }) {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
@@ -798,6 +798,7 @@ function AnalyzerPanel() {
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [lastInjectedId, setLastInjectedId] = useState<string | null>(null);
 
   const dynoRef = useRef<DynoChartHandle>(null);
   const dynoContainerRef = useRef<HTMLDivElement>(null);
@@ -815,18 +816,18 @@ function AnalyzerPanel() {
 
   const { exportToPdf, isExporting, exportError } = usePdfExport();
 
-  const processFile = useCallback(async (file: File) => {
+  // Process raw CSV string (used by both file upload and datalogger injection)
+  const processCSVContent = useCallback(async (content: string, name: string) => {
     setLoading(true);
     setError(null);
     try {
-      const content = await file.text();
       const rawData = parseCSV(content);
       const processed = processData(rawData);
       const downsampled = downsampleData(processed, 2000);
       const binned = createBinnedData(processed, 40);
       setData(downsampled);
       setBinnedData(binned);
-      setFileName(file.name);
+      setFileName(name);
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
       const reasoning = runReasoningEngine(downsampled, diagnosticReport);
@@ -835,7 +836,7 @@ function AnalyzerPanel() {
       setDragAnalysis(drag);
       const reportNoVin = generateHealthReport(downsampled, undefined);
       setHealthReport(reportNoVin);
-      const detectedVin = extractVinFromFilename(file.name);
+      const detectedVin = extractVinFromFilename(name);
       setVinFromFile(detectedVin);
       if (detectedVin) {
         decodeVinNhtsa(detectedVin).then(vehicleInfo => {
@@ -844,13 +845,27 @@ function AnalyzerPanel() {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process file');
+      setError(err instanceof Error ? err.message : 'Failed to process data');
       setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setVinFromFile(null); setManualVin(''); setReasoningReport(null); setDragAnalysis(null);
     } finally {
       setLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, []);
+
+  // Auto-process injected CSV from Datalogger
+  useEffect(() => {
+    if (injectedCSV && injectedCSV.filename !== lastInjectedId) {
+      setLastInjectedId(injectedCSV.filename);
+      processCSVContent(injectedCSV.csv, injectedCSV.filename);
+      if (onInjectedConsumed) onInjectedConsumed();
+    }
+  }, [injectedCSV, lastInjectedId, processCSVContent, onInjectedConsumed]);
+
+  const processFile = useCallback(async (file: File) => {
+    const content = await file.text();
+    await processCSVContent(content, file.name);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [processCSVContent]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
@@ -1055,6 +1070,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
+  const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const engine = useMemo(() => getSearchEngine(), []);
@@ -1127,7 +1143,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         {/* Tab content */}
-        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel /></div>}
+        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} /></div>}
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
@@ -1194,7 +1210,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'mode6' && <div className="ppei-anim-fade-up"><Mode6Panel /></div>}
         {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
         {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
-        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setActiveTab('analyzer'); /* TODO: auto-load CSV into analyzer */ }} /></div>}
+        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
       </main>
 
       {/* Footer */}
