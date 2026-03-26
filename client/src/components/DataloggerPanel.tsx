@@ -902,6 +902,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
       }
     });
 
+    conn.on('pidAvailability', (e) => {
+      const { supported, unsupported } = e.data as { supported: PIDDefinition[]; unsupported: PIDDefinition[] };
+      addLog(`PID availability: ${supported.length} supported, ${unsupported.length} filtered out`);
+      if (unsupported.length > 0) {
+        addLog(`Filtered: ${unsupported.map(p => p.shortName).join(', ')}`);
+      }
+    });
+
     connectionRef.current = conn;
     addLog('Connecting to OBDLink device...');
 

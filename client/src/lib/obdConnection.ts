@@ -92,7 +92,8 @@ export type ConnectionEventType =
   | 'log'
   | 'scanProgress'
   | 'dtcRead'
-  | 'dtcCleared';
+  | 'dtcCleared'
+  | 'pidAvailability';
 
 export interface ConnectionEvent {
   type: ConnectionEventType;
@@ -2880,17 +2881,51 @@ export class OBDConnection {
     return new Set(this.supportedPids);
   }
 
+  /**
+   * Returns standard (Mode 01) PIDs that the vehicle confirmed it supports
+   * via the Mode 01 PID 0x00/0x20/0x40/0x60 bitmask scan.
+   */
   getAvailablePids(): PIDDefinition[] {
     return STANDARD_PIDS.filter(p => this.supportedPids.has(p.pid));
   }
 
-  // Mode 22 PIDs are always "available" since we can't query support via Mode 01
+  /**
+   * Check if a specific standard PID is supported by the connected vehicle.
+   * Mode 22 extended PIDs always return true (can't be queried via bitmask).
+   */
+  isPidSupported(pid: PIDDefinition): boolean {
+    const service = pid.service ?? 0x01;
+    if (service === 0x22) return true; // Extended PIDs can't be pre-checked
+    return this.supportedPids.has(pid.pid);
+  }
+
+  /**
+   * Returns all manufacturer-specific extended PIDs (Mode 22).
+   * These are always "available" since support can't be queried via Mode 01 bitmask.
+   */
   getAvailableExtendedPids(): PIDDefinition[] {
-    return GM_EXTENDED_PIDS;
+    return ALL_PIDS.filter(p => (p.service ?? 0x01) === 0x22);
   }
 
   getAllAvailablePids(): PIDDefinition[] {
     return [...this.getAvailablePids(), ...this.getAvailableExtendedPids()];
+  }
+
+  /**
+   * Filter a list of PIDs to only those supported by the connected vehicle.
+   * Standard PIDs are checked against the bitmask; Mode 22 PIDs pass through.
+   */
+  filterSupportedPids(pids: PIDDefinition[]): { supported: PIDDefinition[]; unsupported: PIDDefinition[] } {
+    const supported: PIDDefinition[] = [];
+    const unsupported: PIDDefinition[] = [];
+    for (const pid of pids) {
+      if (this.isPidSupported(pid)) {
+        supported.push(pid);
+      } else {
+        unsupported.push(pid);
+      }
+    }
+    return { supported, unsupported };
   }
 
   // ─── Single PID Request ──────────────────────────────────────────────────
@@ -3141,29 +3176,45 @@ export class OBDConnection {
       throw new Error('Device must be in ready state to start logging');
     }
 
+    // ── Pre-filter: remove standard PIDs the vehicle doesn't support ──
+    // The Mode 01 bitmask scan (PIDs 0x00/0x20/0x40/0x60) already ran during
+    // initialize(). Use it to strip unsupported standard PIDs BEFORE the
+    // first poll, avoiding the noisy "not responding — disabled" messages.
+    const { supported: filteredPids, unsupported: removedPids } = this.filterSupportedPids(pids);
+
+    if (removedPids.length > 0) {
+      this.emit('log', null, `Pre-filtered ${removedPids.length} unsupported PID(s): ${removedPids.map(p => `${p.shortName} (0x${p.pid.toString(16)})`).join(', ')}`);
+      this.emit('pidAvailability', { supported: filteredPids, unsupported: removedPids });
+    }
+
+    if (filteredPids.length === 0) {
+      this.emit('error', null, 'None of the selected PIDs are supported by this vehicle. Try a different preset or select individual PIDs.');
+      throw new Error('No supported PIDs to log');
+    }
+
     const session: LogSession = {
       id: `log_${Date.now()}`,
       startTime: Date.now(),
       sampleRate: intervalMs,
-      pids: [...pids],
+      pids: [...filteredPids],
       readings: new Map(),
     };
 
     // Initialize reading arrays
-    for (const pid of pids) {
+    for (const pid of filteredPids) {
       session.readings.set(pid.pid, []);
     }
 
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${pids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms`);
+    this.emit('log', null, `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${filteredPids.length}/${pids.length} PIDs supported)`);
 
-    // Track per-PID failures so we can auto-prune unsupported PIDs
+    // Track per-PID failures so we can auto-prune unsupported Mode 22 PIDs at runtime
     const pidFailCount = new Map<number, number>();
     const pidDisabled = new Set<number>();
     const MAX_CONSECUTIVE_FAILS = 5;
-    let activePids = [...pids];
+    let activePids = [...filteredPids];
     let loopCount = 0;
 
     // Logging loop

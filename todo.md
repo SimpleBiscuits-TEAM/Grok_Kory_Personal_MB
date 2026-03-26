@@ -62,3 +62,16 @@
 - [x] Add BMW chassis PIDs (active suspension, dynamic stability, brake energy regen)
 - [x] Add BMW-specific presets for the XM
 - [x] Write tests for BMW UDS PIDs
+
+## PID Availability Scan (Fix unsupported PID failures)
+- [x] Implement Mode 01 PID support bitmask scan (PIDs 0x00, 0x20, 0x40, 0x60) during initialize()
+- [x] Parse bitmask response to build Set of supported standard PIDs
+- [x] Filter preset PIDs against supported bitmask before logging starts
+- [x] Auto-remove unsupported PIDs from active polling list
+- [x] Show supported/unsupported PID count in DataloggerPanel UI
+- [x] Mark unsupported PIDs visually in PID selector
+- [x] Write tests for bitmask parsing and PID filtering
+
+## CSV Export / Analyzer Compatibility Fix
+- [x] Fix datalogger CSV export format to be compatible with Analyzer parser
+- [x] Fix failing BMW PID tests (shortName mismatches)

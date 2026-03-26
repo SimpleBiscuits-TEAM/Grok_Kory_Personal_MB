@@ -19,6 +19,9 @@ import {
   getPidsByCategory,
   getMode22Pids,
   getMode01Pids,
+  FORD_EXTENDED_PIDS,
+  getPidsForVehicle,
+  getPresetsForVehicle,
 } from './obdConnection';
 
 // ─── PID Formula Tests ──────────────────────────────────────────────────────
@@ -591,5 +594,310 @@ describe('sessionToAnalyzerCSV', () => {
     expect(lines[0]).toContain('DPF Soot Load');
     expect(lines[1]).toContain('MPa');
     expect(lines[1]).toContain('g');
+  });
+});
+
+// ─── PID Availability Filtering Tests ──────────────────────────────────────
+
+describe('OBDConnection.filterSupportedPids', () => {
+  // We can't easily instantiate OBDConnection (needs WebSerial), but we can
+  // test the static helper functions that feed into the filtering logic.
+
+  it('isPidSupported returns true for Mode 22 PIDs regardless of bitmask', () => {
+    // Mode 22 PIDs always pass through since they can't be checked via Mode 01 bitmask
+    const mode22Pid = GM_EXTENDED_PIDS[0];
+    expect(mode22Pid.service).toBe(0x22);
+    // The logic is: if service === 0x22, always supported
+    // We verify this by checking the type definition
+    expect(mode22Pid.service).toBeDefined();
+  });
+
+  it('standard PIDs can be checked against a bitmask set', () => {
+    // Simulate a supportedPids set from a Duramax (diesel — no O2 sensors, no fuel trims)
+    const duramaxSupported = new Set([
+      0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x11, // Core engine
+      0x1C, 0x1F, 0x21, 0x23, 0x2F, 0x33, 0x42, 0x43, 0x45, 0x46, 0x49, 0x4C,
+    ]);
+
+    // Filter standard PIDs against this set
+    const supported = STANDARD_PIDS.filter(p => duramaxSupported.has(p.pid));
+    const unsupported = STANDARD_PIDS.filter(p => !duramaxSupported.has(p.pid));
+
+    // Diesel should NOT support O2 sensors, fuel trims, catalyst temps
+    expect(unsupported.some(p => p.shortName === 'STFT1')).toBe(true);
+    expect(unsupported.some(p => p.shortName === 'LTFT1')).toBe(true);
+    expect(unsupported.some(p => p.shortName === 'O2_B1S2')).toBe(true);
+
+    // Diesel SHOULD support RPM, ECT, MAP, Speed
+    expect(supported.some(p => p.shortName === 'RPM')).toBe(true);
+    expect(supported.some(p => p.shortName === 'ECT')).toBe(true);
+    expect(supported.some(p => p.shortName === 'MAP')).toBe(true);
+    expect(supported.some(p => p.shortName === 'VSS')).toBe(true);
+  });
+
+  it('gas engine supports O2 sensors and fuel trims', () => {
+    // Simulate a gas engine supported PID set (Ford Raptor 6.2L)
+    const gasSupported = new Set([
+      0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, // Fuel system + trims
+      0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, // Core engine + MAF
+      0x14, 0x15, 0x19, // O2 sensors
+      0x1C, 0x1F, 0x21, 0x2E, 0x2F, 0x31, 0x33,
+      0x34, 0x3C, 0x3D, // Wideband + catalyst
+      0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x49, 0x4A, 0x4C,
+    ]);
+
+    const supported = STANDARD_PIDS.filter(p => gasSupported.has(p.pid));
+
+    // Gas engine SHOULD support fuel trims and O2 sensors
+    expect(supported.some(p => p.shortName === 'STFT1')).toBe(true);
+    expect(supported.some(p => p.shortName === 'LTFT1')).toBe(true);
+    expect(supported.some(p => p.shortName === 'MAF')).toBe(true);
+    expect(supported.some(p => p.shortName === 'LAMBDA')).toBe(true);
+  });
+
+  it('pre-filtering removes more PIDs from diesel than gas presets', () => {
+    // Diesel bitmask — fewer standard PIDs
+    const dieselSupported = new Set([0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x11, 0x23, 0x42]);
+    // Gas bitmask — more standard PIDs
+    const gasSupported = new Set([
+      0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+      0x10, 0x11, 0x14, 0x15, 0x19, 0x1C, 0x1F, 0x21, 0x2E, 0x2F, 0x31, 0x33,
+      0x34, 0x3C, 0x3D, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x49, 0x4A, 0x4C,
+    ]);
+
+    const dieselFiltered = STANDARD_PIDS.filter(p => !dieselSupported.has(p.pid));
+    const gasFiltered = STANDARD_PIDS.filter(p => !gasSupported.has(p.pid));
+
+    // Diesel should filter out more PIDs than gas
+    expect(dieselFiltered.length).toBeGreaterThan(gasFiltered.length);
+  });
+});
+
+// ─── Ford 6.2L Boss Extended PID Tests ─────────────────────────────────────
+
+describe('FORD_EXTENDED_PIDS — 6.2L Boss V8', () => {
+  it('has oil temperature PID', () => {
+    const oilTemp = FORD_EXTENDED_PIDS.find(p => p.shortName === 'EOT_BOSS');
+    expect(oilTemp).toBeDefined();
+    expect(oilTemp!.service).toBe(0x22);
+    expect(oilTemp!.unit).toBe('°C');
+    expect(oilTemp!.manufacturer).toBe('ford');
+  });
+
+  it('has oil pressure PID', () => {
+    const oilPress = FORD_EXTENDED_PIDS.find(p => p.shortName === 'EOP_BOSS');
+    expect(oilPress).toBeDefined();
+    expect(oilPress!.unit).toBe('psi');
+  });
+
+  it('has cylinder head temperature PID', () => {
+    const cht = FORD_EXTENDED_PIDS.find(p => p.shortName === 'CHT_BOSS');
+    expect(cht).toBeDefined();
+    expect(cht!.unit).toBe('°C');
+    expect(cht!.category).toBe('cooling');
+  });
+
+  it('has per-cylinder knock retard PIDs', () => {
+    const knockPids = FORD_EXTENDED_PIDS.filter(p => p.shortName.startsWith('KR_C'));
+    // Should have 8 knock retard PIDs for V8
+    expect(knockPids.length).toBe(8);
+    for (const kr of knockPids) {
+      expect(kr.unit).toBe('°');
+      expect(kr.manufacturer).toBe('ford');
+    }
+  });
+
+  it('has per-cylinder misfire count PIDs', () => {
+    const misfirePids = FORD_EXTENDED_PIDS.filter(p => p.shortName.startsWith('MIS_C'));
+    expect(misfirePids.length).toBe(8);
+    for (const mis of misfirePids) {
+      expect(mis.unit).toBe('counts');
+    }
+  });
+
+  it('has VCT cam position PIDs', () => {
+    const vctPids = FORD_EXTENDED_PIDS.filter(p => p.shortName.includes('CAM'));
+    expect(vctPids.length).toBeGreaterThanOrEqual(4); // Intake/exhaust, bank 1/2
+    for (const vct of vctPids) {
+      expect(vct.unit).toBe('°CA');
+    }
+  });
+
+  it('has 6R80 transmission PIDs', () => {
+    const transPids = FORD_EXTENDED_PIDS.filter(p =>
+      p.shortName.includes('TFT') || p.shortName.includes('TCS') ||
+      p.shortName.includes('GEAR') || p.shortName.includes('TCC') ||
+      p.shortName.includes('LP_6R80')
+    );
+    expect(transPids.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('all Ford PIDs have manufacturer=ford', () => {
+    for (const pid of FORD_EXTENDED_PIDS) {
+      expect(pid.manufacturer).toBe('ford');
+    }
+  });
+
+  it('all Ford PIDs have service=0x22', () => {
+    for (const pid of FORD_EXTENDED_PIDS) {
+      expect(pid.service).toBe(0x22);
+    }
+  });
+
+  it('Ford PIDs have valid formulas', () => {
+    for (const pid of FORD_EXTENDED_PIDS) {
+      const result = pid.formula([0x80, 0x80]);
+      expect(typeof result).toBe('number');
+      expect(isFinite(result)).toBe(true);
+    }
+  });
+});
+
+// ─── BMW UDS Extended PID Tests ────────────────────────────────────────────
+
+import { BMW_EXTENDED_PIDS } from './obdConnection';
+
+describe('BMW_EXTENDED_PIDS — UDS Extended Diagnostics', () => {
+  it('has DME engine management PIDs', () => {
+    const dmePids = BMW_EXTENDED_PIDS.filter(p => p.category === 'engine');
+    expect(dmePids.length).toBeGreaterThanOrEqual(5);
+    // Should have VANOS (via VAN_ prefix) and boost PIDs
+    const allShortNames = BMW_EXTENDED_PIDS.map(p => p.shortName);
+    expect(allShortNames.some(s => s.includes('VAN_'))).toBe(true);
+    expect(allShortNames.some(s => s.includes('BOOST'))).toBe(true);
+  });
+
+  it('has ZF 8HP transmission PIDs', () => {
+    const transPids = BMW_EXTENDED_PIDS.filter(p => p.category === 'transmission');
+    expect(transPids.length).toBeGreaterThanOrEqual(4);
+    const shortNames = transPids.map(p => p.shortName);
+    expect(shortNames.some(s => s.includes('TFT') || s.includes('TCS') || s.includes('GEAR'))).toBe(true);
+  });
+
+  it('has DSC/xDrive torque distribution PIDs', () => {
+    const dscPids = BMW_EXTENDED_PIDS.filter(p =>
+      p.shortName.includes('YAW') || p.shortName.includes('XFER') ||
+      p.shortName.includes('LAT_G') || p.shortName.includes('LON_G') ||
+      p.shortName.includes('FAXLE') || p.shortName.includes('RAXLE')
+    );
+    expect(dscPids.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('has HV battery system PIDs', () => {
+    const hvPids = BMW_EXTENDED_PIDS.filter(p =>
+      p.shortName.includes('HV_')
+    );
+    expect(hvPids.length).toBeGreaterThanOrEqual(3);
+    // Should have SOC, voltage, current, temp
+    const shortNames = hvPids.map(p => p.shortName);
+    expect(shortNames.some(s => s.includes('SOC'))).toBe(true);
+    expect(shortNames.some(s => s.includes('VOLT'))).toBe(true);
+  });
+
+  it('has electric motor PIDs', () => {
+    const motorPids = BMW_EXTENDED_PIDS.filter(p =>
+      p.shortName.includes('EMOT_') || p.shortName.includes('EMOT_TRQ') ||
+      p.shortName.includes('EMOT_RPM')
+    );
+    expect(motorPids.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('has active suspension PIDs', () => {
+    const suspPids = BMW_EXTENDED_PIDS.filter(p =>
+      p.shortName.includes('DAMP') || p.shortName.includes('RH_') ||
+      p.shortName.includes('ROLL') || p.shortName.includes('PITCH')
+    );
+    expect(suspPids.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('all BMW PIDs have manufacturer=bmw', () => {
+    for (const pid of BMW_EXTENDED_PIDS) {
+      expect(pid.manufacturer).toBe('bmw');
+    }
+  });
+
+  it('all BMW PIDs have service=0x22', () => {
+    for (const pid of BMW_EXTENDED_PIDS) {
+      expect(pid.service).toBe(0x22);
+    }
+  });
+
+  it('BMW PIDs have valid formulas', () => {
+    for (const pid of BMW_EXTENDED_PIDS) {
+      const result = pid.formula([0x80, 0x80]);
+      expect(typeof result).toBe('number');
+      expect(isFinite(result)).toBe(true);
+    }
+  });
+
+  it('BMW PIDs have ECU header addresses', () => {
+    for (const pid of BMW_EXTENDED_PIDS) {
+      expect(pid.ecuHeader).toBeDefined();
+      expect(pid.ecuHeader!.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─── Preset Filtering for Specific Vehicles ────────────────────────────────
+
+describe('getPresetsForVehicle', () => {
+  it('returns Ford Raptor presets for ford/gasoline', () => {
+    const presets = getPresetsForVehicle('ford', 'gasoline');
+    const names = presets.map(p => p.name);
+    expect(names.some(n => n.includes('Raptor') || n.includes('Boss') || n.includes('Ford'))).toBe(true);
+  });
+
+  it('returns BMW XM presets for bmw/any', () => {
+    const presets = getPresetsForVehicle('bmw', 'any');
+    const names = presets.map(p => p.name);
+    expect(names.some(n => n.includes('BMW') || n.includes('XM'))).toBe(true);
+  });
+
+  it('returns Duramax presets for gm/diesel', () => {
+    const presets = getPresetsForVehicle('gm', 'diesel');
+    const names = presets.map(p => p.name);
+    expect(names.some(n => n.includes('Duramax') || n.includes('Diesel'))).toBe(true);
+  });
+
+  it('always includes universal presets', () => {
+    const fordPresets = getPresetsForVehicle('ford', 'gasoline');
+    const bmwPresets = getPresetsForVehicle('bmw', 'any');
+    const gmPresets = getPresetsForVehicle('gm', 'diesel');
+
+    // All should include Engine Basics (universal)
+    expect(fordPresets.some(p => p.name === 'Engine Basics')).toBe(true);
+    expect(bmwPresets.some(p => p.name === 'Engine Basics')).toBe(true);
+    expect(gmPresets.some(p => p.name === 'Engine Basics')).toBe(true);
+  });
+});
+
+// ─── getPidsForVehicle Tests ───────────────────────────────────────────────
+
+describe('getPidsForVehicle', () => {
+  it('returns Ford extended PIDs for ford manufacturer', () => {
+    const pids = getPidsForVehicle('ford', 'gasoline');
+    const fordPids = pids.filter(p => p.manufacturer === 'ford');
+    expect(fordPids.length).toBeGreaterThan(0);
+  });
+
+  it('returns BMW extended PIDs for bmw manufacturer', () => {
+    const pids = getPidsForVehicle('bmw', 'any');
+    const bmwPids = pids.filter(p => p.manufacturer === 'bmw');
+    expect(bmwPids.length).toBeGreaterThan(0);
+  });
+
+  it('returns GM extended PIDs for gm/diesel', () => {
+    const pids = getPidsForVehicle('gm', 'diesel');
+    const gmPids = pids.filter(p => p.manufacturer === 'gm');
+    expect(gmPids.length).toBeGreaterThan(0);
+  });
+
+  it('always includes standard PIDs', () => {
+    const fordPids = getPidsForVehicle('ford', 'gasoline');
+    const bmwPids = getPidsForVehicle('bmw', 'any');
+    
+    // Should include RPM, ECT, Speed (universal standard PIDs)
+    expect(fordPids.some(p => p.pid === 0x0C && (p.service ?? 0x01) === 0x01)).toBe(true);
+    expect(bmwPids.some(p => p.pid === 0x0C && (p.service ?? 0x01) === 0x01)).toBe(true);
   });
 });

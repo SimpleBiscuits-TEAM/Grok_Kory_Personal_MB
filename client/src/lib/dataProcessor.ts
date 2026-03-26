@@ -112,6 +112,13 @@ export function parseCSV(content: string): DuramaxData {
   // Try to detect format
   const lines = content.split('\n').map(line => line.trim());
   
+  // Check for PPEI Datalogger format (our own live-capture export)
+  // Detected by "Timestamp (ms)" or "Elapsed (s)" in the first row
+  const isDatalogger = lines.length > 0 && (
+    lines[0].includes('Timestamp (ms)') ||
+    lines[0].includes('Elapsed (s)')
+  );
+
   // Check for Banks Power format (has "Horsepower ECU", "Torque ECU", "DYNO" columns)
   const isBanksPower = lines.some(line => 
     line.includes('Horsepower ECU') || 
@@ -122,13 +129,293 @@ export function parseCSV(content: string): DuramaxData {
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
   const isEFILive = lines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
   
-  if (isBanksPower) {
+  if (isDatalogger) {
+    return parseDataloggerCSV(content);
+  } else if (isBanksPower) {
     return parseBanksPowerCSV(content);
   } else if (isEFILive) {
     return parseEFILiveCSV(content);
   } else {
     return parseHPTunersCSV(content);
   }
+}
+
+/**
+ * Datalogger shortName → logical channel mapping.
+ * Maps the shortName used in our live datalogger CSV export to the
+ * internal DuramaxData channel names. The datalogger header format is:
+ *   SHORTNAME (unit)  — e.g. "RPM (rpm)", "ECT (°C)", "LOAD (%)"
+ * We strip the unit suffix and match on the shortName.
+ */
+const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
+  // Core engine
+  'RPM': 'rpm',
+  'LOAD': 'torquePercent',
+  'ECT': 'coolantTemp',
+  'MAP': 'boost',
+  'MAF': 'maf',
+  'TPS': 'throttlePosition',
+  'TIMING': '_timing',
+  'IAT': '_iat',
+  'SPEED': 'vehicleSpeed',
+  'VSS': 'vehicleSpeed',
+  // Fuel system
+  'FRP': 'railPressureActual',
+  'FRP_CMD': 'railPressureDesired',
+  'FRP_ACT': 'railPressureActual',
+  'FUEL_RATE': 'fuelRate',
+  // Turbo / boost
+  'BOOST': 'boost',
+  'BOOST_DES': 'boostDesired',
+  'VGT_POS': 'turboVanePosition',
+  'VGT_DES': 'turboVaneDesired',
+  // Exhaust
+  'EGT': 'exhaustGasTemp',
+  'EGT_B1S1': 'exhaustGasTemp',
+  // Transmission
+  'TCC_SLIP': 'converterSlip',
+  'TCC_DUTY': 'converterDutyCycle',
+  'TCC_PRESS': 'converterPressure',
+  'GEAR': 'currentGear',
+  'TRANS_GEAR': 'currentGear',
+  // Oil / temps
+  'OIL_P': 'oilPressure',
+  'OIL_T': 'oilTemp',
+  'EOT': 'oilTemp',
+  'TFT': 'transFluidTemp',
+  'BARO': 'barometricPressure',
+  // Voltage
+  'VPWR': '_voltage',
+  // Fuel trims (gas engines)
+  'STFT1': '_stft1',
+  'LTFT1': '_ltft1',
+  'STFT2': '_stft2',
+  'LTFT2': '_ltft2',
+  // O2 sensors
+  'O2_B1S2': '_o2b1s2',
+  'O2_B2S2': '_o2b2s2',
+  'WB_B1S1': '_wb_b1s1',
+  // Catalyst
+  'CAT_B1S1': '_catb1s1',
+  'CAT_B2S1': '_catb2s1',
+  // EVAP
+  'EVAP_PCT': '_evap_pct',
+  'EVAP_VP': '_evap_vp',
+  // Other
+  'FUEL_LVL': '_fuel_lvl',
+  'FUEL_SYS': '_fuel_sys',
+  'ABS_LOAD': '_abs_load',
+  'LAMBDA': '_lambda',
+  'REL_TPS': '_rel_tps',
+  'AAT': '_aat',
+  'TPS_B': '_tps_b',
+  'APP_D': 'throttlePosition',
+  'APP_E': '_app_e',
+  'TAC': '_tac',
+  'OBD_STD': '_obd_std',
+  'RUN_TIME': '_run_time',
+  'MIL_DIST': '_mil_dist',
+  'CLR_DIST': '_clr_dist',
+  'INJ_TMG': '_inj_tmg',
+  'EGR_FLOW': '_egr_flow',
+  // GM extended PIDs (Mode 22)
+  'DPF_SOOT': '_dpf_soot',
+  'DPF_REGEN': '_dpf_regen',
+  'DEF_LVL': '_def_lvl',
+  'DEF_RATE': '_def_rate',
+  'DEF_QUAL': '_def_qual',
+  'PCV_DC': 'pcvDutyCycle',
+  'PCV_ACT': 'pcvDutyCycle',
+};
+
+/**
+ * Parse our own datalogger CSV export format.
+ * Header: "Timestamp (ms),Elapsed (s),SHORTNAME (unit),..."
+ * Data rows: numeric values with empty cells for PIDs that haven't responded yet.
+ */
+function parseDataloggerCSV(content: string): DuramaxData {
+  const lines = content.split('\n').map(line => line.trim());
+  if (lines.length < 2) throw new Error('Datalogger CSV has no data rows');
+
+  // Parse header — extract shortName from "SHORTNAME (unit)" format
+  const rawHeaders = lines[0].split(',').map(h => h.trim());
+  const shortNames: string[] = rawHeaders.map(h => {
+    // Strip unit suffix: "RPM (rpm)" → "RPM", "Timestamp (ms)" → "Timestamp"
+    const match = h.match(/^([^(]+?)\s*\(/);
+    return match ? match[1].trim() : h.trim();
+  });
+
+  // Find time column
+  const elapsedIdx = shortNames.indexOf('Elapsed');
+  const timestampIdx = shortNames.indexOf('Timestamp');
+  if (elapsedIdx === -1 && timestampIdx === -1) {
+    throw new Error('Datalogger CSV missing Elapsed or Timestamp column');
+  }
+
+  // Build channel → column index mapping
+  const channelColumns: Record<string, number> = {};
+  for (let i = 0; i < shortNames.length; i++) {
+    const sn = shortNames[i];
+    const channel = DATALOGGER_CHANNEL_MAP[sn];
+    if (channel && !channel.startsWith('_')) {
+      // Only map to DuramaxData channels (skip underscore-prefixed internal ones)
+      if (!channelColumns[channel]) {
+        channelColumns[channel] = i;
+      }
+    }
+  }
+
+  // Parse data rows
+  const rpm: number[] = [];
+  const maf: number[] = [];
+  const boost: number[] = [];
+  const mapAbsolute: number[] = [];
+  const throttlePosition: number[] = [];
+  const torquePercent: number[] = [];
+  const maxTorque: number[] = [];
+  const vehicleSpeed: number[] = [];
+  const fuelRate: number[] = [];
+  const offset: number[] = [];
+  const railPressureActual: number[] = [];
+  const railPressureDesired: number[] = [];
+  const pcvDutyCycle: number[] = [];
+  const boostDesired: number[] = [];
+  const turboVanePosition: number[] = [];
+  const turboVaneDesired: number[] = [];
+  const exhaustGasTemp: number[] = [];
+  const converterSlip: number[] = [];
+  const converterDutyCycle: number[] = [];
+  const converterPressure: number[] = [];
+  const currentGear: number[] = [];
+  const oilPressure: number[] = [];
+  const coolantTemp: number[] = [];
+  const oilTemp: number[] = [];
+  const transFluidTemp: number[] = [];
+  const barometricPressure: number[] = [];
+
+  const getVal = (values: number[], channel: string): number => {
+    const idx = channelColumns[channel];
+    if (idx === undefined || idx >= values.length) return 0;
+    const v = values[idx];
+    return isNaN(v) ? 0 : v;
+  };
+
+  // Track last known values for sparse data (datalogger fills progressively)
+  const lastKnown: Record<string, number> = {};
+  const getValWithFill = (values: number[], channel: string): number => {
+    const idx = channelColumns[channel];
+    if (idx === undefined || idx >= values.length) return lastKnown[channel] ?? 0;
+    const raw = values[idx];
+    if (isNaN(raw) || raw === undefined) return lastKnown[channel] ?? 0;
+    lastKnown[channel] = raw;
+    return raw;
+  };
+
+  let startTime = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    const values = line.split(',').map(v => {
+      const num = parseFloat(v.trim());
+      return isNaN(num) ? NaN : num;
+    });
+
+    // Get elapsed time in seconds
+    let elapsed: number;
+    if (elapsedIdx !== -1 && !isNaN(values[elapsedIdx])) {
+      elapsed = values[elapsedIdx];
+    } else if (timestampIdx !== -1 && !isNaN(values[timestampIdx])) {
+      if (startTime === 0) startTime = values[timestampIdx];
+      elapsed = (values[timestampIdx] - startTime) / 1000;
+    } else {
+      continue; // skip rows without valid time
+    }
+
+    // Only include rows that have at least RPM or LOAD data
+    const rpmVal = getValWithFill(values, 'rpm');
+    const loadVal = getValWithFill(values, 'torquePercent');
+    if (rpmVal === 0 && loadVal === 0 && elapsed < 0.5) continue;
+
+    offset.push(elapsed);
+    rpm.push(rpmVal);
+    maf.push(getValWithFill(values, 'maf'));
+    const boostVal = getValWithFill(values, 'boost');
+    // MAP values from datalogger are in kPa — convert to gauge PSI
+    // MAP at idle ≈ 100 kPa (atmospheric). Values > 100 = positive boost.
+    const mapKpa = boostVal;
+    const baroVal = getValWithFill(values, 'barometricPressure');
+    const baroPsia = baroVal > 0 ? baroVal * 0.145038 : 14.696;
+    const mapPsia = mapKpa > 0 ? mapKpa * 0.145038 : 0;
+    mapAbsolute.push(mapPsia);
+    // If MAP > baro, there's positive boost
+    boost.push(Math.max(0, mapPsia - baroPsia));
+    torquePercent.push(loadVal);
+    maxTorque.push(879.174); // Default Duramax max torque lb-ft
+    vehicleSpeed.push(getValWithFill(values, 'vehicleSpeed'));
+    fuelRate.push(getValWithFill(values, 'fuelRate'));
+    railPressureActual.push(getValWithFill(values, 'railPressureActual'));
+    railPressureDesired.push(getValWithFill(values, 'railPressureDesired'));
+    pcvDutyCycle.push(getValWithFill(values, 'pcvDutyCycle'));
+    boostDesired.push(getValWithFill(values, 'boostDesired'));
+    turboVanePosition.push(getValWithFill(values, 'turboVanePosition'));
+    turboVaneDesired.push(getValWithFill(values, 'turboVaneDesired'));
+    exhaustGasTemp.push(getValWithFill(values, 'exhaustGasTemp'));
+    converterSlip.push(getValWithFill(values, 'converterSlip'));
+    converterDutyCycle.push(getValWithFill(values, 'converterDutyCycle'));
+    converterPressure.push(getValWithFill(values, 'converterPressure'));
+    currentGear.push(getValWithFill(values, 'currentGear'));
+    oilPressure.push(getValWithFill(values, 'oilPressure'));
+    coolantTemp.push(getValWithFill(values, 'coolantTemp'));
+    oilTemp.push(getValWithFill(values, 'oilTemp'));
+    transFluidTemp.push(getValWithFill(values, 'transFluidTemp'));
+    barometricPressure.push(baroPsia);
+    throttlePosition.push(getValWithFill(values, 'throttlePosition'));
+  }
+
+  if (rpm.length === 0) {
+    throw new Error('No valid data rows found in datalogger CSV');
+  }
+
+  const duration = offset.length > 0 ? offset[offset.length - 1] - offset[0] : 0;
+
+  return {
+    rpm,
+    maf,
+    boost,
+    mapAbsolute,
+    throttlePosition,
+    torquePercent,
+    maxTorque,
+    vehicleSpeed,
+    fuelRate,
+    offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    turboVaneDesired,
+    exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
+    currentGear,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
+    barometricPressure,
+    boostSource: channelColumns['boost'] !== undefined ? 'map_derived' : 'none',
+    boostActualAvailable: boost.some(v => v > 0),
+    pidSubstitutions: [],
+    pidsMissing: [],
+    boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
+    timestamp: new Date().toLocaleString(),
+    duration,
+    fileFormat: 'hptuners', // Use hptuners format for downstream compatibility
+  };
 }
 
 /**
