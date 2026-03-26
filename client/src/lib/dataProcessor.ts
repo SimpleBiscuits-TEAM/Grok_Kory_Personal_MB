@@ -492,10 +492,39 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const boostGaugePsigIdx = getColumnIndex(['Boost/Vacuum', 'Boost Pressure', 'Boost (psi)', 'Boost Gauge']);
 
   // MAP absolute: used as fallback when no direct boost gauge channel exists
-  // Prefer Hi-Res A channel, then standard SAE MAP
+  // Prefer Hi-Res A/B channel, then standard SAE MAP.
+  // IMPORTANT: Some logs include a Hi-Res column in the header but leave it empty.
+  // We must verify the column actually has numeric data before selecting it.
   const boostIdx = (() => {
+    // Helper: check if a column index has at least one non-empty numeric value
+    // in the first few data rows after the header.
+    const colHasData = (colIdx: number): boolean => {
+      if (colIdx === -1) return false;
+      // Find the first data row (skip units row / blanks)
+      let sampleStart = headerIndex + 1;
+      for (let s = headerIndex + 1; s < Math.min(headerIndex + 6, lines.length); s++) {
+        const fv = parseFloat(lines[s].split(',')[0]);
+        if (!isNaN(fv)) { sampleStart = s; break; }
+      }
+      // Check up to 5 data rows for a non-empty numeric value
+      for (let s = sampleStart; s < Math.min(sampleStart + 5, lines.length); s++) {
+        const cols = lines[s].split(',');
+        if (colIdx < cols.length) {
+          const val = cols[colIdx].trim();
+          if (val !== '' && !isNaN(parseFloat(val))) return true;
+        }
+      }
+      return false;
+    };
+
     const hiResA = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure A (SAE) (Hi Res)');
-    if (hiResA !== -1) return hiResA;
+    if (hiResA !== -1 && colHasData(hiResA)) return hiResA;
+    // L5P logs use "B" variant for the high-resolution MAP channel
+    const hiResB = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure B (SAE) (Hi Res)');
+    if (hiResB !== -1 && colHasData(hiResB)) return hiResB;
+    // Generic Hi-Res fallback (any variant letter)
+    const hiResAny = headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') && h.includes('Hi Res'));
+    if (hiResAny !== -1 && colHasData(hiResAny)) return hiResAny;
     const sae = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure (SAE)');
     if (sae !== -1) return sae;
     return headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') || h.includes('MAP'));
@@ -505,12 +534,12 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const maxTorqueIdx      = getColumnIndex(['Maximum Engine Torque']);
   const speedIdx          = getColumnIndex(['Vehicle Speed (SAE)', 'Vehicle Speed']);
   const fuelRateIdx       = getColumnIndex(['Engine Fuel Rate (SAE)', 'Engine Fuel Rate']);
-  const railActualIdx     = getColumnIndex(['Fuel Rail Pressure (SAE)', 'Fuel Rail Pressure']);
+  const railActualIdx     = getColumnIndex(['Fuel Rail Pressure (SAE)', 'Fuel Rail Pressure', 'Fuel Pressure (SAE)']);
   const railDesiredIdx    = getColumnIndex(['Desired Fuel Pressure']);
   const pcvIdx            = getColumnIndex(['PCV', 'Pressure Regulator', 'High Pressure Fuel Pump Hold DC']);
   const boostDesiredIdx   = getColumnIndex(['Desired Boost']);
   const turboVaneIdx      = getColumnIndex(['Turbo A Vane Position (SAE)', 'Turbo Vane Position', 'Turbo A Vane Position']);
-  const turboVaneDesiredIdx = getColumnIndex(['Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo A Vane Desired']);
+  const turboVaneDesiredIdx = getColumnIndex(['Desired Turbo Vane Position', 'Commanded Turbo A Vane Position (SAE)', 'Turbo Vane Desired', 'Turbo A Vane Desired']);
   // EGT: prefer B1S1 (pre-DPF, most representative), then any EGT channel
   const egtIdx = (() => {
     const b1s1 = headers.findIndex(h => h === 'Exhaust Gas Temperature B1S1');
@@ -520,6 +549,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
   // TCC Slip: 'TCC Slip' (HP Tuners full-description) or legacy names
   const converterSlipIdx  = getColumnIndex(['TCC Slip', 'Converter Slip', 'TCM.TCSLIP']);
   const converterDutyIdx  = getColumnIndex(['Converter Duty', 'Converter PWM']);
+  // TCC State Commanded: L5P uses text values like 'CeTCCC_ControlledOn', 'CeTCCC_ImmediateOff'
+  // We derive a synthetic duty cycle from this when no numeric duty column exists
+  const tccStateIdx = getColumnIndex(['TCC State Commanded']);
   const converterPressureIdx = getColumnIndex(['TCC Line Pressure', 'Converter Pressure', 'TCC Pressure']);
   const currentGearIdx = getColumnIndex(['Trans Current Gear', 'Current Gear', 'Gear', 'Transmission Gear']);
   const oilPressureIdx    = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
@@ -575,8 +607,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
     const line = lines[i];
     if (!line || line.startsWith('[')) break;
     
-    const values = line.split(',').map(v => {
-      const num = parseFloat(v.trim());
+    // Keep raw string values for text columns (gear, TCC state)
+    const rawCols = line.split(',').map(v => v.trim());
+    const values = rawCols.map(v => {
+      const num = parseFloat(v);
       return isNaN(num) ? 0 : num;
     });
     
@@ -610,9 +644,38 @@ function parseHPTunersCSV(content: string): DuramaxData {
     turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
-    converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
+    // Converter duty: prefer numeric column; fall back to TCC State text -> synthetic duty
+    if (converterDutyIdx !== -1) {
+      converterDutyCycle.push(values[converterDutyIdx]);
+    } else if (tccStateIdx !== -1 && tccStateIdx < rawCols.length) {
+      const tccState = rawCols[tccStateIdx].toLowerCase();
+      if (tccState.includes('controlledon')) {
+        converterDutyCycle.push(100);
+      } else if (tccState.includes('controlledhyst')) {
+        converterDutyCycle.push(75);
+      } else if (tccState.includes('controlledoff')) {
+        converterDutyCycle.push(25);
+      } else if (tccState.includes('immediateoff')) {
+        converterDutyCycle.push(0);
+      } else {
+        converterDutyCycle.push(0);
+      }
+    } else {
+      converterDutyCycle.push(0);
+    }
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
-    currentGear.push(currentGearIdx !== -1 ? values[currentGearIdx] : 0);
+    // Gear: prefer numeric value; fall back to parsing text like '2nd Gear', '3rd Gear'
+    if (currentGearIdx !== -1) {
+      let gearVal = values[currentGearIdx];
+      if (gearVal === 0 && currentGearIdx < rawCols.length) {
+        const gearText = rawCols[currentGearIdx];
+        const gearMatch = gearText.match(/(\d+)/);
+        if (gearMatch) gearVal = parseInt(gearMatch[1], 10);
+      }
+      currentGear.push(gearVal);
+    } else {
+      currentGear.push(0);
+    }
     oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);

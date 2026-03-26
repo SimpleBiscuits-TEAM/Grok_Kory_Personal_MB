@@ -2946,27 +2946,33 @@ export class OBDConnection {
 
   // ─── Multi-PID Request (batch for speed) ─────────────────────────────────
 
+  // Track whether multi-PID batching works for this vehicle.
+  // Some vehicles (especially Fords) don't handle multi-PID requests well,
+  // responding to only the first few PIDs and ignoring the rest.
+  private batchSizeLimit = 6; // start optimistic; auto-reduce on partial responses
+  private batchFailCount = 0;
+
   async readPids(pids: PIDDefinition[]): Promise<PIDReading[]> {
     const results: PIDReading[] = [];
     
-    // CAN supports up to 6 PIDs per request in Service 01
-    // Mode 22 PIDs must be requested individually (2-byte DID)
+    // CAN supports up to 6 PIDs per request in Service 01, but some ECUs
+    // can't handle that many. We start at 6 and auto-reduce if partial
+    // responses are detected.
+    const maxBatch = this.batchSizeLimit;
     const batches: PIDDefinition[][] = [];
     let currentBatch: PIDDefinition[] = [];
     
     for (const pid of pids) {
       if ((pid.service ?? 0x01) === 0x22) {
-        // Mode 22 PIDs use 2-byte DIDs, request individually
         batches.push([pid]);
         continue;
       }
       if ((pid.service ?? 0x01) !== 0x01) {
-        // Other non-service-01 PIDs also individually
         batches.push([pid]);
         continue;
       }
       currentBatch.push(pid);
-      if (currentBatch.length >= 6) {
+      if (currentBatch.length >= maxBatch) {
         batches.push(currentBatch);
         currentBatch = [];
       }
@@ -2986,11 +2992,43 @@ export class OBDConnection {
           const response = await this.sendCommand(command, 5000);
           const readings = this.parseMultiPidResponse(batch, response);
           results.push(...readings);
+
+          // Detect partial response: if less than half the batch responded,
+          // the ECU likely can't handle this batch size.
+          if (readings.length < batch.length) {
+            const missingPids = batch.filter(p => !readings.find(r => r.pid === p.pid));
+            // Fall back to individual requests for the missing PIDs
+            for (const pid of missingPids) {
+              const reading = await this.readPid(pid);
+              if (reading) results.push(reading);
+            }
+
+            // If more than half the batch was missing, reduce batch size
+            if (missingPids.length > batch.length / 2) {
+              this.batchFailCount++;
+              if (this.batchFailCount >= 2 && this.batchSizeLimit > 1) {
+                // Reduce batch size: 6 → 3 → 1 (individual)
+                this.batchSizeLimit = this.batchSizeLimit <= 3 ? 1 : 3;
+                this.emit('log', null, `Reduced batch size to ${this.batchSizeLimit} (vehicle partial response detected)`);
+                this.batchFailCount = 0;
+              }
+            }
+          } else {
+            // Full response — reset fail counter
+            this.batchFailCount = 0;
+          }
         } catch {
           // Fall back to individual requests
           for (const pid of batch) {
             const reading = await this.readPid(pid);
             if (reading) results.push(reading);
+          }
+          // Total failure — reduce batch size
+          this.batchFailCount++;
+          if (this.batchFailCount >= 2 && this.batchSizeLimit > 1) {
+            this.batchSizeLimit = this.batchSizeLimit <= 3 ? 1 : 3;
+            this.emit('log', null, `Reduced batch size to ${this.batchSizeLimit} (batch request failed)`);
+            this.batchFailCount = 0;
           }
         }
       }
@@ -3210,21 +3248,41 @@ export class OBDConnection {
     this.setState('logging');
     this.emit('log', null, `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${filteredPids.length}/${pids.length} PIDs supported)`);
 
-    // Track per-PID failures so we can auto-prune unsupported Mode 22 PIDs at runtime
+    // Track per-PID failures with soft-disable and periodic retry.
+    // Instead of permanently removing PIDs after N failures, we "pause" them
+    // and retry every RETRY_INTERVAL loops. This handles vehicles that
+    // intermittently drop responses (common with Ford multi-PID batching).
     const pidFailCount = new Map<number, number>();
-    const pidDisabled = new Set<number>();
-    const MAX_CONSECUTIVE_FAILS = 5;
+    const pidPausedUntilLoop = new Map<number, number>(); // pid → loop# when to retry
+    const MAX_CONSECUTIVE_FAILS = 8; // more forgiving threshold
+    const RETRY_INTERVAL = 20; // retry paused PIDs every 20 loops
     let activePids = [...filteredPids];
     let loopCount = 0;
+
+    // Reset batch size limit for each new logging session
+    this.batchSizeLimit = 6;
+    this.batchFailCount = 0;
 
     // Logging loop
     const logLoop = async () => {
       while (this.loggingActive) {
         const startTime = Date.now();
         loopCount++;
+
+        // Re-add paused PIDs that are due for retry
+        for (const [pidId, retryAt] of Array.from(pidPausedUntilLoop.entries())) {
+          if (loopCount >= retryAt) {
+            const pidDef = filteredPids.find(p => p.pid === pidId);
+            if (pidDef && !activePids.find(p => p.pid === pidId)) {
+              activePids.push(pidDef);
+              pidFailCount.set(pidId, 0);
+              pidPausedUntilLoop.delete(pidId);
+            }
+          }
+        }
         
         try {
-          // Only poll PIDs that haven't been disabled
+          // Only poll PIDs that are currently active
           const readings = await this.readPids(activePids);
           
           // Track which PIDs responded
@@ -3239,32 +3297,40 @@ export class OBDConnection {
           }
           
           // Track failures for PIDs that didn't respond
+          const newlyPaused: string[] = [];
           for (const pid of activePids) {
             if (!respondedPids.has(pid.pid)) {
               const fails = (pidFailCount.get(pid.pid) || 0) + 1;
               pidFailCount.set(pid.pid, fails);
               
-              if (fails >= MAX_CONSECUTIVE_FAILS && !pidDisabled.has(pid.pid)) {
-                pidDisabled.add(pid.pid);
-                this.emit('log', null, `PID ${pid.shortName} (0x${pid.pid.toString(16)}) not responding — disabled after ${MAX_CONSECUTIVE_FAILS} failures`);
+              if (fails >= MAX_CONSECUTIVE_FAILS && !pidPausedUntilLoop.has(pid.pid)) {
+                // Soft-disable: pause this PID and schedule retry
+                pidPausedUntilLoop.set(pid.pid, loopCount + RETRY_INTERVAL);
+                newlyPaused.push(pid.shortName);
               }
             }
           }
+
+          if (newlyPaused.length > 0) {
+            this.emit('log', null, `Paused ${newlyPaused.length} slow PID(s): ${newlyPaused.join(', ')} (will retry in ${RETRY_INTERVAL} cycles)`);
+          }
           
-          // Prune disabled PIDs from active list
-          if (pidDisabled.size > 0) {
-            activePids = activePids.filter(p => !pidDisabled.has(p.pid));
+          // Remove paused PIDs from active list
+          if (pidPausedUntilLoop.size > 0) {
+            activePids = activePids.filter(p => !pidPausedUntilLoop.has(p.pid));
           }
           
           // Log status on first loop
           if (loopCount === 1) {
-            this.emit('log', null, `First poll: ${readings.length}/${activePids.length + pidDisabled.size} PIDs responded`);
+            this.emit('log', null, `First poll: ${readings.length}/${filteredPids.length} PIDs responded`);
             if (readings.length > 0) {
               this.emit('log', null, `Active PIDs: ${readings.map(r => r.name).join(', ')}`);
             }
-            if (pidDisabled.size > 0) {
-              const disabledNames = pids.filter(p => pidDisabled.has(p.pid)).map(p => p.shortName);
-              this.emit('log', null, `No response: ${disabledNames.join(', ')}`);
+            if (readings.length < filteredPids.length) {
+              const missingNames = filteredPids
+                .filter(p => !respondedPids.has(p.pid))
+                .map(p => p.shortName);
+              this.emit('log', null, `No initial response: ${missingNames.join(', ')} (will keep retrying)`);
             }
           }
 

@@ -75,3 +75,15 @@
 ## CSV Export / Analyzer Compatibility Fix
 - [x] Fix datalogger CSV export format to be compatible with Analyzer parser
 - [x] Fix failing BMW PID tests (shortName mismatches)
+
+## L5P HP Tuners CSV Compatibility Fix (ticket145410)
+- [x] Add PID substitution aliases for all new L5P columns (turbo vane, injector timing, DPF, DEF, NOX, etc.)
+- [x] Fix duplicate column handling (Trans Output Shaft RPM x2, Auto Trans Drive x3, Injector Pulse Width Cyl 4 x2, etc.)
+- [x] Map new PIDs to logical channels used by diagnostics engine
+- [x] Fix diagnostic logic for new PID names (turbo analysis, DPF health, DEF system)
+- [x] Fix chart rendering for new data channels
+- [x] Write test to verify this specific CSV parses correctly (18 tests in l5pParser.test.ts)
+
+## Ford Raptor PID Display Issue
+- [x] Analyze Ford datalog to identify which PIDs stopped displaying (multi-PID batch response issue)
+- [x] Fix datalogger PID display stopping during recording on Ford (adaptive batch sizing + soft-disable with retry)
