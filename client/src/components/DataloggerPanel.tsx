@@ -19,6 +19,7 @@ import {
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star
 } from 'lucide-react';
+import LiveChart from '@/components/LiveChart';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
   LogSession, STANDARD_PIDS, GM_EXTENDED_PIDS, ALL_PIDS,
@@ -1265,19 +1266,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             </div>
           )}
 
-          {/* Live Charts */}
-          {readingHistory.size > 0 && (
+          {/* Real-Time Chart */}
+          {(isLogging || readingHistory.size > 0) && (
             <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
-                LIVE CHARTS
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '8px' }}>
-                {activePids.map(pid => {
-                  const history = readingHistory.get(pid.pid) || [];
-                  if (history.length < 2) return null;
-                  return <MiniChart key={`${pid.service}-${pid.pid}`} readings={history} pid={pid} />;
-                })}
-              </div>
+              <LiveChart
+                pids={activePids}
+                readingHistory={readingHistory}
+                liveReadings={liveReadings}
+                isLogging={isLogging}
+              />
             </div>
           )}
 
