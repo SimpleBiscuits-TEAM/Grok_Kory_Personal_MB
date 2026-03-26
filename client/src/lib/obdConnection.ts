@@ -66,13 +66,35 @@ export type ConnectionEventType =
   | 'data' 
   | 'error' 
   | 'vehicleInfo' 
-  | 'log';
+  | 'log'
+  | 'scanProgress';
 
 export interface ConnectionEvent {
   type: ConnectionEventType;
   data?: unknown;
   message?: string;
   timestamp: number;
+}
+
+export interface ScanResult {
+  pid: PIDDefinition;
+  supported: boolean;
+  sampleValue?: number;
+  rawResponse?: string;
+  error?: string;
+}
+
+export interface DIDScanReport {
+  timestamp: number;
+  duration: number;
+  vehicleInfo?: VehicleInfo;
+  standardSupported: ScanResult[];
+  extendedSupported: ScanResult[];
+  standardUnsupported: ScanResult[];
+  extendedUnsupported: ScanResult[];
+  totalScanned: number;
+  totalSupported: number;
+  autoPreset?: PIDPreset;
 }
 
 type EventCallback = (event: ConnectionEvent) => void;
@@ -1501,6 +1523,155 @@ export class OBDConnection {
 
     return dtcs;
   }
+
+  // ─── DID Discovery Scan ──────────────────────────────────────────────────
+
+  async scanSupportedDIDs(options?: {
+    includeStandard?: boolean;   // Also scan Mode 01 PIDs (default: true)
+    includeExtended?: boolean;   // Scan Mode 22 PIDs (default: true)
+    onProgress?: (current: number, total: number, pid: PIDDefinition, supported: boolean) => void;
+    abortSignal?: AbortSignal;
+  }): Promise<DIDScanReport> {
+    const includeStandard = options?.includeStandard ?? true;
+    const includeExtended = options?.includeExtended ?? true;
+    const startTime = Date.now();
+
+    const pidsToScan: PIDDefinition[] = [];
+    if (includeStandard) pidsToScan.push(...STANDARD_PIDS);
+    if (includeExtended) pidsToScan.push(...GM_EXTENDED_PIDS);
+
+    const standardSupported: ScanResult[] = [];
+    const extendedSupported: ScanResult[] = [];
+    const standardUnsupported: ScanResult[] = [];
+    const extendedUnsupported: ScanResult[] = [];
+
+    this.emit('log', null, `Starting DID discovery scan (${pidsToScan.length} PIDs)...`);
+
+    for (let i = 0; i < pidsToScan.length; i++) {
+      // Check abort
+      if (options?.abortSignal?.aborted) {
+        this.emit('log', null, 'Scan aborted by user.');
+        break;
+      }
+
+      const pid = pidsToScan[i];
+      const service = pid.service ?? 0x01;
+      const pidHexLen = service === 0x22 ? 4 : 2;
+      const command = `${service.toString(16).padStart(2, '0')}${pid.pid.toString(16).padStart(pidHexLen, '0')}`;
+
+      let supported = false;
+      let sampleValue: number | undefined;
+      let rawResponse: string | undefined;
+      let error: string | undefined;
+
+      try {
+        const response = await this.sendCommand(command, 3000);
+        rawResponse = response;
+
+        // Check for negative responses
+        const cleaned = response.replace(/[\r\n\s]/g, '').toUpperCase();
+        if (
+          cleaned.includes('NODATA') ||
+          cleaned.includes('ERROR') ||
+          cleaned.includes('UNABLE') ||
+          cleaned.includes('?') ||
+          cleaned.startsWith('7F')  // UDS negative response
+        ) {
+          supported = false;
+        } else {
+          // Try to parse a value
+          const reading = this.parsePidResponse(pid, response);
+          if (reading) {
+            supported = true;
+            sampleValue = reading.value;
+          } else {
+            // Got a response but couldn't parse — still might be supported
+            // Check if the response prefix matches expected (41 for Mode 01, 62 for Mode 22)
+            const expectedPrefix = service === 0x22 ? '62' : '41';
+            supported = cleaned.includes(expectedPrefix.toUpperCase());
+          }
+        }
+      } catch (err) {
+        supported = false;
+        error = err instanceof Error ? err.message : 'Timeout';
+      }
+
+      const result: ScanResult = { pid, supported, sampleValue, rawResponse, error };
+
+      if (service === 0x22) {
+        (supported ? extendedSupported : extendedUnsupported).push(result);
+      } else {
+        (supported ? standardSupported : standardUnsupported).push(result);
+      }
+
+      // Emit progress
+      const progress = {
+        current: i + 1,
+        total: pidsToScan.length,
+        pid,
+        supported,
+        sampleValue,
+      };
+      this.emit('scanProgress', progress);
+      if (options?.onProgress) {
+        options.onProgress(i + 1, pidsToScan.length, pid, supported);
+      }
+
+      // Small delay between requests to avoid overwhelming the ECU
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    const duration = Date.now() - startTime;
+    const totalSupported = standardSupported.length + extendedSupported.length;
+
+    this.emit('log', null, `Scan complete: ${totalSupported}/${pidsToScan.length} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
+
+    // Auto-generate a vehicle-specific preset from discovered PIDs
+    const supportedPidNumbers = [
+      ...standardSupported.map(r => r.pid.pid),
+      ...extendedSupported.map(r => r.pid.pid),
+    ];
+
+    let autoPreset: PIDPreset | undefined;
+    if (supportedPidNumbers.length > 0) {
+      const vehicleId = this.vehicleInfo?.vin
+        ? this.vehicleInfo.vin.slice(-8)
+        : `vehicle_${Date.now()}`;
+      
+      autoPreset = createCustomPreset(
+        `Auto-Scan ${vehicleId}`,
+        `Auto-discovered ${totalSupported} PIDs (${standardSupported.length} std + ${extendedSupported.length} ext) — ${new Date().toLocaleDateString()}`,
+        supportedPidNumbers
+      );
+      autoPreset.id = `autoscan_${vehicleId}_${Date.now()}`;
+
+      // Save to localStorage
+      const existing = loadCustomPresets();
+      // Remove any previous autoscan preset for this vehicle
+      const filtered = existing.filter(p => !p.id?.startsWith(`autoscan_${vehicleId}`));
+      filtered.push(autoPreset);
+      saveCustomPresets(filtered);
+
+      this.emit('log', null, `Auto-generated preset "${autoPreset.name}" with ${supportedPidNumbers.length} PIDs saved.`);
+    }
+
+    const report: DIDScanReport = {
+      timestamp: startTime,
+      duration,
+      vehicleInfo: this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+      standardUnsupported,
+      extendedUnsupported,
+      totalScanned: pidsToScan.length,
+      totalSupported,
+      autoPreset,
+    };
+
+    return report;
+  }
+
+  private vehicleInfo: VehicleInfo | undefined;
 
   // ─── Raw Command (for advanced users) ────────────────────────────────────
 

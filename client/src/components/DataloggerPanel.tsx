@@ -17,13 +17,14 @@ import {
   Settings, AlertCircle, CheckCircle, Loader2, Gauge,
   Activity, Zap, ChevronDown, ChevronRight, RefreshCw,
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
-  Flame, Droplets, Wind, Thermometer, Star
+  Flame, Droplets, Wind, Thermometer, Star,
+  Search, Radar
 } from 'lucide-react';
 import LiveChart from '@/components/LiveChart';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
   LogSession, STANDARD_PIDS, GM_EXTENDED_PIDS, ALL_PIDS,
-  PID_PRESETS, PIDPreset,
+  PID_PRESETS, PIDPreset, DIDScanReport, ScanResult,
   exportSessionToCSV, sessionToAnalyzerCSV,
   loadCustomPresets, saveCustomPresets, createCustomPreset,
   deleteCustomPreset, updateCustomPreset, getAllPresets
@@ -797,6 +798,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
 
+  // DID Scan state
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ current: number; total: number; pid?: string; supported?: boolean } | null>(null);
+  const [scanReport, setScanReport] = useState<DIDScanReport | null>(null);
+  const [showScanResults, setShowScanResults] = useState(false);
+  const scanAbortRef = useRef<AbortController | null>(null);
+
   // WebSerial support check
   const isWebSerialSupported = useMemo(() => OBDConnection.isSupported(), []);
 
@@ -984,6 +992,59 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     setEditingPreset(null);
   }, [editingPreset, customPresets, addLog]);
 
+  // ─── DID Scan handlers ──────────────────────────────────────────────
+
+  const handleStartScan = useCallback(async () => {
+    const conn = connectionRef.current;
+    if (!conn || connectionState !== 'ready') return;
+
+    setIsScanning(true);
+    setScanProgress({ current: 0, total: STANDARD_PIDS.length + GM_EXTENDED_PIDS.length });
+    setScanReport(null);
+    setShowScanResults(true);
+
+    const abortController = new AbortController();
+    scanAbortRef.current = abortController;
+
+    addLog('Starting DID discovery scan...');
+
+    try {
+      const report = await conn.scanSupportedDIDs({
+        includeStandard: true,
+        includeExtended: true,
+        abortSignal: abortController.signal,
+        onProgress: (current, total, pid, supported) => {
+          setScanProgress({ current, total, pid: pid.shortName, supported });
+        },
+      });
+
+      setScanReport(report);
+
+      // Auto-apply the generated preset
+      if (report.autoPreset) {
+        setCustomPresets(loadCustomPresets());
+        const newPids = new Set(report.autoPreset.pids);
+        setSelectedPids(newPids);
+        addLog(`Auto-preset "${report.autoPreset.name}" applied with ${report.totalSupported} PIDs`);
+      }
+
+      addLog(`Scan complete: ${report.totalSupported} supported / ${report.totalScanned} scanned (${(report.duration / 1000).toFixed(1)}s)`);
+    } catch (err) {
+      addLog(`Scan error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsScanning(false);
+      setScanProgress(null);
+      scanAbortRef.current = null;
+    }
+  }, [connectionState, addLog]);
+
+  const handleAbortScan = useCallback(() => {
+    if (scanAbortRef.current) {
+      scanAbortRef.current.abort();
+      addLog('Scan abort requested...');
+    }
+  }, [addLog]);
+
   // ─── Export handlers ─────────────────────────────────────────────────
 
   const handleExportCSV = useCallback((session: LogSession) => {
@@ -1124,8 +1185,39 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             </button>
           )}
 
+          {/* Scan Vehicle */}
+          {connectionState === 'ready' && !isLogging && !isScanning && (
+            <button
+              onClick={handleStartScan}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: sColor.purple, border: 'none',
+                borderRadius: '3px', color: 'white',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer',
+              }}
+            >
+              <Radar style={{ width: 14, height: 14 }} /> SCAN VEHICLE
+            </button>
+          )}
+          {isScanning && (
+            <button
+              onClick={handleAbortScan}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: 'oklch(0.20 0.01 300)',
+                border: `2px solid ${sColor.purple}`, borderRadius: '3px', color: sColor.purple,
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer', animation: 'pulse 2s infinite',
+              }}
+            >
+              <Square style={{ width: 14, height: 14 }} /> ABORT SCAN
+              {scanProgress && ` · ${scanProgress.current}/${scanProgress.total}`}
+            </button>
+          )}
+
           {/* Start/Stop Logging */}
-          {connectionState === 'ready' && !isLogging && (
+          {connectionState === 'ready' && !isLogging && !isScanning && (
             <button
               onClick={handleStartLogging}
               style={{
@@ -1172,6 +1264,181 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               Your browser does not support the WebSerial API. Please use <strong style={{ color: sColor.text }}>Google Chrome</strong> or <strong style={{ color: sColor.text }}>Microsoft Edge</strong> on desktop to connect to an OBDLink EX device. Safari and Firefox do not support WebSerial.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* DID Scan Progress & Results */}
+      {(isScanning || showScanResults) && (
+        <div style={{
+          background: sColor.bgCard, border: `1px solid ${isScanning ? sColor.purple : sColor.border}`,
+          borderRadius: '3px', padding: '16px 20px', marginBottom: '16px',
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Radar style={{ width: 18, height: 18, color: sColor.purple }} />
+              <span style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.1em', color: sColor.text }}>
+                {isScanning ? 'SCANNING VEHICLE...' : 'SCAN RESULTS'}
+              </span>
+            </div>
+            {!isScanning && (
+              <button onClick={() => setShowScanResults(false)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', color: sColor.textDim, padding: '4px',
+              }}>
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            )}
+          </div>
+
+          {/* Progress Bar */}
+          {isScanning && scanProgress && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>
+                  Testing: {scanProgress.pid || '...'}
+                </span>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.text }}>
+                  {scanProgress.current}/{scanProgress.total} ({Math.round((scanProgress.current / scanProgress.total) * 100)}%)
+                </span>
+              </div>
+              <div style={{
+                width: '100%', height: '8px', background: 'oklch(0.15 0.005 260)',
+                borderRadius: '4px', overflow: 'hidden',
+              }}>
+                <div style={{
+                  width: `${(scanProgress.current / scanProgress.total) * 100}%`,
+                  height: '100%', background: sColor.purple, borderRadius: '4px',
+                  transition: 'width 0.2s ease',
+                }} />
+              </div>
+              {scanProgress.supported !== undefined && (
+                <div style={{
+                  fontFamily: sFont.mono, fontSize: '0.65rem', marginTop: '4px',
+                  color: scanProgress.supported ? sColor.green : sColor.textMuted,
+                }}>
+                  {scanProgress.pid}: {scanProgress.supported ? '✓ SUPPORTED' : '✗ Not supported'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Scan Results */}
+          {scanReport && !isScanning && (
+            <div>
+              {/* Summary Stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                <div style={{ background: 'oklch(0.12 0.01 145 / 0.2)', borderRadius: '3px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '1.4rem', color: sColor.green, fontWeight: 'bold' }}>
+                    {scanReport.totalSupported}
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Supported
+                  </div>
+                </div>
+                <div style={{ background: 'oklch(0.12 0.01 260 / 0.2)', borderRadius: '3px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '1.4rem', color: sColor.blue, fontWeight: 'bold' }}>
+                    {scanReport.standardSupported.length}
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Standard (01)
+                  </div>
+                </div>
+                <div style={{ background: 'oklch(0.12 0.02 55 / 0.2)', borderRadius: '3px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '1.4rem', color: sColor.orange, fontWeight: 'bold' }}>
+                    {scanReport.extendedSupported.length}
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    GM Extended (22)
+                  </div>
+                </div>
+                <div style={{ background: 'oklch(0.12 0.01 25 / 0.2)', borderRadius: '3px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '1.4rem', color: sColor.textDim, fontWeight: 'bold' }}>
+                    {scanReport.totalScanned - scanReport.totalSupported}
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Unsupported
+                  </div>
+                </div>
+                <div style={{ background: 'oklch(0.12 0.005 260 / 0.2)', borderRadius: '3px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '1.4rem', color: sColor.text, fontWeight: 'bold' }}>
+                    {(scanReport.duration / 1000).toFixed(1)}s
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Scan Time
+                  </div>
+                </div>
+              </div>
+
+              {/* Auto-Preset Badge */}
+              {scanReport.autoPreset && (
+                <div style={{
+                  background: 'oklch(0.15 0.02 300 / 0.3)', border: `1px solid oklch(0.40 0.15 300)`,
+                  borderRadius: '3px', padding: '10px 14px', marginBottom: '16px',
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                }}>
+                  <Star style={{ width: 16, height: 16, color: sColor.purple, fill: sColor.purple }} />
+                  <div>
+                    <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.08em' }}>
+                      AUTO-PRESET CREATED: "{scanReport.autoPreset.name}"
+                    </div>
+                    <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim }}>
+                      {scanReport.autoPreset.pids.length} PIDs auto-selected and saved. This preset is available in your custom presets.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Supported PIDs List */}
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.green, letterSpacing: '0.08em', marginBottom: '8px' }}>
+                  SUPPORTED PIDs ({scanReport.totalSupported})
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {[...scanReport.standardSupported, ...scanReport.extendedSupported].map((r) => (
+                    <span key={`${r.pid.service ?? 1}-${r.pid.pid}`} style={{
+                      fontFamily: sFont.mono, fontSize: '0.6rem',
+                      padding: '2px 6px', borderRadius: '2px',
+                      background: (r.pid.service ?? 0x01) === 0x22 ? 'oklch(0.15 0.02 55 / 0.4)' : 'oklch(0.15 0.01 145 / 0.4)',
+                      color: (r.pid.service ?? 0x01) === 0x22 ? sColor.orange : sColor.green,
+                      border: `1px solid ${(r.pid.service ?? 0x01) === 0x22 ? 'oklch(0.30 0.10 55)' : 'oklch(0.30 0.10 145)'}`,
+                    }}>
+                      {r.pid.shortName}
+                      {r.sampleValue !== undefined && (
+                        <span style={{ color: sColor.textDim, marginLeft: '4px' }}>
+                          ({r.sampleValue.toFixed(1)})
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Unsupported PIDs (collapsed) */}
+              {(scanReport.standardUnsupported.length + scanReport.extendedUnsupported.length) > 0 && (
+                <details>
+                  <summary style={{
+                    fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.textMuted,
+                    letterSpacing: '0.08em', cursor: 'pointer', marginBottom: '6px',
+                  }}>
+                    UNSUPPORTED PIDs ({scanReport.standardUnsupported.length + scanReport.extendedUnsupported.length})
+                  </summary>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {[...scanReport.standardUnsupported, ...scanReport.extendedUnsupported].map((r) => (
+                      <span key={`${r.pid.service ?? 1}-${r.pid.pid}`} style={{
+                        fontFamily: sFont.mono, fontSize: '0.6rem',
+                        padding: '2px 6px', borderRadius: '2px',
+                        background: 'oklch(0.12 0.005 260)', color: sColor.textMuted,
+                        border: `1px solid oklch(0.18 0.005 260)`,
+                        textDecoration: 'line-through',
+                      }}>
+                        {r.pid.shortName}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
         </div>
       )}
 
