@@ -66,6 +66,7 @@ export interface VehicleInfo {
   towingCapacity: string;
   payloadCapacity: string;
   gvwr: string;
+  nhtsaVerified: boolean;
 }
 
 // ─── VIN POSITION DECODERS ────────────────────────────────────────────────────
@@ -419,6 +420,7 @@ export function decodeVin(vin: string): VehicleInfo {
     towingCapacity: vinConfig.towingCapacity,
     payloadCapacity: vinConfig.payloadCapacity,
     gvwr: vinConfig.gvwr,
+    nhtsaVerified: false,
   };
 }
 
@@ -430,4 +432,81 @@ export function getVehicleInfoFromFilename(filename: string): VehicleInfo | null
   const vin = extractVinFromFilename(filename);
   if (!vin) return null;
   return decodeVin(vin);
+}
+
+/**
+ * Async VIN decode via NHTSA vPIC API.
+ * Returns NHTSA-verified VehicleInfo, falling back to local decode on failure.
+ */
+export async function decodeVinNhtsa(vin: string): Promise<VehicleInfo> {
+  const v = vin.toUpperCase();
+  const localFallback = decodeVin(v);
+
+  try {
+    const resp = await fetch(
+      `https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${v}?format=json`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!resp.ok) return { ...localFallback, nhtsaVerified: false };
+
+    const json = await resp.json();
+    const r = json?.Results?.[0];
+    if (!r) return { ...localFallback, nhtsaVerified: false };
+
+    // Only trust NHTSA data if ErrorCode is 0 (clean decode)
+    const errorCode = r.ErrorCode?.toString() || '';
+    const isClean = errorCode === '0' || errorCode === '';
+
+    // Helper: prefer NHTSA value, fall back to local
+    const pick = (nhtsaVal: string | undefined, localVal: string): string => {
+      if (nhtsaVal && nhtsaVal !== 'Not Applicable' && nhtsaVal !== '0' && nhtsaVal.trim()) {
+        return nhtsaVal.trim();
+      }
+      return localVal;
+    };
+    const pickNum = (nhtsaVal: string | undefined, localVal: number): number => {
+      const n = parseFloat(nhtsaVal || '');
+      return isNaN(n) || n === 0 ? localVal : n;
+    };
+
+    // Build engine name from NHTSA fields
+    const nhtsaDisplacement = r.DisplacementL ? `${parseFloat(r.DisplacementL).toFixed(1)}L` : '';
+    const nhtsaCylinders = r.EngineCylinders ? `V${r.EngineCylinders}` : '';
+    const nhtsaFuelType = pick(r.FuelTypePrimary, '');
+    const nhtsaTurbo = r.Turbo === 'Yes' ? 'Turbocharged' : (r.Turbo || '');
+    const nhtsaEngineName = [nhtsaDisplacement, nhtsaCylinders, nhtsaTurbo, nhtsaFuelType, r.EngineModel || ''].filter(Boolean).join(' ');
+
+    return {
+      ...localFallback,
+      nhtsaVerified: isClean,
+      // Override with NHTSA-verified data
+      year: pickNum(r.ModelYear, localFallback.year),
+      make: pick(r.Make, localFallback.make),
+      model: pick(r.Model, localFallback.model),
+      series: pick(r.Series || r.Series2, localFallback.series),
+      trim: pick(r.Trim || r.Trim2, localFallback.trim),
+      bodyStyle: pick(r.BodyClass, localFallback.bodyStyle),
+      engine: nhtsaEngineName || localFallback.engine,
+      engineCode: pick(r.EngineModel, localFallback.engineCode),
+      displacement: nhtsaDisplacement || localFallback.displacement,
+      cylinders: pickNum(r.EngineCylinders, localFallback.cylinders),
+      fuelType: pick(r.FuelTypePrimary, localFallback.fuelType),
+      injectionSystem: pick(r.FuelInjectionType, localFallback.injectionSystem),
+      turbocharger: nhtsaTurbo || localFallback.turbocharger,
+      driveType: pick(r.DriveType, localFallback.driveType),
+      transmission: pick(r.TransmissionStyle, localFallback.transmission),
+      factoryHp: pickNum(r.EngineHP, localFallback.factoryHp),
+      country: pick(r.PlantCountry, localFallback.country),
+      manufacturer: pick(r.Manufacturer, localFallback.manufacturer),
+      plant: pick(
+        [r.PlantCity, r.PlantState].filter(Boolean).join(', '),
+        localFallback.plant
+      ),
+      plantCity: pick(r.PlantCity, localFallback.plantCity),
+      gvwr: pick(r.GVWR, localFallback.gvwr),
+    };
+  } catch {
+    // Network error or timeout: fall back to local decode
+    return { ...localFallback, nhtsaVerified: false };
+  }
 }

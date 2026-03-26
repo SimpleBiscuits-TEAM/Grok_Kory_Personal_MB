@@ -42,6 +42,7 @@ export interface DuramaxData {
   converterSlip: number[];
   converterDutyCycle: number[];
   converterPressure: number[];
+  currentGear: number[];        // Trans current gear (1-10)
   oilPressure: number[];
   coolantTemp: number[];
   oilTemp: number[];
@@ -77,6 +78,7 @@ export interface ProcessedMetrics {
   converterSlip: number[];
   converterDutyCycle: number[];
   converterPressure: number[];
+  currentGear: number[];        // Trans current gear (1-10)
   oilPressure: number[];
   coolantTemp: number[];
   oilTemp: number[];
@@ -232,6 +234,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const converterSlipIdx  = getColumnIndex(['TCC Slip', 'Converter Slip', 'TCM.TCSLIP']);
   const converterDutyIdx  = getColumnIndex(['Converter Duty', 'Converter PWM']);
   const converterPressureIdx = getColumnIndex(['TCC Line Pressure', 'Converter Pressure', 'TCC Pressure']);
+  const currentGearIdx = getColumnIndex(['Trans Current Gear', 'Current Gear', 'Gear', 'Transmission Gear']);
   const oilPressureIdx    = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
   const coolantTempIdx    = getColumnIndex(['Engine Coolant Temp (SAE)', 'Engine Coolant Temp', 'Coolant Temperature', 'ECT']);
   const oilTempIdx        = getColumnIndex(['Engine Oil Temp', 'Oil Temperature', 'EOT']);
@@ -274,6 +277,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const currentGear: number[] = [];
   const oilPressure: number[] = [];
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
@@ -321,6 +325,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+    currentGear.push(currentGearIdx !== -1 ? values[currentGearIdx] : 0);
     oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
@@ -360,6 +365,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    currentGear,
     oilPressure,
     coolantTemp,
     oilTemp,
@@ -461,8 +467,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const converterDutyIdx   = tccPcsIdx !== -1 ? tccPcsIdx : tccPressureIdx;
   // Actual slip = TCCSLIP; reference slip = TCSLIP (used as fallback)
   const converterSlipIdx   = tccActualSlipIdx !== -1 ? tccActualSlipIdx : tccRefSlipIdx;
+  const currentGearIdx    = getColumnIndex(['TCM.CURGEAR', 'TCM.GEAR', 'TCM.CG']);
 
-  // ── Other sensor PIDs ────────────────────────────────────────────────────
+  // ── Other sensor PIDs ────────────────────────────────────────────────────────────────────────
   const oilPressureIdx    = getColumnIndex(['ECM.OILP']);
   const coolantTempIdx    = getColumnIndex(['ECM.ECT']);
   const oilTempIdx        = getColumnIndex(['ECM.EOT']);
@@ -500,6 +507,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const currentGear: number[] = [];
   const oilPressure: number[] = [];
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
@@ -613,6 +621,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // TCC pressure (legacy field — use PCS pressure if available)
     const tccPresVal = parseVal(tccPressureIdx);
     converterPressure.push(isNaN(tccPresVal) ? (isNaN(tccPcsVal) ? 0 : tccPcsVal) : tccPresVal);
+    const gearVal = parseVal(currentGearIdx);
+    currentGear.push(isNaN(gearVal) ? 0 : gearVal);
 
     // Oil pressure: EFILive may log in kPa — convert to psi if value looks like kPa (>100)
     const oilPresRaw = parseVal(oilPressureIdx);
@@ -661,6 +671,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    currentGear,
     oilPressure,
     coolantTemp,
     oilTemp,
@@ -724,6 +735,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
   const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
   const converterPressureIdx = getColumnIndex(['Trans Line 1 Pressure']);
+  const currentGearIdx = getColumnIndex(['Trans Current Gear', 'Current Gear', 'Gear', 'Transmission Gear']);
   const oilPressureIdx = getColumnIndex(['Engine Oil Pressure', 'Oil Pressure']);
   const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temp']);
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temp']);
@@ -754,6 +766,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const converterSlip: number[] = [];
   const converterDutyCycle: number[] = [];
   const converterPressure: number[] = [];
+  const currentGear: number[] = [];
   const oilPressure: number[] = [];
   const coolantTemp: number[] = [];
   const oilTemp: number[] = [];
@@ -821,6 +834,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
+    currentGear.push(currentGearIdx !== -1 ? values[currentGearIdx] : 0);
     oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
     coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
     oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
@@ -854,6 +868,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     converterSlip,
     converterDutyCycle,
     converterPressure,
+    currentGear,
     oilPressure,
     coolantTemp,
     oilTemp,
@@ -1045,6 +1060,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     converterSlip: rawData.converterSlip,
     converterDutyCycle: rawData.converterDutyCycle,
     converterPressure: rawData.converterPressure,
+    currentGear: rawData.currentGear,
     oilPressure: rawData.oilPressure,
     coolantTemp: rawData.coolantTemp,
     oilTemp: rawData.oilTemp,
@@ -1090,6 +1106,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     converterSlip: downsample(data.converterSlip),
     converterDutyCycle: downsample(data.converterDutyCycle),
     converterPressure: downsample(data.converterPressure),
+    currentGear: downsample(data.currentGear),
     oilPressure: downsample(data.oilPressure),
     coolantTemp: downsample(data.coolantTemp),
     oilTemp: downsample(data.oilTemp),

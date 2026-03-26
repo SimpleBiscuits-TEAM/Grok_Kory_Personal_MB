@@ -87,6 +87,17 @@ export default function HealthReport({ report }: HealthReportProps) {
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.45 0.010 260)', letterSpacing: '0.08em', marginBottom: '4px' }}>VIN</div>
               <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.85rem', color: 'oklch(0.70 0.18 200)', letterSpacing: '0.12em' }}>{v.vin}</div>
+              {v.nhtsaVerified ? (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '6px', padding: '2px 8px', background: 'oklch(0.65 0.20 145 / 0.15)', border: '1px solid oklch(0.65 0.20 145 / 0.4)', borderRadius: '3px' }}>
+                  <Shield style={{ width: '10px', height: '10px', color: 'oklch(0.65 0.20 145)' }} />
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.65rem', color: 'oklch(0.65 0.20 145)', letterSpacing: '0.06em', fontWeight: 600 }}>NHTSA VERIFIED</span>
+                </div>
+              ) : (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '6px', padding: '2px 8px', background: 'oklch(0.75 0.18 60 / 0.15)', border: '1px solid oklch(0.75 0.18 60 / 0.4)', borderRadius: '3px' }}>
+                  <AlertTriangle style={{ width: '10px', height: '10px', color: 'oklch(0.75 0.18 60)' }} />
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.65rem', color: 'oklch(0.75 0.18 60)', letterSpacing: '0.06em', fontWeight: 600 }}>LOCAL DECODE</span>
+                </div>
+              )}
             </div>
           </div>
 

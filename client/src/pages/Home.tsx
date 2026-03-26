@@ -18,7 +18,7 @@ import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
-import { getVehicleInfoFromFilename, decodeVin } from '@/lib/vinLookup';
+import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import EcuReferencePanel from '@/components/EcuReferencePanel';
 import DtcSearch from '@/components/DtcSearch';
 import { usePdfExport } from '@/hooks/usePdfExport';
@@ -88,11 +88,19 @@ export default function Home() {
       const drag = analyzeDragRuns(processed);
       setDragAnalysis(drag);
 
-      const detectedVin = getVehicleInfoFromFilename(file.name);
-      setVinFromFile(detectedVin ? detectedVin.vin : null);
-      const vehicleInfo = detectedVin || undefined;
-      const report = generateHealthReport(downsampled, vehicleInfo);
-      setHealthReport(report);
+      // Generate health report without vehicle info first (data is ready)
+      const reportNoVin = generateHealthReport(downsampled, undefined);
+      setHealthReport(reportNoVin);
+
+      // Async VIN decode via NHTSA (don't block the main analysis)
+      const detectedVin = extractVinFromFilename(file.name);
+      setVinFromFile(detectedVin);
+      if (detectedVin) {
+        decodeVinNhtsa(detectedVin).then(vehicleInfo => {
+          const reportWithVin = generateHealthReport(downsampled, vehicleInfo);
+          setHealthReport(reportWithVin);
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
       setData(null);
@@ -153,12 +161,13 @@ export default function Home() {
 
   const hasFaults = diagnostics && diagnostics.issues.length > 0;
 
-  const applyManualVin = useCallback(() => {
+  const applyManualVin = useCallback(async () => {
     if (!data || !manualVin.trim()) return;
     const vin = manualVin.trim().toUpperCase();
     if (vin.length !== 17) return;
-    const vehicleInfo = decodeVin(vin);
     setVinFromFile(vin);
+    // Show loading state while NHTSA verifies
+    const vehicleInfo = await decodeVinNhtsa(vin);
     const report = generateHealthReport(data, vehicleInfo);
     setHealthReport(report);
   }, [data, manualVin]);

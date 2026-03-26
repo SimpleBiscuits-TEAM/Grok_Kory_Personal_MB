@@ -64,9 +64,9 @@
   --popover: oklch(0.13 0.006 260);
   --popover-foreground: oklch(0.95 0.005 260);
   --secondary: oklch(0.18 0.006 260);
-  --secondary-foreground: oklch(0.85 0.005 260);
+  --secondary-foreground: oklch(0.90 0.005 260);
   --muted: oklch(0.20 0.006 260);
-  --muted-foreground: oklch(0.72 0.010 260);  /* raised from 0.60 for legibility */
+  --muted-foreground: oklch(0.78 0.010 260);  /* raised to 0.78 for strong legibility */
   --accent: oklch(0.52 0.22 25);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.52 0.22 25);
@@ -103,9 +103,9 @@
   --popover: oklch(0.13 0.006 260);
   --popover-foreground: oklch(0.95 0.005 260);
   --secondary: oklch(0.18 0.006 260);
-  --secondary-foreground: oklch(0.85 0.005 260);
+  --secondary-foreground: oklch(0.90 0.005 260);
   --muted: oklch(0.20 0.006 260);
-  --muted-foreground: oklch(0.72 0.010 260);  /* raised from 0.60 for legibility */
+  --muted-foreground: oklch(0.78 0.010 260);  /* raised to 0.78 for strong legibility */
   --accent: oklch(0.52 0.22 25);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.52 0.22 25);
@@ -135,7 +135,13 @@
   body {
     @apply bg-background text-foreground;
     font-family: 'Rajdhani', 'Segoe UI', sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
   }
+  /* Ensure small/muted text never drops below readable size */
+  .text-xs { font-size: 0.8rem !important; line-height: 1.5; }
+  .text-sm { font-size: 0.9rem !important; line-height: 1.5; }
+  .text-muted-foreground { color: var(--muted-foreground) !important; }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   [type="button"]:not(:disabled),

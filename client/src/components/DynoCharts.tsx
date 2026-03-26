@@ -1629,12 +1629,15 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   const maxPressure = Math.max(...(data.converterPressure || []).filter(v => v > 0));
   const usePressure = maxDuty < 5 && maxPressure > 10;
 
+  const hasGear = data.currentGear && data.currentGear.some(v => v > 0);
+
   const chartData = data.timeMinutes.map((t, i) => ({
     time: parseFloat(t.toFixed(3)),
     slip: data.converterSlip[i] ?? 0,
     lockSignal: usePressure
       ? (data.converterPressure?.[i] ?? 0)
       : (data.converterDutyCycle?.[i] ?? 0),
+    ...(hasGear ? { gear: data.currentGear[i] ?? 0 } : {}),
   }));
 
   const lockLabel = usePressure ? 'Line Pressure (psi)' : 'TCC Duty (%)';
@@ -1675,6 +1678,10 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
             label={{ value: 'Slip (RPM)', angle: -90, position: 'insideLeft', fill: '#fb7185', fontSize: 10 }} />
           <YAxis yAxisId="lock" orientation="right" stroke={lockColor} tick={{ fill: lockColor, fontSize: 10 }}
             label={{ value: lockLabel, angle: 90, position: 'insideRight', fill: lockColor, fontSize: 10 }} domain={lockDomain} />
+          {hasGear && (
+            <YAxis yAxisId="gear" orientation="right" stroke="#4ade80" tick={{ fill: '#4ade80', fontSize: 10 }}
+              label={{ value: 'Gear', angle: 90, position: 'insideRight', fill: '#4ade80', fontSize: 10, offset: 30 }} domain={[0, 10]} hide />
+          )}
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
           <ReferenceLine yAxisId="slip" y={19.5} stroke="#ff4444" strokeDasharray="4 2"
@@ -1685,6 +1692,9 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
             label={{ value: lockThresholdLabel, fill: '#fbbf24', fontSize: 9, position: 'left' }} />
           <Line yAxisId="slip" type="monotone" dataKey="slip" stroke="#fb7185" dot={false} strokeWidth={1.5} name="Conv Slip (RPM)" />
           <Line yAxisId="lock" type="monotone" dataKey="lockSignal" stroke={lockColor} dot={false} strokeWidth={1} name={lockLabel} />
+          {hasGear && (
+            <Line yAxisId="gear" type="stepAfter" dataKey="gear" stroke="#4ade80" dot={false} strokeWidth={2} name="Current Gear" strokeDasharray="6 3" />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </FaultChartWrapper>
