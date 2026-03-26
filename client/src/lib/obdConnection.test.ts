@@ -272,7 +272,8 @@ describe('GM Mode 22 formulas', () => {
 
 describe('ALL_PIDS', () => {
   it('contains both standard and extended PIDs', () => {
-    expect(ALL_PIDS.length).toBe(STANDARD_PIDS.length + GM_EXTENDED_PIDS.length);
+    // ALL_PIDS now includes standard + GM + Ford + Chrysler + Toyota + Honda extended PIDs
+    expect(ALL_PIDS.length).toBeGreaterThan(STANDARD_PIDS.length + GM_EXTENDED_PIDS.length);
   });
 
   it('no PID collisions between standard and extended (different services)', () => {
@@ -316,7 +317,8 @@ describe('PID lookup helpers', () => {
 
   it('getMode22Pids returns only extended PIDs', () => {
     const pids = getMode22Pids();
-    expect(pids.length).toBe(GM_EXTENDED_PIDS.length);
+    // Now includes GM + Ford + Chrysler + Toyota + Honda extended PIDs
+    expect(pids.length).toBeGreaterThanOrEqual(GM_EXTENDED_PIDS.length);
     for (const pid of pids) {
       expect(pid.service).toBe(0x22);
     }
@@ -337,11 +339,11 @@ describe('PID_PRESETS', () => {
   it('has expected preset names', () => {
     const names = PID_PRESETS.map(p => p.name);
     expect(names).toContain('Engine Basics');
-    expect(names).toContain('Duramax Turbo');
-    expect(names).toContain('Fuel System');
-    expect(names).toContain('Emissions');
-    expect(names).toContain('Full Duramax');
+    expect(names).toContain('Fuel Trims');
     expect(names).toContain('Transmission');
+    expect(names).toContain('Full Duramax');
+    expect(names).toContain('Diesel Turbo/Boost');
+    expect(names).toContain('Gas Engine Monitor');
   });
 
   it('all preset PIDs exist in STANDARD_PIDS', () => {

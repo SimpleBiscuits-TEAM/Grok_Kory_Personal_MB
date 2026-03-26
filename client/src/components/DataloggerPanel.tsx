@@ -18,8 +18,10 @@ import {
   Activity, Zap, ChevronDown, ChevronRight, RefreshCw,
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
-  Search, Radar
+  Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser
 } from 'lucide-react';
+import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
+import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
@@ -27,7 +29,10 @@ import {
   PID_PRESETS, PIDPreset, DIDScanReport, ScanResult,
   exportSessionToCSV, sessionToAnalyzerCSV,
   loadCustomPresets, saveCustomPresets, createCustomPreset,
-  deleteCustomPreset, updateCustomPreset, getAllPresets
+  deleteCustomPreset, updateCustomPreset, getAllPresets,
+  VehicleInfo, PIDManufacturer, FuelType,
+  FORD_EXTENDED_PIDS, CHRYSLER_EXTENDED_PIDS, TOYOTA_EXTENDED_PIDS, HONDA_EXTENDED_PIDS,
+  MANUFACTURER_PIDS, getPidsForVehicle, getPresetsForVehicle,
 } from '@/lib/obdConnection';
 
 // ─── Styles ────────────────────────────────────────────────────────────────
@@ -371,7 +376,7 @@ function CustomPresetDialog({
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>
-            {presetPids.size} PIDs ({Array.from(presetPids).filter(p => GM_EXTENDED_PIDS.some(e => e.pid === p)).length} Mode 22)
+            {presetPids.size} PIDs ({Array.from(presetPids).filter(p => ALL_PIDS.some(e => e.pid === p && (e.service ?? 0x01) === 0x22)).length} Extended)
           </span>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
@@ -410,7 +415,8 @@ function CustomPresetDialog({
 
 function PIDSelector({
   selectedPids, onTogglePid, onApplyPreset, supportedPids, disabled,
-  customPresets, onCreatePreset, onEditPreset, onDeletePreset
+  customPresets, onCreatePreset, onEditPreset, onDeletePreset,
+  manufacturer, fuelType
 }: {
   selectedPids: Set<number>;
   onTogglePid: (pid: number) => void;
@@ -421,20 +427,37 @@ function PIDSelector({
   onCreatePreset: () => void;
   onEditPreset: (preset: PIDPreset) => void;
   onDeletePreset: (presetId: string) => void;
+  manufacturer: PIDManufacturer;
+  fuelType: FuelType;
 }) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>('engine');
-  const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'mode22'>('all');
+  const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'extended' | 'vehicle'>('vehicle');
+
+  // Get vehicle-specific PIDs
+  const vehiclePids = useMemo(() => getPidsForVehicle(manufacturer, fuelType), [manufacturer, fuelType]);
+  const vehiclePresets = useMemo(() => getPresetsForVehicle(manufacturer, fuelType), [manufacturer, fuelType]);
+
+  // Get manufacturer-specific extended PIDs
+  const extendedPids = useMemo(() => MANUFACTURER_PIDS[manufacturer] || [], [manufacturer]);
+
+  const mfgLabel = manufacturer === 'universal' ? 'EXT' : manufacturer.toUpperCase();
 
   const categories = useMemo(() => {
     const cats = new Map<string, PIDDefinition[]>();
-    const pidsToShow = pidSource === 'mode01' ? STANDARD_PIDS : pidSource === 'mode22' ? GM_EXTENDED_PIDS : ALL_PIDS;
+    let pidsToShow: PIDDefinition[];
+    switch (pidSource) {
+      case 'mode01': pidsToShow = STANDARD_PIDS; break;
+      case 'extended': pidsToShow = extendedPids; break;
+      case 'vehicle': pidsToShow = vehiclePids; break;
+      default: pidsToShow = ALL_PIDS; break;
+    }
     for (const pid of pidsToShow) {
       const list = cats.get(pid.category) || [];
       list.push(pid);
       cats.set(pid.category, list);
     }
     return cats;
-  }, [pidSource]);
+  }, [pidSource, vehiclePids, extendedPids]);
 
   const categoryIcons: Record<string, React.ReactNode> = {
     engine: <Cpu style={{ width: 14, height: 14 }} />,
@@ -445,38 +468,61 @@ function PIDSelector({
     electrical: <Zap style={{ width: 14, height: 14 }} />,
     exhaust: <Thermometer style={{ width: 14, height: 14 }} />,
     def: <Droplets style={{ width: 14, height: 14 }} />,
+    oxygen: <Activity style={{ width: 14, height: 14 }} />,
+    catalyst: <Thermometer style={{ width: 14, height: 14 }} />,
+    evap: <Wind style={{ width: 14, height: 14 }} />,
+    ignition: <Zap style={{ width: 14, height: 14 }} />,
+    cooling: <Thermometer style={{ width: 14, height: 14 }} />,
+    intake: <Wind style={{ width: 14, height: 14 }} />,
     other: <BarChart3 style={{ width: 14, height: 14 }} />,
   };
 
   return (
     <div>
+      {/* Vehicle Info Badge */}
+      {manufacturer !== 'universal' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px',
+          padding: '6px 10px', background: 'oklch(0.15 0.02 55 / 0.3)',
+          border: `1px solid ${sColor.orange}`, borderRadius: '3px',
+        }}>
+          <Cpu style={{ width: 12, height: 12, color: sColor.orange }} />
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.orange, letterSpacing: '0.05em' }}>
+            {manufacturer.toUpperCase()} {fuelType !== 'any' ? `· ${fuelType.toUpperCase()}` : ''}
+          </span>
+          <span style={{ fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textDim, marginLeft: 'auto' }}>
+            {vehiclePids.length} PIDs available
+          </span>
+        </div>
+      )}
+
       {/* Source Filter */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
-        {(['all', 'mode01', 'mode22'] as const).map(src => (
+        {(['vehicle', 'all', 'mode01', 'extended'] as const).map(src => (
           <button
             key={src}
             onClick={() => setPidSource(src)}
             style={{
               flex: 1, padding: '4px 6px', borderRadius: '3px',
               fontFamily: sFont.mono, fontSize: '0.6rem', letterSpacing: '0.05em',
-              background: pidSource === src ? (src === 'mode22' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
-              border: `1px solid ${pidSource === src ? (src === 'mode22' ? sColor.orange : sColor.red) : sColor.borderLight}`,
+              background: pidSource === src ? (src === 'extended' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
+              border: `1px solid ${pidSource === src ? (src === 'extended' ? sColor.orange : sColor.red) : sColor.borderLight}`,
               color: pidSource === src ? sColor.text : sColor.textMuted,
               cursor: 'pointer',
             }}
           >
-            {src === 'all' ? 'ALL' : src === 'mode01' ? 'STD (01)' : 'GM EXT (22)'}
+            {src === 'vehicle' ? 'VEHICLE' : src === 'all' ? 'ALL' : src === 'mode01' ? 'STD (01)' : `${mfgLabel} (22)`}
           </button>
         ))}
       </div>
 
-      {/* Built-in Presets */}
+      {/* Built-in Presets (filtered by vehicle type) */}
       <div style={{ marginBottom: '12px' }}>
         <div style={{ fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.textDim, letterSpacing: '0.1em', marginBottom: '6px' }}>
-          BUILT-IN PRESETS
+          {manufacturer !== 'universal' ? `${manufacturer.toUpperCase()} PRESETS` : 'BUILT-IN PRESETS'}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-          {PID_PRESETS.map(preset => (
+          {vehiclePresets.map(preset => (
             <button
               key={preset.name}
               onClick={() => onApplyPreset(preset)}
@@ -764,7 +810,9 @@ export interface DataloggerPanelProps {
 export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelProps) {
   // Connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const [vehicleInfo, setVehicleInfo] = useState<{ vin?: string; protocol?: string; voltage?: string } | null>(null);
+  const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo | null>(null);
+  const [detectedManufacturer, setDetectedManufacturer] = useState<PIDManufacturer>('universal');
+  const [detectedFuelType, setDetectedFuelType] = useState<FuelType>('any');
   const [supportedPids, setSupportedPids] = useState<Set<number> | null>(null);
   const connectionRef = useRef<OBDConnection | null>(null);
 
@@ -805,6 +853,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
   const [showScanResults, setShowScanResults] = useState(false);
   const scanAbortRef = useRef<AbortController | null>(null);
 
+  // DTC state
+  const [dtcResult, setDtcResult] = useState<DTCReadResult | null>(null);
+  const [isReadingDTCs, setIsReadingDTCs] = useState(false);
+  const [isClearingDTCs, setIsClearingDTCs] = useState(false);
+  const [showDTCPanel, setShowDTCPanel] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
   // WebSerial support check
   const isWebSerialSupported = useMemo(() => OBDConnection.isSupported(), []);
 
@@ -836,9 +891,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     });
 
     conn.on('vehicleInfo', (e) => {
-      const info = e.data as { vin?: string; protocol?: string; voltage?: string };
+      const info = e.data as VehicleInfo;
       setVehicleInfo(info);
-      addLog(`Vehicle: VIN=${info.vin || 'N/A'}, Protocol=${info.protocol || 'N/A'}, Voltage=${info.voltage || 'N/A'}`);
+      if (info.manufacturer) setDetectedManufacturer(info.manufacturer);
+      if (info.fuelType) setDetectedFuelType(info.fuelType);
+      const makeModel = [info.make, info.model, info.year].filter(Boolean).join(' ');
+      addLog(`Vehicle: ${makeModel || 'Unknown'} | VIN=${info.vin || 'N/A'} | Protocol=${info.protocol || 'N/A'} | Voltage=${info.voltage || 'N/A'}`);
+      if (info.manufacturer && info.manufacturer !== 'universal') {
+        addLog(`Auto-detected: ${info.manufacturer.toUpperCase()} ${info.fuelType || 'any'} — loading manufacturer-specific PIDs`);
+      }
     });
 
     connectionRef.current = conn;
@@ -848,8 +909,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     if (success) {
       setSupportedPids(conn.getSupportedPids());
       const stdCount = conn.getAvailablePids().length;
-      const extCount = GM_EXTENDED_PIDS.length;
-      addLog(`Connected! ${stdCount} standard PIDs + ${extCount} GM extended PIDs available`);
+      const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
+      const extCount = extPids.length;
+      const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
+      addLog(`Connected! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
   }, [addLog]);
 
@@ -1045,7 +1108,57 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     }
   }, [addLog]);
 
-  // ─── Export handlers ─────────────────────────────────────────────────
+  // ─── DTC handlers ───────────────────────────────────────────────────────
+
+  const handleReadDTCs = useCallback(async () => {
+    const conn = connectionRef.current;
+    if (!conn || connectionState !== 'ready') return;
+
+    setIsReadingDTCs(true);
+    setShowDTCPanel(true);
+    addLog('Reading DTCs from vehicle...');
+
+    try {
+      const result = await conn.readDTCs();
+      setDtcResult(result);
+      if (result.totalCount === 0) {
+        addLog('No DTCs found — vehicle is clean!');
+      } else {
+        addLog(`Found ${result.stored.length} stored, ${result.pending.length} pending, ${result.permanent.length} permanent DTCs`);
+      }
+    } catch (err) {
+      addLog(`ERROR reading DTCs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsReadingDTCs(false);
+    }
+  }, [connectionState, addLog]);
+
+  const handleClearDTCs = useCallback(async () => {
+    const conn = connectionRef.current;
+    if (!conn || connectionState !== 'ready') return;
+
+    setIsClearingDTCs(true);
+    setShowClearConfirm(false);
+    addLog('Clearing DTCs (Mode 04)...');
+
+    try {
+      const success = await conn.clearDTCs();
+      if (success) {
+        addLog('DTCs cleared successfully! MIL (Check Engine Light) reset.');
+        // Re-read to confirm
+        const result = await conn.readDTCs();
+        setDtcResult(result);
+      } else {
+        addLog('WARNING: Clear DTCs command may not have been accepted');
+      }
+    } catch (err) {
+      addLog(`ERROR clearing DTCs: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsClearingDTCs(false);
+    }
+  }, [connectionState, addLog]);
+
+  // ─── Export handlers ─────────────────────────────────────────────────────
 
   const handleExportCSV = useCallback((session: LogSession) => {
     const csv = exportSessionToCSV(session);
@@ -1245,6 +1358,28 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               <Square style={{ width: 14, height: 14 }} /> STOP · {logDuration}s · {sampleCount} samples
             </button>
           )}
+
+          {/* Read DTCs */}
+          {connectionState === 'ready' && !isLogging && !isScanning && (
+            <button
+              onClick={handleReadDTCs}
+              disabled={isReadingDTCs}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: sColor.orange, border: 'none',
+                borderRadius: '3px', color: 'white',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: isReadingDTCs ? 'wait' : 'pointer',
+                opacity: isReadingDTCs ? 0.7 : 1,
+              }}
+            >
+              {isReadingDTCs ? (
+                <><Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> READING DTCs...</>
+              ) : (
+                <><ShieldAlert style={{ width: 14, height: 14 }} /> READ DTCs</>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1264,6 +1399,261 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               Your browser does not support the WebSerial API. Please use <strong style={{ color: sColor.text }}>Google Chrome</strong> or <strong style={{ color: sColor.text }}>Microsoft Edge</strong> on desktop to connect to an OBDLink EX device. Safari and Firefox do not support WebSerial.
             </div>
           </div>
+        </div>
+      )}
+
+      {/* DTC Results Panel */}
+      {showDTCPanel && (
+        <div style={{
+          background: sColor.bgCard, border: `1px solid ${dtcResult && dtcResult.totalCount > 0 ? sColor.orange : sColor.border}`,
+          borderRadius: '3px', padding: '16px 20px', marginBottom: '16px',
+        }}>
+          {/* DTC Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ShieldAlert style={{ width: 18, height: 18, color: dtcResult?.milStatus ? sColor.red : sColor.orange }} />
+              <span style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.1em', color: sColor.text }}>
+                DIAGNOSTIC TROUBLE CODES
+              </span>
+              {dtcResult?.milStatus && (
+                <span style={{
+                  fontFamily: sFont.mono, fontSize: '0.65rem', padding: '2px 8px',
+                  background: 'oklch(0.20 0.08 25)', border: `1px solid ${sColor.red}`,
+                  borderRadius: '2px', color: sColor.red, letterSpacing: '0.05em',
+                }}>
+                  MIL ON (CHECK ENGINE)
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {/* Clear DTCs Button */}
+              {dtcResult && dtcResult.totalCount > 0 && connectionState === 'ready' && (
+                showClearConfirm ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.red }}>Clear all DTCs?</span>
+                    <button
+                      onClick={handleClearDTCs}
+                      disabled={isClearingDTCs}
+                      style={{
+                        fontFamily: sFont.heading, fontSize: '0.7rem', padding: '3px 10px',
+                        background: sColor.red, border: 'none', borderRadius: '2px',
+                        color: 'white', cursor: 'pointer', letterSpacing: '0.08em',
+                      }}
+                    >
+                      {isClearingDTCs ? 'CLEARING...' : 'YES, CLEAR'}
+                    </button>
+                    <button
+                      onClick={() => setShowClearConfirm(false)}
+                      style={{
+                        fontFamily: sFont.heading, fontSize: '0.7rem', padding: '3px 10px',
+                        background: 'transparent', border: `1px solid ${sColor.border}`, borderRadius: '2px',
+                        color: sColor.textDim, cursor: 'pointer', letterSpacing: '0.08em',
+                      }}
+                    >
+                      CANCEL
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowClearConfirm(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      fontFamily: sFont.heading, fontSize: '0.7rem', padding: '3px 10px',
+                      background: 'oklch(0.18 0.02 25)', border: `1px solid oklch(0.35 0.10 25)`,
+                      borderRadius: '2px', color: sColor.red, cursor: 'pointer', letterSpacing: '0.08em',
+                    }}
+                  >
+                    <Eraser style={{ width: 12, height: 12 }} /> CLEAR DTCs
+                  </button>
+                )
+              )}
+              {/* Refresh */}
+              {connectionState === 'ready' && (
+                <button
+                  onClick={handleReadDTCs}
+                  disabled={isReadingDTCs}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    fontFamily: sFont.heading, fontSize: '0.7rem', padding: '3px 10px',
+                    background: 'transparent', border: `1px solid ${sColor.border}`,
+                    borderRadius: '2px', color: sColor.textDim, cursor: 'pointer', letterSpacing: '0.08em',
+                  }}
+                >
+                  <RefreshCw style={{ width: 12, height: 12 }} /> REFRESH
+                </button>
+              )}
+              {/* Close */}
+              <button onClick={() => setShowDTCPanel(false)} style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', color: sColor.textDim, padding: '4px',
+              }}>
+                <X style={{ width: 14, height: 14 }} />
+              </button>
+            </div>
+          </div>
+
+          {/* Loading State */}
+          {isReadingDTCs && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '20px 0' }}>
+              <Loader2 style={{ width: 18, height: 18, color: sColor.orange, animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim }}>Reading DTCs from vehicle ECU...</span>
+            </div>
+          )}
+
+          {/* No DTCs */}
+          {dtcResult && dtcResult.totalCount === 0 && !isReadingDTCs && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '10px', padding: '16px',
+              background: 'oklch(0.12 0.02 145 / 0.3)', border: `1px solid oklch(0.30 0.10 145)`,
+              borderRadius: '3px',
+            }}>
+              <ShieldCheck style={{ width: 24, height: 24, color: sColor.green }} />
+              <div>
+                <div style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: sColor.green, letterSpacing: '0.08em' }}>
+                  NO TROUBLE CODES FOUND
+                </div>
+                <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '2px' }}>
+                  Vehicle is clean. MIL is OFF. No stored, pending, or permanent DTCs detected.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DTC List */}
+          {dtcResult && dtcResult.totalCount > 0 && !isReadingDTCs && (
+            <div>
+              {/* Summary Bar */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                {dtcResult.stored.length > 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px',
+                    background: 'oklch(0.15 0.02 25 / 0.5)', border: `1px solid oklch(0.35 0.10 25)`,
+                    borderRadius: '2px',
+                  }}>
+                    <ShieldX style={{ width: 14, height: 14, color: sColor.red }} />
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.red }}>
+                      {dtcResult.stored.length} STORED
+                    </span>
+                  </div>
+                )}
+                {dtcResult.pending.length > 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px',
+                    background: 'oklch(0.15 0.02 55 / 0.5)', border: `1px solid oklch(0.40 0.12 55)`,
+                    borderRadius: '2px',
+                  }}>
+                    <AlertCircle style={{ width: 14, height: 14, color: sColor.yellow }} />
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.yellow }}>
+                      {dtcResult.pending.length} PENDING
+                    </span>
+                  </div>
+                )}
+                {dtcResult.permanent.length > 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px',
+                    background: 'oklch(0.15 0.02 300 / 0.5)', border: `1px solid oklch(0.35 0.12 300)`,
+                    borderRadius: '2px',
+                  }}>
+                    <ShieldAlert style={{ width: 14, height: 14, color: sColor.purple }} />
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.purple }}>
+                      {dtcResult.permanent.length} PERMANENT
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* DTC Cards */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* Render all DTCs grouped by type */}
+                {(['stored', 'pending', 'permanent'] as const).map(dtcType => {
+                  const dtcs = dtcResult[dtcType];
+                  if (dtcs.length === 0) return null;
+                  const typeColor = dtcType === 'stored' ? sColor.red : dtcType === 'pending' ? sColor.yellow : sColor.purple;
+                  const typeLabel = dtcType.toUpperCase();
+                  return dtcs.map((dtc: DTCCode, idx: number) => (
+                    <div
+                      key={`${dtcType}-${dtc.code}-${idx}`}
+                      style={{
+                        display: 'flex', gap: '12px', padding: '10px 14px',
+                        background: sColor.bg, border: `1px solid ${sColor.border}`,
+                        borderLeft: `3px solid ${typeColor}`, borderRadius: '3px',
+                      }}
+                    >
+                      {/* Code */}
+                      <div style={{ minWidth: '70px' }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.95rem', color: typeColor, fontWeight: 700 }}>
+                          {dtc.code}
+                        </div>
+                        <div style={{
+                          fontFamily: sFont.mono, fontSize: '0.55rem', color: typeColor, opacity: 0.7,
+                          marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.05em',
+                        }}>
+                          {typeLabel}
+                        </div>
+                      </div>
+                      {/* Details */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.text, lineHeight: 1.4 }}>
+                          {dtc.description}
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                          {dtc.severity && (
+                            <span style={{
+                              fontFamily: sFont.mono, fontSize: '0.55rem', padding: '1px 6px',
+                              background: dtc.severity === 'critical' ? 'oklch(0.18 0.05 25)' : dtc.severity === 'warning' ? 'oklch(0.18 0.04 55)' : 'oklch(0.15 0.01 260)',
+                              border: `1px solid ${dtc.severity === 'critical' ? 'oklch(0.35 0.10 25)' : dtc.severity === 'warning' ? 'oklch(0.35 0.08 55)' : sColor.border}`,
+                              borderRadius: '2px', color: dtc.severity === 'critical' ? sColor.red : dtc.severity === 'warning' ? sColor.yellow : sColor.textDim,
+                              textTransform: 'uppercase',
+                            }}>
+                              {dtc.severity}
+                            </span>
+                          )}
+                          {dtc.system && (
+                            <span style={{
+                              fontFamily: sFont.mono, fontSize: '0.55rem', padding: '1px 6px',
+                              background: 'oklch(0.14 0.005 260)', border: `1px solid ${sColor.border}`,
+                              borderRadius: '2px', color: sColor.textDim, textTransform: 'uppercase',
+                            }}>
+                              {dtc.system.replace(/_/g, ' ')}
+                            </span>
+                          )}
+                        </div>
+                        {/* Possible Causes */}
+                        {dtc.possibleCauses && dtc.possibleCauses.length > 0 && (
+                          <div style={{ marginTop: '6px' }}>
+                            <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, letterSpacing: '0.05em' }}>POSSIBLE CAUSES: </span>
+                            <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim }}>
+                              {dtc.possibleCauses.join(' · ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ));
+                })}
+              </div>
+
+              {/* Clear Warning */}
+              {dtcResult.permanent.length > 0 && (
+                <div style={{
+                  display: 'flex', alignItems: 'flex-start', gap: '8px', marginTop: '12px',
+                  padding: '10px 14px', background: 'oklch(0.12 0.01 300 / 0.3)',
+                  border: `1px solid oklch(0.30 0.08 300)`, borderRadius: '3px',
+                }}>
+                  <Info style={{ width: 14, height: 14, color: sColor.purple, flexShrink: 0, marginTop: '2px' }} />
+                  <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, lineHeight: 1.5 }}>
+                    <strong style={{ color: sColor.purple }}>Permanent DTCs</strong> cannot be cleared with Mode 04. They require the underlying fault to be repaired and the vehicle to complete a drive cycle before the ECU will remove them.
+                  </span>
+                </div>
+              )}
+
+              {/* Timestamp */}
+              {dtcResult.readTimestamp && (
+                <div style={{ marginTop: '8px', fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted }}>
+                  Read at {new Date(dtcResult.readTimestamp).toLocaleTimeString()}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1447,12 +1837,37 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
         <div style={{
           background: 'oklch(0.12 0.01 145 / 0.2)', border: `1px solid oklch(0.30 0.10 145)`,
           borderRadius: '3px', padding: '10px 16px', marginBottom: '16px',
-          display: 'flex', gap: '24px', flexWrap: 'wrap',
+          display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start',
         }}>
+          {/* Vehicle Identity */}
+          {(vehicleInfo.make || vehicleInfo.model) && (
+            <div>
+              <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vehicle</span>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>
+                {[vehicleInfo.year, vehicleInfo.make, vehicleInfo.model].filter(Boolean).join(' ')}
+              </div>
+            </div>
+          )}
           {vehicleInfo.vin && (
             <div>
               <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>VIN</span>
-              <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{vehicleInfo.vin}</div>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.text }}>{vehicleInfo.vin}</div>
+            </div>
+          )}
+          {/* Manufacturer & Fuel Type */}
+          {vehicleInfo.manufacturer && vehicleInfo.manufacturer !== 'universal' && (
+            <div>
+              <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.orange, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Platform</span>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.orange }}>
+                {vehicleInfo.manufacturer.toUpperCase()}
+                {vehicleInfo.fuelType && vehicleInfo.fuelType !== 'any' ? ` · ${vehicleInfo.fuelType.toUpperCase()}` : ''}
+              </div>
+            </div>
+          )}
+          {vehicleInfo.engineType && (
+            <div>
+              <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Engine</span>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.text }}>{vehicleInfo.engineType}</div>
             </div>
           )}
           <div>
@@ -1468,8 +1883,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{supportedPids?.size || 0}</div>
           </div>
           <div>
-            <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.orange, textTransform: 'uppercase', letterSpacing: '0.08em' }}>GM Extended</span>
-            <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.orange }}>{GM_EXTENDED_PIDS.length}</div>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.orange, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              {detectedManufacturer !== 'universal' ? `${detectedManufacturer.toUpperCase()} Extended` : 'Extended PIDs'}
+            </span>
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.orange }}>
+              {(MANUFACTURER_PIDS[detectedManufacturer] || []).length}
+            </div>
           </div>
         </div>
       )}
@@ -1500,6 +1919,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               onCreatePreset={handleCreatePreset}
               onEditPreset={handleEditPreset}
               onDeletePreset={handleDeletePreset}
+              manufacturer={detectedManufacturer}
+              fuelType={detectedFuelType}
             />
           </div>
         )}
