@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { computeTraceStats, filterReadingsByTimeWindow } from './LiveChart';
+import { computeTraceStats, filterReadingsByTimeWindow, computeVisibleRange, clampViewport, ViewportState } from './LiveChart';
 import type { PIDReading } from '@/lib/obdConnection';
 
 function makeReading(pid: number, value: number, timestamp: number): PIDReading {
   return { pid, value, timestamp, raw: '' };
 }
+
+// ─── computeTraceStats ────────────────────────────────────────────────────
 
 describe('computeTraceStats', () => {
   it('returns zeros for empty readings', () => {
@@ -57,13 +59,15 @@ describe('computeTraceStats', () => {
   });
 });
 
+// ─── filterReadingsByTimeWindow ───────────────────────────────────────────
+
 describe('filterReadingsByTimeWindow', () => {
   it('returns all readings when window is -1 (ALL)', () => {
     const now = Date.now();
     const readings = [
-      makeReading(0x0C, 1000, now - 600000), // 10 min ago
-      makeReading(0x0C, 2000, now - 300000), // 5 min ago
-      makeReading(0x0C, 3000, now - 1000),   // 1 sec ago
+      makeReading(0x0C, 1000, now - 600000),
+      makeReading(0x0C, 2000, now - 300000),
+      makeReading(0x0C, 3000, now - 1000),
     ];
     const filtered = filterReadingsByTimeWindow(readings, -1);
     expect(filtered.length).toBe(3);
@@ -77,11 +81,11 @@ describe('filterReadingsByTimeWindow', () => {
   it('filters readings within 10-second window', () => {
     const now = Date.now();
     const readings = [
-      makeReading(0x0C, 1000, now - 30000), // 30s ago - excluded
-      makeReading(0x0C, 2000, now - 15000), // 15s ago - excluded
-      makeReading(0x0C, 3000, now - 8000),  // 8s ago - included
-      makeReading(0x0C, 4000, now - 3000),  // 3s ago - included
-      makeReading(0x0C, 5000, now - 500),   // 0.5s ago - included
+      makeReading(0x0C, 1000, now - 30000),
+      makeReading(0x0C, 2000, now - 15000),
+      makeReading(0x0C, 3000, now - 8000),
+      makeReading(0x0C, 4000, now - 3000),
+      makeReading(0x0C, 5000, now - 500),
     ];
     const filtered = filterReadingsByTimeWindow(readings, 10);
     expect(filtered.length).toBe(3);
@@ -92,9 +96,9 @@ describe('filterReadingsByTimeWindow', () => {
   it('filters readings within 30-second window', () => {
     const now = Date.now();
     const readings = [
-      makeReading(0x0C, 1000, now - 60000), // 60s ago - excluded
-      makeReading(0x0C, 2000, now - 25000), // 25s ago - included
-      makeReading(0x0C, 3000, now - 10000), // 10s ago - included
+      makeReading(0x0C, 1000, now - 60000),
+      makeReading(0x0C, 2000, now - 25000),
+      makeReading(0x0C, 3000, now - 10000),
     ];
     const filtered = filterReadingsByTimeWindow(readings, 30);
     expect(filtered.length).toBe(2);
@@ -104,10 +108,10 @@ describe('filterReadingsByTimeWindow', () => {
   it('filters readings within 5-minute window', () => {
     const now = Date.now();
     const readings = [
-      makeReading(0x0C, 1000, now - 600000), // 10 min ago - excluded
-      makeReading(0x0C, 2000, now - 240000), // 4 min ago - included
-      makeReading(0x0C, 3000, now - 60000),  // 1 min ago - included
-      makeReading(0x0C, 4000, now - 1000),   // 1s ago - included
+      makeReading(0x0C, 1000, now - 600000),
+      makeReading(0x0C, 2000, now - 240000),
+      makeReading(0x0C, 3000, now - 60000),
+      makeReading(0x0C, 4000, now - 1000),
     ];
     const filtered = filterReadingsByTimeWindow(readings, 300);
     expect(filtered.length).toBe(3);
@@ -128,5 +132,129 @@ describe('filterReadingsByTimeWindow', () => {
     for (let i = 1; i < filtered.length; i++) {
       expect(filtered[i].timestamp).toBeGreaterThan(filtered[i - 1].timestamp);
     }
+  });
+});
+
+// ─── computeVisibleRange ──────────────────────────────────────────────────
+
+describe('computeVisibleRange', () => {
+  const dataMin = 1000;
+  const dataMax = 11000; // 10s range
+
+  it('returns full range at zoom 1.0 with autoScroll', () => {
+    const vp: ViewportState = { zoomLevel: 1.0, panOffsetMs: 0, autoScroll: true };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMin).toBe(1000);
+    expect(viewMax).toBe(11000);
+  });
+
+  it('returns half range at zoom 2.0 with autoScroll (locked to right)', () => {
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 0, autoScroll: true };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMax).toBe(11000);
+    expect(viewMax - viewMin).toBe(5000);
+    expect(viewMin).toBe(6000);
+  });
+
+  it('applies pan offset when autoScroll is off', () => {
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 2000, autoScroll: false };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMax).toBe(9000);
+    expect(viewMin).toBe(4000);
+  });
+
+  it('returns same range for zero-length data', () => {
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 0, autoScroll: true };
+    const [viewMin, viewMax] = computeVisibleRange(5000, 5000, vp);
+    expect(viewMin).toBe(5000);
+    expect(viewMax).toBe(5000);
+  });
+
+  it('zooms to 1/10th at zoom 10x', () => {
+    const vp: ViewportState = { zoomLevel: 10.0, panOffsetMs: 0, autoScroll: true };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMax).toBe(11000);
+    expect(viewMax - viewMin).toBe(1000);
+  });
+
+  it('pan offset 0 with autoScroll off shows latest data', () => {
+    const vp: ViewportState = { zoomLevel: 5.0, panOffsetMs: 0, autoScroll: false };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMax).toBe(11000);
+    expect(viewMax - viewMin).toBe(2000);
+  });
+
+  it('max pan offset shows earliest data', () => {
+    // At zoom 2.0, visible = 5000ms, max pan = 10000 - 5000 = 5000
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 5000, autoScroll: false };
+    const [viewMin, viewMax] = computeVisibleRange(dataMin, dataMax, vp);
+    expect(viewMax).toBe(6000);
+    expect(viewMin).toBe(1000);
+  });
+});
+
+// ─── clampViewport ────────────────────────────────────────────────────────
+
+describe('clampViewport', () => {
+  const dataMin = 0;
+  const dataMax = 10000;
+
+  it('clamps zoom below minimum to 1.0', () => {
+    const vp: ViewportState = { zoomLevel: 0.5, panOffsetMs: 0, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.zoomLevel).toBe(1.0);
+  });
+
+  it('clamps zoom above maximum to 50.0', () => {
+    const vp: ViewportState = { zoomLevel: 100, panOffsetMs: 0, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.zoomLevel).toBe(50.0);
+  });
+
+  it('clamps negative pan offset to 0', () => {
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: -5000, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.panOffsetMs).toBe(0);
+  });
+
+  it('clamps excessive pan offset to max allowed', () => {
+    // At zoom 2.0, visible = 5000ms, max pan = 10000 - 5000 = 5000
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 9000, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.panOffsetMs).toBe(5000);
+  });
+
+  it('preserves autoScroll flag', () => {
+    const vp: ViewportState = { zoomLevel: 2.0, panOffsetMs: 0, autoScroll: true };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.autoScroll).toBe(true);
+  });
+
+  it('handles zero-range data gracefully', () => {
+    const vp: ViewportState = { zoomLevel: 5.0, panOffsetMs: 1000, autoScroll: false };
+    const result = clampViewport(vp, 5000, 5000);
+    expect(result.zoomLevel).toBe(5.0);
+    expect(result.panOffsetMs).toBe(1000);
+  });
+
+  it('at zoom 1.0 max pan is 0', () => {
+    const vp: ViewportState = { zoomLevel: 1.0, panOffsetMs: 5000, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.panOffsetMs).toBe(0);
+  });
+
+  it('valid viewport passes through unchanged', () => {
+    const vp: ViewportState = { zoomLevel: 3.0, panOffsetMs: 1000, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.zoomLevel).toBe(3.0);
+    expect(result.panOffsetMs).toBe(1000);
+    expect(result.autoScroll).toBe(false);
+  });
+
+  it('at high zoom, pan range is very small', () => {
+    // At zoom 50.0, visible = 200ms, max pan = 10000 - 200 = 9800
+    const vp: ViewportState = { zoomLevel: 50.0, panOffsetMs: 9800, autoScroll: false };
+    const result = clampViewport(vp, dataMin, dataMax);
+    expect(result.panOffsetMs).toBe(9800);
   });
 });

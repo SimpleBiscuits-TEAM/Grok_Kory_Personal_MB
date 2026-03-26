@@ -8,13 +8,20 @@
  * - PID toggle to show/hide individual traces
  * - Min/Max/Current value indicators per PID
  * - Crosshair cursor with value readout
- * - Auto-scrolling with pause on hover
+ * - Mouse wheel zoom (zooms into cursor position on time axis)
+ * - Click-drag pan (horizontal scrolling through time)
+ * - Touch pinch-to-zoom and drag-to-pan gesture support
+ * - Minimap overview bar showing full session with viewport indicator
+ * - Auto-scroll pauses when zoomed/panned, resumes on reset
  * - Grid lines and time axis labels
  */
 
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { PIDDefinition, PIDReading } from '@/lib/obdConnection';
-import { Eye, EyeOff, Maximize2, Minimize2, Clock, TrendingUp } from 'lucide-react';
+import {
+  Eye, EyeOff, Maximize2, Minimize2, Clock, TrendingUp,
+  ZoomIn, ZoomOut, RotateCcw, Move, Lock, Unlock
+} from 'lucide-react';
 
 // ─── Styles ────────────────────────────────────────────────────────────────
 
@@ -40,24 +47,11 @@ const sColor = {
   purple: 'oklch(0.60 0.20 300)',
 };
 
-// Color palette for PID traces — high contrast on dark background
 const TRACE_COLORS = [
-  '#FF3B3B', // red
-  '#00E676', // green
-  '#40C4FF', // blue
-  '#FFD740', // amber
-  '#FF6EFF', // magenta
-  '#00E5FF', // cyan
-  '#FF9100', // orange
-  '#B388FF', // purple
-  '#76FF03', // lime
-  '#FF80AB', // pink
-  '#18FFFF', // teal
-  '#FFFF00', // yellow
-  '#FF5252', // light red
-  '#69F0AE', // light green
-  '#448AFF', // light blue
-  '#FFE57F', // light amber
+  '#FF3B3B', '#00E676', '#40C4FF', '#FFD740',
+  '#FF6EFF', '#00E5FF', '#FF9100', '#B388FF',
+  '#76FF03', '#FF80AB', '#18FFFF', '#FFFF00',
+  '#FF5252', '#69F0AE', '#448AFF', '#FFE57F',
 ];
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -81,6 +75,27 @@ interface LiveChartProps {
   liveReadings: Map<number, PIDReading>;
   isLogging: boolean;
 }
+
+/** Viewport state for zoom/pan — represents the visible time range */
+export interface ViewportState {
+  /** Zoom level: 1.0 = fit all data, >1 = zoomed in */
+  zoomLevel: number;
+  /** Pan offset in ms from the right edge (0 = showing latest data) */
+  panOffsetMs: number;
+  /** Whether auto-scroll is locked (follows latest data) */
+  autoScroll: boolean;
+}
+
+const DEFAULT_VIEWPORT: ViewportState = {
+  zoomLevel: 1.0,
+  panOffsetMs: 0,
+  autoScroll: true,
+};
+
+const MIN_ZOOM = 1.0;
+const MAX_ZOOM = 50.0;
+const ZOOM_SENSITIVITY = 0.002;
+const PAN_SENSITIVITY = 1.0;
 
 // ─── Chart Data Manager ────────────────────────────────────────────────────
 
@@ -106,14 +121,58 @@ export function filterReadingsByTimeWindow(readings: PIDReading[], windowSeconds
   return readings.filter(r => r.timestamp >= cutoff);
 }
 
+/**
+ * Compute the visible time range given a viewport state and the full data range.
+ * Returns [viewMinTime, viewMaxTime] in ms.
+ */
+export function computeVisibleRange(
+  dataMinTime: number,
+  dataMaxTime: number,
+  viewport: ViewportState,
+): [number, number] {
+  const fullRange = dataMaxTime - dataMinTime;
+  if (fullRange <= 0) return [dataMinTime, dataMaxTime];
+
+  const visibleDuration = fullRange / viewport.zoomLevel;
+
+  if (viewport.autoScroll) {
+    // Locked to latest data
+    return [dataMaxTime - visibleDuration, dataMaxTime];
+  }
+
+  // Manual pan: offset from right edge
+  const viewMax = dataMaxTime - viewport.panOffsetMs;
+  const viewMin = viewMax - visibleDuration;
+  return [viewMin, viewMax];
+}
+
+/**
+ * Clamp viewport so it doesn't pan beyond data boundaries.
+ */
+export function clampViewport(viewport: ViewportState, dataMinTime: number, dataMaxTime: number): ViewportState {
+  const fullRange = dataMaxTime - dataMinTime;
+  if (fullRange <= 0) return viewport;
+
+  const visibleDuration = fullRange / viewport.zoomLevel;
+  const maxPan = Math.max(0, fullRange - visibleDuration);
+
+  return {
+    ...viewport,
+    zoomLevel: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, viewport.zoomLevel)),
+    panOffsetMs: Math.max(0, Math.min(maxPan, viewport.panOffsetMs)),
+  };
+}
+
 // ─── Canvas Chart Renderer ─────────────────────────────────────────────────
 
 function drawChart(
   canvas: HTMLCanvasElement,
   traces: TraceData[],
-  timeWindow: TimeWindow,
+  viewport: ViewportState,
   mouseX: number | null,
+  mouseY: number | null,
   expanded: boolean,
+  isDragging: boolean,
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -134,7 +193,6 @@ function drawChart(
   ctx.fillStyle = '#0D0D0D';
   ctx.fillRect(0, 0, w, h);
 
-  // Find global time range
   const visibleTraces = traces.filter(t => t.visible && t.readings.length > 0);
   if (visibleTraces.length === 0) {
     ctx.fillStyle = '#555';
@@ -144,26 +202,24 @@ function drawChart(
     return;
   }
 
-  let globalMinTime = Infinity, globalMaxTime = -Infinity;
+  // Compute full data range
+  let dataMinTime = Infinity, dataMaxTime = -Infinity;
   for (const trace of visibleTraces) {
     for (const r of trace.readings) {
-      if (r.timestamp < globalMinTime) globalMinTime = r.timestamp;
-      if (r.timestamp > globalMaxTime) globalMaxTime = r.timestamp;
+      if (r.timestamp < dataMinTime) dataMinTime = r.timestamp;
+      if (r.timestamp > dataMaxTime) dataMaxTime = r.timestamp;
     }
   }
+  if (dataMaxTime - dataMinTime < 2000) dataMinTime = dataMaxTime - 2000;
 
-  // Ensure minimum time range of 2 seconds
-  if (globalMaxTime - globalMinTime < 2000) {
-    globalMinTime = globalMaxTime - 2000;
-  }
-
-  const timeRange = globalMaxTime - globalMinTime;
+  // Apply viewport zoom/pan
+  const [viewMinTime, viewMaxTime] = computeVisibleRange(dataMinTime, dataMaxTime, viewport);
+  const viewRange = viewMaxTime - viewMinTime;
 
   // ─── Grid ─────────────────────────────────────────────────────────
   ctx.strokeStyle = '#1A1A1A';
   ctx.lineWidth = 1;
 
-  // Horizontal grid lines (5 lines)
   for (let i = 0; i <= 4; i++) {
     const y = padding.top + (plotH / 4) * i;
     ctx.beginPath();
@@ -172,31 +228,34 @@ function drawChart(
     ctx.stroke();
   }
 
-  // Vertical grid lines (time-based)
-  const timeStepMs = timeRange < 15000 ? 2000 : timeRange < 60000 ? 5000 : timeRange < 180000 ? 15000 : 30000;
-  const firstGridTime = Math.ceil(globalMinTime / timeStepMs) * timeStepMs;
+  const timeStepMs = viewRange < 5000 ? 1000 : viewRange < 15000 ? 2000 : viewRange < 60000 ? 5000 : viewRange < 180000 ? 15000 : 30000;
+  const firstGridTime = Math.ceil(viewMinTime / timeStepMs) * timeStepMs;
   ctx.fillStyle = '#444';
   ctx.font = '10px "Share Tech Mono", monospace';
   ctx.textAlign = 'center';
 
-  for (let t = firstGridTime; t <= globalMaxTime; t += timeStepMs) {
-    const x = padding.left + ((t - globalMinTime) / timeRange) * plotW;
+  for (let t = firstGridTime; t <= viewMaxTime; t += timeStepMs) {
+    const x = padding.left + ((t - viewMinTime) / viewRange) * plotW;
+    if (x < padding.left || x > padding.left + plotW) continue;
     ctx.beginPath();
     ctx.moveTo(x, padding.top);
     ctx.lineTo(x, padding.top + plotH);
     ctx.stroke();
 
-    // Time label
-    const elapsed = (t - globalMinTime) / 1000;
-    const label = elapsed >= 60 ? `${Math.floor(elapsed / 60)}:${(elapsed % 60).toFixed(0).padStart(2, '0')}` : `${elapsed.toFixed(0)}s`;
+    const elapsed = (t - dataMinTime) / 1000;
+    const label = elapsed >= 60 ? `${Math.floor(elapsed / 60)}:${(elapsed % 60).toFixed(0).padStart(2, '0')}` : `${elapsed.toFixed(1)}s`;
     ctx.fillText(label, x, padding.top + plotH + 16);
   }
 
-  // ─── Draw traces ──────────────────────────────────────────────────
+  // ─── Draw traces (clipped to viewport) ────────────────────────────
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(padding.left, padding.top, plotW, plotH);
+  ctx.clip();
+
   for (const trace of visibleTraces) {
     if (trace.readings.length < 2) continue;
 
-    // Compute Y range with 5% padding
     const yMin = trace.min;
     const yMax = trace.max;
     const yRange = yMax - yMin || 1;
@@ -213,7 +272,7 @@ function drawChart(
 
     let started = false;
     for (const r of trace.readings) {
-      const x = padding.left + ((r.timestamp - globalMinTime) / timeRange) * plotW;
+      const x = padding.left + ((r.timestamp - viewMinTime) / viewRange) * plotW;
       const y = padding.top + plotH - ((r.value - effectiveMin) / effectiveRange) * plotH;
 
       if (!started) {
@@ -225,73 +284,78 @@ function drawChart(
     }
     ctx.stroke();
 
-    // Draw glow effect for the most recent point
-    const lastReading = trace.readings[trace.readings.length - 1];
-    const lastX = padding.left + ((lastReading.timestamp - globalMinTime) / timeRange) * plotW;
-    const lastY = padding.top + plotH - ((lastReading.value - effectiveMin) / effectiveRange) * plotH;
+    // Glow on most recent visible point
+    const lastVisible = trace.readings.filter(r => r.timestamp >= viewMinTime && r.timestamp <= viewMaxTime);
+    if (lastVisible.length > 0) {
+      const last = lastVisible[lastVisible.length - 1];
+      const lx = padding.left + ((last.timestamp - viewMinTime) / viewRange) * plotW;
+      const ly = padding.top + plotH - ((last.value - effectiveMin) / effectiveRange) * plotH;
 
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = trace.color;
-    ctx.fill();
+      ctx.beginPath();
+      ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+      ctx.fillStyle = trace.color;
+      ctx.fill();
 
-    // Glow
-    ctx.beginPath();
-    ctx.arc(lastX, lastY, 8, 0, Math.PI * 2);
-    ctx.fillStyle = trace.color + '33';
-    ctx.fill();
+      ctx.beginPath();
+      ctx.arc(lx, ly, 8, 0, Math.PI * 2);
+      ctx.fillStyle = trace.color + '33';
+      ctx.fill();
+    }
   }
 
-  // ─── Y-axis labels (use first visible trace's scale) ──────────────
-  if (visibleTraces.length > 0) {
-    const primaryTrace = visibleTraces[0];
-    const yMin = primaryTrace.min;
-    const yMax = primaryTrace.max;
-    const yRange = yMax - yMin || 1;
-    const yPad = yRange * 0.05;
-    const effectiveMin = yMin - yPad;
-    const effectiveMax = yMax + yPad;
+  ctx.restore();
 
-    ctx.fillStyle = primaryTrace.color;
+  // ─── Y-axis labels ────────────────────────────────────────────────
+  if (visibleTraces.length > 0) {
+    const pt = visibleTraces[0];
+    const yRange = pt.max - pt.min || 1;
+    const yPad = yRange * 0.05;
+    const eMin = pt.min - yPad;
+    const eMax = pt.max + yPad;
+
+    ctx.fillStyle = pt.color;
     ctx.font = '10px "Share Tech Mono", monospace';
     ctx.textAlign = 'right';
 
     for (let i = 0; i <= 4; i++) {
       const frac = i / 4;
-      const val = effectiveMin + (effectiveMax - effectiveMin) * (1 - frac);
+      const val = eMin + (eMax - eMin) * (1 - frac);
       const y = padding.top + plotH * frac;
       ctx.fillText(val.toFixed(val > 100 ? 0 : 1), padding.left - 6, y + 3);
     }
 
-    // Unit label
     ctx.save();
     ctx.translate(12, padding.top + plotH / 2);
     ctx.rotate(-Math.PI / 2);
     ctx.textAlign = 'center';
     ctx.font = '10px "Share Tech Mono", monospace';
-    ctx.fillText(primaryTrace.pid.unit, 0, 0);
+    ctx.fillText(pt.pid.unit, 0, 0);
     ctx.restore();
   }
 
-  // ─── Crosshair on hover ───────────────────────────────────────────
-  if (mouseX !== null && mouseX >= padding.left && mouseX <= padding.left + plotW) {
-    // Vertical crosshair line
+  // ─── Crosshair on hover (not while dragging) ─────────────────────
+  if (mouseX !== null && mouseY !== null && !isDragging &&
+      mouseX >= padding.left && mouseX <= padding.left + plotW &&
+      mouseY >= padding.top && mouseY <= padding.top + plotH) {
     ctx.strokeStyle = '#ffffff44';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
+    // Vertical
     ctx.beginPath();
     ctx.moveTo(mouseX, padding.top);
     ctx.lineTo(mouseX, padding.top + plotH);
     ctx.stroke();
+    // Horizontal
+    ctx.beginPath();
+    ctx.moveTo(padding.left, mouseY);
+    ctx.lineTo(padding.left + plotW, mouseY);
+    ctx.stroke();
     ctx.setLineDash([]);
 
-    // Find time at cursor
-    const cursorTime = globalMinTime + ((mouseX - padding.left) / plotW) * timeRange;
+    const cursorTime = viewMinTime + ((mouseX - padding.left) / plotW) * viewRange;
 
-    // Draw value labels at crosshair
     let labelY = padding.top + 14;
     for (const trace of visibleTraces) {
-      // Find closest reading
       let closest: PIDReading | null = null;
       let closestDist = Infinity;
       for (const r of trace.readings) {
@@ -302,38 +366,113 @@ function drawChart(
         }
       }
 
-      if (closest && closestDist < timeRange * 0.05) {
-        ctx.fillStyle = '#0D0D0DCC';
+      if (closest && closestDist < viewRange * 0.05) {
         const text = `${trace.pid.shortName}: ${closest.value.toFixed(1)} ${trace.pid.unit}`;
         const metrics = ctx.measureText(text);
-        const boxX = mouseX + 8;
+        let boxX = mouseX + 10;
+        // Flip label to left if too close to right edge
+        if (boxX + metrics.width + 12 > padding.left + plotW) {
+          boxX = mouseX - metrics.width - 16;
+        }
         const boxY = labelY - 10;
-        ctx.fillRect(boxX - 2, boxY - 2, metrics.width + 8, 16);
+        ctx.fillStyle = '#0D0D0DEE';
+        ctx.fillRect(boxX - 4, boxY - 2, metrics.width + 12, 16);
+        ctx.strokeStyle = trace.color + '66';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX - 4, boxY - 2, metrics.width + 12, 16);
         ctx.fillStyle = trace.color;
         ctx.font = '11px "Share Tech Mono", monospace';
         ctx.textAlign = 'left';
         ctx.fillText(text, boxX + 2, labelY);
-        labelY += 16;
+        labelY += 18;
       }
     }
+  }
+
+  // ─── Drag indicator ───────────────────────────────────────────────
+  if (isDragging) {
+    ctx.fillStyle = '#ffffff11';
+    ctx.fillRect(padding.left, padding.top, plotW, plotH);
   }
 
   // ─── Border ───────────────────────────────────────────────────────
   ctx.strokeStyle = '#333';
   ctx.lineWidth = 1;
   ctx.strokeRect(padding.left, padding.top, plotW, plotH);
+
+  // ─── Minimap (overview bar at bottom of plot area) ────────────────
+  if (viewport.zoomLevel > 1.05) {
+    const mmH = 20;
+    const mmY = padding.top + plotH - mmH - 4;
+    const mmX = padding.left + 4;
+    const mmW = plotW - 8;
+
+    // Background
+    ctx.fillStyle = '#0D0D0DCC';
+    ctx.fillRect(mmX, mmY, mmW, mmH);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(mmX, mmY, mmW, mmH);
+
+    // Draw mini traces
+    const fullRange = dataMaxTime - dataMinTime;
+    for (const trace of visibleTraces) {
+      if (trace.readings.length < 2) continue;
+      const yRange = trace.max - trace.min || 1;
+      ctx.strokeStyle = trace.color + '66';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      let s = false;
+      for (let i = 0; i < trace.readings.length; i += Math.max(1, Math.floor(trace.readings.length / mmW))) {
+        const r = trace.readings[i];
+        const mx = mmX + ((r.timestamp - dataMinTime) / fullRange) * mmW;
+        const my = mmY + mmH - ((r.value - trace.min) / yRange) * (mmH - 4) - 2;
+        if (!s) { ctx.moveTo(mx, my); s = true; } else { ctx.lineTo(mx, my); }
+      }
+      ctx.stroke();
+    }
+
+    // Viewport indicator rectangle
+    const vpLeft = mmX + ((viewMinTime - dataMinTime) / fullRange) * mmW;
+    const vpRight = mmX + ((viewMaxTime - dataMinTime) / fullRange) * mmW;
+    const vpW = Math.max(4, vpRight - vpLeft);
+
+    ctx.fillStyle = '#ffffff15';
+    ctx.fillRect(vpLeft, mmY, vpW, mmH);
+    ctx.strokeStyle = '#FF3B3B88';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(vpLeft, mmY, vpW, mmH);
+
+    // Label
+    ctx.fillStyle = '#888';
+    ctx.font = '8px "Share Tech Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${viewport.zoomLevel.toFixed(1)}x`, mmX + mmW / 2, mmY - 3);
+  }
 }
 
 // ─── LiveChart Component ───────────────────────────────────────────────────
 
 export default function LiveChart({ pids, readingHistory, liveReadings, isLogging }: LiveChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const animFrameRef = useRef<number>(0);
   const mouseXRef = useRef<number | null>(null);
+  const mouseYRef = useRef<number | null>(null);
 
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(30);
   const [expanded, setExpanded] = useState(false);
   const [hiddenPids, setHiddenPids] = useState<Set<number>>(new Set());
+  const [viewport, setViewport] = useState<ViewportState>(DEFAULT_VIEWPORT);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Refs for drag state (avoid re-renders during drag)
+  const dragStartRef = useRef<{ x: number; panOffset: number } | null>(null);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+
+  // Touch state refs
+  const touchStartRef = useRef<{ touches: { x: number; y: number }[]; pinchDist: number; panOffset: number; zoom: number } | null>(null);
 
   // Assign colors to PIDs
   const pidColors = useMemo(() => {
@@ -343,6 +482,20 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     });
     return map;
   }, [pids]);
+
+  // Compute full data time range (needed for zoom/pan calculations)
+  const dataTimeRange = useMemo(() => {
+    let min = Infinity, max = -Infinity;
+    for (const pid of pids) {
+      const readings = readingHistory.get(pid.pid) || [];
+      const windowed = filterReadingsByTimeWindow(readings, timeWindow);
+      for (const r of windowed) {
+        if (r.timestamp < min) min = r.timestamp;
+        if (r.timestamp > max) max = r.timestamp;
+      }
+    }
+    return { min: min === Infinity ? Date.now() - 2000 : min, max: max === -Infinity ? Date.now() : max };
+  }, [pids, readingHistory, timeWindow]);
 
   // Build trace data
   const traces = useMemo((): TraceData[] => {
@@ -375,14 +528,251 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     });
   }, []);
 
+  // ─── Mouse wheel zoom ────────────────────────────────────────────
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseXInPlot = e.clientX - rect.left;
+    const padding = { left: 60, right: 16 };
+    const plotW = rect.width - padding.left - padding.right;
+
+    // Only zoom if mouse is within plot area
+    if (mouseXInPlot < padding.left || mouseXInPlot > padding.left + plotW) return;
+
+    const cursorFraction = (mouseXInPlot - padding.left) / plotW;
+
+    setViewport(prev => {
+      const fullRange = dataTimeRange.max - dataTimeRange.min;
+      if (fullRange <= 0) return prev;
+
+      // Compute zoom delta
+      const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoomLevel * (1 + zoomDelta)));
+
+      if (newZoom <= 1.01) {
+        // Reset to default
+        return { zoomLevel: 1.0, panOffsetMs: 0, autoScroll: true };
+      }
+
+      // Compute current visible range
+      const oldVisibleDuration = fullRange / prev.zoomLevel;
+      const newVisibleDuration = fullRange / newZoom;
+
+      // The time at cursor position should stay at the same screen position
+      const [oldViewMin] = computeVisibleRange(dataTimeRange.min, dataTimeRange.max, prev);
+      const cursorTime = oldViewMin + cursorFraction * oldVisibleDuration;
+      const newViewMin = cursorTime - cursorFraction * newVisibleDuration;
+      const newViewMax = newViewMin + newVisibleDuration;
+      const newPanOffset = dataTimeRange.max - newViewMax;
+
+      const clamped = clampViewport(
+        { zoomLevel: newZoom, panOffsetMs: newPanOffset, autoScroll: false },
+        dataTimeRange.min,
+        dataTimeRange.max,
+      );
+      return clamped;
+    });
+  }, [dataTimeRange]);
+
+  // ─── Mouse drag pan ──────────────────────────────────────────────
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return; // Left click only
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const padding = { left: 60, right: 16 };
+    const plotW = rect.width - padding.left - padding.right;
+    if (mx < padding.left || mx > padding.left + plotW) return;
+
+    // Only allow drag when zoomed in
+    if (viewportRef.current.zoomLevel <= 1.01) return;
+
+    dragStartRef.current = { x: e.clientX, panOffset: viewportRef.current.panOffsetMs };
+    setIsDragging(true);
+  }, []);
+
+  const handleMouseMoveGlobal = useCallback((e: MouseEvent) => {
+    if (!dragStartRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const padding = { left: 60, right: 16 };
+    const plotW = rect.width - padding.left - padding.right;
+    const fullRange = dataTimeRange.max - dataTimeRange.min;
+    if (fullRange <= 0 || plotW <= 0) return;
+
+    const dx = e.clientX - dragStartRef.current.x;
+    const msPerPixel = (fullRange / viewportRef.current.zoomLevel) / plotW;
+    const panDelta = dx * msPerPixel * PAN_SENSITIVITY;
+
+    setViewport(prev => {
+      const newPan = dragStartRef.current!.panOffset + panDelta;
+      return clampViewport(
+        { ...prev, panOffsetMs: newPan, autoScroll: false },
+        dataTimeRange.min,
+        dataTimeRange.max,
+      );
+    });
+  }, [dataTimeRange]);
+
+  const handleMouseUpGlobal = useCallback(() => {
+    dragStartRef.current = null;
+    setIsDragging(false);
+  }, []);
+
+  // ─── Touch gestures ──────────────────────────────────────────────
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    if (e.touches.length === 1) {
+      // Single touch = pan
+      if (viewportRef.current.zoomLevel <= 1.01) return;
+      const t = e.touches[0];
+      touchStartRef.current = {
+        touches: [{ x: t.clientX, y: t.clientY }],
+        pinchDist: 0,
+        panOffset: viewportRef.current.panOffsetMs,
+        zoom: viewportRef.current.zoomLevel,
+      };
+    } else if (e.touches.length === 2) {
+      e.preventDefault();
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      touchStartRef.current = {
+        touches: [{ x: t0.clientX, y: t0.clientY }, { x: t1.clientX, y: t1.clientY }],
+        pinchDist: dist,
+        panOffset: viewportRef.current.panOffsetMs,
+        zoom: viewportRef.current.zoomLevel,
+      };
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    if (!touchStartRef.current) return;
+
+    if (e.touches.length === 1 && touchStartRef.current.touches.length === 1) {
+      // Single touch pan
+      e.preventDefault();
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const padding = { left: 60, right: 16 };
+      const plotW = rect.width - padding.left - padding.right;
+      const fullRange = dataTimeRange.max - dataTimeRange.min;
+      if (fullRange <= 0 || plotW <= 0) return;
+
+      const dx = e.touches[0].clientX - touchStartRef.current.touches[0].x;
+      const msPerPixel = (fullRange / viewportRef.current.zoomLevel) / plotW;
+      const panDelta = dx * msPerPixel;
+
+      setViewport(prev => clampViewport(
+        { ...prev, panOffsetMs: touchStartRef.current!.panOffset + panDelta, autoScroll: false },
+        dataTimeRange.min,
+        dataTimeRange.max,
+      ));
+    } else if (e.touches.length === 2 && touchStartRef.current.pinchDist > 0) {
+      // Pinch zoom
+      e.preventDefault();
+      const t0 = e.touches[0], t1 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      const scale = dist / touchStartRef.current.pinchDist;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, touchStartRef.current.zoom * scale));
+
+      if (newZoom <= 1.01) {
+        setViewport({ zoomLevel: 1.0, panOffsetMs: 0, autoScroll: true });
+      } else {
+        setViewport(prev => clampViewport(
+          { ...prev, zoomLevel: newZoom, autoScroll: false },
+          dataTimeRange.min,
+          dataTimeRange.max,
+        ));
+      }
+    }
+  }, [dataTimeRange]);
+
+  const handleTouchEnd = useCallback(() => {
+    touchStartRef.current = null;
+  }, []);
+
+  // ─── Register global mouse/touch listeners ────────────────────────
+  useEffect(() => {
+    document.addEventListener('mousemove', handleMouseMoveGlobal);
+    document.addEventListener('mouseup', handleMouseUpGlobal);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMoveGlobal);
+      document.removeEventListener('mouseup', handleMouseUpGlobal);
+    };
+  }, [handleMouseMoveGlobal, handleMouseUpGlobal]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
+
   // Mouse tracking for crosshair
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     mouseXRef.current = e.clientX - rect.left;
+    mouseYRef.current = e.clientY - rect.top;
   }, []);
 
   const handleMouseLeave = useCallback(() => {
     mouseXRef.current = null;
+    mouseYRef.current = null;
+  }, []);
+
+  // Reset viewport
+  const resetViewport = useCallback(() => {
+    setViewport(DEFAULT_VIEWPORT);
+  }, []);
+
+  // Zoom in/out buttons
+  const zoomIn = useCallback(() => {
+    setViewport(prev => {
+      const newZoom = Math.min(MAX_ZOOM, prev.zoomLevel * 1.5);
+      return clampViewport(
+        { ...prev, zoomLevel: newZoom, autoScroll: false },
+        dataTimeRange.min,
+        dataTimeRange.max,
+      );
+    });
+  }, [dataTimeRange]);
+
+  const zoomOut = useCallback(() => {
+    setViewport(prev => {
+      const newZoom = Math.max(MIN_ZOOM, prev.zoomLevel / 1.5);
+      if (newZoom <= 1.01) return DEFAULT_VIEWPORT;
+      return clampViewport(
+        { ...prev, zoomLevel: newZoom },
+        dataTimeRange.min,
+        dataTimeRange.max,
+      );
+    });
+  }, [dataTimeRange]);
+
+  // Toggle auto-scroll
+  const toggleAutoScroll = useCallback(() => {
+    setViewport(prev => {
+      if (prev.autoScroll) return prev; // Already on
+      return { ...prev, panOffsetMs: 0, autoScroll: true };
+    });
   }, []);
 
   // Animation loop
@@ -391,20 +781,18 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     if (!canvas) return;
 
     let running = true;
-
     const render = () => {
       if (!running) return;
-      drawChart(canvas, traces, timeWindow, mouseXRef.current, expanded);
+      drawChart(canvas, traces, viewportRef.current, mouseXRef.current, mouseYRef.current, expanded, isDragging);
       animFrameRef.current = requestAnimationFrame(render);
     };
-
     render();
 
     return () => {
       running = false;
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [traces, timeWindow, expanded]);
+  }, [traces, expanded, isDragging]);
 
   const chartHeight = expanded ? 500 : 280;
   const timeWindowOptions: { value: TimeWindow; label: string }[] = [
@@ -416,9 +804,10 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
   ];
 
   const hasData = traces.some(t => t.readings.length > 0);
+  const isZoomed = viewport.zoomLevel > 1.05;
 
   return (
-    <div style={{
+    <div ref={containerRef} style={{
       background: sColor.bgCard,
       border: `1px solid ${sColor.border}`,
       borderRadius: '3px',
@@ -426,7 +815,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     }}>
       {/* Chart Header */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: '12px',
+        display: 'flex', alignItems: 'center', gap: '8px',
         padding: '10px 16px', borderBottom: `1px solid ${sColor.borderLight}`,
         flexWrap: 'wrap',
       }}>
@@ -438,12 +827,12 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
         </div>
 
         {/* Time Window Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
           <Clock style={{ width: 12, height: 12, color: sColor.textDim }} />
           {timeWindowOptions.map(opt => (
             <button
               key={opt.value}
-              onClick={() => setTimeWindow(opt.value)}
+              onClick={() => { setTimeWindow(opt.value); resetViewport(); }}
               style={{
                 padding: '2px 8px',
                 background: timeWindow === opt.value ? sColor.red : 'transparent',
@@ -451,13 +840,72 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                 borderRadius: '2px',
                 color: timeWindow === opt.value ? 'white' : sColor.textDim,
                 fontFamily: sFont.mono, fontSize: '0.65rem',
-                cursor: 'pointer',
-                letterSpacing: '0.05em',
+                cursor: 'pointer', letterSpacing: '0.05em',
               }}
             >
               {opt.label}
             </button>
           ))}
+        </div>
+
+        {/* Zoom Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
+          <button onClick={zoomOut} title="Zoom Out" style={{
+            padding: '2px 6px', background: 'transparent',
+            border: `1px solid ${sColor.borderLight}`, borderRadius: '2px',
+            color: sColor.textDim, cursor: 'pointer', display: 'flex', alignItems: 'center',
+          }}>
+            <ZoomOut style={{ width: 12, height: 12 }} />
+          </button>
+
+          {/* Zoom level indicator */}
+          <span style={{
+            fontFamily: sFont.mono, fontSize: '0.6rem', minWidth: '36px', textAlign: 'center',
+            color: isZoomed ? sColor.yellow : sColor.textMuted,
+            fontWeight: isZoomed ? 700 : 400,
+          }}>
+            {viewport.zoomLevel.toFixed(1)}x
+          </span>
+
+          <button onClick={zoomIn} title="Zoom In" style={{
+            padding: '2px 6px', background: 'transparent',
+            border: `1px solid ${sColor.borderLight}`, borderRadius: '2px',
+            color: sColor.textDim, cursor: 'pointer', display: 'flex', alignItems: 'center',
+          }}>
+            <ZoomIn style={{ width: 12, height: 12 }} />
+          </button>
+
+          {/* Reset zoom */}
+          {isZoomed && (
+            <button onClick={resetViewport} title="Reset Zoom" style={{
+              padding: '2px 6px', background: sColor.red + '33',
+              border: `1px solid ${sColor.red}66`, borderRadius: '2px',
+              color: sColor.red, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem',
+            }}>
+              <RotateCcw style={{ width: 10, height: 10 }} />
+              RESET
+            </button>
+          )}
+
+          {/* Auto-scroll toggle */}
+          {isZoomed && (
+            <button onClick={toggleAutoScroll} title={viewport.autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF (click to follow latest)'} style={{
+              padding: '2px 6px',
+              background: viewport.autoScroll ? sColor.green + '22' : 'transparent',
+              border: `1px solid ${viewport.autoScroll ? sColor.green + '66' : sColor.borderLight}`,
+              borderRadius: '2px',
+              color: viewport.autoScroll ? sColor.green : sColor.textMuted,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem',
+            }}>
+              {viewport.autoScroll
+                ? <Unlock style={{ width: 10, height: 10 }} />
+                : <Lock style={{ width: 10, height: 10 }} />
+              }
+              {viewport.autoScroll ? 'LIVE' : 'PAUSED'}
+            </button>
+          )}
         </div>
 
         {/* Expand/Collapse */}
@@ -476,15 +924,32 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
         </button>
       </div>
 
+      {/* Zoom hint bar */}
+      {hasData && !isZoomed && (
+        <div style={{
+          padding: '3px 16px', background: 'oklch(0.08 0.004 260)',
+          borderBottom: `1px solid ${sColor.borderLight}`,
+          display: 'flex', alignItems: 'center', gap: '6px',
+        }}>
+          <Move style={{ width: 10, height: 10, color: sColor.textMuted }} />
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>
+            SCROLL TO ZOOM · DRAG TO PAN · PINCH ON TOUCH
+          </span>
+        </div>
+      )}
+
       {/* Canvas Chart */}
       <div style={{ position: 'relative', height: `${chartHeight}px` }}>
         <canvas
           ref={canvasRef}
+          onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
           style={{
             width: '100%', height: '100%',
-            display: 'block', cursor: 'crosshair',
+            display: 'block',
+            cursor: isDragging ? 'grabbing' : isZoomed ? 'grab' : 'crosshair',
+            touchAction: 'none',
           }}
         />
         {!hasData && (
@@ -524,12 +989,10 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                 transition: 'all 0.15s ease',
               }}
             >
-              {/* Color dot */}
               <span style={{
                 width: '8px', height: '8px', borderRadius: '50%',
                 background: trace.color, flexShrink: 0,
               }} />
-              {/* PID name */}
               <span style={{
                 fontFamily: sFont.mono, fontSize: '0.65rem',
                 color: trace.visible ? sColor.text : sColor.textMuted,
@@ -537,7 +1000,6 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                 {isMode22 && <span style={{ color: sColor.orange, marginRight: '3px' }}>M22</span>}
                 {trace.pid.shortName}
               </span>
-              {/* Current value */}
               {trace.visible && trace.readings.length > 0 && (
                 <span style={{
                   fontFamily: sFont.mono, fontSize: '0.6rem', color: trace.color,
@@ -546,7 +1008,6 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                   {trace.current.toFixed(trace.current > 100 ? 0 : 1)}
                 </span>
               )}
-              {/* Visibility icon */}
               {trace.visible
                 ? <Eye style={{ width: 10, height: 10, color: sColor.textDim }} />
                 : <EyeOff style={{ width: 10, height: 10, color: sColor.textMuted }} />
@@ -569,10 +1030,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
             return (
               <div
                 key={`stat-${trace.pid.service}-${trace.pid.pid}`}
-                style={{
-                  background: 'oklch(0.08 0.004 260)',
-                  padding: '8px 12px',
-                }}
+                style={{ background: 'oklch(0.08 0.004 260)', padding: '8px 12px' }}
               >
                 <div style={{
                   fontFamily: sFont.mono, fontSize: '0.6rem',
