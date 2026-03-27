@@ -6,9 +6,24 @@
  * - Beta improvement suggestions
  */
 
-import { useState } from 'react';
-import { Brain, ChevronDown, ChevronRight, AlertCircle, AlertTriangle, Info, Lightbulb, Wrench, Zap, ThumbsUp } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Brain, ChevronDown, ChevronRight, AlertCircle, AlertTriangle, Info, Lightbulb, Wrench, Zap, ThumbsUp, ExternalLink } from 'lucide-react';
 import type { ReasoningReport, ReasoningFinding, BetaImprovement } from '@/lib/reasoningEngine';
+
+/**
+ * Mapping from reasoning finding IDs → fault chart anchor IDs.
+ * When a finding has a matching chart, we show a "View Chart" link.
+ */
+const findingToChartMap: Record<string, { chartId: string; label: string }> = {
+  'tcc-slip-analysis': { chartId: 'fault-chart-tcc', label: 'TCC / Converter Slip Chart' },
+  'rail-pressure-analysis': { chartId: 'fault-chart-rail-pressure', label: 'Rail Pressure Chart' },
+  'rail-pcv-correlation': { chartId: 'fault-chart-rail-pressure', label: 'Rail Pressure Chart' },
+  'coolant-stability': { chartId: 'fault-chart-coolant', label: 'Coolant Temp Chart' },
+  'vgt-tracking': { chartId: 'fault-chart-vgt', label: 'VGT Tracking Chart' },
+  'converter-stall-turbo-mismatch': { chartId: 'fault-chart-converter-stall', label: 'Converter Stall Chart' },
+  'boost-leak-suspicion': { chartId: 'fault-chart-boost', label: 'Boost Pressure Chart' },
+  'tcc-load-correlation': { chartId: 'fault-chart-tcc', label: 'TCC / Converter Slip Chart' },
+};
 
 interface ReasoningPanelProps {
   report: ReasoningReport;
@@ -55,6 +70,21 @@ function FindingCard({ finding }: { finding: ReasoningFinding }) {
   const borderColor = typeBorderColors[finding.type];
   const catColor = categoryColors[finding.category];
   const conf = confidenceBadge[finding.confidence];
+  const chartLink = findingToChartMap[finding.id];
+
+  const scrollToChart = useCallback(() => {
+    if (!chartLink) return;
+    const el = document.getElementById(chartLink.chartId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Flash highlight
+      el.style.transition = 'box-shadow 0.3s ease';
+      el.style.boxShadow = '0 0 0 3px rgba(255,77,0,0.6), 0 0 30px rgba(255,77,0,0.3)';
+      setTimeout(() => {
+        el.style.boxShadow = '';
+      }, 2000);
+    }
+  }, [chartLink]);
 
   return (
     <div style={{
@@ -150,6 +180,42 @@ function FindingCard({ finding }: { finding: ReasoningFinding }) {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* Link to chart */}
+          {chartLink && (
+            <button
+              onClick={scrollToChart}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(255,77,0,0.08)',
+                border: '1px solid rgba(255,77,0,0.25)',
+                borderRadius: '3px',
+                padding: '6px 10px',
+                cursor: 'pointer',
+                width: '100%',
+                textAlign: 'left',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255,77,0,0.15)';
+                e.currentTarget.style.borderColor = 'rgba(255,77,0,0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255,77,0,0.08)';
+                e.currentTarget.style.borderColor = 'rgba(255,77,0,0.25)';
+              }}
+            >
+              <ExternalLink style={{ width: '12px', height: '12px', color: '#ff4d00', flexShrink: 0 }} />
+              <span style={{
+                fontFamily: '"Share Tech Mono", monospace',
+                fontSize: '0.72rem',
+                color: '#ff4d00',
+                letterSpacing: '0.04em',
+              }}>VIEW {chartLink.label.toUpperCase()} →</span>
+            </button>
           )}
 
           {/* Suggestion */}

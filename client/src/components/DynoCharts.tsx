@@ -35,6 +35,7 @@ import {
 import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { DiagnosticReport } from '@/lib/diagnostics';
 import { AlertCircle } from 'lucide-react';
+import { ZoomableChart } from './ZoomableChart';
 
 export interface DynoChartHandle {
   jumpToTime: (startMin: number, endMin: number) => void;
@@ -313,13 +314,14 @@ const FaultChartWrapper = forwardRef<HTMLDivElement, {
   ruleEvaluated: string;
   children: React.ReactNode;
   badges?: React.ReactNode;
-}>(({ code, title, severity, description, recommendation, ruleEvaluated, children, badges }, ref) => {
+  chartId?: string;
+}>(({ code, title, severity, description, recommendation, ruleEvaluated, children, badges, chartId }, ref) => {
   const borderColor = severity === 'critical' ? '#ff2222' : '#ff9900';
   const badgeColor = severity === 'critical' ? 'rgba(255,34,34,0.2)' : 'rgba(255,153,0,0.2)';
   const badgeText = severity === 'critical' ? '#ff6666' : '#ffcc44';
 
   return (
-    <div ref={ref} style={{
+    <div ref={ref} id={chartId} style={{
       background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
       border: `1px solid ${borderColor}`,
       borderRadius: '12px',
@@ -796,9 +798,10 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       </div>
 
       {/* Chart */}
-      <div style={{ height: fullscreen ? 'calc(100vh - 300px)' : 380, flex: fullscreen ? '1 1 auto' : undefined }}>
+      <ZoomableChart data={activeChartData} height={fullscreen ? 'calc(100vh - 300px)' : 380}>
+        {(visibleData) => (
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={activeChartData} margin={{ top: 10, right: rightMargin, bottom: xMode === 'time' ? 50 : 30, left: 10 }}>
+          <ComposedChart data={visibleData} margin={{ top: 10, right: rightMargin, bottom: xMode === 'time' ? 50 : 30, left: 10 }}>
             <defs>
               <linearGradient id="hpGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#ff4d00" stopOpacity={0.35} />
@@ -941,7 +944,8 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
             )}
           </ComposedChart>
         </ResponsiveContainer>
-      </div>
+        )}
+      </ZoomableChart>
 
       <div style={{ textAlign: 'right', marginTop: 8, color: '#222', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
         PERFORMANCE ANALYZER · OBD-II ESTIMATED
@@ -1033,6 +1037,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-rail-pressure"
       code={displayCode}
       title={issue?.title || 'Rail Pressure Analysis'}
       severity={issue?.severity || 'warning'}
@@ -1046,9 +1051,10 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
       </>}
     >
       {hasRailData && chartData.length > 0 ? (
-        <div style={{ height: 300 }}>
+        <ZoomableChart data={chartData} height={300}>
+          {(visibleData) => (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
               <defs>
                 <linearGradient id="deltaLowGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ff2222" stopOpacity={0.35} />
@@ -1088,7 +1094,8 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
               )}
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+          )}
+        </ZoomableChart>
       ) : (
         <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 11, padding: '20px 0', textAlign: 'center' }}>
           Rail pressure channels not logged — fault detected via other indicators.
@@ -1152,6 +1159,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-boost"
       code="Low Boost"
       title={issue?.title || 'Boost Pressure Analysis'}
       severity={issue?.severity || 'warning'}
@@ -1165,9 +1173,10 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
       </>}
     >
       {hasBoostData && chartData.length > 0 ? (
-        <div style={{ height: 300 }}>
+        <ZoomableChart data={chartData} height={300}>
+          {(visibleData) => (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
               <defs>
                 <linearGradient id="boostDeltaGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ff2222" stopOpacity={0.35} />
@@ -1198,7 +1207,8 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
                 fill="url(#boostDeltaGrad)" isAnimationActive={false} name="Δ Underboost" />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+          )}
+        </ZoomableChart>
       ) : (
         <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 11, padding: '20px 0', textAlign: 'center' }}>
           Boost pressure channels not logged — fault detected via other indicators.
@@ -1262,6 +1272,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-egt"
       code="EGT Sensor"
       title={issue.title}
       severity={issue.severity}
@@ -1275,9 +1286,10 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       </>}
     >
       {hasEgtData && chartData.length > 0 ? (
-        <div style={{ height: 300 }}>
+        <ZoomableChart data={chartData} height={300}>
+          {(visibleData) => (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
               <defs>
                 <linearGradient id="egtDeltaGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ff2222" stopOpacity={0.5} />
@@ -1314,7 +1326,8 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
                 fill="url(#egtDeltaGrad)" isAnimationActive={false} name="Δ Over-Limit" />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+          )}
+        </ZoomableChart>
       ) : (
         <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 11, padding: '20px 0', textAlign: 'center' }}>
           EGT channels not logged — fault detected via other indicators.
@@ -1374,6 +1387,7 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-maf"
       code="MAF Idle"
       title={issue.title}
       severity={issue.severity}
@@ -1387,9 +1401,10 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       </>}
     >
       {hasMafData && chartData.length > 0 ? (
-        <div style={{ height: 300 }}>
+        <ZoomableChart data={chartData} height={300}>
+          {(visibleData) => (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
+            <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
               <defs>
                 <linearGradient id="mafDeltaHighGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#ff2222" stopOpacity={0.4} />
@@ -1422,7 +1437,8 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
                 fill="url(#mafDeltaLowGrad)" isAnimationActive={false} name="Δ Low Fault" />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+          )}
+        </ZoomableChart>
       ) : (
         <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 11, padding: '20px 0', textAlign: 'center' }}>
           MAF channels not logged — fault detected via other indicators.
@@ -1534,9 +1550,10 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
             ))}
           </div>
 
-          <div style={{ height: 360 }}>
+          <ZoomableChart data={chartData} height={360}>
+            {(visibleData) => (
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 10, right: 55, bottom: 30, left: 10 }}>
+              <ComposedChart data={visibleData} margin={{ top: 10, right: 55, bottom: 30, left: 10 }}>
                 <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
                 <XAxis
                   dataKey="rpm"
@@ -1618,7 +1635,8 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
                 )}
               </ComposedChart>
             </ResponsiveContainer>
-          </div>
+            )}
+          </ZoomableChart>
 
           {/* Stats row */}
           <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
@@ -1675,6 +1693,7 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-tcc"
       code={issue.code}
       title={issue.title}
       severity={issue.severity}
@@ -1695,8 +1714,10 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
         )}
         onJumpToTime={onJumpToTime}
       />
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+      <ZoomableChart data={chartData} height={220}>
+        {(visibleData) => (
+        <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
@@ -1723,6 +1744,8 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           )}
         </ComposedChart>
       </ResponsiveContainer>
+        )}
+      </ZoomableChart>
     </FaultChartWrapper>
   );
 });
@@ -1749,6 +1772,7 @@ export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-vgt"
       code={issue.code}
       title={issue.title}
       severity={issue.severity}
@@ -1767,8 +1791,10 @@ export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
         )}
         onJumpToTime={onJumpToTime}
       />
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+      <ZoomableChart data={chartData} height={220}>
+        {(visibleData) => (
+        <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
@@ -1789,6 +1815,8 @@ export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
           )}
         </ComposedChart>
       </ResponsiveContainer>
+        )}
+      </ZoomableChart>
     </FaultChartWrapper>
   );
 });
@@ -1809,6 +1837,7 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-regulator"
       code={issue.code}
       title={issue.title}
       severity={issue.severity}
@@ -1827,8 +1856,10 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
         )}
         onJumpToTime={onJumpToTime}
       />
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
+      <ZoomableChart data={chartData} height={220}>
+        {(visibleData) => (
+        <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
@@ -1847,6 +1878,8 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
           <Line yAxisId="delta" type="monotone" dataKey="delta" stroke="#ff4444" dot={false} strokeWidth={1} name="Delta (psi)" />
         </ComposedChart>
       </ResponsiveContainer>
+        )}
+      </ZoomableChart>
     </FaultChartWrapper>
   );
 });
@@ -1868,6 +1901,7 @@ export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-coolant"
       code={issue.code}
       title={issue.title}
       severity={issue.severity}
@@ -1886,8 +1920,10 @@ export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
         )}
         onJumpToTime={onJumpToTime}
       />
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+      <ZoomableChart data={chartData} height={220}>
+        {(visibleData) => (
+        <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={visibleData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
@@ -1902,6 +1938,8 @@ export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
           <Line type="monotone" dataKey="coolant" stroke="#22d3ee" dot={false} strokeWidth={1.5} name="Coolant Temp (°F)" />
         </ComposedChart>
       </ResponsiveContainer>
+        )}
+      </ZoomableChart>
       <div style={{ display: 'flex', gap: 16, marginTop: 10, fontFamily: 'monospace', fontSize: 11 }}>
         <span style={{ color: '#888' }}>Max: <strong style={{ color: '#22d3ee' }}>{maxTemp.toFixed(0)}°F</strong></span>
         <span style={{ color: '#888' }}>Min: <strong style={{ color: '#38bdf8' }}>{minTemp.toFixed(0)}°F</strong></span>
@@ -1927,6 +1965,7 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-idle-rpm"
       code={issue.code}
       title={issue.title}
       severity={issue.severity}
@@ -1945,8 +1984,10 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
         )}
         onJumpToTime={onJumpToTime}
       />
-      <ResponsiveContainer width="100%" height={220}>
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+      <ZoomableChart data={chartData} height={220}>
+        {(visibleData) => (
+        <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={visibleData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
@@ -1961,6 +2002,8 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
           <Line type="monotone" dataKey="rpm" stroke="#38bdf8" dot={false} strokeWidth={1.5} name="Idle RPM" />
         </ComposedChart>
       </ResponsiveContainer>
+        )}
+      </ZoomableChart>
       <div style={{ display: 'flex', gap: 16, marginTop: 10, fontFamily: 'monospace', fontSize: 11 }}>
         <span style={{ color: '#888' }}>Min Idle: <strong style={{ color: '#fb7185' }}>{minRpm} RPM</strong></span>
         <span style={{ color: '#888' }}>Max Idle: <strong style={{ color: '#fb7185' }}>{maxRpm} RPM</strong></span>
@@ -2099,6 +2142,7 @@ export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(
   return (
     <FaultChartWrapper
       ref={ref}
+      chartId="fault-chart-converter-stall"
       code="Converter Stall"
       title="Possible Converter Stall / Turbo Spool Mismatch — WOT Launch Analysis"
       severity="warning"
@@ -2150,9 +2194,10 @@ export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(
         />
       </>}
     >
-      <div style={{ height: 340 }}>
+      <ZoomableChart data={chartData} height={340}>
+        {(visibleData) => (
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 35, left: 10 }}>
+          <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 35, left: 10 }}>
             <defs>
               <linearGradient id="stallLagGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#ff9900" stopOpacity={0.25} />
@@ -2299,7 +2344,8 @@ export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(
             />
           </ComposedChart>
         </ResponsiveContainer>
-      </div>
+        )}
+      </ZoomableChart>
 
       {/* Per-launch summary table */}
       {wotLaunches.length > 1 && (

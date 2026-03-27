@@ -408,3 +408,11 @@
 - [x] Add small beta tab badge next to "Performance Analyzer" on home screen branding
 - [x] Fix feedback form — already wired to DB + notifyOwner() (confirmed table + router exist)
 - [x] Fix feedback form — already wired: saves to DB + notifyOwner() to Manus notifications (verified table exists)
+
+## Chart Zoom/Pan/Scroll + Reasoning Linking
+- [x] Add mouse wheel zoom on all charts (Dyno, Boost Efficiency, all Fault Zone charts)
+- [x] Add click-drag pan on all charts
+- [x] Add zoom controls (buttons for zoom in/out/reset)
+- [x] Add pinch-zoom support for touch devices
+- [x] Add clickable links from PPEI AI Reasoning findings to their corresponding fault zone chart sections
+- [x] Highlight the linked fault zone chart when navigated to from reasoning panel
