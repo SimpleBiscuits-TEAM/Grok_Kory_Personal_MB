@@ -270,7 +270,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
-  // P0089 - Fuel Pressure Regulator Performance — diesel CP4/CP3 only
+  // P0089 - Fuel Pressure Regulator Performance — diesel high-pressure pump (CP4/HP4/CP3)
   if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkFuelPressureRegulatorPerformance(railPressureActual, railPressureDesired, rpm));
   }
@@ -332,23 +332,50 @@ function checkLowRailPressure(
   throttlePosition: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 5000;       // psi offset to flag (raised from 3900)
-  const minDuration = 10;       // seconds sustained (raised from 6.5)
+  const ABS_THRESHOLD = 5000;   // psi absolute offset
+  const PCT_THRESHOLD = 0.20;   // 20% relative deviation required
+  const minDuration = 15;       // seconds sustained (raised from 10)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
   const MIN_RPM = 1000;         // pump can't make pressure below this
   const MIN_THROTTLE = 30;      // per user requirement: don't flag below 30%
+  const RAMP_LOOKBACK = 30;     // 3 seconds lookback for pressure ramp detection
+  const RAMP_RISE_THRESHOLD = 1000; // psi rise = pump is responding
+
+  // ── Pump saturation detection ──────────────────────────────────────────
+  // On tuned trucks, desired rail pressure is set above the high-pressure pump's
+  // physical capacity. The pump maxes out while desired stays higher.
+  // This is normal for high-HP tunes — NOT a fuel system fault.
+  const validActual = actual.filter((v, i) => v > 5000 && rpmArr[i] > MIN_RPM && !decelMask[i]);
+  const peakActualRail = validActual.length > 0 ? Math.max(...validActual) : 0;
+  // Saturation zone: within 15% of peak actual rail pressure
+  const saturationFloor = peakActualRail * 0.85;
 
   let consecutiveViolations = 0;
   for (let i = 0; i < actual.length; i++) {
     const offset = desired[i] - actual[i];
+    const pctOffset = desired[i] > 0 ? offset / desired[i] : 0;
+
+    // Pump ramp-up detection: if pressure is rising, pump is responding
+    let isRamping = false;
+    if (i >= RAMP_LOOKBACK) {
+      const pressRise = actual[i] - actual[i - RAMP_LOOKBACK];
+      if (pressRise > RAMP_RISE_THRESHOLD) isRamping = true;
+    }
+
+    // Pump saturation: actual is near its physical peak
+    const isSaturated = peakActualRail > 20000 && actual[i] >= saturationFloor && actual[i] > 15000;
+
     const isExcluded =
       decelMask[i] ||
       throttleTransientMask[i] ||
       rpmArr[i] < MIN_RPM ||
-      (throttlePosition.length > i && throttlePosition[i] < MIN_THROTTLE);
+      (throttlePosition.length > i && throttlePosition[i] < MIN_THROTTLE) ||
+      isRamping ||
+      isSaturated;
 
-    if (offset > threshold && !isExcluded) {
+    // Must exceed BOTH absolute AND percentage thresholds
+    if (offset > ABS_THRESHOLD && pctOffset > PCT_THRESHOLD && !isExcluded) {
       consecutiveViolations++;
       if (consecutiveViolations >= minSamples) {
         const pcvValue = pcv[i] || 0;
@@ -357,7 +384,7 @@ function checkLowRailPressure(
             code: 'LOW-RAIL-PRESSURE-MAXED',
             severity: 'critical',
             title: 'Low Rail Pressure - System Maxed Out',
-            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA (below 500mA threshold).`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA. Pump peak in this log: ${peakActualRail.toFixed(0)} psi.`,
             recommendation:
               'The fuel rail system is at maximum capacity. Check for fuel pump issues, fuel filter restrictions, or fuel line blockages. Consider upgrading the fuel system.',
           });
@@ -366,7 +393,7 @@ function checkLowRailPressure(
             code: 'LOW-RAIL-PRESSURE-TUNING',
             severity: 'warning',
             title: 'Low Rail Pressure - Possible Tuning Issue',
-            description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA (above 500mA threshold).`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
             recommendation:
               'A tuning adjustment may resolve this issue. Contact your tuner to review fuel pressure calibration and PCV settings.',
           });
@@ -416,7 +443,7 @@ function checkLowRailPressure(
  * Check for High Rail Pressure (P0088)
  *
  * False-positive prevention:
- * - Exclude deceleration (CP4 overshoot during engine braking is normal)
+ * - Exclude deceleration (pump overshoot during engine braking is normal)
  * - Exclude rapid throttle transients
  * - Require 8+ seconds sustained (was 5s)
  * - Threshold raised to 2500 psi (was 1950)
@@ -437,7 +464,7 @@ function checkHighRailPressure(
   const MIN_RPM = 1000;         // exclude low RPM where pressure control is less precise
 
   // Build a "desired-dropping" mask: when desired pressure is falling or has
-  // recently fallen, the CP4 pump physically cannot depressurize the rail fast
+  // recently fallen, the high-pressure pump physically cannot depressurize the rail fast
   // enough — this is normal behavior during commanded decel, NOT a regulator fault.
   // Strategy: check multiple lookback windows to catch both fast and gradual drops.
   // Also mark samples where desired is still settling after a drop.
@@ -565,22 +592,51 @@ function checkLowBoostPressure(
   throttleTransientMask: boolean[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 8;          // psi offset (raised from 6.5)
-  const minDuration = 10;       // seconds (raised from 6.5)
+  const ABS_THRESHOLD = 10;     // psi absolute offset (raised from 8)
+  const PCT_THRESHOLD = 0.30;   // 30% relative deviation required
+  const minDuration = 15;       // seconds sustained (raised from 10)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
   const MIN_RPM = 1500;         // turbo needs RPM to spool
+  const SPOOL_LOOKBACK = 30;    // 3 seconds lookback for spool detection
+  const SPOOL_RISE_THRESHOLD = 3; // psi rise = turbo is spooling
+
+  // ── Turbo saturation detection ──────────────────────────────────────────
+  // On tuned trucks, desired boost is intentionally set above the turbo's
+  // physical limit to extract maximum performance. The turbo plateaus at its
+  // max output while desired stays higher — this is NOT a fault.
+  // Strategy: find the peak actual boost in the log. If actual consistently
+  // reaches near that peak while desired is higher, the turbo is saturated.
+  const validActual = actual.filter((v, i) => v > 5 && rpm[i] > MIN_RPM && !decelMask[i]);
+  const peakActualBoost = validActual.length > 0 ? Math.max(...validActual) : 0;
+  // Saturation zone: within 15% of peak actual boost
+  const saturationFloor = peakActualBoost * 0.85;
 
   let consecutiveViolations = 0;
 
   for (let i = 0; i < actual.length; i++) {
     const offset = desired[i] - actual[i];
+    const pctOffset = desired[i] > 0 ? offset / desired[i] : 0;
+
+    // Turbo spool-up detection: if boost is rising, turbo is responding
+    let isSpooling = false;
+    if (i >= SPOOL_LOOKBACK) {
+      const boostRise = actual[i] - actual[i - SPOOL_LOOKBACK];
+      if (boostRise > SPOOL_RISE_THRESHOLD) isSpooling = true;
+    }
+
+    // Turbo saturation: actual is near its physical peak
+    const isSaturated = peakActualBoost > 20 && actual[i] >= saturationFloor && actual[i] > 15;
+
     const isExcluded =
       decelMask[i] ||
       throttleTransientMask[i] ||
-      rpm[i] < MIN_RPM;
+      rpm[i] < MIN_RPM ||
+      isSpooling ||
+      isSaturated;
 
-    if (offset > threshold && !isExcluded) {
+    // Must exceed BOTH absolute AND percentage thresholds
+    if (offset > ABS_THRESHOLD && pctOffset > PCT_THRESHOLD && !isExcluded) {
       consecutiveViolations++;
 
       if (consecutiveViolations >= minSamples && issues.length === 0) {
@@ -588,12 +644,12 @@ function checkLowBoostPressure(
         const mafFlow = maf[i] || 0;
         const currentRpm = rpm[i] || 0;
 
-        if (mafFlow > 71.5 && actual[i] < 25 && vanePos > 58.5) {
+        if (mafFlow > 71.5 && actual[i] < 20 && vanePos > 58.5) {
           issues.push({
             code: 'LOW-BOOST-LEAK',
             severity: 'critical',
             title: 'Low Boost Pressure - Likely Boost Leak',
-            description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at steady-state (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% (above 45%) and MAF flow is ${mafFlow.toFixed(1)} lb/min (above 55 lb/min).`,
+            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at steady-state (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% and MAF flow is ${mafFlow.toFixed(1)} lb/min. Turbo peak in this log: ${peakActualBoost.toFixed(1)} psi.`,
             recommendation:
               'A boost leak is very likely. Perform a boost leakdown test and inspect intake system for leaks, cracks, or loose connections. Check intercooler, piping, and clamps.',
           });
@@ -602,7 +658,7 @@ function checkLowBoostPressure(
             code: 'LOW-BOOST-TURBO',
             severity: 'warning',
             title: 'Low Boost Pressure - Turbo Issue',
-            description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at ${currentRpm.toFixed(0)} RPM (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% (above 45%).`,
+            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at ${currentRpm.toFixed(0)} RPM (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}%. Turbo peak: ${peakActualBoost.toFixed(1)} psi.`,
             recommendation:
               'Perform a boost leakdown test and check the intake system for leaks. Inspect turbo for damage or excessive play.',
           });
@@ -611,7 +667,7 @@ function checkLowBoostPressure(
             code: 'LOW-BOOST-GENERAL',
             severity: 'info',
             title: 'Low Boost Pressure Detected',
-            description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at steady-state (transients and low-RPM excluded).`,
+            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at steady-state (transients, low-RPM, and turbo spool-up excluded). Turbo peak: ${peakActualBoost.toFixed(1)} psi.`,
             recommendation:
               'Check boost system components including turbo, intercooler, and intake piping. Verify wastegate operation.',
           });

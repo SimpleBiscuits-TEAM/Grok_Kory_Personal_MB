@@ -224,13 +224,18 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
 
   if (boostAvail && boostVals.length > 0) {
     const maxBoost = Math.max(...boostVals);
-    // Low boost condition: high MAF (>55 lb/min) but low boost (<25 PSIG gauge) = likely boost leak
-    const highMafLowBoostCount = data.maf.filter((m: number, i: number) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 25).length;
+    // Low boost condition: high MAF (>55 lb/min) but low boost
+    // Use dynamic threshold: if peak boost > 30 psi, turbo is making good boost
+    // and the truck is likely tuned — only flag if boost is below 50% of peak
+    const boostLeakFloor = maxBoost > 30 ? maxBoost * 0.50 : 25;
+    const highMafLowBoostCount = data.maf.filter((m: number, i: number) =>
+      m > 55 && boostVals[i] !== undefined && boostVals[i] < boostLeakFloor
+    ).length;
 
-    if (highMafLowBoostCount > 30) {
+    if (highMafLowBoostCount > 50) {
       turboStatus = '⚠ WARNING — Possible boost leak (high MAF, low boost pressure)';
       score -= 15;
-      findings.push('High MAF with low boost pressure detected — perform boost leak test and inspect intake');
+      findings.push(`High MAF with low boost pressure detected (below ${boostLeakFloor.toFixed(0)} psi while MAF > 55 lb/min) — perform boost leak test and inspect intake`);
     } else {
       findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSIG, peak MAF ${maxMaf.toFixed(1)} lb/min`);
     }
@@ -270,16 +275,22 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
     };
   }
 
-  // Low rail pressure: Actual is 5k+ lower than desired for sustained period
+  // Low rail pressure: pump saturation-aware — only count when actual is NOT near pump peak
   // High rail pressure: Actual is 3.5k+ higher than desired, EXCLUDING decel/transients
   // Must match diagnostics.ts thresholds to avoid false positives
+  const validRailForPeak = railActual.filter(v => v > 5000);
+  const peakRailPressure = validRailForPeak.length > 0 ? Math.max(...validRailForPeak) : 0;
+  const railSaturationFloor = peakRailPressure * 0.85;
   let lowRailCount = 0;
   let highRailSustained = 0;
   let highRailMaxConsecutive = 0;
   let highRailConsecutive = 0;
   for (let i = 0; i < railActual.length; i++) {
     if (railActual[i] > 0 && railDesired[i] > 0) {
-      if (railDesired[i] - railActual[i] > 5000) lowRailCount++;
+      const railOffset = railDesired[i] - railActual[i];
+      const railPctOffset = railDesired[i] > 0 ? railOffset / railDesired[i] : 0;
+      const isPumpSaturated = peakRailPressure > 20000 && railActual[i] >= railSaturationFloor && railActual[i] > 15000;
+      if (railOffset > 5000 && railPctOffset > 0.20 && !isPumpSaturated) lowRailCount++;
       // High rail: exclude when desired is dropping (decel/coast-down)
       const isDesiredDropping =
         (i >= 5 && railDesired[i - 5] - railDesired[i] > 200) ||
@@ -308,7 +319,7 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
 
   let pressureStatus = '✓ Normal — Rail pressure regulation within spec';
 
-  if (lowRailCount >= 100) {
+  if (lowRailCount >= 150) {
     pressureStatus = '✗ FAIL — Low rail pressure detected';
     score -= 25;
     const pcvVals = validValues(data.pcvDutyCycle);
@@ -540,24 +551,36 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
 function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   const detectedCodes: string[] = [];
 
-  // ── Low Rail Pressure ──────────────────────────────────────────────────
-  // Actual is 5k+ lower than desired for sustained period (100 samples)
-  // Thresholds raised to match diagnostics.ts false-positive prevention
+  // ── Low Rail Pressure ──────────────────────────────────────────────────────────────
+  // Pump saturation-aware: on tuned trucks, desired rail pressure is set above
+  // the pump's (CP4/HP4) physical capacity. Only flag when actual is well below
+  // the pump's demonstrated peak AND the deviation exceeds both absolute and
+  // percentage thresholds.
   let p0087Status = '✓ PASS';
   const railActual = data.railPressureActual;
   const railDesired = data.railPressureDesired;
   const hasRailData = validValues(railActual).length > 10 && validValues(railDesired).length > 10;
   if (hasRailData) {
-    const lowRailCount = railActual.filter((a, i) => a > 0 && railDesired[i] > 0 && (railDesired[i] - a) > 5000).length;
-    if (lowRailCount >= 100) {
+    // Find the pump's demonstrated peak in this log
+    const validRail = railActual.filter(v => v > 5000);
+    const peakRail = validRail.length > 0 ? Math.max(...validRail) : 0;
+    const railSatFloor = peakRail * 0.85;
+    // Only count samples where actual is NOT near the pump's peak (not saturated)
+    // AND deviation exceeds both 5000 psi absolute AND 20% relative
+    const lowRailCount = railActual.filter((a, i) => {
+      if (a <= 0 || railDesired[i] <= 0) return false;
+      const offset = railDesired[i] - a;
+      const pctOffset = offset / railDesired[i];
+      const isSaturated = peakRail > 20000 && a >= railSatFloor && a > 15000;
+      return offset > 5000 && pctOffset > 0.20 && !isSaturated;
+    }).length;
+    if (lowRailCount >= 150) {
       p0087Status = '✗ DETECTED — Low Rail Pressure Deviation';
       detectedCodes.push('LOW_RAIL_PRESSURE');
     }
   } else {
     p0087Status = '— Rail pressure not logged';
-  }
-
-  // ── High Rail Pressure Deviation ──────────────────────────────────────────
+  } // ── High Rail Pressure Deviation ──────────────────────────────────────────
   // Actual is 3.5k+ higher than desired, EXCLUDING decel/transients, sustained 120+ consecutive samples
   let highRailStatus = '✓ PASS';
   if (hasRailData) {
@@ -586,18 +609,25 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     highRailStatus = '— Rail pressure not logged';
   }
 
-  // ── Low Boost / Underboost ──────────────────────────────────────────────────
-  // Actual boost 5+ PSI below desired for >3 seconds (75 samples at 25Hz)
-  // Skip entirely when boostActualAvailable is false — MAP was not logged, zero values are invalid
+  // ── Low Boost / Underboost ────────────────────────────────────────────────────────
+  // Turbo saturation-aware: on tuned trucks, desired boost is set above the
+  // turbo's physical limit. Only flag when actual is well below the turbo's
+  // demonstrated peak AND high MAF confirms airflow demand.
   let p0299Status = '✓ PASS';
   const boostActual = validValues(data.boost);
   const boostAvailForP0299 = data.boostActualAvailable !== false;
   if (!boostAvailForP0299) {
     p0299Status = '— Actual boost not available (Manifold Absolute Pressure not in datalog)';
   } else if (boostActual.length > 0) {
-    // Check for high MAF but low boost (boost leak indicator)
-    const highMafLowBoost = data.maf.filter((m: number, i: number) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;
-    if (highMafLowBoost >= 75) {
+    // Find the turbo's demonstrated peak in this log
+    const peakBoost = Math.max(...boostActual.filter(v => v > 0));
+    // Dynamic floor: if turbo makes > 30 psi, use 50% of peak; otherwise 25 psi
+    const boostLeakFloor = peakBoost > 30 ? peakBoost * 0.50 : 25;
+    // Only count samples where boost is below the dynamic floor with high MAF
+    const highMafLowBoost = data.maf.filter((m: number, i: number) =>
+      m > 55 && data.boost[i] > 0 && data.boost[i] < boostLeakFloor
+    ).length;
+    if (highMafLowBoost >= 100) {
       p0299Status = '✗ DETECTED — Low Boost (possible boost leak)';
       detectedCodes.push('LOW_BOOST');
     }
@@ -605,7 +635,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     p0299Status = '— Boost pressure not logged';
   }
 
-  // ── EGT Warning ───────────────────────────────────────────────────────────
+  // ── EGT Warning ─────────────────────────────────────────────────────────────────
   // >1475°F for >5 seconds, or stuck >1800°F
   let egtStatus = '✓ PASS';
   const egtVals = validValues(data.exhaustGasTemp);

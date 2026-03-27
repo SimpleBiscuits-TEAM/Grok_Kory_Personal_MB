@@ -283,3 +283,10 @@
 - [x] Add format detection card display
 - [x] Expand GM part number database with E90/E88 gasoline parts
 - [x] Analyze SPS flash programming log for UDS sequence (security access, transfer data, module order)
+
+## False Low Boost & Rail Pressure Alert Fix
+- [x] Analyze 145+hp_558_1288.csv to understand what triggers false low boost alert
+- [x] Fix low boost detection thresholds (recurring false positives across multiple datalogs)
+- [x] Fix low boost fault zone not displaying in the problematic area
+- [x] Fix false rail pressure alert if present
+- [x] Verify fixes against the 145+hp datalog
