@@ -817,8 +817,9 @@ function analyzeConverterStallVsTurboSpool(
         'Also check for boost leaks that could compound the issue (pressurize the charge system to ' +
         '40 PSI and watch for leakdown). If the vehicle has a larger turbo, a stall converter in the ' +
         '2200-2800 RPM range (matched to the turbo) is common practice. ' +
-        'Be aware that a tight stall can also overspeed the turbo at low RPM — the turbo shaft speeds ' +
-        'get very high trying to push air through a converter that won\'t let the engine rev. ' +
+        'If a boost leak is also present, be aware that the turbo shaft speeds can get very high — ' +
+        'the turbo spins harder trying to compensate for pressure lost through the leak, which can ' +
+        'overspeed the turbo. A tight stall alone does not overspeed the turbo, but a boost leak will. ' +
         'MAF limiting (reducing fuel on the bottom end) can reduce smoke but may increase lag since ' +
         'there is less heat energy to drive the turbo.',
       betaNote:
@@ -1058,8 +1059,9 @@ function generateBetaImprovements(
       observation: `The following parameters were not found in this datalog: ${missingPids.join(', ')}`,
       suggestion:
         `Adding these parameters to your ${toolName} configuration would enable more comprehensive ` +
-        `diagnostics. EGT is particularly valuable for detecting fueling issues and DPF health. ` +
-        `Oil pressure and temperature help identify lubrication system concerns under load.`,
+        `diagnostics.` +
+        (hasEgt ? ` EGT is particularly valuable for detecting fueling issues and exhaust system health.` : '') +
+        ` Oil pressure and temperature help identify lubrication system concerns under load.`,
       priority: hasEgt ? 'high' : 'medium',
     });
   }
@@ -1157,7 +1159,7 @@ function generateSummary(
   }
 
   if (faults.length === 0 && warnings.length === 0) {
-    parts.push('No critical faults or warnings detected by the reasoning engine.');
+    parts.push('No critical faults or warnings detected.');
   }
 
   if (ctx.tccFullLockDetected) {

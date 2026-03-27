@@ -1036,8 +1036,8 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
       code={displayCode}
       title={issue?.title || 'Rail Pressure Analysis'}
       severity={issue?.severity || 'warning'}
-      description={issue?.description || 'The reasoning engine detected a rail pressure concern. See the AI Reasoning Engine section for details.'}
-      recommendation={issue?.recommendation || 'Review the AI Reasoning Engine findings for specific recommendations.'}
+      description={issue?.description || 'A rail pressure concern was detected. See the PPEI AI Reasoning section for details.'}
+      recommendation={issue?.recommendation || 'Review the PPEI AI Reasoning findings for specific recommendations.'}
       ruleEvaluated={ruleText}
       badges={<>
         <DeltaBadge label="Peak Rail Pressure" actual={peakActual.toFixed(0)} expected={peakDesired.toFixed(0)} delta={(isLow ? peakDesired - peakActual : peakActual - peakDesired).toFixed(0)} unit=" psi" isCritical={true} />
@@ -1155,8 +1155,8 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
       code="Low Boost"
       title={issue?.title || 'Boost Pressure Analysis'}
       severity={issue?.severity || 'warning'}
-      description={issue?.description || 'The reasoning engine detected a boost-related concern. See the AI Reasoning Engine section for details.'}
-      recommendation={issue?.recommendation || 'Review the AI Reasoning Engine findings for specific recommendations.'}
+      description={issue?.description || 'A boost-related concern was detected. See the PPEI AI Reasoning section for details.'}
+      recommendation={issue?.recommendation || 'Review the PPEI AI Reasoning findings for specific recommendations.'}
       ruleEvaluated={ruleText}
       badges={<>
         <DeltaBadge label="Peak Boost" actual={peakActual.toFixed(1)} expected={peakDesired > 0 ? peakDesired.toFixed(1) : '48.0'} delta={(peakDesired > 0 ? peakDesired - peakActual : 48 - peakActual).toFixed(1)} unit=" psi" isCritical={true} />
@@ -1969,3 +1969,403 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
   );
 });
 IdleRpmFaultChart.displayName = 'IdleRpmFaultChart';
+
+
+// ─── CONVERTER STALL / TURBO SPOOL CHART ────────────────────────────────────
+/**
+ * Visualizes WOT launch events showing RPM vs Boost to highlight the boost
+ * build delay caused by a potential converter stall / turbo spool mismatch.
+ *
+ * Triggers when the reasoning engine detects 'converter-stall-turbo-mismatch'.
+ * Shows each detected launch as a time-series with RPM on the left Y-axis and
+ * boost on the right Y-axis, with the "lag zone" shaded from WOT to first
+ * meaningful boost (>3 PSI).
+ */
+export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
+  // Only render when reasoning engine detected converter stall / turbo spool mismatch
+  const stallFinding = reasoningReport?.findings?.find(
+    f => f.id === 'converter-stall-turbo-mismatch' && (f.type === 'warning' || f.type === 'fault')
+  );
+  if (!stallFinding) return null;
+
+  const rpm = data.rpm;
+  const throttle = data.throttlePosition;
+  const boost = data.boost;
+  const gear = data.currentGear || [];
+  const vss = data.vehicleSpeed;
+  const timeMin = data.timeMinutes;
+
+  // Detect WOT launch events (same logic as reasoning engine)
+  const wotLaunches = useMemo(() => {
+    if (rpm.length === 0 || throttle.length === 0 || boost.length === 0) return [];
+
+    const launches: Array<{
+      startIdx: number;
+      endIdx: number;
+      peakRpm: number;
+      rpmAtFirstBoost: number;
+      firstBoostIdx: number;
+      boostBuildDelay: number;
+    }> = [];
+
+    let inWotLaunch = false;
+    let launchStart = -1;
+    let peakRpm = 0;
+    let firstBoostIdx = -1;
+
+    for (let i = 0; i < rpm.length; i++) {
+      const isWot = throttle[i] > 85;
+      const isLowGear = gear.length > 0 ? (gear[i] === 1 || gear[i] === 2) : true;
+      const isLowSpeed = vss[i] < 15;
+
+      if (isWot && isLowGear && isLowSpeed && !inWotLaunch) {
+        inWotLaunch = true;
+        launchStart = i;
+        peakRpm = rpm[i];
+        firstBoostIdx = -1;
+      } else if (inWotLaunch) {
+        if (!isWot || vss[i] > 30) {
+          if (launchStart >= 0 && (i - launchStart) > 5) {
+            launches.push({
+              startIdx: launchStart,
+              endIdx: i,
+              peakRpm,
+              rpmAtFirstBoost: firstBoostIdx >= 0 ? rpm[firstBoostIdx] : 0,
+              firstBoostIdx: firstBoostIdx >= 0 ? firstBoostIdx : i,
+              boostBuildDelay: firstBoostIdx >= 0 ? firstBoostIdx - launchStart : i - launchStart,
+            });
+          }
+          inWotLaunch = false;
+          launchStart = -1;
+        } else {
+          if (rpm[i] > peakRpm) peakRpm = rpm[i];
+          if (firstBoostIdx < 0 && boost[i] > 3) firstBoostIdx = i;
+        }
+      }
+    }
+    return launches;
+  }, [rpm, throttle, boost, gear, vss]);
+
+  // Build chart data: for each launch, create a time-series of RPM + boost
+  // We show the first (best) launch in detail, with summary stats for all
+  const chartData = useMemo(() => {
+    if (wotLaunches.length === 0) return [];
+
+    // Use the first launch (typically the most representative)
+    const launch = wotLaunches[0];
+    const startTime = timeMin[launch.startIdx] || 0;
+    const points: Array<{
+      time: number;       // seconds from WOT start
+      rpm: number;
+      boost: number;
+      inLagZone: boolean;
+    }> = [];
+
+    // Show up to 5 seconds of data from the launch start
+    const maxSamples = Math.min(launch.endIdx, launch.startIdx + 80); // ~8s at 10Hz
+    for (let i = launch.startIdx; i < maxSamples && i < rpm.length; i++) {
+      const secFromStart = (timeMin[i] - startTime) * 60;
+      points.push({
+        time: parseFloat(secFromStart.toFixed(2)),
+        rpm: rpm[i],
+        boost: boost[i] > 0 ? boost[i] : 0,
+        inLagZone: i < launch.firstBoostIdx,
+      });
+    }
+    return points;
+  }, [wotLaunches, rpm, boost, timeMin]);
+
+  if (chartData.length === 0) return null;
+
+  const sampleRate = 10; // assumed 10 Hz
+  const launch = wotLaunches[0];
+  const startRpm = rpm[launch.startIdx];
+  const rpmAtFirstBoost = launch.rpmAtFirstBoost;
+  const boostDelaySec = (launch.boostBuildDelay / sampleRate);
+  const peakBoostInLaunch = Math.max(...chartData.map(d => d.boost));
+  const peakRpmInLaunch = Math.max(...chartData.map(d => d.rpm));
+  const lagZoneEnd = chartData.find(d => !d.inLagZone)?.time ?? chartData[chartData.length - 1].time;
+
+  // Averages across all launches
+  const avgStartRpm = wotLaunches.reduce((s, l) => s + rpm[l.startIdx], 0) / wotLaunches.length;
+  const avgBoostDelay = wotLaunches.reduce((s, l) => s + l.boostBuildDelay / sampleRate, 0) / wotLaunches.length;
+
+  const ruleText = `Converter Stall / Turbo Spool Analysis: ${wotLaunches.length} WOT launch event(s) detected. ` +
+    `Average converter flash stall: ${avgStartRpm.toFixed(0)} RPM. ` +
+    `Average boost build delay from WOT: ${avgBoostDelay.toFixed(1)}s. ` +
+    `RPM at first meaningful boost (>3 PSI): ${rpmAtFirstBoost > 0 ? rpmAtFirstBoost.toFixed(0) + ' RPM' : 'boost never exceeded 3 PSI during stall'}. ` +
+    `Trigger: reasoning engine detected extended boost build time from WOT launches.`;
+
+  return (
+    <FaultChartWrapper
+      ref={ref}
+      code="Converter Stall"
+      title="Possible Converter Stall / Turbo Spool Mismatch — WOT Launch Analysis"
+      severity="warning"
+      description={
+        `The PPEI AI Reasoning engine detected that boost takes an extended time to build during WOT launches from a stop. ` +
+        `This chart shows RPM and boost pressure during the first detected WOT launch event. ` +
+        `The shaded "lag zone" represents the time from WOT application to the first meaningful boost (>3 PSI). ` +
+        `A longer lag zone may indicate the converter stall speed is not reaching the turbo's efficient spool range.`
+      }
+      recommendation={
+        `Consider evaluating the torque converter stall speed relative to the turbocharger's effective spool range. ` +
+        `Converter stall ratings (e.g. "2200 stall") are measured under specific conditions — actual flash stall from a dead stop ` +
+        `can be significantly lower than the rated number. Also check for boost leaks that could compound the issue ` +
+        `(pressurize the charge system to 40 PSI and watch for leakdown).`
+      }
+      ruleEvaluated={ruleText}
+      badges={<>
+        <DeltaBadge
+          label="Flash Stall RPM"
+          actual={startRpm.toFixed(0)}
+          expected=">1800"
+          delta={(1800 - startRpm).toFixed(0)}
+          unit=" RPM"
+          isCritical={startRpm < 1500}
+        />
+        <DeltaBadge
+          label="Boost Build Delay"
+          actual={`${boostDelaySec.toFixed(1)}s`}
+          expected="<1.0s"
+          delta={`${(boostDelaySec - 1.0).toFixed(1)}s`}
+          unit=""
+          isCritical={boostDelaySec > 1.5}
+        />
+        <DeltaBadge
+          label="RPM at First Boost"
+          actual={rpmAtFirstBoost > 0 ? rpmAtFirstBoost.toFixed(0) : 'N/A'}
+          expected="<1800"
+          delta={rpmAtFirstBoost > 0 ? (rpmAtFirstBoost - 1800).toFixed(0) : 'N/A'}
+          unit={rpmAtFirstBoost > 0 ? ' RPM' : ''}
+          isCritical={rpmAtFirstBoost > 2000}
+        />
+        <DeltaBadge
+          label="WOT Launches"
+          actual={`${wotLaunches.length}`}
+          expected="—"
+          delta={`Avg delay: ${avgBoostDelay.toFixed(1)}s`}
+          unit=""
+          isCritical={false}
+        />
+      </>}
+    >
+      <div style={{ height: 340 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 35, left: 10 }}>
+            <defs>
+              <linearGradient id="stallLagGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#ff9900" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="#ff9900" stopOpacity={0.03} />
+              </linearGradient>
+              <linearGradient id="stallBoostGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#4080FF" stopOpacity={0.3} />
+                <stop offset="100%" stopColor="#4080FF" stopOpacity={0.03} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
+
+            {/* Lag zone shading — from t=0 to first boost */}
+            {lagZoneEnd > 0 && (
+              <ReferenceArea
+                x1={0}
+                x2={lagZoneEnd}
+                fill="rgba(255,153,0,0.08)"
+                stroke="#ff9900"
+                strokeWidth={1}
+                strokeDasharray="5 3"
+                label={{
+                  value: `⚠ LAG ZONE (${lagZoneEnd.toFixed(1)}s)`,
+                  position: 'insideTop',
+                  fill: '#ff9900',
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                }}
+              />
+            )}
+
+            <XAxis
+              dataKey="time"
+              stroke="#333"
+              tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
+              tickFormatter={(v) => `${Number(v).toFixed(1)}s`}
+              label={{
+                value: 'TIME FROM WOT (seconds)',
+                position: 'insideBottom',
+                offset: -15,
+                fill: '#555',
+                fontSize: 9,
+                fontFamily: 'monospace',
+              }}
+            />
+
+            <YAxis
+              yAxisId="rpm"
+              stroke="#ff4d00"
+              tick={{ fill: '#ff8844', fontSize: 10, fontFamily: 'monospace' }}
+              domain={[0, Math.ceil(peakRpmInLaunch / 500) * 500 + 500]}
+              label={{
+                value: 'RPM',
+                angle: -90,
+                position: 'insideLeft',
+                offset: 14,
+                fill: '#ff8844',
+                fontSize: 10,
+                fontFamily: 'monospace',
+              }}
+            />
+
+            <YAxis
+              yAxisId="boost"
+              orientation="right"
+              stroke="#4080FF"
+              tick={{ fill: '#57A9FB', fontSize: 10, fontFamily: 'monospace' }}
+              domain={[0, Math.ceil(peakBoostInLaunch / 5) * 5 + 5]}
+              label={{
+                value: 'BOOST (PSIG)',
+                angle: 90,
+                position: 'insideRight',
+                offset: 14,
+                fill: '#57A9FB',
+                fontSize: 10,
+                fontFamily: 'monospace',
+              }}
+            />
+
+            <Tooltip content={<FaultTooltip xLabel="Time from WOT (s)" />} />
+
+            <Legend
+              wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
+              formatter={(v) => (
+                <span style={{
+                  color: v === 'RPM' ? '#ff4d00'
+                    : v === 'Boost (PSIG)' ? '#4080FF'
+                    : '#ff9900'
+                }}>{v}</span>
+              )}
+            />
+
+            {/* Reference lines */}
+            <ReferenceLine
+              yAxisId="rpm"
+              y={1800}
+              stroke="#ff9900"
+              strokeDasharray="6 3"
+              label={{
+                value: 'TURBO SPOOL THRESHOLD (1800 RPM)',
+                position: 'insideTopRight',
+                fill: '#ff9900',
+                fontSize: 9,
+                fontFamily: 'monospace',
+              }}
+            />
+
+            <ReferenceLine
+              yAxisId="boost"
+              y={3}
+              stroke="#37D4CF"
+              strokeDasharray="6 3"
+              label={{
+                value: 'FIRST BOOST (3 PSIG)',
+                position: 'insideBottomRight',
+                fill: '#37D4CF',
+                fontSize: 9,
+                fontFamily: 'monospace',
+              }}
+            />
+
+            {/* RPM curve */}
+            <Line
+              yAxisId="rpm"
+              type="monotone"
+              dataKey="rpm"
+              stroke="#ff4d00"
+              strokeWidth={2.5}
+              dot={false}
+              isAnimationActive={false}
+              name="RPM"
+            />
+
+            {/* Boost curve with fill */}
+            <Area
+              yAxisId="boost"
+              type="monotone"
+              dataKey="boost"
+              stroke="#4080FF"
+              strokeWidth={2.5}
+              fill="url(#stallBoostGrad)"
+              isAnimationActive={false}
+              name="Boost (PSIG)"
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Per-launch summary table */}
+      {wotLaunches.length > 1 && (
+        <div style={{
+          marginTop: 14,
+          border: '1px solid rgba(255,153,0,0.25)',
+          borderRadius: 6,
+          overflow: 'hidden',
+          fontFamily: 'monospace',
+          fontSize: 11,
+        }}>
+          <div style={{
+            background: 'rgba(255,153,0,0.1)',
+            padding: '6px 12px',
+            color: '#ffaa44',
+            fontWeight: 'bold',
+            fontSize: 10,
+            letterSpacing: 1,
+            borderBottom: '1px solid rgba(255,153,0,0.25)',
+          }}>
+            ALL WOT LAUNCHES ({wotLaunches.length})
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                {['#', 'TIME', 'STALL RPM', 'RPM @ 1ST BOOST', 'BOOST DELAY', 'PEAK RPM'].map(h => (
+                  <th key={h} style={{
+                    padding: '5px 10px', textAlign: 'left', color: '#555',
+                    fontSize: 9, fontWeight: 'bold', letterSpacing: 1,
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {wotLaunches.map((l, i) => {
+                const stallRpm = rpm[l.startIdx];
+                const delaySec = l.boostBuildDelay / sampleRate;
+                const launchTime = timeMin[l.startIdx];
+                return (
+                  <tr key={i} style={{
+                    background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                  }}>
+                    <td style={{ padding: '5px 10px', color: '#555', fontSize: 10 }}>{i + 1}</td>
+                    <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{launchTime.toFixed(2)} min</td>
+                    <td style={{ padding: '5px 10px', color: stallRpm < 1500 ? '#ff6666' : '#ffcc44', fontSize: 10, fontWeight: 'bold' }}>
+                      {stallRpm.toFixed(0)} RPM
+                    </td>
+                    <td style={{ padding: '5px 10px', color: l.rpmAtFirstBoost > 2000 ? '#ff6666' : '#aaa', fontSize: 10 }}>
+                      {l.rpmAtFirstBoost > 0 ? `${l.rpmAtFirstBoost.toFixed(0)} RPM` : '—'}
+                    </td>
+                    <td style={{ padding: '5px 10px', color: delaySec > 1.5 ? '#ff6666' : '#ffcc44', fontSize: 10, fontWeight: 'bold' }}>
+                      {delaySec.toFixed(1)}s
+                    </td>
+                    <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>
+                      {l.peakRpm.toFixed(0)} RPM
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </FaultChartWrapper>
+  );
+});
+ConverterStallChart.displayName = 'ConverterStallChart';

@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
-import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
@@ -64,6 +64,7 @@ export default function Home() {
   const regulatorFaultRef = useRef<HTMLDivElement>(null);
   const coolantFaultRef = useRef<HTMLDivElement>(null);
   const idleRpmFaultRef = useRef<HTMLDivElement>(null);
+  const converterStallRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const healthRef = useRef<HTMLDivElement>(null);
 
@@ -160,13 +161,17 @@ export default function Home() {
       regulatorFaultRef,
       coolantFaultRef,
       idleRpmFaultRef,
+      converterStallRef,
       statsRef,
       healthRef,
     };
     exportToPdf(data, fileName, diagnostics, healthReport, refs);
   };
 
-  const hasFaults = diagnostics && diagnostics.issues.length > 0;
+  const hasReasoningFaults = reasoningReport?.findings?.some(
+    f => (f.id === 'converter-stall-turbo-mismatch' || f.id === 'boost-leak-suspicion') && (f.type === 'warning' || f.type === 'fault')
+  ) ?? false;
+  const hasFaults = (diagnostics && diagnostics.issues.length > 0) || hasReasoningFaults;
 
   const applyManualVin = useCallback(async () => {
     if (!data || !manualVin.trim()) return;
@@ -202,16 +207,31 @@ export default function Home() {
               />
               {/* Title block */}
               <div style={{ borderLeft: '3px solid oklch(0.52 0.22 25)', paddingLeft: '1rem' }}>
-                <h1 style={{
-                  fontFamily: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
-                  fontSize: '1.6rem',
-                  letterSpacing: '0.08em',
-                  color: 'white',
-                  lineHeight: 1.1,
-                  margin: 0
-                }}>
-                  PERFORMANCE ANALYZER
-                </h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h1 style={{
+                    fontFamily: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
+                    fontSize: '1.6rem',
+                    letterSpacing: '0.08em',
+                    color: 'white',
+                    lineHeight: 1.1,
+                    margin: 0
+                  }}>
+                    PERFORMANCE ANALYZER
+                  </h1>
+                  <span style={{
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.55rem',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.08em',
+                    color: 'oklch(0.52 0.22 25)',
+                    background: 'rgba(255,77,0,0.12)',
+                    border: '1px solid rgba(255,77,0,0.3)',
+                    borderRadius: '3px',
+                    padding: '2px 6px',
+                    lineHeight: 1.4,
+                    marginTop: '2px',
+                  }}>BETA</span>
+                </div>
                 <p style={{
                   fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
                   fontSize: '0.8rem',
@@ -521,7 +541,7 @@ export default function Home() {
                   }}>
                     {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
                     {hasFaults
-                      ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {diagnostics!.issues.length} potential fault area(s) detected</span>
+                      ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {(diagnostics?.issues.length ?? 0) + (hasReasoningFaults ? 1 : 0)} potential fault area(s) detected</span>
                       : <span style={{ color: 'oklch(0.65 0.20 145)' }}> · No fault areas detected</span>
                     }
                   </p>
@@ -791,15 +811,16 @@ export default function Home() {
                     — actual vs desired with shaded delta error
                   </span>
                 </div>
-                <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
-                <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
-                <EgtFaultChart ref={egtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <MafFaultChart ref={mafFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <TccFaultChart ref={tccFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <VgtFaultChart ref={vgtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <RegulatorFaultChart ref={regulatorFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <CoolantFaultChart ref={coolantFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-                <IdleRpmFaultChart ref={idleRpmFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
+                <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
+                <ConverterStallChart ref={converterStallRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
+                <EgtFaultChart ref={egtFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <MafFaultChart ref={mafFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <TccFaultChart ref={tccFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <VgtFaultChart ref={vgtFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <RegulatorFaultChart ref={regulatorFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <CoolantFaultChart ref={coolantFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <IdleRpmFaultChart ref={idleRpmFaultRef} data={data} diagnostics={diagnostics ?? { issues: [], summary: '', timestamp: new Date() }} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
               </div>
             )}
 

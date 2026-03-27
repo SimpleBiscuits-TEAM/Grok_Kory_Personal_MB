@@ -289,13 +289,27 @@ export function ReasoningPanel({ report }: ReasoningPanelProps) {
       }}>
         <Brain style={{ width: '20px', height: '20px', color: 'oklch(0.52 0.22 25)' }} />
         <div>
-          <h3 style={{
-            fontFamily: '"Bebas Neue", "Impact", sans-serif',
-            fontSize: '1.1rem',
-            letterSpacing: '0.06em',
-            color: 'white',
-            margin: 0,
-          }}>PPEI AI REASONING ENGINE</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h3 style={{
+              fontFamily: '"Bebas Neue", "Impact", sans-serif',
+              fontSize: '1.1rem',
+              letterSpacing: '0.06em',
+              color: 'white',
+              margin: 0,
+            }}>PPEI Ai Reasoning</h3>
+            <span style={{
+              fontFamily: '"Share Tech Mono", monospace',
+              fontSize: '0.55rem',
+              fontWeight: 'bold',
+              letterSpacing: '0.08em',
+              color: 'oklch(0.52 0.22 25)',
+              background: 'rgba(255,77,0,0.12)',
+              border: '1px solid rgba(255,77,0,0.3)',
+              borderRadius: '3px',
+              padding: '1px 5px',
+              lineHeight: 1.4,
+            }}>BETA</span>
+          </div>
           <p style={{
             fontFamily: '"Share Tech Mono", monospace',
             fontSize: '0.65rem',
@@ -407,7 +421,7 @@ export function ReasoningPanel({ report }: ReasoningPanelProps) {
         }}>
           <ThumbsUp style={{ width: '16px', height: '16px', color: 'oklch(0.65 0.18 140)' }} />
           <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.70 0.10 140)', margin: 0 }}>
-            No issues detected by the reasoning engine. All analyzed parameters appear within normal operating ranges.
+            No issues detected. All analyzed parameters appear within normal operating ranges.
           </p>
         </div>
       )}

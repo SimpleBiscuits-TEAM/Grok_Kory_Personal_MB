@@ -36,7 +36,7 @@ import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
-import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
 import { StatsSummary } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
@@ -815,6 +815,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   const regulatorFaultRef = useRef<HTMLDivElement>(null);
   const coolantFaultRef = useRef<HTMLDivElement>(null);
   const idleRpmFaultRef = useRef<HTMLDivElement>(null);
+  const converterStallRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const healthRef = useRef<HTMLDivElement>(null);
 
@@ -882,7 +883,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
     if (!data || !fileName) return;
     exportToPdf(data, fileName, diagnostics, healthReport, {
       dynoRef: dynoContainerRef, boostEffRef, railFaultRef, boostFaultRef, egtFaultRef,
-      mafFaultRef, tccFaultRef, vgtFaultRef, regulatorFaultRef, coolantFaultRef, idleRpmFaultRef, statsRef, healthRef,
+      mafFaultRef, tccFaultRef, vgtFaultRef, regulatorFaultRef, coolantFaultRef, idleRpmFaultRef, converterStallRef, statsRef, healthRef,
     });
   };
 
@@ -896,7 +897,10 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
     setHealthReport(report);
   }, [data, manualVin]);
 
-  const hasFaults = diagnostics && diagnostics.issues.length > 0;
+  const hasReasoningFaults = reasoningReport?.findings?.some(
+    f => (f.id === 'converter-stall-turbo-mismatch' || f.id === 'boost-leak-suspicion') && (f.type === 'warning' || f.type === 'fault')
+  ) ?? false;
+  const hasFaults = (diagnostics && diagnostics.issues.length > 0) || hasReasoningFaults;
 
   if (!data) {
     return (
@@ -1035,8 +1039,9 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
             <AlertCircle style={{ width: 20, height: 20, color: sColor.red }} />
             <h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>FAULT ZONE ANALYSIS</h2>
           </div>
-          <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
-          <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+          <RailPressureFaultChart ref={railFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
+          <BoostFaultChart ref={boostFaultRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
+          <ConverterStallChart ref={converterStallRef} data={data} diagnostics={diagnostics!} binnedData={binnedData} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} reasoningReport={reasoningReport} />
           <EgtFaultChart ref={egtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
           <MafFaultChart ref={mafFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
           <TccFaultChart ref={tccFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />

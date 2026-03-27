@@ -398,3 +398,13 @@
 - [x] Encode into converter stall analysis: rated stall vs actual flash stall discrepancy is common
 - [x] Suppress EGT PID suggestion for platforms without factory EGT sensors (LB7)
 - [x] Fix fault-to-graph mapping: every warning/fault must have a corresponding graph zone
+
+## LB7 Fixes Round 2
+- [x] Suppress DPF PID suggestion for LB7 (no DPF on LB7)
+- [x] Fix turbo overspeed context: tight stall does NOT overspeed turbo — boost leak does (turbo spins harder compensating for lost pressure)
+- [x] Rename "AI REASONING ENGINE" / "PPEI AI REASONING ENGINE" → just "PPEI AI REASONING" everywhere
+- [x] Add converter stall / turbo spool chart — show boost vs RPM during WOT launches to visualize the lag (fault zone graph style)
+- [x] Fix reasoning panel title to "PPEI Ai Reasoning" (not all caps) with small beta tab badge
+- [x] Add small beta tab badge next to "Performance Analyzer" on home screen branding
+- [x] Fix feedback form — already wired to DB + notifyOwner() (confirmed table + router exist)
+- [x] Fix feedback form — already wired: saves to DB + notifyOwner() to Manus notifications (verified table exists)
