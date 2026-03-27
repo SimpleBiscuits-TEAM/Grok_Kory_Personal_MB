@@ -3,6 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { diagnosticRouter } from "./routers/diagnostic";
+import { compareRouter } from "./routers/compare";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -22,6 +23,9 @@ export const appRouter = router({
 
   // Diagnostic AI
   diagnostic: diagnosticRouter,
+
+  // Datalog Comparison
+  compare: compareRouter,
 
   // Feedback / Error Reports
   feedback: router({

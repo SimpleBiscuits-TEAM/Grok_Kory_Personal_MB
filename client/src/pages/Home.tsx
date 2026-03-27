@@ -29,6 +29,7 @@ import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
+import CompareView from '@/components/CompareView';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -46,6 +47,7 @@ export default function Home() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
+  const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refs for PDF export
@@ -273,6 +275,63 @@ export default function Home() {
               </p>
             </div>
 
+            {/* Mode Toggle: Analyze vs Compare */}
+            <div className="ppei-anim-fade-up" style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '0',
+              marginBottom: '1.5rem',
+            }}>
+              <button
+                onClick={() => setMode('analyze')}
+                style={{
+                  background: mode === 'analyze' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
+                  color: mode === 'analyze' ? 'white' : 'oklch(0.55 0.010 260)',
+                  fontFamily: '"Bebas Neue", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.08em',
+                  padding: '10px 28px',
+                  border: mode === 'analyze' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.28 0.008 260)',
+                  borderRadius: '3px 0 0 3px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <BarChart3 style={{ width: '16px', height: '16px' }} />
+                ANALYZE
+              </button>
+              <button
+                onClick={() => setMode('compare')}
+                style={{
+                  background: mode === 'compare' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
+                  color: mode === 'compare' ? 'white' : 'oklch(0.55 0.010 260)',
+                  fontFamily: '"Bebas Neue", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.08em',
+                  padding: '10px 28px',
+                  border: mode === 'compare' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.28 0.008 260)',
+                  borderRadius: '0 3px 3px 0',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  borderLeft: 'none',
+                }}
+              >
+                <Gauge style={{ width: '16px', height: '16px' }} />
+                COMPARE
+              </button>
+            </div>
+
+            {mode === 'compare' ? (
+              <CompareView onBack={() => setMode('analyze')} />
+            ) : (
+            <>
+
             {/* Drop zone */}
             <div
               onDrop={handleDrop}
@@ -412,6 +471,7 @@ export default function Home() {
                 POWERED BY PPEI · CUSTOM TUNING · REDEFINING THE LIMITS
               </p>
             </div>
+            </>)}
           </div>
         ) : (
           /* ── Dashboard Section ── */

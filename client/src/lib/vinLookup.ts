@@ -125,6 +125,33 @@ const WMI_MAP: Record<string, WmiData> = {
   '3GT': { country: 'Mexico', make: 'GMC', manufacturer: 'General Motors de Mexico' },
 };
 
+/** Check if a VIN belongs to a known GM truck */
+function isGmVin(vin: string): boolean {
+  const wmi = vin.substring(0, 3).toUpperCase();
+  return WMI_MAP.hasOwnProperty(wmi);
+}
+
+/** Return a generic unknown engine detail for non-GM VINs */
+function getGenericEngineDetail(): EngineDetail {
+  return {
+    name: 'Unknown Engine',
+    code: 'Unknown',
+    displacement: 'Unknown',
+    hp: 0,
+    torque: 0,
+    peakTorqueRpm: 0,
+    peakHpRpm: 0,
+    redline: 0,
+    injectionSystem: 'Unknown',
+    maxRailPressure: 'Unknown',
+    turbocharger: 'Unknown',
+    aftertreatment: 'Unknown',
+    oilCapacity: 'Unknown',
+    coolantCapacity: 'Unknown',
+    defTankCapacity: 'Unknown',
+  };
+}
+
 // ─── DETAILED VIN CONFIGS ─────────────────────────────────────────────────────
 
 interface VinConfig {
@@ -209,7 +236,9 @@ interface EngineDetail {
   defTankCapacity: string;
 }
 
-function getEngineDetail(year: number, engineChar: string): EngineDetail {
+function getEngineDetail(year: number, engineChar: string, isGm: boolean = true): EngineDetail {
+  // Non-GM VINs should not get Duramax engine defaults
+  if (!isGm) return getGenericEngineDetail();
   // L5P Gen 2 (2024+) — E42 ECM, Global B architecture
   if (year >= 2024 && (engineChar === 'Y' || engineChar === 'L')) {
     return {
@@ -324,8 +353,8 @@ export function decodeVin(vin: string): VehicleInfo {
   const wmi = v.substring(0, 3);
   const wmiData = WMI_MAP[wmi] || {
     country: COUNTRY_MAP[v[0]] || 'Unknown',
-    make: v[1] === 'G' ? 'GMC' : 'Chevrolet',
-    manufacturer: 'General Motors LLC',
+    make: 'Unknown',
+    manufacturer: 'Unknown',
   };
 
   // VDS (positions 4–9)
@@ -345,8 +374,9 @@ export function decodeVin(vin: string): VehicleInfo {
 
   const year = YEAR_MAP[pos10_year] || 2018;
   const plantData = GM_PLANT_MAP[pos11_plant] || { city: 'Unknown', state: '' };
-  const engineDetail = getEngineDetail(year, pos8_engine);
-  const transmissionInfo = getTransmissionInfo(year, pos8_engine);
+  const isGm = isGmVin(v);
+  const engineDetail = getEngineDetail(year, pos8_engine, isGm);
+  const transmissionInfo = isGm ? getTransmissionInfo(year, pos8_engine) : { name: 'Unknown', code: 'Unknown' };
 
   // Try to find vehicle config by 8-char prefix
   let vinConfig: VinConfig | null = null;
@@ -359,19 +389,34 @@ export function decodeVin(vin: string): VehicleInfo {
 
   // Fallback config
   if (!vinConfig) {
-    const isSierra = wmiData.make === 'GMC';
-    const is3500 = v[4] === 'Z' || v[4] === '3';
-    vinConfig = {
-      model: isSierra ? (is3500 ? 'Sierra 3500 HD' : 'Sierra 2500 HD') : (is3500 ? 'Silverado 3500 HD' : 'Silverado 2500 HD'),
-      series: is3500 ? '3500 HD' : '2500 HD',
-      trim: 'Unknown',
-      bodyStyle: 'Pickup Truck',
-      driveType: '4WD',
-      gvwr: '10,000+ lbs',
-      towingCapacity: 'See window sticker',
-      payloadCapacity: 'See window sticker',
-      fuelTankCapacity: '36 gal',
-    };
+    if (isGm) {
+      const isSierra = wmiData.make === 'GMC';
+      const is3500 = v[4] === 'Z' || v[4] === '3';
+      vinConfig = {
+        model: isSierra ? (is3500 ? 'Sierra 3500 HD' : 'Sierra 2500 HD') : (is3500 ? 'Silverado 3500 HD' : 'Silverado 2500 HD'),
+        series: is3500 ? '3500 HD' : '2500 HD',
+        trim: 'Unknown',
+        bodyStyle: 'Pickup Truck',
+        driveType: '4WD',
+        gvwr: '10,000+ lbs',
+        towingCapacity: 'See window sticker',
+        payloadCapacity: 'See window sticker',
+        fuelTankCapacity: '36 gal',
+      };
+    } else {
+      // Non-GM: generic fallback, let NHTSA fill in the real data
+      vinConfig = {
+        model: 'Unknown',
+        series: 'Unknown',
+        trim: 'Unknown',
+        bodyStyle: 'Unknown',
+        driveType: 'Unknown',
+        gvwr: 'Unknown',
+        towingCapacity: 'Unknown',
+        payloadCapacity: 'Unknown',
+        fuelTankCapacity: 'Unknown',
+      };
+    }
   }
 
   // Decode body/series position
@@ -400,8 +445,8 @@ export function decodeVin(vin: string): VehicleInfo {
     engine: engineDetail.name,
     engineCode: engineDetail.code,
     displacement: engineDetail.displacement,
-    cylinders: 8,
-    fuelType: 'Ultra-Low Sulfur Diesel (ULSD)',
+    cylinders: isGm ? 8 : 0,
+    fuelType: isGm ? 'Ultra-Low Sulfur Diesel (ULSD)' : 'Unknown',
     injectionSystem: engineDetail.injectionSystem,
     maxRailPressure: engineDetail.maxRailPressure,
     turbocharger: engineDetail.turbocharger,
@@ -514,7 +559,7 @@ export async function decodeVinNhtsa(vin: string): Promise<VehicleInfo> {
       cylinders: pickNum(r.EngineCylinders, localFallback.cylinders),
       fuelType: pick(r.FuelTypePrimary, localFallback.fuelType),
       injectionSystem: pick(r.FuelInjectionType, localFallback.injectionSystem),
-      turbocharger: nhtsaTurbo || localFallback.turbocharger,
+      turbocharger: pick(nhtsaTurbo || r.Turbo, localFallback.turbocharger),
       driveType: pick(r.DriveType, localFallback.driveType),
       transmission: pick(r.TransmissionStyle, localFallback.transmission),
       factoryHp: pickNum(r.EngineHP, localFallback.factoryHp),

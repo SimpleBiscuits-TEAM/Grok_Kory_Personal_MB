@@ -331,3 +331,15 @@
 - [x] Fix injector pulsewidth diagnostic messaging: high PW is hard on pistons (wide spray patterns on stock injectors), not stress on injectors. Acceptable for 1/4 mile bursts.
 - [x] Add low-timing-at-high-PW diagnostic warning: 15° timing at 2500μs PW and 3000 RPM is too low — flag as potential timing issue (late burn, high EGTs, reduced efficiency). Timing should scale with PW and RPM.
 - [x] Add piezo injector shutoff delay context: ~800μs shutoff delay means a 1.5ms command = ~2.3ms actual fuel delivery. Piezo needle bottoms out at 1400-1600μs, fuel past that is extremely inefficient. Factor into PW analysis and commentary.
+
+## Compare Datalog Feature
+- [x] Build comparison engine: condition matching, pairing logic (RPM ranges, load events, boost sweeps), delta analysis
+- [x] Extend existing upload box to support multi-file compare mode (upload 2+ datalogs)
+- [x] Build comparison results UI: side-by-side metrics, overlay charts, tune change report
+- [x] Add reasoning/commentary explaining what changed between tunes and the implications
+- [x] Optional context chat: user describes what changed between tests (tune change, turbo swap, etc.) to improve comparison reasoning
+- [x] Add combustion mode PID detection (mode 0/1 = normal, higher = regen/DPF). Warn if comparing logs with different operating modes. Filter comparison to normal-mode samples when available. 80+ HP difference if in regen.
+- [x] Fix VIN decoder: Cummins VIN correctly decoded by NHTSA but analyzer mixes it with L5P engine type. VIN-decoded engine type must override default Duramax assumptions.
+- [ ] Add Cummins exhaust pressure PID parsing (exhaust pressure vs boost pressure, not just boost)
+- [ ] Add Cummins-specific thresholds: exhaust pressure concern at 75 PSI (stock), ideal boost:exhaust ratio ~1:2, achieved through vane adjustments
+- [ ] When VIN detects Cummins, apply Cummins-specific diagnostic logic instead of Duramax defaults
