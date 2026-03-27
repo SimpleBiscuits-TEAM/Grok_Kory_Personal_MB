@@ -353,26 +353,41 @@ export function resolvePids(
     } else {
       channels['transFluidTemp'] = new Array(rpm.length).fill(0);
     }
-  }
-
-  // ─── EGT ─────────────────────────────────────────────────────────────────
+  }  // ─── EGT ───────────────────────────────────────────────────────────────────────
+  // Scan ALL EGT-matching columns and pick the one with the highest peak reading.
   {
-    const egtIdx = find([
-      'ECM.EGTS1', 'ECM.EGTS', 'Exhaust Gas Temperature',
-      'EGT1 - Diesel Oxidization CAT (DOC) Inlet', 'EGT - Turbo Inlet Temperature', 'EGT',
-    ]);
-    const egtArr = egtIdx !== -1 ? col(egtIdx) : [];
-    if (egtIdx !== -1 && !isFlat(egtArr)) {
-      const maxEgt = Math.max(...egtArr.filter(v => !isNaN(v)));
-      channels['exhaustGasTemp'] = egtArr.map(v =>
+    const egtKeywords = [
+      'ECM.EGTS1', 'ECM.EGTS2', 'ECM.EGTS3', 'ECM.EGTS4', 'ECM.EGTS5', 'ECM.EGTS', 'ECM.EGT',
+      'Exhaust Gas Temperature', 'EGT1 - Diesel Oxidization CAT (DOC) Inlet',
+      'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature', 'EGT',
+    ];
+    // Find ALL matching EGT column indices
+    const egtCandidateIdxs: number[] = [];
+    for (const kw of egtKeywords) {
+      for (let hi = 0; hi < headers.length; hi++) {
+        if (headers[hi] === kw || headers[hi].toLowerCase().includes(kw.toLowerCase())) {
+          if (!egtCandidateIdxs.includes(hi)) egtCandidateIdxs.push(hi);
+        }
+      }
+    }
+    // Pick the candidate with the highest peak value
+    let bestArr: number[] = [];
+    let bestPeak = -Infinity;
+    for (const idx of egtCandidateIdxs) {
+      const arr = col(idx);
+      if (isFlat(arr)) continue;
+      const peak = Math.max(...arr.filter(v => !isNaN(v)));
+      if (peak > bestPeak) { bestPeak = peak; bestArr = arr; }
+    }
+    if (bestArr.length > 0 && !isFlat(bestArr)) {
+      const maxEgt = Math.max(...bestArr.filter(v => !isNaN(v)));
+      channels['exhaustGasTemp'] = bestArr.map(v =>
         isNaN(v) || v <= -40 ? 0 : (maxEgt < 800 && format === 'efilive') ? (v * 9 / 5) + 32 : v
       );
     } else {
       channels['exhaustGasTemp'] = new Array(rpm.length).fill(0);
     }
-  }
-
-  // ─── TCC Slip ─────────────────────────────────────────────────────────────
+  }// ─── TCC Slip ─────────────────────────────────────────────────────────────
   {
     const slipIdx = find(['TCM.TCCSLIP', 'TCM.TCSLIP', 'Converter Slip', 'Transmission Slip', 'TCC Slip']);
     const slipArr = slipIdx !== -1 ? col(slipIdx) : [];

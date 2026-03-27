@@ -673,11 +673,29 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const boostDesiredIdx   = getColumnIndex(['Desired Boost']);
   const turboVaneIdx      = getColumnIndex(['Turbo A Vane Position (SAE)', 'Turbo Vane Position', 'Turbo A Vane Position']);
   const turboVaneDesiredIdx = getColumnIndex(['Desired Turbo Vane Position', 'Commanded Turbo A Vane Position (SAE)', 'Turbo Vane Desired', 'Turbo A Vane Desired']);
-  // EGT: prefer B1S1 (pre-DPF, most representative), then any EGT channel
+  // EGT: scan ALL EGT-matching columns and pick the one with the highest peak reading
+  // HP Tuners may log B1S1, B1S2, B1S3, etc. — use the hottest one for diagnostics
   const egtIdx = (() => {
-    const b1s1 = headers.findIndex(h => h === 'Exhaust Gas Temperature B1S1');
-    if (b1s1 !== -1) return b1s1;
-    return headers.findIndex(h => h.includes('Exhaust Gas Temperature') || h.includes('EGT'));
+    const egtCandidates = headers
+      .map((h, i) => ({ header: h, idx: i }))
+      .filter(({ header }) => /Exhaust Gas Temp|\bEGT\b/i.test(header));
+    if (egtCandidates.length === 0) return -1;
+    if (egtCandidates.length === 1) return egtCandidates[0].idx;
+    // Parse data rows to find which EGT column has the highest peak
+    // Use headerIndex + 2 as a safe data start (skip header + potential units row)
+    const egtScanStart = headerIndex + 2;
+    let bestIdx = egtCandidates[0].idx;
+    let bestPeak = -Infinity;
+    for (const { idx } of egtCandidates) {
+      let peak = 0;
+      for (let r = egtScanStart; r < lines.length; r++) {
+        if (!lines[r]) continue;
+        const val = parseFloat(lines[r].split(',')[idx]?.trim());
+        if (!isNaN(val) && val > peak) peak = val;
+      }
+      if (peak > bestPeak) { bestPeak = peak; bestIdx = idx; }
+    }
+    return bestIdx;
   })();
   // TCC Slip: 'TCC Slip' (HP Tuners full-description) or legacy names
   const converterSlipIdx  = getColumnIndex(['TCC Slip', 'Converter Slip', 'TCM.TCSLIP']);
@@ -975,8 +993,28 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD']);
 
   // ── EGT PIDs — LML has up to 5 sensors ───────────────────────────────────
-  // Use EGTS1 (pre-DPF) as primary; fall back to any EGTS
-  const egtIdx = getColumnIndex(['ECM.EGTS1']);
+  // Scan ALL EGT-matching columns and pick the one with the highest peak reading.
+  // LML/L5P may have EGTS1 through EGTS5 — use the hottest channel for diagnostics.
+  const egtIdx = (() => {
+    const egtCandidates = pidHeaders
+      .map((h, i) => ({ header: h, idx: i }))
+      .filter(({ header }) => /^ECM\.EGTS\d?$/i.test(header) || /^ECM\.EGT$/i.test(header));
+    if (egtCandidates.length === 0) return -1;
+    if (egtCandidates.length === 1) return egtCandidates[0].idx;
+    // Parse data rows (start at row 3) to find which EGT column has the highest peak
+    let bestIdx = egtCandidates[0].idx;
+    let bestPeak = -Infinity;
+    for (const { idx } of egtCandidates) {
+      let peak = 0;
+      for (let r = 3; r < lines.length; r++) {
+        if (!lines[r]) continue;
+        const val = parseFloat(lines[r].split(',')[idx]?.trim());
+        if (!isNaN(val) && val > peak) peak = val;
+      }
+      if (peak > bestPeak) { bestPeak = peak; bestIdx = idx; }
+    }
+    return bestIdx;
+  })();
 
   // ── Transmission / TCC PIDs ───────────────────────────────────────────────
   // TCM.TCCSLIP = actual TCC slip in RPM (the real slip value)
@@ -1255,7 +1293,28 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
   const turboVaneDesiredIdx = getColumnIndex(['Turbo Vane Position Desired', 'Desired Turbo Vane Position', 'Turbo Vane Desired']);
-  const egtIdx = getColumnIndex(['EGT1 - Diesel Oxidization CAT (DOC) Inlet', 'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature']);
+  // EGT: scan ALL EGT-matching columns and pick the one with the highest peak reading
+  // Banks Power may log multiple EGT sensors (DOC inlet, turbo inlet, DPF outlet, etc.)
+  const egtIdx = (() => {
+    const egtCandidates = headers
+      .map((h, i) => ({ header: h, idx: i }))
+      .filter(({ header }) => /EGT|Exhaust Gas Temp/i.test(header));
+    if (egtCandidates.length === 0) return -1;
+    if (egtCandidates.length === 1) return egtCandidates[0].idx;
+    // Parse a sample of data rows to find which EGT column has the highest peak
+    const dataRows = lines.slice(4).filter(l => l && !isNaN(parseFloat(l.split(',')[0]?.trim())));
+    let bestIdx = egtCandidates[0].idx;
+    let bestPeak = -Infinity;
+    for (const { idx } of egtCandidates) {
+      let peak = 0;
+      for (const row of dataRows) {
+        const val = parseFloat(row.split(',')[idx]?.trim());
+        if (!isNaN(val) && val > peak) peak = val;
+      }
+      if (peak > bestPeak) { bestPeak = peak; bestIdx = idx; }
+    }
+    return bestIdx;
+  })();
   const converterSlipIdx = getColumnIndex(['Transmission Slip']);
   const converterDutyIdx = getColumnIndex(['Torque Converter Status']);
   const converterPressureIdx = getColumnIndex(['Trans Line 1 Pressure']);

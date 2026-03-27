@@ -240,7 +240,10 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)
   // Diesel EGT thresholds (1300°F+) are NOT applicable to gasoline engines.
   // Gasoline EGT is typically 1400-1600°F under load — normal for gas, critical for diesel.
-  if (isDiesel && exhaustGasTemp.length > 0) {
+  // GUARD: Only run EGT checks if the channel has actual observed data (non-zero values).
+  // An all-zero array means the EGT channel was not logged or not populated.
+  const egtHasRealData = exhaustGasTemp.length > 0 && exhaustGasTemp.some((v: number) => v > 0);
+  if (isDiesel && egtHasRealData) {
     issues.push(...checkAllEgtIssues(exhaustGasTemp));
   }
 

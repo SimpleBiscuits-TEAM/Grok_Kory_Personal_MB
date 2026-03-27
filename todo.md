@@ -183,3 +183,10 @@
 - [x] Download as standalone PDF via blue button in Health Report section header
 - [x] Wire up download button in the UI (Home.tsx and Advanced.tsx)
 - [x] Add dyno graph disclaimer: dependent on tuning setup, can be inaccurate, but good reference
+
+## EGT Channel Fix & Report Improvements
+- [x] EGT channel selection: all 3 parsers + pidSubstitution now scan ALL EGT columns and pick the one with the highest peak reading
+- [x] No fault should appear unless the channel was actually observed with real data (added egtHasRealData guard in diagnostics.ts)
+- [x] Darken humor tone in health report PDF: dry/dark truck humor, less bubbly, still respectful to customers
+- [x] Add more graphs to the health report PDF (RPM, boost, rail pressure, coolant temp, EGT, converter slip, trans temp, speed) with explanations
+- [x] Each graph section includes a customer-friendly explanation of what the parameter means and what to watch for
