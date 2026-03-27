@@ -498,8 +498,23 @@ export function generateHealthReportPdf(
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DATA GRAPHS — "Customers love graphs"
+  // SECTION 1: BASIC VEHICLE HEALTH REPORT
   // ══════════════════════════════════════════════════════════════════════════
+  checkBreak(25);
+  doc.setFillColor(30, 100, 200);
+  doc.roundedRect(margin, y, contentWidth, 12, 1.5, 1.5, 'F');
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('SECTION 1: BASIC VEHICLE HEALTH REPORT', margin + 6, y + 8);
+  y += 18;
+  addWrappedText(
+    'This section provides a straightforward overview of your vehicle\'s health based on the datalog. Simple graphs, plain-language summaries, and system scores give you the big picture without needing an engineering degree.',
+    8.5, 'normal', [100, 100, 110], 1.3,
+  );
+  y += 2;
+
+  // ── DATA GRAPHS ──────────────────────────────────────────────────────────
   checkBreak(20);
   addText('DATALOG ANALYSIS GRAPHS', 12, 'bold', BLUE);
   drawHR([200, 210, 230]);
@@ -614,24 +629,6 @@ export function generateHealthReportPdf(
     checkBreak(48);
     y = drawMiniGraph(doc, margin, y, contentWidth, 38, config, margin, contentWidth);
   }
-
-  // ── ADVANCED TUNING ANALYSIS (correlated multi-parameter graphs) ──────────
-  renderAdvancedAnalytics(
-    doc,
-    y,
-    data,
-    healthReport.vehicleInfo,
-    margin,
-    contentWidth,
-    pageHeight,
-    speedRef,
-    addText,
-    addWrappedText,
-    checkBreak,
-    drawHR,
-    () => y,
-    (newY: number) => { y = newY; },
-  );
 
   // ── SYSTEM-BY-SYSTEM BREAKDOWN ────────────────────────────────────────────
   const sections = [
@@ -814,11 +811,48 @@ export function generateHealthReportPdf(
   });
   y += 4;
 
-  // ── CLOSING MESSAGE ───────────────────────────────────────────────────────
+  // ── CLOSING MESSAGE (Basic Section) ────────────────────────────────────────
   checkBreak(30);
   drawHR([200, 210, 230]);
   addWrappedText(getClosing(mood), 9.5, 'normal', TEXT_DARK, 1.6);
   y += 4;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SECTION 2: ADVANCED TUNING ANALYSIS
+  // ══════════════════════════════════════════════════════════════════════════
+  doc.addPage();
+  y = margin + 5;
+
+  // Section 2 header banner
+  doc.setFillColor(220, 38, 38);
+  doc.roundedRect(margin, y, contentWidth, 12, 1.5, 1.5, 'F');
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('SECTION 2: ADVANCED TUNING ANALYSIS', margin + 6, y + 8);
+  y += 18;
+  addWrappedText(
+    'This section digs deeper into the relationship between key engine parameters. Correlated multi-parameter graphs, injection timing math, boost leak detection, and derived analytics like Manifold Air Density. If you\'re not into the technical details, the Basic section above has you covered. If you are, welcome to the fun part.',
+    8.5, 'normal', [100, 100, 110], 1.3,
+  );
+  y += 4;
+
+  renderAdvancedAnalytics(
+    doc,
+    y,
+    data,
+    healthReport.vehicleInfo,
+    margin,
+    contentWidth,
+    pageHeight,
+    speedRef,
+    addText,
+    addWrappedText,
+    checkBreak,
+    drawHR,
+    () => y,
+    (newY: number) => { y = newY; },
+  );
 
   // ── BETA DISCLAIMER (with joke) ───────────────────────────────────────────
   checkBreak(55);

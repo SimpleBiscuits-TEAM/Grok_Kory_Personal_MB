@@ -213,3 +213,9 @@
 - [x] Don't sustain high temps for extended periods
 - [x] Add total Crank Angle Duration (CAD) calculation from pulse width + RPM, show injection end relative to TDC (approximate, not exact)
 - [x] Include fuel pressure in CAD/TDC analysis context (higher rail pressure affects atomization and combustion)
+
+## Health Report PDF - Basic & Advanced Sections
+- [x] Restructure health report PDF into two clearly labeled sections: BASIC and ADVANCED
+- [x] BASIC section: customer-friendly overview with simple graphs, plain-language summaries, system scores, findings, recommendations
+- [x] ADVANCED section: correlated multi-parameter analysis (injector/timing, CAD/TDC, boost/vane, rail/PCV, MAF/boost leak, MAD, converter stall)
+- [x] Add clear visual divider/header between Basic and Advanced sections (blue banner for Basic, red banner for Advanced, new page break)
