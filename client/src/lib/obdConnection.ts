@@ -8,6 +8,86 @@
  * and automatic VIN-based vehicle identification.
  */
 
+// ─── Known USB Adapter Database ──────────────────────────────────────────────
+
+export type AdapterType = 'elm327' | 'pcan' | 'kvaser' | 'ixxat' | 'canable' | 'unknown';
+
+export interface KnownAdapter {
+  vendorId: number;
+  productIds?: number[];  // If empty, all products from this vendor match
+  type: AdapterType;
+  name: string;
+  compatible: boolean;    // Whether it works with this tool
+  reason?: string;        // Why it's incompatible
+  suggestion?: string;    // What to use instead
+}
+
+/**
+ * Known USB adapter VID/PID database.
+ * Used to identify the adapter type when the user selects a serial port.
+ * 
+ * Compatible adapters use ELM327/STN2xx text protocol over USB serial.
+ * Incompatible adapters are raw CAN interfaces that don't speak ELM327.
+ */
+export const KNOWN_ADAPTERS: KnownAdapter[] = [
+  // ── PEAK System (PCAN) — Raw CAN interfaces, NOT ELM327 ──
+  {
+    vendorId: 0x0C72, type: 'pcan', name: 'PEAK PCAN-USB',
+    compatible: false,
+    reason: 'PCAN-USB is a raw CAN bus interface that does not speak the ELM327/OBD-II text protocol. It sends and receives raw CAN frames and requires PEAK\'s proprietary PCAN-Basic API or SocketCAN drivers.',
+    suggestion: 'Use an ELM327-compatible adapter instead: OBDLink EX (recommended), OBDLink MX+, OBDLink SX, or any genuine ELM327/STN2xx-based adapter with USB serial support.',
+  },
+  // ── Kvaser — Raw CAN interfaces ──
+  {
+    vendorId: 0x0BFD, type: 'kvaser', name: 'Kvaser CAN',
+    compatible: false,
+    reason: 'Kvaser adapters are raw CAN bus interfaces that require Kvaser\'s CANlib SDK. They do not support ELM327 AT commands.',
+    suggestion: 'Use an ELM327-compatible adapter: OBDLink EX, OBDLink MX+, or any genuine ELM327/STN2xx USB adapter.',
+  },
+  // ── IXXAT (HMS Networks) — Raw CAN interfaces ──
+  {
+    vendorId: 0x08D8, type: 'ixxat', name: 'IXXAT USB-to-CAN',
+    compatible: false,
+    reason: 'IXXAT adapters are industrial CAN interfaces that use the VCI (Virtual CAN Interface) driver. They do not support ELM327 commands.',
+    suggestion: 'Use an ELM327-compatible adapter: OBDLink EX, OBDLink MX+, or any genuine ELM327/STN2xx USB adapter.',
+  },
+  // ── CANable / Canable (GS_USB) — Raw CAN interfaces ──
+  {
+    vendorId: 0x1D50, productIds: [0x606F], type: 'canable', name: 'CANable / candleLight',
+    compatible: false,
+    reason: 'CANable is a raw CAN interface using the GS_USB/candleLight firmware. It does not support ELM327 AT commands.',
+    suggestion: 'Use an ELM327-compatible adapter: OBDLink EX, OBDLink MX+, or any genuine ELM327/STN2xx USB adapter.',
+  },
+  // ── OBDLink / ScanTool.net (STN chips) — COMPATIBLE ──
+  {
+    vendorId: 0x0403, type: 'elm327', name: 'FTDI-based adapter (OBDLink / ELM327)',
+    compatible: true,
+  },
+  {
+    vendorId: 0x1EAF, type: 'elm327', name: 'OBDLink (STN direct)',
+    compatible: true,
+  },
+];
+
+/**
+ * Identify a USB adapter by its vendor ID and optional product ID.
+ * Returns the matching adapter info, or null if unknown.
+ */
+export function identifyAdapter(vendorId?: number, productId?: number): KnownAdapter | null {
+  if (vendorId === undefined) return null;
+  for (const adapter of KNOWN_ADAPTERS) {
+    if (adapter.vendorId === vendorId) {
+      if (adapter.productIds && adapter.productIds.length > 0) {
+        if (productId !== undefined && adapter.productIds.includes(productId)) return adapter;
+        // VID matches but PID doesn't — still likely the same vendor
+        continue;
+      }
+      return adapter;
+    }
+  }
+  return null;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'initializing' | 'ready' | 'logging' | 'error';
@@ -2360,10 +2440,27 @@ export class OBDConnection {
       // Show ALL available serial ports — no vendor ID filtering.
       this.port = await navigator.serial.requestPort();
 
-      // Log USB device info if available for debugging
+      // Log USB device info and check adapter compatibility
       const info = this.port.getInfo();
       if (info.usbVendorId !== undefined) {
-        this.emit('log', null, `USB device: VID=0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, '0')} PID=0x${(info.usbProductId ?? 0).toString(16).toUpperCase().padStart(4, '0')}`);
+        const vid = info.usbVendorId;
+        const pid = info.usbProductId ?? 0;
+        this.emit('log', null, `USB device: VID=0x${vid.toString(16).toUpperCase().padStart(4, '0')} PID=0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
+
+        // Check against known adapter database
+        const adapter = identifyAdapter(vid, pid);
+        if (adapter) {
+          this.emit('log', null, `Identified adapter: ${adapter.name} (type: ${adapter.type})`);
+          if (!adapter.compatible) {
+            this.setState('error');
+            this.emit('error', null,
+              `INCOMPATIBLE ADAPTER: ${adapter.name}\n\n` +
+              `${adapter.reason}\n\n` +
+              `RECOMMENDATION: ${adapter.suggestion}`
+            );
+            return false;
+          }
+        }
       } else {
         this.emit('log', null, 'Serial port selected (no USB info — may be Bluetooth or platform port)');
       }
@@ -2386,7 +2483,15 @@ export class OBDConnection {
 
       if (!connected) {
         this.setState('error');
-        this.emit('error', null, 'Could not communicate with device at any baud rate. Try: 1) Unplug and re-plug USB, 2) Turn ignition OFF then ON, 3) Close other apps using the port (OBDwiz, FORScan, etc.)');
+        // Check if this might be a non-ELM327 adapter
+        const portInfo = this.port?.getInfo();
+        const adapterHint = portInfo?.usbVendorId !== undefined
+          ? identifyAdapter(portInfo.usbVendorId, portInfo.usbProductId)
+          : null;
+        const extraHint = adapterHint && !adapterHint.compatible
+          ? `\n\nDETECTED: ${adapterHint.name} — ${adapterHint.reason}\nRECOMMENDATION: ${adapterHint.suggestion}`
+          : '\n\nIf you are using a raw CAN interface (PCAN-USB, Kvaser, CANable, etc.), those adapters are NOT compatible. This tool requires an ELM327-compatible adapter (OBDLink EX, OBDLink MX+, OBDLink SX, or genuine ELM327/STN2xx USB adapter).';
+        this.emit('error', null, `Could not communicate with device at any baud rate.\n\nTroubleshooting:\n1) Unplug and re-plug the USB cable\n2) Turn ignition OFF then ON\n3) Close other apps using the port (OBDwiz, FORScan, PCAN-View, etc.)\n4) Verify your adapter is ELM327-compatible${extraHint}`);
         return false;
       }
 

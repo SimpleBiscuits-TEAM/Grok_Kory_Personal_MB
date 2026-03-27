@@ -707,11 +707,27 @@ function ConsoleLog({ logs }: { logs: string[] }) {
       {logs.length === 0 ? (
         <span style={{ color: sColor.textMuted }}>No log entries yet. Connect to a device to begin.</span>
       ) : (
-        logs.map((log, i) => (
-          <div key={i} style={{ color: log.includes('ERROR') || log.includes('error') ? 'oklch(0.60 0.20 25)' : log.includes('ready') || log.includes('Ready') || log.includes('OK') ? sColor.green : sColor.textDim }}>
-            <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
-          </div>
-        ))
+        logs.map((log, i) => {
+          const isError = log.includes('ERROR') || log.includes('error');
+          const isIncompatible = log.includes('INCOMPATIBLE ADAPTER');
+          const isSuccess = log.includes('ready') || log.includes('Ready') || log.includes('OK');
+          const color = isError ? 'oklch(0.60 0.20 25)' : isSuccess ? sColor.green : sColor.textDim;
+          return (
+            <div key={i} style={{
+              color,
+              ...(isIncompatible ? {
+                background: 'oklch(0.12 0.04 25 / 0.3)',
+                border: '1px solid oklch(0.35 0.12 25)',
+                borderRadius: '3px',
+                padding: '8px 10px',
+                margin: '4px 0',
+                whiteSpace: 'pre-wrap' as const,
+              } : {}),
+            }}>
+              <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -1982,23 +1998,46 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             }}>
               <Gauge style={{ width: 48, height: 48, color: sColor.textMuted, margin: '0 auto 16px' }} />
               <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
-                CONNECT YOUR OBDLINK EX
+                CONNECT YOUR OBD-II ADAPTER
               </div>
               <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '500px', margin: '0 auto' }}>
-                Plug the OBDLink EX into your vehicle's OBD-II port, connect it to your computer via USB, turn the ignition to ON (engine running or KOEO), then click <strong style={{ color: sColor.green }}>CONNECT</strong> above.
+                Plug your ELM327-compatible adapter into your vehicle's OBD-II port, connect it to your computer via USB, turn the ignition to ON (engine running or KOEO), then click <strong style={{ color: sColor.green }}>CONNECT</strong> above.
               </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.5 }}>
-                Supported: OBDLink EX, OBDLink MX+, OBDLink SX, and other ELM327-compatible adapters via USB.
-                <br />Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
-                <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
+
+              {/* Supported Adapters */}
+              <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.6, maxWidth: '520px', margin: '16px auto 0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                  <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 145 / 0.2)', border: '1px solid oklch(0.25 0.06 145)', borderRadius: '3px' }}>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.green, marginBottom: '4px', letterSpacing: '0.06em' }}>✓ COMPATIBLE</div>
+                    <div>OBDLink EX <span style={{ color: sColor.orange }}>(recommended)</span></div>
+                    <div>OBDLink MX+ / SX</div>
+                    <div>ELM327 v1.5+ USB</div>
+                    <div>STN1110 / STN2120</div>
+                    <div>Any ELM327-compatible</div>
+                  </div>
+                  <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 25 / 0.2)', border: '1px solid oklch(0.25 0.06 25)', borderRadius: '3px' }}>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.red, marginBottom: '4px', letterSpacing: '0.06em' }}>✗ NOT COMPATIBLE</div>
+                    <div>PCAN-USB (raw CAN)</div>
+                    <div>Kvaser (raw CAN)</div>
+                    <div>CANable / candleLight</div>
+                    <div>IXXAT USB-to-CAN</div>
+                    <div>Any raw CAN interface</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: '8px' }}>
+                  Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
+                  <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
+                </div>
               </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.5, padding: '10px', border: `1px solid ${sColor.borderLight}`, borderRadius: '4px', textAlign: 'left', maxWidth: '500px', margin: '12px auto 0' }}>
+
+              <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.5, padding: '10px', border: `1px solid ${sColor.borderLight}`, borderRadius: '3px', textAlign: 'left', maxWidth: '520px', margin: '12px auto 0' }}>
                 <strong style={{ color: sColor.yellow }}>TROUBLESHOOTING:</strong>
-                <br />{'\u2022'} Close any other apps using the device (OBDwiz, FORScan, etc.)
-                <br />{'\u2022'} Try unplugging and re-plugging the USB cable
-                <br />{'\u2022'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
-                <br />{'\u2022'} On Windows, check Device Manager {'\u2192'} Ports (COM & LPT) to confirm the device is recognized
-                <br />{'\u2022'} Ensure you are using Chrome or Edge (WebSerial is not supported in Firefox/Safari)
+                <br />{'•'} Close any other apps using the device (OBDwiz, FORScan, PCAN-View, etc.)
+                <br />{'•'} Try unplugging and re-plugging the USB cable
+                <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
+                <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
+                <br />{'•'} Ensure you are using Chrome or Edge (WebSerial is not supported in Firefox/Safari)
+                <br />{'•'} <strong style={{ color: sColor.red }}>Raw CAN adapters</strong> (PCAN-USB, Kvaser, CANable) will NOT work — they don't speak ELM327
               </div>
             </div>
           )}

@@ -416,3 +416,9 @@
 - [x] Add pinch-zoom support for touch devices
 - [x] Add clickable links from PPEI AI Reasoning findings to their corresponding fault zone chart sections
 - [x] Highlight the linked fault zone chart when navigated to from reasoning panel
+
+## PCAN-USB Adapter Detection
+- [x] Add USB VID/PID-based adapter detection (PEAK 0x0C72 vs OBDLink/FTDI/STN)
+- [x] Show specific error message when PCAN-USB detected explaining it's a raw CAN interface, not ELM327
+- [x] Improve generic connection failure messages with adapter compatibility guidance
+- [x] Add supported adapter list to the connection UI help section
