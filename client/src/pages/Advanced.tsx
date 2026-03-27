@@ -35,7 +35,7 @@ import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
-import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
 import { StatsSummary } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
@@ -811,6 +811,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   const vgtFaultRef = useRef<HTMLDivElement>(null);
   const regulatorFaultRef = useRef<HTMLDivElement>(null);
   const coolantFaultRef = useRef<HTMLDivElement>(null);
+  const idleRpmFaultRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const healthRef = useRef<HTMLDivElement>(null);
 
@@ -878,7 +879,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
     if (!data || !fileName) return;
     exportToPdf(data, fileName, diagnostics, healthReport, {
       dynoRef: dynoContainerRef, boostEffRef, railFaultRef, boostFaultRef, egtFaultRef,
-      mafFaultRef, tccFaultRef, vgtFaultRef, regulatorFaultRef, coolantFaultRef, statsRef, healthRef,
+      mafFaultRef, tccFaultRef, vgtFaultRef, regulatorFaultRef, coolantFaultRef, idleRpmFaultRef, statsRef, healthRef,
     });
   };
 
@@ -1028,6 +1029,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
           <VgtFaultChart ref={vgtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
           <RegulatorFaultChart ref={regulatorFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
           <CoolantFaultChart ref={coolantFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+          <IdleRpmFaultChart ref={idleRpmFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
         </div>
       )}
 

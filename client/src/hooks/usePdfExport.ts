@@ -15,6 +15,7 @@ export interface PdfExportRefs {
   vgtFaultRef: React.RefObject<HTMLDivElement | null>;
   regulatorFaultRef: React.RefObject<HTMLDivElement | null>;
   coolantFaultRef: React.RefObject<HTMLDivElement | null>;
+  idleRpmFaultRef: React.RefObject<HTMLDivElement | null>;
   statsRef: React.RefObject<HTMLDivElement | null>;
   healthRef: React.RefObject<HTMLDivElement | null>;
 }

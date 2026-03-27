@@ -167,3 +167,9 @@
 - [x] Beta suggestions must not reference wrong tool (e.g., don't say "EFILive" when format is Banks Power)
 - [x] Remove internal PID ID names from suggestions (no ECM.EGTS1, TCM.TFT etc.) — use plain language like "Exhaust Gas Temperature", "Oil Pressure", "Transmission Fluid Temperature"
 - [x] Suggestion text should be generic or match the detected format (Banks Power, HP Tuners, EFILive, OBD datalogger, etc.)
+
+## Fault Zone Analysis Enforcement Rule
+- [x] RULE: Every fault/potential fault in diagnostics MUST also appear in fault zone analysis with a graph — no orphaned faults
+- [x] Fix low boost fault not populating the fault zone chart
+- [x] Audit ALL fault types to ensure each one has a corresponding fault zone chart (EGT-HIGH, CONVERTER-SLIP, CONVERTER-SLIP-WARN, IDLE-RPM-LOW, IDLE-RPM-HIGH all now mapped)
+- [x] If a fault zone chart has no data to display, show an explanation instead of returning null/empty (already handled in all charts)

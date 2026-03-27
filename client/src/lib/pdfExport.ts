@@ -277,6 +277,7 @@ doc.addPage();
       [refs.vgtFaultRef, 'VGT Turbo Vane Tracking — Potential Fault Area'],
       [refs.regulatorFaultRef, 'Fuel Pressure Regulator — Potential Fault Area'],
       [refs.coolantFaultRef, 'Coolant Temperature — Potential Fault Area'],
+      [refs.idleRpmFaultRef, 'Idle RPM — Potential Fault Area'],
     ];
     for (const [ref, label] of faultRefs) {
       if (ref.current) {

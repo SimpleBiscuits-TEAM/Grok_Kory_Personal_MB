@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { StatsSummary } from '@/components/Charts';
-import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart } from '@/components/DynoCharts';
+import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
@@ -59,6 +59,7 @@ export default function Home() {
   const vgtFaultRef = useRef<HTMLDivElement>(null);
   const regulatorFaultRef = useRef<HTMLDivElement>(null);
   const coolantFaultRef = useRef<HTMLDivElement>(null);
+  const idleRpmFaultRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const healthRef = useRef<HTMLDivElement>(null);
 
@@ -154,6 +155,7 @@ export default function Home() {
       vgtFaultRef,
       regulatorFaultRef,
       coolantFaultRef,
+      idleRpmFaultRef,
       statsRef,
       healthRef,
     };
@@ -693,6 +695,7 @@ export default function Home() {
                 <VgtFaultChart ref={vgtFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
                 <RegulatorFaultChart ref={regulatorFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
                 <CoolantFaultChart ref={coolantFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
+                <IdleRpmFaultChart ref={idleRpmFaultRef} data={data} diagnostics={diagnostics!} onJumpToTime={(s, e) => dynoRef.current?.jumpToTime(s, e)} />
               </div>
             )}
 

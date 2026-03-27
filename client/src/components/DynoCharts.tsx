@@ -1204,8 +1204,8 @@ BoostFaultChart.displayName = 'BoostFaultChart';
 
 // ─── EGT FAULT CHART ──────────────────────────────────────────────────────────
 export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  // Match descriptive condition codes for EGT
-  const issue = diagnostics.issues.find(i => i.code.startsWith('EGT-SENSOR'));
+  // Match all EGT condition codes: EGT-SENSOR-*, EGT-HIGH
+  const issue = diagnostics.issues.find(i => i.code.startsWith('EGT-'));
   if (!issue) return null;
 
   const hasEgtData = (data.exhaustGasTemp?.length ?? 0) > 0;
@@ -1626,8 +1626,10 @@ BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';
 
 // ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
 export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  // Match all TCC/converter slip codes
   const issue = diagnostics.issues.find(i =>
-    i.code === 'TCC-STUCK-OFF' || i.code === 'TCC-STUCK-ON'
+    i.code === 'TCC-STUCK-OFF' || i.code === 'TCC-STUCK-ON' ||
+    i.code === 'CONVERTER-SLIP' || i.code === 'CONVERTER-SLIP-WARN'
   );
   if (!issue) return null;
 
