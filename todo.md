@@ -265,3 +265,21 @@
 - [x] Add binary upload UI to Advanced section
 - [x] Show hex dump view of key data regions
 - [ ] Flag mismatched part numbers (tuner-modified vs factory) when official GM records become available
+
+## Multi-Format Binary Parser
+- [x] Analyze E46 3.0L Duramax EFILive container binary structure
+- [x] Add format auto-detection (WinOLS, EFILive, HP Tuners, raw flash dump)
+- [x] Parse filename metadata for EFILive containers (part numbers, OS, platform embedded in filename)
+- [x] Handle E46 ECM binary patterns (different from E41)
+- [x] Expand GM part number database with E46/3.0L Duramax part numbers
+- [x] Test parser with both E41 and E46 binaries
+- [x] Analyze E90 gasoline EcoTec3 V8 EFILive binary structure
+- [x] Add E90/E88 segment header parsing with CVN extraction
+- [x] Add PPEI JSON flash descriptor parsing (author, tuner, version, CAN address, sw_c1-sw_c6)
+- [x] Add signature block parsing at 0x800000 region (platform string, module name)
+- [x] Map segment functions from SPS log data (OS, System, Fuel, Speedo, Diagnostic, Operation)
+- [x] Add segment map table display in BinaryUploadPanel
+- [x] Add PPEI flash descriptor card display
+- [x] Add format detection card display
+- [x] Expand GM part number database with E90/E88 gasoline parts
+- [x] Analyze SPS flash programming log for UDS sequence (security access, transfer data, module order)

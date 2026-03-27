@@ -25,6 +25,9 @@ const CATEGORY_COLORS: Record<string, string> = {
   flash_block: 'oklch(0.50 0.12 300)',
   metadata: 'oklch(0.55 0.10 200)',
   string: sColor.textDim,
+  segment: 'oklch(0.60 0.18 180)',
+  ppei: 'oklch(0.58 0.16 50)',
+  signature: 'oklch(0.50 0.14 280)',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -35,6 +38,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   flash_block: 'FLASH BLOCK',
   metadata: 'METADATA',
   string: 'STRING',
+  segment: 'SEGMENT',
+  ppei: 'PPEI',
+  signature: 'SIGNATURE',
 };
 
 // ── Hex Dump Viewer ────────────────────────────────────────────────────────
@@ -413,7 +419,7 @@ export default function BinaryUploadPanel() {
             Drop a .bin calibration file to extract part numbers, calibration IDs, VIN, and module data
           </p>
           <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '8px' }}>
-            Supports: .bin .hex .ori (GM E41, E98, E92 ECU calibration files)
+            Supports: .bin .hex .ori — WinOLS, EFILive, PPEI container formats (E41, E46, E90, E88, E92)
           </p>
         </div>
       )}
@@ -445,8 +451,9 @@ export default function BinaryUploadPanel() {
                 </span>
               </div>
               <div style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.textDim, marginTop: '4px' }}>
-                {(analysis.fileSize / 1024).toFixed(1)} KB · {analysis.findings.length} findings · {analysis.partNumbers.length} part numbers · {analysis.moduleNames.length} modules
+                {analysis.fileSize > 1024 * 1024 ? `${(analysis.fileSize / 1024 / 1024).toFixed(2)} MB` : `${(analysis.fileSize / 1024).toFixed(1)} KB`} · {analysis.findings.length} findings · {analysis.partNumbers.length} part numbers · {analysis.moduleNames.length} modules
                 {analysis.ecuPlatform && <> · Platform: <span style={{ color: sColor.green }}>{analysis.ecuPlatform}</span></>}
+                {analysis.segments.length > 0 && <> · {analysis.segments.length} segments</>}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -463,6 +470,113 @@ export default function BinaryUploadPanel() {
               </button>
             </div>
           </div>
+
+          {/* Format Detection Card */}
+          <div style={{
+            background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
+            borderLeft: '3px solid oklch(0.55 0.10 200)', padding: '16px', marginBottom: '16px',
+          }}>
+            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: 'white', marginBottom: '8px' }}>
+              FORMAT: {analysis.fileFormat.replace(/_/g, ' ').toUpperCase()}
+            </h3>
+            <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim }}>
+              {analysis.formatDescription}
+            </div>
+            {analysis.platformFromFilename && (
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.78rem', color: sColor.green, marginTop: '6px' }}>
+                Platform from filename: {analysis.platformFromFilename}
+              </div>
+            )}
+          </div>
+
+          {/* PPEI Metadata Card */}
+          {analysis.ppeiMetadata && (
+            <div style={{
+              background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
+              borderLeft: '3px solid oklch(0.58 0.16 50)', padding: '16px', marginBottom: '16px',
+            }}>
+              <h3 style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: 'white', marginBottom: '12px' }}>
+                PPEI FLASH DESCRIPTOR
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '8px', marginBottom: '12px' }}>
+                {analysis.ppeiMetadata.author && (
+                  <div style={{ padding: '6px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.borderLight}` }}>
+                    <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.06em' }}>AUTHOR</div>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.9rem', color: 'white' }}>{analysis.ppeiMetadata.author}</div>
+                  </div>
+                )}
+                {analysis.ppeiMetadata.tuner && (
+                  <div style={{ padding: '6px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.borderLight}` }}>
+                    <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.06em' }}>TUNER</div>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.9rem', color: 'white' }}>{analysis.ppeiMetadata.tuner}</div>
+                  </div>
+                )}
+                {analysis.ppeiMetadata.version && (
+                  <div style={{ padding: '6px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.borderLight}` }}>
+                    <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.06em' }}>VERSION</div>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.9rem', color: 'white' }}>{analysis.ppeiMetadata.version}</div>
+                  </div>
+                )}
+                {analysis.ppeiMetadata.canAddress && (
+                  <div style={{ padding: '6px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.borderLight}` }}>
+                    <div style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.06em' }}>CAN ADDRESS</div>
+                    <div style={{ fontFamily: sFont.mono, fontSize: '0.9rem', color: 'white' }}>{analysis.ppeiMetadata.canAddress}</div>
+                  </div>
+                )}
+              </div>
+              {analysis.ppeiMetadata.softwareParts.length > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginBottom: '6px', letterSpacing: '0.06em' }}>SOFTWARE CALIBRATIONS</div>
+                  {analysis.ppeiMetadata.softwareParts.map(sp => (
+                    <div key={sp.key} style={{
+                      display: 'flex', gap: '12px', alignItems: 'center', padding: '4px 10px',
+                      background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.borderLight}`, marginBottom: '2px',
+                    }}>
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMuted, minWidth: '40px' }}>{sp.key}</span>
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.85rem', color: sColor.red, fontWeight: 'bold' }}>{sp.partNumber}</span>
+                      {sp.function && <span style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim }}>{sp.function}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Segment Map Card */}
+          {analysis.segments.length > 0 && (
+            <div style={{
+              background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
+              borderLeft: '3px solid oklch(0.60 0.18 180)', padding: '16px', marginBottom: '16px',
+            }}>
+              <h3 style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: 'white', marginBottom: '12px' }}>
+                FLASH SEGMENT MAP ({analysis.segments.length})
+              </h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: sFont.mono, fontSize: '0.75rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${sColor.border}` }}>
+                      {['SEG', 'PART NUMBER', 'FUNCTION', 'BIN OFFSET', 'CHIP ADDR', 'SIZE', 'CVN'].map(h => (
+                        <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: sColor.textMuted, fontWeight: 'normal', fontSize: '0.65rem', letterSpacing: '0.06em' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysis.segments.map(seg => (
+                      <tr key={seg.index} style={{ borderBottom: `1px solid ${sColor.borderLight}` }}>
+                        <td style={{ padding: '6px 8px', color: sColor.textDim }}>{String(seg.index).padStart(2, '0')}</td>
+                        <td style={{ padding: '6px 8px', color: sColor.red, fontWeight: 'bold' }}>{seg.partNumber}</td>
+                        <td style={{ padding: '6px 8px', color: sColor.text, fontFamily: sFont.body }}>{seg.function}</td>
+                        <td style={{ padding: '6px 8px', color: sColor.blue }}>{seg.binOffsetHex}</td>
+                        <td style={{ padding: '6px 8px', color: sColor.blue }}>{seg.chipAddressHex}</td>
+                        <td style={{ padding: '6px 8px', color: sColor.textDim }}>{seg.length > 1024 * 1024 ? `${(seg.length / 1024 / 1024).toFixed(2)} MB` : `${(seg.length / 1024).toFixed(1)} KB`}</td>
+                        <td style={{ padding: '6px 8px', color: seg.cvn ? sColor.green : sColor.textMuted }}>{seg.cvn || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Summary Cards */}
           <CalibrationCard analysis={analysis} />
