@@ -2435,7 +2435,7 @@ export class OBDConnection {
 
     try {
       this.setState('connecting');
-      this.emit('log', null, 'Requesting serial port... (select your OBDLink device)');
+      this.emit('log', null, 'Requesting serial port... (select your ELM327-compatible adapter from the list)');
 
       // Show ALL available serial ports — no vendor ID filtering.
       this.port = await navigator.serial.requestPort();
@@ -2499,7 +2499,7 @@ export class OBDConnection {
       const initialized = await this.initialize();
       if (initialized) {
         this.setState('ready');
-        this.emit('log', null, 'OBDLink device ready — connected and initialized successfully');
+        this.emit('log', null, 'Device ready — connected and initialized successfully');
         return true;
       } else {
         this.setState('error');

@@ -422,3 +422,9 @@
 - [x] Show specific error message when PCAN-USB detected explaining it's a raw CAN interface, not ELM327
 - [x] Improve generic connection failure messages with adapter compatibility guidance
 - [x] Add supported adapter list to the connection UI help section
+
+## PCAN-USB Messaging & Port Picker UX
+- [x] Change "select your OBDLink device" log message to generic adapter language
+- [x] Add pre-connect warning when PCAN-USB won't appear in port picker (it's not a serial device)
+- [x] Update DataloggerPanel connect button flow to show "device not showing?" help
+- [x] Update all remaining OBDLink-specific text references to be adapter-agnostic

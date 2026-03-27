@@ -1,8 +1,8 @@
 /**
- * DataloggerPanel — Live OBD-II Datalogger for OBDLink EX
+ * DataloggerPanel — Live OBD-II Datalogger
  * 
  * Features:
- * - WebSerial connection to OBDLink EX (ELM327/STN2xx protocol)
+ * - WebSerial connection to ELM327-compatible adapters (OBDLink EX, MX+, SX, STN2xx)
  * - Standard Mode 01 + GM Mode 22 extended PIDs (diesel-specific)
  * - PID selection with built-in and user-customizable preset groups
  * - Real-time gauge display with live values
@@ -927,7 +927,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     });
 
     connectionRef.current = conn;
-    addLog('Connecting to OBDLink device...');
+    addLog('Connecting to OBD-II adapter...');
+    addLog('NOTE: Only ELM327-compatible adapters (OBDLink, ELM327, STN) will appear in the port picker. Raw CAN interfaces (PCAN-USB, Kvaser, CANable) will NOT appear — they are not serial devices.');
 
     const success = await conn.connect();
     if (success) {
@@ -1420,7 +1421,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               WEBSERIAL NOT SUPPORTED
             </div>
             <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, lineHeight: 1.5 }}>
-              Your browser does not support the WebSerial API. Please use <strong style={{ color: sColor.text }}>Google Chrome</strong> or <strong style={{ color: sColor.text }}>Microsoft Edge</strong> on desktop to connect to an OBDLink EX device. Safari and Firefox do not support WebSerial.
+              Your browser does not support the WebSerial API. Please use <strong style={{ color: sColor.text }}>Google Chrome</strong> or <strong style={{ color: sColor.text }}>Microsoft Edge</strong> on desktop to connect to an ELM327-compatible OBD-II adapter. Safari and Firefox do not support WebSerial.
             </div>
           </div>
         </div>
@@ -2027,6 +2028,17 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                 <div style={{ marginTop: '8px' }}>
                   Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
                   <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
+                </div>
+              </div>
+
+              {/* PCAN-USB specific callout */}
+              <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, marginTop: '12px', lineHeight: 1.6, padding: '12px 14px', background: 'oklch(0.12 0.04 25 / 0.25)', border: '1px solid oklch(0.30 0.12 25)', borderRadius: '3px', textAlign: 'left', maxWidth: '520px', margin: '12px auto 0' }}>
+                <strong style={{ color: sColor.red, fontFamily: sFont.mono, fontSize: '0.7rem', letterSpacing: '0.06em' }}>⚠ USING A PCAN-USB?</strong>
+                <div style={{ marginTop: '6px' }}>
+                  The PCAN-USB (PEAK System) is a <strong style={{ color: sColor.text }}>raw CAN bus interface</strong> that does not create a serial port. It will <strong style={{ color: sColor.red }}>not appear</strong> in the browser's port picker because it uses PEAK's proprietary driver, not a standard USB serial connection.
+                </div>
+                <div style={{ marginTop: '6px' }}>
+                  To use this tool, you need an <strong style={{ color: sColor.orange }}>ELM327-compatible adapter</strong> that creates a virtual COM port over USB. The <strong style={{ color: sColor.text }}>OBDLink EX</strong> is recommended for Duramax trucks — it supports both standard OBD-II and GM Mode 22 extended PIDs.
                 </div>
               </div>
 
