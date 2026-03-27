@@ -351,10 +351,7 @@ export default function BinaryUploadPanel() {
   const [showAllFindings, setShowAllFindings] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = useCallback(async (file: File) => {
     setLoading(true);
     setError(null);
     setAnalysis(null);
@@ -379,6 +376,41 @@ export default function BinaryUploadPanel() {
     }
   }, []);
 
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFile(file);
+  }, [processFile]);
+
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    // Validate extension
+    const ext = file.name.toLowerCase().split('.').pop();
+    if (!['bin', 'hex', 'ori'].includes(ext || '')) {
+      setError('Unsupported file type. Please upload a .bin, .hex, or .ori file.');
+      return;
+    }
+    processFile(file);
+  }, [processFile]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
   const filteredFindings = analysis?.findings.filter(f =>
     filterCategory === 'all' || f.category === filterCategory
   ) || [];
@@ -393,12 +425,17 @@ export default function BinaryUploadPanel() {
       {!analysis && (
         <div
           onClick={() => fileInputRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           style={{
-            border: `2px dashed ${sColor.border}`, padding: '4rem 2rem', textAlign: 'center',
-            cursor: 'pointer', transition: 'all 0.2s', background: 'oklch(0.11 0.005 260)',
+            border: `2px dashed ${isDragOver ? sColor.red : sColor.border}`,
+            padding: '4rem 2rem', textAlign: 'center',
+            cursor: 'pointer', transition: 'all 0.2s',
+            background: isDragOver ? 'oklch(0.14 0.010 25)' : 'oklch(0.11 0.005 260)',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = sColor.red; e.currentTarget.style.background = 'oklch(0.13 0.006 260)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = sColor.border; e.currentTarget.style.background = 'oklch(0.11 0.005 260)'; }}
+          onMouseEnter={(e) => { if (!isDragOver) { e.currentTarget.style.borderColor = sColor.red; e.currentTarget.style.background = 'oklch(0.13 0.006 260)'; } }}
+          onMouseLeave={(e) => { if (!isDragOver) { e.currentTarget.style.borderColor = sColor.border; e.currentTarget.style.background = 'oklch(0.11 0.005 260)'; } }}
         >
           <input
             ref={fileInputRef}

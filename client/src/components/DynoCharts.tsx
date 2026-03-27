@@ -595,6 +595,14 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
           <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
             Duramax L5P 6.6L Diesel — Estimated from OBD-II Torque Data
           </div>
+          <div style={{
+            color: '#665533', fontSize: 10, fontFamily: 'monospace', marginTop: 4,
+            padding: '4px 8px', background: 'rgba(255,180,50,0.06)', borderRadius: 4,
+            borderLeft: '2px solid #664400', lineHeight: 1.4, maxWidth: 500,
+          }}>
+            These numbers are calculated from the datalog and are heavily dependent on tuning configuration.
+            They can be inaccurate vs. an actual chassis dyno. Use as a trend indicator, not bragging rights.
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
           {/* Fullscreen toggle */}

@@ -126,95 +126,108 @@ function drawCorrelatedGraph(
     doc.line(graphX, gy, graphX + graphW, gy);
   }
 
-  // RPM + Speed bottom overlay (split bottom 35% into two halves for better readability)
+  // RPM + Speed bottom overlay (separated into distinct bands with separator)
   const { rpmData } = config;
-  const overlayH = graphH * 0.35;
+  const overlayH = graphH * 0.40; // slightly larger for better separation
   const overlayBaseY = graphY + graphH;
+  const halfH = overlayH / 2;
+  const rpmBandTop = overlayBaseY - overlayH;
+  const rpmBandBot = rpmBandTop + halfH;
+  const spdBandTop = rpmBandBot + 0.5;
+  const spdBandBot = overlayBaseY;
 
-  // RPM overlay (top half of overlay area, light blue) with tick marks
+  // Light background bands for visual separation
+  doc.setFillColor(240, 245, 255); // very light blue for RPM band
+  doc.rect(graphX, rpmBandTop, graphW, halfH, 'F');
+  doc.setFillColor(245, 245, 250); // very light gray for Speed band
+  doc.rect(graphX, spdBandTop, graphW, halfH - 0.5, 'F');
+
+  // Separator line between RPM and Speed bands
+  doc.setDrawColor(200, 200, 215);
+  doc.setLineWidth(0.2);
+  doc.line(graphX, rpmBandBot, graphX + graphW, rpmBandBot);
+
+  // RPM overlay (top band, light blue) with tick marks
   if (rpmData && rpmData.length > 10) {
     const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
     const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
     const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
     const rpmMax = Math.max(...rpmSampled, 1);
-    const halfH = overlayH / 2;
-    const rpmTopY = overlayBaseY - overlayH;
+    const traceH = halfH - 4; // leave room for tick labels
 
     // Draw RPM trace line
-    doc.setDrawColor(100, 150, 210);
-    doc.setLineWidth(0.15);
+    doc.setDrawColor(70, 120, 200);
+    doc.setLineWidth(0.2);
     for (let i = 1; i < rpmSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (rpmSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (rpmSampled.length - 1)) * graphW;
-      const y1 = rpmTopY + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
-      const y2 = rpmTopY + halfH - (rpmSampled[i] / rpmMax) * halfH;
+      const y1 = rpmBandTop + 1 + traceH - (rpmSampled[i - 1] / rpmMax) * traceH;
+      const y2 = rpmBandTop + 1 + traceH - (rpmSampled[i] / rpmMax) * traceH;
       doc.line(x1, y1, x2, y2);
     }
 
-    // RPM tick marks along the bottom of RPM area (evenly spaced, actual values)
+    // RPM tick marks along bottom of RPM band
     const rpmTickCount = 8;
-    doc.setFontSize(5);
+    doc.setFontSize(4.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 150, 210);
+    doc.setTextColor(70, 120, 200);
     for (let t = 0; t <= rpmTickCount; t++) {
       const frac = t / rpmTickCount;
       const tx = graphX + frac * graphW;
       const idx = Math.min(Math.floor(frac * (rpmSampled.length - 1)), rpmSampled.length - 1);
       const rpmVal = rpmSampled[idx] || 0;
-      // Tick mark
-      doc.setDrawColor(100, 150, 210);
+      doc.setDrawColor(70, 120, 200);
       doc.setLineWidth(0.12);
-      doc.line(tx, rpmTopY + halfH - 0.8, tx, rpmTopY + halfH + 0.5);
-      // Value label
-      doc.text(`${Math.round(rpmVal)}`, tx - 2.5, rpmTopY + halfH + 3);
+      doc.line(tx, rpmBandBot - 3.5, tx, rpmBandBot - 2.5);
+      doc.text(`${Math.round(rpmVal)}`, tx - 2.5, rpmBandBot - 0.5);
     }
     // RPM label at left
     doc.setFontSize(5);
-    doc.setTextColor(100, 150, 210);
-    doc.text('RPM', x + 1.5, rpmTopY + halfH - 1);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(70, 120, 200);
+    doc.text('RPM', x + 1, rpmBandTop + 4);
   }
 
-  // Speed overlay (bottom half of overlay area, gray) with tick marks
+  // Speed overlay (bottom band, gray) with tick marks
   if (speedData && speedData.length > 10) {
     const spdValid = speedData.filter(v => !isNaN(v));
     const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
     const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
     const spdMax = Math.max(...spdSampled, 1);
-    const halfH = overlayH / 2;
-    const spdTopY = overlayBaseY - halfH;
+    const bandH = spdBandBot - spdBandTop;
+    const traceH = bandH - 4;
 
     // Draw speed trace line
-    doc.setDrawColor(160, 160, 185);
-    doc.setLineWidth(0.15);
+    doc.setDrawColor(130, 130, 160);
+    doc.setLineWidth(0.2);
     for (let i = 1; i < spdSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
-      const y1 = overlayBaseY - (spdSampled[i - 1] / spdMax) * halfH;
-      const y2 = overlayBaseY - (spdSampled[i] / spdMax) * halfH;
+      const y1 = spdBandTop + 1 + traceH - (spdSampled[i - 1] / spdMax) * traceH;
+      const y2 = spdBandTop + 1 + traceH - (spdSampled[i] / spdMax) * traceH;
       doc.line(x1, y1, x2, y2);
     }
 
-    // Speed tick marks along the bottom of speed area (evenly spaced, actual values)
+    // Speed tick marks along bottom of Speed band
     const spdTickCount = 8;
-    doc.setFontSize(5);
+    doc.setFontSize(4.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(160, 160, 185);
+    doc.setTextColor(130, 130, 160);
     for (let t = 0; t <= spdTickCount; t++) {
       const frac = t / spdTickCount;
       const tx = graphX + frac * graphW;
       const idx = Math.min(Math.floor(frac * (spdSampled.length - 1)), spdSampled.length - 1);
       const spdVal = spdSampled[idx] || 0;
-      // Tick mark
-      doc.setDrawColor(160, 160, 185);
+      doc.setDrawColor(130, 130, 160);
       doc.setLineWidth(0.12);
-      doc.line(tx, overlayBaseY - 0.8, tx, overlayBaseY + 0.5);
-      // Value label
-      doc.text(`${Math.round(spdVal)}`, tx - 2.5, overlayBaseY + 3);
+      doc.line(tx, spdBandBot - 3.5, tx, spdBandBot - 2.5);
+      doc.text(`${Math.round(spdVal)}`, tx - 2.5, spdBandBot - 0.5);
     }
     // MPH label at left
     doc.setFontSize(5);
-    doc.setTextColor(160, 160, 185);
-    doc.text('MPH', x + 1.5, overlayBaseY - 1);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(130, 130, 160);
+    doc.text('MPH', x + 1, spdBandTop + 4);
   }
 
   // Draw each series
@@ -278,15 +291,36 @@ function getInjectorAnalysis(
   const spicyCount = valid.filter(v => v >= spicyThreshold).length;
   const spicyPct = (spicyCount / valid.length) * 100;
 
+  // Piezo injectors have ~800μs of shutoff delay, so a 1.5ms command = ~2.3ms actual
+  // fuel delivery. After 1400-1600μs, the piezo needle is bottomed out and fuel
+  // delivered past that point is extremely inefficient — terrible atomization, wide
+  // spray patterns, fuel washing piston bowl walls.
+  const piezoShutoffDelay = 0.8; // ms (~800μs)
+  const piezoBottomedOut = 1.5; // ms (1400-1600μs range, needle fully open)
+  const effectivePw = isPiezo ? maxPw + piezoShutoffDelay : maxPw;
+
   let commentary = '';
   if (maxPw < spicyThreshold * 0.7) {
-    commentary = `Injector pulse width peaked at ${maxPw.toFixed(2)}ms — well within the comfort zone for ${isPiezo ? 'piezo' : 'solenoid'} injectors. The fuel system isn't being asked to do anything heroic here.`;
+    commentary = `Injector pulse width peaked at ${maxPw.toFixed(2)}ms — well within the comfort zone. The fuel system isn't being asked to do anything heroic here, and the pistons are living an easy life.`;
   } else if (maxPw < spicyThreshold) {
-    commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is getting up there for ${isPiezo ? 'piezo' : 'solenoid'} injectors. Not in the danger zone yet, but the injectors are earning their paycheck. Keep an eye on EGTs when you're in this range.`;
+    commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is getting up there. Not in the danger zone yet, but the longer the injector stays open, the wider the spray pattern gets — and that means more fuel washing the piston bowl walls instead of atomizing cleanly.`;
+    if (isPiezo) {
+      commentary += ` Keep in mind that piezo injectors have roughly 800μs of shutoff delay — so a ${maxPw.toFixed(2)}ms command means the injector is actually delivering fuel for approximately ${effectivePw.toFixed(2)}ms.`;
+    }
+    commentary += ` Keep an eye on EGTs when you're in this range.`;
   } else if (maxPw < spicyThreshold * 1.3) {
-    commentary = `Peak pulse width hit ${maxPw.toFixed(2)}ms — that's ${isPiezo ? 'race territory for piezo injectors' : 'putting real stress on solenoid injectors'}. At this duration, EGTs climb fast and piston loading increases significantly. ${spicyPct > 10 ? `You spent ${spicyPct.toFixed(1)}% of the log above the spicy threshold, which is a lot of time asking the fuel system to be a hero.` : 'It was brief, which helps.'} If you're making this kind of power regularly, consider injectors sized for your target HP — OEM duration or lower at your desired power level is the easy rule of thumb.`;
+    commentary = `Peak pulse width hit ${maxPw.toFixed(2)}ms — that's ${isPiezo ? 'race territory for piezo injectors' : 'big-tune territory on stock injectors'}. At this duration, the spray pattern widens significantly and fuel is hitting the piston bowl walls directly. That's hard on the pistons, not the injectors — the injectors are fine, it's the downstream effect that matters.`;
+    if (isPiezo) {
+      commentary += ` With ~800μs shutoff delay, the actual fuel delivery duration is closer to ${effectivePw.toFixed(2)}ms. Past about 1.4-1.6ms, the piezo needle is bottomed out — fuel delivered beyond that point is extremely inefficient with terrible atomization.`;
+    }
+    commentary += ` ${spicyPct > 10 ? `You spent ${spicyPct.toFixed(1)}% of the log above the spicy threshold — that's a lot of time with wide spray patterns beating on the pistons.` : 'It was brief, which helps — a 1/4 mile burst is fine... until it isn\'t.'} If you're making this kind of power regularly, consider injectors sized for your target HP — shorter pulse at higher flow rate means tighter spray patterns and happier pistons.`;
   } else {
-    commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into ${isPiezo ? 'race-only territory for piezo injectors. Past 1.5ms, you\'re generating serious heat and piston loading' : 'the hard-on-pistons zone for solenoid injectors. Past 2.5ms (2500μs), you\'re asking a lot of the bottom end'}. ${spicyPct > 5 ? `${spicyPct.toFixed(1)}% of the log was above threshold — that's sustained abuse, not a quick pull.` : ''} This is where matched injectors become a necessity, not a suggestion. The more horsepower you chase, the harder everything has to work. Do the build correctly: keep things cool, efficient, and matched.`;
+    if (isPiezo) {
+      commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into race-only territory for piezo injectors. With ~800μs shutoff delay, actual fuel delivery is approximately ${effectivePw.toFixed(2)}ms. The piezo needle bottoms out around 1.4-1.6ms — everything past that is extremely inefficient fuel delivery with wide-open spray patterns hammering the piston bowl walls. The injector is basically maxed out and dumping fuel with terrible atomization for ${(effectivePw - piezoBottomedOut).toFixed(2)}ms of that event.`;
+    } else {
+      commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into the hard-on-pistons zone. Past 2.5ms (2500μs), stock injectors are spraying fuel everywhere — wide spray patterns hammer the piston bowl walls and increase thermal loading on the bottom end.`;
+    }
+    commentary += ` ${spicyPct > 5 ? `${spicyPct.toFixed(1)}% of the log was above threshold — that's sustained abuse on the pistons, not just a quick pull.` : ''} This is the big injector argument: matched injectors flow more fuel in less time, keeping spray patterns tight and pistons happy. It's OK to go fast in 1/4 mile bursts... until it isn't. The more horsepower you chase on stock injectors, the harder the pistons have to work. Do the build correctly: keep things cool, efficient, and matched.`;
   }
 
   return { maxPw, avgPw, spicyPct, commentary };
@@ -362,6 +396,9 @@ function getCADAnalysis(
 
 function getTimingAnalysis(
   timing: number[],
+  pulseWidth?: number[],
+  rpm?: number[],
+  isPiezo?: boolean,
 ): { maxTiming: number; avgTiming: number; commentary: string } {
   const valid = timing.filter(v => v > 0);
   if (valid.length === 0) return { maxTiming: 0, avgTiming: 0, commentary: '' };
@@ -376,6 +413,47 @@ function getTimingAnalysis(
     commentary = `Timing peaked at ${maxTiming.toFixed(1)}° BTDC, averaging ${avgTiming.toFixed(1)}°. Getting into the performance range but still within reason. High timing makes power but also makes cylinder pressure — it's a balancing act.`;
   } else {
     commentary = `Timing hit ${maxTiming.toFixed(1)}° BTDC — that's spicy. Past 27° on a diesel, cylinder pressures climb fast. High pulse width calls for high timing to burn the fuel efficiently, but this is where you need everything else to be right: injectors matched to power level, turbo sized correctly, and the bottom end built to handle it. This isn't a "run it and forget it" setup.`;
+  }
+
+  // ── Low timing at high pulse width warning ──
+  // When PW is high (big tune territory), the injector is open a long time and the
+  // spray pattern is wide. You NEED enough timing to actually burn all that fuel
+  // before the exhaust valve opens. Low timing + high PW = late burn, high EGTs,
+  // wasted energy going out the exhaust. At 2500μs+ PW, you want 27°+ timing
+  // depending on RPM — either you're making power or you're wasting it as heat.
+  if (pulseWidth && rpm && pulseWidth.length > 10) {
+    const spicyThreshold = isPiezo ? 1.5 : 2.5; // ms
+    // Find samples where PW is high and RPM is above idle
+    let lowTimingHighPwCount = 0;
+    let worstPw = 0;
+    let worstTiming = 0;
+    let worstRpm = 0;
+    const len = Math.min(timing.length, pulseWidth.length, rpm?.length ?? timing.length);
+    for (let i = 0; i < len; i++) {
+      const pw = pulseWidth[i];
+      const r = rpm ? rpm[i] : 0;
+      const t = timing[i];
+      if (pw <= 0 || t <= 0 || r < 1500) continue;
+
+      // At high PW (>= spicy threshold), a pulse that high does better at 27°+
+      // of timing depending on RPM. We don't want to spray that much fuel if
+      // it's not going to be used for power — either making power or wasting it
+      // with heat. Higher RPM needs even more timing to complete combustion.
+      const minExpectedTiming = r >= 3500 ? 29 : r >= 3000 ? 27 : r >= 2500 ? 25 : 22;
+      if (pw >= spicyThreshold * 0.9 && r >= 2500 && t < minExpectedTiming) {
+        lowTimingHighPwCount++;
+        if (pw > worstPw) {
+          worstPw = pw;
+          worstTiming = t;
+          worstRpm = r;
+        }
+      }
+    }
+
+    if (lowTimingHighPwCount > 5 && worstPw > 0) {
+      const expectedMin = worstRpm >= 3500 ? 29 : worstRpm >= 3000 ? 27 : worstRpm >= 2500 ? 25 : 22;
+      commentary += ` ⚠ Low timing at high pulse width: ${worstTiming.toFixed(1)}° at ${worstPw.toFixed(2)}ms PW and ${Math.round(worstRpm)} RPM. A pulse that high does better at ${expectedMin}°+ of timing at this RPM. We don't want to spray that much fuel if it's not going to be used for power — you're either making power or wasting it as heat. Low timing at high PW means the fuel charge isn't burning efficiently: energy goes out the exhaust instead of pushing the piston down. That's higher EGTs, reduced efficiency, and wasted fuel. The tune should be advancing timing to match the fuel delivery.`;
+    }
   }
 
   return { maxTiming, avgTiming, commentary };
@@ -755,7 +833,12 @@ export function renderAdvancedAnalytics(
 
     // Timing commentary
     if (hasTiming) {
-      const timingAnalysis = getTimingAnalysis(data.injectionTiming);
+      const timingAnalysis = getTimingAnalysis(
+        data.injectionTiming,
+        hasInjector ? data.injectorPulseWidth : undefined,
+        data.rpm,
+        isPiezo,
+      );
       if (timingAnalysis.commentary) {
         addWrappedText(timingAnalysis.commentary, 8, 'normal', TEXT_BODY, 1.3);
       }
@@ -778,7 +861,7 @@ export function renderAdvancedAnalytics(
       const spicyThreshold = isPiezo ? 1.5 : 2.5;
       if (maxPw > spicyThreshold && maxTiming > 25) {
         addWrappedText(
-          `Both pulse width (${maxPw.toFixed(2)}ms) and timing (${maxTiming.toFixed(1)}°) are elevated. High pulse width calls for high timing to burn the fuel efficiently — but this combination puts serious stress on the bottom end. This is why we recommend getting injectors that match your desired horsepower. OEM duration or lower for your desired power level is the easy rule of thumb for small builds. If you're pushing past that, make sure the rest of the build supports it.`,
+          `Both pulse width (${maxPw.toFixed(2)}ms) and timing (${maxTiming.toFixed(1)}°) are elevated. High pulse width means wide spray patterns hitting the piston bowl walls, and high timing increases cylinder pressure — together, that's hard on the pistons and bottom end. The injectors themselves are fine; it's the downstream effect that matters. This is the big injector argument: matched injectors deliver the same fuel in less time with tighter spray patterns, reducing piston loading. OK for 1/4 mile bursts, but if you're doing this regularly, size your injectors to your target HP.`,
           8, 'italic', AMBER, 1.3,
         );
       }

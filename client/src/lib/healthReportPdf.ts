@@ -193,7 +193,7 @@ function drawMiniGraph(
 
   // Reserve space: left margin for Y-axis labels, bottom for RPM/Speed axis
   const yAxisW = 16; // width reserved for Y-axis labels
-  const bottomAxisH = 14; // height reserved for RPM + Speed bottom axis (larger for readability)
+  const bottomAxisH = 22; // height reserved for RPM + Speed bottom axis (larger for readability, no overlap)
   const totalH = height + bottomAxisH;
 
   // Graph background
@@ -271,91 +271,111 @@ function drawMiniGraph(
     doc.line(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]);
   }
 
-  // ── BOTTOM AXIS: RPM + Speed ───────────────────────────────────────────
+  // ── BOTTOM AXIS: RPM + Speed (separated into distinct bands) ─────────
   const axisY = graphY + graphH + 1; // just below the main graph
-  const axisH = bottomAxisH - 2; // ~12mm total for both overlays
-  const halfH = axisH / 2; // ~6mm each for RPM and Speed
+  const axisH = bottomAxisH - 2; // ~20mm total for both overlays
+  const halfH = axisH / 2; // ~10mm each for RPM and Speed
+  const rpmBandTop = axisY;
+  const rpmBandBot = axisY + halfH;
+  const spdBandTop = rpmBandBot + 0.5; // small gap between bands
+  const spdBandBot = axisY + axisH;
 
-  // RPM axis (top half of bottom area, light blue) with tick marks
+  // Light background bands for visual separation
+  doc.setFillColor(240, 245, 255); // very light blue for RPM band
+  doc.rect(graphX, rpmBandTop, graphW, halfH, 'F');
+  doc.setFillColor(245, 245, 250); // very light gray for Speed band
+  doc.rect(graphX, spdBandTop, graphW, halfH - 0.5, 'F');
+
+  // Separator line between RPM and Speed bands
+  doc.setDrawColor(200, 200, 215);
+  doc.setLineWidth(0.2);
+  doc.line(graphX, rpmBandBot, graphX + graphW, rpmBandBot);
+
+  // RPM axis (top band, light blue) with tick marks
   if (rpmData && !isRpmGraph && rpmData.length > 10) {
     const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
     const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
     const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
     const rpmMax = Math.max(...rpmSampled, 1);
+    const traceH = halfH - 4; // leave room for tick labels below trace
 
     // Draw RPM trace line
-    doc.setDrawColor(100, 150, 210);
-    doc.setLineWidth(0.2);
+    doc.setDrawColor(70, 120, 200);
+    doc.setLineWidth(0.25);
     for (let i = 1; i < rpmSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (rpmSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (rpmSampled.length - 1)) * graphW;
-      const y1 = axisY + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
-      const y2 = axisY + halfH - (rpmSampled[i] / rpmMax) * halfH;
+      const y1 = rpmBandTop + 1 + traceH - (rpmSampled[i - 1] / rpmMax) * traceH;
+      const y2 = rpmBandTop + 1 + traceH - (rpmSampled[i] / rpmMax) * traceH;
       doc.line(x1, y1, x2, y2);
     }
 
-    // RPM tick marks along bottom (evenly spaced, showing actual RPM at each point)
+    // RPM tick marks along bottom of RPM band
     const rpmTickCount = 6;
-    doc.setFontSize(5);
+    doc.setFontSize(4.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 150, 210);
+    doc.setTextColor(70, 120, 200);
     for (let t = 0; t <= rpmTickCount; t++) {
       const frac = t / rpmTickCount;
       const tx = graphX + frac * graphW;
       const idx = Math.min(Math.floor(frac * (rpmSampled.length - 1)), rpmSampled.length - 1);
       const rpmVal = rpmSampled[idx] || 0;
       // Tick mark
-      doc.setDrawColor(100, 150, 210);
-      doc.setLineWidth(0.15);
-      doc.line(tx, axisY + halfH - 1, tx, axisY + halfH + 0.5);
+      doc.setDrawColor(70, 120, 200);
+      doc.setLineWidth(0.12);
+      doc.line(tx, rpmBandBot - 3.5, tx, rpmBandBot - 2.5);
       // Value label
-      doc.text(`${Math.round(rpmVal)}`, tx - 2, axisY + halfH + 3);
+      doc.text(`${Math.round(rpmVal)}`, tx - 2.5, rpmBandBot - 0.5);
     }
     // RPM label at left
     doc.setFontSize(5);
-    doc.setTextColor(100, 150, 210);
-    doc.text('RPM', x + 1.5, axisY + halfH - 1);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(70, 120, 200);
+    doc.text('RPM', x + 1, rpmBandTop + 4);
   }
 
-  // Speed axis (bottom half of bottom area, gray) with tick marks
+  // Speed axis (bottom band, gray) with tick marks
   if (speedData && !isSpeedGraph && speedData.length > 10) {
     const spdValid = speedData.filter(v => !isNaN(v));
     const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
     const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
     const spdMax = Math.max(...spdSampled, 1);
+    const bandH = spdBandBot - spdBandTop;
+    const traceH = bandH - 4; // leave room for tick labels below trace
 
     // Draw speed trace line
-    doc.setDrawColor(160, 160, 185);
-    doc.setLineWidth(0.2);
+    doc.setDrawColor(130, 130, 160);
+    doc.setLineWidth(0.25);
     for (let i = 1; i < spdSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
-      const y1 = axisY + axisH - (spdSampled[i - 1] / spdMax) * halfH;
-      const y2 = axisY + axisH - (spdSampled[i] / spdMax) * halfH;
+      const y1 = spdBandTop + 1 + traceH - (spdSampled[i - 1] / spdMax) * traceH;
+      const y2 = spdBandTop + 1 + traceH - (spdSampled[i] / spdMax) * traceH;
       doc.line(x1, y1, x2, y2);
     }
 
-    // Speed tick marks along bottom (evenly spaced, showing actual MPH at each point)
+    // Speed tick marks along bottom of Speed band
     const spdTickCount = 6;
-    doc.setFontSize(5);
+    doc.setFontSize(4.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(160, 160, 185);
+    doc.setTextColor(130, 130, 160);
     for (let t = 0; t <= spdTickCount; t++) {
       const frac = t / spdTickCount;
       const tx = graphX + frac * graphW;
       const idx = Math.min(Math.floor(frac * (spdSampled.length - 1)), spdSampled.length - 1);
       const spdVal = spdSampled[idx] || 0;
       // Tick mark
-      doc.setDrawColor(160, 160, 185);
-      doc.setLineWidth(0.15);
-      doc.line(tx, axisY + axisH - 1, tx, axisY + axisH + 0.5);
+      doc.setDrawColor(130, 130, 160);
+      doc.setLineWidth(0.12);
+      doc.line(tx, spdBandBot - 3.5, tx, spdBandBot - 2.5);
       // Value label
-      doc.text(`${Math.round(spdVal)}`, tx - 2, axisY + axisH + 3);
+      doc.text(`${Math.round(spdVal)}`, tx - 2.5, spdBandBot - 0.5);
     }
     // MPH label at left
     doc.setFontSize(5);
-    doc.setTextColor(160, 160, 185);
-    doc.text('MPH', x + 1.5, axisY + axisH - 1);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(130, 130, 160);
+    doc.text('MPH', x + 1, spdBandTop + 4);
   }
 
   let newY = y + totalH + 2;
@@ -988,9 +1008,9 @@ export function generateHealthReportPdf(
     });
   }
 
-  // Draw all graphs (height 50 + 14 for bottom axis = 64 total, checkBreak for 72)
+  // Draw all graphs (height 50 + 22 for bottom axis = 72 total, checkBreak for 80)
   for (const config of graphConfigs) {
-    checkBreak(72);
+    checkBreak(80);
     y = drawMiniGraph(doc, margin, y, contentWidth, 50, config, margin, contentWidth);
   }
 
@@ -1146,6 +1166,123 @@ export function generateHealthReportPdf(
     y += 6.5;
   });
   y += 4;
+
+  // ── PEAK POWER vs PEAK TORQUE SNAPSHOT ──────────────────────────────────
+  // Find the sample indices where peak HP (torque-based) and peak torque occur
+  if (data.hpTorque.length > 10 && data.stats.hpTorqueMax > 0) {
+    checkBreak(55);
+    addText('PEAK POWER vs PEAK TORQUE SNAPSHOT', 12, 'bold', BLUE);
+    drawHR([200, 210, 230]);
+
+    // Find peak HP index
+    let peakHpIdx = 0;
+    let peakHpVal = 0;
+    for (let i = 0; i < data.hpTorque.length; i++) {
+      if (data.hpTorque[i] > peakHpVal) {
+        peakHpVal = data.hpTorque[i];
+        peakHpIdx = i;
+      }
+    }
+
+    // Find peak torque index (torque = torquePercent/100 * maxTorque if available)
+    // For Duramax, torque lb-ft = (torquePercent / 100) * maxTorque
+    let peakTqIdx = 0;
+    let peakTqVal = 0;
+    const torquePercent = data.rpm.map((_, i) => {
+      // hpTorque = (torquePercent/100 * maxTorque * rpm) / 5252
+      // torque lb-ft = hpTorque * 5252 / rpm
+      const rpm = data.rpm[i];
+      if (rpm < 500) return 0;
+      return (data.hpTorque[i] * 5252) / rpm;
+    });
+    for (let i = 0; i < torquePercent.length; i++) {
+      if (torquePercent[i] > peakTqVal) {
+        peakTqVal = torquePercent[i];
+        peakTqIdx = i;
+      }
+    }
+
+    // Helper to get value at index safely
+    const valAt = (arr: number[], idx: number) => {
+      if (!arr || idx >= arr.length) return 0;
+      const v = arr[idx];
+      return isNaN(v) ? 0 : v;
+    };
+
+    // Check if fuel quantity data is available
+    const hasFuelQty = data.fuelQuantity && data.fuelQuantity.some(v => v > 0);
+
+    // Build side-by-side table
+    const colW = (contentWidth - 45) / 2; // two data columns
+    const labelW = 45;
+    const tableX = margin;
+    const col1X = tableX + labelW;
+    const col2X = col1X + colW;
+
+    // Table header
+    doc.setFillColor(30, 30, 40);
+    doc.rect(tableX, y, contentWidth, 7, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.text('Parameter', tableX + 2, y + 5);
+    doc.text(`@ Peak HP (${Math.round(peakHpVal)} HP)`, col1X + 2, y + 5);
+    doc.text(`@ Peak Torque (${Math.round(peakTqVal)} lb-ft)`, col2X + 2, y + 5);
+    y += 7;
+
+    // Table rows
+    const snapshotRows: [string, string, string][] = [
+      ['RPM', `${Math.round(valAt(data.rpm, peakHpIdx))}`, `${Math.round(valAt(data.rpm, peakTqIdx))}`],
+      ['MAF (g/s)', `${valAt(data.maf, peakHpIdx).toFixed(1)}`, `${valAt(data.maf, peakTqIdx).toFixed(1)}`],
+      ['Boost (PSI)', `${valAt(data.boost, peakHpIdx).toFixed(1)}`, `${valAt(data.boost, peakTqIdx).toFixed(1)}`],
+      ['Rail Pressure (PSI)', `${Math.round(valAt(data.railPressureActual, peakHpIdx))}`, `${Math.round(valAt(data.railPressureActual, peakTqIdx))}`],
+      ['Vane Position (%)', `${valAt(data.turboVanePosition, peakHpIdx).toFixed(1)}`, `${valAt(data.turboVanePosition, peakTqIdx).toFixed(1)}`],
+    ];
+
+    if (hasFuelQty) {
+      snapshotRows.push([
+        'Fuel Qty (mm\u00B3)', 
+        `${valAt(data.fuelQuantity, peakHpIdx).toFixed(1)}`,
+        `${valAt(data.fuelQuantity, peakTqIdx).toFixed(1)}`
+      ]);
+    }
+
+    // Add vehicle speed and EGT if available
+    if (data.vehicleSpeed.some(v => v > 0)) {
+      snapshotRows.push([
+        'Speed (MPH)',
+        `${Math.round(valAt(data.vehicleSpeed, peakHpIdx))}`,
+        `${Math.round(valAt(data.vehicleSpeed, peakTqIdx))}`
+      ]);
+    }
+    if (data.exhaustGasTemp.some(v => v > 0)) {
+      snapshotRows.push([
+        'EGT (\u00B0F)',
+        `${Math.round(valAt(data.exhaustGasTemp, peakHpIdx))}`,
+        `${Math.round(valAt(data.exhaustGasTemp, peakTqIdx))}`
+      ]);
+    }
+
+    snapshotRows.forEach(([label, val1, val2], rowIdx) => {
+      checkBreak(7);
+      const rowY = y;
+      // Alternating row background
+      if (rowIdx % 2 === 0) {
+        doc.setFillColor(245, 245, 250);
+        doc.rect(tableX, rowY, contentWidth, 6, 'F');
+      }
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...TEXT_DARK);
+      doc.text(label, tableX + 2, rowY + 4.2);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...BLUE);
+      doc.text(val1, col1X + 2, rowY + 4.2);
+      doc.text(val2, col2X + 2, rowY + 4.2);
+      y += 6;
+    });
+    y += 4;
+  }
 
   // ── ESTIMATED DYNO GRAPH ──────────────────────────────────────────────────
   if (data.stats.hpTorqueMax > 0 && data.hpTorque.length > 10) {

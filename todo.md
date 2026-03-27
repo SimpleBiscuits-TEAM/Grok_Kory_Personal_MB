@@ -321,3 +321,13 @@
 - [ ] Add Aisin AS69RC transmission knowledge and diagnostics
 - [ ] Add Cummins-specific DTC codes to diagnostic lookup
 - [ ] Verify Cummins datalog analysis produces correct diagnostics
+
+## UI Fixes (Current Session)
+- [x] Fix RPM/speed overlay on health report PDF graphs — they overlap each other making it hard to read
+- [x] Add dyno results disclaimer to on-screen dyno display (same as health report PDF disclaimer)
+- [x] Make subsystem values collapsible — hidden by default, shown only when subsystem is clicked
+- [x] Fix binary upload drag & drop not working
+- [x] Add peak power vs peak torque side-by-side snapshot stats in health report PDF (RPM, MAF, vane position, boost, rail pressure, fuel quantity mm3/mg at peak HP and peak torque moments)
+- [x] Fix injector pulsewidth diagnostic messaging: high PW is hard on pistons (wide spray patterns on stock injectors), not stress on injectors. Acceptable for 1/4 mile bursts.
+- [x] Add low-timing-at-high-PW diagnostic warning: 15° timing at 2500μs PW and 3000 RPM is too low — flag as potential timing issue (late burn, high EGTs, reduced efficiency). Timing should scale with PW and RPM.
+- [x] Add piezo injector shutoff delay context: ~800μs shutoff delay means a 1.5ms command = ~2.3ms actual fuel delivery. Piezo needle bottoms out at 1400-1600μs, fuel past that is extremely inefficient. Factor into PW analysis and commentary.

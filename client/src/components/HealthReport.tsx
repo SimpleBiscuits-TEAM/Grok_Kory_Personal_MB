@@ -4,7 +4,8 @@
  * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for data
  */
 
-import { AlertCircle, CheckCircle, AlertTriangle, Car, Cpu, Wrench, Fuel, Shield, MapPin, Hash, Zap } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, CheckCircle, AlertTriangle, Car, Cpu, Wrench, Fuel, Shield, MapPin, Hash, Zap, ChevronDown, ChevronRight } from "lucide-react";
 import { HealthReportData } from "@/lib/healthReport";
 
 interface HealthReportProps {
@@ -372,6 +373,7 @@ export default function HealthReport({ report }: HealthReportProps) {
 }
 
 function SystemCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div style={{
       background: 'oklch(0.13 0.006 260)',
@@ -379,17 +381,32 @@ function SystemCard({ icon, title, children }: { icon: React.ReactNode; title: s
       borderRadius: '3px',
       padding: '1rem 1.25rem'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem', paddingBottom: '0.5rem', borderBottom: '1px solid oklch(0.20 0.006 260)' }}>
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          marginBottom: expanded ? '1rem' : 0,
+          paddingBottom: expanded ? '0.5rem' : 0,
+          borderBottom: expanded ? '1px solid oklch(0.20 0.006 260)' : 'none',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
         {icon}
         <h4 style={{
           fontFamily: '"Bebas Neue", "Impact", sans-serif',
           fontSize: '0.9rem',
           letterSpacing: '0.08em',
           color: 'oklch(0.75 0.010 260)',
-          margin: 0
+          margin: 0,
+          flex: 1,
         }}>{title}</h4>
+        {expanded
+          ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.010 260)', transition: 'transform 0.15s' }} />
+          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.010 260)', transition: 'transform 0.15s' }} />
+        }
       </div>
-      {children}
+      {expanded && children}
     </div>
   );
 }

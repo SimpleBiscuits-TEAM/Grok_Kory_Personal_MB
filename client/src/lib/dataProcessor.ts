@@ -70,6 +70,7 @@ export interface DuramaxData {
   injectorPulseWidth: number[];  // Injector pulse width (ms)
   injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
   intakeAirTemp: number[];       // Intake air temperature (°F)
+  fuelQuantity: number[];         // Fuel quantity per injection (mm3/stroke)
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
   pidsMissing: string[];       // channels that had no valid substitute
   timestamp: string;
@@ -110,6 +111,7 @@ export interface ProcessedMetrics {
   injectorPulseWidth: number[];  // Injector pulse width (ms)
   injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
   intakeAirTemp: number[];       // Intake air temperature (°F)
+  fuelQuantity: number[];         // Fuel quantity per injection (mm3/stroke)
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
   boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
@@ -322,6 +324,8 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'DEF_QUAL': '_def_qual',
   'PCV_DC': 'pcvDutyCycle',
   'PCV_ACT': 'pcvDutyCycle',
+  'FUEL_QTY': 'fuelQuantity',
+  'INJ_QTY': 'fuelQuantity',
 };
 
 /**
@@ -520,6 +524,19 @@ function parseDataloggerCSV(content: string): DuramaxData {
     throw new Error('No valid data rows found in datalogger CSV');
   }
 
+  // Fuel quantity: use fuelQuantity channel if available, otherwise empty
+  const fuelQuantity: number[] = channelColumns['fuelQuantity'] !== undefined
+    ? rpm.map((_, i) => {
+        const idx = channelColumns['fuelQuantity'];
+        if (idx === undefined) return 0;
+        const line = lines[i + 1]; // +1 for header offset
+        if (!line) return 0;
+        const vals = line.split(',');
+        const raw = parseFloat(vals[idx]?.trim());
+        return isNaN(raw) ? 0 : raw;
+      })
+    : new Array(rpm.length).fill(0);
+
   const duration = offset.length > 0 ? offset[offset.length - 1] - offset[0] : 0;
 
   return {
@@ -552,6 +569,7 @@ function parseDataloggerCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    fuelQuantity,
     boostSource: channelColumns['boost'] !== undefined ? 'map_derived' : 'none',
     boostActualAvailable: boost.some(v => v > 0),
     pidSubstitutions: [],
@@ -726,6 +744,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const injPulseWidthIdx  = getColumnIndex(['Injector Pulse Width', 'Inj Pulse Width', 'Fuel Pulse Width', 'Injector PW', 'INJPW', 'Fuel Injection Pulse Width']);
   const injTimingIdx      = getColumnIndex(['Injection Timing', 'Timing Advance', 'SOI', 'Start of Injection', 'Injection Angle', 'Fuel Timing']);
   const iatIdx            = getColumnIndex(['Intake Air Temp (SAE)', 'Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
+  const fuelQuantityIdx   = getColumnIndex(['Fuel Mass Desired', 'Main Fuel Rate', 'Injection Quantity All', 'Fuel Quantity', 'Cylinder Fuel Rate']);
 
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns: RPM or MAF');
@@ -896,6 +915,23 @@ function parseHPTunersCSV(content: string): DuramaxData {
     injectionTiming.push(injTimingIdx !== -1 ? hptConvert(injTimingIdx, values[injTimingIdx]) : 0);
     intakeAirTemp.push(iatIdx !== -1 ? hptConvert(iatIdx, values[iatIdx]) : 0);
   }
+
+  // Fuel quantity: parse from Fuel Mass Desired (mg) or Main Fuel Rate (mm3)
+  // HP Tuners hptConvert handles unit conversion if needed
+  const fuelQuantity: number[] = [];
+  if (fuelQuantityIdx !== -1) {
+    // Re-parse from the data to get fuel quantity values
+    for (let i = dataStart; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || line.startsWith('[')) break;
+      const values = line.split(',').map(v => { const n = parseFloat(v.trim()); return isNaN(n) ? 0 : n; });
+      if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
+      fuelQuantity.push(hptConvert(fuelQuantityIdx, values[fuelQuantityIdx]));
+    }
+  }
+  // Ensure fuelQuantity matches rpm length
+  while (fuelQuantity.length < rpm.length) fuelQuantity.push(0);
+  if (fuelQuantity.length > rpm.length) fuelQuantity.length = rpm.length;
   
   if (rpm.length === 0) {
     throw new Error('No valid data rows found in CSV');
@@ -937,6 +973,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    fuelQuantity,
     boostSource: hpBoostSource,
     // HP Tuners: boost is direct or MAP-derived; actual is available if any non-zero values exist
     boostActualAvailable: boost.some(v => v > 0),
@@ -1065,8 +1102,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW']);
   const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING']);
   const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT']);
+  const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate']);
 
-  // ── Validate required columns ────────────────────────────────────────────
+  // ── Validate required columns ────────────────────────────────────────
   // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
   // so we only require RPM and MAF as hard requirements.
   if (rpmIdx === -1 || mafIdx === -1) {
@@ -1105,6 +1143,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const oilTemp: number[] = [];
   const transFluidTemp: number[] = [];
   const barometricPressure: number[] = [];
+  const fuelQuantity: number[] = [];
 
   // EFILive data starts at row 3 (after PID codes, descriptions, units)
   const dataStartRow = 3;
@@ -1243,6 +1282,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // Intake air temp — EFILive logs in °C, convert to °F
     const iatC = parseVal(iatIdx);
     intakeAirTemp.push(isNaN(iatC) || iatC <= -40 ? 0 : (iatC * 9/5) + 32);
+    // Fuel quantity: ECM.INJQNTALL is in mm3/stroke (no conversion needed)
+    const fqVal = parseVal(fuelQuantityIdx);
+    fuelQuantity.push(isNaN(fqVal) ? 0 : fqVal);
   }
 
   if (rpm.length === 0) {
@@ -1281,6 +1323,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     oilTemp,
     transFluidTemp,
     barometricPressure,
+    fuelQuantity,
     boostSource: mapIdx !== -1 ? 'map_derived' : 'none',
     // EFILive: MAP is the actual boost source. If MAP was all N/A the boost array is all zeros.
     // Detect this by checking if any boost value is non-zero AND mapIdx was found.
@@ -1513,6 +1556,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     injectorPulseWidth,
     injectionTiming,
     intakeAirTemp,
+    fuelQuantity: new Array(rpm.length).fill(0), // Banks Power doesn't log fuel quantity
     boostSource: boostGaugeIdx !== -1 ? 'direct' : mapIdx !== -1 ? 'map_derived' : 'none',
     boostActualAvailable: boost.some(v => v > 0),
     pidSubstitutions: [],
@@ -1709,6 +1753,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     injectorPulseWidth: rawData.injectorPulseWidth,
     injectionTiming: rawData.injectionTiming,
     intakeAirTemp: rawData.intakeAirTemp,
+    fuelQuantity: rawData.fuelQuantity,
     pidSubstitutions: rawData.pidSubstitutions,
     pidsMissing: rawData.pidsMissing,
     boostCalibration,
@@ -1754,6 +1799,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     transFluidTemp: downsample(data.transFluidTemp),
     barometricPressure: downsample(data.barometricPressure),
     throttlePosition: downsample(data.throttlePosition),
+    fuelQuantity: downsample(data.fuelQuantity),
   };
 }
 
