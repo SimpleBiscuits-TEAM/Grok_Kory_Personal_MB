@@ -35,6 +35,7 @@ import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
+import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart } from '@/components/DynoCharts';
 import { StatsSummary } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
@@ -998,7 +999,18 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
         </div>
       )}
 
-      {healthReport && <div ref={healthRef}><SectionHeader icon={<Activity style={{ width: 18, height: 18, color: sColor.red }} />} title="VEHICLE HEALTH REPORT" /><HealthReport report={healthReport} /></div>}
+      {healthReport && <div ref={healthRef}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <SectionHeader icon={<Activity style={{ width: 18, height: 18, color: sColor.red }} />} title="VEHICLE HEALTH REPORT" />
+          <button
+            onClick={() => { if (data && healthReport && fileName) generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0); }}
+            style={{ background: sColor.blue, color: 'white', fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em', padding: '6px 14px', borderRadius: '3px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
+          >
+            <FileDown style={{ width: 14, height: 14 }} />DOWNLOAD HEALTH REPORT PDF
+          </button>
+        </div>
+        <HealthReport report={healthReport} />
+      </div>}
       {diagnostics && <div><SectionHeader icon={<Zap style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC ANALYSIS" /><DiagnosticReportComponent report={diagnostics} /></div>}
       {reasoningReport && <div><SectionHeader icon={<Brain style={{ width: 18, height: 18, color: sColor.red }} />} title="PPEI AI REASONING ENGINE" /><div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1.25rem' }}><ReasoningPanel report={reasoningReport} /></div></div>}
 

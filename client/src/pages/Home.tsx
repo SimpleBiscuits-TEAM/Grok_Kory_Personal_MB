@@ -28,6 +28,7 @@ import { ReasoningPanel } from '@/components/ReasoningPanel';
 import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
+import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -581,7 +582,37 @@ export default function Home() {
             {/* Vehicle Health Report */}
             {healthReport && (
               <div ref={healthRef} className="ppei-section-reveal">
-                <SectionHeader icon={<Activity style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="VEHICLE HEALTH REPORT" />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+                  <SectionHeader icon={<Activity style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="VEHICLE HEALTH REPORT" />
+                  <button
+                    onClick={() => {
+                      if (data && healthReport && fileName) {
+                        generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0);
+                      }
+                    }}
+                    style={{
+                      background: 'oklch(0.70 0.18 200)',
+                      color: 'white',
+                      fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                      fontSize: '0.85rem',
+                      letterSpacing: '0.08em',
+                      padding: '6px 14px',
+                      borderRadius: '3px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'background 0.2s',
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'oklch(0.60 0.18 200)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'oklch(0.70 0.18 200)')}
+                  >
+                    <FileDown style={{ width: '14px', height: '14px' }} />
+                    DOWNLOAD HEALTH REPORT PDF
+                  </button>
+                </div>
                 <HealthReport report={healthReport} />
               </div>
             )}

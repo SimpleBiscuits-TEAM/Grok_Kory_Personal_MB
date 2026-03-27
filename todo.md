@@ -173,3 +173,13 @@
 - [x] Fix low boost fault not populating the fault zone chart
 - [x] Audit ALL fault types to ensure each one has a corresponding fault zone chart (EGT-HIGH, CONVERTER-SLIP, CONVERTER-SLIP-WARN, IDLE-RPM-LOW, IDLE-RPM-HIGH all now mapped)
 - [x] If a fault zone chart has no data to display, show an explanation instead of returning null/empty (already handled in all charts)
+
+## Standalone Vehicle Health Report PDF
+- [x] Create dedicated Vehicle Health Report PDF generator with friendly/funny personality
+- [x] Tone adjusts based on severity: light and funny for clean reports, more serious for critical faults
+- [x] Include BETA AI model disclaimer with a joke about it
+- [x] Author set to "Kory (Maybe?)"
+- [x] Training/improving rapidly message included
+- [x] Download as standalone PDF via blue button in Health Report section header
+- [x] Wire up download button in the UI (Home.tsx and Advanced.tsx)
+- [x] Add dyno graph disclaimer: dependent on tuning setup, can be inaccurate, but good reference
