@@ -181,13 +181,49 @@ function analyzeTccBehavior(
   const duty = data.converterDutyCycle;
   const rpm = data.rpm;
   const vss = data.vehicleSpeed;
+  const gear = data.currentGear || [];
 
   if (slip.length === 0) return findings;
 
   const fullLockThreshold = ctx.tccPressureFormat === 'kpa_pcs' ? 1000 : 90;
   const lockLabel = ctx.tccPressureFormat === 'kpa_pcs' ? '1050 kPa (full lock)' : '90% duty (full lock)';
 
-  // Collect slip events under full lock
+  // ── Noise-floor awareness ─────────────────────────────────────────────────
+  // ±15 RPM slip while locked is normal — caused by the logging tool's
+  // filtering/sampling of the TCM slip speed signal, not actual mechanical slip.
+  const SLIP_NOISE_FLOOR = 15;
+
+  // Build gear-shift exclusion mask: slip during shifts is expected because
+  // the converter naturally slips while the transmission changes ratios,
+  // even with steady duty cycle.
+  const SHIFT_EXCLUSION_WINDOW = 8;
+  const isShifting = new Uint8Array(slip.length);
+  if (gear.length >= slip.length) {
+    for (let i = 1; i < gear.length; i++) {
+      if (gear[i] !== gear[i - 1] && gear[i] > 0 && gear[i - 1] > 0) {
+        const start = Math.max(0, i - SHIFT_EXCLUSION_WINDOW);
+        const end = Math.min(slip.length - 1, i + SHIFT_EXCLUSION_WINDOW);
+        for (let j = start; j <= end; j++) isShifting[j] = 1;
+      }
+    }
+  }
+
+  // Build lock-transition grace period mask: when the TCM transitions
+  // between locked/unlocked, there is a hydraulic apply delay.
+  const LOCK_GRACE_WINDOW = 10;
+  const isTransitioning = new Uint8Array(slip.length);
+  let prevLocked = duty[0] >= fullLockThreshold;
+  for (let i = 1; i < slip.length; i++) {
+    const nowLocked = duty[i] >= fullLockThreshold;
+    if (nowLocked !== prevLocked) {
+      const start = Math.max(0, i - LOCK_GRACE_WINDOW);
+      const end = Math.min(slip.length - 1, i + LOCK_GRACE_WINDOW);
+      for (let j = start; j <= end; j++) isTransitioning[j] = 1;
+    }
+    prevLocked = nowLocked;
+  }
+
+  // Collect slip events under full lock, excluding noise, shifts, and transitions
   const slipEventsUnderLock: Array<{slip: number; rpm: number; vss: number; idx: number}> = [];
   let consecutiveSlip = 0;
 
@@ -195,9 +231,16 @@ function analyzeTccBehavior(
     const isLocked = duty[i] >= fullLockThreshold;
     const absSlip = Math.abs(slip[i]);
 
-    if (isLocked && absSlip > 20) {
+    // Skip gear shifts and lock transitions — slip is expected during these
+    if (isShifting[i] || isTransitioning[i]) {
+      consecutiveSlip = 0;
+      continue;
+    }
+
+    if (isLocked && absSlip > SLIP_NOISE_FLOOR) {
       consecutiveSlip++;
-      if (consecutiveSlip >= 3) {
+      // Require 5 consecutive samples (raised from 3) = 500ms at 10 Hz
+      if (consecutiveSlip >= 5) {
         slipEventsUnderLock.push({ slip: slip[i], rpm: rpm[i] || 0, vss: vss[i] || 0, idx: i });
       }
     } else {
@@ -219,7 +262,7 @@ function analyzeTccBehavior(
 
   const evidence: string[] = [
     `TCC commanded at ${lockLabel} throughout slip events`,
-    `${slipEventsUnderLock.length} confirmed slip events (≥3 consecutive samples >20 RPM)`,
+    `${slipEventsUnderLock.length} confirmed slip events (≥5 consecutive samples >${SLIP_NOISE_FLOOR} RPM, gear shifts and lock transitions excluded)`,
     `Peak slip: ${maxSlip.toFixed(0)} RPM`,
     `Average RPM during slip: ${avgRpmObserved(slipEventsUnderLock)} RPM`,
     `Average speed during slip: ${avgSpeed.toFixed(0)} mph`,
@@ -271,9 +314,10 @@ function analyzeTccBehavior(
     evidence,
     suggestion,
     betaNote:
-      'PPEI AI Beta: Slip pattern analysis uses consecutive-sample confirmation to filter sensor noise. ' +
-      'Load-correlation logic compares slip events against RPM/VSS thresholds to distinguish ' +
-      'mechanical wear from solenoid/hydraulic faults.',
+      'PPEI AI Beta: Slip pattern analysis uses ±15 RPM noise-floor filtering (logging tool signal noise), ' +
+      'gear-shift exclusion (±8 samples around gear changes), lock-transition grace period (±10 samples), ' +
+      'and 5-consecutive-sample confirmation. Load-correlation logic compares slip events against ' +
+      'RPM/VSS thresholds to distinguish mechanical wear from solenoid/hydraulic faults.',
   });
 
   return findings;

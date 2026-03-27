@@ -237,13 +237,52 @@ function parseDataloggerCSV(content: string): DuramaxData {
   const lines = content.split('\n').map(line => line.trim());
   if (lines.length < 2) throw new Error('Datalogger CSV has no data rows');
 
-  // Parse header — extract shortName from "SHORTNAME (unit)" format
+  // Parse header — extract shortName and unit from "SHORTNAME (unit)" format
   const rawHeaders = lines[0].split(',').map(h => h.trim());
-  const shortNames: string[] = rawHeaders.map(h => {
-    // Strip unit suffix: "RPM (rpm)" → "RPM", "Timestamp (ms)" → "Timestamp"
-    const match = h.match(/^([^(]+?)\s*\(/);
-    return match ? match[1].trim() : h.trim();
-  });
+  const shortNames: string[] = [];
+  const headerUnits: string[] = [];
+  for (const h of rawHeaders) {
+    const match = h.match(/^([^(]+?)\s*\(([^)]+)\)/);
+    if (match) {
+      shortNames.push(match[1].trim());
+      headerUnits.push(match[2].trim().toLowerCase());
+    } else {
+      shortNames.push(h.trim());
+      headerUnits.push('');
+    }
+  }
+
+  // Build unit conversion functions based on detected header units.
+  // OBD-II standard PIDs output in metric; we convert to imperial for consistency.
+  const unitConverters: Record<number, (v: number) => number> = {};
+  for (let i = 0; i < headerUnits.length; i++) {
+    const u = headerUnits[i];
+    if (u === '°c' || u === 'c' || u === 'celsius') {
+      // Celsius → Fahrenheit
+      unitConverters[i] = (v: number) => v <= -40 ? 0 : (v * 9 / 5) + 32;
+    } else if (u === 'km/h' || u === 'kph') {
+      // km/h → mph
+      unitConverters[i] = (v: number) => v * 0.621371;
+    } else if (u === 'g/s') {
+      // grams/sec → lb/min
+      unitConverters[i] = (v: number) => v * 0.132277;
+    } else if (u === 'l/h' || u === 'lph') {
+      // liters/hour → gallons/hour
+      unitConverters[i] = (v: number) => v * 0.264172;
+    } else if (u === 'kpa') {
+      // kPa → psi (for rail pressure, oil pressure, etc.)
+      unitConverters[i] = (v: number) => v * 0.145038;
+    } else if (u === 'bar') {
+      // bar → psi
+      unitConverters[i] = (v: number) => v * 14.5038;
+    } else if (u === 'nm' || u === 'n·m') {
+      // Newton-meters → lb-ft
+      unitConverters[i] = (v: number) => v * 0.737562;
+    } else if (u === 'kg/h') {
+      // kg/h → lb/min
+      unitConverters[i] = (v: number) => v * 0.03674;
+    }
+  }
 
   // Find time column
   const elapsedIdx = shortNames.indexOf('Elapsed');
@@ -297,7 +336,10 @@ function parseDataloggerCSV(content: string): DuramaxData {
     const idx = channelColumns[channel];
     if (idx === undefined || idx >= values.length) return 0;
     const v = values[idx];
-    return isNaN(v) ? 0 : v;
+    if (isNaN(v)) return 0;
+    // Apply unit conversion if the header unit is metric
+    const converter = unitConverters[idx];
+    return converter ? converter(v) : v;
   };
 
   // Track last known values for sparse data (datalogger fills progressively)
@@ -307,8 +349,11 @@ function parseDataloggerCSV(content: string): DuramaxData {
     if (idx === undefined || idx >= values.length) return lastKnown[channel] ?? 0;
     const raw = values[idx];
     if (isNaN(raw) || raw === undefined) return lastKnown[channel] ?? 0;
-    lastKnown[channel] = raw;
-    return raw;
+    // Apply unit conversion if the header unit is metric
+    const converter = unitConverters[idx];
+    const converted = converter ? converter(raw) : raw;
+    lastKnown[channel] = converted;
+    return converted;
   };
 
   let startTime = 0;
@@ -341,15 +386,13 @@ function parseDataloggerCSV(content: string): DuramaxData {
     offset.push(elapsed);
     rpm.push(rpmVal);
     maf.push(getValWithFill(values, 'maf'));
-    const boostVal = getValWithFill(values, 'boost');
-    // MAP values from datalogger are in kPa — convert to gauge PSI
-    // MAP at idle ≈ 100 kPa (atmospheric). Values > 100 = positive boost.
-    const mapKpa = boostVal;
+    // MAP/BARO: auto-converter already handles kPa→psi if header says (kPa).
+    // After conversion, values are in psi absolute. Derive gauge boost from MAP-BARO.
+    const mapPsia = getValWithFill(values, 'boost');
     const baroVal = getValWithFill(values, 'barometricPressure');
-    const baroPsia = baroVal > 0 ? baroVal * 0.145038 : 14.696;
-    const mapPsia = mapKpa > 0 ? mapKpa * 0.145038 : 0;
+    const baroPsia = baroVal > 0 ? baroVal : 14.696;
     mapAbsolute.push(mapPsia);
-    // If MAP > baro, there's positive boost
+    // If MAP > baro, there's positive boost (gauge pressure)
     boost.push(Math.max(0, mapPsia - baroPsia));
     torquePercent.push(loadVal);
     maxTorque.push(879.174); // Default Duramax max torque lb-ft
@@ -370,7 +413,7 @@ function parseDataloggerCSV(content: string): DuramaxData {
     coolantTemp.push(getValWithFill(values, 'coolantTemp'));
     oilTemp.push(getValWithFill(values, 'oilTemp'));
     transFluidTemp.push(getValWithFill(values, 'transFluidTemp'));
-    barometricPressure.push(baroPsia);
+    barometricPressure.push(baroPsia); // already in psi from auto-converter or default 14.696
     throttlePosition.push(getValWithFill(values, 'throttlePosition'));
   }
 
@@ -568,14 +611,55 @@ function parseHPTunersCSV(content: string): DuramaxData {
   // ── Data start: skip units row, blank lines, and section markers ──────────
   // After the header row there may be: units row, blank line, '[Channel Data]' marker.
   // Scan forward from headerIndex+1 to find the first row that looks like numeric data.
+  // Also capture the units row for metric-to-imperial conversion.
   let dataStart = headerIndex + 1;
+  let hptUnits: string[] = [];
   for (let i = headerIndex + 1; i < Math.min(headerIndex + 6, lines.length); i++) {
-    const firstVal = parseFloat(lines[i].split(',')[0]);
+    const cols = lines[i].split(',').map(c => c.trim());
+    const firstVal = parseFloat(cols[0]);
     if (!isNaN(firstVal)) {
       dataStart = i;
       break;
     }
+    // Units row: contains unit strings like 's', 'rpm', '°F', 'L/h', 'kPa', etc.
+    // Heuristic: row has at least 3 cols and contains known unit strings
+    if (cols.length >= 3 && cols.some(c => /^(s|rpm|%|°[FC]|psi|kPa|mph|km\/h|lb\/min|g\/s|L\/h|V|ms|lb·ft|Nm|gal|mi)$/i.test(c))) {
+      hptUnits = cols.map(c => c.toLowerCase());
+    }
   }
+
+  // Build per-column metric→imperial converters from the HP Tuners units row.
+  // Most HP Tuners logs are already in imperial, but some columns may be metric
+  // (e.g., Engine Fuel Rate in L/h, temps in °C, pressures in kPa).
+  const hptConverters: Record<number, (v: number) => number> = {};
+  if (hptUnits.length > 0) {
+    for (let i = 0; i < hptUnits.length; i++) {
+      const u = hptUnits[i];
+      if (u === '°c' || u === 'c' || u === 'celsius') {
+        hptConverters[i] = (v: number) => v <= -40 ? 0 : (v * 9 / 5) + 32;
+      } else if (u === 'km/h' || u === 'kph') {
+        hptConverters[i] = (v: number) => v * 0.621371;
+      } else if (u === 'g/s') {
+        hptConverters[i] = (v: number) => v * 0.132277;
+      } else if (u === 'l/h' || u === 'lph') {
+        hptConverters[i] = (v: number) => v * 0.264172;
+      } else if (u === 'kpa') {
+        hptConverters[i] = (v: number) => v * 0.145038;
+      } else if (u === 'bar') {
+        hptConverters[i] = (v: number) => v * 14.5038;
+      } else if (u === 'nm' || u === 'n·m') {
+        hptConverters[i] = (v: number) => v * 0.737562;
+      } else if (u === 'kg/h') {
+        hptConverters[i] = (v: number) => v * 0.03674;
+      }
+    }
+  }
+
+  // Helper: apply HP Tuners unit conversion for a column index
+  const hptConvert = (idx: number, v: number): number => {
+    const conv = hptConverters[idx];
+    return conv ? conv(v) : v;
+  };
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -616,33 +700,33 @@ function parseHPTunersCSV(content: string): DuramaxData {
     
     if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
     
-    const baroVal = baroIdx !== -1 ? (values[baroIdx] || 14.7) : 14.7;
-    const mapPsia = boostIdx !== -1 ? values[boostIdx] : 0;
+    const baroVal = baroIdx !== -1 ? hptConvert(baroIdx, values[baroIdx] || 14.7) : 14.7;
+    const mapPsia = boostIdx !== -1 ? hptConvert(boostIdx, values[boostIdx]) : 0;
     
     rpm.push(values[rpmIdx] || 0);
-    maf.push(values[mafIdx] || 0);
-    // HP Tuners 'Intake Manifold Absolute Pressure' is PSIA; store raw for fallback
+    maf.push(hptConvert(mafIdx, values[mafIdx] || 0));
+    // HP Tuners MAP — hptConvert handles kPa→psi if units row says kPa
     mapAbsolute.push(mapPsia);
     // If a direct gauge boost PID exists, use it; otherwise MAP - baro = gauge
     if (boostGaugePsigIdx !== -1) {
-      boost.push(Math.max(0, values[boostGaugePsigIdx]));
+      boost.push(Math.max(0, hptConvert(boostGaugePsigIdx, values[boostGaugePsigIdx])));
     } else if (boostIdx !== -1) {
       boost.push(Math.max(0, mapPsia - baroVal));
     } else {
       boost.push(0);
     }
     torquePercent.push(values[torqueIdx] || 0);
-    maxTorque.push(maxTorqueIdx !== -1 ? values[maxTorqueIdx] : 879.174);
-    vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
-    fuelRate.push(fuelRateIdx !== -1 ? values[fuelRateIdx] : 0);
+    maxTorque.push(maxTorqueIdx !== -1 ? hptConvert(maxTorqueIdx, values[maxTorqueIdx]) : 879.174);
+    vehicleSpeed.push(speedIdx !== -1 ? hptConvert(speedIdx, values[speedIdx]) : 0);
+    fuelRate.push(fuelRateIdx !== -1 ? hptConvert(fuelRateIdx, values[fuelRateIdx]) : 0);
     offset.push(offsetIdx !== -1 ? values[offsetIdx] : i - dataStart);
-    railPressureActual.push(railActualIdx !== -1 ? values[railActualIdx] : 0);
-    railPressureDesired.push(railDesiredIdx !== -1 ? values[railDesiredIdx] : 0);
+    railPressureActual.push(railActualIdx !== -1 ? hptConvert(railActualIdx, values[railActualIdx]) : 0);
+    railPressureDesired.push(railDesiredIdx !== -1 ? hptConvert(railDesiredIdx, values[railDesiredIdx]) : 0);
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
-    boostDesired.push(boostDesiredIdx !== -1 ? values[boostDesiredIdx] : 0);
+    boostDesired.push(boostDesiredIdx !== -1 ? hptConvert(boostDesiredIdx, values[boostDesiredIdx]) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
-    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
+    exhaustGasTemp.push(egtIdx !== -1 ? hptConvert(egtIdx, values[egtIdx]) : 0);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     // Converter duty: prefer numeric column; fall back to TCC State text -> synthetic duty
     if (converterDutyIdx !== -1) {
@@ -676,10 +760,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
     } else {
       currentGear.push(0);
     }
-    oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
-    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
-    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
-    transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
+    oilPressure.push(oilPressureIdx !== -1 ? hptConvert(oilPressureIdx, values[oilPressureIdx]) : 0);
+    coolantTemp.push(coolantTempIdx !== -1 ? hptConvert(coolantTempIdx, values[coolantTempIdx]) : 0);
+    oilTemp.push(oilTempIdx !== -1 ? hptConvert(oilTempIdx, values[oilTempIdx]) : 0);
+    transFluidTemp.push(transFluidTempIdx !== -1 ? hptConvert(transFluidTempIdx, values[transFluidTempIdx]) : 0);
     barometricPressure.push(baroVal);
     throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
   }

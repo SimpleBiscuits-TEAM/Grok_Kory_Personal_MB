@@ -87,3 +87,20 @@
 ## Ford Raptor PID Display Issue
 - [x] Analyze Ford datalog to identify which PIDs stopped displaying (multi-PID batch response issue)
 - [x] Fix datalogger PID display stopping during recording on Ford (adaptive batch sizing + soft-disable with retry)
+
+## TCC Fault Detection Threshold Tuning
+- [x] Add ±15 RPM slip tolerance while converter is locked (logging tool signal noise floor)
+- [x] Exclude slip during gear shifts from fault detection (natural shift slip)
+- [x] Add grace period for lock/unlock transitions (pressure application delay)
+- [x] Distinguish duty cycle vs lockup pressure (high sustained pressure = max clamping, not fault)
+- [x] Update reasoning engine TCC analysis with same thresholds
+
+## Automatic Metric-to-Imperial Conversion
+- [x] Auto-convert °C to °F for all temperature PIDs (ECT, IAT, EGT, oil temp, etc.)
+- [x] Auto-convert kPa to psi for pressure PIDs (MAP, rail pressure, barometric)
+- [x] Auto-convert km/h to mph for vehicle speed
+- [x] Auto-convert L/h to gal/h for fuel rate
+- [x] Auto-convert g/s to lb/min for MAF
+- [x] Auto-convert bar to psi, Nm to lb-ft, kg/h to lb/min
+- [x] Apply unit-aware conversion in datalogger CSV parser (detects units from header)
+- [x] Apply unit-aware conversion in HP Tuners parser (detects units from units row)

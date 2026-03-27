@@ -55,6 +55,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   const converterPressure = data.converterPressure || [];
   const coolantTemp = data.coolantTemp || [];
   const timeMinutes = data.timeMinutes || [];
+  const currentGear = data.currentGear || [];
 
   // Debug logging — helps trace false positives
   if (railPressureActual.length > 0) {
@@ -144,7 +145,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
       converterSlip,
       converterDutyCycle,
       converterPressure,
-      rpm
+      rpm,
+      currentGear
     );
     issues.push(...converterIssues);
   }
@@ -167,7 +169,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   // P0741/P0742 - TCC Operation
   // Run when slip data is present; checkTccOperation handles missing duty cycle gracefully
   if (converterSlip.length > 0) {
-    issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm, converterPressure));
+    issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm, converterPressure, currentGear));
   }
 
   // P1089 - Rail Pressure High on Decel
@@ -633,37 +635,38 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
  *
  * Context-aware logic:
  * - EFILive LML/L5P: TCM.TCCPCSCP = TCC PCS commanded pressure in kPa
- *   1050 kPa = full lock command (zero slip target). Any slip >20 RPM
- *   while TCCPCSCP = 1050 is a confirmed slip under full lock.
+ *   1050 kPa = full lock command (zero slip target).
  * - HP Tuners / Banks: duty cycle 0-100%; >90% = full lock command.
  * - The check is ONLY meaningful when the TCM is commanding full lock.
  *   Slip during partial apply or open converter is normal and expected.
+ *
+ * Noise-floor awareness:
+ * - ±15 RPM slip while locked is normal — caused by the logging tool's
+ *   filtering/sampling of the TCM slip speed signal, not actual mechanical slip.
+ * - Gear shifts naturally cause brief slip spikes even with steady duty cycle;
+ *   samples within ±8 samples of a gear change are excluded.
+ * - Lock/unlock transitions have a hydraulic apply delay; samples within
+ *   ±10 samples of a lock-state change are excluded (grace period).
+ * - Sustained high duty/pressure at a constant value = max clamping force
+ *   commanding lock — this is normal operation, not a fault.
  */
 function checkConverterSlip(
   slip: number[],
   dutyCycle: number[],
   pressure: number[],
-  rpm: number[]
+  rpm: number[],
+  currentGear: number[] = []
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   if (slip.length === 0) return issues;
 
   // ── Determine which signal to use for "full lock" detection ──────────────
-  // Priority 1: EFILive kPa format (TCCPCSCP, values 400-1050 kPa)
-  // Priority 2: HP Tuners duty cycle % (0-100%)
-  // Priority 3: HP Tuners TCC Line Pressure psi (0-150 psi) — used when duty cycle is all zeros
   const maxDuty = dutyCycle.length > 0 ? Math.max(...dutyCycle.filter(v => v > 0)) : 0;
   const maxPressure = pressure.length > 0 ? Math.max(...pressure.filter(v => v > 0)) : 0;
   const dutyHasData = maxDuty > 5;
-  const isEFILiveKpa = maxDuty > 200; // kPa values will be 400-1050, duty% max 100
-  // When duty cycle is absent but TCC Line Pressure (psi) is present, use pressure as lock signal
-  // HP Tuners TCC Line Pressure: 0 psi = open, ~90-150 psi = full lock
+  const isEFILiveKpa = maxDuty > 200;
   const usePressureAsLock = !dutyHasData && maxPressure > 10;
 
-  // Full lock threshold varies by signal type:
-  // EFILive kPa: 1000+ kPa = full lock
-  // HP Tuners duty %: 90%+ = full lock
-  // HP Tuners line pressure psi: 80+ psi = full lock
   const FULL_LOCK_THRESHOLD = isEFILiveKpa ? 1000 : (usePressureAsLock ? 80 : 90);
   const lockSignal = (i: number) => {
     if (isEFILiveKpa || dutyHasData) return dutyCycle[i] ?? 0;
@@ -671,23 +674,68 @@ function checkConverterSlip(
     return 0;
   };
 
-  // Slip threshold: >20 RPM while fully locked = confirmed slip
-  const SLIP_THRESHOLD = 20;
-  // Minimum consecutive samples to confirm a slip event (not just sensor noise)
-  // At ~10 Hz sample rate, 3 samples = 300ms minimum duration
-  const MIN_CONSECUTIVE = 3;
+  // ── Build gear-shift exclusion mask ──────────────────────────────────────
+  // Mark samples within ±8 of a gear change as "shifting" — slip during
+  // shifts is expected because the converter naturally slips while the
+  // transmission is changing ratios, even with steady duty cycle.
+  const SHIFT_EXCLUSION_WINDOW = 8;
+  const isShifting = new Uint8Array(slip.length);
+  if (currentGear.length >= slip.length) {
+    for (let i = 1; i < currentGear.length; i++) {
+      if (currentGear[i] !== currentGear[i - 1] && currentGear[i] > 0 && currentGear[i - 1] > 0) {
+        const start = Math.max(0, i - SHIFT_EXCLUSION_WINDOW);
+        const end = Math.min(slip.length - 1, i + SHIFT_EXCLUSION_WINDOW);
+        for (let j = start; j <= end; j++) isShifting[j] = 1;
+      }
+    }
+  }
+
+  // ── Build lock-transition grace period mask ──────────────────────────────
+  // When the TCM transitions between locked/unlocked, there is a hydraulic
+  // apply delay while pressure builds or bleeds. Slip during this window
+  // is expected and should not count as a fault.
+  const LOCK_GRACE_WINDOW = 10;
+  const isTransitioning = new Uint8Array(slip.length);
+  let prevLocked = lockSignal(0) >= FULL_LOCK_THRESHOLD;
+  for (let i = 1; i < slip.length; i++) {
+    const nowLocked = lockSignal(i) >= FULL_LOCK_THRESHOLD;
+    if (nowLocked !== prevLocked) {
+      const start = Math.max(0, i - LOCK_GRACE_WINDOW);
+      const end = Math.min(slip.length - 1, i + LOCK_GRACE_WINDOW);
+      for (let j = start; j <= end; j++) isTransitioning[j] = 1;
+    }
+    prevLocked = nowLocked;
+  }
+
+  // ── Slip analysis ───────────────────────────────────────────────────────
+  // Noise floor: ±15 RPM is normal logging-tool signal noise, not real slip.
+  // Only flag slip ABOVE this threshold while fully locked, outside of
+  // gear shifts and lock transitions.
+  const SLIP_NOISE_FLOOR = 15;
+  // Require 5 consecutive qualifying samples to confirm a real slip event
+  // (at ~10 Hz = 500ms sustained slip — filters out transient spikes)
+  const MIN_CONSECUTIVE = 5;
+
   let slipEventCount = 0;
   let maxSlipObserved = 0;
   let consecutiveSlip = 0;
   let slipWhileLockedCount = 0;
   let totalLockedSamples = 0;
+
   for (let i = 0; i < slip.length; i++) {
     const isFullyLocked = lockSignal(i) >= FULL_LOCK_THRESHOLD;
     const absSlip = Math.abs(slip[i]);
 
     if (isFullyLocked) {
+      // Skip samples during gear shifts or lock transitions — slip is expected
+      if (isShifting[i] || isTransitioning[i]) {
+        consecutiveSlip = 0;
+        continue;
+      }
+
       totalLockedSamples++;
-      if (absSlip > SLIP_THRESHOLD) {
+
+      if (absSlip > SLIP_NOISE_FLOOR) {
         consecutiveSlip++;
         slipWhileLockedCount++;
         maxSlipObserved = Math.max(maxSlipObserved, absSlip);
@@ -706,8 +754,10 @@ function checkConverterSlip(
 
   const slipRate = (slipWhileLockedCount / totalLockedSamples) * 100;
 
-  // Critical: frequent slip events under full lock command
-  if (slipEventCount >= 5 || slipRate > 15) {
+  // Critical: frequent sustained slip events under full lock command
+  // Thresholds raised to account for signal noise and normal operation:
+  // - Need 8+ confirmed events (was 5) and >20% slip rate (was 15%)
+  if (slipEventCount >= 8 || slipRate > 20) {
     const lockDesc = isEFILiveKpa
       ? `TCC PCS commanded pressure at full lock (≥1050 kPa)`
       : `TCC commanded at ≥90% duty cycle (full lock)`;
@@ -716,25 +766,29 @@ function checkConverterSlip(
       severity: 'critical',
       title: 'Torque Converter Slip Under Full Lock Command',
       description:
-        `${lockDesc}, yet the converter shows slip events exceeding ${SLIP_THRESHOLD} RPM ` +
-        `(${slipEventCount} confirmed events, peak slip: ${maxSlipObserved.toFixed(0)} RPM, ` +
-        `${slipRate.toFixed(1)}% of locked samples). ` +
+        `${lockDesc}, yet the converter shows sustained slip events exceeding ${SLIP_NOISE_FLOOR} RPM ` +
+        `(${slipEventCount} confirmed events after filtering shift/transition noise, ` +
+        `peak slip: ${maxSlipObserved.toFixed(0)} RPM, ` +
+        `${slipRate.toFixed(1)}% of steady-state locked samples). ` +
+        `Gear-shift and lock-transition samples were excluded from analysis. ` +
         `This is a confirmed TCC clutch slip — the converter is not holding under load.`,
       recommendation:
         'The torque converter clutch is slipping under full lock command. This indicates internal ' +
         'converter wear, a faulty TCC solenoid, or degraded transmission fluid. Have the converter ' +
         'and TCC solenoid inspected. Consider a transmission fluid service. Contact your transmission specialist.',
     });
-  } else if (slipEventCount >= 2 || slipRate > 5) {
-    // Warning: occasional slip events
+  } else if (slipEventCount >= 4 || slipRate > 10) {
+    // Warning: occasional sustained slip events (raised from 2 events / 5% rate)
     const lockDesc = isEFILiveKpa ? `TCC PCS at full lock (≥1050 kPa)` : `TCC at ≥90% duty`;
     issues.push({
       code: 'CONVERTER-SLIP-WARN',
       severity: 'warning',
       title: 'Intermittent TCC Slip Under Lock Command',
       description:
-        `${lockDesc}, the converter shows intermittent slip above ${SLIP_THRESHOLD} RPM ` +
-        `(${slipEventCount} events, peak: ${maxSlipObserved.toFixed(0)} RPM, ${slipRate.toFixed(1)}% of locked samples). ` +
+        `${lockDesc}, the converter shows intermittent slip above ${SLIP_NOISE_FLOOR} RPM ` +
+        `(${slipEventCount} events after filtering, peak: ${maxSlipObserved.toFixed(0)} RPM, ` +
+        `${slipRate.toFixed(1)}% of steady-state locked samples). ` +
+        `Gear-shift and lock-transition samples were excluded. ` +
         `May indicate early converter wear or a marginal TCC apply circuit.`,
       recommendation:
         'Monitor converter slip closely. Check transmission fluid level and condition. ' +
@@ -1012,20 +1066,22 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
  * - P0741 (stuck off): commanded full lock (≥1050 kPa) but sustained slip >50 RPM
  * - P0742 (stuck on): commanded open (<200 kPa) but near-zero slip at cruise speed
  *
- * For HP Tuners / Banks (duty cycle 0-100%):
- * - P0741: duty >90% but slip >50 RPM
- * - P0742: duty <15% but slip <10 RPM at cruise
+ * Noise-floor awareness (same as checkConverterSlip):
+ * - ±15 RPM slip is logging-tool signal noise, not mechanical slip
+ * - Gear shifts and lock transitions are excluded via grace windows
+ * - P0741 requires sustained slip >50 RPM (well above noise floor)
  */
 export function checkTccOperation(
   slip: number[],
   dutyCycle: number[],
   rpm: number[],
-  pressure: number[] = []
+  pressure: number[] = [],
+  currentGear: number[] = []
 ): DiagnosticIssue[] {
-   const issues: DiagnosticIssue[] = [];
+  const issues: DiagnosticIssue[] = [];
   if (!slip.length) return issues;
   // PID quality guard: if slip has no meaningful variation, sensor not logging
-  const slipHasData = slip.some(v => Math.abs(v) > 5);
+  const slipHasData = slip.some(v => Math.abs(v) > 15); // raised from 5 to 15 (noise floor)
   if (!slipHasData) return issues;
   // Detect EFILive kPa format vs HP Tuners % format vs HP Tuners line pressure psi
   const maxDuty = dutyCycle.length > 0 ? Math.max(...dutyCycle.filter(v => v > 0)) : 0;
@@ -1034,22 +1090,52 @@ export function checkTccOperation(
   const dutyCycleHasData = dutyCycle.some(v => v > 5);
   const usePressureAsLock = !dutyCycleHasData && maxPressure > 10;
   // Thresholds vary by format
-  const FULL_LOCK_THRESHOLD  = isEFILiveKpa ? 1000 : (usePressureAsLock ? 80 : 90);  // kPa, psi, or %
-  const OPEN_CONV_THRESHOLD  = isEFILiveKpa ? 200  : (usePressureAsLock ? 15 : 15);  // kPa, psi, or %
+  const FULL_LOCK_THRESHOLD  = isEFILiveKpa ? 1000 : (usePressureAsLock ? 80 : 90);
+  const OPEN_CONV_THRESHOLD  = isEFILiveKpa ? 200  : (usePressureAsLock ? 15 : 15);
   const lockVal = (i: number) => usePressureAsLock ? (pressure[i] ?? 0) : (dutyCycle[i] ?? 0);
-  const SLIP_THRESHOLD_LOCKED = 50;  // RPM — sustained slip while fully locked
+  const SLIP_THRESHOLD_LOCKED = 50;  // RPM — well above 15 RPM noise floor
   const SLIP_THRESHOLD_OPEN   = 10;  // RPM — near-zero slip while commanded open
   const MIN_RPM = 1500;
+
+  // Build gear-shift exclusion mask (same as checkConverterSlip)
+  const SHIFT_EXCLUSION_WINDOW = 8;
+  const isShifting = new Uint8Array(slip.length);
+  if (currentGear.length >= slip.length) {
+    for (let i = 1; i < currentGear.length; i++) {
+      if (currentGear[i] !== currentGear[i - 1] && currentGear[i] > 0 && currentGear[i - 1] > 0) {
+        const start = Math.max(0, i - SHIFT_EXCLUSION_WINDOW);
+        const end = Math.min(slip.length - 1, i + SHIFT_EXCLUSION_WINDOW);
+        for (let j = start; j <= end; j++) isShifting[j] = 1;
+      }
+    }
+  }
+
+  // Build lock-transition grace period mask
+  const LOCK_GRACE_WINDOW = 10;
+  const isTransitioning = new Uint8Array(slip.length);
+  let prevLocked = lockVal(0) >= FULL_LOCK_THRESHOLD;
+  for (let i = 1; i < slip.length; i++) {
+    const nowLocked = lockVal(i) >= FULL_LOCK_THRESHOLD;
+    if (nowLocked !== prevLocked) {
+      const start = Math.max(0, i - LOCK_GRACE_WINDOW);
+      const end = Math.min(slip.length - 1, i + LOCK_GRACE_WINDOW);
+      for (let j = start; j <= end; j++) isTransitioning[j] = 1;
+    }
+    prevLocked = nowLocked;
+  }
 
   let stuckOffCount = 0;
   let stuckOnCount = 0;
 
   for (let i = 0; i < slip.length; i++) {
     if (rpm[i] < MIN_RPM) continue;
-    const absSlip = Math.abs(slip[i]);
+    // Skip gear shifts and lock transitions
+    if (isShifting[i] || isTransitioning[i]) continue;
 
+    const absSlip = Math.abs(slip[i]);
     const lv = lockVal(i);
-    // P0741: commanded full lock but sustained slip
+
+    // P0741: commanded full lock but sustained slip (well above noise floor)
     if ((dutyCycleHasData || usePressureAsLock) && lv >= FULL_LOCK_THRESHOLD && absSlip > SLIP_THRESHOLD_LOCKED) {
       stuckOffCount++;
     }
@@ -1058,29 +1144,35 @@ export function checkTccOperation(
       stuckOnCount++;
     }
   }
+
   const lockLabel = isEFILiveKpa ? `≥${FULL_LOCK_THRESHOLD} kPa (full lock)` : (usePressureAsLock ? `≥${FULL_LOCK_THRESHOLD} psi line pressure` : `>${FULL_LOCK_THRESHOLD}% duty cycle`);
   const openLabel = isEFILiveKpa ? `<${OPEN_CONV_THRESHOLD} kPa (open)` : (usePressureAsLock ? `<${OPEN_CONV_THRESHOLD} psi line pressure` : `<${OPEN_CONV_THRESHOLD}% duty cycle`);
-  if ((dutyCycleHasData || usePressureAsLock) && stuckOffCount > 30) {
+
+  // Raised threshold from 30 to 50 samples to reduce false positives
+  if ((dutyCycleHasData || usePressureAsLock) && stuckOffCount > 50) {
     issues.push({
       code: 'P0741',
       severity: 'critical',
       title: 'Torque Converter Clutch Stuck Off (P0741)',
       description:
         `TCC commanded at ${lockLabel} but showed >${SLIP_THRESHOLD_LOCKED} RPM slip for ` +
-        `${stuckOffCount} samples. The converter clutch is not engaging properly.`,
+        `${stuckOffCount} samples (gear shifts and lock transitions excluded). ` +
+        `The converter clutch is not engaging properly.`,
       recommendation:
         'Check transmission fluid level and condition. Test TCC solenoid. Inspect torque converter for internal wear. Consider transmission service.',
     });
   }
 
-  if (dutyCycleHasData && stuckOnCount > 50) {
+  // Raised threshold from 50 to 75 samples
+  if (dutyCycleHasData && stuckOnCount > 75) {
     issues.push({
       code: 'P0742',
       severity: 'warning',
       title: 'Torque Converter Clutch Stuck On (P0742)',
       description:
         `TCC commanded ${openLabel} but showed near-zero slip (<${SLIP_THRESHOLD_OPEN} RPM) ` +
-        `for ${stuckOnCount} samples at cruise. The converter clutch may be stuck applied.`,
+        `for ${stuckOnCount} samples at cruise (gear shifts excluded). ` +
+        `The converter clutch may be stuck applied.`,
       recommendation:
         'Inspect TCC solenoid and hydraulic circuit. Check transmission fluid for contamination. Have transmission inspected for stuck TCC apply circuit.',
     });
