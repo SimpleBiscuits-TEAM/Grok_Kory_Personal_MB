@@ -178,7 +178,9 @@ const VIN_CONFIGS: Record<string, VinConfig> = {
 // ─── TRANSMISSION DECODER ─────────────────────────────────────────────────────
 
 function getTransmissionInfo(year: number, engineCode: string): { name: string; code: string } {
-  if (year >= 2020) {
+  if (year >= 2024) {
+    return { name: 'Allison 10L1000 10-Speed Automatic', code: '10L1000' };
+  } else if (year >= 2020) {
     return { name: 'Allison 10-Speed Automatic (MYC)', code: 'MYC' };
   } else if (year >= 2017) {
     return { name: 'Allison 6-Speed Automatic (MYD)', code: 'MYD' };
@@ -208,7 +210,27 @@ interface EngineDetail {
 }
 
 function getEngineDetail(year: number, engineChar: string): EngineDetail {
-  // L5P (2017–present)
+  // L5P Gen 2 (2024+) — E42 ECM, Global B architecture
+  if (year >= 2024 && (engineChar === 'Y' || engineChar === 'L')) {
+    return {
+      name: 'Duramax L5P Gen 2 6.6L Turbodiesel V8',
+      code: 'L5P',
+      displacement: '6.6L (402 cu in)',
+      hp: 470,
+      torque: 975,
+      peakTorqueRpm: 1600,
+      peakHpRpm: 2800,
+      redline: 3500,
+      injectionSystem: 'Denso HP4 High-Pressure Common Rail (up to 32,000 psi)',
+      maxRailPressure: '32,000 psi (220 MPa)',
+      turbocharger: 'Garrett Variable Geometry Turbocharger (VGT) — 10-blade, enhanced actuator',
+      aftertreatment: 'DOC + DPF + SCR (DEF/AdBlue) + EGR',
+      oilCapacity: '10 qts (9.5L) with filter',
+      coolantCapacity: '~23 qts (21.7L)',
+      defTankCapacity: '5.3 gal (20L)',
+    };
+  }
+  // L5P Gen 1 (2017–2023) — E41 ECM
   if (year >= 2017 && (engineChar === 'Y' || engineChar === 'L')) {
     return {
       name: 'Duramax L5P 6.6L Turbodiesel V8',
@@ -219,7 +241,7 @@ function getEngineDetail(year: number, engineChar: string): EngineDetail {
       peakTorqueRpm: 1600,
       peakHpRpm: 3000,
       redline: 3500,
-      injectionSystem: 'Bosch HP4 High-Pressure Common Rail (up to 29,000 psi)',
+      injectionSystem: 'Denso HP4 High-Pressure Common Rail (up to 29,000 psi)',
       maxRailPressure: '29,000 psi (200 MPa)',
       turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
       aftertreatment: 'DOC + DPF + SCR (DEF/AdBlue) + EGR',

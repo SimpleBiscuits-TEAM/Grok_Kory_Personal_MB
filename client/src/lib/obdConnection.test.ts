@@ -194,6 +194,31 @@ describe('GM_EXTENDED_PIDS', () => {
     expect(categories.has('engine')).toBe(true);
   });
 
+  it('all GM PIDs have ECU header addresses', () => {
+    for (const pid of GM_EXTENDED_PIDS) {
+      expect(pid.ecuHeader).toBeDefined();
+      expect(pid.ecuHeader!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('engine/fuel/turbo/exhaust PIDs use ECM header 7E0', () => {
+    const ecmCategories = ['fuel', 'turbo', 'exhaust', 'def', 'emissions', 'engine'];
+    const ecmPids = GM_EXTENDED_PIDS.filter(p => ecmCategories.includes(p.category!));
+    for (const pid of ecmPids) {
+      if (pid.category !== 'transmission') {
+        expect(pid.ecuHeader).toBe('7E0');
+      }
+    }
+  });
+
+  it('transmission PIDs use TCM header 7E1', () => {
+    const tcmPids = GM_EXTENDED_PIDS.filter(p => p.category === 'transmission');
+    expect(tcmPids.length).toBeGreaterThan(0);
+    for (const pid of tcmPids) {
+      expect(pid.ecuHeader).toBe('7E1');
+    }
+  });
+
   it('has all 8 injector balance rates', () => {
     const ibrs = GM_EXTENDED_PIDS.filter(p => p.shortName.startsWith('IBR_'));
     expect(ibrs.length).toBe(8);
@@ -344,7 +369,10 @@ describe('PID_PRESETS', () => {
     expect(names).toContain('Engine Basics');
     expect(names).toContain('Fuel Trims');
     expect(names).toContain('Transmission');
-    expect(names).toContain('Full Duramax');
+    expect(names).toContain('Full Duramax (Gen 1 / 2017-2023)');
+    expect(names).toContain('Full Duramax (Gen 2 / 2024+)');
+    expect(names).toContain('Duramax Fuel System (Extended)');
+    expect(names).toContain('Duramax DPF / DEF / Emissions');
     expect(names).toContain('Diesel Turbo/Boost');
     expect(names).toContain('Gas Engine Monitor');
   });
@@ -371,10 +399,28 @@ describe('PID_PRESETS', () => {
     }
   });
 
-  it('Full Duramax preset has 7 PIDs', () => {
-    const fullDuramax = PID_PRESETS.find(p => p.name === 'Full Duramax')!;
+  it('Full Duramax Gen 1 preset has 7 PIDs', () => {
+    const fullDuramax = PID_PRESETS.find(p => p.name === 'Full Duramax (Gen 1 / 2017-2023)')!;
     expect(fullDuramax).toBeDefined();
     expect(fullDuramax.pids.length).toBe(7);
+  });
+
+  it('Full Duramax Gen 2 preset has 12 PIDs with Mode 22 extended PIDs', () => {
+    const gen2 = PID_PRESETS.find(p => p.name === 'Full Duramax (Gen 2 / 2024+)')!;
+    expect(gen2).toBeDefined();
+    expect(gen2.pids.length).toBe(12);
+    // Should include Mode 22 PIDs (>= 0x0500)
+    const mode22Pids = gen2.pids.filter(p => p >= 0x0500);
+    expect(mode22Pids.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('Duramax Fuel System Extended preset includes injector balance rates', () => {
+    const fuelPreset = PID_PRESETS.find(p => p.name === 'Duramax Fuel System (Extended)')!;
+    expect(fuelPreset).toBeDefined();
+    // Should include all 8 IBR PIDs (0x1940-0x1947)
+    for (let i = 0x1940; i <= 0x1947; i++) {
+      expect(fuelPreset.pids).toContain(i);
+    }
   });
 });
 

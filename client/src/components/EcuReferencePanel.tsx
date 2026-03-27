@@ -338,8 +338,8 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                 <div>
                   <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', marginBottom: '8px' }}>PERFORMANCE (STOCK)</h4>
                   <div style={{ background: 'oklch(0.11 0.005 260)', border: '1px solid oklch(0.20 0.008 260)', borderRadius: '2px', padding: '10px 12px' }}>
-                    <SpecRow label="Peak Horsepower" value={`${L5P_SPECS.performance.stockHp} HP @ ${L5P_SPECS.performance.peakHpRpm} RPM`} />
-                    <SpecRow label="Peak Torque" value={`${L5P_SPECS.performance.stockTorque} lb·ft @ ${L5P_SPECS.performance.peakTorqueRpm} RPM`} />
+                    <SpecRow label="Peak HP (Gen 1 / Gen 2)" value={`${L5P_SPECS.performance.stockHp} / ${L5P_SPECS.performance.stockHpGen2} HP`} />
+                    <SpecRow label="Peak Torque (Gen 1 / Gen 2)" value={`${L5P_SPECS.performance.stockTorque} / ${L5P_SPECS.performance.stockTorqueGen2} lb·ft`} />
                     <SpecRow label="Redline" value={`${L5P_SPECS.performance.redline} RPM`} />
                     <SpecRow label="Idle Speed" value={`${L5P_SPECS.performance.idleRpm} RPM (warm)`} />
                     <SpecRow label="Max Boost (Stock)" value={`~${L5P_SPECS.performance.maxBoostStock} psi`} />
@@ -351,7 +351,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                   <div style={{ background: 'oklch(0.11 0.005 260)', border: '1px solid oklch(0.20 0.008 260)', borderRadius: '2px', padding: '10px 12px' }}>
                     <SpecRow label="EGT Warning" value={`>${L5P_SPECS.operatingLimits.maxEgt1_F}°F (sustained >5s)`} />
                     <SpecRow label="EGT Sensor Fail" value={`>${L5P_SPECS.operatingLimits.maxEgt1_stuck_F}°F (stuck = disconnected)`} />
-                    <SpecRow label="Max Rail Pressure" value={`${L5P_SPECS.operatingLimits.maxRailPressure_psi.toLocaleString()} psi`} />
+                    <SpecRow label="Max Rail Pressure (Gen 1 / Gen 2)" value={`${L5P_SPECS.operatingLimits.maxRailPressure_psi.toLocaleString()} / ${L5P_SPECS.operatingLimits.maxRailPressure_psi_gen2.toLocaleString()} psi`} />
                     <SpecRow label="MAF Idle (Normal)" value={`~${L5P_SPECS.operatingLimits.mafIdleNormal_gs} g/s (clean filter)`} />
                     <SpecRow label="MAF Idle (Range)" value={`${L5P_SPECS.operatingLimits.mafIdleMin_lbMin}–${L5P_SPECS.operatingLimits.mafIdleMax_lbMin} lb/min`} />
                     <SpecRow label="MAF at WOT (Stock)" value={`~${L5P_SPECS.operatingLimits.mafMaxLoad_lbMin} lb/min`} />

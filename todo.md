@@ -117,3 +117,12 @@
 - [x] Sync healthReport.ts thresholds with new diagnostics.ts (P0087: 5000psi/100 samples, P0088: 2500psi/80 samples, TCC: 25/50 RPM / 150 samples)
 - [x] Update reasoning engine TCC analysis (noise floor 25 RPM, shift window 15, lock grace 20, converging slip exclusion, 15 consecutive samples)
 - [x] Write false-positive prevention vitest (10 tests covering transients, low RPM, low throttle, gear shifts, converging slip, lock transitions)
+
+## 2024 L5P Duramax Datalogger Detection Fix
+- [x] Research 2024 L5P OBD-II changes (E42 ECM, directed addressing required, 470hp/975tq, 10L1000 trans)
+- [x] Fix VIN decoder to recognize 2024+ L5P Gen 2 (E42 ECM, updated specs)
+- [x] Fix OBD communication for 2024 L5P (added ecuHeader 7E0/7E1 to all 48 GM PIDs, ATSH switching in readPid/readPids/scanSupportedDIDs)
+- [x] Add Gen 2 Duramax presets (Full Gen 2, Fuel System Extended, DPF/DEF/Emissions)
+- [x] Update vehicle knowledge base with Gen 2 L5P specs (E42 ECM, 32000 psi rail, 470hp/975tq)
+- [x] Update ECU reference panel for Gen 1 vs Gen 2 display
+- [x] Update tests for 2024 L5P detection (286 tests passing)
