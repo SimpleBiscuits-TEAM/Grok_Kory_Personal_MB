@@ -8,6 +8,7 @@
 import jsPDF from 'jspdf';
 import { ProcessedMetrics } from './dataProcessor';
 import { VehicleInfo } from './vinLookup';
+import { getCalibrationContext, type AnalysisInsight } from './l5pEcuReference';
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 const TEXT_DARK: [number, number, number] = [40, 40, 40];
@@ -532,6 +533,59 @@ function getConverterStallAnalysis(
   return `Converter stall analysis: Maximum slip of ${maxSlipAtLaunch.toFixed(0)} RPM was observed at ${launchRpm.toFixed(0)} engine RPM during low-speed operation. As you increase power (especially with a larger turbo), the power curve shifts to the right — a converter with a stall speed matched to where peak torque now lives keeps the engine in the power band during launches and heavy pulls. A mismatched converter leaves power on the table or generates excessive heat.`;
 }
 
+// ── ECU Context Box ─────────────────────────────────────────────────────────
+
+function renderEcuContextBox(
+  observation: Parameters<typeof getCalibrationContext>[0],
+  doc: jsPDF,
+  margin: number,
+  contentWidth: number,
+  checkBreak: (space: number) => void,
+  getY: () => number,
+  setY: (y: number) => void,
+): void {
+  const insight = getCalibrationContext(observation);
+  if (!insight || insight.subsystem === 'Unknown') return;
+
+  checkBreak(22);
+  const boxX = margin + 2;
+  const boxW = contentWidth - 4;
+  const y0 = getY();
+
+  // Measure text height
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  const lines = doc.splitTextToSize(insight.context, boxW - 6);
+  const textH = lines.length * 3;
+  const boxH = textH + 12;
+
+  // Draw box
+  doc.setFillColor(243, 244, 248);
+  doc.setDrawColor(200, 205, 215);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(boxX, y0, boxW, boxH, 1, 1, 'FD');
+
+  // Header
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(80, 90, 120);
+  doc.text(`ECU REFERENCE: ${insight.title}`, boxX + 3, y0 + 4.5);
+
+  // Subsystem tag
+  doc.setFontSize(5.5);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(120, 130, 150);
+  doc.text(`Subsystem: ${insight.subsystem}`, boxX + 3, y0 + 8);
+
+  // Context text
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 85, 95);
+  doc.text(lines, boxX + 3, y0 + 11.5);
+
+  setY(y0 + boxH + 2);
+}
+
 // ── Main Export ──────────────────────────────────────────────────────────────
 
 export interface AdvancedAnalyticsResult {
@@ -659,6 +713,21 @@ export function renderAdvancedAnalytics(
       }
     }
 
+    // ECU context for injector/timing
+    if (hasInjector) {
+      const maxPw = Math.max(...data.injectorPulseWidth.filter(v => v > 0));
+      const spicyThreshold = isPiezo ? 1.5 : 2.5;
+      if (maxPw > spicyThreshold * 0.8) {
+        renderEcuContextBox('injector_pulse_high', doc, margin, contentWidth, checkBreak, getY, setY);
+      }
+    }
+    if (hasTiming) {
+      const maxTiming = Math.max(...data.injectionTiming.filter(v => v > 0));
+      if (maxTiming > 22) {
+        renderEcuContextBox('timing_aggressive', doc, margin, contentWidth, checkBreak, getY, setY);
+      }
+    }
+
     setY(getY() + 3);
   }
 
@@ -708,6 +777,17 @@ export function renderAdvancedAnalytics(
       if (boostVaneResult.commentary) {
         const commentColor: [number, number, number] = boostVaneResult.leakSuspected ? PPEI_RED : TEXT_BODY;
         addWrappedText(boostVaneResult.commentary, 8, boostVaneResult.leakSuspected ? 'bold' : 'normal', commentColor, 1.3);
+      }
+
+      // ECU context for boost deviation
+      if (hasDesiredBoost && data.boost.some(v => v > 0)) {
+        const boostDiffs = data.boost.map((v, i) => Math.abs(v - (data.boostDesired[i] || 0))).filter(v => v > 3);
+        if (boostDiffs.length > data.boost.length * 0.15) {
+          renderEcuContextBox('boost_deviation', doc, margin, contentWidth, checkBreak, getY, setY);
+        }
+      }
+      if (boostVaneResult.leakSuspected) {
+        renderEcuContextBox('low_boost', doc, margin, contentWidth, checkBreak, getY, setY);
       }
 
       // Vane desired vs actual
@@ -780,6 +860,30 @@ export function renderAdvancedAnalytics(
         addWrappedText(railResult.commentary, 8, 'normal', TEXT_BODY, 1.3);
       }
 
+      // ECU context for rail pressure
+      if (hasRealData(data.railPressureActual)) {
+        const maxRail = Math.max(...data.railPressureActual.filter(v => v > 0));
+        if (maxRail > oemPeakRail + 2000) {
+          renderEcuContextBox('rail_pressure_high', doc, margin, contentWidth, checkBreak, getY, setY);
+        }
+        // Check for hunting
+        const railDiffs: number[] = [];
+        const railValid = data.railPressureActual.filter(v => v > 5000);
+        for (let i = 1; i < railValid.length; i++) {
+          railDiffs.push(Math.abs(railValid[i] - railValid[i - 1]));
+        }
+        const avgDiff = railDiffs.length > 0 ? railDiffs.reduce((a, b) => a + b, 0) / railDiffs.length : 0;
+        if (avgDiff > 800) {
+          renderEcuContextBox('rail_pressure_hunting', doc, margin, contentWidth, checkBreak, getY, setY);
+        }
+      }
+      if (hasPcv) {
+        const maxPcv = Math.max(...data.pcvDutyCycle.filter(v => v > 0));
+        if (maxPcv > 90) {
+          renderEcuContextBox('pcv_maxed', doc, margin, contentWidth, checkBreak, getY, setY);
+        }
+      }
+
       setY(getY() + 3);
     }
   }
@@ -808,6 +912,9 @@ export function renderAdvancedAnalytics(
 
     setY(getY() + 3);
   }
+
+  // ── Boost leak ECU context ────────────────────────────────────────────────
+  // (Rendered after the boost/MAF/vane graph if leak is suspected)
 
   // ── 5. MANIFOLD AIR DENSITY (MAD) ────────────────────────────────────────
   if (data.boost.some(v => v > 0) && hasIat) {
@@ -871,6 +978,22 @@ export function renderAdvancedAnalytics(
       checkBreak(20);
       addWrappedText(stallComment, 8, 'normal', TEXT_BODY, 1.3);
       setY(getY() + 3);
+    }
+  }
+
+  // ── EGT ECU context ──────────────────────────────────────────────────────
+  if (hasRealData(data.exhaustGasTemp)) {
+    const maxEgt = Math.max(...data.exhaustGasTemp.filter(v => v > 100));
+    if (maxEgt > 1200) {
+      renderEcuContextBox('high_egt', doc, margin, contentWidth, checkBreak, getY, setY);
+    }
+  }
+
+  // ── TCC ECU context ──────────────────────────────────────────────────────
+  if (hasRealData(data.converterSlip)) {
+    const maxSlip = Math.max(...data.converterSlip.map(Math.abs));
+    if (maxSlip > 100) {
+      renderEcuContextBox('tcc_slip', doc, margin, contentWidth, checkBreak, getY, setY);
     }
   }
 

@@ -219,3 +219,11 @@
 - [x] BASIC section: customer-friendly overview with simple graphs, plain-language summaries, system scores, findings, recommendations
 - [x] ADVANCED section: correlated multi-parameter analysis (injector/timing, CAD/TDC, boost/vane, rail/PCV, MAF/boost leak, MAD, converter stall)
 - [x] Add clear visual divider/header between Basic and Advanced sections (blue banner for Basic, red banner for Advanced, new page break)
+
+## L5P ECU Reference Module (E41 A2L)
+- [x] Parse and categorize the 71,220 E41 calibration parameters into functional groups (15 subsystems mapped)
+- [x] Map GM internal naming convention (Kt/Ka/Ke prefixes, AICC/FHPC/FULC/ETQC subsystems) to human-readable descriptions
+- [x] Build L5P-specific knowledge base: fuel system (SOI timing, rail pressure setpoints, PCV), boost control (VGT feedforward, PID gains, boost setpoints), torque management, EGT monitoring, TCC control
+- [x] Integrate ECU reference into advanced health report PDF — conditional context boxes appear when thresholds are exceeded (12 observation types)
+- [x] Integrate ECU reference into diagnostics via calibration context (injector_pulse_high, timing_aggressive, boost_deviation, rail_pressure_high/hunting, high_egt, tcc_slip, low_boost, pcv_maxed, oil_pressure_low, regen_detected, vane_position_high)
+- [x] Add calibration structure info (table dimensions = RPM x load) to explain tuning relationships (e.g., AICC boost setpoint 20x21, FULC ET_InjTbl 22x20)
