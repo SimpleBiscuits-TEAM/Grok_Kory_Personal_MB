@@ -104,3 +104,16 @@
 - [x] Auto-convert bar to psi, Nm to lb-ft, kg/h to lb/min
 - [x] Apply unit-aware conversion in datalogger CSV parser (detects units from header)
 - [x] Apply unit-aware conversion in HP Tuners parser (detects units from units row)
+
+## False Positive Fault Detection Fix
+- [x] Fix false P0087 (low rail pressure) fault detection
+- [x] Fix false P0088 (high rail pressure) fault detection
+- [x] Fix false high TCC slip fault detection (still too sensitive after previous tuning)
+- [x] Fix false boost pressure deviation fault detection (desired vs actual boost too tight)
+- [x] Add transient exclusion for all pressure faults (rapid throttle changes, gear shifts, low RPM)
+- [x] Increase minimum sustained duration requirements for all pressure/boost faults
+- [x] Only flag TCC slip faults when TCC is truly locked (not during ControlledHyst or ImmediateOff states)
+- [x] Fix ECU calibration IDs in knowledge base: LLY=E60, LML 2011-2014=E86A, LML 2015-2016=E86B
+- [x] Sync healthReport.ts thresholds with new diagnostics.ts (P0087: 5000psi/100 samples, P0088: 2500psi/80 samples, TCC: 25/50 RPM / 150 samples)
+- [x] Update reasoning engine TCC analysis (noise floor 25 RPM, shift window 15, lock grace 20, converging slip exclusion, 15 consecutive samples)
+- [x] Write false-positive prevention vitest (10 tests covering transients, low RPM, low throttle, gear shifts, converging slip, lock transitions)

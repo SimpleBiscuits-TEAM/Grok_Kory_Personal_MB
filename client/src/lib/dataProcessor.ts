@@ -1546,6 +1546,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     oilTemp: downsample(data.oilTemp),
     transFluidTemp: downsample(data.transFluidTemp),
     barometricPressure: downsample(data.barometricPressure),
+    throttlePosition: downsample(data.throttlePosition),
   };
 }
 

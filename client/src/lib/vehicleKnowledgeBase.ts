@@ -123,7 +123,7 @@ const LML_PLATFORM: VehiclePlatform = {
     'Turbocharger': 'Variable Geometry Turbo (VGT)',
     'Emissions': 'SCR + DPF + DOC + EGR',
     'Transmission': 'Allison 1000 6-speed',
-    'ECM': 'E98',
+    'ECM': 'E86A (2011-2014) / E86B (2015-2016)',
   },
   commonDTCs: [
     { code: 'P0087', description: 'Fuel Rail/System Pressure Too Low', severity: 'critical', commonCauses: ['CP4.2 pump failure (CRITICAL - can contaminate entire fuel system)', 'Fuel filter restriction', 'Injector leak-back', 'Lift pump failure'], diagnosticSteps: ['IMMEDIATELY check for metal in fuel filter - CP4 failure can destroy injectors, lines, and rail', 'Check lift pump pressure', 'Monitor rail pressure desired vs actual', 'Perform injector balance rate test'] },
@@ -148,7 +148,7 @@ const LML_PLATFORM: VehiclePlatform = {
     'LML was the first Duramax with DEF/SCR. Early models (2011-2012) had more DEF system issues.',
     'The LML uses the Allison 1000 6-speed transmission. TCC lockup behavior differs from the 10-speed in L5P.',
     'Injector balance rates are a critical diagnostic tool. Values beyond +/-6 mm3/stroke indicate injector issues.',
-    'The LML ECM (E98) is more accessible for tuning than the L5P E92.',
+    'The LML ECM (E86A for 2011-2014, E86B for 2015-2016) is more accessible for tuning than the L5P E92.',
     'Common CP4 failure symptoms: sudden loss of power, metallic debris in fuel filter, erratic rail pressure.',
   ],
 };
@@ -216,7 +216,7 @@ const LLY_PLATFORM: VehiclePlatform = {
     'Turbocharger': 'Garrett Variable Geometry Turbo',
     'Emissions': 'EGR (first Duramax with EGR)',
     'Transmission': 'Allison 1000 5-speed',
-    'ECM': 'E35',
+    'ECM': 'E60',
   },
   commonDTCs: [
     { code: 'P0087', description: 'Fuel Rail Pressure Too Low', severity: 'critical', commonCauses: ['CP3 pump wear', 'Fuel filter', 'Injector leak-back'], diagnosticSteps: ['Check fuel filter', 'Monitor rail pressure', 'Test injectors'] },

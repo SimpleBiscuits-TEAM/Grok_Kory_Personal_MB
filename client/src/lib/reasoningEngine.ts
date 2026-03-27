@@ -189,14 +189,15 @@ function analyzeTccBehavior(
   const lockLabel = ctx.tccPressureFormat === 'kpa_pcs' ? '1050 kPa (full lock)' : '90% duty (full lock)';
 
   // ── Noise-floor awareness ─────────────────────────────────────────────────
-  // ±15 RPM slip while locked is normal — caused by the logging tool's
+  // ±25 RPM slip while locked is normal — caused by the logging tool's
   // filtering/sampling of the TCM slip speed signal, not actual mechanical slip.
-  const SLIP_NOISE_FLOOR = 15;
+  // Raised from 15 to 25 RPM to account for real-world noise.
+  const SLIP_NOISE_FLOOR = 25;
 
   // Build gear-shift exclusion mask: slip during shifts is expected because
   // the converter naturally slips while the transmission changes ratios,
   // even with steady duty cycle.
-  const SHIFT_EXCLUSION_WINDOW = 8;
+  const SHIFT_EXCLUSION_WINDOW = 15; // raised from 8 to match diagnostics.ts
   const isShifting = new Uint8Array(slip.length);
   if (gear.length >= slip.length) {
     for (let i = 1; i < gear.length; i++) {
@@ -210,7 +211,7 @@ function analyzeTccBehavior(
 
   // Build lock-transition grace period mask: when the TCM transitions
   // between locked/unlocked, there is a hydraulic apply delay.
-  const LOCK_GRACE_WINDOW = 10;
+  const LOCK_GRACE_WINDOW = 20; // raised from 10 to match diagnostics.ts
   const isTransitioning = new Uint8Array(slip.length);
   let prevLocked = duty[0] >= fullLockThreshold;
   for (let i = 1; i < slip.length; i++) {
@@ -223,7 +224,19 @@ function analyzeTccBehavior(
     prevLocked = nowLocked;
   }
 
-  // Collect slip events under full lock, excluding noise, shifts, and transitions
+  // Build converging slip mask: when slip is steadily decreasing, the converter
+  // is in normal torque-multiplication mode during acceleration — NOT a fault.
+  const CONVERGE_WINDOW = 20;
+  const isConverging = new Uint8Array(slip.length);
+  for (let i = CONVERGE_WINDOW; i < slip.length; i++) {
+    const startSlip = Math.abs(slip[i - CONVERGE_WINDOW]);
+    const endSlip = Math.abs(slip[i]);
+    if (startSlip > 50 && endSlip < startSlip * 0.7) {
+      for (let j = i - CONVERGE_WINDOW; j <= i; j++) isConverging[j] = 1;
+    }
+  }
+
+  // Collect slip events under full lock, excluding noise, shifts, transitions, and converging slip
   const slipEventsUnderLock: Array<{slip: number; rpm: number; vss: number; idx: number}> = [];
   let consecutiveSlip = 0;
 
@@ -231,16 +244,16 @@ function analyzeTccBehavior(
     const isLocked = duty[i] >= fullLockThreshold;
     const absSlip = Math.abs(slip[i]);
 
-    // Skip gear shifts and lock transitions — slip is expected during these
-    if (isShifting[i] || isTransitioning[i]) {
+    // Skip gear shifts, lock transitions, and converging slip — all are expected
+    if (isShifting[i] || isTransitioning[i] || isConverging[i]) {
       consecutiveSlip = 0;
       continue;
     }
 
     if (isLocked && absSlip > SLIP_NOISE_FLOOR) {
       consecutiveSlip++;
-      // Require 5 consecutive samples (raised from 3) = 500ms at 10 Hz
-      if (consecutiveSlip >= 5) {
+      // Require 15 consecutive samples (raised from 5) = 1.5s at 10 Hz
+      if (consecutiveSlip >= 15) {
         slipEventsUnderLock.push({ slip: slip[i], rpm: rpm[i] || 0, vss: vss[i] || 0, idx: i });
       }
     } else {
@@ -262,7 +275,7 @@ function analyzeTccBehavior(
 
   const evidence: string[] = [
     `TCC commanded at ${lockLabel} throughout slip events`,
-    `${slipEventsUnderLock.length} confirmed slip events (≥5 consecutive samples >${SLIP_NOISE_FLOOR} RPM, gear shifts and lock transitions excluded)`,
+    `${slipEventsUnderLock.length} confirmed slip events (≥15 consecutive samples >${SLIP_NOISE_FLOOR} RPM, gear shifts, lock transitions, and converging slip excluded)`,
     `Peak slip: ${maxSlip.toFixed(0)} RPM`,
     `Average RPM during slip: ${avgRpmObserved(slipEventsUnderLock)} RPM`,
     `Average speed during slip: ${avgSpeed.toFixed(0)} mph`,
@@ -314,9 +327,10 @@ function analyzeTccBehavior(
     evidence,
     suggestion,
     betaNote:
-      'PPEI AI Beta: Slip pattern analysis uses ±15 RPM noise-floor filtering (logging tool signal noise), ' +
-      'gear-shift exclusion (±8 samples around gear changes), lock-transition grace period (±10 samples), ' +
-      'and 5-consecutive-sample confirmation. Load-correlation logic compares slip events against ' +
+      'PPEI AI Beta: Slip pattern analysis uses ±25 RPM noise-floor filtering (logging tool signal noise), ' +
+      'gear-shift exclusion (±15 samples around gear changes), lock-transition grace period (±20 samples), ' +
+      'converging-slip exclusion (slip decreasing >30% over 20 samples = normal torque multiplication), ' +
+      'and 15-consecutive-sample confirmation. Load-correlation logic compares slip events against ' +
       'RPM/VSS thresholds to distinguish mechanical wear from solenoid/hydraulic faults.',
   });
 
