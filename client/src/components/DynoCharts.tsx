@@ -331,7 +331,7 @@ const FaultChartWrapper = forwardRef<HTMLDivElement, {
         <span style={{
           background: badgeColor, color: badgeText, padding: '2px 8px', borderRadius: 4,
           fontSize: 11, fontFamily: 'monospace', fontWeight: 'bold', border: `1px solid ${borderColor}`,
-        }}>{code}</span>
+        }}>POTENTIAL FAULT AREA</span>
         <span style={{ color: '#e0e0e0', fontWeight: 'bold', fontSize: 13, fontFamily: 'monospace', flex: 1 }}>{title}</span>
         <span style={{
           background: badgeColor, color: badgeText, padding: '2px 10px', borderRadius: 4,
@@ -935,7 +935,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       </div>
 
       <div style={{ textAlign: 'right', marginTop: 8, color: '#222', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
-        DURAMAX PERFORMANCE ANALYZER · OBD-II ESTIMATED
+        PERFORMANCE ANALYZER · OBD-II ESTIMATED
       </div>
     </div>
   );
@@ -968,14 +968,14 @@ DynoHPChart.displayName = 'DynoHPChart';
 
 // ─── RAIL PRESSURE FAULT CHART ────────────────────────────────────────────────
 export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  // Match suffixed codes: P0087-RAIL-MAXED, P0087-RAIL-TUNING, P0087-RELIEF-VALVE, P0088-*, P0088-OSCILLATION
-  const p0087Issue = diagnostics.issues.find(i => i.code.startsWith('P0087'));
-  const p0088Issue = diagnostics.issues.find(i => i.code.startsWith('P0088'));
-  const issue = p0087Issue || p0088Issue;
+  // Match descriptive condition codes for rail pressure
+  const lowRailIssue = diagnostics.issues.find(i => i.code.startsWith('LOW-RAIL-PRESSURE'));
+  const highRailIssue = diagnostics.issues.find(i => i.code.startsWith('HIGH-RAIL') || i.code === 'RAIL-PRESSURE-OSCILLATION' || i.code === 'HIGH-IDLE-RAIL-PRESSURE');
+  const issue = lowRailIssue || highRailIssue;
   if (!issue) return null;
 
-  const isLow = !!p0087Issue;
-  const displayCode = isLow ? 'P0087' : 'P0088';
+  const isLow = !!lowRailIssue;
+  const displayCode = isLow ? 'Low Rail Pressure' : 'High Rail Pressure';
 
   const hasRailData = (data.railPressureActual?.length ?? 0) > 0 && (data.railPressureDesired?.length ?? 0) > 0;
 
@@ -1006,7 +1006,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   const avgDesired = chartData.length ? chartData.reduce((s, d) => s + (d.desired ?? 0), 0) / chartData.length : 0;
 
   // Fault zone: time range where delta exceeds threshold
-  // Thresholds synced with diagnostics.ts: P0087=5000 psi, P0088=3500 psi
+  // Thresholds synced with diagnostics.ts: Low Rail=5000 psi, High Rail=3500 psi
   const CHART_THRESHOLD_LOW = 5000;
   const CHART_THRESHOLD_HIGH = 3500;
   const faultPoints = chartData.filter(d => isLow ? d.deltaLow > CHART_THRESHOLD_LOW : d.deltaHigh > CHART_THRESHOLD_HIGH);
@@ -1014,14 +1014,14 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
   const ruleText = isLow
-    ? `P0087: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDeltaLow.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
-    : `P0088: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds. Max observed delta: ${maxDeltaHigh.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
+    ? `Low Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDeltaLow.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
+    : `High Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds (decel/transients excluded). Max observed delta: ${maxDeltaHigh.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
 
   return (
     <FaultChartWrapper
       ref={ref}
       code={displayCode}
-      title={`${displayCode} — ${issue.title}`}
+      title={issue.title}
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
@@ -1098,7 +1098,7 @@ RailPressureFaultChart.displayName = 'RailPressureFaultChart';
 
 // ─── BOOST PRESSURE FAULT CHART ───────────────────────────────────────────────
 export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code.startsWith('P0299'));
+  const issue = diagnostics.issues.find(i => i.code.startsWith('LOW-BOOST'));
   if (!issue) return null;
 
   const hasBoostData = (data.boost?.length ?? 0) > 0;
@@ -1130,13 +1130,13 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
   const faultTimeMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.time)) : 0;
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
-  const ruleText = `P0299: Actual boost is ≥${BOOST_FAULT_THRESHOLD} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
+  const ruleText = `Low Boost: Actual boost is ≥${BOOST_FAULT_THRESHOLD} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
 
   return (
     <FaultChartWrapper
       ref={ref}
-      code="P0299"
-      title={`P0299 — ${issue.title}`}
+      code="Low Boost"
+      title={issue.title}
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
@@ -1204,8 +1204,8 @@ BoostFaultChart.displayName = 'BoostFaultChart';
 
 // ─── EGT FAULT CHART ──────────────────────────────────────────────────────────
 export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  // Match suffixed codes: EGT-HIGH, EGT-SENSOR-FAULT
-  const issue = diagnostics.issues.find(i => i.code.startsWith('EGT'));
+  // Match descriptive condition codes for EGT
+  const issue = diagnostics.issues.find(i => i.code.startsWith('EGT-SENSOR'));
   if (!issue) return null;
 
   const hasEgtData = (data.exhaustGasTemp?.length ?? 0) > 0;
@@ -1236,15 +1236,17 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
     ? faultPoints.length * (data.timeMinutes[data.timeMinutes.length - 1] / data.timeMinutes.length) * 60
     : 0;
 
-  const ruleText = issue.code === 'EGT-SENSOR-FAULT'
-    ? `EGT SENSOR FAULT: Reading stuck above 1,800°F — sensor disconnected or out of service. Observed: ${maxEgt.toFixed(0)}°F.`
-    : `EGT HIGH: Temperature exceeded 1,475°F for >${faultDuration.toFixed(1)} seconds. Max observed: ${maxEgt.toFixed(0)}°F. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
+  const ruleText = issue.code === 'EGT-SENSOR-OUT-OF-RANGE'
+    ? `EGT Sensor Out of Range: Reading above 1,800°F — sensor disconnected or out of service. Observed: ${maxEgt.toFixed(0)}°F.`
+    : issue.code === 'EGT-SENSOR-STUCK'
+    ? `EGT Sensor Stuck: Reading frozen (< 1°F change) for extended period.`
+    : `EGT Sensor Erratic: Temperature readings are unstable. Max observed: ${maxEgt.toFixed(0)}°F. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
 
   return (
     <FaultChartWrapper
       ref={ref}
-      code="EGT"
-      title={`EGT — ${issue.title}`}
+      code="EGT Sensor"
+      title={issue.title}
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
@@ -1318,7 +1320,7 @@ EgtFaultChart.displayName = 'EgtFaultChart';
 
 // ─── MAF FAULT CHART ──────────────────────────────────────────────────────────
 export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code.startsWith('P0101'));
+  const issue = diagnostics.issues.find(i => i.code.endsWith('-IDLE-MAF'));
   if (!issue) return null;
 
   const hasMafData = (data.maf?.length ?? 0) > 0;
@@ -1350,13 +1352,13 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   const minIdleMaf = idlePoints.length ? Math.min(...idlePoints.map(d => d.maf ?? 0)) : 0;
   const isHigh = avgIdleMaf > 6;
 
-  const ruleText = `P0101: MAF flow at idle (RPM <1000) is ${isHigh ? 'above 6.0 lb/min' : 'below 2.0 lb/min'} for >5 seconds. Avg idle MAF: ${avgIdleMaf.toFixed(2)} lb/min. Normal idle range: 2.0–6.0 lb/min.`;
+  const ruleText = `MAF Idle Fault: MAF flow at idle (RPM <1000) is ${isHigh ? 'above 6.0 lb/min' : 'below 2.0 lb/min'} for >5 seconds. Avg idle MAF: ${avgIdleMaf.toFixed(2)} lb/min. Normal idle range: 2.0–6.0 lb/min.`;
 
   return (
     <FaultChartWrapper
       ref={ref}
-      code="P0101"
-      title={`P0101 — ${issue.title}`}
+      code="MAF Idle"
+      title={issue.title}
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
@@ -1625,7 +1627,7 @@ BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';
 // ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
 export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
   const issue = diagnostics.issues.find(i =>
-    i.code === 'CONVERTER-SLIP' || i.code === 'CONVERTER-SLIP-WARN' || i.code === 'P0741' || i.code === 'P0742'
+    i.code === 'TCC-STUCK-OFF' || i.code === 'TCC-STUCK-ON'
   );
   if (!issue) return null;
 
@@ -1660,8 +1662,8 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       description={issue.description}
       recommendation={issue.recommendation}
       ruleEvaluated={usePressure
-        ? 'TCC slip > 20 RPM while line pressure >= 80 psi (full lock command)'
-        : 'TCC slip > 19.5 RPM while duty cycle > 90% (P0741) or slip < 7 RPM while duty cycle < 15% at RPM > 2000 (P0742)'}
+        ? 'TCC slip > 40 RPM while line pressure >= 80 psi for 25+ consecutive locked samples'
+        : 'TCC slip > 40 RPM while duty cycle > 90% for 25+ consecutive locked samples, or slip < 7 RPM while duty cycle < 15% at RPM > 2000'}
       badges={undefined}
     >
       <FaultEventList
@@ -1709,7 +1711,7 @@ TccFaultChart.displayName = 'TccFaultChart';
 
 // ─── VGT TRACKING FAULT CHART ────────────────────────────────────────────────
 export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code === 'P0046');
+  const issue = diagnostics.issues.find(i => i.code === 'VGT-TRACKING-ERROR');
   if (!issue) return null;
 
   const hasVaneDesired = data.turboVaneDesired.some(v => v > 0);
@@ -1775,7 +1777,7 @@ VgtFaultChart.displayName = 'VgtFaultChart';
 
 // ─── FUEL PRESSURE REGULATOR FAULT CHART (P0089) ─────────────────────────────
 export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code === 'P0089');
+  const issue = diagnostics.issues.find(i => i.code === 'FUEL-REGULATOR-HUNTING');
   if (!issue) return null;
 
   const chartData = data.timeMinutes.map((t, i) => ({
@@ -1833,7 +1835,7 @@ RegulatorFaultChart.displayName = 'RegulatorFaultChart';
 
 // ─── COOLANT TEMP FAULT CHART (P0116 / P0128) ────────────────────────────────
 export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code === 'P0116' || i.code === 'P0128');
+  const issue = diagnostics.issues.find(i => i.code === 'COOLANT-SENSOR-ERRATIC' || i.code === 'COOLANT-LOW-TEMP');
   if (!issue) return null;
 
   const chartData = data.timeMinutes.map((t, i) => ({
@@ -1852,7 +1854,7 @@ export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
-      ruleEvaluated="P0128: coolant never reaches 185F after 6.5+ minutes. P0116: coolant sensor jumps >26F between samples."
+      ruleEvaluated="Coolant Low Temp: coolant never reaches 185°F after 6.5+ minutes. Coolant Sensor Erratic: coolant sensor jumps >26°F between samples."
       badges={undefined}
     >
       <FaultEventList
@@ -1892,7 +1894,7 @@ CoolantFaultChart.displayName = 'CoolantFaultChart';
 
 // ─── IDLE RPM FAULT CHART (P0506 / P0507) ────────────────────────────────────
 export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
-  const issue = diagnostics.issues.find(i => i.code === 'P0506' || i.code === 'P0507');
+  const issue = diagnostics.issues.find(i => i.code === 'IDLE-RPM-LOW' || i.code === 'IDLE-RPM-HIGH');
   if (!issue) return null;
 
   // Only show samples in the idle RPM range
@@ -1911,7 +1913,7 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
       severity={issue.severity}
       description={issue.description}
       recommendation={issue.recommendation}
-      ruleEvaluated="P0506: idle RPM < 540 for 65+ samples. P0507: idle RPM > 1100 for 65+ samples."
+      ruleEvaluated="Idle RPM Low: idle RPM < 540 for 65+ samples. Idle RPM High: idle RPM > 1100 for 65+ samples."
       badges={undefined}
     >
       <FaultEventList

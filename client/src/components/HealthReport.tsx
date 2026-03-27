@@ -316,23 +316,23 @@ export default function HealthReport({ report }: HealthReportProps) {
             </div>
           </div>
           <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', marginBottom: '1rem' }}>
-            The following conditions were detected in the datalog. Use the Diagnostic Code Lookup below for full remedies.
+            The following conditions were analyzed in the datalog. Review the Fault Zone Analysis charts for detailed visualization.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
             {report.diagnosticSummary.p0087Status.includes('DETECTED') && (
-              <FaultItem code="P0087" status={report.diagnosticSummary.p0087Status} />
+              <FaultItem code="Low Rail Pressure" status={report.diagnosticSummary.p0087Status} />
             )}
-            {report.diagnosticSummary.p0088Status.includes('DETECTED') && (
-              <FaultItem code="P0088" status={report.diagnosticSummary.p0088Status} />
+            {report.diagnosticSummary.highRailStatus.includes('DETECTED') && (
+              <FaultItem code="High Rail Pressure" status={report.diagnosticSummary.highRailStatus} />
             )}
             {report.diagnosticSummary.p0299Status.includes('DETECTED') && (
-              <FaultItem code="P0299" status={report.diagnosticSummary.p0299Status} />
+              <FaultItem code="Low Boost" status={report.diagnosticSummary.p0299Status} />
             )}
             {(report.diagnosticSummary.egtStatus.includes('DETECTED') || report.diagnosticSummary.egtStatus.includes('WARNING')) && (
               <FaultItem code="EGT" status={report.diagnosticSummary.egtStatus} />
             )}
             {report.diagnosticSummary.p0101Status.includes('DETECTED') && (
-              <FaultItem code="P0101" status={report.diagnosticSummary.p0101Status} />
+              <FaultItem code="MAF Idle" status={report.diagnosticSummary.p0101Status} />
             )}
             {(report.diagnosticSummary.converterSlipStatus.includes('DETECTED') || report.diagnosticSummary.converterSlipStatus.includes('WARNING')) && (
               <FaultItem code="TCC Slip" status={report.diagnosticSummary.converterSlipStatus} />

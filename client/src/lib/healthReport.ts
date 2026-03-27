@@ -62,7 +62,7 @@ interface ThermalSection {
 
 interface DiagnosticSummarySection {
   p0087Status: string;
-  p0088Status: string;
+  highRailStatus: string;
   p0299Status: string;
   egtStatus: string;
   p0101Status: string;
@@ -224,7 +224,7 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
 
   if (boostAvail && boostVals.length > 0) {
     const maxBoost = Math.max(...boostVals);
-    // P0299 condition: high MAF (>55 lb/min) but low boost (<25 PSIG gauge) = likely boost leak
+    // Low boost condition: high MAF (>55 lb/min) but low boost (<25 PSIG gauge) = likely boost leak
     const highMafLowBoostCount = data.maf.filter((m: number, i: number) => m > 55 && boostVals[i] !== undefined && boostVals[i] < 25).length;
 
     if (highMafLowBoostCount > 30) {
@@ -270,16 +270,37 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
     };
   }
 
-  // P0087: Actual is 5k+ lower than desired for sustained period (100 samples)
-  // Thresholds raised to match diagnostics.ts false-positive prevention
+  // Low rail pressure: Actual is 5k+ lower than desired for sustained period
+  // High rail pressure: Actual is 3.5k+ higher than desired, EXCLUDING decel/transients
+  // Must match diagnostics.ts thresholds to avoid false positives
   let lowRailCount = 0;
-  let highRailCount = 0;
+  let highRailSustained = 0;
+  let highRailMaxConsecutive = 0;
+  let highRailConsecutive = 0;
   for (let i = 0; i < railActual.length; i++) {
     if (railActual[i] > 0 && railDesired[i] > 0) {
       if (railDesired[i] - railActual[i] > 5000) lowRailCount++;
-      if (railActual[i] - railDesired[i] > 2500) highRailCount++;
+      // High rail: exclude when desired is dropping (decel/coast-down)
+      const isDesiredDropping =
+        (i >= 5 && railDesired[i - 5] - railDesired[i] > 200) ||
+        (i >= 20 && railDesired[i - 20] - railDesired[i] > 500) ||
+        (i >= 50 && railDesired[i - 50] - railDesired[i] > 1000);
+      // Also exclude if desired was recently much higher (pressure still bleeding off)
+      let recentPeak = 0;
+      const lb = Math.min(i, 80);
+      for (let j = i - lb; j < i; j++) { if (j >= 0 && railDesired[j] > recentPeak) recentPeak = railDesired[j]; }
+      const isSettling = recentPeak - railDesired[i] > 2000;
+
+      if (railActual[i] - railDesired[i] > 3500 && !isDesiredDropping && !isSettling) {
+        highRailConsecutive++;
+        if (highRailConsecutive > highRailMaxConsecutive) highRailMaxConsecutive = highRailConsecutive;
+      } else {
+        highRailConsecutive = 0;
+      }
     }
   }
+  // Only flag high rail if sustained for 120+ consecutive samples (12 seconds at 10Hz)
+  const highRailFlagged = highRailMaxConsecutive >= 120;
 
   const avgActual = safeAvg(railActual);
   const avgDesired = safeAvg(railDesired);
@@ -288,19 +309,19 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
   let pressureStatus = '✓ Normal — Rail pressure regulation within spec';
 
   if (lowRailCount >= 100) {
-    pressureStatus = '✗ FAIL — Low rail pressure (P0087 condition)';
+    pressureStatus = '✗ FAIL — Low rail pressure detected';
     score -= 25;
     const pcvVals = validValues(data.pcvDutyCycle);
     const avgPcv = pcvVals.length ? pcvVals.reduce((a, b) => a + b, 0) / pcvVals.length : 0;
     if (avgPcv < 500 && avgPcv > 0) {
       findings.push('Low rail pressure — PCV below 500mA, fuel system is maxed out. Check fuel pump, lift pump, and filter.');
     } else {
-      findings.push('Low rail pressure — PCV above 500mA, a tuning adjustment may resolve this. Contact PPEI.');
+      findings.push('Low rail pressure — PCV above 500mA, a tuning adjustment may resolve this. Contact tuner.');
     }
-  } else if (highRailCount >= 80) {
-    pressureStatus = '⚠ WARNING — High rail pressure (P0088 condition)';
+  } else if (highRailFlagged) {
+    pressureStatus = '⚠ WARNING — High rail pressure deviation detected';
     score -= 15;
-    findings.push(`High rail pressure detected (${highRailCount} samples > +2500 psi offset) — regulator adjustment may be needed. Contact tuner.`);
+    findings.push(`High rail pressure deviation sustained for ${(highRailMaxConsecutive / 10).toFixed(1)}s (threshold: 3500 psi, excl. decel/transients) — regulator adjustment may be needed.`);
   } else {
     findings.push(`Fuel rail pressure regulation excellent — avg differential: ${avgDiff.toFixed(0)} PSI`);
     findings.push(`Rail pressure: actual avg ${avgActual.toFixed(0)} PSI vs desired avg ${avgDesired.toFixed(0)} PSI`);
@@ -318,29 +339,83 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
   const findings: string[] = [];
   let score = 100;
 
-  const slip = validValues(data.converterSlip.map(s => Math.abs(s)));
+  const slip = data.converterSlip.map(s => Math.abs(s));
+  const dutyCycle = data.converterDutyCycle || [];
   const transTemp = validValues(data.transFluidTemp);
 
   let slipStatus = '✓ Normal — Torque converter slip within spec';
 
-  if (slip.length > 0) {
-    const maxSlip = Math.max(...slip);
-    const avgSlip = slip.reduce((a, b) => a + b, 0) / slip.length;
-    // Thresholds raised to match diagnostics.ts: noise floor 25 RPM, require 150+ samples
-    // to avoid false positives from transients, gear shifts, and converging slip
-    const highSlipCount = slip.filter(s => s > 25).length;
-    const criticalSlipCount = slip.filter(s => s > 50).length;
+  if (validValues(slip).length > 0) {
+    // Only evaluate slip during LOCKED states (duty cycle > 90%)
+    // Slip during ControlledOn, ImmediateOff, etc. is intentional and not a fault
+    // SETTLE-THEN-RISE detection: Only flag slip as a fault when the converter
+    // has already settled (slip was <20 RPM for 10+ samples, indicating full lockup)
+    // and then rises back above threshold — this indicates actual clutch degradation.
+    // During the initial apply sequence (ControlledOn with high slip converging to zero),
+    // high slip is NORMAL and should never be flagged.
+    const lockedSlip: number[] = [];
+    for (let i = 0; i < slip.length; i++) {
+      const isLocked = dutyCycle.length > i ? dutyCycle[i] > 90 : true;
+      if (isLocked && slip[i] > 0) lockedSlip.push(slip[i]);
+    }
 
-    if (criticalSlipCount > 150) {
-      slipStatus = '✗ FAIL — Excessive converter slip (>50 RPM sustained)';
+    const maxLockedSlip = lockedSlip.length > 0 ? Math.max(...lockedSlip) : 0;
+    const avgSlip = lockedSlip.length > 0 ? lockedSlip.reduce((a, b) => a + b, 0) / lockedSlip.length : 0;
+
+    let hasSettled = false; // Has the converter reached full lockup (<20 RPM)?
+    let settledCount = 0;  // How many consecutive samples below settle threshold?
+    const SETTLE_THRESHOLD = 20; // RPM — below this = fully locked
+    const SETTLE_SAMPLES = 10;   // Must stay below threshold for this many samples
+    let criticalConsecutive = 0;
+    let maxCriticalConsecutive = 0;
+    let warnConsecutive = 0;
+    let maxWarnConsecutive = 0;
+
+    for (let i = 0; i < slip.length; i++) {
+      const isLocked = dutyCycle.length > i ? dutyCycle[i] > 90 : true;
+
+      if (!isLocked) {
+        // TCC not commanded on — reset settle tracking
+        hasSettled = false;
+        settledCount = 0;
+        criticalConsecutive = 0;
+        warnConsecutive = 0;
+        continue;
+      }
+
+      // Track settle state
+      if (slip[i] < SETTLE_THRESHOLD) {
+        settledCount++;
+        if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+      } else if (!hasSettled) {
+        // High slip but converter hasn't settled yet — this is the apply sequence
+        settledCount = 0;
+        criticalConsecutive = 0;
+        warnConsecutive = 0;
+        continue; // Skip — normal apply behavior
+      }
+      // If hasSettled is true and slip rises, that's a real fault
+
+      if (hasSettled && slip[i] > 60) {
+        criticalConsecutive++;
+        if (criticalConsecutive > maxCriticalConsecutive) maxCriticalConsecutive = criticalConsecutive;
+      } else { criticalConsecutive = 0; }
+      if (hasSettled && slip[i] > 40) {
+        warnConsecutive++;
+        if (warnConsecutive > maxWarnConsecutive) maxWarnConsecutive = warnConsecutive;
+      } else { warnConsecutive = 0; }
+    }
+
+    if (maxCriticalConsecutive >= 25) {
+      slipStatus = '✗ FAIL — Excessive converter slip after lockup (clutch degradation suspected)';
       score -= 30;
-      findings.push(`Torque converter slipping excessively — max ${maxSlip.toFixed(0)} RPM slip. Internal wear suspected.`);
-    } else if (highSlipCount > 150) {
-      slipStatus = `⚠ WARNING — Elevated converter slip (max: ${maxSlip.toFixed(0)} RPM)`;
+      findings.push(`Converter slip >60 RPM sustained for ${maxCriticalConsecutive} samples after TCC had settled. Internal wear suspected.`);
+    } else if (maxWarnConsecutive >= 25) {
+      slipStatus = `⚠ WARNING — Elevated converter slip after lockup (max: ${maxLockedSlip.toFixed(0)} RPM)`;
       score -= 10;
-      findings.push(`Converter slip above 25 RPM detected (${highSlipCount} samples) — monitor and inspect`);
+      findings.push(`Converter slip >40 RPM sustained for ${maxWarnConsecutive} samples after TCC had settled — monitor and inspect`);
     } else {
-      findings.push(`Torque converter healthy — max slip ${maxSlip.toFixed(1)} RPM, avg ${avgSlip.toFixed(1)} RPM`);
+      findings.push(`Torque converter healthy — max locked slip ${maxLockedSlip.toFixed(1)} RPM, avg ${avgSlip.toFixed(1)} RPM`);
     }
   } else {
     slipStatus = '— Converter slip not logged in this file';
@@ -465,7 +540,7 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
 function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   const detectedCodes: string[] = [];
 
-  // ── P0087: Low Rail Pressure ──────────────────────────────────────────────
+  // ── Low Rail Pressure ──────────────────────────────────────────────────
   // Actual is 5k+ lower than desired for sustained period (100 samples)
   // Thresholds raised to match diagnostics.ts false-positive prevention
   let p0087Status = '✓ PASS';
@@ -475,28 +550,43 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   if (hasRailData) {
     const lowRailCount = railActual.filter((a, i) => a > 0 && railDesired[i] > 0 && (railDesired[i] - a) > 5000).length;
     if (lowRailCount >= 100) {
-      p0087Status = '✗ DETECTED — P0087 Low Rail Pressure';
-      detectedCodes.push('P0087');
+      p0087Status = '✗ DETECTED — Low Rail Pressure Deviation';
+      detectedCodes.push('LOW_RAIL_PRESSURE');
     }
   } else {
     p0087Status = '— Rail pressure not logged';
   }
 
-  // ── P0088: High Rail Pressure ─────────────────────────────────────────────
-  // Actual is 2.5k+ higher than desired for sustained period (80 samples)
-  // Thresholds raised to match diagnostics.ts false-positive prevention
-  let p0088Status = '✓ PASS';
+  // ── High Rail Pressure Deviation ──────────────────────────────────────────
+  // Actual is 3.5k+ higher than desired, EXCLUDING decel/transients, sustained 120+ consecutive samples
+  let highRailStatus = '✓ PASS';
   if (hasRailData) {
-    const highRailCount = railActual.filter((a, i) => a > 0 && railDesired[i] > 0 && (a - railDesired[i]) > 2500).length;
-    if (highRailCount >= 80) {
-      p0088Status = '✗ DETECTED — P0088 High Rail Pressure';
-      detectedCodes.push('P0088');
+    let hrConsec = 0, hrMaxConsec = 0;
+    for (let i = 0; i < railActual.length; i++) {
+      if (railActual[i] > 0 && railDesired[i] > 0) {
+        const isDesiredDropping =
+          (i >= 5 && railDesired[i - 5] - railDesired[i] > 200) ||
+          (i >= 20 && railDesired[i - 20] - railDesired[i] > 500) ||
+          (i >= 50 && railDesired[i - 50] - railDesired[i] > 1000);
+        let recentPeak = 0;
+        const lb = Math.min(i, 80);
+        for (let j = i - lb; j < i; j++) { if (j >= 0 && railDesired[j] > recentPeak) recentPeak = railDesired[j]; }
+        const isSettling = recentPeak - railDesired[i] > 2000;
+        if (railActual[i] - railDesired[i] > 3500 && !isDesiredDropping && !isSettling) {
+          hrConsec++;
+          if (hrConsec > hrMaxConsec) hrMaxConsec = hrConsec;
+        } else { hrConsec = 0; }
+      }
+    }
+    if (hrMaxConsec >= 120) {
+      highRailStatus = '✗ DETECTED — High Rail Pressure Deviation';
+      detectedCodes.push('HIGH_RAIL_PRESSURE');
     }
   } else {
-    p0088Status = '— Rail pressure not logged';
+    highRailStatus = '— Rail pressure not logged';
   }
 
-  // ── P0299: Underboost ─────────────────────────────────────────────────────
+  // ── Low Boost / Underboost ──────────────────────────────────────────────────
   // Actual boost 5+ PSI below desired for >3 seconds (75 samples at 25Hz)
   // Skip entirely when boostActualAvailable is false — MAP was not logged, zero values are invalid
   let p0299Status = '✓ PASS';
@@ -508,8 +598,8 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     // Check for high MAF but low boost (boost leak indicator)
     const highMafLowBoost = data.maf.filter((m: number, i: number) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;
     if (highMafLowBoost >= 75) {
-      p0299Status = '✗ DETECTED — P0299 Underboost (possible boost leak)';
-      detectedCodes.push('P0299');
+      p0299Status = '✗ DETECTED — Low Boost (possible boost leak)';
+      detectedCodes.push('LOW_BOOST');
     }
   } else {
     p0299Status = '— Boost pressure not logged';
@@ -533,7 +623,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     egtStatus = '— EGT not logged';
   }
 
-  // ── P0101: MAF Out of Range at Idle ──────────────────────────────────────
+  // ── MAF Out of Range at Idle ───────────────────────────────────────────
   let p0101Status = '✓ PASS';
   const idleIndices = data.rpm.map((r, i) => (r > 500 && r < 900 ? i : -1)).filter(i => i !== -1);
   if (idleIndices.length > 50) {
@@ -542,30 +632,57 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
       const highIdleCount = idleMafVals.filter(m => m > 6).length;
       const lowIdleCount = idleMafVals.filter(m => m < 2).length;
       if (highIdleCount > 30) {
-        p0101Status = '✗ DETECTED — P0101 MAF High at Idle (>6 lb/min)';
-        detectedCodes.push('P0101');
+        p0101Status = '✗ DETECTED — MAF High at Idle (>6 lb/min)';
+        detectedCodes.push('HIGH_IDLE_MAF');
       } else if (lowIdleCount > 30) {
-        p0101Status = '✗ DETECTED — P0101 MAF Low at Idle (<2 lb/min)';
-        detectedCodes.push('P0101');
+        p0101Status = '✗ DETECTED — MAF Low at Idle (<2 lb/min)';
+        detectedCodes.push('LOW_IDLE_MAF');
       }
     }
   } else {
     p0101Status = '— Insufficient idle data';
   }
 
-  // ── Converter Slip ────────────────────────────────────────────────────────
-  // Thresholds raised to match diagnostics.ts: noise floor 25 RPM, require 150+ samples
-  // to avoid false positives from transients, gear shifts, and converging slip
+  // ── Converter Slip (settle-then-rise detection) ────────────────────────────────
+  // Only flag slip as a fault when the converter has ALREADY SETTLED (<20 RPM for 10+
+  // samples) and then rises back above threshold. During the initial apply sequence
+  // (ControlledOn with high slip converging to zero), high slip is NORMAL.
   let converterSlipStatus = '✓ PASS';
-  const slipVals = validValues(data.converterSlip.map(s => Math.abs(s)));
-  if (slipVals.length > 0) {
-    const criticalSlipCount = slipVals.filter(s => s > 50).length;
-    const highSlipCount = slipVals.filter(s => s > 25).length;
-    if (criticalSlipCount > 150) {
-      converterSlipStatus = '✗ DETECTED — Excessive Converter Slip (>50 RPM sustained)';
+  const slipVals = data.converterSlip.map(s => Math.abs(s));
+  const dcVals = data.converterDutyCycle || [];
+  if (validValues(slipVals).length > 0) {
+    let hasSettled = false;
+    let settledCount = 0;
+    const SETTLE_THRESH = 20;
+    const SETTLE_SAMPLES = 10;
+    let critConsec = 0, maxCritConsec = 0;
+    let warnConsec = 0, maxWarnConsec = 0;
+    for (let i = 0; i < slipVals.length; i++) {
+      const isLocked = dcVals.length > i ? dcVals[i] > 90 : true;
+      if (!isLocked) {
+        hasSettled = false; settledCount = 0;
+        critConsec = 0; warnConsec = 0;
+        continue;
+      }
+      if (slipVals[i] < SETTLE_THRESH) {
+        settledCount++;
+        if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+      } else if (!hasSettled) {
+        settledCount = 0; critConsec = 0; warnConsec = 0;
+        continue; // Normal apply sequence
+      }
+      if (hasSettled && slipVals[i] > 60) {
+        critConsec++; if (critConsec > maxCritConsec) maxCritConsec = critConsec;
+      } else { critConsec = 0; }
+      if (hasSettled && slipVals[i] > 40) {
+        warnConsec++; if (warnConsec > maxWarnConsec) maxWarnConsec = warnConsec;
+      } else { warnConsec = 0; }
+    }
+    if (maxCritConsec >= 25) {
+      converterSlipStatus = '✗ DETECTED — Excessive Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_CRITICAL');
-    } else if (highSlipCount > 150) {
-      converterSlipStatus = '⚠ WARNING — Elevated Converter Slip (>25 RPM sustained)';
+    } else if (maxWarnConsec >= 25) {
+      converterSlipStatus = '⚠ WARNING — Elevated Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_WARNING');
     }
   } else {
@@ -574,7 +691,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
 
   return {
     p0087Status,
-    p0088Status,
+    highRailStatus,
     p0299Status,
     egtStatus,
     p0101Status,

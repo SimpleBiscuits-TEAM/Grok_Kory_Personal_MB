@@ -69,7 +69,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ throttlePosition: throttle, railPressureActual: railActual, railPressureDesired: railDesired, rpm });
       const report = analyzeDiagnostics(data);
-      const railFaults = report.issues.filter(i => i.code.startsWith('P0087'));
+      const railFaults = report.issues.filter(i => i.code.includes('LOW-RAIL'));
       expect(railFaults.length).toBe(0);
     });
 
@@ -82,7 +82,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ rpm, railPressureActual: railActual, railPressureDesired: railDesired, throttlePosition: throttle });
       const report = analyzeDiagnostics(data);
-      const railFaults = report.issues.filter(i => i.code === 'P0087-RAIL-MAXED' || i.code === 'P0087-RAIL-TUNING');
+      const railFaults = report.issues.filter(i => i.code.includes('LOW-RAIL'));
       expect(railFaults.length).toBe(0);
     });
 
@@ -95,7 +95,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ rpm, railPressureActual: railActual, railPressureDesired: railDesired, throttlePosition: throttle });
       const report = analyzeDiagnostics(data);
-      const railFaults = report.issues.filter(i => i.code === 'P0087-RAIL-MAXED' || i.code === 'P0087-RAIL-TUNING');
+      const railFaults = report.issues.filter(i => i.code.includes('LOW-RAIL'));
       expect(railFaults.length).toBe(0);
     });
 
@@ -108,7 +108,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ rpm, railPressureActual: railActual, railPressureDesired: railDesired, throttlePosition: throttle });
       const report = analyzeDiagnostics(data);
-      const railFaults = report.issues.filter(i => i.code.startsWith('P0087'));
+      const railFaults = report.issues.filter(i => i.code.includes('LOW-RAIL'));
       expect(railFaults.length).toBeGreaterThan(0);
     });
   });
@@ -139,7 +139,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ throttlePosition: throttle, boost: boostActual, boostDesired, rpm });
       const report = analyzeDiagnostics(data);
-      const boostFaults = report.issues.filter(i => i.code.startsWith('P0299'));
+      const boostFaults = report.issues.filter(i => i.code.includes('LOW-BOOST'));
       expect(boostFaults.length).toBe(0);
     });
 
@@ -152,7 +152,7 @@ describe('False Positive Prevention', () => {
 
       const data = makeData({ rpm, boost: boostActual, boostDesired, throttlePosition: throttle });
       const report = analyzeDiagnostics(data);
-      const boostFaults = report.issues.filter(i => i.code.startsWith('P0299'));
+      const boostFaults = report.issues.filter(i => i.code.includes('LOW-BOOST'));
       expect(boostFaults.length).toBe(0);
     });
   });
@@ -161,22 +161,30 @@ describe('False Positive Prevention', () => {
     it('should NOT flag converging slip during ControlledOn (normal torque multiplication)', () => {
       const len = 500;
       const slip = new Array(len).fill(0);
-      const duty = new Array(len).fill(1050); // full lock kPa
+      const duty = new Array(len).fill(0); // Start unlocked
       const gear = new Array(len).fill(6);
       const rpm = new Array(len).fill(2000);
 
-      // Simulate converging slip: starts at 700 RPM, decreases to 0 over 80 samples
-      // This is normal ControlledOn behavior during acceleration
+      // Simulate real TCC apply sequence:
+      // 0-99: TCC off (duty=0, slip=0)
+      // 100-179: TCC commanded on with high converging slip (normal apply)
+      // 180-500: TCC fully locked (low slip)
       for (let i = 100; i < 180; i++) {
+        duty[i] = 1050; // Full lock commanded
         slip[i] = 700 * (1 - (i - 100) / 80); // 700 → 0 RPM over 80 samples
+      }
+      for (let i = 180; i < len; i++) {
+        duty[i] = 1050; // Full lock
+        slip[i] = 2 + Math.random() * 3; // Near-zero slip (normal locked)
       }
 
       const data = makeData({ converterSlip: slip, converterDutyCycle: duty, currentGear: gear, rpm });
       const report = analyzeDiagnostics(data);
       const tccFaults = report.issues.filter(i =>
-        i.code.includes('TCC') || i.code.includes('P0741') || i.code.includes('P0742')
+        i.code.includes('TCC') || i.code.includes('CONVERTER')
       );
-      // Should not flag as a fault — converging slip is normal
+      // Should not flag as a fault — converging slip during apply is normal,
+      // and the converter hasn't settled yet when the high slip occurs
       const criticalTccFaults = tccFaults.filter(i => i.severity === 'critical' || i.severity === 'warning');
       expect(criticalTccFaults.length).toBe(0);
     });
@@ -198,7 +206,7 @@ describe('False Positive Prevention', () => {
       const data = makeData({ converterSlip: slip, converterDutyCycle: duty, currentGear: gear, rpm });
       const report = analyzeDiagnostics(data);
       const tccFaults = report.issues.filter(i =>
-        i.code.includes('TCC') || i.code.includes('P0741')
+        i.code.includes('TCC') || i.code.includes('CONVERTER')
       );
       const criticalTccFaults = tccFaults.filter(i => i.severity === 'critical');
       expect(criticalTccFaults.length).toBe(0);
@@ -221,7 +229,7 @@ describe('False Positive Prevention', () => {
       const data = makeData({ converterSlip: slip, converterDutyCycle: duty, currentGear: gear, rpm });
       const report = analyzeDiagnostics(data);
       const tccFaults = report.issues.filter(i =>
-        i.code.includes('TCC') || i.code.includes('P0741')
+        i.code.includes('TCC') || i.code.includes('CONVERTER')
       );
       const criticalTccFaults = tccFaults.filter(i => i.severity === 'critical');
       expect(criticalTccFaults.length).toBe(0);

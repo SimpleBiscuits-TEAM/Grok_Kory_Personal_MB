@@ -236,7 +236,7 @@ export async function generatePerformanceReport(
       const sevColor: [number, number, number] = issue.severity === 'critical' ? [220, 38, 38] : [202, 138, 4];
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold'); doc.setTextColor(...sevColor);
-      doc.text(`${issue.code} — ${issue.title}`, margin, y); y += 5;
+      doc.text(`${issue.title}`, margin, y); y += 5;
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal'); doc.setTextColor(60, 60, 60);
       const descLines = doc.splitTextToSize(issue.description, contentWidth);
@@ -269,14 +269,14 @@ doc.addPage();
   // ── FAULT ZONE CHARTS ──────────────────────────────────────────────────────
   if (diagnostics && diagnostics.issues.length > 0) {
     const faultRefs: Array<[React.RefObject<HTMLDivElement | null>, string]> = [
-      [refs.railFaultRef, 'Rail Pressure Potential Fault Area (P0087 / P0088)'],
-      [refs.boostFaultRef, 'Boost Pressure Potential Fault Area (P0299)'],
-      [refs.egtFaultRef, 'Exhaust Gas Temperature Potential Fault Area'],
-      [refs.mafFaultRef, 'Mass Airflow Potential Fault Area (P0101)'],
-      [refs.tccFaultRef, 'Torque Converter Clutch Potential Fault Area (P0741/P0742)'],
-      [refs.vgtFaultRef, 'VGT Turbo Vane Tracking Potential Fault Area (P0046)'],
-      [refs.regulatorFaultRef, 'Fuel Pressure Regulator Potential Fault Area (P0089)'],
-      [refs.coolantFaultRef, 'Coolant Temperature Potential Fault Area (P0116/P0128)'],
+      [refs.railFaultRef, 'Rail Pressure — Potential Fault Area'],
+      [refs.boostFaultRef, 'Boost Pressure — Potential Fault Area'],
+      [refs.egtFaultRef, 'Exhaust Gas Temperature — Potential Fault Area'],
+      [refs.mafFaultRef, 'Mass Airflow — Potential Fault Area'],
+      [refs.tccFaultRef, 'Torque Converter Clutch — Potential Fault Area'],
+      [refs.vgtFaultRef, 'VGT Turbo Vane Tracking — Potential Fault Area'],
+      [refs.regulatorFaultRef, 'Fuel Pressure Regulator — Potential Fault Area'],
+      [refs.coolantFaultRef, 'Coolant Temperature — Potential Fault Area'],
     ];
     for (const [ref, label] of faultRefs) {
       if (ref.current) {

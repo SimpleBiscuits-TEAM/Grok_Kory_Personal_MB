@@ -351,7 +351,7 @@ function checkLowRailPressure(
         const pcvValue = pcv[i] || 0;
         if (pcvValue < 325) {
           issues.push({
-            code: 'P0087-RAIL-MAXED',
+            code: 'LOW-RAIL-PRESSURE-MAXED',
             severity: 'critical',
             title: 'Low Rail Pressure - System Maxed Out',
             description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA (below 500mA threshold).`,
@@ -360,7 +360,7 @@ function checkLowRailPressure(
           });
         } else {
           issues.push({
-            code: 'P0087-RAIL-TUNING',
+            code: 'LOW-RAIL-PRESSURE-TUNING',
             severity: 'warning',
             title: 'Low Rail Pressure - Possible Tuning Issue',
             description: `Rail pressure is ${offset.toFixed(0)} psi lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA (above 500mA threshold).`,
@@ -395,7 +395,7 @@ function checkLowRailPressure(
 
       if (lowPressureCount > 0) {
         issues.push({
-          code: 'P0087-RELIEF-VALVE',
+          code: 'LOW-RAIL-PRESSURE-RELIEF-VALVE',
           severity: 'warning',
           title: 'Low Rail Pressure - Possible Relief Valve Issue',
           description: `Desired rail pressure exceeds 25kpsi, but actual pressure stays between 12k-15kpsi for extended periods.`,
@@ -470,7 +470,7 @@ function checkHighRailPressure(
 
       if (consecutiveViolations >= minSamples) {
         issues.push({
-          code: 'P0088-HIGH-RAIL',
+          code: 'HIGH-RAIL-PRESSURE',
           severity: 'warning',
           title: 'High Rail Pressure Detected',
           description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds at steady-state (transients, deceleration, and commanded pressure drops excluded).`,
@@ -504,7 +504,7 @@ function checkHighRailPressure(
     const oscillationPercentage = steadySamples > 0 ? (oscillationCount / steadySamples) * 100 : 0;
     if (oscillationPercentage > 20) {
       issues.push({
-        code: 'P0088-OSCILLATION',
+        code: 'RAIL-PRESSURE-OSCILLATION',
         severity: 'warning',
         title: 'Rail Pressure Oscillation',
         description: `Rail pressure is jumping rapidly (over/undershooting by 3500+ psi while desired is stable) ${oscillationPercentage.toFixed(1)}% of steady-state time.`,
@@ -527,7 +527,7 @@ function checkHighRailPressure(
         const avgIdlePcv = idleIndices.map((i: number) => pcv[i] || 0).reduce((a: number, b: number) => a + b) / idleIndices.length;
         if (avgIdlePcv < 1040) {
           issues.push({
-            code: 'P0088-IDLE-PCV',
+            code: 'HIGH-IDLE-RAIL-PRESSURE',
             severity: 'info',
             title: 'High Idle Rail Pressure - PCV Adjustment Needed',
             description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. PCV duty cycle is ${avgIdlePcv.toFixed(0)}mA (below 1600mA).`,
@@ -587,7 +587,7 @@ function checkLowBoostPressure(
 
         if (mafFlow > 71.5 && actual[i] < 25 && vanePos > 58.5) {
           issues.push({
-            code: 'P0299-BOOST-LEAK',
+            code: 'LOW-BOOST-LEAK',
             severity: 'critical',
             title: 'Low Boost Pressure - Likely Boost Leak',
             description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at steady-state (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% (above 45%) and MAF flow is ${mafFlow.toFixed(1)} lb/min (above 55 lb/min).`,
@@ -596,7 +596,7 @@ function checkLowBoostPressure(
           });
         } else if (vanePos > 58.5 && currentRpm > 3640) {
           issues.push({
-            code: 'P0299-UNDERBOOST',
+            code: 'LOW-BOOST-TURBO',
             severity: 'warning',
             title: 'Low Boost Pressure - Turbo Issue',
             description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at ${currentRpm.toFixed(0)} RPM (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% (above 45%).`,
@@ -605,7 +605,7 @@ function checkLowBoostPressure(
           });
         } else {
           issues.push({
-            code: 'P0299-UNDERBOOST-OTHER',
+            code: 'LOW-BOOST-GENERAL',
             severity: 'info',
             title: 'Low Boost Pressure Detected',
             description: `Boost is ${offset.toFixed(1)} psi lower than desired for ${minDuration}+ seconds at steady-state (transients and low-RPM excluded).`,
@@ -643,7 +643,7 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   const maxEgt = Math.max(...egt);
   if (maxEgt > CRITICAL_THRESHOLD) {
     issues.push({
-      code: 'EGT-SENSOR-FAULT',
+      code: 'EGT-SENSOR-OUT-OF-RANGE',
       severity: 'critical',
       title: 'Exhaust Gas Temperature Sensor Fault',
       description: `EGT reading reached ${maxEgt.toFixed(0)}F, which exceeds the physically plausible limit of ${CRITICAL_THRESHOLD}F. The sensor is likely disconnected or out of range.`,
@@ -664,9 +664,9 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   }
   if (maxStuck > 65) {
     issues.push({
-      code: 'P2080',
+      code: 'EGT-SENSOR-STUCK',
       severity: 'warning',
-      title: 'EGT Sensor Stuck/Frozen (P2080)',
+      title: 'EGT Sensor Stuck/Frozen',
       description: `EGT sensor reading was frozen (< 1F change) for ${maxStuck} consecutive samples. A stuck sensor cannot protect the DPF from overtemperature events.`,
       recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
     });
@@ -679,9 +679,9 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   }
   if (erraticCount > 4) {
     issues.push({
-      code: 'P2084',
+      code: 'EGT-SENSOR-ERRATIC',
       severity: 'warning',
-      title: 'EGT Sensor Erratic (P2084)',
+      title: 'EGT Sensor Erratic',
       description: `EGT sensor shows ${erraticCount} rapid jumps of >200F between samples. This indicates a failing sensor or wiring fault.`,
       recommendation: 'Inspect EGT sensor connector and wiring for heat damage. Replace EGT sensor if erratic readings persist.',
     });
@@ -736,7 +736,7 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
 
     if (highMafCount > 65) {
       issues.push({
-        code: 'P0101-HIGH-IDLE-MAF',
+        code: 'HIGH-IDLE-MAF',
         severity: 'warning',
         title: 'High MAF at Idle',
         description: `MAF flow exceeds 6 lb/min at idle for extended periods (peak: ${maxIdleMaf.toFixed(1)} lb/min, average: ${avgIdleMaf.toFixed(1)} lb/min).`,
@@ -752,7 +752,7 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
 
     if (lowMafCount > 65) {
       issues.push({
-        code: 'P0101-LOW-IDLE-MAF',
+        code: 'LOW-IDLE-MAF',
         severity: 'warning',
         title: 'Low MAF at Idle',
         description: `MAF flow drops below 2 lb/min at idle for extended periods (minimum: ${minIdleMaf.toFixed(1)} lb/min).`,
@@ -836,43 +836,56 @@ function checkConverterSlip(
     prevLocked = nowLocked;
   }
 
-  // ── Detect converging slip patterns ──
-  // If slip is steadily decreasing (converging toward zero), the converter is
-  // in normal torque-multiplication mode during acceleration — NOT a fault.
-  // Mark these regions as "converging" and exclude them.
-  const CONVERGE_WINDOW = 20; // look at 20-sample windows
-  const isConverging = new Uint8Array(slip.length);
-  for (let i = CONVERGE_WINDOW; i < slip.length; i++) {
-    const startSlip = Math.abs(slip[i - CONVERGE_WINDOW]);
-    const endSlip = Math.abs(slip[i]);
-    // Converging if slip decreased by at least 30% over the window
-    if (startSlip > 50 && endSlip < startSlip * 0.7) {
-      // Mark the entire window as converging
-      for (let j = i - CONVERGE_WINDOW; j <= i; j++) isConverging[j] = 1;
-    }
-  }
-
-  // ── Slip analysis ──
-  const SLIP_NOISE_FLOOR = 40; // raised from 25 RPM — 3.6% of ControlledOn samples exceed 25 RPM in normal driving
-  const MIN_CONSECUTIVE = 25;  // raised from 15 (2.5 seconds at 10Hz — need truly sustained slip)
+  // ── SETTLE-THEN-RISE slip detection ──
+  // Only flag slip as a fault when the converter has ALREADY SETTLED
+  // (slip was <20 RPM for 10+ consecutive samples, indicating full lockup)
+  // and then rises back above the noise floor. During the initial apply sequence
+  // (ControlledOn with high slip converging to zero), high slip is NORMAL
+  // and should never be flagged.
+  const SLIP_NOISE_FLOOR = 40;
+  const MIN_CONSECUTIVE = 25;
+  const SETTLE_THRESHOLD = 20; // RPM — below this = fully locked
+  const SETTLE_SAMPLES = 10;   // Must stay below threshold for this many samples
 
   let slipEventCount = 0;
   let maxSlipObserved = 0;
   let consecutiveSlip = 0;
   let slipWhileLockedCount = 0;
   let totalLockedSamples = 0;
+  let hasSettled = false;
+  let settledCount = 0;
 
   for (let i = 0; i < slip.length; i++) {
     const isFullyLocked = lockSignal(i) >= FULL_LOCK_THRESHOLD;
     const absSlip = Math.abs(slip[i]);
 
-    if (isFullyLocked) {
-      // Skip samples during gear shifts, lock transitions, or converging slip
-      if (isShifting[i] || isTransitioning[i] || isConverging[i]) {
-        consecutiveSlip = 0;
-        continue;
-      }
+    if (!isFullyLocked) {
+      // TCC not commanded on — reset all tracking
+      consecutiveSlip = 0;
+      hasSettled = false;
+      settledCount = 0;
+      continue;
+    }
 
+    // Skip samples during gear shifts or lock transitions
+    if (isShifting[i] || isTransitioning[i]) {
+      consecutiveSlip = 0;
+      continue;
+    }
+
+    // Track settle state: has the converter reached full lockup?
+    if (absSlip < SETTLE_THRESHOLD) {
+      settledCount++;
+      if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+    } else if (!hasSettled) {
+      // High slip but converter hasn't settled yet — this is the apply sequence
+      settledCount = 0;
+      consecutiveSlip = 0;
+      continue; // Skip — normal apply behavior
+    }
+
+    // Only count samples AFTER the converter has settled
+    if (hasSettled) {
       totalLockedSamples++;
 
       if (absSlip > SLIP_NOISE_FLOOR) {
@@ -885,8 +898,6 @@ function checkConverterSlip(
       } else {
         consecutiveSlip = 0;
       }
-    } else {
-      consecutiveSlip = 0;
     }
   }
 
@@ -986,9 +997,9 @@ export function checkVgtTracking(
 
     if (consecutiveCount >= MIN_SAMPLES) {
       issues.push({
-        code: 'P0046',
-        severity: 'warning',
-        title: 'VGT Vane Tracking Error (P0046)',
+      code: 'VGT-TRACKING-ERROR',
+      severity: 'warning',
+      title: 'VGT Vane Tracking Error',
         description: `Turbo vane position deviated from commanded by up to ${maxDelta.toFixed(1)}% for more than 3 seconds. This indicates a sticking VGT actuator, carbon buildup on vanes, or a faulty boost control solenoid.`,
         recommendation: 'Clean VGT vanes with approved cleaner. Test boost control solenoid. Perform VGT learn procedure. Inspect actuator rod for binding.',
       });
@@ -1032,9 +1043,9 @@ export function checkFuelPressureRegulatorPerformance(
   const oscillationRate = (oscillationCount / actual.length) * 100;
   if (oscillationRate > 6.5 || directionChanges > 26) {
     issues.push({
-      code: 'P0089',
+      code: 'FUEL-REGULATOR-HUNTING',
       severity: 'warning',
-      title: 'Fuel Pressure Regulator Performance (P0089)',
+      title: 'Fuel Pressure Regulator Performance',
       description: `Rail pressure is oscillating excessively (${oscillationRate.toFixed(1)}% of samples show large swings, ${directionChanges} direction reversals). This indicates a hunting or unstable fuel pressure regulator.`,
       recommendation: 'Inspect the fuel pressure regulator (PCV solenoid). Check for air in the fuel system. Verify fuel filter is not partially clogged causing pressure fluctuations.',
     });
@@ -1071,9 +1082,9 @@ export function checkCoolantTemp(
 
   if (runTime > 10 && maxTemp < 185) {
     issues.push({
-      code: 'P0128',
+      code: 'COOLANT-LOW-TEMP',
       severity: 'warning',
-      title: 'Coolant Below Thermostat Regulating Temp (P0128)',
+      title: 'Coolant Below Thermostat Regulating Temperature',
       description:
         `After ${runTime.toFixed(1)} minutes of operation, coolant temperature only reached ` +
         `${maxTemp.toFixed(0)}°F (started at ${minTemp.toFixed(0)}°F). ` +
@@ -1096,9 +1107,9 @@ export function checkCoolantTemp(
     }
     if (erraticCount > 5) {
       issues.push({
-        code: 'P0116',
+        code: 'COOLANT-SENSOR-ERRATIC',
         severity: 'warning',
-        title: 'Coolant Temperature Sensor Erratic (P0116)',
+        title: 'Coolant Temperature Sensor Erratic',
         description:
           `After warmup, coolant temperature sensor shows ${erraticCount} rapid jumps of >20°F ` +
           `between samples. This indicates a failing sensor, loose connector, or wiring fault.`,
@@ -1144,9 +1155,9 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
 
   if (lowCount >= MIN_SAMPLES) {
     issues.push({
-      code: 'P0506',
+      code: 'IDLE-RPM-LOW',
       severity: 'warning',
-      title: 'Idle RPM Too Low (P0506)',
+      title: 'Idle RPM Too Low',
       description: `Engine idle RPM dropped below ${IDLE_LOW_THRESHOLD} RPM for ${lowCount} samples (min observed: ${minIdleRpm === Infinity ? 'N/A' : minIdleRpm} RPM). This can indicate a rough idle, vacuum leak, or idle control system fault.`,
       recommendation: 'Check for vacuum leaks. Inspect idle air control system. Verify no misfires or fuel delivery issues at idle.',
     });
@@ -1154,9 +1165,9 @@ export function checkIdleRpm(rpm: number[]): DiagnosticIssue[] {
 
   if (highCount >= MIN_SAMPLES) {
     issues.push({
-      code: 'P0507',
+      code: 'IDLE-RPM-HIGH',
       severity: 'warning',
-      title: 'Idle RPM Too High (P0507)',
+      title: 'Idle RPM Too High',
       description: `Engine idle RPM exceeded ${IDLE_HIGH_THRESHOLD} RPM for ${highCount} samples (max observed: ${maxIdleRpm} RPM). This can indicate a vacuum leak, stuck throttle, or idle control fault.`,
       recommendation: 'Check for vacuum leaks causing unmetered air. Inspect throttle body for sticking. Check idle control system.',
     });
@@ -1265,9 +1276,9 @@ export function checkTccOperation(
   // Raised thresholds: 75 samples (was 50) for stuck off, 100 (was 75) for stuck on
   if ((dutyCycleHasData || usePressureAsLock) && stuckOffCount > 75) {
     issues.push({
-      code: 'P0741',
+      code: 'TCC-STUCK-OFF',
       severity: 'critical',
-      title: 'Torque Converter Clutch Stuck Off (P0741)',
+      title: 'Torque Converter Clutch Not Engaging',
       description:
         `TCC commanded at ${lockLabel} but showed >${SLIP_THRESHOLD_LOCKED} RPM slip for ` +
         `${stuckOffCount} samples (gear shifts, lock transitions, and converging slip excluded). ` +
@@ -1279,9 +1290,9 @@ export function checkTccOperation(
 
   if ((dutyCycleHasData || usePressureAsLock) && stuckOnCount > 100) {
     issues.push({
-      code: 'P0742',
+      code: 'TCC-STUCK-ON',
       severity: 'warning',
-      title: 'Torque Converter Clutch Stuck On (P0742)',
+      title: 'Torque Converter Clutch Stuck Applied',
       description:
         `TCC commanded ${openLabel} but showed near-zero slip (<${SLIP_THRESHOLD_OPEN} RPM) ` +
         `for ${stuckOnCount} samples at cruise (gear shifts excluded). ` +
@@ -1320,9 +1331,9 @@ export function checkHighRailOnDecel(
 
   if (highDecelCount > 26) {
     issues.push({
-      code: 'P1089',
+      code: 'HIGH-RAIL-DECEL',
       severity: 'warning',
-      title: 'Rail Pressure High During Deceleration (P1089)',
+      title: 'Rail Pressure High During Deceleration',
       description: `Rail pressure remained above ${HIGH_DECEL_THRESHOLD.toLocaleString()} psi during ${highDecelCount} deceleration samples when it should have dropped. This indicates a stuck-open high-pressure pump or faulty pressure relief valve.`,
       recommendation: 'Inspect the high-pressure fuel pump pressure relief valve. Check PCV solenoid operation. Verify fuel return lines are not restricted.',
     });

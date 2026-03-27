@@ -146,7 +146,7 @@ describe('Vehicle-Aware Diagnostics — Diesel vs Gasoline', () => {
         fuelType: 'gasoline',
         manufacturer: 'bmw',
       },
-      // Simulate huge rail pressure deviation that would trigger P0087 on diesel
+      // Simulate huge rail pressure deviation that would trigger LOW-RAIL on diesel
       railActual: Array(200).fill(10000),
       railDesired: Array(200).fill(25000),
       rpm: Array(200).fill(2500),
@@ -154,7 +154,7 @@ describe('Vehicle-Aware Diagnostics — Diesel vs Gasoline', () => {
 
     const report = analyzeDiagnostics(data);
     const railIssues = report.issues.filter(i =>
-      i.code === 'P0087' || i.code === 'P0088' || i.code === 'P0089' || i.code === 'P1089'
+      i.code.includes('LOW-RAIL') || i.code.includes('HIGH-RAIL') || i.code.includes('REGULATOR') || i.code.includes('RAIL-PRESSURE')
     );
     expect(railIssues).toHaveLength(0);
   });
@@ -203,15 +203,15 @@ describe('Vehicle-Aware Diagnostics — Diesel vs Gasoline', () => {
     const report = analyzeDiagnostics(data);
     // Coolant checks are universal — should flag for any vehicle
     const coolantIssues = report.issues.filter(i =>
-      i.code.includes('P0116') || i.code.includes('P0128') ||
+      i.code.includes('COOLANT') || i.code.includes('OVERHEAT') ||
       i.title.toLowerCase().includes('coolant') ||
       i.title.toLowerCase().includes('overheating')
     );
     // If no specific coolant fault code, at least verify no diesel-specific codes were generated
     // The coolant check may use different codes — just verify diesel checks are absent
     const dieselIssues = report.issues.filter(i =>
-      i.code === 'P0087' || i.code === 'P0088' || i.code === 'P0089' ||
-      i.code === 'P0299' || i.code === 'P0046' || i.code === 'P1089'
+      i.code.includes('LOW-RAIL') || i.code.includes('HIGH-RAIL') || i.code.includes('REGULATOR') ||
+      i.code.includes('LOW-BOOST') || i.code.includes('VGT') || i.code.includes('RAIL-PRESSURE')
     );
     expect(dieselIssues).toHaveLength(0);
   });

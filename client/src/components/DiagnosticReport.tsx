@@ -60,7 +60,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
               color: 'oklch(0.75 0.18 25)',
               margin: 0
             }}>
-              POTENTIAL FAULT AREAS — CRITICAL ({criticalIssues.length})
+                CRITICAL CONDITIONS DETECTED ({criticalIssues.length})
             </h4>
           </div>
           {criticalIssues.map((issue, i) => (
@@ -81,7 +81,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
               color: 'oklch(0.80 0.18 60)',
               margin: 0
             }}>
-              POTENTIAL FAULT AREAS — WARNINGS ({warningIssues.length})
+              WARNING CONDITIONS ({warningIssues.length})
             </h4>
           </div>
           {warningIssues.map((issue, i) => (
@@ -102,7 +102,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
               color: 'oklch(0.70 0.18 200)',
               margin: 0
             }}>
-              POTENTIAL FAULT AREAS — INFORMATION ({infoIssues.length})
+              INFORMATIONAL CONDITIONS ({infoIssues.length})
             </h4>
           </div>
           {infoIssues.map((issue, i) => (
@@ -199,7 +199,7 @@ function IssueCard({ issue }: IssueCardProps) {
               color: config.codeColor,
               margin: 0,
               letterSpacing: '0.05em'
-            }}>{issue.code}</p>
+            }}>POTENTIAL FAULT AREA: {issue.code.replace(/-/g, ' ')}</p>
           </div>
         </div>
 
@@ -244,7 +244,7 @@ export function DiagnosticReportForPDF({ report }: DiagnosticReportProps) {
       {report.issues.map((issue, i) => (
         <div key={`${issue.code}-${i}`} className="border-l-4 pl-3 py-2">
           <p className="font-bold text-gray-900">{issue.title}</p>
-          <p className="text-xs text-gray-500 mb-1">{issue.code}</p>
+          <p className="text-xs text-gray-500 mb-1">Potential Fault Area: {issue.code.replace(/-/g, ' ')}</p>
           <p className="text-gray-700 mb-2">{issue.description}</p>
           <p className="text-gray-700 bg-gray-100 p-2 rounded">
             <span className="font-semibold">Recommendation: </span>

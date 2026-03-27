@@ -103,7 +103,7 @@ export default function Home() {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process file');
+      setError('File load error — Contact PPEI and the team will update the tool.');
       setData(null);
       setBinnedData(undefined);
       setDiagnostics(null);
@@ -130,7 +130,7 @@ export default function Home() {
     if (file && file.name.endsWith('.csv')) {
       processFile(file);
     } else {
-      setError('Please drop a CSV file.');
+      setError('File load error — Please upload a CSV file. If the issue persists, contact PPEI and the team will update the tool.');
     }
   }, [processFile]);
 
@@ -395,35 +395,7 @@ export default function Home() {
                   </li>
                 </ul>
               </div>
-              <div className="ppei-card-hover" style={{
-                background: 'oklch(0.13 0.006 260)',
-                border: '1px solid oklch(0.22 0.008 260)',
-                borderTop: '3px solid oklch(0.65 0.20 145)',
-                borderRadius: '3px',
-                padding: '1.25rem'
-              }}>
-                <h3 style={{
-                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
-                  fontSize: '1.1rem',
-                  letterSpacing: '0.08em',
-                  color: 'white',
-                  marginBottom: '0.75rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}>
-                  <Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
-                  FILE REQUIREMENTS
-                </h3>
-                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8, margin: 0 }}>
-                  Upload any CSV datalog export for analysis.
-                </p>
-                <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', lineHeight: 1.7, marginTop: '0.75rem' }}>
-                  Supported formats: CSV datalog exports<br />
-                  Required columns: RPM, MAF, Torque<br />
-                  Optional: Boost, Rail Pressure, EGT, Speed
-                </p>
-              </div>
+
             </div>
 
             {/* Bottom brand tagline */}
@@ -759,7 +731,7 @@ export default function Home() {
             <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />
             <div>
               <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
-                {error ? 'ERROR PROCESSING FILE' : 'PDF EXPORT FAILED'}
+                {error ? 'FILE LOAD ERROR' : 'PDF EXPORT FAILED'}
               </p>
               <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
                 {error || exportError}

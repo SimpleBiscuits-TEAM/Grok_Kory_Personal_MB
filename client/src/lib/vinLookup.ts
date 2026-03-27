@@ -179,13 +179,13 @@ const VIN_CONFIGS: Record<string, VinConfig> = {
 
 function getTransmissionInfo(year: number, engineCode: string): { name: string; code: string } {
   if (year >= 2024) {
-    return { name: 'Allison 10L1000 10-Speed Automatic', code: '10L1000' };
+    return { name: 'GM/Allison 10L1000 10-Speed Automatic', code: '10L1000' };
   } else if (year >= 2020) {
-    return { name: 'Allison 10-Speed Automatic (MYC)', code: 'MYC' };
-  } else if (year >= 2017) {
-    return { name: 'Allison 6-Speed Automatic (MYD)', code: 'MYD' };
+    return { name: 'GM/Allison 10L1000 10-Speed Automatic (MYC)', code: '10L1000' };
+  } else if (year >= 2006) {
+    return { name: 'Allison 1000 6-Speed Automatic', code: 'MYD' };
   } else {
-    return { name: 'Allison 6-Speed Automatic (MYD)', code: 'MYD' };
+    return { name: 'Allison 1000 5-Speed Automatic', code: 'MYD' };
   }
 }
 

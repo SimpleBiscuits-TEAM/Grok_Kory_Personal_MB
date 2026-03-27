@@ -147,3 +147,18 @@
 - [x] Changed subtitle to "AI-POWERED DIAGNOSTICS"
 - [x] Removed "L5P DURAMAX" badge from top right
 - [x] Cleaned up redundant HP Tuners/EFILive/Banks references from upload area and file requirements
+
+## Critical Fixes: Fault Display, DTC Codes, and False Positives
+- [x] Find and fix ALL paths that still report P0088 and TCC slip on the 17L5P CSV (diagnostics.ts, healthReport.ts, reasoningEngine.ts)
+- [x] Replace all DTC codes (P0088, P0087, P0741, etc.) with descriptive condition names throughout the codebase
+- [x] Display conditions as "potential fault area" with description and thresholds, not as DTCs
+- [x] Fault zone graphs MUST always render when any condition is reported — never return null
+- [x] If fault zone graph has no data to show, display explanation of why it didn't populate
+- [x] Update DiagnosticReportComponent to show conditions instead of DTC codes
+- [x] Update fault zone chart components to always render when their condition is reported
+- [x] Update PDF export to use condition names instead of DTC codes
+- [x] Remove file requirements section/tab from UI entirely
+- [x] Replace file parsing errors with user-friendly "Contact PPEI" message
+- [x] Fix TCC converging slip detection in healthReport.ts — replaced with settle-then-rise logic
+- [x] Fix transmission knowledge base: Allison 1000 5-speed (01-05), Allison 1000 6-speed (06-19), GM/Allison 10L1000 10-speed (2020+)
+- [x] Fix TCC slip detection for 10L1000: settle-then-rise logic in diagnostics.ts, healthReport.ts, and evaluateDiagnostics
