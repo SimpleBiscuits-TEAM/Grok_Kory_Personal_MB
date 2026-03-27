@@ -50,6 +50,7 @@ interface FaultChartsProps {
   diagnostics: DiagnosticReport;
   binnedData?: any[];
   onJumpToTime?: (start: number, end: number) => void;
+  reasoningReport?: { findings: Array<{ id: string; type: string; category: string }> } | null;
 }
 
 // ─── Custom Dynojet-style Tooltip ────────────────────────────────────────────
@@ -975,12 +976,16 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
 DynoHPChart.displayName = 'DynoHPChart';
 
 // ─── RAIL PRESSURE FAULT CHART ────────────────────────────────────────────────
-export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
   // Match descriptive condition codes for rail pressure
   const lowRailIssue = diagnostics.issues.find(i => i.code.startsWith('LOW-RAIL-PRESSURE'));
   const highRailIssue = diagnostics.issues.find(i => i.code.startsWith('HIGH-RAIL') || i.code === 'RAIL-PRESSURE-OSCILLATION' || i.code === 'HIGH-IDLE-RAIL-PRESSURE');
   const issue = lowRailIssue || highRailIssue;
-  if (!issue) return null;
+  // Also check reasoning engine for rail pressure findings (warning or fault)
+  const reasoningRailFinding = reasoningReport?.findings?.find(
+    f => f.id === 'rail-pressure-analysis' && (f.type === 'warning' || f.type === 'fault')
+  );
+  if (!issue && !reasoningRailFinding) return null;
 
   const isLow = !!lowRailIssue;
   const displayCode = isLow ? 'Low Rail Pressure' : 'High Rail Pressure';
@@ -1029,10 +1034,10 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
     <FaultChartWrapper
       ref={ref}
       code={displayCode}
-      title={issue.title}
-      severity={issue.severity}
-      description={issue.description}
-      recommendation={issue.recommendation}
+      title={issue?.title || 'Rail Pressure Analysis'}
+      severity={issue?.severity || 'warning'}
+      description={issue?.description || 'The reasoning engine detected a rail pressure concern. See the AI Reasoning Engine section for details.'}
+      recommendation={issue?.recommendation || 'Review the AI Reasoning Engine findings for specific recommendations.'}
       ruleEvaluated={ruleText}
       badges={<>
         <DeltaBadge label="Peak Rail Pressure" actual={peakActual.toFixed(0)} expected={peakDesired.toFixed(0)} delta={(isLow ? peakDesired - peakActual : peakActual - peakDesired).toFixed(0)} unit=" psi" isCritical={true} />
@@ -1090,7 +1095,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
         </div>
       )}
       <FaultEventList
-        isCritical={issue.severity === 'critical'}
+        isCritical={issue?.severity === 'critical'}
         events={computeFaultEvents(
           chartData,
           d => isLow ? (d.deltaLow ?? 0) > CHART_THRESHOLD_LOW : (d.deltaHigh ?? 0) > CHART_THRESHOLD_HIGH,
@@ -1105,9 +1110,13 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
 RailPressureFaultChart.displayName = 'RailPressureFaultChart';
 
 // ─── BOOST PRESSURE FAULT CHART ───────────────────────────────────────────────
-export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
   const issue = diagnostics.issues.find(i => i.code.startsWith('LOW-BOOST'));
-  if (!issue) return null;
+  // Also check reasoning engine for boost-related findings (warning or fault)
+  const reasoningBoostFinding = reasoningReport?.findings?.find(
+    f => (f.id === 'boost-leak-suspicion' || f.id === 'converter-stall-turbo-mismatch') && (f.type === 'warning' || f.type === 'fault')
+  );
+  if (!issue && !reasoningBoostFinding) return null;
 
   const hasBoostData = (data.boost?.length ?? 0) > 0;
 
@@ -1144,10 +1153,10 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
     <FaultChartWrapper
       ref={ref}
       code="Low Boost"
-      title={issue.title}
-      severity={issue.severity}
-      description={issue.description}
-      recommendation={issue.recommendation}
+      title={issue?.title || 'Boost Pressure Analysis'}
+      severity={issue?.severity || 'warning'}
+      description={issue?.description || 'The reasoning engine detected a boost-related concern. See the AI Reasoning Engine section for details.'}
+      recommendation={issue?.recommendation || 'Review the AI Reasoning Engine findings for specific recommendations.'}
       ruleEvaluated={ruleText}
       badges={<>
         <DeltaBadge label="Peak Boost" actual={peakActual.toFixed(1)} expected={peakDesired > 0 ? peakDesired.toFixed(1) : '48.0'} delta={(peakDesired > 0 ? peakDesired - peakActual : 48 - peakActual).toFixed(1)} unit=" psi" isCritical={true} />
@@ -1196,7 +1205,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
         </div>
       )}
       <FaultEventList
-        isCritical={issue.severity === 'critical'}
+        isCritical={issue?.severity === 'critical'}
         events={computeFaultEvents(
           chartData,
           d => ((d.desired ?? 0) - (d.actual ?? 0)) > BOOST_FAULT_THRESHOLD,

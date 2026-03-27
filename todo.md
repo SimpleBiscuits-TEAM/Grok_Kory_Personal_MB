@@ -381,3 +381,20 @@
 - [x] Never state stall is "too tight" definitively — suggest as a possibility
 - [x] Add LB7 platform to vehicleKnowledgeBase with CP3, solenoid injectors, Allison 1000 5-speed
 - [x] Add PCM.* candidates to pidSubstitution.ts
+
+## LB7 Diagnostic Fixes (Post-Upload Testing)
+- [x] Suppress VGT vane position recommendations/details for LB7 (no VGT — fixed geometry turbo)
+- [x] Suppress EGT sensor warnings/recommendations for LB7 (no EGT sensors on LB7)
+- [x] Increase rail pressure deviation threshold by ~10% to eliminate false faults on acceptable deviation
+- [x] Map all warnings to corresponding fault analysis graphs (e.g., rail pressure warning must show graph with problematic zone)
+- [x] Fix turbo spool lag detection — slow boost build for extended time was not flagged; logic from converter stall analysis should trigger
+
+## LB7 Customer Case Training Data (Kory @ PPEI)
+- [x] Encode real case: Suncoast 2200 triple disc actual flash stall ~1300 RPM (well below rated 2200)
+- [x] Add knowledge: mechanical boost gauge reading (31-33 PSI) > MAP sensor reading (29 PSI) confirms sensor saturation
+- [x] Add knowledge: no boost leak confirmed + tight stall = stall is primary issue for lag/smoke
+- [x] Add knowledge: MAF limiting trade-off — less smoke but more lag when converter can't flash high enough
+- [x] Add knowledge: turbo shaft speed concern — tight stall can overspeed turbo trying to push air
+- [x] Encode into converter stall analysis: rated stall vs actual flash stall discrepancy is common
+- [x] Suppress EGT PID suggestion for platforms without factory EGT sensors (LB7)
+- [x] Fix fault-to-graph mapping: every warning/fault must have a corresponding graph zone

@@ -306,6 +306,14 @@ const LB7_PLATFORM: VehiclePlatform = {
     'When diagnosing smoke and lag complaints on modified LB7s: check converter stall RPM vs turbo spool threshold, AND check for boost leaks. These two issues compound each other.',
     'A boost leak on an LB7 with a larger turbo will exaggerate a tight converter stall — the turbo cannot build pressure it is losing, making the stall problem appear worse.',
     'Allison 1000 5-speed: gear text in EFILive (First, Second, Third, Fourth, Fifth, Reverse, Neutral, Park). Analyzer converts to numeric.',
+    'REAL CASE: Suncoast 2200 triple disc converter with larger turbo — rated stall 2200 RPM but actual flash stall from dead stop was only ~1300 RPM. Turbo did not spool until ~2300 RPM. Result: extreme lag and smoke from a stop.',
+    'Converter stall ratings (e.g. "2200 stall") are measured under specific conditions. Actual flash stall from a dead stop can be significantly lower than the rated number, especially with a tight converter and heavy vehicle.',
+    'When customer reports mechanical boost gauge reads higher than MAP sensor (e.g. 31-33 PSI vs 29 PSI logged), this confirms OEM MAP sensor saturation. The turbo IS making boost — the sensor just cannot read it.',
+    'Diagnostic priority for smoke + lag on modified LB7: (1) Check converter stall vs turbo spool range, (2) Boost leak test (pressurize to 40 PSI, watch for slow leakdown), (3) Check turbo shaft speed if accessible.',
+    'MAF limiting trade-off: reducing fuel on the bottom end (MAF limiting) will reduce smoke but will likely increase lag because there is less heat energy to drive the turbo. Only effective if the converter stall is adequate.',
+    'Turbo shaft speed concern: a tight converter stall forces the turbo to work harder at low RPM. The shaft speeds can get very high, potentially overspeeding the turbo. This is especially concerning with aftermarket turbos.',
+    'LB7 OEM MAP sensor is approximately 3-bar (~29 PSI gauge max from raw kPa reading). The ECU processed BOOST PID caps at 22-24 PSI. EFILive BOOST_M reads the raw MAP kPa which can show up to ~29 PSI gauge.',
+    'When boost leak test is performed: pressurize the charge system to 40 PSI and observe leakdown rate. A very slow leakdown confirms the system holds pressure. Quick leakdown indicates a leak in boots, clamps, intercooler, or up-pipe.',
   ],
 };
 

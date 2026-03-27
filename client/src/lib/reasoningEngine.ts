@@ -56,6 +56,7 @@ export interface OperatingContext {
   railPressureFormat: 'kpa' | 'psi';
   tccPressureFormat: 'kpa_pcs' | 'percent';
   fileFormat: string;
+  platform: string; // e.g. 'LB7', 'LLY', 'LBZ', 'LMM', 'LML', 'L5P'
 }
 
 export interface BetaImprovement {
@@ -170,6 +171,7 @@ function buildOperatingContext(data: ProcessedMetrics): OperatingContext {
     railPressureFormat,
     tccPressureFormat,
     fileFormat: data.fileFormat,
+    platform: data.vehicleMeta?.engineType || '',
   };
 }
 
@@ -405,15 +407,17 @@ function analyzeRailPressure(
   const pcvLabel = isEFILivePcvMa ? 'mA' : '%';
 
   // Determine if PCV is fluctuating excessively (indicates regulator instability)
-  // EFILive: >200 mA swing = significant; HP Tuners: >20% swing = significant
-  const pcvFluctuating = isEFILivePcvMa ? pcvRange > 200 : pcvRange > 20;
+  // EFILive: >900 mA swing = significant (raised from 200 — CP3 systems like LB7/LBZ
+  // can show 800+ mA swings under normal operation); HP Tuners: >25% swing = significant
+  const pcvFluctuating = isEFILivePcvMa ? pcvRange > 900 : pcvRange > 25;
 
-  // Count samples with significant deviation (>5% from desired)
-  const significantDevCount = warmSamples.filter(s => Math.abs(s.devPct) > 5).length;
+  // Count samples with significant deviation (>5.5% from desired)
+  // Raised from 5% to 5.5% to reduce false positives on acceptable deviation
+  const significantDevCount = warmSamples.filter(s => Math.abs(s.devPct) > 5.5).length;
   const significantDevRate = (significantDevCount / warmSamples.length) * 100;
 
-  // Only report if there's a meaningful pattern
-  if (significantDevRate > 10 || pcvFluctuating) {
+  // Only report if there's a meaningful pattern (raised from 10% to 15%)
+  if (significantDevRate > 15 || pcvFluctuating) {
     const evidence: string[] = [
       `${warmSamples.length} samples analyzed at operating temperature`,
       `Average rail pressure deviation: ${avgDev.toFixed(0)} psi (${avgDevPct.toFixed(1)}%)`,
@@ -429,7 +433,7 @@ function analyzeRailPressure(
     let reasoning = '';
     let type: 'fault' | 'warning' | 'improvement' | 'info' = 'info';
 
-    if (pcvFluctuating && significantDevRate > 20) {
+    if (pcvFluctuating && significantDevRate > 30) {
       type = 'warning';
       reasoning =
         `The PCV (pressure control valve) current is fluctuating by ${pcvRange.toFixed(0)} ${pcvLabel}, ` +
@@ -705,63 +709,122 @@ function analyzeConverterStallVsTurboSpool(
 
   if (wotLaunches.length === 0) return findings;
 
-  // Analyze the launches for stall/spool mismatch
-  const avgPeakStallRpm = wotLaunches.reduce((s, l) => s + l.peakRpm, 0) / wotLaunches.length;
-  const avgBoostDuringStall = wotLaunches.reduce((s, l) => s + l.peakBoostDuringStall, 0) / wotLaunches.length;
+  // ── Analyze the launches for turbo spool delay / converter stall mismatch ──
+  // The key insight: we don't just look at peak RPM during the event (the turbo
+  // eventually spools and RPM climbs). Instead we look at:
+  //  1. rpmAtFirstBoost — what RPM did the engine need to reach before the turbo
+  //     started producing meaningful boost (>3 psi)? Higher = more lag.
+  //  2. boostBuildDelay — how many samples from WOT to first meaningful boost?
+  //     Longer = more time spent fueling without airflow (smoke, lag).
+  //  3. The RPM at the START of the WOT event (initial stall RPM) — if the
+  //     converter doesn't flash high enough, the turbo never enters its spool range.
+
   const maxBoostOverall = Math.max(...boost.filter(v => v > 0));
+  const sampleRate = 10; // assumed 10 Hz
 
-  // If peak stall RPM is below ~1800 and boost during the stall phase is minimal,
-  // the converter may not be allowing the engine to reach the turbo's spool range
-  const stallRpmLow = avgPeakStallRpm < 1800;
-  const boostDuringStallLow = avgBoostDuringStall < 5; // less than 5 psi during stall phase
-  const significantBoostLater = maxBoostOverall > 15; // turbo does make boost eventually
+  // Compute averages across all launches
+  const avgRpmAtFirstBoost = wotLaunches
+    .filter(l => l.rpmAtFirstBoost > 0)
+    .reduce((s, l, _, a) => s + l.rpmAtFirstBoost / a.length, 0);
+  const avgBoostBuildDelay = wotLaunches.reduce((s, l) => s + l.boostBuildDelay, 0) / wotLaunches.length;
+  const avgBoostBuildDelaySec = avgBoostBuildDelay / sampleRate;
+  const avgStartRpm = wotLaunches.reduce((s, l) => s + rpm[l.startIdx], 0) / wotLaunches.length;
 
-  if (stallRpmLow && boostDuringStallLow) {
+  // Trigger conditions (any of these indicates a potential issue):
+  // A) Turbo doesn't produce boost until engine is above 1800 RPM (high spool threshold)
+  const highSpoolThreshold = avgRpmAtFirstBoost > 1800;
+  // B) Boost build delay is more than 1.0 seconds from WOT (extended lag)
+  const extendedBoostDelay = avgBoostBuildDelaySec > 1.0;
+  // C) Start RPM at WOT is low (converter not flashing high) AND boost is delayed
+  const lowStartRpm = avgStartRpm < 1500;
+
+  // We need at least one strong indicator
+  const hasSpoolIssue = highSpoolThreshold || extendedBoostDelay;
+
+  if (hasSpoolIssue) {
     const evidence: string[] = [
-      `Average peak RPM during WOT launch stall: ${avgPeakStallRpm.toFixed(0)} RPM`,
-      `Average boost during stall phase: ${avgBoostDuringStall.toFixed(1)} psi`,
       `WOT launch events analyzed: ${wotLaunches.length}`,
+      `Average RPM at WOT start (converter stall flash): ${avgStartRpm.toFixed(0)} RPM`,
     ];
 
-    if (significantBoostLater) {
-      evidence.push(`Peak boost observed later in log: ${maxBoostOverall.toFixed(1)} psi — turbo is capable of producing boost at higher RPM`);
+    if (avgRpmAtFirstBoost > 0) {
+      evidence.push(`Average RPM when boost first exceeded 3 psi: ${avgRpmAtFirstBoost.toFixed(0)} RPM`);
     }
+    evidence.push(`Average time from WOT to first meaningful boost: ${avgBoostBuildDelaySec.toFixed(1)} seconds (${avgBoostBuildDelay.toFixed(0)} samples)`);
+    evidence.push(`Peak boost observed in log: ${maxBoostOverall.toFixed(1)} psi`);
 
     for (const launch of wotLaunches.slice(0, 3)) {
+      const startRpm = rpm[launch.startIdx];
+      const delaySec = launch.boostBuildDelay / sampleRate;
       evidence.push(
-        `Launch event: stall peak ${launch.peakRpm.toFixed(0)} RPM, ` +
-        `boost during stall ${launch.peakBoostDuringStall.toFixed(1)} psi` +
-        (launch.rpmAtFirstBoost > 0 ? `, first boost (>3 psi) at ${launch.rpmAtFirstBoost.toFixed(0)} RPM` : ', no meaningful boost during stall phase')
+        `Launch event: start RPM ${startRpm.toFixed(0)}, peak RPM ${launch.peakRpm.toFixed(0)}, ` +
+        `first boost (>3 psi) at ${launch.rpmAtFirstBoost > 0 ? launch.rpmAtFirstBoost.toFixed(0) + ' RPM' : 'N/A'}, ` +
+        `boost delay ${delaySec.toFixed(1)}s, peak boost ${launch.peakBoostDuringStall.toFixed(1)} psi`
       );
     }
+
+    // Build reasoning based on what we observed
+    let reasoningText =
+      `During WOT launches from a stop, the turbocharger required approximately ` +
+      `${avgBoostBuildDelaySec.toFixed(1)} seconds to begin producing meaningful boost (>3 psi). `;
+
+    if (avgRpmAtFirstBoost > 0) {
+      reasoningText +=
+        `The engine needed to reach approximately ${avgRpmAtFirstBoost.toFixed(0)} RPM before ` +
+        `the turbo started building pressure. `;
+    }
+
+    if (lowStartRpm) {
+      reasoningText +=
+        `The converter stall flash speed at WOT was approximately ${avgStartRpm.toFixed(0)} RPM, ` +
+        `which may be below the turbo's effective spool range. If this vehicle is equipped with ` +
+        `a larger aftermarket turbocharger that comes on around 2000+ RPM, a converter stall ` +
+        `speed that doesn't reach that range could contribute to sluggish off-the-line response ` +
+        `and excessive smoke from fueling without adequate airflow. `;
+    }
+
+    if (extendedBoostDelay) {
+      reasoningText +=
+        `The extended boost build time (${avgBoostBuildDelaySec.toFixed(1)}s) means the engine ` +
+        `is fueling at WOT for a significant period before the turbo provides matching airflow. ` +
+        `This can cause visible smoke and a perception of lag. `;
+    }
+
+    reasoningText +=
+      `This is one possible contributing factor — it does not necessarily mean the converter is ` +
+      `the sole issue, but the data suggests the turbo is slow to respond during the initial ` +
+      `launch phase. A boost leak could compound this by further reducing the turbo's ability ` +
+      `to build pressure.`;
+
+    // Determine confidence based on how many indicators are present
+    const indicatorCount = [highSpoolThreshold, extendedBoostDelay, lowStartRpm].filter(Boolean).length;
+    const confidence = indicatorCount >= 2 ? 'medium' : 'low';
 
     findings.push({
       id: 'converter-stall-turbo-mismatch',
       category: 'transmission',
-      confidence: 'medium',
+      confidence,
       type: 'warning',
-      title: 'Possible Converter Stall / Turbo Spool Mismatch',
-      reasoning:
-        `During WOT launches from a stop, the torque converter stall speed peaked at approximately ` +
-        `${avgPeakStallRpm.toFixed(0)} RPM with minimal boost production (${avgBoostDuringStall.toFixed(1)} psi). ` +
-        `If this vehicle is equipped with a larger aftermarket turbocharger, the turbo may require ` +
-        `higher RPM (typically 1800-2200+ RPM) to begin producing meaningful boost. ` +
-        `A converter stall speed that does not reach the turbo's spool threshold could result in ` +
-        `sluggish acceleration, excessive smoke from unburned fuel (fueling without adequate airflow), ` +
-        `and a perception of lag from a dead stop. ` +
-        `This is one possible contributing factor — it does not necessarily mean the converter is ` +
-        `the sole issue, but the data suggests the engine is not reaching the RPM range where ` +
-        `the turbocharger becomes efficient during the initial launch phase.`,
+      title: 'Possible Converter Stall / Turbo Spool Mismatch — Extended Boost Build Time',
+      reasoning: reasoningText,
       evidence,
       suggestion:
         'Consider evaluating the torque converter stall speed relative to the turbocharger\'s ' +
-        'effective spool range. A converter with a higher stall speed matched to the turbo\'s ' +
-        'power curve may improve off-the-line response. Also check for boost leaks that could ' +
-        'compound the issue by reducing boost at all RPM ranges. If the vehicle has a larger turbo, ' +
-        'a stall converter in the 2200-2800 RPM range (matched to the turbo) is common practice.',
+        'effective spool range. Note that converter stall ratings (e.g. "2200 stall") are measured ' +
+        'under specific conditions — actual flash stall from a dead stop can be significantly lower ' +
+        'than the rated number. A converter with a higher stall speed matched to the turbo\'s ' +
+        'power curve may improve off-the-line response. ' +
+        'Also check for boost leaks that could compound the issue (pressurize the charge system to ' +
+        '40 PSI and watch for leakdown). If the vehicle has a larger turbo, a stall converter in the ' +
+        '2200-2800 RPM range (matched to the turbo) is common practice. ' +
+        'Be aware that a tight stall can also overspeed the turbo at low RPM — the turbo shaft speeds ' +
+        'get very high trying to push air through a converter that won\'t let the engine rev. ' +
+        'MAF limiting (reducing fuel on the bottom end) can reduce smoke but may increase lag since ' +
+        'there is less heat energy to drive the turbo.',
       betaNote:
         'PPEI AI Beta: Converter stall analysis examines WOT launch events (throttle >85%, ' +
-        'gear 1-2, VSS <15 mph) and compares peak stall RPM against boost production. ' +
+        'gear 1-2, VSS <15 mph) and measures the delay from WOT to first meaningful boost ' +
+        'production, as well as the RPM at which the turbo begins spooling. ' +
         'This finding is presented as a possibility, not a definitive diagnosis — multiple ' +
         'factors (boost leaks, fueling, turbo sizing) can produce similar symptoms.',
     });
@@ -817,17 +880,58 @@ function analyzeBoostLeak(
 
   // Heuristic: If MAF is reasonably high (engine is getting fuel and air request)
   // but boost is suspiciously low, suspect a leak.
-  // For reference: a stock LB7 makes ~22 psi, a larger turbo should exceed 30 psi.
-  // A MAP sensor typically maxes around 30-36 psi on most Duramax platforms.
-  // If peak boost is under 28 psi with good MAF, there may be a leak.
   //
-  // We use MAF-to-boost ratio as a secondary indicator:
-  // Higher MAF with lower boost = air is being produced but not contained.
+  // IMPORTANT: Must account for OEM MAP sensor limits per platform!
+  // OEM MAP sensor gauge maximums (approximate):
+  //   LB7 (2001-2004):   ~3 bar raw, ECU boost PID caps ~22-24 psi, raw MAP kPa ~29 psi gauge
+  //   LLY (2004.5-2005): ~3 bar, reads to ~37 psi gauge
+  //   LBZ (2006-2007):   ~3 bar, reads to ~37 psi gauge
+  //   LMM (2007.5-2010): ~3 bar, reads to ~37 psi gauge
+  //   LML (2011-2016):   ~3 bar, reads to ~37 psi gauge
+  //   L5P (2017+):       ~3 bar, reads to ~37 psi gauge
+  // Aftermarket 4-bar or 5-bar or 10-bar sensors read higher.
+  // If peak boost is near the sensor limit, the sensor is SATURATED
+  // and we cannot conclude boost is "low" — the turbo may be making more than the sensor reads.
+  //
+  // We use multiple indicators:
+  // 1. Peak boost well below sensor limit with high MAF = possible leak
+  // 2. Boost plateau: boost doesn't climb with RPM despite more airflow
+  // 3. MAF-to-boost ratio as secondary indicator
+  // But NONE of these apply if the MAP sensor is pegged.
+
+  // MAP sensor saturation detection (data-driven, no platform assumption needed)
+  // Instead of guessing the sensor bar rating, detect saturation from the data itself:
+  // If the peak boost value hits a hard ceiling (multiple samples at the same max value),
+  // the sensor is saturated and we cannot conclude boost is "low".
+  //
+  // Known OEM MAP sensor gauge ceilings:
+  //   LB7 (2001-2004):   ~29 psi gauge (3-bar sensor, raw MAP kPa)
+  //   LLY-LML (2004-2016): ~37 psi gauge
+  //   L5P (2017+):       ~37 psi gauge
+  // But aftermarket sensors (4-bar, 5-bar, 10-bar) read much higher.
+  //
+  // Detection: count how many WOT samples are within 1 psi of peak boost.
+  // If >20% of WOT samples are at the ceiling, the sensor is likely maxed out.
+  const nearPeakSamples = wotSamples.filter(s => s.boost >= (peakWotBoost - 1.0)).length;
+  const nearPeakRatio = nearPeakSamples / wotSamples.length;
+  const sensorSaturated = nearPeakRatio > 0.20 && peakWotBoost > 20;
+
+  if (sensorSaturated) {
+    // Sensor appears to be pegged — many WOT samples hitting the same ceiling.
+    // The turbo is making at least as much boost as the sensor can read.
+    // Cannot determine if there's a leak from boost pressure alone.
+    return findings;
+  }
 
   // Determine if boost seems low for the airflow being produced
-  // MAF > 40 lb/min (converted from g/s: ~300 g/s) with boost < 28 psi is suspicious
   const mafHighEnough = peakWotMaf > 40; // lb/min — indicates turbo is moving air
-  const boostSuspiciouslyLow = peakWotBoost < 28;
+  const boostSuspiciouslyLow = peakWotBoost < 25; // well below 3-bar sensor limit
+
+  // MAF-to-boost ratio: how many lb/min of air per psi of boost?
+  // A healthy system typically shows 1.5-2.0 lb/min per psi at peak.
+  // Higher ratios (>2.5) suggest air is being produced but not contained.
+  const mafToBoostRatio = peakWotBoost > 1 ? peakWotMaf / peakWotBoost : 0;
+  const highMafToBoostRatio = mafToBoostRatio > 2.5; // raised from 2.2 to reduce false positives
 
   // Also check: does boost plateau early and not climb with increasing RPM?
   // This is a classic leak signature — the turbo makes more air but it escapes.
@@ -843,7 +947,7 @@ function analyzeBoostLeak(
     }
   }
 
-  if ((mafHighEnough && boostSuspiciouslyLow) || boostPlateaus) {
+  if ((mafHighEnough && boostSuspiciouslyLow) || boostPlateaus || (mafHighEnough && highMafToBoostRatio)) {
     const evidence: string[] = [
       `Peak boost under WOT: ${peakWotBoost.toFixed(1)} psi`,
       `Peak MAF under WOT: ${peakWotMaf.toFixed(1)} lb/min`,
@@ -933,7 +1037,15 @@ function generateBetaImprovements(
 
   // Suggestion 1: Additional PIDs that would improve diagnostic accuracy
   const missingPids: string[] = [];
-  if (data.exhaustGasTemp.every(v => v === 0)) missingPids.push('Exhaust Gas Temperature (EGT)');
+  // LB7 does not have factory EGT sensors — don't suggest adding EGT for LB7
+  // Detect LB7 from platform field OR from PID prefix (PCM.* = LB7/LLY era)
+  const platformLower = ctx.platform?.toLowerCase() || '';
+  const isLb7ByPlatform = platformLower.includes('lb7');
+  // If no vehicleMeta, detect from file format: EFILive with PCM prefix = LB7/LLY (no factory EGT)
+  const isLb7ByPids = ctx.fileFormat === 'efilive' && data.fileFormat === 'efilive' &&
+    data.exhaustGasTemp.every(v => v === 0) && data.turboVanePosition.every(v => v === 0);
+  const hasNoFactoryEgt = isLb7ByPlatform || isLb7ByPids;
+  if (data.exhaustGasTemp.every(v => v === 0) && !hasNoFactoryEgt) missingPids.push('Exhaust Gas Temperature (EGT)');
   if (data.oilPressure.every(v => v === 0)) missingPids.push('Oil Pressure');
   if (data.oilTemp.every(v => v === 0)) missingPids.push('Oil Temperature');
   if (data.transFluidTemp.every(v => v === 0)) missingPids.push('Transmission Fluid Temperature');

@@ -266,7 +266,11 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // P0046 - VGT Vane Tracking — diesel VGT only
-  if (isDiesel && turboVanePosition.length > 0 && turboVaneDesired.length > 0) {
+  // Also require non-zero data — LB7 and other non-VGT platforms may have
+  // zero-filled arrays when no VGT PID exists
+  const vgtHasRealData = turboVanePosition.length > 0 && turboVaneDesired.length > 0
+    && turboVanePosition.some((v: number) => v > 0) && turboVaneDesired.some((v: number) => v > 0);
+  if (isDiesel && vgtHasRealData) {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
@@ -332,8 +336,8 @@ function checkLowRailPressure(
   throttlePosition: number[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const ABS_THRESHOLD = 5000;   // psi absolute offset
-  const PCT_THRESHOLD = 0.20;   // 20% relative deviation required
+  const ABS_THRESHOLD = 5500;   // psi absolute offset (raised from 5000 — +10%)
+  const PCT_THRESHOLD = 0.22;   // 22% relative deviation required (raised from 20% — +10%)
   const minDuration = 15;       // seconds sustained (raised from 10)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
