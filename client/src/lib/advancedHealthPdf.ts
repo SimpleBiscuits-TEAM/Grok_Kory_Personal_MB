@@ -279,12 +279,45 @@ function getOemPeakRailPsi(vehicleInfo?: VehicleInfo): number {
 function getInjectorAnalysis(
   pulseWidthMs: number[],
   isPiezo: boolean,
+  railPressure?: number[],
 ): { maxPw: number; avgPw: number; spicyPct: number; commentary: string } {
   const valid = pulseWidthMs.filter(v => v > 0);
   if (valid.length === 0) return { maxPw: 0, avgPw: 0, spicyPct: 0, commentary: '' };
 
   const maxPw = Math.max(...valid);
   const avgPw = valid.reduce((a, b) => a + b, 0) / valid.length;
+
+  // ── Rail pressure context ──
+  // Pulse width severity depends heavily on rail pressure. 2.9ms at 8,000 PSI is a
+  // completely different situation than 2.9ms at 25,000+ PSI. At low pressure, the
+  // injector isn't delivering nearly as much fuel per microsecond, so the spray
+  // pattern and piston loading are much less aggressive.
+  // We find the rail pressure AT the moment of peak PW to assess the real severity.
+  let railAtPeakPw = 0;
+  let peakPwIdx = 0;
+  for (let i = 0; i < valid.length; i++) {
+    if (pulseWidthMs[i] === maxPw && peakPwIdx === 0) {
+      peakPwIdx = i;
+      break;
+    }
+  }
+  // Find actual index in full array
+  let fullIdx = -1;
+  for (let i = 0; i < pulseWidthMs.length; i++) {
+    if (Math.abs(pulseWidthMs[i] - maxPw) < 0.001) {
+      fullIdx = i;
+      break;
+    }
+  }
+  if (railPressure && fullIdx >= 0 && fullIdx < railPressure.length) {
+    railAtPeakPw = railPressure[fullIdx];
+  }
+
+  // Determine if this is a "high pressure" situation
+  // L5P OEM peak is ~29,000 PSI, LML ~27,000 PSI, LBZ ~23,000 PSI
+  // Below ~15,000 PSI, even a long PW isn't delivering massive fuel volume
+  const highPressureThreshold = isPiezo ? 20000 : 18000; // PSI
+  const lowPressure = railAtPeakPw > 0 && railAtPeakPw < highPressureThreshold;
 
   // Thresholds differ by injector type
   const spicyThreshold = isPiezo ? 1.5 : 2.5; // ms for piezo, ms (2500uS) for solenoid
@@ -299,28 +332,50 @@ function getInjectorAnalysis(
   const piezoBottomedOut = 1.5; // ms (1400-1600μs range, needle fully open)
   const effectivePw = isPiezo ? maxPw + piezoShutoffDelay : maxPw;
 
+  const railContext = railAtPeakPw > 0
+    ? ` Rail pressure at peak PW was ${Math.round(railAtPeakPw).toLocaleString()} PSI${lowPressure ? ' — that\'s relatively low pressure, so the actual fuel volume delivered per millisecond is significantly less than it would be at full rail pressure' : ''}.`
+    : '';
+
   let commentary = '';
   if (maxPw < spicyThreshold * 0.7) {
-    commentary = `Injector pulse width peaked at ${maxPw.toFixed(2)}ms — well within the comfort zone. The fuel system isn't being asked to do anything heroic here, and the pistons are living an easy life.`;
+    commentary = `Injector pulse width peaked at ${maxPw.toFixed(2)}ms — well within the comfort zone.${railContext} The fuel system isn't being asked to do anything heroic here, and the pistons are living an easy life.`;
   } else if (maxPw < spicyThreshold) {
-    commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is getting up there. Not in the danger zone yet, but the longer the injector stays open, the wider the spray pattern gets — and that means more fuel washing the piston bowl walls instead of atomizing cleanly.`;
+    commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is getting up there.${railContext}`;
+    if (lowPressure) {
+      commentary += ` However, at this rail pressure the fuel volume per millisecond is moderate — the duration looks long but the actual fuel mass delivered is less aggressive than the same PW at full rail pressure would be.`;
+    } else {
+      commentary += ` The longer the injector stays open, the wider the spray pattern gets — and that means more fuel washing the piston bowl walls instead of atomizing cleanly.`;
+    }
     if (isPiezo) {
       commentary += ` Keep in mind that piezo injectors have roughly 800μs of shutoff delay — so a ${maxPw.toFixed(2)}ms command means the injector is actually delivering fuel for approximately ${effectivePw.toFixed(2)}ms.`;
     }
     commentary += ` Keep an eye on EGTs when you're in this range.`;
   } else if (maxPw < spicyThreshold * 1.3) {
-    commentary = `Peak pulse width hit ${maxPw.toFixed(2)}ms — that's ${isPiezo ? 'race territory for piezo injectors' : 'big-tune territory on stock injectors'}. At this duration, the spray pattern widens significantly and fuel is hitting the piston bowl walls directly. That's hard on the pistons, not the injectors — the injectors are fine, it's the downstream effect that matters.`;
+    if (lowPressure) {
+      commentary = `Peak pulse width hit ${maxPw.toFixed(2)}ms — the duration is in ${isPiezo ? 'race territory for piezo injectors' : 'big-tune territory on stock injectors'}, but rail pressure at that moment was only ${Math.round(railAtPeakPw).toLocaleString()} PSI.${railContext} At this lower pressure, the injector isn't delivering nearly as much fuel per millisecond as it would at full rail pressure. The spray pattern is wider than ideal, but the actual fuel mass and piston loading are significantly less severe than the same PW at ${isPiezo ? '25,000+' : '20,000+'} PSI would be.`;
+    } else {
+      commentary = `Peak pulse width hit ${maxPw.toFixed(2)}ms — that's ${isPiezo ? 'race territory for piezo injectors' : 'big-tune territory on stock injectors'}.${railContext} At this duration${!lowPressure && railAtPeakPw > 0 ? ' and pressure' : ''}, the spray pattern widens significantly and fuel is hitting the piston bowl walls directly. That's hard on the pistons, not the injectors — the injectors are fine, it's the downstream effect that matters.`;
+    }
     if (isPiezo) {
       commentary += ` With ~800μs shutoff delay, the actual fuel delivery duration is closer to ${effectivePw.toFixed(2)}ms. Past about 1.4-1.6ms, the piezo needle is bottomed out — fuel delivered beyond that point is extremely inefficient with terrible atomization.`;
     }
-    commentary += ` ${spicyPct > 10 ? `You spent ${spicyPct.toFixed(1)}% of the log above the spicy threshold — that's a lot of time with wide spray patterns beating on the pistons.` : 'It was brief, which helps — a 1/4 mile burst is fine... until it isn\'t.'} If you're making this kind of power regularly, consider injectors sized for your target HP — shorter pulse at higher flow rate means tighter spray patterns and happier pistons.`;
-  } else {
-    if (isPiezo) {
-      commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into race-only territory for piezo injectors. With ~800μs shutoff delay, actual fuel delivery is approximately ${effectivePw.toFixed(2)}ms. The piezo needle bottoms out around 1.4-1.6ms — everything past that is extremely inefficient fuel delivery with wide-open spray patterns hammering the piston bowl walls. The injector is basically maxed out and dumping fuel with terrible atomization for ${(effectivePw - piezoBottomedOut).toFixed(2)}ms of that event.`;
-    } else {
-      commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into the hard-on-pistons zone. Past 2.5ms (2500μs), stock injectors are spraying fuel everywhere — wide spray patterns hammer the piston bowl walls and increase thermal loading on the bottom end.`;
+    if (!lowPressure) {
+      commentary += ` ${spicyPct > 10 ? `You spent ${spicyPct.toFixed(1)}% of the log above the spicy threshold — that's a lot of time with wide spray patterns beating on the pistons.` : 'It was brief, which helps — a 1/4 mile burst is fine... until it isn\'t.'} If you're making this kind of power regularly, consider injectors sized for your target HP — shorter pulse at higher flow rate means tighter spray patterns and happier pistons.`;
     }
-    commentary += ` ${spicyPct > 5 ? `${spicyPct.toFixed(1)}% of the log was above threshold — that's sustained abuse on the pistons, not just a quick pull.` : ''} This is the big injector argument: matched injectors flow more fuel in less time, keeping spray patterns tight and pistons happy. It's OK to go fast in 1/4 mile bursts... until it isn't. The more horsepower you chase on stock injectors, the harder the pistons have to work. Do the build correctly: keep things cool, efficient, and matched.`;
+  } else {
+    if (lowPressure) {
+      commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is a long injection event, but rail pressure at that point was only ${Math.round(railAtPeakPw).toLocaleString()} PSI.${railContext} The duration is high, but the fuel volume delivered is substantially less than it would be at full rail pressure. The spray pattern is wider than ideal, but piston loading is moderated by the lower pressure. This is a different situation than the same PW at ${isPiezo ? '25,000+' : '20,000+'} PSI — context matters.`;
+      if (isPiezo) {
+        commentary += ` With ~800μs shutoff delay, actual fuel delivery is approximately ${effectivePw.toFixed(2)}ms.`;
+      }
+    } else {
+      if (isPiezo) {
+        commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into race-only territory for piezo injectors.${railContext} With ~800μs shutoff delay, actual fuel delivery is approximately ${effectivePw.toFixed(2)}ms. The piezo needle bottoms out around 1.4-1.6ms — everything past that is extremely inefficient fuel delivery with wide-open spray patterns hammering the piston bowl walls. The injector is basically maxed out and dumping fuel with terrible atomization for ${(effectivePw - piezoBottomedOut).toFixed(2)}ms of that event.`;
+      } else {
+        commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into the hard-on-pistons zone.${railContext} Past 2.5ms (2500μs), stock injectors are spraying fuel everywhere — wide spray patterns hammer the piston bowl walls and increase thermal loading on the bottom end.`;
+      }
+      commentary += ` ${spicyPct > 5 ? `${spicyPct.toFixed(1)}% of the log was above threshold — that's sustained abuse on the pistons, not just a quick pull.` : ''} This is the big injector argument: matched injectors flow more fuel in less time, keeping spray patterns tight and pistons happy. It's OK to go fast in 1/4 mile bursts... until it isn't. The more horsepower you chase on stock injectors, the harder the pistons have to work. Do the build correctly: keep things cool, efficient, and matched.`;
+    }
   }
 
   return { maxPw, avgPw, spicyPct, commentary };
@@ -825,7 +880,7 @@ export function renderAdvancedAnalytics(
 
     // Injector commentary
     if (hasInjector) {
-      const injAnalysis = getInjectorAnalysis(data.injectorPulseWidth, isPiezo);
+      const injAnalysis = getInjectorAnalysis(data.injectorPulseWidth, isPiezo, data.railPressureActual);
       if (injAnalysis.commentary) {
         addWrappedText(injAnalysis.commentary, 8, 'normal', TEXT_BODY, 1.3);
       }
@@ -854,15 +909,34 @@ export function renderAdvancedAnalytics(
       }
     }
 
-    // Combined insight
+    // Combined insight — factor in rail pressure context
     if (hasInjector && hasTiming) {
       const maxPw = Math.max(...data.injectorPulseWidth.filter(v => v > 0));
       const maxTiming = Math.max(...data.injectionTiming.filter(v => v > 0));
       const spicyThreshold = isPiezo ? 1.5 : 2.5;
-      if (maxPw > spicyThreshold && maxTiming > 25) {
+      // Find rail pressure at peak PW to determine actual severity
+      let railAtMaxPw = 0;
+      const hasRail = hasRealData(data.railPressureActual);
+      if (hasRail) {
+        for (let i = 0; i < data.injectorPulseWidth.length; i++) {
+          if (Math.abs(data.injectorPulseWidth[i] - maxPw) < 0.001 && i < data.railPressureActual.length) {
+            railAtMaxPw = data.railPressureActual[i];
+            break;
+          }
+        }
+      }
+      const highPressureThreshold = isPiezo ? 20000 : 18000;
+      const isLowPressure = railAtMaxPw > 0 && railAtMaxPw < highPressureThreshold;
+
+      if (maxPw > spicyThreshold && maxTiming > 25 && !isLowPressure) {
         addWrappedText(
-          `Both pulse width (${maxPw.toFixed(2)}ms) and timing (${maxTiming.toFixed(1)}°) are elevated. High pulse width means wide spray patterns hitting the piston bowl walls, and high timing increases cylinder pressure — together, that's hard on the pistons and bottom end. The injectors themselves are fine; it's the downstream effect that matters. This is the big injector argument: matched injectors deliver the same fuel in less time with tighter spray patterns, reducing piston loading. OK for 1/4 mile bursts, but if you're doing this regularly, size your injectors to your target HP.`,
+          `Both pulse width (${maxPw.toFixed(2)}ms) and timing (${maxTiming.toFixed(1)}°) are elevated${railAtMaxPw > 0 ? ` at ${Math.round(railAtMaxPw).toLocaleString()} PSI rail pressure` : ''}. High pulse width means wide spray patterns hitting the piston bowl walls, and high timing increases cylinder pressure — together, that's hard on the pistons and bottom end. The injectors themselves are fine; it's the downstream effect that matters. This is the big injector argument: matched injectors deliver the same fuel in less time with tighter spray patterns, reducing piston loading. OK for 1/4 mile bursts, but if you're doing this regularly, size your injectors to your target HP.`,
           8, 'italic', AMBER, 1.3,
+        );
+      } else if (maxPw > spicyThreshold && maxTiming > 25 && isLowPressure) {
+        addWrappedText(
+          `Pulse width (${maxPw.toFixed(2)}ms) and timing (${maxTiming.toFixed(1)}°) are both elevated, but rail pressure at peak PW was only ${Math.round(railAtMaxPw).toLocaleString()} PSI. At this lower pressure, the actual fuel volume per millisecond is significantly less than at full rail pressure — so while the duration is long, the piston loading and spray pattern impact are moderated. This is a different severity level than the same PW at ${isPiezo ? '25,000+' : '20,000+'} PSI.`,
+          8, 'italic', TEXT_BODY, 1.3,
         );
       }
     }

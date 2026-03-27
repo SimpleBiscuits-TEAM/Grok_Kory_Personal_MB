@@ -343,3 +343,4 @@
 - [ ] Add Cummins exhaust pressure PID parsing (exhaust pressure vs boost pressure, not just boost)
 - [ ] Add Cummins-specific thresholds: exhaust pressure concern at 75 PSI (stock), ideal boost:exhaust ratio ~1:2, achieved through vane adjustments
 - [ ] When VIN detects Cummins, apply Cummins-specific diagnostic logic instead of Duramax defaults
+- [x] Fix PW diagnostic: pulse width severity must factor in rail pressure. 2.9ms at low pressure is not the same as 2.9ms at high pressure. Only flag as concerning when PW is high AND rail pressure is high simultaneously.
