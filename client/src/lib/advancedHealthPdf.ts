@@ -83,50 +83,52 @@ function drawCorrelatedGraph(
   doc.roundedRect(x, y, width, height, 1, 1, 'FD');
 
   // Title
-  doc.setFontSize(8);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...TEXT_DARK);
-  doc.text(title, x + 3, y + 5);
+  doc.text(title, x + 3, y + 5.5);
 
   // Legend
   let legendX = x + 3;
-  const legendY = y + 10;
-  doc.setFontSize(5.5);
+  const legendY = y + 10.5;
+  doc.setFontSize(6);
   validSeries.forEach((s, idx) => {
     if (s.dashed) {
       doc.setDrawColor(...s.color);
       doc.setLineWidth(0.4);
       doc.setLineDashPattern([1, 1], 0);
-      doc.line(legendX, legendY - 1, legendX + 6, legendY - 1);
+      doc.line(legendX, legendY - 1, legendX + 7, legendY - 1);
       doc.setLineDashPattern([], 0);
     } else {
       doc.setFillColor(...s.color);
-      doc.rect(legendX, legendY - 2.5, 6, 2, 'F');
+      doc.rect(legendX, legendY - 2.5, 7, 2.2, 'F');
     }
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...s.color);
     const lbl = `${s.label} (${s.unit})`;
-    doc.text(lbl, legendX + 7.5, legendY);
-    legendX += doc.getTextWidth(lbl) + 12;
+    doc.text(lbl, legendX + 8.5, legendY);
+    legendX += doc.getTextWidth(lbl) + 13;
   });
 
-  // Graph area
-  const graphX = x + 3;
-  const graphY = y + 13;
-  const graphW = width - 6;
-  const graphH = height - 17;
+  // Graph area (with left margin for Y-axis labels)
+  const yAxisW = 14;
+  const graphX = x + yAxisW;
+  const graphY = y + 14;
+  const graphW = width - yAxisW - 3;
+  const graphH = height - 18;
 
-  // Grid lines
+  // Grid lines (5 horizontal) with Y-axis tick labels
   doc.setDrawColor(235, 235, 240);
   doc.setLineWidth(0.1);
-  for (let g = 0; g <= 3; g++) {
-    const gy = graphY + (graphH * g) / 3;
+  const gridSteps = 4; // 5 lines = 4 intervals
+  for (let g = 0; g <= gridSteps; g++) {
+    const gy = graphY + (graphH * g) / gridSteps;
     doc.line(graphX, gy, graphX + graphW, gy);
   }
 
-  // RPM + Speed bottom overlay (split bottom 25% into two halves)
+  // RPM + Speed bottom overlay (split bottom 35% into two halves for better readability)
   const { rpmData } = config;
-  const overlayH = graphH * 0.25;
+  const overlayH = graphH * 0.35;
   const overlayBaseY = graphY + graphH;
 
   // RPM overlay (top half of overlay area, light blue)
@@ -146,7 +148,7 @@ function drawCorrelatedGraph(
       const y2 = overlayBaseY - overlayH + halfH - (rpmSampled[i] / rpmMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(4);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 150, 210);
     doc.text(`RPM (0-${rpmMax.toFixed(0)})`, graphX, overlayBaseY - overlayH + halfH - 0.5);
@@ -169,7 +171,7 @@ function drawCorrelatedGraph(
       const y2 = overlayBaseY - (spdSampled[i] / spdMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(4);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(160, 160, 185);
     doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX, overlayBaseY - 0.5);
@@ -197,9 +199,9 @@ function drawCorrelatedGraph(
     if (s.dashed) doc.setLineDashPattern([], 0);
 
     // Min/Max labels on right side
-    doc.setFontSize(5);
+    doc.setFontSize(5.5);
     doc.setTextColor(...s.color);
-    doc.text(`${max.toFixed(1)}${s.unit}`, graphX + graphW + 1, graphY + 2 + idx * 4);
+    doc.text(`${max.toFixed(1)}${s.unit}`, graphX + graphW + 1, graphY + 2 + idx * 4.5);
   });
 
   return y + height + 2;
@@ -675,7 +677,7 @@ export function renderAdvancedAnalytics(
 
   // ── 1. INJECTOR PULSE WIDTH & TIMING ──────────────────────────────────────
   if (hasInjector || hasTiming) {
-    checkBreak(55);
+    checkBreak(65);
 
     const injSeries: CorrelatedSeries[] = [];
     if (hasInjector) {
@@ -697,7 +699,7 @@ export function renderAdvancedAnalytics(
     }
 
     const newY = drawCorrelatedGraph(
-      doc, margin, getY(), contentWidth, 42,
+      doc, margin, getY(), contentWidth, 55,
       { title: 'INJECTOR PULSE WIDTH & TIMING', series: injSeries, speedData: speedRef, rpmData: rpmRef },
       margin, contentWidth,
     );
@@ -762,7 +764,7 @@ export function renderAdvancedAnalytics(
 
   // ── 2. DESIRED vs ACTUAL BOOST + VANE POSITION ────────────────────────────
   if (hasDesiredBoost || hasVane) {
-    checkBreak(55);
+    checkBreak(65);
 
     const boostSeries: CorrelatedSeries[] = [];
     if (data.boost.some(v => v > 0)) {
@@ -793,7 +795,7 @@ export function renderAdvancedAnalytics(
 
     if (boostSeries.length >= 2) {
       const newY = drawCorrelatedGraph(
-        doc, margin, getY(), contentWidth, 42,
+        doc, margin, getY(), contentWidth, 55,
         { title: 'DESIRED vs ACTUAL BOOST + VANE POSITION', series: boostSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
@@ -821,13 +823,13 @@ export function renderAdvancedAnalytics(
 
       // Vane desired vs actual
       if (hasVane && hasVaneDesired) {
-        checkBreak(50);
+        checkBreak(60);
         const vaneSeries: CorrelatedSeries[] = [
           { data: data.turboVanePosition, label: 'Actual Vane', unit: '%', color: PURPLE },
           { data: data.turboVaneDesired, label: 'Desired Vane', unit: '%', color: TEAL, dashed: true },
         ];
         const vaneY = drawCorrelatedGraph(
-          doc, margin, getY(), contentWidth, 38,
+          doc, margin, getY(), contentWidth, 50,
           { title: 'VANE POSITION: DESIRED vs ACTUAL', series: vaneSeries, speedData: speedRef, rpmData: rpmRef },
           margin, contentWidth,
         );
@@ -844,7 +846,7 @@ export function renderAdvancedAnalytics(
 
   // ── 3. DESIRED vs ACTUAL RAIL PRESSURE + PCV ─────────────────────────────
   if (hasDesiredRail || hasPcv) {
-    checkBreak(55);
+    checkBreak(65);
 
     const railSeries: CorrelatedSeries[] = [];
     if (hasRealData(data.railPressureActual)) {
@@ -875,7 +877,7 @@ export function renderAdvancedAnalytics(
 
     if (railSeries.length >= 2) {
       const newY = drawCorrelatedGraph(
-        doc, margin, getY(), contentWidth, 42,
+        doc, margin, getY(), contentWidth, 55,
         { title: 'DESIRED vs ACTUAL FUEL RAIL PRESSURE + PCV', series: railSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
@@ -919,7 +921,7 @@ export function renderAdvancedAnalytics(
 
   // ── 4. BOOST vs MAF vs VANE (Leak Detection) ─────────────────────────────
   if (hasMaf && hasVane && data.boost.some(v => v > 0)) {
-    checkBreak(55);
+    checkBreak(65);
 
     const leakSeries: CorrelatedSeries[] = [
       { data: data.boost, label: 'Boost', unit: 'PSI', color: GREEN },
@@ -928,7 +930,7 @@ export function renderAdvancedAnalytics(
     ];
 
     const newY = drawCorrelatedGraph(
-      doc, margin, getY(), contentWidth, 42,
+      doc, margin, getY(), contentWidth, 55,
       { title: 'BOOST vs MAF vs VANE POSITION (Leak Detection)', series: leakSeries, speedData: speedRef, rpmData: rpmRef },
       margin, contentWidth,
     );
@@ -950,7 +952,7 @@ export function renderAdvancedAnalytics(
     const madResult = getMADAnalysis(data.boost, data.intakeAirTemp, data.barometricPressure);
 
     if (madResult.madValues.length > 10) {
-      checkBreak(55);
+      checkBreak(65);
 
       const madSeries: CorrelatedSeries[] = [
         { data: madResult.madValues, label: 'MAD Index', unit: '', color: TEAL },
@@ -966,7 +968,7 @@ export function renderAdvancedAnalytics(
       }
 
       const newY = drawCorrelatedGraph(
-        doc, margin, getY(), contentWidth, 42,
+        doc, margin, getY(), contentWidth, 55,
         { title: 'MANIFOLD AIR DENSITY (MAD)', series: madSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
@@ -982,14 +984,14 @@ export function renderAdvancedAnalytics(
     const densityResult = getBoostAirDensityAnalysis(data.boost, data.maf, data.rpm);
 
     if (densityResult.densityValues.length > 10) {
-      checkBreak(55);
+      checkBreak(60);
 
       const densitySeries: CorrelatedSeries[] = [
         { data: densityResult.densityValues, label: 'Density Index', unit: '', color: BLUE },
       ];
 
       const newY = drawCorrelatedGraph(
-        doc, margin, getY(), contentWidth, 38,
+        doc, margin, getY(), contentWidth, 50,
         { title: 'BOOST AIR DENSITY', series: densitySeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );

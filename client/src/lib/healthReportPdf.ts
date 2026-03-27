@@ -192,8 +192,8 @@ function drawMiniGraph(
   const avg = sampled.reduce((a, b) => a + b, 0) / sampled.length;
 
   // Reserve space: left margin for Y-axis labels, bottom for RPM/Speed axis
-  const yAxisW = 14; // width reserved for Y-axis labels
-  const bottomAxisH = 10; // height reserved for RPM + Speed bottom axis
+  const yAxisW = 16; // width reserved for Y-axis labels
+  const bottomAxisH = 14; // height reserved for RPM + Speed bottom axis (larger for readability)
   const totalH = height + bottomAxisH;
 
   // Graph background
@@ -203,42 +203,38 @@ function drawMiniGraph(
   doc.roundedRect(x, y, width, totalH, 1, 1, 'FD');
 
   // Label
-  doc.setFontSize(8);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...color);
-  doc.text(label, x + 3, y + 5);
+  doc.text(label, x + 3, y + 5.5);
 
   // Stats
-  doc.setFontSize(6.5);
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...MED_GRAY);
-  doc.text(`Min: ${niceRound(min)}${unit}  Avg: ${niceRound(avg)}${unit}  Max: ${niceRound(max)}${unit}`, x + 3, y + 9.5);
+  doc.text(`Min: ${niceRound(min)}${unit}  Avg: ${niceRound(avg)}${unit}  Max: ${niceRound(max)}${unit}`, x + 3, y + 10);
 
   // Draw the line graph area (shifted right for Y-axis labels)
   const graphX = x + yAxisW;
-  const graphY = y + 12;
+  const graphY = y + 13;
   const graphW = width - yAxisW - 3;
-  const graphH = height - 16;
+  const graphH = height - 17;
 
-  // Grid lines (3 horizontal) with Y-axis labels
+  // Grid lines (5 horizontal) with Y-axis labels for better readability
   doc.setDrawColor(235, 235, 240);
   doc.setLineWidth(0.1);
-  for (let g = 0; g <= 2; g++) {
-    const gy = graphY + (graphH * g) / 2;
+  const gridSteps = 4; // 5 lines = 4 intervals
+  for (let g = 0; g <= gridSteps; g++) {
+    const gy = graphY + (graphH * g) / gridSteps;
     doc.line(graphX, gy, graphX + graphW, gy);
 
     // Y-axis label (simple rounded values)
-    const val = max - (g / 2) * range;
-    doc.setFontSize(5.5);
+    const val = max - (g / gridSteps) * range;
+    doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(140, 140, 150);
-    doc.text(niceRound(val), x + 2, gy + 1.5);
+    doc.setTextColor(120, 120, 135);
+    doc.text(niceRound(val), x + 1.5, gy + 1.5);
   }
-  // Bottom grid line
-  doc.line(graphX, graphY + graphH, graphX + graphW, graphY + graphH);
-  doc.setFontSize(5.5);
-  doc.setTextColor(140, 140, 150);
-  doc.text(niceRound(min), x + 2, graphY + graphH + 1.5);
 
   // Threshold lines
   if (thresholdHigh !== undefined && thresholdHigh >= min && thresholdHigh <= max * 1.1) {
@@ -277,8 +273,8 @@ function drawMiniGraph(
 
   // ── BOTTOM AXIS: RPM + Speed ───────────────────────────────────────────
   const axisY = graphY + graphH + 1; // just below the main graph
-  const axisH = bottomAxisH - 2;
-  const halfH = axisH / 2;
+  const axisH = bottomAxisH - 2; // ~12mm total for both overlays
+  const halfH = axisH / 2; // ~6mm each for RPM and Speed
 
   // RPM axis (top half of bottom area, light blue)
   if (rpmData && !isRpmGraph && rpmData.length > 10) {
@@ -296,7 +292,7 @@ function drawMiniGraph(
       const y2 = axisY + halfH - (rpmSampled[i] / rpmMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(4.5);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 150, 210);
     doc.text(`RPM (0-${niceRound(rpmMax)})`, graphX, axisY + halfH - 0.5);
@@ -318,7 +314,7 @@ function drawMiniGraph(
       const y2 = axisY + axisH - (spdSampled[i] / spdMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(4.5);
+    doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(160, 160, 185);
     doc.text(`MPH (0-${niceRound(spdMax)})`, graphX, axisY + axisH - 0.5);
@@ -328,12 +324,12 @@ function drawMiniGraph(
 
   // Data-driven synopsis of what happened in this graph
   const synopsis = generateSynopsis(label, min, max, avg, unit, sampled);
-  doc.setFontSize(7.5);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
-  doc.setTextColor(100, 100, 110);
+  doc.setTextColor(90, 90, 100);
   const synLines = doc.splitTextToSize(synopsis, contentWidth - 4);
   doc.text(synLines, margin + 2, newY);
-  newY += synLines.length * 3.2 + 4;
+  newY += synLines.length * 3.4 + 4;
 
   return newY;
 }
@@ -954,10 +950,10 @@ export function generateHealthReportPdf(
     });
   }
 
-  // Draw all graphs (height 38 + 10 for bottom axis = 48 total, checkBreak for 58)
+  // Draw all graphs (height 50 + 14 for bottom axis = 64 total, checkBreak for 72)
   for (const config of graphConfigs) {
-    checkBreak(58);
-    y = drawMiniGraph(doc, margin, y, contentWidth, 38, config, margin, contentWidth);
+    checkBreak(72);
+    y = drawMiniGraph(doc, margin, y, contentWidth, 50, config, margin, contentWidth);
   }
 
   // ── SYSTEM-BY-SYSTEM BREAKDOWN ────────────────────────────────────────────

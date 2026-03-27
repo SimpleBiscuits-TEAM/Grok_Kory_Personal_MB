@@ -237,3 +237,10 @@
 - [x] Fix dyno graph not populating in health report PDF
 - [x] Add drag timeslip image to health report PDF when 1/4 mile conditions are met (0 MPH + throttle 80%+)
 - [x] Dragy-style data in health report PDF: 0-60, 60ft, 1/8 mile, 1000ft, 1/4 mile times + trap speeds + G-force; suggest missing PIDs if not available
+
+## PDF Graph Readability Improvements
+- [x] Make basic graphs taller (30mm → 50mm) for more data room
+- [x] Make advanced correlated graphs taller (42mm → 55mm)
+- [x] Add 3-5 evenly spaced Y-axis tick labels with values on left edge of all graphs
+- [x] Increase RPM/speed overlay from 25% to 35-40% of graph height
+- [x] Increase font sizes on axis labels, legend text, and tick values
