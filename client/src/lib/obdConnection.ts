@@ -2875,6 +2875,7 @@ export class OBDConnection {
         this.emit('log', null, 'VIN not available — using universal PID set');
       }
 
+      this.vehicleInfo = vehicleInfo;
       this.emit('vehicleInfo', vehicleInfo);
       this.emit('log', null, `Supported PIDs: ${this.supportedPids.size}`);
 
@@ -3340,6 +3341,7 @@ export class OBDConnection {
       sampleRate: intervalMs,
       pids: [...filteredPids],
       readings: new Map(),
+      vehicleInfo: this.vehicleInfo,
     };
 
     // Initialize reading arrays
@@ -3663,9 +3665,22 @@ export class OBDConnection {
 export function exportSessionToCSV(session: LogSession): string {
   const pids = session.pids;
   
+  // Build metadata rows (prefixed with # for easy parsing)
+  const metaRows: string[] = [];
+  if (session.vehicleInfo) {
+    const vi = session.vehicleInfo;
+    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
+    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
+    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
+    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
+    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
+  }
+
   // Build header
   const header = ['Timestamp (ms)', 'Elapsed (s)', ...pids.map(p => `${p.shortName} (${p.unit})`)];
-  const rows: string[] = [header.join(',')];
+  const rows: string[] = [...metaRows, header.join(',')];
 
   // Collect ALL readings across all PIDs and sort by timestamp.
   // This handles the fact that PIDs are polled sequentially, so each
@@ -3735,10 +3750,23 @@ export function sessionToAnalyzerCSV(session: LogSession): string {
   // Convert to HP Tuners-compatible CSV format for the existing analyzer
   const pids = session.pids;
   
+  // Build metadata rows (prefixed with # for easy parsing by analyzer)
+  const metaRows: string[] = [];
+  if (session.vehicleInfo) {
+    const vi = session.vehicleInfo;
+    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
+    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
+    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
+    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
+    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
+  }
+
   // HP Tuners format header
   const header = ['Time', ...pids.map(p => p.name)];
   const unitRow = ['s', ...pids.map(p => p.unit)];
-  const rows: string[] = [header.join(','), unitRow.join(',')];
+  const rows: string[] = [...metaRows, header.join(','), unitRow.join(',')];
 
   // Use the same timestamp-bucketing approach as exportSessionToCSV
   interface SampleRow {

@@ -22,6 +22,22 @@ export interface BoostCalibrationInfo {
   desiredAlreadyGauge: boolean;
 }
 
+/**
+ * Vehicle metadata extracted from CSV comment headers (# VIN: ..., # FuelType: ..., etc.)
+ * or inferred from VIN embedded in filename.
+ */
+export interface VehicleMeta {
+  vin?: string;
+  make?: string;
+  model?: string;
+  year?: number;
+  engineType?: string;
+  manufacturer?: string;  // 'gm' | 'ford' | 'bmw' | 'universal'
+  fuelType?: string;      // 'diesel' | 'gasoline' | 'hybrid' | 'any'
+  displacement?: string;
+  protocol?: string;
+}
+
 export interface DuramaxData {
   rpm: number[];
   maf: number[];
@@ -57,6 +73,7 @@ export interface DuramaxData {
   duration: number;
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
   boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
+  vehicleMeta?: VehicleMeta; // VIN-based vehicle identification from CSV metadata
 }
 
 export interface ProcessedMetrics {
@@ -103,41 +120,114 @@ export interface ProcessedMetrics {
     duration: number;
   };
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
+  vehicleMeta?: VehicleMeta; // VIN-based vehicle identification
 }
 
 /**
  * Detect file format and parse accordingly
  */
+/**
+ * Extract vehicle metadata from CSV comment headers.
+ * Lines starting with # are treated as metadata:
+ *   # VIN: 1GCUYDED5RZ123456
+ *   # Vehicle: 2024 Chevrolet Silverado 2500 HD
+ *   # FuelType: diesel
+ */
+function extractVehicleMeta(lines: string[]): VehicleMeta | undefined {
+  const meta: VehicleMeta = {};
+  let found = false;
+
+  for (const line of lines) {
+    if (!line.startsWith('#')) break; // metadata is always at the top
+    found = true;
+    const match = line.match(/^#\s*(\w+):\s*(.+)$/);
+    if (!match) continue;
+    const [, key, value] = match;
+    const v = value.trim();
+    switch (key.toLowerCase()) {
+      case 'vin': meta.vin = v; break;
+      case 'vehicle': {
+        // Parse "2024 Chevrolet Silverado 2500 HD" → year + make + model
+        const parts = v.match(/^(\d{4})\s+(.+)$/);
+        if (parts) {
+          meta.year = parseInt(parts[1], 10);
+          const rest = parts[2].trim();
+          const spaceIdx = rest.indexOf(' ');
+          if (spaceIdx > 0) {
+            meta.make = rest.slice(0, spaceIdx);
+            meta.model = rest.slice(spaceIdx + 1);
+          } else {
+            meta.make = rest;
+          }
+        }
+        break;
+      }
+      case 'engine': meta.engineType = v; break;
+      case 'manufacturer': meta.manufacturer = v; break;
+      case 'fueltype': meta.fuelType = v; break;
+      case 'displacement': meta.displacement = v; break;
+      case 'protocol': meta.protocol = v; break;
+    }
+  }
+
+  return found ? meta : undefined;
+}
+
+/**
+ * Strip metadata comment lines from CSV content so parsers only see data.
+ */
+function stripMetaLines(content: string): string {
+  const lines = content.split('\n');
+  const firstDataLine = lines.findIndex(l => !l.trim().startsWith('#'));
+  if (firstDataLine <= 0) return content;
+  return lines.slice(firstDataLine).join('\n');
+}
+
 export function parseCSV(content: string): DuramaxData {
   // Try to detect format
   const lines = content.split('\n').map(line => line.trim());
+
+  // Extract vehicle metadata from # comment headers (if present)
+  const vehicleMeta = extractVehicleMeta(lines);
+
+  // Strip metadata lines so downstream parsers don't choke on them
+  const cleanContent = stripMetaLines(content);
+  const cleanLines = cleanContent.split('\n').map(line => line.trim());
   
   // Check for PPEI Datalogger format (our own live-capture export)
   // Detected by "Timestamp (ms)" or "Elapsed (s)" in the first row
-  const isDatalogger = lines.length > 0 && (
-    lines[0].includes('Timestamp (ms)') ||
-    lines[0].includes('Elapsed (s)')
+  const isDatalogger = cleanLines.length > 0 && (
+    cleanLines[0].includes('Timestamp (ms)') ||
+    cleanLines[0].includes('Elapsed (s)')
   );
 
   // Check for Banks Power format (has "Horsepower ECU", "Torque ECU", "DYNO" columns)
-  const isBanksPower = lines.some(line => 
+  const isBanksPower = cleanLines.some(line => 
     line.includes('Horsepower ECU') || 
     line.includes('DYNO - WHP') || 
     line.includes('Transmission Slip')
   );
   
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
-  const isEFILive = lines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
+  const isEFILive = cleanLines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
   
+  let result: DuramaxData;
   if (isDatalogger) {
-    return parseDataloggerCSV(content);
+    result = parseDataloggerCSV(cleanContent);
   } else if (isBanksPower) {
-    return parseBanksPowerCSV(content);
+    result = parseBanksPowerCSV(cleanContent);
   } else if (isEFILive) {
-    return parseEFILiveCSV(content);
+    result = parseEFILiveCSV(cleanContent);
   } else {
-    return parseHPTunersCSV(content);
+    result = parseHPTunersCSV(cleanContent);
   }
+
+  // Attach vehicle metadata if extracted
+  if (vehicleMeta) {
+    result.vehicleMeta = vehicleMeta;
+  }
+
+  return result;
 }
 
 /**
@@ -1508,6 +1598,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     boostCalibration,
     stats,
     fileFormat: rawData.fileFormat,
+    vehicleMeta: rawData.vehicleMeta,
   };
 }
 

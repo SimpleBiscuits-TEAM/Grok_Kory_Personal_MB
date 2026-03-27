@@ -85,8 +85,61 @@ function buildDecelMask(
 /**
  * Analyze datalog for diagnostic issues
  */
+/**
+ * Determine the vehicle's fuel type from VehicleMeta.
+ * Returns 'diesel', 'gasoline', 'hybrid', or 'unknown'.
+ */
+function getVehicleFuelType(meta?: import('./dataProcessor').VehicleMeta): string {
+  if (!meta) return 'unknown';
+  if (meta.fuelType && meta.fuelType !== 'any') return meta.fuelType;
+  // Infer from manufacturer if fuelType not explicit
+  if (meta.manufacturer === 'gm') {
+    // GM in this tool context is Duramax diesel
+    return 'diesel';
+  }
+  // BMW XM, Ford Raptor gas, etc.
+  if (meta.engineType) {
+    const et = meta.engineType.toLowerCase();
+    if (et.includes('diesel') || et.includes('duramax')) return 'diesel';
+    if (et.includes('hybrid') || et.includes('phev')) return 'hybrid';
+    if (et.includes('gas') || et.includes('petrol') || et.includes('v8') || et.includes('v6') || et.includes('turbo')) return 'gasoline';
+  }
+  return 'unknown';
+}
+
+/**
+ * Check if a diagnostic check category is relevant for this vehicle.
+ * Diesel-specific checks (rail pressure, boost, VGT, EGT, DPF, DEF) should
+ * NOT run on gasoline or hybrid vehicles.
+ */
+function isDieselCheck(checkName: string): boolean {
+  const dieselChecks = [
+    'rail_pressure', 'boost', 'vgt', 'egt',
+    'fuel_pressure_regulator', 'high_rail_decel',
+  ];
+  return dieselChecks.includes(checkName);
+}
+
 export function analyzeDiagnostics(data: any): DiagnosticReport {
   const issues: DiagnosticIssue[] = [];
+
+  // ── Vehicle-aware filtering ────────────────────────────────────────────
+  const vehicleMeta: import('./dataProcessor').VehicleMeta | undefined = data.vehicleMeta;
+  const vehicleFuel = getVehicleFuelType(vehicleMeta);
+  const isDiesel = vehicleFuel === 'diesel' || vehicleFuel === 'unknown';
+  // When fuel type is unknown (no VIN), run all checks for backward compat.
+  // When fuel type is explicitly non-diesel, skip diesel-specific checks.
+
+  if (vehicleMeta && vehicleFuel !== 'unknown') {
+    console.log('[Diagnostics] Vehicle-aware mode:', {
+      vin: vehicleMeta.vin,
+      make: vehicleMeta.make,
+      model: vehicleMeta.model,
+      fuelType: vehicleFuel,
+      manufacturer: vehicleMeta.manufacturer,
+      dieselChecksEnabled: isDiesel,
+    });
+  }
 
   const railPressureActual = data.railPressureActual || [];
   const railPressureDesired = data.railPressureDesired || [];
@@ -134,8 +187,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   const decelMask = buildDecelMask(rpm);
   const throttleTransientMask = buildThrottleTransientMask(throttlePosition);
 
-  // Check for Low Rail Pressure (P0087)
-  if (railPressureActual.length > 0) {
+  // Check for Low Rail Pressure (P0087) — diesel only
+  if (isDiesel && railPressureActual.length > 0) {
     const lowRailIssues = checkLowRailPressure(
       railPressureActual,
       railPressureDesired,
@@ -148,8 +201,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...lowRailIssues);
   }
 
-  // Check for High Rail Pressure (P0088)
-  if (railPressureActual.length > 0) {
+  // Check for High Rail Pressure (P0088) — diesel only
+  if (isDiesel && railPressureActual.length > 0) {
     const highRailIssues = checkHighRailPressure(
       railPressureActual,
       railPressureDesired,
@@ -161,9 +214,9 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...highRailIssues);
   }
 
-  // Check for Low Boost Pressure (P0299)
+  // Check for Low Boost Pressure (P0299) — diesel only (VGT turbo-specific thresholds)
   const boostActualAvailable = data.boostActualAvailable !== false;
-  if (boostActual.length > 0 && boostActualAvailable) {
+  if (isDiesel && boostActual.length > 0 && boostActualAvailable) {
     const lowBoostIssues = checkLowBoostPressure(
       boostActual,
       boostDesired,
@@ -174,7 +227,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
       throttleTransientMask
     );
     issues.push(...lowBoostIssues);
-  } else if (boostDesired.length > 0 && !boostActualAvailable && boostDesired.some((v: number) => v > 0)) {
+  } else if (isDiesel && boostDesired.length > 0 && !boostActualAvailable && boostDesired.some((v: number) => v > 0)) {
     issues.push({
       code: 'INFO-MAP-NOT-LOGGED',
       severity: 'info',
@@ -185,12 +238,14 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)
-  if (exhaustGasTemp.length > 0) {
+  // Diesel EGT thresholds (1300°F+) are NOT applicable to gasoline engines.
+  // Gasoline EGT is typically 1400-1600°F under load — normal for gas, critical for diesel.
+  if (isDiesel && exhaustGasTemp.length > 0) {
     issues.push(...checkAllEgtIssues(exhaustGasTemp));
   }
 
-  // Check Mass Airflow (P0101)
-  if (maf.length > 0 && rpm.length > 0) {
+  // Check Mass Airflow (P0101) — diesel-specific MAF/RPM ratios
+  if (isDiesel && maf.length > 0 && rpm.length > 0) {
     const mafIssues = checkMassAirflow(maf, rpm);
     issues.push(...mafIssues);
   }
@@ -207,13 +262,13 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...converterIssues);
   }
 
-  // P0046 - VGT Vane Tracking
-  if (turboVanePosition.length > 0 && turboVaneDesired.length > 0) {
+  // P0046 - VGT Vane Tracking — diesel VGT only
+  if (isDiesel && turboVanePosition.length > 0 && turboVaneDesired.length > 0) {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
-  // P0089 - Fuel Pressure Regulator Performance
-  if (railPressureActual.length > 0) {
+  // P0089 - Fuel Pressure Regulator Performance — diesel CP4/CP3 only
+  if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkFuelPressureRegulatorPerformance(railPressureActual, railPressureDesired, rpm));
   }
 
@@ -227,8 +282,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkTccOperation(converterSlip, converterDutyCycle, rpm, converterPressure, currentGear));
   }
 
-  // P1089 - Rail Pressure High on Decel
-  if (railPressureActual.length > 0) {
+  // P1089 - Rail Pressure High on Decel — diesel only
+  if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkHighRailOnDecel(railPressureActual, railPressureDesired, rpm));
   }
 

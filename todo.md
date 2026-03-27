@@ -126,3 +126,13 @@
 - [x] Update vehicle knowledge base with Gen 2 L5P specs (E42 ECM, 32000 psi rail, 470hp/975tq)
 - [x] Update ECU reference panel for Gen 1 vs Gen 2 display
 - [x] Update tests for 2024 L5P detection (286 tests passing)
+
+## VIN in Datalogger Display & CSV Export + Vehicle-Aware Diagnostics
+- [x] Display detected VIN prominently in DataloggerPanel UI during logging (stored on OBDConnection instance, emitted via vehicleInfo event)
+- [x] Embed VIN + vehicle metadata (make, model, year, fuelType, manufacturer, engine, protocol) in CSV export # comment headers
+- [x] Update CSV parser to extract VIN metadata from # comment headers (extractVehicleMeta + stripMetaLines)
+- [x] Pass vehicleMeta through DuramaxData → ProcessedMetrics → diagnostics pipeline
+- [x] Skip diesel-specific checks (EGT, rail pressure P0087/P0088/P0089/P1089, boost P0299, VGT P0046, MAF P0101) for non-diesel vehicles
+- [x] Skip gas-specific checks for diesel vehicles (fuel type inference from VehicleMeta)
+- [x] Update healthReport.ts with vehicle-aware filtering (skip diesel engine/fuel sections for non-diesel)
+- [x] Write tests for VIN extraction from CSV and vehicle-aware diagnostic filtering (8 new tests, 294 total passing)

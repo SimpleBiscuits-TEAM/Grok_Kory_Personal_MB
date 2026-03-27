@@ -13,7 +13,7 @@
  *  - Boost:               Normal 0–48 PSIG gauge (L5P peaks ~48 PSIG stock; atmospheric ~14.7 PSI subtracted)
  */
 
-import { ProcessedMetrics } from './dataProcessor';
+import { ProcessedMetrics, VehicleMeta } from './dataProcessor';
 import { VehicleInfo } from './vinLookup';
 
 export interface HealthReportData {
@@ -92,11 +92,38 @@ function safeAvg(arr: number[]): number {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
 }
 
+/** Default engine health section for non-diesel vehicles (skip diesel-specific analysis) */
+function makeDefaultSection(_label: string): EngineHealthSection {
+  return {
+    score: 100,
+    status: 'N/A — Non-diesel vehicle',
+    turbochargerStatus: 'N/A',
+    egtStatus: 'N/A',
+    mafStatus: 'N/A',
+    findings: ['Diesel-specific engine analysis skipped — vehicle identified as non-diesel'],
+  };
+}
+
+/** Default fuel system section for non-diesel vehicles */
+function makeDefaultFuelSection(): FuelSystemSection {
+  return {
+    score: 100,
+    status: 'N/A — Non-diesel vehicle',
+    pressureRegulation: 'N/A',
+    findings: ['Diesel fuel system analysis skipped — vehicle identified as non-diesel'],
+  };
+}
+
 export function generateHealthReport(data: ProcessedMetrics, vehicleInfo?: VehicleInfo): HealthReportData {
-  const engineHealth = evaluateEngineHealth(data);
-  const fuelSystem = evaluateFuelSystem(data);
-  const transmission = evaluateTransmission(data);
-  const thermalManagement = evaluateThermalManagement(data);
+  // Determine if vehicle is diesel from VehicleMeta
+  const meta = data.vehicleMeta;
+  const fuelType = meta?.fuelType || 'unknown';
+  const isDiesel = fuelType === 'diesel' || fuelType === 'unknown'; // unknown = backward compat
+
+  const engineHealth = isDiesel ? evaluateEngineHealth(data) : makeDefaultSection('Engine') as EngineHealthSection;
+  const fuelSystem = isDiesel ? evaluateFuelSystem(data) : makeDefaultFuelSection();
+  const transmission = evaluateTransmission(data); // universal
+  const thermalManagement = evaluateThermalManagement(data); // universal
   const diagnosticSummary = evaluateDiagnostics(data);
 
   const scores = [engineHealth.score, fuelSystem.score, transmission.score, thermalManagement.score];
