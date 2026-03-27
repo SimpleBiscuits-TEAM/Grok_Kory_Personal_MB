@@ -131,37 +131,59 @@ function drawCorrelatedGraph(
   const overlayH = graphH * 0.35;
   const overlayBaseY = graphY + graphH;
 
-  // RPM overlay (top half of overlay area, light blue)
+  // RPM overlay (top half of overlay area, light blue) with tick marks
   if (rpmData && rpmData.length > 10) {
     const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
     const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
     const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
     const rpmMax = Math.max(...rpmSampled, 1);
     const halfH = overlayH / 2;
+    const rpmTopY = overlayBaseY - overlayH;
 
+    // Draw RPM trace line
     doc.setDrawColor(100, 150, 210);
     doc.setLineWidth(0.15);
     for (let i = 1; i < rpmSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (rpmSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (rpmSampled.length - 1)) * graphW;
-      const y1 = overlayBaseY - overlayH + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
-      const y2 = overlayBaseY - overlayH + halfH - (rpmSampled[i] / rpmMax) * halfH;
+      const y1 = rpmTopY + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
+      const y2 = rpmTopY + halfH - (rpmSampled[i] / rpmMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(5.5);
+
+    // RPM tick marks along the bottom of RPM area (evenly spaced, actual values)
+    const rpmTickCount = 8;
+    doc.setFontSize(5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 150, 210);
-    doc.text(`RPM (0-${rpmMax.toFixed(0)})`, graphX, overlayBaseY - overlayH + halfH - 0.5);
+    for (let t = 0; t <= rpmTickCount; t++) {
+      const frac = t / rpmTickCount;
+      const tx = graphX + frac * graphW;
+      const idx = Math.min(Math.floor(frac * (rpmSampled.length - 1)), rpmSampled.length - 1);
+      const rpmVal = rpmSampled[idx] || 0;
+      // Tick mark
+      doc.setDrawColor(100, 150, 210);
+      doc.setLineWidth(0.12);
+      doc.line(tx, rpmTopY + halfH - 0.8, tx, rpmTopY + halfH + 0.5);
+      // Value label
+      doc.text(`${Math.round(rpmVal)}`, tx - 2.5, rpmTopY + halfH + 3);
+    }
+    // RPM label at left
+    doc.setFontSize(5);
+    doc.setTextColor(100, 150, 210);
+    doc.text('RPM', x + 1.5, rpmTopY + halfH - 1);
   }
 
-  // Speed overlay (bottom half of overlay area, gray)
+  // Speed overlay (bottom half of overlay area, gray) with tick marks
   if (speedData && speedData.length > 10) {
     const spdValid = speedData.filter(v => !isNaN(v));
     const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
     const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
     const spdMax = Math.max(...spdSampled, 1);
     const halfH = overlayH / 2;
+    const spdTopY = overlayBaseY - halfH;
 
+    // Draw speed trace line
     doc.setDrawColor(160, 160, 185);
     doc.setLineWidth(0.15);
     for (let i = 1; i < spdSampled.length; i++) {
@@ -171,10 +193,28 @@ function drawCorrelatedGraph(
       const y2 = overlayBaseY - (spdSampled[i] / spdMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(5.5);
+
+    // Speed tick marks along the bottom of speed area (evenly spaced, actual values)
+    const spdTickCount = 8;
+    doc.setFontSize(5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(160, 160, 185);
-    doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX, overlayBaseY - 0.5);
+    for (let t = 0; t <= spdTickCount; t++) {
+      const frac = t / spdTickCount;
+      const tx = graphX + frac * graphW;
+      const idx = Math.min(Math.floor(frac * (spdSampled.length - 1)), spdSampled.length - 1);
+      const spdVal = spdSampled[idx] || 0;
+      // Tick mark
+      doc.setDrawColor(160, 160, 185);
+      doc.setLineWidth(0.12);
+      doc.line(tx, overlayBaseY - 0.8, tx, overlayBaseY + 0.5);
+      // Value label
+      doc.text(`${Math.round(spdVal)}`, tx - 2.5, overlayBaseY + 3);
+    }
+    // MPH label at left
+    doc.setFontSize(5);
+    doc.setTextColor(160, 160, 185);
+    doc.text('MPH', x + 1.5, overlayBaseY - 1);
   }
 
   // Draw each series

@@ -405,6 +405,54 @@ function checkLowRailPressure(
     }
   }
 
+  // ── Scattered low-rail detection ──────────────────────────────────────
+  // The health report counts ALL qualifying samples across the entire log.
+  // If total scattered violations exceed threshold, flag it even without
+  // 15 consecutive seconds — ensures fault zone chart always renders when
+  // the health report identifies a rail pressure issue.
+  if (issues.length === 0) {
+    let totalViolations = 0;
+    for (let i = 0; i < actual.length; i++) {
+      const offset = desired[i] - actual[i];
+      const pctOffset = desired[i] > 0 ? offset / desired[i] : 0;
+      const isSaturated = peakActualRail > 20000 && actual[i] >= saturationFloor && actual[i] > 15000;
+      // Apply same exclusions as the consecutive path: RPM, throttle, decel, transients
+      const isExcludedScattered =
+        decelMask[i] ||
+        throttleTransientMask[i] ||
+        rpmArr[i] < MIN_RPM ||
+        (throttlePosition.length > i && throttlePosition[i] < MIN_THROTTLE) ||
+        isSaturated;
+      if (offset > ABS_THRESHOLD && pctOffset > PCT_THRESHOLD && !isExcludedScattered && actual[i] > 0 && desired[i] > 0) {
+        totalViolations++;
+      }
+    }
+    if (totalViolations >= 150) {
+      const avgPcv = pcv.filter(v => v > 0).length > 0
+        ? pcv.filter(v => v > 0).reduce((a, b) => a + b, 0) / pcv.filter(v => v > 0).length
+        : 0;
+      if (avgPcv < 325 && avgPcv > 0) {
+        issues.push({
+          code: 'LOW-RAIL-PRESSURE-MAXED',
+          severity: 'warning',
+          title: 'Low Rail Pressure - Scattered Deviation',
+          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered, not consecutive). PCV avg: ${avgPcv.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
+          recommendation:
+            'Fuel rail pressure shows intermittent low-pressure events. Check fuel pump, lift pump, and filter condition.',
+        });
+      } else {
+        issues.push({
+          code: 'LOW-RAIL-PRESSURE-TUNING',
+          severity: 'info',
+          title: 'Low Rail Pressure - Scattered Deviation (Tuning)',
+          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered). PCV avg: ${avgPcv.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi. This may be normal for high-HP tunes.`,
+          recommendation:
+            'Contact your tuner to review fuel pressure calibration if concerned.',
+        });
+      }
+    }
+  }
+
   // Check for relief valve issue (sustained 12k-15k when desired >25k)
   if (desired.length > 0) {
     const avgDesired = desired.reduce((a: number, b: number) => a + b) / desired.length;

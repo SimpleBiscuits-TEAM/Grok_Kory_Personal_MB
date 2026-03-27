@@ -276,13 +276,14 @@ function drawMiniGraph(
   const axisH = bottomAxisH - 2; // ~12mm total for both overlays
   const halfH = axisH / 2; // ~6mm each for RPM and Speed
 
-  // RPM axis (top half of bottom area, light blue)
+  // RPM axis (top half of bottom area, light blue) with tick marks
   if (rpmData && !isRpmGraph && rpmData.length > 10) {
     const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
     const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
     const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
     const rpmMax = Math.max(...rpmSampled, 1);
 
+    // Draw RPM trace line
     doc.setDrawColor(100, 150, 210);
     doc.setLineWidth(0.2);
     for (let i = 1; i < rpmSampled.length; i++) {
@@ -292,19 +293,38 @@ function drawMiniGraph(
       const y2 = axisY + halfH - (rpmSampled[i] / rpmMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(5.5);
+
+    // RPM tick marks along bottom (evenly spaced, showing actual RPM at each point)
+    const rpmTickCount = 6;
+    doc.setFontSize(5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 150, 210);
-    doc.text(`RPM (0-${niceRound(rpmMax)})`, graphX, axisY + halfH - 0.5);
+    for (let t = 0; t <= rpmTickCount; t++) {
+      const frac = t / rpmTickCount;
+      const tx = graphX + frac * graphW;
+      const idx = Math.min(Math.floor(frac * (rpmSampled.length - 1)), rpmSampled.length - 1);
+      const rpmVal = rpmSampled[idx] || 0;
+      // Tick mark
+      doc.setDrawColor(100, 150, 210);
+      doc.setLineWidth(0.15);
+      doc.line(tx, axisY + halfH - 1, tx, axisY + halfH + 0.5);
+      // Value label
+      doc.text(`${Math.round(rpmVal)}`, tx - 2, axisY + halfH + 3);
+    }
+    // RPM label at left
+    doc.setFontSize(5);
+    doc.setTextColor(100, 150, 210);
+    doc.text('RPM', x + 1.5, axisY + halfH - 1);
   }
 
-  // Speed axis (bottom half of bottom area, gray)
+  // Speed axis (bottom half of bottom area, gray) with tick marks
   if (speedData && !isSpeedGraph && speedData.length > 10) {
     const spdValid = speedData.filter(v => !isNaN(v));
     const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
     const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
     const spdMax = Math.max(...spdSampled, 1);
 
+    // Draw speed trace line
     doc.setDrawColor(160, 160, 185);
     doc.setLineWidth(0.2);
     for (let i = 1; i < spdSampled.length; i++) {
@@ -314,10 +334,28 @@ function drawMiniGraph(
       const y2 = axisY + axisH - (spdSampled[i] / spdMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(5.5);
+
+    // Speed tick marks along bottom (evenly spaced, showing actual MPH at each point)
+    const spdTickCount = 6;
+    doc.setFontSize(5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(160, 160, 185);
-    doc.text(`MPH (0-${niceRound(spdMax)})`, graphX, axisY + axisH - 0.5);
+    for (let t = 0; t <= spdTickCount; t++) {
+      const frac = t / spdTickCount;
+      const tx = graphX + frac * graphW;
+      const idx = Math.min(Math.floor(frac * (spdSampled.length - 1)), spdSampled.length - 1);
+      const spdVal = spdSampled[idx] || 0;
+      // Tick mark
+      doc.setDrawColor(160, 160, 185);
+      doc.setLineWidth(0.15);
+      doc.line(tx, axisY + axisH - 1, tx, axisY + axisH + 0.5);
+      // Value label
+      doc.text(`${Math.round(spdVal)}`, tx - 2, axisY + axisH + 3);
+    }
+    // MPH label at left
+    doc.setFontSize(5);
+    doc.setTextColor(160, 160, 185);
+    doc.text('MPH', x + 1.5, axisY + axisH - 1);
   }
 
   let newY = y + totalH + 2;

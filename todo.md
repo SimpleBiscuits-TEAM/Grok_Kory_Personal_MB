@@ -290,3 +290,34 @@
 - [x] Fix low boost fault zone not displaying in the problematic area
 - [x] Fix false rail pressure alert if present
 - [x] Verify fixes against the 145+hp datalog
+
+## Binary Segment Swap Tool
+- [ ] Build binary segment swap: upload two .bin files with same OS and offsets
+- [ ] Compare segments between two binaries and display differences
+- [ ] Allow user to select which part number/segment to swap from comparison file
+- [ ] Generate new binary with swapped segment(s) and offer download
+- [ ] Validate same OS and same offsets before allowing swap
+- [ ] Only allow swap between same format files (exception: if Manus can make cross-format work)
+
+## L5P Injector Type Fix
+- [x] Fix L5P injector type reference from piezo to solenoid in health report and diagnostics
+
+## Health Report Graph Axis Improvements
+- [x] All graphs must always have Y-axis values (not just min/max labels)
+- [x] RPM and speed bottom axis must have tick markings from beginning to end (not just overlay)
+- [x] Speed markings must be clearly labeled so user doesn't have to guess
+
+## Low Rail Pressure Fault Zone Fix
+- [x] Low rail pressure deviation must appear in fault analysis zone when detected
+- [x] Verify fault zone chart renders for LOW_RAIL_PRESSURE condition
+
+## Cummins 6.7L Support (2019-2024)
+- [ ] Analyze Cummins 6.7L binary file structure and extract metadata
+- [ ] Add Cummins ECU format detection to binary parser (part numbers, calibration IDs, VIN)
+- [ ] Parse Cummins CSV datalog format (PID names, units, structure)
+- [ ] Add Cummins PID name mapping to dataProcessor.ts for CSV import
+- [ ] Add Cummins 6.7L vehicle knowledge base entry
+- [ ] Add 68RFE transmission knowledge and diagnostics
+- [ ] Add Aisin AS69RC transmission knowledge and diagnostics
+- [ ] Add Cummins-specific DTC codes to diagnostic lookup
+- [ ] Verify Cummins datalog analysis produces correct diagnostics
