@@ -344,3 +344,10 @@
 - [ ] Add Cummins-specific thresholds: exhaust pressure concern at 75 PSI (stock), ideal boost:exhaust ratio ~1:2, achieved through vane adjustments
 - [ ] When VIN detects Cummins, apply Cummins-specific diagnostic logic instead of Duramax defaults
 - [x] Fix PW diagnostic: pulse width severity must factor in rail pressure. 2.9ms at low pressure is not the same as 2.9ms at high pressure. Only flag as concerning when PW is high AND rail pressure is high simultaneously.
+
+## Segment Swap Feature
+- [x] Build segment swap engine — copy entire segment data blocks between two binaries using segment map boundaries
+- [x] Hex-verify segment boundaries before copying (confirm expected bytes at offset, pattern search fallback if shifted)
+- [x] Build segment swap UI — two-bin upload (target + source), side-by-side segment maps, swap selection per segment
+- [x] Download modified binary with descriptive filename after segment swap
+- [x] Validate OS compatibility between source and target before allowing swap
