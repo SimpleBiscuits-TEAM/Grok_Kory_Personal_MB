@@ -264,6 +264,4 @@
 - [x] Look up GM part numbers for component identification
 - [x] Add binary upload UI to Advanced section
 - [x] Show hex dump view of key data regions
-- [ ] Automate TIS2Web VIN lookup to pull official GM ECM service history
-- [ ] Cross-reference binary part numbers against TIS2Web official records
-- [ ] Flag mismatched part numbers (tuner-modified vs factory)
+- [ ] Flag mismatched part numbers (tuner-modified vs factory) when official GM records become available

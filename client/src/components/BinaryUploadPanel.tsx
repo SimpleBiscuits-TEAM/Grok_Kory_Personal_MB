@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useRef } from 'react';
-import { Upload, FileDown, AlertCircle, CheckCircle, Loader2, Copy, ExternalLink, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Upload, FileDown, AlertCircle, CheckCircle, Loader2, Copy, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { parseEcuBinary, decodeVinNhtsa, lookupPartNumber, BinaryAnalysis, BinaryFinding, HexRegion, NhtsaVehicleInfo } from '@/lib/binaryParser';
 
 const sFont = { heading: '"Bebas Neue", "Impact", sans-serif', body: '"Rajdhani", sans-serif', mono: '"Share Tech Mono", monospace' };
@@ -450,22 +450,7 @@ export default function BinaryUploadPanel() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {analysis.vinFound && (
-                <a
-                  href={`https://tis2web.service.opel.com/tis2web/`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px',
-                    background: `${sColor.blue}22`, border: `1px solid ${sColor.blue}44`,
-                    color: sColor.blue, fontFamily: sFont.mono, fontSize: '0.7rem',
-                    textDecoration: 'none', cursor: 'pointer',
-                  }}
-                >
-                  <ExternalLink style={{ width: 12, height: 12 }} />
-                  VERIFY ON TIS2WEB
-                </a>
-              )}
+
               <button
                 onClick={() => { setAnalysis(null); setVehicleInfo(null); fileInputRef.current && (fileInputRef.current.value = ''); }}
                 style={{
