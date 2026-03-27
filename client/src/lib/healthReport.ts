@@ -219,7 +219,7 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   const boostVals = validValues(data.boost);
   const maxMaf = safeMax(data.maf);
   let turboStatus = '✓ Normal — Turbocharger responding correctly';
-  // boostActualAvailable: false means MAP was not in the scan list — all boost values are zero/invalid
+  // boostActualAvailable: false means MAP was not in the datalog — all boost values are zero/invalid
   const boostAvail = data.boostActualAvailable !== false;
 
   if (boostAvail && boostVals.length > 0) {
@@ -235,8 +235,8 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
       findings.push(`Turbocharger healthy — peak boost ${maxBoost.toFixed(1)} PSIG, peak MAF ${maxMaf.toFixed(1)} lb/min`);
     }
   } else if (!boostAvail) {
-    turboStatus = '— MAP not logged (add ECM.MAP to scan list for boost analysis)';
-    findings.push(`Turbocharger — peak MAF ${maxMaf.toFixed(1)} lb/min (actual boost unavailable: ECM.MAP not in scan list)`);
+    turboStatus = '— Manifold Absolute Pressure not logged (add MAP to datalog for boost analysis)';
+    findings.push(`Turbocharger — peak MAF ${maxMaf.toFixed(1)} lb/min (actual boost unavailable: MAP not in datalog)`);
   } else {
     findings.push(`Turbocharger data — peak MAF ${maxMaf.toFixed(1)} lb/min (boost channel not logged)`);
   }
@@ -593,7 +593,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   const boostActual = validValues(data.boost);
   const boostAvailForP0299 = data.boostActualAvailable !== false;
   if (!boostAvailForP0299) {
-    p0299Status = '— Actual boost not available (ECM.MAP not in scan list)';
+    p0299Status = '— Actual boost not available (Manifold Absolute Pressure not in datalog)';
   } else if (boostActual.length > 0) {
     // Check for high MAF but low boost (boost leak indicator)
     const highMafLowBoost = data.maf.filter((m: number, i: number) => m > 55 && data.boost[i] > 0 && data.boost[i] < 40).length;

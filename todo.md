@@ -162,3 +162,8 @@
 - [x] Fix TCC converging slip detection in healthReport.ts — replaced with settle-then-rise logic
 - [x] Fix transmission knowledge base: Allison 1000 5-speed (01-05), Allison 1000 6-speed (06-19), GM/Allison 10L1000 10-speed (2020+)
 - [x] Fix TCC slip detection for 10L1000: settle-then-rise logic in diagnostics.ts, healthReport.ts, and evaluateDiagnostics
+
+## Format-Aware Beta Suggestions
+- [x] Beta suggestions must not reference wrong tool (e.g., don't say "EFILive" when format is Banks Power)
+- [x] Remove internal PID ID names from suggestions (no ECM.EGTS1, TCM.TFT etc.) — use plain language like "Exhaust Gas Temperature", "Oil Pressure", "Transmission Fluid Temperature"
+- [x] Suggestion text should be generic or match the detected format (Banks Power, HP Tuners, EFILive, OBD datalogger, etc.)

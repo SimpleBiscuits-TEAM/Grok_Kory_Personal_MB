@@ -231,9 +231,9 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push({
       code: 'INFO-MAP-NOT-LOGGED',
       severity: 'info',
-      title: 'Actual Boost Not Available — MAP Not in Scan List',
-      description: `Desired boost data is present (peak: ${Math.max(...boostDesired).toFixed(1)} psi) but the MAP sensor (ECM.MAP) was not included in the EFILive scan list. Actual vs. desired boost comparison cannot be performed.`,
-      recommendation: 'Add ECM.MAP to your EFILive scan list to enable boost efficiency analysis and underboost detection.',
+      title: 'Actual Boost Not Available — Manifold Absolute Pressure Not Logged',
+      description: `Desired boost data is present (peak: ${Math.max(...boostDesired).toFixed(1)} psi) but the Manifold Absolute Pressure (MAP) sensor was not included in the datalog. Actual vs. desired boost comparison cannot be performed.`,
+      recommendation: 'Add Manifold Absolute Pressure (MAP) to your datalog configuration to enable boost efficiency analysis and underboost detection.',
     });
   }
 

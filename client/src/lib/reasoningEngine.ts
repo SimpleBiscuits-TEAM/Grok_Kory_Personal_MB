@@ -553,22 +553,23 @@ function analyzeBoostSystem(
   if (!boostAvail) {
     const maxDesired = data.boostDesired.length > 0 ? Math.max(...data.boostDesired) : 0;
     if (maxDesired > 0) {
+      const toolName = getToolDisplayName(ctx.fileFormat);
       findings.push({
         id: 'boost-map-not-logged',
         category: 'boost',
         confidence: 'high',
         type: 'info',
-        title: 'Actual Boost Not Available — ECM.MAP Not in Scan List',
+        title: 'Actual Boost Not Available — Manifold Absolute Pressure Not Logged',
         reasoning:
-          `Desired boost data is present (peak ${maxDesired.toFixed(1)} psi) but the MAP sensor ` +
-          `(ECM.MAP) was not included in the EFILive scan list. Without actual MAP readings, ` +
+          `Desired boost data is present (peak ${maxDesired.toFixed(1)} psi) but the Manifold Absolute Pressure (MAP) ` +
+          `sensor was not included in the datalog. Without actual MAP readings, ` +
           `boost efficiency, underboost detection, and VGT tracking analysis cannot be performed. ` +
           `This is a data collection gap, not a vehicle fault.`,
         evidence: [
           `Peak desired boost: ${maxDesired.toFixed(1)} psi`,
-          `ECM.MAP: not present in scan list`,
+          `Manifold Absolute Pressure: not present in datalog`,
         ],
-        suggestion: 'Add ECM.MAP to your EFILive scan list and re-log to enable full boost analysis.',
+        suggestion: `Add Manifold Absolute Pressure (MAP) to your ${toolName} configuration and re-log to enable full boost analysis.`,
       });
     }
     return findings;
@@ -625,6 +626,19 @@ function analyzeBoostSystem(
 // Beta Improvement Suggestions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Get a user-friendly display name for the datalog source tool.
+ * Used throughout suggestions to avoid referencing the wrong tool.
+ */
+function getToolDisplayName(fileFormat: string): string {
+  switch (fileFormat) {
+    case 'bankspower': return 'Banks Power iDash';
+    case 'efilive': return 'EFILive';
+    case 'hptuners': return 'datalog tool';
+    default: return 'datalog tool';
+  }
+}
+
 function generateBetaImprovements(
   data: ProcessedMetrics,
   ctx: OperatingContext,
@@ -632,24 +646,26 @@ function generateBetaImprovements(
   diagnostics: DiagnosticReport
 ): BetaImprovement[] {
   const improvements: BetaImprovement[] = [];
+  const toolName = getToolDisplayName(ctx.fileFormat);
 
   // Suggestion 1: Additional PIDs that would improve diagnostic accuracy
   const missingPids: string[] = [];
-  if (data.exhaustGasTemp.every(v => v === 0)) missingPids.push('EGT (ECM.EGTS1)');
-  if (data.oilPressure.every(v => v === 0)) missingPids.push('Oil Pressure (ECM.OILP)');
-  if (data.oilTemp.every(v => v === 0)) missingPids.push('Oil Temperature (ECM.EOT)');
-  if (data.transFluidTemp.every(v => v === 0)) missingPids.push('Trans Fluid Temp (TCM.TFT)');
+  if (data.exhaustGasTemp.every(v => v === 0)) missingPids.push('Exhaust Gas Temperature (EGT)');
+  if (data.oilPressure.every(v => v === 0)) missingPids.push('Oil Pressure');
+  if (data.oilTemp.every(v => v === 0)) missingPids.push('Oil Temperature');
+  if (data.transFluidTemp.every(v => v === 0)) missingPids.push('Transmission Fluid Temperature');
 
   if (missingPids.length > 0) {
+    const hasEgt = missingPids.some(p => p.includes('EGT'));
     improvements.push({
       id: 'missing-pids',
       area: 'Data Coverage',
-      observation: `The following PIDs were not logged in this datalog: ${missingPids.join(', ')}`,
+      observation: `The following parameters were not found in this datalog: ${missingPids.join(', ')}`,
       suggestion:
-        `Adding these PIDs to your EFILive scan tool configuration would enable more comprehensive ` +
+        `Adding these parameters to your ${toolName} configuration would enable more comprehensive ` +
         `diagnostics. EGT is particularly valuable for detecting fueling issues and DPF health. ` +
         `Oil pressure and temperature help identify lubrication system concerns under load.`,
-      priority: missingPids.includes('EGT (ECM.EGTS1)') ? 'high' : 'medium',
+      priority: hasEgt ? 'high' : 'medium',
     });
   }
 
@@ -660,11 +676,12 @@ function generateBetaImprovements(
       id: 'tcc-load-correlation',
       area: 'Transmission Diagnostics',
       observation:
-        'TCC slip events were detected under full lock command. Adding transmission line pressure ' +
-        '(TCM.TLPRES or TCM.TCCPRES) to the datalog would allow the analyzer to distinguish ' +
-        'between a TCC solenoid fault (insufficient apply pressure) and mechanical converter wear.',
+        'TCC slip events were detected under full lock command. Adding Transmission Line Pressure ' +
+        'to the datalog would allow the analyzer to distinguish between a TCC solenoid fault ' +
+        '(insufficient apply pressure) and mechanical converter wear.',
       suggestion:
-        'Log TCM.TLPRES (transmission line pressure) alongside TCM.TCCSLIP and TCM.TCCPCSCP. ' +
+        `Log Transmission Line Pressure alongside Converter Slip Speed and TCC Commanded Pressure ` +
+        `in your ${toolName} configuration. ` +
         'If line pressure is normal but slip persists, the issue is mechanical (converter clutch). ' +
         'If line pressure is low, the issue is hydraulic (solenoid, valve body, or pump).',
       priority: 'high',
@@ -682,7 +699,7 @@ function generateBetaImprovements(
       area: 'Data Quality',
       observation: `Estimated sample rate: ~${sampleRateHz.toFixed(1)} Hz. Higher sample rates improve transient event detection.`,
       suggestion:
-        `Increasing your EFILive scan tool sample rate to 10+ Hz will improve detection of ` +
+        `Increasing your ${toolName} sample rate to 10+ Hz will improve detection of ` +
         `brief slip events, rail pressure spikes, and boost transients. ` +
         `Short-duration events (<300ms) may be missed at lower sample rates.`,
       priority: 'medium',
@@ -696,13 +713,13 @@ function generateBetaImprovements(
       id: 'rail-pcv-correlation',
       area: 'Fuel System Diagnostics',
       observation:
-        'Rail pressure deviation correlates with PCV current fluctuation. ' +
-        'Adding ECM.FRPVAC (PCV measured current) alongside ECM.FRPVDC (PCV desired current) ' +
+        'Rail pressure deviation correlates with Pressure Control Valve (PCV) current fluctuation. ' +
+        'Adding PCV Measured Current alongside PCV Desired Current ' +
         'would allow the analyzer to detect PCV solenoid response lag.',
       suggestion:
-        'Log both ECM.FRPVAC (measured) and ECM.FRPVDC (desired) PCV current. ' +
+        `Log both PCV Measured Current and PCV Desired Current in your ${toolName} configuration. ` +
         'A large gap between desired and measured current indicates a failing PCV solenoid. ' +
-        'This is a key early indicator of CP4 pump failure on LML/L5P engines.',
+        'This is a key early indicator of high-pressure fuel pump failure on LML/L5P engines.',
       priority: 'high',
     });
   }

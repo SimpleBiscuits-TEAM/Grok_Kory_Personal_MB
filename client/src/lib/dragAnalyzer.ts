@@ -249,7 +249,7 @@ export function analyzeDragRuns(data: ProcessedMetrics): DragAnalysis {
         category: 'general',
         severity: 'warning',
         title: 'Vehicle Speed Channel Missing',
-        detail: 'Drag run detection requires a vehicle speed (VSS) channel. Add ECM.VSS to your EFILive scan list or enable Vehicle Speed in HP Tuners.',
+        detail: 'Drag run detection requires a Vehicle Speed channel. Ensure Vehicle Speed is included in your datalog configuration.',
         estimatedGain: 'N/A',
       }],
       dataQuality: 'insufficient',
@@ -506,7 +506,7 @@ function generateDragTips(
       category: 'tcc',
       severity: 'warning',
       title: 'TCC Not Confirmed Locked by 3rd Gear',
-      detail: 'For maximum performance on the drag strip, the torque converter should be fully locked by 3rd gear. An unlocked converter wastes power as heat. Add TCM.TCCPCSCP and TCM.TCCSLIP to your scan list for definitive TCC status.',
+      detail: 'For maximum performance on the drag strip, the torque converter should be fully locked by 3rd gear. An unlocked converter wastes power as heat. Add TCC Commanded Pressure and Converter Slip Speed to your datalog for definitive TCC status.',
       estimatedGain: '0.05-0.10 sec ET',
     });
   }
@@ -568,7 +568,7 @@ function generateDragTips(
       category: 'shift',
       severity: 'info',
       title: `Shift Time Optimization: ~${(bestRun.totalShiftTimeLost * 1000).toFixed(0)}ms Lost`,
-      detail: `Detected ${bestRun.shifts.length} gear change(s) with an estimated ${(bestRun.totalShiftTimeLost * 1000).toFixed(0)}ms of time lost to shifting. For drag racing, having your tune optimized for aggressive shift firmness and reduced shift overlap time can recover this. The Allison 1000 responds well to shift pressure tuning in HP Tuners or EFILive.`,
+      detail: `Detected ${bestRun.shifts.length} gear change(s) with an estimated ${(bestRun.totalShiftTimeLost * 1000).toFixed(0)}ms of time lost to shifting. For drag racing, having your tune optimized for aggressive shift firmness and reduced shift overlap time can recover this. The transmission responds well to shift pressure tuning via a custom calibration.`,
       estimatedGain: `${(bestRun.totalShiftTimeLost * 0.5 * 1000).toFixed(0)}-${(bestRun.totalShiftTimeLost * 1000).toFixed(0)}ms ET`,
     });
   }
@@ -587,7 +587,7 @@ function generateDragTips(
       category: 'general',
       severity: 'info',
       title: 'Add These PIDs for Better Analysis',
-      detail: `The following channels were not found in your datalog: ${missingChannels.join(', ')}. Adding them to your scan list will enable more detailed drag analysis including TCC lock status, fuel system health, and boost curve analysis.`,
+      detail: `The following parameters were not found in your datalog: ${missingChannels.join(', ')}. Adding them to your datalog configuration will enable more detailed drag analysis including TCC lock status, fuel system health, and boost curve analysis.`,
       estimatedGain: 'Better diagnostic accuracy',
     });
   }
