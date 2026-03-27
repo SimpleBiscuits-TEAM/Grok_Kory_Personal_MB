@@ -194,3 +194,22 @@
 ## Health Report PDF Graph Improvements
 - [x] Change graph descriptions from generic warnings to data-driven synopses of what actually happened in the data
 - [x] Add MPH speed reference line (light gray overlay) at the bottom of each graph for context
+
+## Advanced Health Report — Correlated Multi-Parameter Graphs
+- [x] Add injector pulse width and timing graphs (if available in datalog)
+- [x] Add desired boost vs actual boost with vane position overlay graph
+- [x] Add desired vs actual fuel rail pressure with PCV duty cycle overlay graph
+- [x] Add boost vs MAF vs vane correlation graph with leak detection logic (high MAF + vane >45% at 2900+ RPM + boost <33 PSI = possible boost leak or tune revision needed)
+- [x] Add derived analytics: MAD (Manifold Air Density), boost air density with explanations
+- [x] Parse injector pulse width and injection timing from datalogs (added to all 3 parsers + ProcessedMetrics)
+- [x] All advanced graphs only render when advanced data channels are present in the datalog
+- [x] Each advanced graph includes data-driven synopsis and MPH speed reference
+- [x] Injector analysis: piezo >1.5ms = race territory / high EGT risk; solenoid >2500uS = hard on pistons
+- [x] Rail pressure: >3000 PSI above OEM peak = "getting spicy"
+- [x] Timing: >27° on diesels = spicy; high pulse width calls for high timing
+- [x] Commentary: recommend injectors matched to desired HP; OEM duration or lower for small builds
+- [x] General wisdom: more HP = harder on everything; build correctly, keep cool, efficient, matched components
+- [x] Torque converter stall matching: should match power curve shift from larger turbo
+- [x] Don't sustain high temps for extended periods
+- [x] Add total Crank Angle Duration (CAD) calculation from pulse width + RPM, show injection end relative to TDC (approximate, not exact)
+- [x] Include fuel pressure in CAD/TDC analysis context (higher rail pressure affects atomization and combustion)

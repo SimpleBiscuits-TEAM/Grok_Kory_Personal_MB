@@ -10,6 +10,7 @@
 import jsPDF from 'jspdf';
 import { HealthReportData } from './healthReport';
 import { ProcessedMetrics } from './dataProcessor';
+import { renderAdvancedAnalytics } from './advancedHealthPdf';
 
 const PPEI_RED: [number, number, number] = [220, 38, 38];
 const DARK_BG: [number, number, number] = [13, 15, 20];
@@ -613,6 +614,24 @@ export function generateHealthReportPdf(
     checkBreak(48);
     y = drawMiniGraph(doc, margin, y, contentWidth, 38, config, margin, contentWidth);
   }
+
+  // ── ADVANCED TUNING ANALYSIS (correlated multi-parameter graphs) ──────────
+  renderAdvancedAnalytics(
+    doc,
+    y,
+    data,
+    healthReport.vehicleInfo,
+    margin,
+    contentWidth,
+    pageHeight,
+    speedRef,
+    addText,
+    addWrappedText,
+    checkBreak,
+    drawHR,
+    () => y,
+    (newY: number) => { y = newY; },
+  );
 
   // ── SYSTEM-BY-SYSTEM BREAKDOWN ────────────────────────────────────────────
   const sections = [

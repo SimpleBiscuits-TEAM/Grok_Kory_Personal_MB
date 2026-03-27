@@ -67,6 +67,9 @@ export interface DuramaxData {
   boostSource: 'direct' | 'map_derived' | 'none'; // how boost was obtained
   boostActualAvailable: boolean; // false when MAP is all N/A — suppresses boost fault checks
   throttlePosition: number[];  // APP / TPS for drag detection
+  injectorPulseWidth: number[];  // Injector pulse width (ms)
+  injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
+  intakeAirTemp: number[];       // Intake air temperature (°F)
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
   pidsMissing: string[];       // channels that had no valid substitute
   timestamp: string;
@@ -104,6 +107,9 @@ export interface ProcessedMetrics {
   boostSource: 'direct' | 'map_derived' | 'none'; // provenance label for UI
   boostActualAvailable: boolean; // false when MAP was all N/A — suppresses boost fault checks
   throttlePosition: number[];  // APP / TPS for drag detection
+  injectorPulseWidth: number[];  // Injector pulse width (ms)
+  injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
+  intakeAirTemp: number[];       // Intake air temperature (°F)
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
   boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
@@ -400,6 +406,9 @@ function parseDataloggerCSV(content: string): DuramaxData {
   const boost: number[] = [];
   const mapAbsolute: number[] = [];
   const throttlePosition: number[] = [];
+  const injectorPulseWidth: number[] = [];
+  const injectionTiming: number[] = [];
+  const intakeAirTemp: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -519,6 +528,9 @@ function parseDataloggerCSV(content: string): DuramaxData {
     boost,
     mapAbsolute,
     throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
     torquePercent,
     maxTorque,
     vehicleSpeed,
@@ -711,6 +723,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const transFluidTempIdx = getColumnIndex(['Trans Fluid Temp', 'Transmission Fluid Temp', 'Trans Temp']);
   const baroIdx           = getColumnIndex(['Barometric Pressure (SAE)', 'Barometric Pressure', 'Baro Pressure', 'Ambient Pressure']);
   const throttleIdx       = getColumnIndex(['Accelerator Position D (SAE)', 'Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
+  const injPulseWidthIdx  = getColumnIndex(['Injector Pulse Width', 'Inj Pulse Width', 'Fuel Pulse Width', 'Injector PW', 'INJPW', 'Fuel Injection Pulse Width']);
+  const injTimingIdx      = getColumnIndex(['Injection Timing', 'Timing Advance', 'SOI', 'Start of Injection', 'Injection Angle', 'Fuel Timing']);
+  const iatIdx            = getColumnIndex(['Intake Air Temp (SAE)', 'Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
 
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns: RPM or MAF');
@@ -773,6 +788,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const boost: number[] = [];
   const mapAbsolute: number[] = [];
   const throttlePosition: number[] = [];
+  const injectorPulseWidth: number[] = [];
+  const injectionTiming: number[] = [];
+  const intakeAirTemp: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -874,6 +892,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
     transFluidTemp.push(transFluidTempIdx !== -1 ? hptConvert(transFluidTempIdx, values[transFluidTempIdx]) : 0);
     barometricPressure.push(baroVal);
     throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
+    injectorPulseWidth.push(injPulseWidthIdx !== -1 ? hptConvert(injPulseWidthIdx, values[injPulseWidthIdx]) : 0);
+    injectionTiming.push(injTimingIdx !== -1 ? hptConvert(injTimingIdx, values[injTimingIdx]) : 0);
+    intakeAirTemp.push(iatIdx !== -1 ? hptConvert(iatIdx, values[iatIdx]) : 0);
   }
   
   if (rpm.length === 0) {
@@ -892,6 +913,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
     boost,
     mapAbsolute,
     throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
     torquePercent,
     maxTorque,
     vehicleSpeed,
@@ -1038,6 +1062,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const transFluidTempIdx = getColumnIndex(['TCM.TFT']);
   const baroIdx           = getColumnIndex(['ECM.BARO']);
   const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'Accelerator Pedal Position', 'Throttle Position']);
+  const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW']);
+  const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING']);
+  const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT']);
 
   // ── Validate required columns ────────────────────────────────────────────
   // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
@@ -1054,6 +1081,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const boost: number[] = [];
   const mapAbsolute: number[] = [];
   const throttlePosition: number[] = [];
+  const injectorPulseWidth: number[] = [];
+  const injectionTiming: number[] = [];
+  const intakeAirTemp: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -1204,6 +1234,15 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
     barometricPressure.push(isNaN(baroKpa) ? 14.7 : baroKpa * 0.145038);
     throttlePosition.push(isNaN(parseVal(throttleIdx)) ? 0 : parseVal(throttleIdx));
+    // Injector pulse width (ms) — EFILive logs this directly
+    const ipwVal = parseVal(injPulseWidthIdx);
+    injectorPulseWidth.push(isNaN(ipwVal) ? 0 : ipwVal);
+    // Injection timing (degrees) — EFILive logs in degrees BTDC
+    const itmVal = parseVal(injTimingIdx);
+    injectionTiming.push(isNaN(itmVal) ? 0 : itmVal);
+    // Intake air temp — EFILive logs in °C, convert to °F
+    const iatC = parseVal(iatIdx);
+    intakeAirTemp.push(isNaN(iatC) || iatC <= -40 ? 0 : (iatC * 9/5) + 32);
   }
 
   if (rpm.length === 0) {
@@ -1218,6 +1257,9 @@ function parseEFILiveCSV(content: string): DuramaxData {
     boost,
     mapAbsolute,
     throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
     torquePercent,
     maxTorque,
     vehicleSpeed,
@@ -1324,6 +1366,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temp']);
   const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp']);
   const throttleIdx = getColumnIndex(['Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
+  const injPulseWidthIdx = getColumnIndex(['Injector Pulse Width', 'Inj Pulse Width', 'Fuel Pulse Width']);
+  const injTimingIdx = getColumnIndex(['Injection Timing', 'Timing Advance', 'SOI', 'Start of Injection']);
+  const iatIdx = getColumnIndex(['Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
   
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns in Banks Power format: Engine RPM or Mass Air Flow');
@@ -1334,6 +1379,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const boost: number[] = [];
   const mapAbsolute: number[] = [];
   const throttlePosition: number[] = [];
+  const injectorPulseWidth: number[] = [];
+  const injectionTiming: number[] = [];
+  const intakeAirTemp: number[] = [];
   const torquePercent: number[] = [];
   const maxTorque: number[] = [];
   const vehicleSpeed: number[] = [];
@@ -1424,6 +1472,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
     barometricPressure.push(ambientVal);
     throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
+    injectorPulseWidth.push(injPulseWidthIdx !== -1 ? values[injPulseWidthIdx] : 0);
+    injectionTiming.push(injTimingIdx !== -1 ? values[injTimingIdx] : 0);
+    intakeAirTemp.push(iatIdx !== -1 ? values[iatIdx] : 0);
   }
   
   if (rpm.length === 0) {
@@ -1459,6 +1510,9 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     barometricPressure,
     mapAbsolute,
     throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
     boostSource: boostGaugeIdx !== -1 ? 'direct' : mapIdx !== -1 ? 'map_derived' : 'none',
     boostActualAvailable: boost.some(v => v > 0),
     pidSubstitutions: [],
@@ -1652,6 +1706,9 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     boostSource: rawData.boostSource,
     boostActualAvailable: rawData.boostActualAvailable,
     throttlePosition: rawData.throttlePosition,
+    injectorPulseWidth: rawData.injectorPulseWidth,
+    injectionTiming: rawData.injectionTiming,
+    intakeAirTemp: rawData.intakeAirTemp,
     pidSubstitutions: rawData.pidSubstitutions,
     pidsMissing: rawData.pidsMissing,
     boostCalibration,
