@@ -256,3 +256,14 @@
 - [ ] Wire PCAN transport as alternative to WebSerial in datalogger UI
 - [ ] Add connection type selector in UI (WebSerial vs PCAN-USB)
 - [ ] Test Android build and USB OTG communication
+
+## Binary Upload / ECU Calibration Parser (Advanced Section)
+- [x] Build client-side .bin file parser to extract ECU metadata (VIN, part numbers, OS IDs, calibration IDs)
+- [x] Display extracted data with hex offsets in structured panel
+- [x] Add VIN decode via NHTSA API for full vehicle details
+- [x] Look up GM part numbers for component identification
+- [x] Add binary upload UI to Advanced section
+- [x] Show hex dump view of key data regions
+- [ ] Automate TIS2Web VIN lookup to pull official GM ECM service history
+- [ ] Cross-reference binary part numbers against TIS2Web official records
+- [ ] Flag mismatched part numbers (tuner-modified vs factory)
