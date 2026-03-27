@@ -109,7 +109,46 @@ interface MiniGraphConfig {
   color: [number, number, number];
   thresholdHigh?: number;
   thresholdLow?: number;
-  explanation: string;
+  speedData?: number[];  // MPH overlay for reference
+  isSpeedGraph?: boolean; // skip speed overlay on the speed graph itself
+}
+
+/** Generate a data-driven synopsis of what actually happened in the graph */
+function generateSynopsis(label: string, min: number, max: number, avg: number, unit: string, sampled: number[]): string {
+  const peakIdx = sampled.indexOf(Math.max(...sampled));
+  const peakPct = ((peakIdx / sampled.length) * 100).toFixed(0);
+  const earlyAvg = sampled.slice(0, Math.floor(sampled.length * 0.25)).reduce((a, b) => a + b, 0) / Math.floor(sampled.length * 0.25);
+  const lateAvg = sampled.slice(Math.floor(sampled.length * 0.75)).reduce((a, b) => a + b, 0) / (sampled.length - Math.floor(sampled.length * 0.75));
+  const trend = lateAvg > earlyAvg * 1.1 ? 'rising' : lateAvg < earlyAvg * 0.9 ? 'falling' : 'steady';
+
+  switch (label) {
+    case 'ENGINE RPM':
+      return `RPM ranged from ${min.toFixed(0)} to ${max.toFixed(0)}, averaging ${avg.toFixed(0)} RPM. Peak hit around ${peakPct}% through the log. The trend was ${trend} over the recording.`;
+    case 'BOOST PRESSURE':
+      return `Boost peaked at ${max.toFixed(1)} PSI and averaged ${avg.toFixed(1)} PSI during the log. Peak boost occurred around ${peakPct}% through the recording. Overall boost trend was ${trend}.`;
+    case 'FUEL RAIL PRESSURE':
+      return `Rail pressure ranged from ${min.toFixed(0)} to ${max.toFixed(0)} PSI, averaging ${avg.toFixed(0)} PSI. The highest demand point was around ${peakPct}% through the log.`;
+    case 'COOLANT TEMPERATURE': {
+      const stabilized = sampled.filter(v => v > avg * 0.9);
+      const stableAvg = stabilized.length > 0 ? stabilized.reduce((a, b) => a + b, 0) / stabilized.length : avg;
+      return `Coolant ranged from ${min.toFixed(0)}${unit} to ${max.toFixed(0)}${unit}. After warm-up, it stabilized around ${stableAvg.toFixed(0)}${unit}. Trend was ${trend} over the session.`;
+    }
+    case 'EXHAUST GAS TEMPERATURE':
+      return `EGT ranged from ${min.toFixed(0)}${unit} to ${max.toFixed(0)}${unit}, averaging ${avg.toFixed(0)}${unit}. Peak EGT occurred around ${peakPct}% through the log. Trend was ${trend}.`;
+    case 'TORQUE CONVERTER SLIP': {
+      const lockedPct = ((sampled.filter(v => Math.abs(v) < 20).length / sampled.length) * 100).toFixed(0);
+      return `Converter slip ranged from ${min.toFixed(0)} to ${max.toFixed(0)} RPM. The converter was locked (near-zero slip) approximately ${lockedPct}% of the time.`;
+    }
+    case 'TRANSMISSION FLUID TEMP': {
+      const stableTemp = sampled.slice(Math.floor(sampled.length * 0.5));
+      const stableAvgT = stableTemp.reduce((a, b) => a + b, 0) / stableTemp.length;
+      return `Trans fluid temp ranged from ${min.toFixed(0)}${unit} to ${max.toFixed(0)}${unit}. In the second half of the log it averaged ${stableAvgT.toFixed(0)}${unit}. Trend was ${trend}.`;
+    }
+    case 'VEHICLE SPEED':
+      return `Speed ranged from ${min.toFixed(0)} to ${max.toFixed(0)} MPH, averaging ${avg.toFixed(0)} MPH over the recording.`;
+    default:
+      return `Ranged from ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}, averaging ${avg.toFixed(1)}${unit}.`;
+  }
 }
 
 function drawMiniGraph(
@@ -122,10 +161,11 @@ function drawMiniGraph(
   margin: number,
   contentWidth: number,
 ): number {
-  const { data, label, unit, color, thresholdHigh, thresholdLow, explanation } = config;
+  const { data, label, unit, color, thresholdHigh, thresholdLow, speedData, isSpeedGraph } = config;
 
-  // Filter to valid non-zero data for graph
-  const validData = data.filter(v => !isNaN(v) && v !== 0);
+  // Filter to valid non-zero data for graph (allow zeros for converter slip)
+  const allowZero = label === 'TORQUE CONVERTER SLIP';
+  const validData = allowZero ? data.filter(v => !isNaN(v)) : data.filter(v => !isNaN(v) && v !== 0);
   if (validData.length < 10) return y; // Not enough data to graph
 
   // Downsample to ~200 points for PDF
@@ -193,7 +233,35 @@ function drawMiniGraph(
     doc.text(`${thresholdLow}${unit}`, graphX + graphW - 12, thY - 1);
   }
 
-  // Data line
+  // ── MPH speed reference overlay (light gray, at bottom of graph) ──────────
+  if (speedData && !isSpeedGraph && speedData.length > 10) {
+    const spdValid = speedData.filter(v => !isNaN(v));
+    const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
+    const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
+    const spdMax = Math.max(...spdSampled, 1);
+
+    // Draw speed as a filled area at the bottom (max 30% of graph height)
+    const spdGraphH = graphH * 0.3;
+    const spdBaseY = graphY + graphH;
+
+    doc.setDrawColor(180, 180, 200);
+    doc.setLineWidth(0.2);
+    for (let i = 1; i < spdSampled.length; i++) {
+      const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
+      const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
+      const y1 = spdBaseY - (spdSampled[i - 1] / spdMax) * spdGraphH;
+      const y2 = spdBaseY - (spdSampled[i] / spdMax) * spdGraphH;
+      doc.line(x1, y1, x2, y2);
+    }
+
+    // MPH label at bottom-right
+    doc.setFontSize(5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(160, 160, 180);
+    doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX + graphW - 18, spdBaseY - 1);
+  }
+
+  // Data line (draw AFTER speed overlay so it's on top)
   doc.setDrawColor(...color);
   doc.setLineWidth(0.4);
   const points: [number, number][] = sampled.map((v, i) => [
@@ -207,13 +275,14 @@ function drawMiniGraph(
 
   let newY = y + height + 2;
 
-  // Explanation text below graph
+  // Data-driven synopsis of what happened in this graph
+  const synopsis = generateSynopsis(label, min, max, avg, unit, sampled);
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(100, 100, 110);
-  const expLines = doc.splitTextToSize(explanation, contentWidth - 4);
-  doc.text(expLines, margin + 2, newY);
-  newY += expLines.length * 3.2 + 4;
+  const synLines = doc.splitTextToSize(synopsis, contentWidth - 4);
+  doc.text(synLines, margin + 2, newY);
+  newY += synLines.length * 3.2 + 4;
 
   return newY;
 }
@@ -434,12 +503,15 @@ export function generateHealthReportPdf(
   addText('DATALOG ANALYSIS GRAPHS', 12, 'bold', BLUE);
   drawHR([200, 210, 230]);
   addWrappedText(
-    'These graphs show key parameters from your datalog over time. Dashed lines indicate thresholds — red for danger zones, amber for caution. If you see the data line crossing a threshold, that\'s where the AI found something worth flagging.',
+    'These graphs show key parameters from your datalog over time. The light gray line at the bottom of each graph shows vehicle speed (MPH) for reference, so you can see what the truck was doing at any given point. Dashed red lines mark common reference thresholds.',
     8.5, 'normal', [100, 100, 110], 1.3,
   );
   y += 2;
 
   const graphConfigs: MiniGraphConfig[] = [];
+
+  // Speed data for overlay on all other graphs
+  const speedRef = data.vehicleSpeed.length > 10 ? data.vehicleSpeed : undefined;
 
   // RPM graph (always available)
   if (data.rpm.length > 10) {
@@ -449,7 +521,7 @@ export function generateHealthReportPdf(
       unit: ' RPM',
       color: [60, 130, 200],
       thresholdHigh: 4000,
-      explanation: 'Engine RPM over the duration of the datalog. This shows how the engine was loaded during the recording. Higher RPM under load is normal during acceleration or towing. Sustained high RPM at low speed may indicate a transmission issue.',
+      speedData: speedRef,
     });
   }
 
@@ -461,8 +533,7 @@ export function generateHealthReportPdf(
       unit: ' PSI',
       color: [30, 160, 80],
       thresholdHigh: 40,
-      thresholdLow: undefined,
-      explanation: 'Boost pressure from the turbocharger. On a stock Duramax, peak boost is typically 25-32 PSI. Tuned trucks may see 35-45+ PSI. If boost drops suddenly under load or never reaches expected levels, the turbo, intercooler, or charge piping may need attention.',
+      speedData: speedRef,
     });
   }
 
@@ -474,7 +545,7 @@ export function generateHealthReportPdf(
       unit: ' PSI',
       color: [200, 80, 40],
       thresholdHigh: 30000,
-      explanation: 'Fuel rail pressure is what feeds the injectors. At idle, expect ~5,000-6,000 PSI. Under full load, it climbs to 26,000-29,000 PSI. If actual pressure can\'t keep up with desired pressure, the CP4 pump, fuel filter, or supply system may be struggling.',
+      speedData: speedRef,
     });
   }
 
@@ -486,7 +557,7 @@ export function generateHealthReportPdf(
       unit: '°F',
       color: [180, 60, 60],
       thresholdHigh: 230,
-      explanation: 'Engine coolant temperature. Normal operating range is 185-210°F. Temps above 220°F under load suggest cooling system stress. Above 235°F is getting into "pull over and think about your life choices" territory. Low temps at the start of a log are normal — that\'s just the engine warming up.',
+      speedData: speedRef,
     });
   }
 
@@ -498,7 +569,7 @@ export function generateHealthReportPdf(
       unit: '°F',
       color: [220, 120, 20],
       thresholdHigh: 1300,
-      explanation: 'Exhaust Gas Temperature measures how hot the exhaust gases are leaving the engine. On a diesel, sustained EGTs above 1,300°F under load can indicate fueling issues, a clogged DPF, or excessive soot loading. Brief spikes during hard pulls are normal. If EGTs stay elevated, back off the throttle and investigate.',
+      speedData: speedRef,
     });
   }
 
@@ -510,7 +581,7 @@ export function generateHealthReportPdf(
       unit: ' RPM',
       color: [140, 60, 180],
       thresholdHigh: 100,
-      explanation: 'Torque converter slip is the RPM difference between the engine and transmission input shaft. When the converter locks up, slip should be near zero. Positive slip during acceleration is normal (the converter is doing its job). Slip that stays high after lockup, or spikes randomly, may indicate a worn converter or solenoid issue.',
+      speedData: speedRef,
     });
   }
 
@@ -522,18 +593,18 @@ export function generateHealthReportPdf(
       unit: '°F',
       color: [160, 80, 120],
       thresholdHigh: 250,
-      explanation: 'Transmission fluid temperature. Normal operating range is 160-220°F. Temps above 240°F accelerate fluid breakdown and wear. If you\'re seeing high trans temps while towing, consider an auxiliary trans cooler. Every 20°F above 200°F cuts fluid life roughly in half.',
+      speedData: speedRef,
     });
   }
 
-  // Speed
+  // Speed (no speed overlay on itself)
   if (data.vehicleSpeed.some(v => v > 5)) {
     graphConfigs.push({
       data: data.vehicleSpeed,
       label: 'VEHICLE SPEED',
       unit: ' MPH',
       color: [80, 80, 160],
-      explanation: 'Vehicle speed over the datalog. This provides context for the other graphs — knowing whether the truck was idling, cruising, or doing a pull helps interpret what the other parameters mean.',
+      isSpeedGraph: true,
     });
   }
 

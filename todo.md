@@ -190,3 +190,7 @@
 - [x] Darken humor tone in health report PDF: dry/dark truck humor, less bubbly, still respectful to customers
 - [x] Add more graphs to the health report PDF (RPM, boost, rail pressure, coolant temp, EGT, converter slip, trans temp, speed) with explanations
 - [x] Each graph section includes a customer-friendly explanation of what the parameter means and what to watch for
+
+## Health Report PDF Graph Improvements
+- [x] Change graph descriptions from generic warnings to data-driven synopses of what actually happened in the data
+- [x] Add MPH speed reference line (light gray overlay) at the bottom of each graph for context
