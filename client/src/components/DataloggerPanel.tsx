@@ -21,6 +21,7 @@ import {
   Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
+import { PCANConnection } from '@/lib/pcanConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
 import {
@@ -830,7 +831,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
   const [detectedManufacturer, setDetectedManufacturer] = useState<PIDManufacturer>('universal');
   const [detectedFuelType, setDetectedFuelType] = useState<FuelType>('any');
   const [supportedPids, setSupportedPids] = useState<Set<number> | null>(null);
-  const connectionRef = useRef<OBDConnection | null>(null);
+  const connectionRef = useRef<OBDConnection | PCANConnection | null>(null);
+  const [adapterType, setAdapterType] = useState<'elm327' | 'pcan'>('elm327');
+  const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
+  const [checkingBridge, setCheckingBridge] = useState(false);
 
   // PID selection
   const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
@@ -885,14 +889,42 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     setConsoleLogs(prev => [...prev.slice(-200), msg]);
   }, []);
 
+  const handleCheckBridge = useCallback(async () => {
+    setCheckingBridge(true);
+    try {
+      const available = await PCANConnection.isBridgeAvailable();
+      setBridgeAvailable(available);
+      if (available) {
+        addLog('PCAN-USB bridge detected on localhost:8765');
+      } else {
+        addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
+      }
+    } catch {
+      setBridgeAvailable(false);
+    } finally {
+      setCheckingBridge(false);
+    }
+  }, [addLog]);
+
   const handleConnect = useCallback(async () => {
-    const conn = new OBDConnection({
-      protocol: '6',
-      adaptiveTiming: 2,
-      echo: false,
-      headers: false,
-      spaces: false,
-    });
+    let conn: OBDConnection | PCANConnection;
+
+    if (adapterType === 'pcan') {
+      // PCAN-USB via WebSocket bridge
+      conn = new PCANConnection({ bridgeUrl: 'ws://localhost:8765' });
+      addLog('Connecting via PCAN-USB bridge...');
+    } else {
+      // ELM327 via WebSerial
+      conn = new OBDConnection({
+        protocol: '6',
+        adaptiveTiming: 2,
+        echo: false,
+        headers: false,
+        spaces: false,
+      });
+      addLog('Connecting to ELM327-compatible adapter...');
+      addLog('NOTE: Select your adapter from the browser port picker. Raw CAN interfaces (PCAN-USB) will NOT appear — use the PCAN-USB mode instead.');
+    }
 
     conn.on('stateChange', (e) => {
       setConnectionState(e.data as ConnectionState);
@@ -927,8 +959,6 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     });
 
     connectionRef.current = conn;
-    addLog('Connecting to OBD-II adapter...');
-    addLog('NOTE: Only ELM327-compatible adapters (OBDLink, ELM327, STN) will appear in the port picker. Raw CAN interfaces (PCAN-USB, Kvaser, CANable) will NOT appear — they are not serial devices.');
 
     const success = await conn.connect();
     if (success) {
@@ -937,9 +967,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
       const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
       const extCount = extPids.length;
       const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
-      addLog(`Connected! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
+      addLog(`Connected via ${adapterType === 'pcan' ? 'PCAN-USB bridge' : 'ELM327 WebSerial'}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
-  }, [addLog]);
+  }, [addLog, adapterType]);
 
   const handleDisconnect = useCallback(async () => {
     if (isLogging) {
@@ -1144,7 +1174,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     addLog('Reading DTCs from vehicle...');
 
     try {
-      const result = await conn.readDTCs();
+      const rawResult = await conn.readDTCs();
+      // Normalize: OBDConnection returns DTCReadResult, PCANConnection returns simpler format
+      const result: DTCReadResult = 'totalCount' in rawResult ? rawResult as DTCReadResult : {
+        stored: (rawResult.codes || []).map((code: string) => ({ code, type: 'stored' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+        pending: (rawResult.pending || []).map((code: string) => ({ code, type: 'pending' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+        permanent: (rawResult.permanent || []).map((code: string) => ({ code, type: 'permanent' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+        totalCount: (rawResult.codes || []).length + (rawResult.pending || []).length + (rawResult.permanent || []).length,
+        milStatus: false,
+        readTimestamp: Date.now(),
+      };
       setDtcResult(result);
       if (result.totalCount === 0) {
         addLog('No DTCs found — vehicle is clean!');
@@ -1171,7 +1210,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
       if (success) {
         addLog('DTCs cleared successfully! MIL (Check Engine Light) reset.');
         // Re-read to confirm
-        const result = await conn.readDTCs();
+        const rawResult = await conn.readDTCs();
+        const result: DTCReadResult = 'totalCount' in rawResult ? rawResult as DTCReadResult : {
+          stored: (rawResult.codes || []).map((code: string) => ({ code, type: 'stored' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+          pending: (rawResult.pending || []).map((code: string) => ({ code, type: 'pending' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+          permanent: (rawResult.permanent || []).map((code: string) => ({ code, type: 'permanent' as const, system: 'unknown' as const, severity: 'unknown' as DTCSeverity, description: '', possibleCauses: [] as string[], rawBytes: [0, 0] as [number, number] })),
+          totalCount: (rawResult.codes || []).length + (rawResult.pending || []).length + (rawResult.permanent || []).length,
+          milStatus: false,
+          readTimestamp: Date.now(),
+        };
         setDtcResult(result);
       } else {
         addLog('WARNING: Clear DTCs command may not have been accepted');
@@ -1291,18 +1338,36 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             </select>
           </div>
 
+          {/* Adapter Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>ADAPTER:</span>
+            <select
+              value={adapterType}
+              onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan')}
+              disabled={connectionState !== 'disconnected' && connectionState !== 'error'}
+              style={{
+                fontFamily: sFont.mono, fontSize: '0.7rem', padding: '2px 6px',
+                background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`,
+                borderRadius: '2px', color: adapterType === 'pcan' ? sColor.orange : sColor.text,
+              }}
+            >
+              <option value="elm327">ELM327 (WebSerial)</option>
+              <option value="pcan">PCAN-USB (Bridge)</option>
+            </select>
+          </div>
+
           {/* Connect/Disconnect */}
           {connectionState === 'disconnected' || connectionState === 'error' ? (
             <button
               onClick={handleConnect}
-              disabled={!isWebSerialSupported}
+              disabled={adapterType === 'elm327' ? !isWebSerialSupported : false}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '6px 14px', background: sColor.green, border: 'none',
                 borderRadius: '3px', color: 'oklch(0.10 0.005 260)',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
-                cursor: isWebSerialSupported ? 'pointer' : 'not-allowed',
-                opacity: isWebSerialSupported ? 1 : 0.5,
+                cursor: (adapterType === 'elm327' && !isWebSerialSupported) ? 'not-allowed' : 'pointer',
+                opacity: (adapterType === 'elm327' && !isWebSerialSupported) ? 0.5 : 1,
               }}
             >
               <Wifi style={{ width: 14, height: 14 }} /> CONNECT
@@ -2001,56 +2066,169 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
               <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
                 CONNECT YOUR OBD-II ADAPTER
               </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '500px', margin: '0 auto' }}>
-                Plug your ELM327-compatible adapter into your vehicle's OBD-II port, connect it to your computer via USB, turn the ignition to ON (engine running or KOEO), then click <strong style={{ color: sColor.green }}>CONNECT</strong> above.
+
+              {/* Adapter Mode Tabs */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0', marginBottom: '20px', maxWidth: '440px', margin: '0 auto 20px' }}>
+                <button
+                  onClick={() => setAdapterType('elm327')}
+                  style={{
+                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
+                    borderRadius: '3px 0 0 3px', cursor: 'pointer',
+                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.08 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                    color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
+                  }}
+                >
+                  <div>ELM327 / OBDLINK</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>WebSerial (USB)</div>
+                </button>
+                <button
+                  onClick={() => setAdapterType('pcan')}
+                  style={{
+                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
+                    borderRadius: '0 3px 3px 0', cursor: 'pointer',
+                    background: adapterType === 'pcan' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.08 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                    color: adapterType === 'pcan' ? sColor.orange : sColor.textDim,
+                  }}
+                >
+                  <div>PCAN-USB</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
+                </button>
               </div>
 
-              {/* Supported Adapters */}
-              <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.6, maxWidth: '520px', margin: '16px auto 0' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
-                  <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 145 / 0.2)', border: '1px solid oklch(0.25 0.06 145)', borderRadius: '3px' }}>
-                    <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.green, marginBottom: '4px', letterSpacing: '0.06em' }}>✓ COMPATIBLE</div>
-                    <div>OBDLink EX <span style={{ color: sColor.orange }}>(recommended)</span></div>
-                    <div>OBDLink MX+ / SX</div>
-                    <div>ELM327 v1.5+ USB</div>
-                    <div>STN1110 / STN2120</div>
-                    <div>Any ELM327-compatible</div>
+              {/* ELM327 Mode Instructions */}
+              {adapterType === 'elm327' && (
+                <>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '500px', margin: '0 auto' }}>
+                    Plug your ELM327-compatible adapter into your vehicle's OBD-II port, connect it to your computer via USB, turn the ignition to ON (engine running or KOEO), then click <strong style={{ color: sColor.green }}>CONNECT</strong> above.
                   </div>
-                  <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 25 / 0.2)', border: '1px solid oklch(0.25 0.06 25)', borderRadius: '3px' }}>
-                    <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.red, marginBottom: '4px', letterSpacing: '0.06em' }}>✗ NOT COMPATIBLE</div>
-                    <div>PCAN-USB (raw CAN)</div>
-                    <div>Kvaser (raw CAN)</div>
-                    <div>CANable / candleLight</div>
-                    <div>IXXAT USB-to-CAN</div>
-                    <div>Any raw CAN interface</div>
+
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.6, maxWidth: '520px', margin: '16px auto 0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                      <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 145 / 0.2)', border: '1px solid oklch(0.25 0.06 145)', borderRadius: '3px' }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.green, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED</div>
+                        <div>OBDLink EX <span style={{ color: sColor.orange }}>(recommended)</span></div>
+                        <div>OBDLink MX+ / SX</div>
+                        <div>ELM327 v1.5+ USB</div>
+                        <div>STN1110 / STN2120</div>
+                      </div>
+                      <div style={{ padding: '8px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>REQUIREMENTS</div>
+                        <div>Chrome or Edge browser</div>
+                        <div>USB connection to PC</div>
+                        <div>Vehicle ignition ON</div>
+                        <div>No other apps using port</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                      Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
+                      <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
+                    </div>
                   </div>
-                </div>
-                <div style={{ marginTop: '8px' }}>
-                  Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
-                  <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
-                </div>
-              </div>
 
-              {/* PCAN-USB specific callout */}
-              <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, marginTop: '12px', lineHeight: 1.6, padding: '12px 14px', background: 'oklch(0.12 0.04 25 / 0.25)', border: '1px solid oklch(0.30 0.12 25)', borderRadius: '3px', textAlign: 'left', maxWidth: '520px', margin: '12px auto 0' }}>
-                <strong style={{ color: sColor.red, fontFamily: sFont.mono, fontSize: '0.7rem', letterSpacing: '0.06em' }}>⚠ USING A PCAN-USB?</strong>
-                <div style={{ marginTop: '6px' }}>
-                  The PCAN-USB (PEAK System) is a <strong style={{ color: sColor.text }}>raw CAN bus interface</strong> that does not create a serial port. It will <strong style={{ color: sColor.red }}>not appear</strong> in the browser's port picker because it uses PEAK's proprietary driver, not a standard USB serial connection.
-                </div>
-                <div style={{ marginTop: '6px' }}>
-                  To use this tool, you need an <strong style={{ color: sColor.orange }}>ELM327-compatible adapter</strong> that creates a virtual COM port over USB. The <strong style={{ color: sColor.text }}>OBDLink EX</strong> is recommended for Duramax trucks — it supports both standard OBD-II and GM Mode 22 extended PIDs.
-                </div>
-              </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.5, padding: '10px', border: `1px solid ${sColor.borderLight}`, borderRadius: '3px', textAlign: 'left', maxWidth: '520px', margin: '12px auto 0' }}>
+                    <strong style={{ color: sColor.yellow }}>TROUBLESHOOTING:</strong>
+                    <br />{'•'} Close any other apps using the device (OBDwiz, FORScan, PCAN-View, etc.)
+                    <br />{'•'} Try unplugging and re-plugging the USB cable
+                    <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
+                    <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
+                    <br />{'•'} <strong style={{ color: sColor.orange }}>Have a PCAN-USB?</strong> Switch to the PCAN-USB tab above to use the bridge mode
+                  </div>
+                </>
+              )}
 
-              <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.5, padding: '10px', border: `1px solid ${sColor.borderLight}`, borderRadius: '3px', textAlign: 'left', maxWidth: '520px', margin: '12px auto 0' }}>
-                <strong style={{ color: sColor.yellow }}>TROUBLESHOOTING:</strong>
-                <br />{'•'} Close any other apps using the device (OBDwiz, FORScan, PCAN-View, etc.)
-                <br />{'•'} Try unplugging and re-plugging the USB cable
-                <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
-                <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
-                <br />{'•'} Ensure you are using Chrome or Edge (WebSerial is not supported in Firefox/Safari)
-                <br />{'•'} <strong style={{ color: sColor.red }}>Raw CAN adapters</strong> (PCAN-USB, Kvaser, CANable) will NOT work — they don't speak ELM327
-              </div>
+              {/* PCAN-USB Mode Instructions */}
+              {adapterType === 'pcan' && (
+                <>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto' }}>
+                    The PCAN-USB connects through a <strong style={{ color: sColor.orange }}>local Python bridge</strong> that translates raw CAN frames to OBD-II. You need to run the bridge script on your computer first.
+                  </div>
+
+                  {/* Bridge Status */}
+                  <div style={{ maxWidth: '520px', margin: '16px auto 0' }}>
+                    <div style={{
+                      padding: '12px 16px', borderRadius: '3px', textAlign: 'left',
+                      background: bridgeAvailable === true ? 'oklch(0.12 0.03 145 / 0.3)' : bridgeAvailable === false ? 'oklch(0.12 0.04 25 / 0.3)' : 'oklch(0.10 0.005 260)',
+                      border: `1px solid ${bridgeAvailable === true ? 'oklch(0.30 0.10 145)' : bridgeAvailable === false ? 'oklch(0.30 0.12 25)' : sColor.border}`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{
+                            width: 8, height: 8, borderRadius: '50%',
+                            background: bridgeAvailable === true ? sColor.green : bridgeAvailable === false ? sColor.red : sColor.textMuted,
+                            boxShadow: bridgeAvailable === true ? `0 0 6px ${sColor.green}` : 'none',
+                          }} />
+                          <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.text, letterSpacing: '0.06em' }}>
+                            BRIDGE STATUS: {bridgeAvailable === true ? 'CONNECTED' : bridgeAvailable === false ? 'NOT DETECTED' : 'UNKNOWN'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={handleCheckBridge}
+                          disabled={checkingBridge}
+                          style={{
+                            fontFamily: sFont.mono, fontSize: '0.65rem', padding: '3px 10px',
+                            background: 'transparent', border: `1px solid ${sColor.border}`,
+                            borderRadius: '2px', color: sColor.textDim, cursor: 'pointer',
+                            letterSpacing: '0.06em',
+                          }}
+                        >
+                          {checkingBridge ? 'CHECKING...' : 'CHECK'}
+                        </button>
+                      </div>
+                      {bridgeAvailable === true && (
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.green, marginTop: '6px' }}>
+                          Bridge is running on localhost:8765. Click <strong>CONNECT</strong> above to start.
+                        </div>
+                      )}
+                      {bridgeAvailable === false && (
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '6px' }}>
+                          Bridge not found. Make sure <strong style={{ color: sColor.text }}>pcan_bridge.py</strong> is running.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Setup Instructions */}
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.8, maxWidth: '520px', margin: '12px auto 0', textAlign: 'left' }}>
+                    <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.08em', marginBottom: '8px' }}>SETUP INSTRUCTIONS</div>
+                    <div style={{ padding: '10px 12px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
+                      <div style={{ color: sColor.textMuted, marginBottom: '4px' }}># 1. Install dependencies (one-time)</div>
+                      <div style={{ color: sColor.green }}>pip install python-can websockets</div>
+                      <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in PCAN-USB, then run the bridge</div>
+                      <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
+                      <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
+                    </div>
+                    <div style={{ marginTop: '8px', color: sColor.textDim }}>
+                      The bridge script is included in the <strong style={{ color: sColor.text }}>tools/</strong> folder. It connects to your PCAN-USB via python-can and serves a WebSocket on localhost:8765. The browser communicates with the bridge to send/receive raw CAN frames.
+                    </div>
+                  </div>
+
+                  {/* Supported PCAN Adapters */}
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.6, maxWidth: '520px', margin: '12px auto 0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                      <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 55 / 0.2)', border: '1px solid oklch(0.25 0.08 55)', borderRadius: '3px' }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.orange, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED VIA BRIDGE</div>
+                        <div>PCAN-USB</div>
+                        <div>PCAN-USB FD</div>
+                        <div>PCAN-USB Pro</div>
+                        <div>Any python-can adapter</div>
+                      </div>
+                      <div style={{ padding: '8px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>REQUIREMENTS</div>
+                        <div>Python 3.8+</div>
+                        <div>PEAK drivers installed</div>
+                        <div>python-can + websockets</div>
+                        <div>Bridge running locally</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '8px' }}>
+                      Protocol: Raw CAN {'→'} ISO 15765-4 (ISO-TP) via bridge. 500 kbit/s default.
+                      <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs supported through raw CAN frame construction.</span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

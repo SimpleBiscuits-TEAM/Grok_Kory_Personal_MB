@@ -428,3 +428,12 @@
 - [x] Add pre-connect warning when PCAN-USB won't appear in port picker (it's not a serial device)
 - [x] Update DataloggerPanel connect button flow to show "device not showing?" help
 - [x] Update all remaining OBDLink-specific text references to be adapter-agnostic
+
+## PCAN-USB Connection Support
+- [x] Research PCAN-USB browser communication (WebUSB vs local bridge)
+- [x] Build PCAN-USB connection class with raw CAN frame protocol
+- [x] Implement ISO 15765-2 (ISO-TP) transport layer for multi-frame messages
+- [x] Implement OBD-II over raw CAN (Mode 01, Mode 09 VIN, Mode 22 GM extended)
+- [x] Add adapter selection UI (OBDLink/ELM327 vs PCAN-USB) to DataloggerPanel
+- [x] Ensure both connection paths produce identical PID data output
+- [x] Write tests for raw CAN frame encoding/decoding and ISO-TP
