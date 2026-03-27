@@ -244,3 +244,15 @@
 - [x] Add 3-5 evenly spaced Y-axis tick labels with values on left edge of all graphs
 - [x] Increase RPM/speed overlay from 25% to 35-40% of graph height
 - [x] Increase font sizes on axis labels, legend text, and tick values
+
+## Capacitor Android App with PCAN-USB Support
+- [ ] Add Capacitor to existing web project (Android platform)
+- [ ] Build native Android USB Host plugin for PCAN-USB communication
+- [ ] Implement PCAN-USB device detection and connection via USB OTG
+- [ ] Implement raw CAN frame send/receive at full bus speed (500kbps/1Mbps)
+- [ ] Add ISO-TP (ISO 15765-2) transport layer for multi-frame CAN messages
+- [ ] Create CAN transport adapter that plugs into existing OBD communication layer
+- [ ] Add UDS (Unified Diagnostic Services) protocol support on top of raw CAN
+- [ ] Wire PCAN transport as alternative to WebSerial in datalogger UI
+- [ ] Add connection type selector in UI (WebSerial vs PCAN-USB)
+- [ ] Test Android build and USB OTG communication
