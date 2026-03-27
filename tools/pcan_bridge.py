@@ -15,9 +15,15 @@ Usage:
     python pcan_bridge.py --channel PCAN_USBBUS1   # Specific channel
     python pcan_bridge.py --bitrate 500000          # Custom bitrate
     python pcan_bridge.py --interface socketcan --channel can0  # Linux socketcan
+    python pcan_bridge.py --no-tls                  # Disable TLS (ws:// only)
 
-The bridge starts a WebSocket server on localhost:8765.
-The browser connects and sends/receives JSON messages.
+The bridge starts BOTH a secure (wss://) server on port 8766 and an
+insecure (ws://) server on port 8765 by default. The browser tries
+wss:// first (works from HTTPS pages), then falls back to ws://.
+
+A self-signed TLS certificate is auto-generated on first run.
+You must accept it in your browser once: visit https://localhost:8766
+and click "Advanced" -> "Proceed" to trust it.
 
 Protocol:
     Browser -> Bridge:
@@ -42,9 +48,13 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import ssl
 import struct
+import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -85,6 +95,83 @@ ISOTP_FLOW_CONTROL = 0x30
 # Timeouts
 OBD_RESPONSE_TIMEOUT = 2.0   # seconds
 ISOTP_FRAME_TIMEOUT = 1.0    # seconds
+
+# TLS certificate paths (stored alongside this script)
+CERT_DIR = Path(__file__).parent / '.certs'
+CERT_FILE = CERT_DIR / 'bridge.crt'
+KEY_FILE = CERT_DIR / 'bridge.key'
+
+
+def generate_self_signed_cert():
+    """Generate a self-signed TLS certificate for localhost."""
+    CERT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    if CERT_FILE.exists() and KEY_FILE.exists():
+        log.info("Using existing TLS certificate")
+        return True
+    
+    log.info("Generating self-signed TLS certificate for localhost...")
+    
+    try:
+        # Try using openssl command
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+            '-keyout', str(KEY_FILE), '-out', str(CERT_FILE),
+            '-days', '365', '-nodes',
+            '-subj', '/CN=localhost',
+            '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'
+        ], check=True, capture_output=True)
+        log.info(f"TLS certificate generated: {CERT_FILE}")
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # openssl not available, try Python's ssl module approach
+        try:
+            # Use Python cryptography if available
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            import datetime
+            import ipaddress
+            
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COMMON_NAME, 'localhost'),
+            ])
+            cert = (
+                x509.CertificateBuilder()
+                .subject_name(subject)
+                .issuer_name(issuer)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.datetime.utcnow())
+                .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
+                .add_extension(
+                    x509.SubjectAlternativeName([
+                        x509.DNSName('localhost'),
+                        x509.IPAddress(ipaddress.IPv4Address('127.0.0.1')),
+                    ]),
+                    critical=False,
+                )
+                .sign(key, hashes.SHA256())
+            )
+            
+            with open(KEY_FILE, 'wb') as f:
+                f.write(key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.TraditionalOpenSSL,
+                    serialization.NoEncryption()
+                ))
+            with open(CERT_FILE, 'wb') as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
+            
+            log.info(f"TLS certificate generated (Python): {CERT_FILE}")
+            return True
+        except ImportError:
+            log.warning("Cannot generate TLS certificate (install 'cryptography' package or 'openssl')")
+            log.warning("  pip install cryptography")
+            log.warning("  OR install openssl on your system")
+            return False
 
 
 class OBDProtocol:
@@ -304,17 +391,19 @@ class OBDProtocol:
 class PCANBridge:
     """WebSocket server that bridges browser to PCAN-USB."""
 
-    def __init__(self, interface: str, channel: str, bitrate: int, port: int):
+    def __init__(self, interface: str, channel: str, bitrate: int, port: int, tls_port: int, enable_tls: bool):
         self.interface = interface
         self.channel = channel
         self.bitrate = bitrate
         self.port = port
+        self.tls_port = tls_port
+        self.enable_tls = enable_tls
         self.bus: Optional[can.Bus] = None
         self.protocol: Optional[OBDProtocol] = None
         self.clients: set = set()
 
     async def start(self):
-        """Initialize CAN bus and start WebSocket server."""
+        """Initialize CAN bus and start WebSocket server(s)."""
         log.info(f"Initializing {self.interface} on {self.channel} at {self.bitrate} bps...")
         try:
             self.bus = can.Bus(
@@ -334,23 +423,59 @@ class PCANBridge:
         self.protocol = OBDProtocol(self.bus)
         await self.protocol.start()
 
+        servers = []
+
+        # Start insecure ws:// server
         log.info(f"Starting WebSocket server on ws://localhost:{self.port}")
-        log.info("Waiting for browser connection...")
+        ws_server = await serve(self.handle_client, "0.0.0.0", self.port)
+        servers.append(ws_server)
+
+        # Start secure wss:// server if TLS is enabled
+        tls_available = False
+        if self.enable_tls:
+            has_cert = generate_self_signed_cert()
+            if has_cert:
+                try:
+                    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ssl_context.load_cert_chain(str(CERT_FILE), str(KEY_FILE))
+                    log.info(f"Starting secure WebSocket server on wss://localhost:{self.tls_port}")
+                    wss_server = await serve(self.handle_client, "0.0.0.0", self.tls_port, ssl=ssl_context)
+                    servers.append(wss_server)
+                    tls_available = True
+                except Exception as e:
+                    log.warning(f"Failed to start TLS server: {e}")
+                    log.warning("Falling back to ws:// only")
+
         log.info("")
         log.info("=" * 60)
         log.info("  PCAN-USB Bridge is READY")
         log.info(f"  Connect from the PPEI Performance Analyzer")
-        log.info(f"  WebSocket: ws://localhost:{self.port}")
+        log.info("")
+        if tls_available:
+            log.info(f"  Secure:   wss://localhost:{self.tls_port}  (recommended)")
+            log.info(f"  Insecure: ws://localhost:{self.port}   (fallback)")
+            log.info("")
+            log.info("  FIRST TIME? Accept the self-signed certificate:")
+            log.info(f"  1. Open https://localhost:{self.tls_port} in Chrome")
+            log.info("  2. Click 'Advanced' -> 'Proceed to localhost'")
+            log.info("  3. You only need to do this once")
+        else:
+            log.info(f"  WebSocket: ws://localhost:{self.port}")
+            log.info("")
+            log.info("  NOTE: If connecting from HTTPS, you may need to")
+            log.info("  enable chrome://flags/#allow-insecure-localhost")
         log.info("=" * 60)
         log.info("")
 
-        async with serve(self.handle_client, "0.0.0.0", self.port):
-            await asyncio.Future()  # Run forever
+        # Keep running
+        await asyncio.Future()
 
     async def handle_client(self, websocket):
         """Handle a WebSocket client connection."""
         client_addr = websocket.remote_address
-        log.info(f"Browser connected from {client_addr}")
+        is_secure = hasattr(websocket, 'transport') and hasattr(websocket.transport, 'get_extra_info') and websocket.transport.get_extra_info('ssl_object') is not None
+        proto = "wss" if is_secure else "ws"
+        log.info(f"Browser connected from {client_addr} ({proto})")
         self.clients.add(websocket)
 
         # Send connection confirmation
@@ -359,7 +484,8 @@ class PCANBridge:
             "adapter": self.interface,
             "channel": self.channel,
             "bitrate": self.bitrate,
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "secure": is_secure
         }))
 
         try:
@@ -444,6 +570,7 @@ Examples:
   python pcan_bridge.py --interface socketcan --channel can0  # Linux socketcan
   python pcan_bridge.py --bitrate 250000                   # 250k bitrate (some older vehicles)
   python pcan_bridge.py --port 9000                        # Custom WebSocket port
+  python pcan_bridge.py --no-tls                           # Disable TLS (ws:// only)
 
 Supported adapters (via python-can):
   pcan       - PEAK PCAN-USB, PCAN-USB Pro, PCAN-USB FD
@@ -462,6 +589,10 @@ Supported adapters (via python-can):
                         help='CAN bitrate in bps (default: 500000)')
     parser.add_argument('--port', '-p', type=int, default=8765,
                         help='WebSocket server port (default: 8765)')
+    parser.add_argument('--tls-port', type=int, default=8766,
+                        help='Secure WebSocket server port (default: 8766)')
+    parser.add_argument('--no-tls', action='store_true',
+                        help='Disable TLS/wss:// server')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
 
@@ -474,7 +605,9 @@ Supported adapters (via python-can):
         interface=args.interface,
         channel=args.channel,
         bitrate=args.bitrate,
-        port=args.port
+        port=args.port,
+        tls_port=args.tls_port,
+        enable_tls=not args.no_tls
     )
 
     try:

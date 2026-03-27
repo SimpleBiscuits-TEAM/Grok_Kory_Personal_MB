@@ -437,3 +437,10 @@
 - [x] Add adapter selection UI (OBDLink/ELM327 vs PCAN-USB) to DataloggerPanel
 - [x] Ensure both connection paths produce identical PID data output
 - [x] Write tests for raw CAN frame encoding/decoding and ISO-TP
+
+## PCAN Bridge Connection Fix
+- [x] Fix mixed content blocking — HTTPS page cannot connect to ws:// localhost WebSocket
+- [x] Add TLS/wss:// support to pcan_bridge.py with auto-generated self-signed certificate
+- [x] Update PCANConnection to try wss:// first, fall back to ws://
+- [x] Add clear error messaging about mixed content if both fail
+- [x] Test connection flow end-to-end

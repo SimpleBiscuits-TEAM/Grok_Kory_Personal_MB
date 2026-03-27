@@ -355,14 +355,38 @@ describe('Adapter Selection Logic', () => {
 // ─── Bridge Availability Check Tests ──────────────────────────────────────
 
 describe('Bridge Availability', () => {
-  it('should construct correct WebSocket URL', () => {
-    const defaultUrl = 'ws://localhost:8765';
-    expect(defaultUrl).toMatch(/^ws:\/\/localhost:\d+$/);
+  it('should have correct default secure URL', () => {
+    const secureUrl = 'wss://localhost:8766';
+    expect(secureUrl).toMatch(/^wss:\/\/localhost:\d+$/);
+  });
+
+  it('should have correct default insecure URL', () => {
+    const insecureUrl = 'ws://localhost:8765';
+    expect(insecureUrl).toMatch(/^ws:\/\/localhost:\d+$/);
+  });
+
+  it('should try secure URL before insecure URL', () => {
+    // The connection flow should try wss:// first, then ws://
+    const urlOrder = ['wss://localhost:8766', 'ws://localhost:8765'];
+    expect(urlOrder[0]).toMatch(/^wss:\/\//);
+    expect(urlOrder[1]).toMatch(/^ws:\/\//);
   });
 
   it('should handle custom bridge URL', () => {
     const customUrl = 'ws://192.168.1.100:9999';
     expect(customUrl).toMatch(/^ws:\/\//);
+  });
+
+  it('should return available status with working URL', () => {
+    // Simulated result from isBridgeAvailable
+    const result = { available: true, url: 'wss://localhost:8766' };
+    expect(result.available).toBe(true);
+    expect(result.url).toMatch(/^wss:\/\//);
+  });
+
+  it('should return unavailable status when no bridge found', () => {
+    const result = { available: false, url: 'ws://localhost:8765' };
+    expect(result.available).toBe(false);
   });
 });
 

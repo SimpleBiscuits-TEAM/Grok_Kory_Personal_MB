@@ -66,7 +66,9 @@ interface BridgeError {
 // ─── PCAN Connection Class ──────────────────────────────────────────────────
 
 export interface PCANConnectionConfig {
-  bridgeUrl?: string;       // Default: ws://localhost:8765
+  bridgeUrl?: string;       // Default: auto-detect (wss://localhost:8766 then ws://localhost:8765)
+  bridgeUrlSecure?: string; // Default: wss://localhost:8766
+  bridgeUrlInsecure?: string; // Default: ws://localhost:8765
   reconnectAttempts?: number; // Default: 3
   requestTimeout?: number;   // Default: 3000ms
 }
@@ -80,6 +82,8 @@ export class PCANConnection {
   private supportedPids: Set<number> = new Set();
   private vehicleInfo: VehicleInfo = {};
   private bridgeUrl: string;
+  private bridgeUrlSecure: string;
+  private bridgeUrlInsecure: string;
   private reconnectAttempts: number;
   private requestTimeout: number;
   private requestId = 0;
@@ -90,7 +94,9 @@ export class PCANConnection {
   }> = new Map();
 
   constructor(config: PCANConnectionConfig = {}) {
-    this.bridgeUrl = config.bridgeUrl ?? 'ws://localhost:8765';
+    this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
+    this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://localhost:8765';
+    this.bridgeUrl = config.bridgeUrl ?? this.bridgeUrlSecure; // Start with secure
     this.reconnectAttempts = config.reconnectAttempts ?? 3;
     this.requestTimeout = config.requestTimeout ?? 3000;
   }
@@ -126,43 +132,61 @@ export class PCANConnection {
   // ─── Bridge Detection ─────────────────────────────────────────────────────
 
   /**
-   * Check if the PCAN bridge is running on the expected port.
-   * Returns true if the bridge responds to a ping.
+   * Check if the PCAN bridge is running.
+   * Tries wss://localhost:8766 first (works from HTTPS pages),
+   * then falls back to ws://localhost:8765.
+   * Returns { available, url } with the working URL.
    */
-  static async isBridgeAvailable(url = 'ws://localhost:8765'): Promise<boolean> {
-    return new Promise((resolve) => {
-      try {
-        const ws = new WebSocket(url);
-        const timer = setTimeout(() => {
-          ws.close();
-          resolve(false);
-        }, 2000);
+  static async isBridgeAvailable(
+    secureUrl = 'wss://localhost:8766',
+    insecureUrl = 'ws://localhost:8765'
+  ): Promise<{ available: boolean; url: string }> {
+    // Try secure first (works from HTTPS pages without mixed content issues)
+    const tryUrl = (url: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        try {
+          const ws = new WebSocket(url);
+          const timer = setTimeout(() => {
+            ws.close();
+            resolve(false);
+          }, 2000);
 
-        ws.onopen = () => {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        };
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          };
 
-        ws.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === 'pong' || msg.type === 'connected') {
-              clearTimeout(timer);
-              ws.close();
-              resolve(true);
+          ws.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.type === 'pong' || msg.type === 'connected') {
+                clearTimeout(timer);
+                ws.close();
+                resolve(true);
+              }
+            } catch {
+              // ignore parse errors
             }
-          } catch {
-            // ignore parse errors
-          }
-        };
+          };
 
-        ws.onerror = () => {
-          clearTimeout(timer);
+          ws.onerror = () => {
+            clearTimeout(timer);
+            resolve(false);
+          };
+        } catch {
           resolve(false);
-        };
-      } catch {
-        resolve(false);
-      }
-    });
+        }
+      });
+    };
+
+    // Try wss:// first
+    if (await tryUrl(secureUrl)) {
+      return { available: true, url: secureUrl };
+    }
+    // Fall back to ws://
+    if (await tryUrl(insecureUrl)) {
+      return { available: true, url: insecureUrl };
+    }
+    return { available: false, url: insecureUrl };
   }
 
   // ─── WebSocket Connection ─────────────────────────────────────────────────
@@ -170,22 +194,35 @@ export class PCANConnection {
   async connect(): Promise<boolean> {
     try {
       this.setState('connecting');
-      this.emit('log', null, `Connecting to PCAN-USB bridge at ${this.bridgeUrl}...`);
+      this.emit('log', null, 'Connecting to PCAN-USB bridge...');
 
-      // Try to connect with retries
+      // Try wss:// (secure) first, then ws:// (insecure)
+      // HTTPS pages block ws:// due to mixed content, so wss:// is preferred
+      const urlsToTry = [this.bridgeUrlSecure, this.bridgeUrlInsecure];
       let connected = false;
-      for (let attempt = 1; attempt <= this.reconnectAttempts; attempt++) {
-        try {
-          await this.openWebSocket();
-          connected = true;
-          break;
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          this.emit('log', null, `Connection attempt ${attempt}/${this.reconnectAttempts} failed: ${msg}`);
-          if (attempt < this.reconnectAttempts) {
-            await new Promise(r => setTimeout(r, 1000));
+
+      for (const url of urlsToTry) {
+        this.bridgeUrl = url;
+        const proto = url.startsWith('wss') ? 'wss (secure)' : 'ws (insecure)';
+        this.emit('log', null, `Trying ${proto}: ${url}...`);
+
+        for (let attempt = 1; attempt <= this.reconnectAttempts; attempt++) {
+          try {
+            await this.openWebSocket();
+            connected = true;
+            this.emit('log', null, `Connected via ${proto}`);
+            break;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (attempt === this.reconnectAttempts) {
+              this.emit('log', null, `${proto} failed after ${this.reconnectAttempts} attempts: ${msg}`);
+            }
+            if (attempt < this.reconnectAttempts) {
+              await new Promise(r => setTimeout(r, 500));
+            }
           }
         }
+        if (connected) break;
       }
 
       if (!connected) {
@@ -195,7 +232,15 @@ export class PCANConnection {
           '  python pcan_bridge.py\n\n' +
           'Install requirements:\n' +
           '  pip install python-can websockets\n\n' +
-          'The bridge must be running before you click Connect.'
+          'The bridge must be running before you click Connect.\n\n' +
+          'HTTPS Mixed Content: If the bridge IS running, your browser\n' +
+          'may be blocking the connection. The bridge needs TLS support:\n' +
+          '  pip install cryptography\n' +
+          '  (then restart the bridge — it auto-generates a certificate)\n\n' +
+          'First time with TLS? Accept the certificate:\n' +
+          '  1. Open https://localhost:8766 in Chrome\n' +
+          '  2. Click Advanced → Proceed to localhost\n' +
+          '  3. Then retry connecting here'
         );
         this.setState('disconnected');
         return false;

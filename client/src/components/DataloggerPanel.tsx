@@ -889,18 +889,26 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     setConsoleLogs(prev => [...prev.slice(-200), msg]);
   }, []);
 
+  const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
+
   const handleCheckBridge = useCallback(async () => {
     setCheckingBridge(true);
     try {
-      const available = await PCANConnection.isBridgeAvailable();
-      setBridgeAvailable(available);
-      if (available) {
-        addLog('PCAN-USB bridge detected on localhost:8765');
+      const result = await PCANConnection.isBridgeAvailable();
+      setBridgeAvailable(result.available);
+      if (result.available) {
+        setDetectedBridgeUrl(result.url);
+        const proto = result.url.startsWith('wss') ? 'wss (secure)' : 'ws';
+        addLog(`PCAN-USB bridge detected via ${proto}: ${result.url}`);
       } else {
+        setDetectedBridgeUrl(null);
         addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
+        addLog('If bridge IS running, you may need to accept the TLS certificate:');
+        addLog('  Open https://localhost:8766 in Chrome → Advanced → Proceed');
       }
     } catch {
       setBridgeAvailable(false);
+      setDetectedBridgeUrl(null);
     } finally {
       setCheckingBridge(false);
     }
@@ -910,8 +918,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
     let conn: OBDConnection | PCANConnection;
 
     if (adapterType === 'pcan') {
-      // PCAN-USB via WebSocket bridge
-      conn = new PCANConnection({ bridgeUrl: 'ws://localhost:8765' });
+      // PCAN-USB via WebSocket bridge — use detected URL or auto-detect
+      conn = new PCANConnection(
+        detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {}
+      );
       addLog('Connecting via PCAN-USB bridge...');
     } else {
       // ELM327 via WebSerial
@@ -2178,7 +2188,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       </div>
                       {bridgeAvailable === true && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.green, marginTop: '6px' }}>
-                          Bridge is running on localhost:8765. Click <strong>CONNECT</strong> above to start.
+                          Bridge detected and ready. Click <strong>CONNECT</strong> above to start.
                         </div>
                       )}
                       {bridgeAvailable === false && (
@@ -2200,7 +2210,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
                     </div>
                     <div style={{ marginTop: '8px', color: sColor.textDim }}>
-                      The bridge script is included in the <strong style={{ color: sColor.text }}>tools/</strong> folder. It connects to your PCAN-USB via python-can and serves a WebSocket on localhost:8765. The browser communicates with the bridge to send/receive raw CAN frames.
+                      The bridge script is included in the <strong style={{ color: sColor.text }}>tools/</strong> folder. It connects to your PCAN-USB via python-can and serves both a secure (wss://localhost:8766) and insecure (ws://localhost:8765) WebSocket. The browser tries the secure connection first (required when this page is served over HTTPS). <strong style={{ color: sColor.red }}>First time?</strong> Accept the self-signed certificate by visiting <strong style={{ color: sColor.text }}>https://localhost:8766</strong> in Chrome and clicking Advanced → Proceed.
                     </div>
                   </div>
 
