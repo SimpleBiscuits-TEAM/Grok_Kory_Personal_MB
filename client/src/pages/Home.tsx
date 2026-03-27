@@ -587,7 +587,7 @@ export default function Home() {
                   <button
                     onClick={() => {
                       if (data && healthReport && fileName) {
-                        generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0);
+                        generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0, dragAnalysis);
                       }
                     }}
                     style={{

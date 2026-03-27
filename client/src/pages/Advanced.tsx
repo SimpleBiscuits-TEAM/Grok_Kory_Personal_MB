@@ -1003,7 +1003,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
           <SectionHeader icon={<Activity style={{ width: 18, height: 18, color: sColor.red }} />} title="VEHICLE HEALTH REPORT" />
           <button
-            onClick={() => { if (data && healthReport && fileName) generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0); }}
+            onClick={() => { if (data && healthReport && fileName) generateHealthReportPdf(healthReport, data, fileName, data.stats.hpTorqueMax > 0, dragAnalysis); }}
             style={{ background: sColor.blue, color: 'white', fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em', padding: '6px 14px', borderRadius: '3px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}
           >
             <FileDown style={{ width: 14, height: 14 }} />DOWNLOAD HEALTH REPORT PDF

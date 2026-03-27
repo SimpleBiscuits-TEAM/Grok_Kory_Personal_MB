@@ -227,3 +227,13 @@
 - [x] Integrate ECU reference into advanced health report PDF — conditional context boxes appear when thresholds are exceeded (12 observation types)
 - [x] Integrate ECU reference into diagnostics via calibration context (injector_pulse_high, timing_aggressive, boost_deviation, rail_pressure_high/hunting, high_egt, tcc_slip, low_boost, pcv_maxed, oil_pressure_low, regen_detected, vane_position_high)
 - [x] Add calibration structure info (table dimensions = RPM x load) to explain tuning relationships (e.g., AICC boost setpoint 20x21, FULC ET_InjTbl 22x20)
+
+## Graph Axis Standardization
+- [x] All health report PDF graphs must always show RPM and speed as bottom axis references
+- [x] Y-axis values should be simple and clean (rounded numbers, no excessive decimals)
+- [x] Update drawMiniGraph (basic section) to include RPM + speed dual bottom axis
+- [x] Update drawCorrelatedGraph (advanced section) to include RPM + speed dual bottom axis
+- [x] Add transmission and torque converter specific graphs to health report PDF (TCC duty cycle, gear position, trans line pressure)
+- [x] Fix dyno graph not populating in health report PDF
+- [x] Add drag timeslip image to health report PDF when 1/4 mile conditions are met (0 MPH + throttle 80%+)
+- [x] Dragy-style data in health report PDF: 0-60, 60ft, 1/8 mile, 1000ft, 1/4 mile times + trap speeds + G-force; suggest missing PIDs if not available

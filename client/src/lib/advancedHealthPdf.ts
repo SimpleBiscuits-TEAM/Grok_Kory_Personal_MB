@@ -35,6 +35,7 @@ interface CorrelatedGraphConfig {
   title: string;
   series: CorrelatedSeries[];
   speedData?: number[];
+  rpmData?: number[];
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -123,28 +124,55 @@ function drawCorrelatedGraph(
     doc.line(graphX, gy, graphX + graphW, gy);
   }
 
-  // Speed overlay
+  // RPM + Speed bottom overlay (split bottom 25% into two halves)
+  const { rpmData } = config;
+  const overlayH = graphH * 0.25;
+  const overlayBaseY = graphY + graphH;
+
+  // RPM overlay (top half of overlay area, light blue)
+  if (rpmData && rpmData.length > 10) {
+    const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
+    const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
+    const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
+    const rpmMax = Math.max(...rpmSampled, 1);
+    const halfH = overlayH / 2;
+
+    doc.setDrawColor(100, 150, 210);
+    doc.setLineWidth(0.15);
+    for (let i = 1; i < rpmSampled.length; i++) {
+      const x1 = graphX + ((i - 1) / (rpmSampled.length - 1)) * graphW;
+      const x2 = graphX + (i / (rpmSampled.length - 1)) * graphW;
+      const y1 = overlayBaseY - overlayH + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
+      const y2 = overlayBaseY - overlayH + halfH - (rpmSampled[i] / rpmMax) * halfH;
+      doc.line(x1, y1, x2, y2);
+    }
+    doc.setFontSize(4);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 150, 210);
+    doc.text(`RPM (0-${rpmMax.toFixed(0)})`, graphX, overlayBaseY - overlayH + halfH - 0.5);
+  }
+
+  // Speed overlay (bottom half of overlay area, gray)
   if (speedData && speedData.length > 10) {
     const spdValid = speedData.filter(v => !isNaN(v));
     const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
     const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
     const spdMax = Math.max(...spdSampled, 1);
-    const spdGraphH = graphH * 0.25;
-    const spdBaseY = graphY + graphH;
+    const halfH = overlayH / 2;
 
-    doc.setDrawColor(180, 180, 200);
+    doc.setDrawColor(160, 160, 185);
     doc.setLineWidth(0.15);
     for (let i = 1; i < spdSampled.length; i++) {
       const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
       const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
-      const y1 = spdBaseY - (spdSampled[i - 1] / spdMax) * spdGraphH;
-      const y2 = spdBaseY - (spdSampled[i] / spdMax) * spdGraphH;
+      const y1 = overlayBaseY - (spdSampled[i - 1] / spdMax) * halfH;
+      const y2 = overlayBaseY - (spdSampled[i] / spdMax) * halfH;
       doc.line(x1, y1, x2, y2);
     }
-    doc.setFontSize(4.5);
+    doc.setFontSize(4);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(160, 160, 180);
-    doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX + graphW - 16, spdBaseY - 1);
+    doc.setTextColor(160, 160, 185);
+    doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX, overlayBaseY - 0.5);
   }
 
   // Draw each series
@@ -612,6 +640,7 @@ export function renderAdvancedAnalytics(
   drawHR: (color?: [number, number, number]) => void,
   getY: () => number,
   setY: (newY: number) => void,
+  rpmRef?: number[],
 ): AdvancedAnalyticsResult {
   let hasContent = false;
 
@@ -669,7 +698,7 @@ export function renderAdvancedAnalytics(
 
     const newY = drawCorrelatedGraph(
       doc, margin, getY(), contentWidth, 42,
-      { title: 'INJECTOR PULSE WIDTH & TIMING', series: injSeries, speedData: speedRef },
+      { title: 'INJECTOR PULSE WIDTH & TIMING', series: injSeries, speedData: speedRef, rpmData: rpmRef },
       margin, contentWidth,
     );
     setY(newY);
@@ -765,7 +794,7 @@ export function renderAdvancedAnalytics(
     if (boostSeries.length >= 2) {
       const newY = drawCorrelatedGraph(
         doc, margin, getY(), contentWidth, 42,
-        { title: 'DESIRED vs ACTUAL BOOST + VANE POSITION', series: boostSeries, speedData: speedRef },
+        { title: 'DESIRED vs ACTUAL BOOST + VANE POSITION', series: boostSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
       setY(newY);
@@ -799,7 +828,7 @@ export function renderAdvancedAnalytics(
         ];
         const vaneY = drawCorrelatedGraph(
           doc, margin, getY(), contentWidth, 38,
-          { title: 'VANE POSITION: DESIRED vs ACTUAL', series: vaneSeries, speedData: speedRef },
+          { title: 'VANE POSITION: DESIRED vs ACTUAL', series: vaneSeries, speedData: speedRef, rpmData: rpmRef },
           margin, contentWidth,
         );
         setY(vaneY);
@@ -847,7 +876,7 @@ export function renderAdvancedAnalytics(
     if (railSeries.length >= 2) {
       const newY = drawCorrelatedGraph(
         doc, margin, getY(), contentWidth, 42,
-        { title: 'DESIRED vs ACTUAL FUEL RAIL PRESSURE + PCV', series: railSeries, speedData: speedRef },
+        { title: 'DESIRED vs ACTUAL FUEL RAIL PRESSURE + PCV', series: railSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
       setY(newY);
@@ -900,7 +929,7 @@ export function renderAdvancedAnalytics(
 
     const newY = drawCorrelatedGraph(
       doc, margin, getY(), contentWidth, 42,
-      { title: 'BOOST vs MAF vs VANE POSITION (Leak Detection)', series: leakSeries, speedData: speedRef },
+      { title: 'BOOST vs MAF vs VANE POSITION (Leak Detection)', series: leakSeries, speedData: speedRef, rpmData: rpmRef },
       margin, contentWidth,
     );
     setY(newY);
@@ -938,7 +967,7 @@ export function renderAdvancedAnalytics(
 
       const newY = drawCorrelatedGraph(
         doc, margin, getY(), contentWidth, 42,
-        { title: 'MANIFOLD AIR DENSITY (MAD)', series: madSeries, speedData: speedRef },
+        { title: 'MANIFOLD AIR DENSITY (MAD)', series: madSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
       setY(newY);
@@ -961,7 +990,7 @@ export function renderAdvancedAnalytics(
 
       const newY = drawCorrelatedGraph(
         doc, margin, getY(), contentWidth, 38,
-        { title: 'BOOST AIR DENSITY', series: densitySeries, speedData: speedRef },
+        { title: 'BOOST AIR DENSITY', series: densitySeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
       setY(newY);

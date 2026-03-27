@@ -11,6 +11,7 @@ import jsPDF from 'jspdf';
 import { HealthReportData } from './healthReport';
 import { ProcessedMetrics } from './dataProcessor';
 import { renderAdvancedAnalytics } from './advancedHealthPdf';
+import { DragAnalysis, DragRun, DragTip } from './dragAnalyzer';
 
 const PPEI_RED: [number, number, number] = [220, 38, 38];
 const DARK_BG: [number, number, number] = [13, 15, 20];
@@ -111,7 +112,9 @@ interface MiniGraphConfig {
   thresholdHigh?: number;
   thresholdLow?: number;
   speedData?: number[];  // MPH overlay for reference
+  rpmData?: number[];    // RPM overlay for reference
   isSpeedGraph?: boolean; // skip speed overlay on the speed graph itself
+  isRpmGraph?: boolean;   // skip RPM overlay on the RPM graph itself
 }
 
 /** Generate a data-driven synopsis of what actually happened in the graph */
@@ -152,6 +155,16 @@ function generateSynopsis(label: string, min: number, max: number, avg: number, 
   }
 }
 
+/** Round to a "nice" number for axis labels */
+function niceRound(val: number): string {
+  const abs = Math.abs(val);
+  if (abs >= 10000) return Math.round(val / 100) * 100 + '';
+  if (abs >= 1000) return Math.round(val / 50) * 50 + '';
+  if (abs >= 100) return Math.round(val / 10) * 10 + '';
+  if (abs >= 10) return Math.round(val) + '';
+  return val.toFixed(1);
+}
+
 function drawMiniGraph(
   doc: jsPDF,
   x: number,
@@ -162,7 +175,7 @@ function drawMiniGraph(
   margin: number,
   contentWidth: number,
 ): number {
-  const { data, label, unit, color, thresholdHigh, thresholdLow, speedData, isSpeedGraph } = config;
+  const { data, label, unit, color, thresholdHigh, thresholdLow, speedData, rpmData, isSpeedGraph, isRpmGraph } = config;
 
   // Filter to valid non-zero data for graph (allow zeros for converter slip)
   const allowZero = label === 'TORQUE CONVERTER SLIP';
@@ -178,11 +191,16 @@ function drawMiniGraph(
   const range = max - min || 1;
   const avg = sampled.reduce((a, b) => a + b, 0) / sampled.length;
 
+  // Reserve space: left margin for Y-axis labels, bottom for RPM/Speed axis
+  const yAxisW = 14; // width reserved for Y-axis labels
+  const bottomAxisH = 10; // height reserved for RPM + Speed bottom axis
+  const totalH = height + bottomAxisH;
+
   // Graph background
   doc.setFillColor(250, 250, 252);
   doc.setDrawColor(220, 220, 225);
   doc.setLineWidth(0.2);
-  doc.roundedRect(x, y, width, height, 1, 1, 'FD');
+  doc.roundedRect(x, y, width, totalH, 1, 1, 'FD');
 
   // Label
   doc.setFontSize(8);
@@ -194,21 +212,33 @@ function drawMiniGraph(
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...MED_GRAY);
-  doc.text(`Min: ${min.toFixed(1)}${unit}  Avg: ${avg.toFixed(1)}${unit}  Max: ${max.toFixed(1)}${unit}`, x + 3, y + 9.5);
+  doc.text(`Min: ${niceRound(min)}${unit}  Avg: ${niceRound(avg)}${unit}  Max: ${niceRound(max)}${unit}`, x + 3, y + 9.5);
 
-  // Draw the line graph
-  const graphX = x + 3;
+  // Draw the line graph area (shifted right for Y-axis labels)
+  const graphX = x + yAxisW;
   const graphY = y + 12;
-  const graphW = width - 6;
+  const graphW = width - yAxisW - 3;
   const graphH = height - 16;
 
-  // Grid lines (3 horizontal)
+  // Grid lines (3 horizontal) with Y-axis labels
   doc.setDrawColor(235, 235, 240);
   doc.setLineWidth(0.1);
   for (let g = 0; g <= 2; g++) {
     const gy = graphY + (graphH * g) / 2;
     doc.line(graphX, gy, graphX + graphW, gy);
+
+    // Y-axis label (simple rounded values)
+    const val = max - (g / 2) * range;
+    doc.setFontSize(5.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(140, 140, 150);
+    doc.text(niceRound(val), x + 2, gy + 1.5);
   }
+  // Bottom grid line
+  doc.line(graphX, graphY + graphH, graphX + graphW, graphY + graphH);
+  doc.setFontSize(5.5);
+  doc.setTextColor(140, 140, 150);
+  doc.text(niceRound(min), x + 2, graphY + graphH + 1.5);
 
   // Threshold lines
   if (thresholdHigh !== undefined && thresholdHigh >= min && thresholdHigh <= max * 1.1) {
@@ -220,7 +250,7 @@ function drawMiniGraph(
     doc.setLineDashPattern([], 0);
     doc.setFontSize(5.5);
     doc.setTextColor(220, 50, 50);
-    doc.text(`${thresholdHigh}${unit}`, graphX + graphW - 12, thY - 1);
+    doc.text(`${thresholdHigh}${unit}`, graphX + graphW - 14, thY - 1);
   }
   if (thresholdLow !== undefined && thresholdLow >= min && thresholdLow <= max) {
     const thY = graphY + graphH - ((thresholdLow - min) / range) * graphH;
@@ -231,50 +261,70 @@ function drawMiniGraph(
     doc.setLineDashPattern([], 0);
     doc.setFontSize(5.5);
     doc.setTextColor(202, 138, 4);
-    doc.text(`${thresholdLow}${unit}`, graphX + graphW - 12, thY - 1);
+    doc.text(`${thresholdLow}${unit}`, graphX + graphW - 14, thY - 1);
   }
 
-  // ── MPH speed reference overlay (light gray, at bottom of graph) ──────────
-  if (speedData && !isSpeedGraph && speedData.length > 10) {
-    const spdValid = speedData.filter(v => !isNaN(v));
-    const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
-    const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
-    const spdMax = Math.max(...spdSampled, 1);
-
-    // Draw speed as a filled area at the bottom (max 30% of graph height)
-    const spdGraphH = graphH * 0.3;
-    const spdBaseY = graphY + graphH;
-
-    doc.setDrawColor(180, 180, 200);
-    doc.setLineWidth(0.2);
-    for (let i = 1; i < spdSampled.length; i++) {
-      const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
-      const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
-      const y1 = spdBaseY - (spdSampled[i - 1] / spdMax) * spdGraphH;
-      const y2 = spdBaseY - (spdSampled[i] / spdMax) * spdGraphH;
-      doc.line(x1, y1, x2, y2);
-    }
-
-    // MPH label at bottom-right
-    doc.setFontSize(5);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(160, 160, 180);
-    doc.text(`MPH (0-${spdMax.toFixed(0)})`, graphX + graphW - 18, spdBaseY - 1);
-  }
-
-  // Data line (draw AFTER speed overlay so it's on top)
+  // Data line (main series)
   doc.setDrawColor(...color);
   doc.setLineWidth(0.4);
   const points: [number, number][] = sampled.map((v, i) => [
     graphX + (i / (sampled.length - 1)) * graphW,
     graphY + graphH - ((v - min) / range) * graphH,
   ]);
-
   for (let i = 1; i < points.length; i++) {
     doc.line(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1]);
   }
 
-  let newY = y + height + 2;
+  // ── BOTTOM AXIS: RPM + Speed ───────────────────────────────────────────
+  const axisY = graphY + graphH + 1; // just below the main graph
+  const axisH = bottomAxisH - 2;
+  const halfH = axisH / 2;
+
+  // RPM axis (top half of bottom area, light blue)
+  if (rpmData && !isRpmGraph && rpmData.length > 10) {
+    const rpmValid = rpmData.filter(v => !isNaN(v) && v > 0);
+    const rpmStep = Math.max(1, Math.floor(rpmValid.length / 200));
+    const rpmSampled = rpmValid.filter((_, i) => i % rpmStep === 0);
+    const rpmMax = Math.max(...rpmSampled, 1);
+
+    doc.setDrawColor(100, 150, 210);
+    doc.setLineWidth(0.2);
+    for (let i = 1; i < rpmSampled.length; i++) {
+      const x1 = graphX + ((i - 1) / (rpmSampled.length - 1)) * graphW;
+      const x2 = graphX + (i / (rpmSampled.length - 1)) * graphW;
+      const y1 = axisY + halfH - (rpmSampled[i - 1] / rpmMax) * halfH;
+      const y2 = axisY + halfH - (rpmSampled[i] / rpmMax) * halfH;
+      doc.line(x1, y1, x2, y2);
+    }
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 150, 210);
+    doc.text(`RPM (0-${niceRound(rpmMax)})`, graphX, axisY + halfH - 0.5);
+  }
+
+  // Speed axis (bottom half of bottom area, gray)
+  if (speedData && !isSpeedGraph && speedData.length > 10) {
+    const spdValid = speedData.filter(v => !isNaN(v));
+    const spdStep = Math.max(1, Math.floor(spdValid.length / 200));
+    const spdSampled = spdValid.filter((_, i) => i % spdStep === 0);
+    const spdMax = Math.max(...spdSampled, 1);
+
+    doc.setDrawColor(160, 160, 185);
+    doc.setLineWidth(0.2);
+    for (let i = 1; i < spdSampled.length; i++) {
+      const x1 = graphX + ((i - 1) / (spdSampled.length - 1)) * graphW;
+      const x2 = graphX + (i / (spdSampled.length - 1)) * graphW;
+      const y1 = axisY + axisH - (spdSampled[i - 1] / spdMax) * halfH;
+      const y2 = axisY + axisH - (spdSampled[i] / spdMax) * halfH;
+      doc.line(x1, y1, x2, y2);
+    }
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(160, 160, 185);
+    doc.text(`MPH (0-${niceRound(spdMax)})`, graphX, axisY + axisH - 0.5);
+  }
+
+  let newY = y + totalH + 2;
 
   // Data-driven synopsis of what happened in this graph
   const synopsis = generateSynopsis(label, min, max, avg, unit, sampled);
@@ -288,11 +338,245 @@ function drawMiniGraph(
   return newY;
 }
 
+/** Draw a single drag strip timeslip card in the PDF (Dragy-style) */
+function drawTimeslip(
+  doc: jsPDF,
+  margin: number,
+  startY: number,
+  contentWidth: number,
+  run: DragRun,
+  runIdx: number,
+  isBest: boolean,
+  checkBreak: (space: number) => void,
+  pageHeight: number,
+): number {
+  let y = startY;
+  checkBreak(90);
+
+  const slipW = contentWidth;
+  const slipX = margin;
+  const borderColor: [number, number, number] = isBest ? PPEI_RED : [80, 80, 90];
+
+  // Outer card background
+  doc.setFillColor(18, 18, 24);
+  doc.setDrawColor(...borderColor);
+  doc.setLineWidth(isBest ? 0.8 : 0.3);
+  doc.roundedRect(slipX, y, slipW, 82, 1.5, 1.5, 'FD');
+
+  // Left red accent bar for best run
+  if (isBest) {
+    doc.setFillColor(...PPEI_RED);
+    doc.rect(slipX, y + 1, 2.5, 80, 'F');
+  }
+
+  const innerX = slipX + 5;
+  const innerW = slipW - 10;
+
+  // Header row: RUN #, BEST badge, quality badge
+  y += 5;
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(160, 160, 170);
+  doc.text(`RUN ${runIdx + 1}`, innerX, y);
+
+  if (isBest) {
+    doc.setFillColor(...PPEI_RED);
+    doc.roundedRect(innerX + 16, y - 3, 14, 4.5, 0.8, 0.8, 'F');
+    doc.setFontSize(5.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('BEST', innerX + 23, y - 0.5, { align: 'center' });
+  }
+
+  // Quality badge
+  const qualColor: [number, number, number] =
+    run.runQuality === 'excellent' ? GREEN :
+    run.runQuality === 'good' ? BLUE :
+    run.runQuality === 'fair' ? AMBER : PPEI_RED;
+  doc.setFontSize(5.5);
+  doc.setTextColor(...qualColor);
+  doc.text(run.runQuality.toUpperCase(), innerX + innerW - 2, y, { align: 'right' });
+
+  y += 5;
+
+  // ── ET Grid (4 cells: 60ft, 330ft, 1/8 mile, 1/4 mile) ──────────────
+  const cellW = (innerW - 3) / 4;
+  const cellH = 14;
+  const etData: { label: string; value: number | null; unit: string; highlight: boolean }[] = [
+    { label: '60 FT', value: run.time60ft, unit: 's', highlight: true },
+    { label: '330 FT', value: run.time330ft, unit: 's', highlight: false },
+    { label: '1/8 MILE', value: run.time660ft, unit: 's', highlight: run.time660ft !== null },
+    { label: '1/4 MILE', value: run.time1320ft, unit: 's', highlight: run.time1320ft !== null },
+  ];
+
+  etData.forEach((cell, ci) => {
+    const cx = innerX + ci * (cellW + 1);
+    doc.setFillColor(cell.highlight ? 28 : 22, cell.highlight ? 28 : 22, cell.highlight ? 36 : 30);
+    doc.roundedRect(cx, y, cellW, cellH, 0.5, 0.5, 'F');
+
+    // Label
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(90, 90, 100);
+    doc.text(cell.label, cx + cellW / 2, y + 4, { align: 'center' });
+
+    // Value
+    doc.setFontSize(cell.value !== null ? 10 : 7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(cell.value !== null ? (cell.highlight ? 255 : 180) : 60, cell.value !== null ? (cell.highlight ? 255 : 180) : 60, cell.value !== null ? (cell.highlight ? 255 : 190) : 70);
+    doc.text(
+      cell.value !== null ? cell.value.toFixed(3) : '---',
+      cx + cellW / 2,
+      y + 10,
+      { align: 'center' },
+    );
+
+    // Unit
+    if (cell.value !== null) {
+      doc.setFontSize(4);
+      doc.setTextColor(80, 80, 90);
+      doc.text(cell.unit, cx + cellW / 2, y + 13, { align: 'center' });
+    }
+  });
+
+  y += cellH + 2;
+
+  // ── Trap Speed Grid (2 cells: 1/8 trap, 1/4 trap) ────────────────────
+  const trapW = (innerW - 1) / 2;
+  const trapH = 11;
+  const trapData: { label: string; value: number | null }[] = [
+    { label: '1/8 TRAP', value: run.speed660ft },
+    { label: '1/4 TRAP', value: run.speed1320ft },
+  ];
+
+  trapData.forEach((cell, ci) => {
+    const cx = innerX + ci * (trapW + 1);
+    doc.setFillColor(22, 22, 30);
+    doc.roundedRect(cx, y, trapW, trapH, 0.5, 0.5, 'F');
+
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(90, 90, 100);
+    doc.text(cell.label, cx + trapW / 2, y + 3.5, { align: 'center' });
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(cell.value !== null ? 255 : 60, cell.value !== null ? 255 : 60, cell.value !== null ? 255 : 70);
+    doc.text(
+      cell.value !== null ? `${cell.value.toFixed(1)} mph` : '---',
+      cx + trapW / 2,
+      y + 8.5,
+      { align: 'center' },
+    );
+  });
+
+  y += trapH + 2;
+
+  // ── Launch / Peak Stats Row (3 cells) ─────────────────────────────────
+  const statW = (innerW - 2) / 3;
+  const statH = 10;
+  const statData: { label: string; value: string }[] = [
+    { label: 'LAUNCH RPM', value: run.launchRpm.toFixed(0) },
+    { label: 'PEAK BOOST', value: run.peakBoost > 0 ? `${run.peakBoost.toFixed(1)} psi` : '---' },
+    { label: 'PEAK RPM', value: run.peakRpm.toFixed(0) },
+  ];
+
+  statData.forEach((cell, ci) => {
+    const cx = innerX + ci * (statW + 1);
+    doc.setFillColor(26, 26, 34);
+    doc.setDrawColor(40, 40, 50);
+    doc.setLineWidth(0.15);
+    doc.roundedRect(cx, y, statW, statH, 0.5, 0.5, 'FD');
+
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(90, 90, 100);
+    doc.text(cell.label, cx + statW / 2, y + 3.5, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(220, 220, 230);
+    doc.text(cell.value, cx + statW / 2, y + 8, { align: 'center' });
+  });
+
+  y += statH + 2;
+
+  // ── Fault Indicator Pills ─────────────────────────────────────────────
+  let pillX = innerX;
+  const pillH = 4.5;
+  const pills: { label: string; color: [number, number, number] }[] = [];
+
+  if (run.maxTccSlip > 75) pills.push({ label: `TCC SLIP ${run.maxTccSlip.toFixed(0)} RPM`, color: PPEI_RED });
+  if (run.railPressureDropPct > 5) pills.push({ label: `RAIL DROP ${run.railPressureDropPct.toFixed(1)}%`, color: AMBER });
+  if (run.boostDropPct > 10) pills.push({ label: `BOOST DROP ${run.boostDropPct.toFixed(1)}%`, color: BLUE });
+  if (run.tccSlipTorqueLoss > 2) pills.push({ label: `~${run.tccSlipTorqueLoss.toFixed(1)}% TORQUE LOST`, color: PPEI_RED });
+  if (run.estimatedEtGain > 0.05) pills.push({ label: `~${run.estimatedEtGain.toFixed(2)}s RECOVERABLE`, color: GREEN });
+
+  pills.forEach((pill) => {
+    const tw = doc.getTextWidth(pill.label) + 4;
+    if (pillX + tw > innerX + innerW) { pillX = innerX; y += pillH + 1; }
+    doc.setFillColor(pill.color[0], pill.color[1], pill.color[2]);
+    // @ts-ignore
+    doc.setGState(new (doc as any).GState({ opacity: 0.15 }));
+    doc.roundedRect(pillX, y, tw + 2, pillH, 0.5, 0.5, 'F');
+    // @ts-ignore
+    doc.setGState(new (doc as any).GState({ opacity: 1.0 }));
+    doc.setFontSize(5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...pill.color);
+    doc.text(pill.label, pillX + 1.5, y + 3.2);
+    pillX += tw + 4;
+  });
+
+  if (pills.length > 0) y += pillH + 2;
+
+  // ── Gear Shifts Strip ─────────────────────────────────────────────────
+  if (run.shifts.length > 0) {
+    doc.setDrawColor(40, 40, 50);
+    doc.setLineWidth(0.1);
+    doc.line(innerX, y, innerX + innerW, y);
+    y += 2;
+
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(90, 90, 100);
+    doc.text('GEAR SHIFTS', innerX, y + 2);
+
+    let shiftX = innerX + 22;
+    run.shifts.forEach((shift) => {
+      const shiftText = `${shift.gear - 1}\u2192${shift.gear} @${shift.timeFromLaunch.toFixed(2)}s -${shift.rpmDrop.toFixed(0)}rpm`;
+      const sw = doc.getTextWidth(shiftText) + 4;
+      if (shiftX + sw > innerX + innerW) { shiftX = innerX + 22; y += 5; }
+
+      doc.setFillColor(26, 26, 34);
+      doc.setDrawColor(40, 40, 50);
+      doc.setLineWidth(0.1);
+      doc.roundedRect(shiftX, y, sw, 4.5, 0.5, 0.5, 'FD');
+
+      doc.setFontSize(5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(140, 140, 150);
+      doc.text(shiftText, shiftX + 2, y + 3.2);
+      shiftX += sw + 2;
+    });
+
+    y += 6;
+    if (run.totalShiftTimeLost > 0.01) {
+      doc.setFontSize(5);
+      doc.setTextColor(...AMBER);
+      doc.text(`Total shift time lost: ${run.totalShiftTimeLost.toFixed(3)}s`, innerX, y + 2);
+      y += 4;
+    }
+  }
+
+  return y + 6;
+}
+
 export function generateHealthReportPdf(
   healthReport: HealthReportData,
   data: ProcessedMetrics,
   fileName: string,
   hasDynoChart: boolean = false,
+  dragAnalysis?: DragAnalysis | null,
 ): void {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -519,15 +803,16 @@ export function generateHealthReportPdf(
   addText('DATALOG ANALYSIS GRAPHS', 12, 'bold', BLUE);
   drawHR([200, 210, 230]);
   addWrappedText(
-    'These graphs show key parameters from your datalog over time. The light gray line at the bottom of each graph shows vehicle speed (MPH) for reference, so you can see what the truck was doing at any given point. Dashed red lines mark common reference thresholds.',
+    'These graphs show key parameters from your datalog over time. Each graph includes RPM (blue) and vehicle speed (gray) reference lines at the bottom axis, so you can see what the engine and truck were doing at any given point. Y-axis labels on the left show simple values. Dashed red lines mark common reference thresholds.',
     8.5, 'normal', [100, 100, 110], 1.3,
   );
   y += 2;
 
   const graphConfigs: MiniGraphConfig[] = [];
 
-  // Speed data for overlay on all other graphs
+  // Speed + RPM data for overlay on all other graphs
   const speedRef = data.vehicleSpeed.length > 10 ? data.vehicleSpeed : undefined;
+  const rpmRef = data.rpm.length > 10 ? data.rpm : undefined;
 
   // RPM graph (always available)
   if (data.rpm.length > 10) {
@@ -538,6 +823,7 @@ export function generateHealthReportPdf(
       color: [60, 130, 200],
       thresholdHigh: 4000,
       speedData: speedRef,
+      isRpmGraph: true,
     });
   }
 
@@ -550,6 +836,7 @@ export function generateHealthReportPdf(
       color: [30, 160, 80],
       thresholdHigh: 40,
       speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
@@ -562,6 +849,7 @@ export function generateHealthReportPdf(
       color: [200, 80, 40],
       thresholdHigh: 30000,
       speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
@@ -574,6 +862,7 @@ export function generateHealthReportPdf(
       color: [180, 60, 60],
       thresholdHigh: 230,
       speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
@@ -586,6 +875,7 @@ export function generateHealthReportPdf(
       color: [220, 120, 20],
       thresholdHigh: 1300,
       speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
@@ -598,6 +888,44 @@ export function generateHealthReportPdf(
       color: [140, 60, 180],
       thresholdHigh: 100,
       speedData: speedRef,
+      rpmData: rpmRef,
+    });
+  }
+
+  // TCC Duty Cycle (if available)
+  if (data.converterDutyCycle.some(v => v > 0)) {
+    graphConfigs.push({
+      data: data.converterDutyCycle,
+      label: 'TCC DUTY CYCLE',
+      unit: '%',
+      color: [100, 60, 160],
+      thresholdHigh: 95,
+      speedData: speedRef,
+      rpmData: rpmRef,
+    });
+  }
+
+  // Converter Pressure / TCC Line Pressure (if available)
+  if (data.converterPressure.some(v => v > 0)) {
+    graphConfigs.push({
+      data: data.converterPressure,
+      label: 'TCC LINE PRESSURE',
+      unit: ' PSI',
+      color: [180, 100, 40],
+      speedData: speedRef,
+      rpmData: rpmRef,
+    });
+  }
+
+  // Current Gear
+  if (data.currentGear.some(v => v > 0)) {
+    graphConfigs.push({
+      data: data.currentGear,
+      label: 'TRANSMISSION GEAR',
+      unit: '',
+      color: [60, 60, 140],
+      speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
@@ -610,10 +938,11 @@ export function generateHealthReportPdf(
       color: [160, 80, 120],
       thresholdHigh: 250,
       speedData: speedRef,
+      rpmData: rpmRef,
     });
   }
 
-  // Speed (no speed overlay on itself)
+  // Speed (no speed overlay on itself, but show RPM)
   if (data.vehicleSpeed.some(v => v > 5)) {
     graphConfigs.push({
       data: data.vehicleSpeed,
@@ -621,12 +950,13 @@ export function generateHealthReportPdf(
       unit: ' MPH',
       color: [80, 80, 160],
       isSpeedGraph: true,
+      rpmData: rpmRef,
     });
   }
 
-  // Draw all graphs
+  // Draw all graphs (height 38 + 10 for bottom axis = 48 total, checkBreak for 58)
   for (const config of graphConfigs) {
-    checkBreak(48);
+    checkBreak(58);
     y = drawMiniGraph(doc, margin, y, contentWidth, 38, config, margin, contentWidth);
   }
 
@@ -783,8 +1113,148 @@ export function generateHealthReportPdf(
   });
   y += 4;
 
-  // ── DYNO GRAPH DISCLAIMER ─────────────────────────────────────────────────
-  if (hasDynoChart && data.stats.hpTorqueMax > 0) {
+  // ── ESTIMATED DYNO GRAPH ──────────────────────────────────────────────────
+  if (data.stats.hpTorqueMax > 0 && data.hpTorque.length > 10) {
+    checkBreak(75);
+    addText('ESTIMATED DYNO CHART (HP vs RPM)', 12, 'bold', BLUE);
+    drawHR([200, 210, 230]);
+
+    // Build RPM-binned HP curve for a cleaner dyno-style look
+    const dynoH = 50;
+    const dynoX = margin;
+    const dynoY = y;
+    const dynoW = contentWidth;
+
+    // Collect peak HP at each RPM bin (100 RPM bins)
+    const rpmBins = new Map<number, number>();
+    for (let i = 0; i < data.rpm.length; i++) {
+      const rpm = Math.round(data.rpm[i] / 100) * 100;
+      const hp = data.hpTorque[i];
+      if (hp > 0 && rpm > 500) {
+        rpmBins.set(rpm, Math.max(rpmBins.get(rpm) || 0, hp));
+      }
+    }
+    const sortedBins = Array.from(rpmBins.entries()).sort((a, b) => a[0] - b[0]);
+
+    if (sortedBins.length > 3) {
+      const rpmMin = sortedBins[0][0];
+      const rpmMax = sortedBins[sortedBins.length - 1][0];
+      const hpMax = Math.max(...sortedBins.map(b => b[1]));
+      const hpCeil = Math.ceil(hpMax / 50) * 50;
+
+      // Background
+      doc.setFillColor(20, 20, 25);
+      doc.roundedRect(dynoX, dynoY, dynoW, dynoH, 1, 1, 'F');
+
+      // Grid lines (4 horizontal)
+      doc.setDrawColor(50, 50, 60);
+      doc.setLineWidth(0.15);
+      for (let g = 1; g <= 4; g++) {
+        const gy = dynoY + dynoH - (g / 4) * dynoH;
+        doc.line(dynoX + 12, gy, dynoX + dynoW - 2, gy);
+        // Y-axis label
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120, 120, 130);
+        doc.text(`${Math.round((g / 4) * hpCeil)}`, dynoX + 1, gy + 1.5);
+      }
+
+      // X-axis RPM labels
+      const rpmRange = rpmMax - rpmMin;
+      const rpmStep = rpmRange > 3000 ? 500 : 250;
+      for (let r = Math.ceil(rpmMin / rpmStep) * rpmStep; r <= rpmMax; r += rpmStep) {
+        const xPos = dynoX + 12 + ((r - rpmMin) / rpmRange) * (dynoW - 14);
+        doc.setFontSize(5.5);
+        doc.setTextColor(120, 120, 130);
+        doc.text(`${r}`, xPos, dynoY + dynoH - 1, { align: 'center' });
+      }
+      // RPM label
+      doc.setFontSize(6);
+      doc.setTextColor(100, 100, 110);
+      doc.text('RPM', dynoX + dynoW / 2, dynoY + dynoH + 3, { align: 'center' });
+
+      // HP label
+      doc.text('EST. HP', dynoX + 1, dynoY + 3);
+
+      // Draw HP curve
+      doc.setDrawColor(200, 40, 40);
+      doc.setLineWidth(0.6);
+      let prevPx = -1, prevPy = -1;
+      for (const [rpm, hp] of sortedBins) {
+        const px = dynoX + 12 + ((rpm - rpmMin) / rpmRange) * (dynoW - 14);
+        const py = dynoY + dynoH - 5 - (hp / hpCeil) * (dynoH - 10);
+        if (prevPx >= 0) {
+          doc.line(prevPx, prevPy, px, py);
+        }
+        prevPx = px;
+        prevPy = py;
+      }
+
+      // Peak HP annotation
+      const peakEntry = sortedBins.reduce((best, e) => e[1] > best[1] ? e : best, sortedBins[0]);
+      const peakPx = dynoX + 12 + ((peakEntry[0] - rpmMin) / rpmRange) * (dynoW - 14);
+      const peakPy = dynoY + dynoH - 5 - (peakEntry[1] / hpCeil) * (dynoH - 10);
+      doc.setFillColor(200, 40, 40);
+      doc.circle(peakPx, peakPy, 1.2, 'F');
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(200, 40, 40);
+      doc.text(`${Math.round(peakEntry[1])} HP @ ${peakEntry[0]} RPM`, peakPx + 3, peakPy - 2);
+
+      // Also draw MAF-based HP if available
+      if (data.hpMaf.length > 10 && data.stats.hpMafMax > 50) {
+        const mafBins = new Map<number, number>();
+        for (let i = 0; i < data.rpm.length; i++) {
+          const rpm = Math.round(data.rpm[i] / 100) * 100;
+          const hp = data.hpMaf[i];
+          if (hp > 0 && rpm > 500) {
+            mafBins.set(rpm, Math.max(mafBins.get(rpm) || 0, hp));
+          }
+        }
+        const mafSorted = Array.from(mafBins.entries()).sort((a, b) => a[0] - b[0]);
+        if (mafSorted.length > 3) {
+          doc.setDrawColor(60, 130, 200);
+          doc.setLineWidth(0.4);
+          let mpx = -1, mpy = -1;
+          for (const [rpm, hp] of mafSorted) {
+            const px = dynoX + 12 + ((rpm - rpmMin) / rpmRange) * (dynoW - 14);
+            const py = dynoY + dynoH - 5 - (hp / hpCeil) * (dynoH - 10);
+            if (mpx >= 0) {
+              doc.line(mpx, mpy, px, py);
+            }
+            mpx = px;
+            mpy = py;
+          }
+          // Legend
+          doc.setFontSize(5.5);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(60, 130, 200);
+          doc.text('— MAF-based HP', dynoX + dynoW - 30, dynoY + 5);
+          doc.setTextColor(200, 40, 40);
+          doc.text('— Torque-based HP', dynoX + dynoW - 30, dynoY + 9);
+        }
+      }
+
+      y = dynoY + dynoH + 6;
+    } else {
+      y += 2;
+    }
+
+    // Synopsis
+    const peakHp = Math.round(data.stats.hpTorqueMax);
+    const peakMaf = data.stats.hpMafMax > 50 ? Math.round(data.stats.hpMafMax) : 0;
+    let dynoSynopsis = `Estimated peak: ${peakHp} HP (torque-based).`;
+    if (peakMaf > 0) {
+      const diff = Math.abs(peakHp - peakMaf);
+      dynoSynopsis += ` MAF-based estimate: ${peakMaf} HP.`;
+      if (diff > 50) {
+        dynoSynopsis += ` The ${diff} HP gap between methods suggests the tune may be reporting torque differently than airflow indicates.`;
+      }
+    }
+    addWrappedText(dynoSynopsis, 8, 'normal', TEXT_DARK, 1.3);
+    y += 2;
+
+    // Disclaimer
     checkBreak(25);
     addText('A NOTE ABOUT THE DYNO GRAPH', 11, 'bold', BLUE);
     drawHR([200, 210, 230]);
@@ -810,6 +1280,77 @@ export function generateHealthReportPdf(
     y += lines.length * 3.8 + 2;
   });
   y += 4;
+
+  // ── DRAG RACING TIMESLIP ──────────────────────────────────────────────────
+  if (dragAnalysis && dragAnalysis.runsDetected > 0 && dragAnalysis.bestRun) {
+    checkBreak(25);
+    addText('DRAG RACING ANALYSIS', 12, 'bold', PPEI_RED);
+    drawHR(PPEI_RED);
+    addWrappedText(
+      `${dragAnalysis.runsDetected} drag run${dragAnalysis.runsDetected !== 1 ? 's' : ''} detected in this datalog. ` +
+      `Data quality: ${dragAnalysis.dataQuality.toUpperCase()}. ` +
+      (dragAnalysis.missingChannels.length > 0
+        ? `Missing channels for full analysis: ${dragAnalysis.missingChannels.join(', ')}.`
+        : 'All required channels present for full analysis.'),
+      8.5, 'normal', TEXT_BODY, 1.3,
+    );
+    y += 2;
+
+    // Draw timeslip for best run (and up to 2 more)
+    const runsToShow = dragAnalysis.runs.slice(0, 3);
+    runsToShow.forEach((run, runIdx) => {
+      const isBest = run === dragAnalysis!.bestRun;
+      y = drawTimeslip(doc, margin, y, contentWidth, run, runIdx, isBest, checkBreak, pageHeight);
+    });
+
+    // Performance tips
+    if (dragAnalysis.tips.length > 0) {
+      checkBreak(25);
+      addText('DRAG PERFORMANCE TIPS', 10, 'bold', BLUE);
+      drawHR([200, 210, 230]);
+
+      dragAnalysis.tips.forEach((tip) => {
+        checkBreak(12);
+        const sevColor: [number, number, number] = tip.severity === 'critical' ? PPEI_RED : tip.severity === 'warning' ? AMBER : BLUE;
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...sevColor);
+        doc.text(`[${tip.category.toUpperCase()}]`, margin, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...TEXT_DARK);
+        doc.text(tip.title, margin + 22, y);
+        y += 4;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...TEXT_BODY);
+        doc.setFontSize(8);
+        const tipLines = doc.splitTextToSize(tip.detail, contentWidth - 6);
+        tipLines.forEach((line: string) => {
+          checkBreak(4);
+          doc.text(line, margin + 4, y);
+          y += 3.5;
+        });
+        if (tip.estimatedGain !== 'N/A' && tip.estimatedGain !== 'Already optimized') {
+          doc.setFontSize(7);
+          doc.setTextColor(...GREEN);
+          doc.text(`Estimated gain: ${tip.estimatedGain}`, margin + 4, y);
+          y += 3.5;
+        }
+        y += 2;
+      });
+    }
+    y += 4;
+  } else if (dragAnalysis && dragAnalysis.runsDetected === 0) {
+    // No runs detected — mention what's needed
+    checkBreak(25);
+    addText('DRAG RACING ANALYSIS', 12, 'bold', BLUE);
+    drawHR([200, 210, 230]);
+    addWrappedText(
+      'No drag runs were detected in this datalog. For drag analysis, the log needs to capture a launch from near-zero speed with wide-open throttle (80%+ accelerator). ' +
+      'Required channels: Vehicle Speed, Throttle Position, RPM. Recommended additional channels: Boost Pressure, Rail Pressure, TCC Slip/Converter Pressure for full fault analysis.',
+      8.5, 'normal', TEXT_BODY, 1.3,
+    );
+    y += 4;
+  }
 
   // ── CLOSING MESSAGE (Basic Section) ────────────────────────────────────────
   checkBreak(30);
@@ -852,6 +1393,7 @@ export function generateHealthReportPdf(
     drawHR,
     () => y,
     (newY: number) => { y = newY; },
+    data.rpm,
   );
 
   // ── BETA DISCLAIMER (with joke) ───────────────────────────────────────────
