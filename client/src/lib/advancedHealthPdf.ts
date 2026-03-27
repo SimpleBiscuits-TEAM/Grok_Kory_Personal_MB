@@ -534,7 +534,7 @@ function getRailPressureAnalysis(
   if (maxActual <= oemPeakPsi) {
     commentary = `Peak rail pressure of ${maxActual.toFixed(0)} PSI stayed at or below the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. The fuel system isn't being pushed beyond factory spec.`;
   } else if (overOem <= 3000) {
-    commentary = `Rail pressure peaked at ${maxActual.toFixed(0)} PSI — about ${overOem.toFixed(0)} PSI above the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. Elevated, but within a reasonable range for a tuned truck. The CP4 (or CP3 if swapped) can handle this.`;
+    commentary = `Rail pressure peaked at ${maxActual.toFixed(0)} PSI — about ${overOem.toFixed(0)} PSI above the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. Elevated, but within a reasonable range for a tuned truck. The high-pressure pump (HP4/CP3 depending on platform) can handle this.`;
   } else {
     commentary = `Rail pressure hit ${maxActual.toFixed(0)} PSI — that's ${overOem.toFixed(0)} PSI above OEM peak (${oemPeakPsi.toFixed(0)} PSI). Getting spicy. Past 3,000 PSI above OEM, you're asking a lot of the high-pressure fuel pump and injector seals. If the PCV duty cycle is pegged high, the pump is working overtime to maintain these pressures.`;
   }

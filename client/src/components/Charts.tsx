@@ -273,7 +273,8 @@ export function StatsSummary({ data }: ChartProps) {
   const { stats } = data;
   const durationMin = (stats.duration / 60).toFixed(1);
 
-  const statCards = [
+  // Build stat cards — always show RPM, MAF, Boost, and conditionally EGT
+  const statCards: { label: string; value: string; unit?: string; sub: string; accent: string }[] = [
     {
       label: 'RPM RANGE',
       value: `${stats.rpmMin.toFixed(0)} – ${stats.rpmMax.toFixed(0)}`,
@@ -293,17 +294,30 @@ export function StatsSummary({ data }: ChartProps) {
       sub: 'Gauge pressure (above atmospheric)',
       accent: 'oklch(0.70 0.18 200)',
     },
-    {
-      label: 'SESSION DURATION',
-      value: durationMin,
-      unit: 'MIN',
-      sub: `Max Boost: ${stats.boostMax.toFixed(1)} PSIG`,
-      accent: 'oklch(0.65 0.20 145)',
-    },
   ];
 
+  // Add EGT card if available and not flatlined
+  if (stats.egtAvailable && !stats.egtFlatlined) {
+    statCards.push({
+      label: 'PEAK EGT',
+      value: stats.egtMax.toFixed(0),
+      unit: '°F',
+      sub: stats.egtMax > 1400 ? 'Elevated — monitor closely' : stats.egtMax > 1200 ? 'Normal operating range' : 'Low / warming up',
+      accent: stats.egtMax > 1400 ? 'oklch(0.52 0.22 25)' : 'oklch(0.75 0.18 60)',
+    });
+  }
+
+  // Always add session duration last
+  statCards.push({
+    label: 'SESSION DURATION',
+    value: durationMin,
+    unit: 'MIN',
+    sub: `Max Boost: ${stats.boostMax.toFixed(1)} PSIG`,
+    accent: 'oklch(0.65 0.20 145)',
+  });
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(statCards.length, 5)}, 1fr)`, gap: '0.75rem' }}>
       {statCards.map((card) => (
         <div key={card.label} style={{
           background: 'oklch(0.13 0.006 260)',

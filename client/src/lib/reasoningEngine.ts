@@ -430,7 +430,7 @@ function analyzeRailPressure(
         `which correlates with rail pressure deviating more than 5% from desired in ${significantDevRate.toFixed(1)}% of samples. ` +
         `When PCV current fluctuates while desired pressure is stable, it indicates the regulator is ` +
         `hunting — actively correcting an unstable pressure condition. This can indicate a partially ` +
-        `clogged fuel filter, air entrainment in the fuel system, or a marginal CP4/CP3 pump.`;
+        `clogged fuel filter, air entrainment in the fuel system, or a marginal high-pressure pump (HP4 on L5P, CP4 on LML, CP3 on LBZ/LMM).`;
     } else if (pcvFluctuating) {
       type = 'improvement';
       reasoning =
@@ -456,7 +456,7 @@ function analyzeRailPressure(
       evidence,
       suggestion: type === 'warning'
         ? 'Check fuel filter condition and replacement interval. Inspect fuel lines for air entrainment. ' +
-          'Verify CP4/CP3 pump output pressure. Consider fuel system inspection if deviation worsens under load.'
+          'Verify high-pressure pump output pressure (HP4 on L5P, CP4 on LML, CP3 on older platforms). Consider fuel system inspection if deviation worsens under load.'
         : undefined,
       betaNote:
         'PPEI AI Beta: Rail pressure deviation is only evaluated at operating temperature (ECT >160°F). ' +

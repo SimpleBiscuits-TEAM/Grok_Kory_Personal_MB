@@ -57,7 +57,7 @@ export const L5P_SUBSYSTEMS: Record<string, SubsystemInfo> = {
   FHPC: {
     code: 'FHPC',
     name: 'Fuel High Pressure Control',
-    description: 'Controls the CP4.2 high-pressure fuel pump and rail pressure regulation. Contains rail pressure setpoint tables (15×16 RPM×fuel quantity), PID gains for the pressure regulator valve (PRV) and metering unit (MU), and pump efficiency maps. When you see rail pressure hunting or deviation, this is the subsystem responsible.',
+    description: 'Controls the Denso HP4 high-pressure fuel pump and rail pressure regulation. Contains rail pressure setpoint tables (15×16 RPM×fuel quantity), PID gains for the pressure regulator valve (PRV) and metering unit (MU), and pump efficiency maps. When you see rail pressure hunting or deviation, this is the subsystem responsible.',
     paramCount: 587,
     tableCount: 287,
     keyTables: [
@@ -265,7 +265,7 @@ export interface DtcDefinition {
  */
 export const L5P_KEY_DTCS: DtcDefinition[] = [
   // Fuel System
-  { gmCode: 'FRP_TooLo', description: 'Fuel Rail Pressure Too Low', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'Rail pressure dropped below the minimum threshold. Could indicate a weak CP4.2 pump, failing pressure relief valve, fuel supply restriction, or the tune is commanding more fuel than the pump can deliver.' },
+  { gmCode: 'FRP_TooLo', description: 'Fuel Rail Pressure Too Low', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'Rail pressure dropped below the minimum threshold. Could indicate a weak HP4 pump, failing pressure relief valve, fuel supply restriction, or the tune is commanding more fuel than the pump can deliver.' },
   { gmCode: 'FRP_TooHi', description: 'Fuel Rail Pressure Too High', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'Rail pressure exceeded the maximum threshold. Could indicate a stuck pressure control valve, faulty rail pressure sensor, or calibration issue commanding excessive pressure.' },
   { gmCode: 'FuelPresReg1Perf', description: 'Fuel Pressure Regulator Performance', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FHPC', whatItMeans: 'The pressure regulator (PCV) is not maintaining commanded pressure within tolerance. Often seen when PCV duty cycle is maxed out or hunting.' },
   { gmCode: 'FuelInjQuantLoExptd', description: 'Fuel Injection Quantity Lower Than Expected', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FULC', whatItMeans: 'The ECM detected less fuel being delivered than commanded. Could indicate worn injectors, low rail pressure, or injector learning at its limit.' },
@@ -339,14 +339,14 @@ export const L5P_CALIBRATION_CONTEXT: CalibrationContext[] = [
     humanName: 'Rail Pressure Setpoint Table',
     dimensions: '15×16 (RPM × Fuel Quantity)',
     axisDescription: 'RPM breakpoints × fuel quantity breakpoints (mm³/stroke)',
-    tuningRelevance: 'Determines desired rail pressure for any RPM/fuel combination. Higher fuel quantities need higher rail pressure for proper atomization. On tuned trucks, this is raised to support increased fueling. The CP4.2 pump has a practical limit around 29,000-30,000 PSI — pushing beyond that accelerates wear.',
+    tuningRelevance: 'Determines desired rail pressure for any RPM/fuel combination. Higher fuel quantities need higher rail pressure for proper atomization. On tuned trucks, this is raised to support increased fueling. The HP4 pump has a practical limit around 29,000-30,000 PSI — pushing beyond that accelerates wear.',
   },
   {
     parameter: 'KtFCBR_p_MaxFuelSysPresCmd',
     humanName: 'Maximum Fuel System Pressure Command',
     dimensions: '33×1 (RPM)',
     axisDescription: 'RPM breakpoints — the absolute ceiling for commanded rail pressure at each RPM',
-    tuningRelevance: 'The hard ceiling for rail pressure. Even if the PresSetPt table asks for more, this table caps it. OEM L5P peaks around 29,000 PSI. Going 3,000+ PSI above OEM peak is getting into spicy territory for the CP4.2.',
+    tuningRelevance: 'The hard ceiling for rail pressure. Even if the PresSetPt table asks for more, this table caps it. OEM L5P peaks around 29,000 PSI. Going 3,000+ PSI above OEM peak is getting into spicy territory for the HP4.',
   },
 
   // Injection Timing
@@ -427,7 +427,7 @@ export function getCalibrationContext(
     },
     rail_pressure_high: {
       title: 'Elevated Rail Pressure — FHPC Subsystem',
-      context: 'Rail pressure setpoints come from the FHPC 15×16 table (RPM × fuel quantity). Higher fuel demand = higher pressure needed for atomization. The L5P CP4.2 pump peaks around 29,000 PSI from the factory. The MaxFuelSysPresCmd table (33×1) sets the absolute ceiling per RPM. Going 3,000+ PSI above OEM peak accelerates CP4.2 wear and increases the risk of fuel system failure. The PCV duty cycle shows how hard the system is working to maintain pressure.',
+      context: 'Rail pressure setpoints come from the FHPC 15×16 table (RPM × fuel quantity). Higher fuel demand = higher pressure needed for atomization. The L5P HP4 pump peaks around 29,000 PSI from the factory. The MaxFuelSysPresCmd table (33×1) sets the absolute ceiling per RPM. Going 3,000+ PSI above OEM peak accelerates HP4 wear and increases the risk of fuel system failure. The PCV duty cycle shows how hard the system is working to maintain pressure.',
       subsystem: 'FHPC',
       relevance: 'high',
     },
@@ -475,7 +475,7 @@ export function getCalibrationContext(
     },
     pcv_maxed: {
       title: 'PCV Duty Cycle Maxed — FHPC at Limit',
-      context: 'The FHPC subsystem controls PCV (Pressure Control Valve) duty cycle to regulate rail pressure. When PCV is at or near 100%, the fuel system is at its maximum capacity. The CP4.2 pump physically cannot deliver more pressure. This is the wall. On tuned trucks, this means the fuel demand exceeds what the stock fuel system can supply. Solutions: reduce fuel demand in the tune, upgrade to a CP3 conversion, or add a lift pump to improve CP4.2 inlet pressure.',
+      context: 'The FHPC subsystem controls PCV (Pressure Control Valve) duty cycle to regulate rail pressure. When PCV is at or near 100%, the fuel system is at its maximum capacity. The HP4 pump physically cannot deliver more pressure. This is the wall. On tuned trucks, this means the fuel demand exceeds what the stock fuel system can supply. Solutions: reduce fuel demand in the tune, upgrade to a CP3 conversion, or add a lift pump to improve HP4 inlet pressure.',
       subsystem: 'FHPC',
       relevance: 'high',
     },

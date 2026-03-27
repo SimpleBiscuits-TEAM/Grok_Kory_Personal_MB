@@ -623,6 +623,122 @@ export function parseEcuBinary(buffer: ArrayBuffer, fileName: string): BinaryAna
     }
   }
 
+  // ── 2b. PPEI Container / Any format: Discover segments via pattern scan ──
+  // If no segments were found by the EFILive parser, scan for the structural
+  // pattern [8 ASCII digits][8 null bytes] which identifies segment headers
+  // in PPEI containers and other formats.
+  if (segments.length === 0 && data.length > 0x40000) {
+    const partNumRegexSeg = /^1[2-9]\d{6}$/;
+    const seenPnOffsets = new Set<number>();
+
+    // Scan ranges covering PPEI container (0x3F0000+) and EFILive (0x030000+) layouts
+    const scanRanges: [number, number][] = [
+      [0x030000, Math.min(0x0A0000, data.length)],
+      [0x1F0000, Math.min(0x600000, data.length)],
+      [0x600000, Math.min(0x700000, data.length)],
+    ];
+
+    for (const [start, end] of scanRanges) {
+      for (let off = start; off < end - 16; off++) {
+        // Check for 8 ASCII digits
+        let isDigits = true;
+        for (let j = 0; j < 8; j++) {
+          const b = data[off + j];
+          if (b < 0x30 || b > 0x39) { isDigits = false; break; }
+        }
+        if (!isDigits) continue;
+
+        // Check for 8 null bytes following the digits
+        let isNulls = true;
+        for (let j = 0; j < 8; j++) {
+          if (data[off + 8 + j] !== 0x00) { isNulls = false; break; }
+        }
+        if (!isNulls) continue;
+
+        const pn = readAsciiString(data, off, 8);
+        if (pn.length !== 8 || !partNumRegexSeg.test(pn)) continue;
+
+        // Check the 16 bytes before — should have some structure (not all 0xFF or 0x00)
+        if (off < 16) continue;
+        const header = data.slice(off - 16, off);
+        let allFF = true;
+        let allZero = true;
+        for (let i = 0; i < 16; i++) {
+          if (header[i] !== 0xFF) allFF = false;
+          if (header[i] !== 0x00) allZero = false;
+        }
+        if (allFF || allZero) continue;
+
+        // Skip duplicate PNs at the same offset
+        if (seenPnOffsets.has(off)) continue;
+        seenPnOffsets.add(off);
+
+        // Skip if we already have this exact PN (avoid double-counting)
+        if (segments.some(s => s.partNumber === pn)) continue;
+
+        const segIndex = segments.length + 1;
+        segments.push({
+          index: segIndex,
+          partNumber: pn,
+          function: SEGMENT_FUNCTIONS[segIndex] || `Segment ${segIndex}`,
+          binOffset: off - 16, // header starts 16 bytes before PN
+          binOffsetHex: toHex(off - 16),
+          chipAddress: 0,
+          chipAddressHex: '0x00000000',
+          length: 0,
+          lengthHex: '0x000000',
+        });
+      }
+    }
+
+    // Sort by bin offset and re-index
+    if (segments.length > 0) {
+      segments.sort((a, b) => a.binOffset - b.binOffset);
+      for (let i = 0; i < segments.length; i++) {
+        segments[i].index = i + 1;
+        segments[i].function = SEGMENT_FUNCTIONS[i + 1] || `Segment ${i + 1}`;
+      }
+
+      // Estimate lengths based on gaps between segments
+      for (let i = 0; i < segments.length; i++) {
+        if (i + 1 < segments.length) {
+          segments[i].length = segments[i + 1].binOffset - segments[i].binOffset;
+        } else {
+          const sigAreaStart = 0x800000;
+          if (segments[i].binOffset < sigAreaStart && sigAreaStart < data.length) {
+            segments[i].length = sigAreaStart - segments[i].binOffset;
+          } else {
+            segments[i].length = data.length - segments[i].binOffset;
+          }
+        }
+        segments[i].lengthHex = '0x' + segments[i].length.toString(16).toUpperCase().padStart(6, '0');
+      }
+
+      // Add findings and hex regions for discovered segments
+      for (const seg of segments) {
+        if (!partNumbers.includes(seg.partNumber)) {
+          partNumbers.push(seg.partNumber);
+        }
+        findings.push({
+          label: `Segment ${seg.index}: ${seg.function}`,
+          value: seg.partNumber,
+          offset: seg.binOffsetHex,
+          offsetNum: seg.binOffset,
+          category: 'segment',
+          description: `Part: ${seg.partNumber} | Bin: ${seg.binOffsetHex} | Size: ${seg.length > 1024 * 1024 ? (seg.length / 1024 / 1024).toFixed(2) + ' MB' : (seg.length / 1024).toFixed(1) + ' KB'} (discovered via pattern scan)`,
+          hexDump: hexDumpRegion(data, seg.binOffset, 64),
+        });
+
+        hexRegions.push({
+          label: `Segment ${seg.index}: ${seg.function} (${seg.partNumber})`,
+          offset: seg.binOffset,
+          offsetHex: seg.binOffsetHex,
+          bytes: data.slice(seg.binOffset, Math.min(seg.binOffset + 128, data.length)),
+        });
+      }
+    }
+  }
+
   // ── 3. Parse signature blocks ─────────────────────────────────────────
   const platformFromSig = parseSignatureBlocks(data, findings, hexRegions);
   if (platformFromSig && !ecuPlatform) {

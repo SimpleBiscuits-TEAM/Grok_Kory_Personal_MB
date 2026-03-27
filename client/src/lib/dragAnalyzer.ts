@@ -517,7 +517,7 @@ function generateDragTips(
       category: 'fuel',
       severity: 'critical',
       title: 'Significant Rail Pressure Drop Under WOT',
-      detail: `Rail pressure dropped ${bestRun.railPressureDropMax.toFixed(0)} kPa (${bestRun.railPressureDropPct.toFixed(1)}%) from baseline during the run. A drop greater than 10% indicates the fuel system cannot keep up with demand. Common causes: weak or failing CP3/CP4 injection pump, clogged fuel filter, inadequate lift pump, or restricted fuel lines. Install an aftermarket lift pump (FASS or AirDog) as a first step.`,
+      detail: `Rail pressure dropped ${bestRun.railPressureDropMax.toFixed(0)} kPa (${bestRun.railPressureDropPct.toFixed(1)}%) from baseline during the run. A drop greater than 10% indicates the fuel system cannot keep up with demand. Common causes: weak or failing high-pressure pump (HP4 on L5P, CP4 on LML, CP3 on older platforms), clogged fuel filter, inadequate lift pump, or restricted fuel lines. Install an aftermarket lift pump (FASS or AirDog) as a first step.`,
       estimatedGain: '0.15-0.25 sec ET',
     });
   } else if (bestRun.railPressureDropPct > 5) {

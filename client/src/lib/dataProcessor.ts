@@ -125,6 +125,9 @@ export interface ProcessedMetrics {
     hpTorqueMax: number;
     hpMafMax: number;
     boostMax: number;
+    egtMax: number;
+    egtAvailable: boolean;
+    egtFlatlined: boolean;
     duration: number;
   };
   fileFormat: 'hptuners' | 'efilive' | 'bankspower';
@@ -1709,6 +1712,23 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     };
   }
 
+  // EGT analysis for quick stats
+  const egtData = rawData.exhaustGasTemp;
+  const egtNonZero = egtData.filter(v => v > 0);
+  const egtAvailable = egtNonZero.length > 10; // need meaningful data
+  const egtMax = egtAvailable ? Math.max(...egtNonZero) : 0;
+  // Flatline detection: if EGT is stuck at a constant value (±5°F) for >90% of samples,
+  // or stuck past 1800°F, the sensor is likely not working
+  let egtFlatlined = false;
+  if (egtAvailable) {
+    const egtMean = egtNonZero.reduce((a, b) => a + b, 0) / egtNonZero.length;
+    const egtStdDev = Math.sqrt(egtNonZero.reduce((sum, v) => sum + (v - egtMean) ** 2, 0) / egtNonZero.length);
+    // Flatlined if standard deviation < 5°F (basically constant) or stuck past 1800°F
+    if (egtStdDev < 5 || (egtMax > 1800 && egtStdDev < 10)) {
+      egtFlatlined = true;
+    }
+  }
+
   const stats = {
     rpmMin: Math.min(...rawData.rpm),
     rpmMax: Math.max(...rawData.rpm),
@@ -1719,6 +1739,9 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     hpTorqueMax: Math.max(...hpTorque),
     hpMafMax: Math.max(...hpMaf),
     boostMax: Math.max(...boost),
+    egtMax,
+    egtAvailable,
+    egtFlatlined,
     duration: rawData.duration,
   };
   

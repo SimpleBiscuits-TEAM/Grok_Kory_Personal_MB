@@ -351,3 +351,13 @@
 - [x] Build segment swap UI — two-bin upload (target + source), side-by-side segment maps, swap selection per segment
 - [x] Download modified binary with descriptive filename after segment swap
 - [x] Validate OS compatibility between source and target before allowing swap
+
+## Segment Swap Button Visibility Fix
+- [x] Fix SEGMENT SWAP button hidden for PPEI container binaries (parser didn't populate segments for ppei_container format)
+- [x] Add pattern-scan segment discovery to binaryParser.ts for PPEI containers (section 2b)
+- [x] Remove analysis.segments.length > 0 gate on SEGMENT SWAP button — always show when binary is loaded
+
+## Quick Stats EGT + Health Report HP4 Fix
+- [x] Add peak EGT to datalog quick stats summary
+- [x] Skip EGT in quick stats if sensor is flatlined (stuck past 1800°F or constant value = not working)
+- [x] Fix health report referencing CP4 pump when vehicle has HP4 (L5P uses HP4, not CP4)

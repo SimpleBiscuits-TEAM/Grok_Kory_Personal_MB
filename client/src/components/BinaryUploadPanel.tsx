@@ -602,22 +602,20 @@ export default function BinaryUploadPanel() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {analysis.segments.length > 0 && (
-                <button
-                  onClick={() => setSwapMode(!swapMode)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '6px',
-                    padding: '6px 12px',
-                    background: swapMode ? `${sColor.red}22` : 'oklch(0.16 0.008 260)',
-                    border: `1px solid ${swapMode ? sColor.red : sColor.borderLight}`,
-                    color: swapMode ? sColor.red : sColor.textDim,
-                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em', cursor: 'pointer',
-                  }}
-                >
-                  <ArrowRightLeft style={{ width: 14, height: 14 }} />
-                  {swapMode ? 'CLOSE SWAP' : 'SEGMENT SWAP'}
-                </button>
-              )}
+              <button
+                onClick={() => setSwapMode(!swapMode)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '6px 12px',
+                  background: swapMode ? `${sColor.red}22` : 'oklch(0.16 0.008 260)',
+                  border: `1px solid ${swapMode ? sColor.red : sColor.borderLight}`,
+                  color: swapMode ? sColor.red : sColor.textDim,
+                  fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em', cursor: 'pointer',
+                }}
+              >
+                <ArrowRightLeft style={{ width: 14, height: 14 }} />
+                {swapMode ? 'CLOSE SWAP' : 'SEGMENT SWAP'}
+              </button>
               <button
                 onClick={() => { setAnalysis(null); setVehicleInfo(null); setSwapMode(false); setBinaryPair(null); setSourceAnalysis(null); fileInputRef.current && (fileInputRef.current.value = ''); }}
                 style={{

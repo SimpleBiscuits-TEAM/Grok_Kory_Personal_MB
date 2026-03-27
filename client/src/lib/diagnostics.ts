@@ -270,7 +270,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
-  // P0089 - Fuel Pressure Regulator Performance — diesel high-pressure pump (CP4/HP4/CP3)
+  // P0089 - Fuel Pressure Regulator Performance — diesel high-pressure pump (HP4 on L5P, CP4 on LML, CP3 on LBZ/LMM)
   if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkFuelPressureRegulatorPerformance(railPressureActual, railPressureDesired, rpm));
   }
