@@ -1,9 +1,8 @@
 /**
- * FeedbackPanel — PPEI AI Beta feedback and error reporting
+ * FeedbackPanel — Feedback and error reporting via tRPC
  *
- * Design: PPEI dark theme, Bebas Neue headings, Rajdhani body, red accents
- * Uses Formspree for form submission (no backend required).
- * Replace FORMSPREE_ENDPOINT with your actual Formspree form URL.
+ * Design: Dark theme, Bebas Neue headings, Rajdhani body, red accents
+ * Submits to backend via tRPC → saved to DB + owner notification
  *
  * Tab 1: General Feedback
  * Tab 2: Error / Bug Report
@@ -11,12 +10,7 @@
 
 import React, { useState } from 'react';
 import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown } from 'lucide-react';
-
-// ── Replace with your Formspree form endpoint ──────────────────────────────
-// Create a free form at https://formspree.io and paste the endpoint here.
-// Example: 'https://formspree.io/f/xpwzabcd'
-const FORMSPREE_ENDPOINT = 'https://formspree.io/f/xpwzabcd';
-// ──────────────────────────────────────────────────────────────────────────
+import { trpc } from '@/lib/trpc';
 
 type Tab = 'feedback' | 'error';
 type Status = 'idle' | 'sending' | 'success' | 'error';
@@ -45,6 +39,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
   const [errDescription, setErrDescription] = useState('');
   const [errSteps, setErrSteps] = useState('');
 
+  const submitMutation = trpc.feedback.submit.useMutation();
+
   const resetAll = () => {
     setStatus('idle');
     setFbName(''); setFbEmail(''); setFbRating(null); setFbMessage('');
@@ -56,49 +52,41 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     onClose();
   };
 
-  const submitForm = async (payload: Record<string, string>) => {
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setStatus('sending');
     try {
-      const res = await fetch(FORMSPREE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
+      const result = await submitMutation.mutateAsync({
+        type: 'feedback',
+        name: fbName || undefined,
+        email: fbEmail || undefined,
+        rating: fbRating ?? undefined,
+        message: fbMessage,
+        context: context || undefined,
       });
-      if (res.ok) {
-        setStatus('success');
-      } else {
-        setStatus('error');
-      }
+      setStatus(result.success ? 'success' : 'error');
     } catch {
       setStatus('error');
     }
   };
 
-  const handleFeedbackSubmit = (e: React.FormEvent) => {
+  const handleErrorSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    submitForm({
-      _subject: `[PPEI AI Beta] Feedback from ${fbName || 'Anonymous'}`,
-      type: 'Feedback',
-      name: fbName || 'Anonymous',
-      email: fbEmail || 'Not provided',
-      rating: fbRating ? `${fbRating}/5` : 'Not rated',
-      message: fbMessage,
-      context: context || 'No file loaded',
-    });
-  };
-
-  const handleErrorSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    submitForm({
-      _subject: `[PPEI AI Beta] Error Report: ${errType || 'General'}`,
-      type: 'Error Report',
-      name: errName || 'Anonymous',
-      email: errEmail || 'Not provided',
-      error_type: errType,
-      description: errDescription,
-      steps_to_reproduce: errSteps || 'Not provided',
-      context: context || 'No file loaded',
-    });
+    setStatus('sending');
+    try {
+      const result = await submitMutation.mutateAsync({
+        type: 'error',
+        name: errName || undefined,
+        email: errEmail || undefined,
+        message: errDescription,
+        errorType: errType || undefined,
+        stepsToReproduce: errSteps || undefined,
+        context: context || undefined,
+      });
+      setStatus(result.success ? 'success' : 'error');
+    } catch {
+      setStatus('error');
+    }
   };
 
   if (!isOpen) return null;
@@ -176,7 +164,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               fontSize: '0.7rem',
               color: 'white',
               letterSpacing: '0.08em',
-            }}>PPEI AI BETA</div>
+            }}>BETA</div>
             <h2 style={{
               fontFamily: '"Bebas Neue", "Impact", sans-serif',
               fontSize: '1.2rem',
@@ -257,7 +245,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 marginBottom: '0.5rem',
               }}>REPORT SENT</h3>
               <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.60 0.010 260)', fontSize: '0.9rem' }}>
-                Thanks for helping improve PPEI AI Beta. We review every submission.
+                Thanks for your feedback. We review every submission.
               </p>
               <button
                 onClick={handleClose}
@@ -289,7 +277,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               fontSize: '0.85rem',
               color: 'oklch(0.75 0.18 25)',
             }}>
-              Submission failed. Please try again or email us directly at <strong>info@ppei.com</strong>
+              Submission failed. Please try again later.
             </div>
           )}
 
@@ -297,7 +285,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
           {status !== 'success' && tab === 'feedback' && (
             <form onSubmit={handleFeedbackSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>
-                Help us improve PPEI AI Beta. All feedback goes directly to the PPEI team.
+                Help us improve. All feedback is reviewed directly by the team.
               </p>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -450,6 +438,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                     <option value="Chart Not Displaying">Chart Not Displaying</option>
                     <option value="PDF Export Issue">PDF Export Issue</option>
                     <option value="DTC Lookup Error">DTC Lookup Error</option>
+                    <option value="OBD Datalogger Issue">OBD Datalogger Issue</option>
                     <option value="App Crash / Freeze">App Crash / Freeze</option>
                     <option value="Other">Other</option>
                   </select>
@@ -481,7 +470,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 <textarea
                   value={errSteps}
                   onChange={e => setErrSteps(e.target.value)}
-                  placeholder="1. Uploaded file X&#10;2. Clicked Y&#10;3. Saw error..."
+                  placeholder={"1. Uploaded file X\n2. Clicked Y\n3. Saw error..."}
                   rows={3}
                   style={{ ...inputStyle, resize: 'vertical', minHeight: '70px' }}
                   className="ppei-input-focus"

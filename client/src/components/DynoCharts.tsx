@@ -1006,13 +1006,16 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   const avgDesired = chartData.length ? chartData.reduce((s, d) => s + (d.desired ?? 0), 0) / chartData.length : 0;
 
   // Fault zone: time range where delta exceeds threshold
-  const faultPoints = chartData.filter(d => isLow ? d.deltaLow > 3000 : d.deltaHigh > 1500);
+  // Thresholds synced with diagnostics.ts: P0087=5000 psi, P0088=3500 psi
+  const CHART_THRESHOLD_LOW = 5000;
+  const CHART_THRESHOLD_HIGH = 3500;
+  const faultPoints = chartData.filter(d => isLow ? d.deltaLow > CHART_THRESHOLD_LOW : d.deltaHigh > CHART_THRESHOLD_HIGH);
   const faultTimeMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.time)) : 0;
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
   const ruleText = isLow
-    ? `P0087: Actual rail pressure is ≥3,000 psi BELOW desired for >5 consecutive seconds. Max observed delta: ${maxDeltaLow.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
-    : `P0088: Actual rail pressure is ≥1,500 psi ABOVE desired for >5 consecutive seconds. Max observed delta: ${maxDeltaHigh.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
+    ? `P0087: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDeltaLow.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
+    : `P0088: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds. Max observed delta: ${maxDeltaHigh.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
 
   return (
     <FaultChartWrapper
@@ -1082,7 +1085,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
         isCritical={issue.severity === 'critical'}
         events={computeFaultEvents(
           chartData,
-          d => isLow ? (d.deltaLow ?? 0) > 3000 : (d.deltaHigh ?? 0) > 1500,
+          d => isLow ? (d.deltaLow ?? 0) > CHART_THRESHOLD_LOW : (d.deltaHigh ?? 0) > CHART_THRESHOLD_HIGH,
           d => isLow ? (d.deltaLow ?? 0) : (d.deltaHigh ?? 0),
           'psi'
         )}
@@ -1121,11 +1124,13 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
   const peakActual = chartData.length ? Math.max(...chartData.map(d => d.actual ?? 0)) : 0;
   const peakDesired = chartData.length ? Math.max(...chartData.map(d => d.desired ?? 0)) : 0;
   const maxDelta = chartData.length ? Math.max(...chartData.map(d => d.delta)) : 0;
-  const faultPoints = chartData.filter(d => ((d.desired ?? 0) - (d.actual ?? 0)) > 5);
+  // Threshold synced with diagnostics.ts: 8 psi (was 5)
+  const BOOST_FAULT_THRESHOLD = 8;
+  const faultPoints = chartData.filter(d => ((d.desired ?? 0) - (d.actual ?? 0)) > BOOST_FAULT_THRESHOLD);
   const faultTimeMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.time)) : 0;
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
-  const ruleText = `P0299: Actual boost is ≥5 psi BELOW desired for >5 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
+  const ruleText = `P0299: Actual boost is ≥${BOOST_FAULT_THRESHOLD} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
 
   return (
     <FaultChartWrapper
@@ -1138,7 +1143,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
       ruleEvaluated={ruleText}
       badges={<>
         <DeltaBadge label="Peak Boost" actual={peakActual.toFixed(1)} expected={peakDesired > 0 ? peakDesired.toFixed(1) : '48.0'} delta={(peakDesired > 0 ? peakDesired - peakActual : 48 - peakActual).toFixed(1)} unit=" psi" isCritical={true} />
-        <DeltaBadge label="Max Fault Delta" actual="Detected" expected="<5 psi gap" delta={maxDelta.toFixed(1)} unit=" psi" isCritical={true} />
+        <DeltaBadge label="Max Fault Delta" actual="Detected" expected={`<${BOOST_FAULT_THRESHOLD} psi gap`} delta={maxDelta.toFixed(1)} unit=" psi" isCritical={true} />
         <DeltaBadge label="Fault Duration" actual={`${faultPoints.length} pts`} expected="0 pts" delta={`${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min`} unit="" isCritical={false} />
       </>}
     >
@@ -1186,7 +1191,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
         isCritical={issue.severity === 'critical'}
         events={computeFaultEvents(
           chartData,
-          d => ((d.desired ?? 0) - (d.actual ?? 0)) > 5,
+          d => ((d.desired ?? 0) - (d.actual ?? 0)) > BOOST_FAULT_THRESHOLD,
           d => (d.desired ?? 0) - (d.actual ?? 0),
           'psi'
         )}

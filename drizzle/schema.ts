@@ -25,4 +25,19 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// ── Feedback / Error Reports ──────────────────────────────────────────────
+export const feedback = mysqlTable("feedback", {
+  id: int("id").autoincrement().primaryKey(),
+  type: mysqlEnum("type", ["feedback", "error"]).notNull(),
+  name: varchar("name", { length: 255 }),
+  email: varchar("email", { length: 320 }),
+  rating: int("rating"),
+  message: text("message").notNull(),
+  errorType: varchar("errorType", { length: 255 }),
+  stepsToReproduce: text("stepsToReproduce"),
+  context: text("context"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Feedback = typeof feedback.$inferSelect;
+export type InsertFeedback = typeof feedback.$inferInsert;

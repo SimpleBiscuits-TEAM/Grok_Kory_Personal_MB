@@ -427,18 +427,45 @@ function checkHighRailPressure(
   throttleTransientMask: boolean[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const threshold = 2500;       // psi offset (raised from 1950)
-  const minDuration = 8;        // seconds (raised from 5)
+  const threshold = 3500;       // psi offset (raised from 2500 — 2500 triggers on normal decel pressure lag)
+  const minDuration = 12;       // seconds (raised from 8 — need sustained deviation, not transient)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
+  const MIN_RPM = 1000;         // exclude low RPM where pressure control is less precise
+
+  // Build a "desired-dropping" mask: when desired pressure is falling or has
+  // recently fallen, the CP4 pump physically cannot depressurize the rail fast
+  // enough — this is normal behavior during commanded decel, NOT a regulator fault.
+  // Strategy: check multiple lookback windows to catch both fast and gradual drops.
+  // Also mark samples where desired is still settling after a drop.
+  const desiredDroppingMask = desired.map((d, i) => {
+    // Short-term drop: 200+ psi over 5 samples (fast transient)
+    if (i >= 5 && desired[i - 5] - d > 200) return true;
+    // Medium-term drop: 500+ psi over 20 samples (moderate decel)
+    if (i >= 20 && desired[i - 20] - d > 500) return true;
+    // Long-term drop: 1000+ psi over 50 samples (gradual decel / coast-down)
+    if (i >= 50 && desired[i - 50] - d > 1000) return true;
+    // Recent peak check: if desired was 2000+ psi higher at any point in last 80 samples,
+    // the rail is still bleeding off pressure — not a fault
+    if (i >= 10) {
+      const lookback = Math.min(i, 80);
+      let recentMax = 0;
+      for (let j = i - lookback; j < i; j++) {
+        if (desired[j] > recentMax) recentMax = desired[j];
+      }
+      if (recentMax - d > 2000) return true;
+    }
+    return false;
+  });
 
   let consecutiveViolations = 0;
 
   for (let i = 0; i < actual.length; i++) {
     const offset = actual[i] - desired[i];
-    const isExcluded = decelMask[i] || throttleTransientMask[i];
+    const isExcluded = decelMask[i] || throttleTransientMask[i] || desiredDroppingMask[i];
+    const rpmOk = rpmArr[i] >= MIN_RPM;
 
-    if (offset > threshold && !isExcluded) {
+    if (offset > threshold && !isExcluded && rpmOk) {
       consecutiveViolations++;
 
       if (consecutiveViolations >= minSamples) {
@@ -446,7 +473,7 @@ function checkHighRailPressure(
           code: 'P0088-HIGH-RAIL',
           severity: 'warning',
           title: 'High Rail Pressure Detected',
-          description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds at steady-state (transients and deceleration excluded).`,
+          description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds at steady-state (transients, deceleration, and commanded pressure drops excluded).`,
           recommendation:
             'Check PCV (pressure regulator duty cycle) settings. This is generally a regulator adjustment by the tuner. Contact your tuner to review fuel pressure calibration.',
         });
@@ -826,8 +853,8 @@ function checkConverterSlip(
   }
 
   // ── Slip analysis ──
-  const SLIP_NOISE_FLOOR = 25; // raised from 15 RPM
-  const MIN_CONSECUTIVE = 15;  // raised from 5 (1.5 seconds at 10Hz)
+  const SLIP_NOISE_FLOOR = 40; // raised from 25 RPM — 3.6% of ControlledOn samples exceed 25 RPM in normal driving
+  const MIN_CONSECUTIVE = 25;  // raised from 15 (2.5 seconds at 10Hz — need truly sustained slip)
 
   let slipEventCount = 0;
   let maxSlipObserved = 0;
@@ -869,8 +896,8 @@ function checkConverterSlip(
 
   // Critical: frequent sustained slip events under full lock command
   // Thresholds significantly raised to prevent false positives:
-  // - Need 12+ confirmed events (was 8) and >25% slip rate (was 20%)
-  if (slipEventCount >= 12 || slipRate > 25) {
+  // - Need 20+ confirmed events (was 12) and >35% slip rate (was 25%)
+  if (slipEventCount >= 20 || slipRate > 35) {
     const lockDesc = isEFILiveKpa
       ? `TCC PCS commanded pressure at full lock (≥1050 kPa)`
       : `TCC commanded at ≥90% duty cycle (full lock)`;
@@ -890,8 +917,8 @@ function checkConverterSlip(
         'converter wear, a faulty TCC solenoid, or degraded transmission fluid. Have the converter ' +
         'and TCC solenoid inspected. Consider a transmission fluid service. Contact your transmission specialist.',
     });
-  } else if (slipEventCount >= 6 || slipRate > 15) {
-    // Warning: occasional sustained slip events (raised from 4 events / 10% rate)
+  } else if (slipEventCount >= 10 || slipRate > 20) {
+    // Warning: occasional sustained slip events (raised from 6 events / 15% rate)
     const lockDesc = isEFILiveKpa ? `TCC PCS at full lock (≥1050 kPa)` : `TCC at ≥90% duty`;
     issues.push({
       code: 'CONVERTER-SLIP-WARN',

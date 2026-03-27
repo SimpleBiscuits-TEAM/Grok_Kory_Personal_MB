@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — Duramax Performance Analyzer
+ * PPEI Custom Tuning — Performance Analyzer
  * Design: Industrial Performance / Motorsport Dark
  * Colors: Black (#0a0a0a bg) + PPEI Red (oklch 0.52 0.22 25) + White text
  * Typography: Bebas Neue (headings) + Rajdhani (body) + Share Tech Mono (data)
@@ -81,7 +81,7 @@ export default function Home() {
       const diagnosticReport = analyzeDiagnostics(downsampled);
       setDiagnostics(diagnosticReport);
 
-      // Run the PPEI AI reasoning engine for context-aware analysis
+      // Run the AI reasoning engine for context-aware analysis
       const reasoning = runReasoningEngine(downsampled, diagnosticReport);
       setReasoningReport(reasoning);
 
@@ -204,7 +204,7 @@ export default function Home() {
                   lineHeight: 1.1,
                   margin: 0
                 }}>
-                  DURAMAX PERFORMANCE ANALYZER
+                  PERFORMANCE ANALYZER
                 </h1>
                 <p style={{
                   fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
@@ -214,7 +214,7 @@ export default function Home() {
                   margin: 0,
                   marginTop: '2px'
                 }}>
-                  AI-POWERED DIAGNOSTICS · HP TUNERS · EFILIVE · BANKS POWER
+                  AI-POWERED DIAGNOSTICS
                 </p>
               </div>
             </div>
@@ -239,17 +239,7 @@ export default function Home() {
                   ADVANCED
                 </div>
               </Link>
-              <div style={{
-                background: 'oklch(0.52 0.22 25)',
-                color: 'white',
-                padding: '4px 12px',
-                borderRadius: '2px',
-                fontFamily: '"Bebas Neue", sans-serif',
-                fontSize: '0.85rem',
-                letterSpacing: '0.1em'
-              }}>
-                L5P DURAMAX
-              </div>
+
             </div>
           </div>
         </div>
@@ -322,13 +312,13 @@ export default function Home() {
                     color: 'white',
                     marginBottom: '0.4rem'
                   }}>
-                    {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DURAMAX LOG'}
+                    {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
                   </h3>
                   <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your CSV file here, or click to browse
                   </p>
                   <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.40 0.008 260)', fontSize: '0.75rem', marginTop: '4px' }}>
-                    HP TUNERS · EFILIVE · BANKS POWER CSV FORMATS
+                    CSV DATALOG FORMATS SUPPORTED
                   </p>
                 </div>
                 <input
@@ -426,10 +416,10 @@ export default function Home() {
                   FILE REQUIREMENTS
                 </h3>
                 <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8, margin: 0 }}>
-                  Currently testing CSV datalog exports for L5P Duramax.
+                  Upload any CSV datalog export for analysis.
                 </p>
                 <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', lineHeight: 1.7, marginTop: '0.75rem' }}>
-                  Supported: HP Tuners · EFILive · Banks Power<br />
+                  Supported formats: CSV datalog exports<br />
                   Required columns: RPM, MAF, Torque<br />
                   Optional: Boost, Rail Pressure, EGT, Speed
                 </p>
@@ -630,10 +620,10 @@ export default function Home() {
               </div>
             )}
 
-            {/* PPEI AI Reasoning Engine */}
+            {/* AI Reasoning Engine */}
             {reasoningReport && (
               <div className="ppei-section-reveal ppei-delay-150">
-                <SectionHeader icon={<Brain style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="PPEI AI REASONING ENGINE" />
+                <SectionHeader icon={<Brain style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="AI REASONING ENGINE" />
                 <div style={{
                   background: 'oklch(0.13 0.006 260)',
                   border: '1px solid oklch(0.22 0.008 260)',
@@ -740,9 +730,9 @@ export default function Home() {
               <DtcSearch />
             </div>
 
-            {/* Engine Reference Panel */}
+            {/* Subsystem Reference */}
             <div>
-              <SectionHeader icon={<Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="ENGINE REFERENCE DATABASE" />
+              <SectionHeader icon={<Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="SUBSYSTEM REFERENCE" />
               <EcuReferencePanel />
             </div>
           </div>

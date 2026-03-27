@@ -136,3 +136,14 @@
 - [x] Skip gas-specific checks for diesel vehicles (fuel type inference from VehicleMeta)
 - [x] Update healthReport.ts with vehicle-aware filtering (skip diesel engine/fuel sections for non-diesel)
 - [x] Write tests for VIN extraction from CSV and vehicle-aware diagnostic filtering (8 new tests, 294 total passing)
+
+## Remaining False Positives & UI Cleanup
+- [x] Fix P0088 still flagging on 17L5P CSV - improved desiredDroppingMask with multi-window lookback (5/20/50 samples) + recent-peak check (80 samples)
+- [x] Fix TCC slip still flagging on 17L5P CSV - raised noise floor to 40 RPM, require 25 consecutive locked samples, raised event thresholds
+- [x] Ensure detected faults ALWAYS display in the graph (fault zone charts render when hasFaults=true, each chart self-filters by code)
+- [x] Remove Engine Reference Database panel, replaced with searchable Subsystem Reference (expanded from 8 to 25+ subsystems)
+- [x] Fix Feedback panel to submit via tRPC + database + owner notification
+- [x] Remove "HP TUNERS · EFILIVE · BANKS POWER" from header, changed to "PERFORMANCE ANALYZER" + "AI-POWERED DIAGNOSTICS"
+- [x] Changed subtitle to "AI-POWERED DIAGNOSTICS"
+- [x] Removed "L5P DURAMAX" badge from top right
+- [x] Cleaned up redundant HP Tuners/EFILive/Banks references from upload area and file requirements
