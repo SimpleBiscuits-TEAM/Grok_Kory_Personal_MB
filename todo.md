@@ -444,3 +444,9 @@
 - [x] Update PCANConnection to try wss:// first, fall back to ws://
 - [x] Add clear error messaging about mixed content if both fail
 - [x] Test connection flow end-to-end
+
+## PCAN Bridge Startup Fix
+- [x] Fix bridge hanging on startup — start WebSocket server immediately, defer CAN bus connection
+- [x] Add clear startup output logging so user can see what's happening
+- [x] Make CAN bus connection happen only when browser sends connect command
+- [x] Handle case where PCAN-USB is plugged in but not connected to vehicle

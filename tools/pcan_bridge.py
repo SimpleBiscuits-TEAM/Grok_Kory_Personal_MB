@@ -10,6 +10,9 @@ requests and raw CAN frames on the bus.
 Requirements:
     pip install python-can websockets
 
+Optional (for TLS/wss support):
+    pip install cryptography
+
 Usage:
     python pcan_bridge.py                          # Auto-detect PCAN-USB
     python pcan_bridge.py --channel PCAN_USBBUS1   # Specific channel
@@ -17,9 +20,9 @@ Usage:
     python pcan_bridge.py --interface socketcan --channel can0  # Linux socketcan
     python pcan_bridge.py --no-tls                  # Disable TLS (ws:// only)
 
-The bridge starts BOTH a secure (wss://) server on port 8766 and an
-insecure (ws://) server on port 8765 by default. The browser tries
-wss:// first (works from HTTPS pages), then falls back to ws://.
+The bridge starts the WebSocket server(s) IMMEDIATELY, then connects to
+the CAN bus when the browser sends its first request. This means you can
+verify the browser-to-bridge connection works even without a vehicle.
 
 A self-signed TLS certificate is auto-generated on first run.
 You must accept it in your browser once: visit https://localhost:8766
@@ -40,7 +43,7 @@ Protocol:
         {"type": "obd_response", "id": <req_id>, "mode": 9, "pid": 2, "data": [...]}  # VIN bytes
         {"type": "can_frame", "arb_id": 2024, "data": [4, 65, 12, 18, 52, 0, 0, 0], "timestamp": 1234567.89}
         {"type": "error", "id": <req_id>, "message": "Timeout waiting for response"}
-        {"type": "pong", "adapter": "pcan", "channel": "PCAN_USBBUS1", "status": "bus_active"}
+        {"type": "pong", "adapter": "pcan", "channel": "PCAN_USBBUS1", "status": "ready|bus_active|bus_error"}
         {"type": "connected", "adapter": "pcan", "channel": "PCAN_USBBUS1", "bitrate": 500000}
 """
 
@@ -57,24 +60,44 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# ─── Immediate startup banner ────────────────────────────────────────────────
+print(flush=True)
+print("=" * 60, flush=True)
+print("  PPEI PCAN-USB Bridge", flush=True)
+print("  Starting up...", flush=True)
+print("=" * 60, flush=True)
+print(flush=True)
+
 try:
     import can
+    print(f"  [OK] python-can {can.__version__}", flush=True)
 except ImportError:
-    print("ERROR: python-can is required. Install with: pip install python-can")
-    print("  For PCAN-USB: pip install python-can")
-    print("  For socketcan: pip install python-can  (Linux only)")
+    print("  [ERROR] python-can is required. Install with:", flush=True)
+    print("    pip install python-can", flush=True)
     sys.exit(1)
 
 try:
     import websockets
     from websockets.asyncio.server import serve
+    print(f"  [OK] websockets {websockets.__version__}", flush=True)
 except ImportError:
-    print("ERROR: websockets is required. Install with: pip install websockets")
+    print("  [ERROR] websockets is required. Install with:", flush=True)
+    print("    pip install websockets", flush=True)
     sys.exit(1)
+
+has_cryptography = False
+try:
+    import cryptography
+    has_cryptography = True
+    print(f"  [OK] cryptography {cryptography.__version__}", flush=True)
+except ImportError:
+    print("  [--] cryptography not installed (TLS may use openssl instead)", flush=True)
+
+print(flush=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
+    format='[%(asctime)s] %(message)s',
     datefmt='%H:%M:%S'
 )
 log = logging.getLogger('pcan_bridge')
@@ -124,9 +147,7 @@ def generate_self_signed_cert():
         log.info(f"TLS certificate generated: {CERT_FILE}")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        # openssl not available, try Python's ssl module approach
         try:
-            # Use Python cryptography if available
             from cryptography import x509
             from cryptography.x509.oid import NameOID
             from cryptography.hazmat.primitives import hashes, serialization
@@ -170,7 +191,6 @@ def generate_self_signed_cert():
         except ImportError:
             log.warning("Cannot generate TLS certificate (install 'cryptography' package or 'openssl')")
             log.warning("  pip install cryptography")
-            log.warning("  OR install openssl on your system")
             return False
 
 
@@ -206,7 +226,6 @@ class OBDProtocol:
         loop = asyncio.get_event_loop()
         while self._running:
             try:
-                # Read with a short timeout so we can check _running
                 msg = await loop.run_in_executor(
                     None, lambda: self.bus.recv(timeout=0.1)
                 )
@@ -237,13 +256,12 @@ class OBDProtocol:
 
         # Build the CAN frame
         if mode == 0x22:  # GM Mode 22 (extended PID)
-            # Mode 22: 3 data bytes [mode, pid_hi, pid_lo]
             pid_hi = (pid >> 8) & 0xFF
             pid_lo = pid & 0xFF
             data = [0x03, mode, pid_hi, pid_lo, 0x00, 0x00, 0x00, 0x00]
-            arb_id = ECM_REQUEST_ID  # Direct to ECM for Mode 22
+            arb_id = ECM_REQUEST_ID
         elif mode == 0x09 and pid == 0x02:
-            # VIN request: Mode 09 PID 02 (multi-frame response)
+            # VIN request
             data = [0x02, mode, pid, 0x00, 0x00, 0x00, 0x00, 0x00]
             arb_id = OBD_REQUEST_ID
         else:
@@ -251,7 +269,6 @@ class OBDProtocol:
             data = [0x02, mode, pid, 0x00, 0x00, 0x00, 0x00, 0x00]
             arb_id = OBD_REQUEST_ID
 
-        # Send the request
         msg = can.Message(
             arbitration_id=arb_id,
             data=data,
@@ -266,7 +283,6 @@ class OBDProtocol:
                 "message": f"CAN send error: {e}"
             }
 
-        # Wait for response
         try:
             response = await asyncio.wait_for(
                 self._wait_for_response(mode, pid),
@@ -283,113 +299,108 @@ class OBDProtocol:
             return {
                 "type": "error",
                 "id": req_id,
-                "message": f"Timeout: no response for Mode {mode:02X} PID {pid:04X}"
+                "message": f"Timeout waiting for response (Mode {mode:02X} PID {pid:04X})"
             }
 
     async def _wait_for_response(self, mode: int, pid: int) -> list:
-        """
-        Wait for and decode an OBD-II response.
-        Handles single-frame and multi-frame ISO-TP.
-        """
+        """Wait for and parse an OBD-II response, handling ISO-TP multi-frame."""
         while True:
             msg = await self._response_queue.get()
             if msg.arbitration_id not in RESPONSE_IDS:
                 continue
 
             frame_data = list(msg.data)
-            frame_type = (frame_data[0] >> 4) & 0x0F
+            pci_type = (frame_data[0] >> 4) & 0x0F
 
-            if frame_type == 0x0:
-                # Single Frame
+            if pci_type == 0:  # Single frame
                 length = frame_data[0] & 0x0F
-                response_mode = frame_data[1]
-                expected_mode = mode + 0x40
-
-                if response_mode == expected_mode:
-                    if mode == 0x22:
-                        # Mode 22 response: [length, 0x62, pid_hi, pid_lo, data...]
-                        return frame_data[4:4 + length - 3]
-                    else:
-                        # Standard response: [length, mode+0x40, pid, data...]
-                        return frame_data[3:3 + length - 2]
+                payload = frame_data[1:1 + length]
+                response_mode = payload[0]
+                if response_mode == (mode + 0x40):
+                    return payload[2:]  # Skip mode + pid bytes
                 elif response_mode == 0x7F:
-                    # Negative response
-                    nrc = frame_data[3] if len(frame_data) > 3 else 0
-                    raise Exception(f"Negative response: NRC 0x{nrc:02X}")
+                    return payload  # Negative response
 
-            elif frame_type == 0x1:
-                # First Frame of multi-frame response
+            elif pci_type == 1:  # First frame (multi-frame)
                 total_length = ((frame_data[0] & 0x0F) << 8) | frame_data[1]
-                response_mode = frame_data[2]
-                expected_mode = mode + 0x40
-
-                if response_mode != expected_mode:
-                    continue
-
-                # Collect first frame data
-                assembled = frame_data[2:]  # Skip the 2 PCI bytes
-                remaining = total_length - len(assembled)
-
-                # Send Flow Control: CTS (Continue To Send)
-                fc = can.Message(
+                payload = frame_data[2:]
+                
+                # Send flow control
+                fc_msg = can.Message(
                     arbitration_id=ECM_REQUEST_ID,
-                    data=[0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                    data=[ISOTP_FLOW_CONTROL, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                     is_extended_id=False
                 )
-                self.bus.send(fc)
+                self.bus.send(fc_msg)
 
-                # Receive consecutive frames
-                seq = 1
-                while remaining > 0:
+                # Collect consecutive frames
+                expected_seq = 1
+                while len(payload) < total_length:
                     try:
                         cf_msg = await asyncio.wait_for(
                             self._response_queue.get(),
                             timeout=ISOTP_FRAME_TIMEOUT
                         )
+                        cf_data = list(cf_msg.data)
+                        cf_pci = (cf_data[0] >> 4) & 0x0F
+                        cf_seq = cf_data[0] & 0x0F
+
+                        if cf_pci == 2 and cf_seq == (expected_seq & 0x0F):
+                            payload.extend(cf_data[1:])
+                            expected_seq += 1
                     except asyncio.TimeoutError:
-                        raise Exception("Timeout waiting for consecutive frame")
+                        break
 
-                    cf_data = list(cf_msg.data)
-                    cf_type = (cf_data[0] >> 4) & 0x0F
-                    cf_seq = cf_data[0] & 0x0F
-
-                    if cf_type == 0x2 and cf_seq == (seq & 0x0F):
-                        assembled.extend(cf_data[1:])
-                        remaining -= 7
-                        seq += 1
-
-                # Parse the assembled data
-                # assembled = [mode+0x40, pid, ...]
-                if mode == 0x09 and pid == 0x02:
-                    # VIN: skip mode, pid, and VIN message count byte
-                    return assembled[3:3+17]  # 17-char VIN
-                else:
-                    return assembled[2:]  # Skip mode and pid
+                # Trim to actual length and skip mode+pid header
+                payload = payload[:total_length]
+                if len(payload) > 2:
+                    return payload[2:]  # Skip mode + pid
+                return payload
 
     async def send_raw_frame(self, arb_id: int, data: list, req_id: str) -> dict:
-        """Send a raw CAN frame."""
+        """Send a raw CAN frame and return the next response."""
+        self._drain_queue()
         msg = can.Message(
             arbitration_id=arb_id,
-            data=bytes(data),
+            data=data,
             is_extended_id=False
         )
         try:
             self.bus.send(msg)
-            return {
-                "type": "can_sent",
-                "id": req_id,
-                "arb_id": arb_id
-            }
+            try:
+                response = await asyncio.wait_for(
+                    self._response_queue.get(),
+                    timeout=OBD_RESPONSE_TIMEOUT
+                )
+                return {
+                    "type": "can_frame",
+                    "id": req_id,
+                    "arb_id": response.arbitration_id,
+                    "data": list(response.data),
+                    "timestamp": response.timestamp
+                }
+            except asyncio.TimeoutError:
+                return {
+                    "type": "error",
+                    "id": req_id,
+                    "message": "Timeout waiting for CAN response"
+                }
         except can.CanError as e:
             return {
                 "type": "error",
                 "id": req_id,
-                "message": f"CAN send error: {e}"
+                "message": f"CAN send error: {e}",
+                "arb_id": arb_id
             }
 
 
 class PCANBridge:
-    """WebSocket server that bridges browser to PCAN-USB."""
+    """WebSocket server that bridges browser to PCAN-USB.
+    
+    The WebSocket server starts IMMEDIATELY so the browser can connect
+    and verify the bridge is running. The CAN bus is opened lazily
+    when the first OBD request arrives (or on explicit 'init_can' message).
+    """
 
     def __init__(self, interface: str, channel: str, bitrate: int, port: int, tls_port: int, enable_tls: bool):
         self.interface = interface
@@ -401,28 +412,47 @@ class PCANBridge:
         self.bus: Optional[can.Bus] = None
         self.protocol: Optional[OBDProtocol] = None
         self.clients: set = set()
+        self.can_initialized = False
+        self.can_error: Optional[str] = None
 
-    async def start(self):
-        """Initialize CAN bus and start WebSocket server(s)."""
-        log.info(f"Initializing {self.interface} on {self.channel} at {self.bitrate} bps...")
+    def _init_can_bus(self) -> bool:
+        """Try to open the CAN bus. Returns True on success."""
+        if self.can_initialized:
+            return True
+        
+        log.info(f"Opening CAN bus: {self.interface} / {self.channel} @ {self.bitrate} bps...")
         try:
             self.bus = can.Bus(
                 interface=self.interface,
                 channel=self.channel,
                 bitrate=self.bitrate
             )
-            log.info(f"CAN bus opened: {self.interface} / {self.channel}")
+            self.can_initialized = True
+            self.can_error = None
+            log.info(f"CAN bus opened successfully!")
+            return True
         except Exception as e:
+            self.can_error = str(e)
             log.error(f"Failed to open CAN bus: {e}")
-            log.error("Ensure PCAN-USB is connected and drivers are installed.")
             if self.interface == 'pcan':
-                log.error("  Windows: Install PCAN-Basic from https://www.peak-system.com/Downloads.76.0.html")
-                log.error("  Linux: Install peak-linux-driver or use socketcan interface")
-            sys.exit(1)
+                log.error("  Check that:")
+                log.error("    1. PCAN-USB is plugged in")
+                log.error("    2. PCAN drivers are installed (PCAN-Basic)")
+                log.error("       Download: https://www.peak-system.com/Downloads.76.0.html")
+                log.error("    3. No other software is using the PCAN-USB (close PCAN-View, etc.)")
+            return False
 
-        self.protocol = OBDProtocol(self.bus)
-        await self.protocol.start()
+    async def _ensure_can_bus(self) -> bool:
+        """Ensure CAN bus is initialized. Called lazily on first request."""
+        if self.can_initialized:
+            return True
+        
+        # Run the blocking CAN init in a thread to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._init_can_bus)
 
+    async def start(self):
+        """Start WebSocket server(s) immediately. CAN bus is deferred."""
         servers = []
 
         # Start insecure ws:// server
@@ -446,26 +476,34 @@ class PCANBridge:
                     log.warning(f"Failed to start TLS server: {e}")
                     log.warning("Falling back to ws:// only")
 
-        log.info("")
-        log.info("=" * 60)
-        log.info("  PCAN-USB Bridge is READY")
-        log.info(f"  Connect from the PPEI Performance Analyzer")
-        log.info("")
+        # Print the ready banner
+        print(flush=True)
+        print("=" * 60, flush=True)
+        print("  PCAN-USB Bridge is READY", flush=True)
+        print(f"  Adapter: {self.interface} / {self.channel}", flush=True)
+        print(f"  Bitrate: {self.bitrate} bps", flush=True)
+        print(flush=True)
         if tls_available:
-            log.info(f"  Secure:   wss://localhost:{self.tls_port}  (recommended)")
-            log.info(f"  Insecure: ws://localhost:{self.port}   (fallback)")
-            log.info("")
-            log.info("  FIRST TIME? Accept the self-signed certificate:")
-            log.info(f"  1. Open https://localhost:{self.tls_port} in Chrome")
-            log.info("  2. Click 'Advanced' -> 'Proceed to localhost'")
-            log.info("  3. You only need to do this once")
+            print(f"  Secure:   wss://localhost:{self.tls_port}  (recommended)", flush=True)
+            print(f"  Insecure: ws://localhost:{self.port}   (fallback)", flush=True)
+            print(flush=True)
+            print("  FIRST TIME? Accept the self-signed certificate:", flush=True)
+            print(f"  1. Open https://localhost:{self.tls_port} in Chrome", flush=True)
+            print("  2. Click 'Advanced' -> 'Proceed to localhost'", flush=True)
+            print("  3. You only need to do this once", flush=True)
         else:
-            log.info(f"  WebSocket: ws://localhost:{self.port}")
-            log.info("")
-            log.info("  NOTE: If connecting from HTTPS, you may need to")
-            log.info("  enable chrome://flags/#allow-insecure-localhost")
-        log.info("=" * 60)
-        log.info("")
+            print(f"  WebSocket: ws://localhost:{self.port}", flush=True)
+            print(flush=True)
+            print("  NOTE: If connecting from HTTPS, you may need to", flush=True)
+            print("  enable chrome://flags/#allow-insecure-localhost", flush=True)
+        print(flush=True)
+        print("  CAN bus will connect when the browser sends", flush=True)
+        print("  its first request (or you can pre-connect with", flush=True)
+        print("  the CHECK button in the app).", flush=True)
+        print("=" * 60, flush=True)
+        print(flush=True)
+        print("  Waiting for browser connection...", flush=True)
+        print(flush=True)
 
         # Keep running
         await asyncio.Future()
@@ -478,14 +516,16 @@ class PCANBridge:
         log.info(f"Browser connected from {client_addr} ({proto})")
         self.clients.add(websocket)
 
-        # Send connection confirmation
+        # Send connection confirmation (CAN bus status included)
         await websocket.send(json.dumps({
             "type": "connected",
             "adapter": self.interface,
             "channel": self.channel,
             "bitrate": self.bitrate,
-            "version": "1.0.0",
-            "secure": is_secure
+            "version": "1.1.0",
+            "secure": is_secure,
+            "can_ready": self.can_initialized,
+            "can_error": self.can_error
         }))
 
         try:
@@ -522,27 +562,78 @@ class PCANBridge:
                 "type": "pong",
                 "adapter": self.interface,
                 "channel": self.channel,
-                "status": "bus_active"
+                "status": "bus_active" if self.can_initialized else "ready",
+                "can_ready": self.can_initialized,
+                "can_error": self.can_error
             }
 
+        elif msg_type == "init_can":
+            # Explicit CAN bus initialization request from browser
+            success = await self._ensure_can_bus()
+            if success:
+                self.protocol = OBDProtocol(self.bus)
+                await self.protocol.start()
+                return {
+                    "type": "can_initialized",
+                    "id": req_id,
+                    "success": True,
+                    "channel": self.channel,
+                    "bitrate": self.bitrate
+                }
+            else:
+                return {
+                    "type": "error",
+                    "id": req_id,
+                    "message": f"Failed to open CAN bus: {self.can_error}\n"
+                               f"Check that PCAN-USB is plugged in and drivers are installed."
+                }
+
         elif msg_type == "obd_request":
+            # Lazy CAN bus initialization on first OBD request
+            if not self.can_initialized:
+                success = await self._ensure_can_bus()
+                if not success:
+                    return {
+                        "type": "error",
+                        "id": req_id,
+                        "message": f"CAN bus not available: {self.can_error}\n"
+                                   f"Make sure PCAN-USB is plugged in and connected to the vehicle."
+                    }
+                self.protocol = OBDProtocol(self.bus)
+                await self.protocol.start()
+
             mode = msg.get("mode", 1)
             pid = msg.get("pid", 0)
             return await self.protocol.send_obd_request(mode, pid, req_id)
 
         elif msg_type == "can_send":
+            if not self.can_initialized:
+                success = await self._ensure_can_bus()
+                if not success:
+                    return {
+                        "type": "error",
+                        "id": req_id,
+                        "message": f"CAN bus not available: {self.can_error}"
+                    }
+                self.protocol = OBDProtocol(self.bus)
+                await self.protocol.start()
+
             arb_id = msg.get("arb_id", 0)
             data = msg.get("data", [])
             return await self.protocol.send_raw_frame(arb_id, data, req_id)
 
         elif msg_type == "set_filter":
-            arb_ids = msg.get("arb_ids", [])
-            self.protocol._filter_ids = set(arb_ids) | RESPONSE_IDS
-            return {"type": "filter_set", "id": req_id, "arb_ids": list(self.protocol._filter_ids)}
+            if self.protocol:
+                arb_ids = msg.get("arb_ids", [])
+                self.protocol._filter_ids = set(arb_ids) | RESPONSE_IDS
+                return {"type": "filter_set", "id": req_id, "arb_ids": list(self.protocol._filter_ids)}
+            return {"type": "error", "id": req_id, "message": "CAN bus not initialized yet"}
 
         elif msg_type == "clear_filter":
-            self.protocol._filter_ids = RESPONSE_IDS.copy()
-            return {"type": "filter_cleared", "id": req_id}
+            if self.protocol:
+                self.protocol._filter_ids = RESPONSE_IDS.copy()
+                return {"type": "filter_cleared", "id": req_id}
+            return {"type": "error", "id": req_id, "message": "CAN bus not initialized yet"}
 
         elif msg_type == "disconnect":
             return {"type": "disconnected", "id": req_id}
@@ -613,10 +704,12 @@ Supported adapters (via python-can):
     try:
         asyncio.run(bridge.start())
     except KeyboardInterrupt:
-        log.info("Shutting down...")
+        print("\nShutting down...", flush=True)
         asyncio.run(bridge.shutdown())
     except Exception as e:
-        log.error(f"Fatal error: {e}")
+        print(f"\nFatal error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
