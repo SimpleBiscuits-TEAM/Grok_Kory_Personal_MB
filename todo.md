@@ -361,3 +361,23 @@
 - [x] Add peak EGT to datalog quick stats summary
 - [x] Skip EGT in quick stats if sensor is flatlined (stuck past 1800°F or constant value = not working)
 - [x] Fix health report referencing CP4 pump when vehicle has HP4 (L5P uses HP4, not CP4)
+
+## PDF Watermark & App Version Badge
+- [x] Add very light "PPEI Ai Beta" watermark to all PDF export pages (already existed in pdfExport.ts and healthReportPdf.ts)
+- [x] Add v0.01 version badge displayed on app pages (version only changes when user explicitly requests it)
+
+## LB7 EFILive Parser Support
+- [x] Fix EFILive format detection to recognize PCM.RPM / PCM.MAF (LB7/LLY prefix)
+- [x] Add LB7 PCM.* PID candidates to EFILive parser column lookups
+- [x] Handle LB7-specific unit conversions (MPa→PSI, kPa absolute boost, µs→ms, text gears, negative mm3)
+- [x] Add PCM.* candidates to pidSubstitution.ts
+- [x] Build converter stall / turbo efficiency diagnostic logic in reasoning engine
+- [x] Add LB7-specific knowledge to vehicleKnowledgeBase
+
+## Converter Stall & Boost Leak Diagnostics
+- [x] Build converter stall vs turbo spool mismatch detection (WOT stall RPM vs turbo spool threshold)
+- [x] Build boost leak suspicion logic (peak boost lower than expected for MAF/turbo size, MAP sensor should be maxed)
+- [x] Compound diagnosis: tight stall + boost leak exaggerate each other — note this in diagnostics
+- [x] Never state stall is "too tight" definitively — suggest as a possibility
+- [x] Add LB7 platform to vehicleKnowledgeBase with CP3, solenoid injectors, Allison 1000 5-speed
+- [x] Add PCM.* candidates to pidSubstitution.ts

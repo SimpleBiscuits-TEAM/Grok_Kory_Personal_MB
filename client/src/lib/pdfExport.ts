@@ -5,6 +5,7 @@ import { ProcessedMetrics } from './dataProcessor';
 import { DiagnosticReport } from './diagnostics';
 import { HealthReportData } from './healthReport';
 import { PdfExportRefs } from '@/hooks/usePdfExport';
+import { APP_VERSION } from './version';
 
 /**
  * Convert a DOM element to a base64 PNG image.
@@ -327,6 +328,6 @@ doc.addPage();
   }
 
   const timestamp = new Date().toISOString().slice(0, 10);
-  doc.save(`Duramax_Report_${timestamp}.pdf`);
+  doc.save(`PPEI_Report_${APP_VERSION}_${timestamp}.pdf`);
 }
 // cache bust Wed Mar 25 16:19:48 EDT 2026

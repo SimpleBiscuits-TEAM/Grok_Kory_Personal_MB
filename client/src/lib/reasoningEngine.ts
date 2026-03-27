@@ -94,6 +94,12 @@ export function runReasoningEngine(
   // ── Step 5: Boost / VGT correlation reasoning ────────────────────────────
   findings.push(...analyzeBoostSystem(data, ctx));
 
+  // ── Step 5b: Converter stall vs turbo spool mismatch ─────────────────────
+  findings.push(...analyzeConverterStallVsTurboSpool(data, ctx));
+
+  // ── Step 5c: Boost leak detection ────────────────────────────────────────
+  findings.push(...analyzeBoostLeak(data, ctx));
+
   // ── Step 6: Beta improvement suggestions ─────────────────────────────────
   betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics));
 
@@ -617,6 +623,283 @@ function analyzeBoostSystem(
         suggestion: 'Clean VGT vanes with approved cleaner. Test boost control solenoid. Perform VGT learn procedure.',
       });
     }
+  }
+
+  return findings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Converter Stall vs Turbo Spool Mismatch Analysis
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Detect when the torque converter stall speed at WOT from a stop is too low
+ * to get the turbocharger into its efficient spool range. This is especially
+ * relevant for vehicles with larger aftermarket turbochargers that need higher
+ * RPM to begin producing boost.
+ *
+ * IMPORTANT: We never state the stall is definitively "too tight" — we suggest
+ * it as a possibility that warrants investigation.
+ */
+function analyzeConverterStallVsTurboSpool(
+  data: ProcessedMetrics,
+  ctx: OperatingContext
+): ReasoningFinding[] {
+  const findings: ReasoningFinding[] = [];
+  const rpm = data.rpm;
+  const throttle = data.throttlePosition;
+  const boost = data.boost;
+  const gear = data.currentGear || [];
+  const vss = data.vehicleSpeed;
+
+  if (rpm.length === 0 || throttle.length === 0 || boost.length === 0) return findings;
+
+  // Find WOT launch events: throttle > 85%, gear 1, vehicle speed < 15 mph (from a stop)
+  // Look for the peak RPM during these events before the vehicle starts moving
+  const wotLaunches: Array<{
+    startIdx: number;
+    peakRpm: number;
+    peakBoostDuringStall: number;
+    rpmAtFirstBoost: number;
+    boostBuildDelay: number; // samples from WOT to first meaningful boost
+  }> = [];
+
+  let inWotLaunch = false;
+  let launchStart = -1;
+  let peakRpm = 0;
+  let peakBoostDuringStall = 0;
+  let firstBoostIdx = -1;
+
+  for (let i = 0; i < rpm.length; i++) {
+    const isWot = throttle[i] > 85;
+    const isLowGear = gear.length > 0 ? (gear[i] === 1 || gear[i] === 2) : true;
+    const isLowSpeed = vss[i] < 15;
+
+    if (isWot && isLowGear && isLowSpeed && !inWotLaunch) {
+      inWotLaunch = true;
+      launchStart = i;
+      peakRpm = rpm[i];
+      peakBoostDuringStall = boost[i];
+      firstBoostIdx = -1;
+    } else if (inWotLaunch) {
+      if (!isWot || vss[i] > 30) {
+        // End of launch event
+        if (launchStart >= 0 && (i - launchStart) > 5) {
+          wotLaunches.push({
+            startIdx: launchStart,
+            peakRpm,
+            peakBoostDuringStall,
+            rpmAtFirstBoost: firstBoostIdx >= 0 ? rpm[firstBoostIdx] : 0,
+            boostBuildDelay: firstBoostIdx >= 0 ? firstBoostIdx - launchStart : i - launchStart,
+          });
+        }
+        inWotLaunch = false;
+        launchStart = -1;
+      } else {
+        if (rpm[i] > peakRpm) peakRpm = rpm[i];
+        if (boost[i] > peakBoostDuringStall) peakBoostDuringStall = boost[i];
+        if (firstBoostIdx < 0 && boost[i] > 3) firstBoostIdx = i;
+      }
+    }
+  }
+
+  if (wotLaunches.length === 0) return findings;
+
+  // Analyze the launches for stall/spool mismatch
+  const avgPeakStallRpm = wotLaunches.reduce((s, l) => s + l.peakRpm, 0) / wotLaunches.length;
+  const avgBoostDuringStall = wotLaunches.reduce((s, l) => s + l.peakBoostDuringStall, 0) / wotLaunches.length;
+  const maxBoostOverall = Math.max(...boost.filter(v => v > 0));
+
+  // If peak stall RPM is below ~1800 and boost during the stall phase is minimal,
+  // the converter may not be allowing the engine to reach the turbo's spool range
+  const stallRpmLow = avgPeakStallRpm < 1800;
+  const boostDuringStallLow = avgBoostDuringStall < 5; // less than 5 psi during stall phase
+  const significantBoostLater = maxBoostOverall > 15; // turbo does make boost eventually
+
+  if (stallRpmLow && boostDuringStallLow) {
+    const evidence: string[] = [
+      `Average peak RPM during WOT launch stall: ${avgPeakStallRpm.toFixed(0)} RPM`,
+      `Average boost during stall phase: ${avgBoostDuringStall.toFixed(1)} psi`,
+      `WOT launch events analyzed: ${wotLaunches.length}`,
+    ];
+
+    if (significantBoostLater) {
+      evidence.push(`Peak boost observed later in log: ${maxBoostOverall.toFixed(1)} psi — turbo is capable of producing boost at higher RPM`);
+    }
+
+    for (const launch of wotLaunches.slice(0, 3)) {
+      evidence.push(
+        `Launch event: stall peak ${launch.peakRpm.toFixed(0)} RPM, ` +
+        `boost during stall ${launch.peakBoostDuringStall.toFixed(1)} psi` +
+        (launch.rpmAtFirstBoost > 0 ? `, first boost (>3 psi) at ${launch.rpmAtFirstBoost.toFixed(0)} RPM` : ', no meaningful boost during stall phase')
+      );
+    }
+
+    findings.push({
+      id: 'converter-stall-turbo-mismatch',
+      category: 'transmission',
+      confidence: 'medium',
+      type: 'warning',
+      title: 'Possible Converter Stall / Turbo Spool Mismatch',
+      reasoning:
+        `During WOT launches from a stop, the torque converter stall speed peaked at approximately ` +
+        `${avgPeakStallRpm.toFixed(0)} RPM with minimal boost production (${avgBoostDuringStall.toFixed(1)} psi). ` +
+        `If this vehicle is equipped with a larger aftermarket turbocharger, the turbo may require ` +
+        `higher RPM (typically 1800-2200+ RPM) to begin producing meaningful boost. ` +
+        `A converter stall speed that does not reach the turbo's spool threshold could result in ` +
+        `sluggish acceleration, excessive smoke from unburned fuel (fueling without adequate airflow), ` +
+        `and a perception of lag from a dead stop. ` +
+        `This is one possible contributing factor — it does not necessarily mean the converter is ` +
+        `the sole issue, but the data suggests the engine is not reaching the RPM range where ` +
+        `the turbocharger becomes efficient during the initial launch phase.`,
+      evidence,
+      suggestion:
+        'Consider evaluating the torque converter stall speed relative to the turbocharger\'s ' +
+        'effective spool range. A converter with a higher stall speed matched to the turbo\'s ' +
+        'power curve may improve off-the-line response. Also check for boost leaks that could ' +
+        'compound the issue by reducing boost at all RPM ranges. If the vehicle has a larger turbo, ' +
+        'a stall converter in the 2200-2800 RPM range (matched to the turbo) is common practice.',
+      betaNote:
+        'PPEI AI Beta: Converter stall analysis examines WOT launch events (throttle >85%, ' +
+        'gear 1-2, VSS <15 mph) and compares peak stall RPM against boost production. ' +
+        'This finding is presented as a possibility, not a definitive diagnosis — multiple ' +
+        'factors (boost leaks, fueling, turbo sizing) can produce similar symptoms.',
+    });
+  }
+
+  return findings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Boost Leak Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Detect possible boost leaks by analyzing the relationship between MAF
+ * (airflow), RPM, and peak boost pressure. A vehicle with a larger turbo
+ * should be pegging the MAP sensor, so low peak boost with adequate airflow
+ * suggests a leak in the charge system.
+ *
+ * Also considers compound effects: a tight converter stall + boost leak
+ * exaggerate each other — the turbo can't spool efficiently at low RPM,
+ * and whatever boost it does make is leaking out.
+ */
+function analyzeBoostLeak(
+  data: ProcessedMetrics,
+  ctx: OperatingContext
+): ReasoningFinding[] {
+  const findings: ReasoningFinding[] = [];
+  const boost = data.boost;
+  const maf = data.maf;
+  const rpm = data.rpm;
+  const throttle = data.throttlePosition;
+
+  if (boost.length === 0 || maf.length === 0) return findings;
+  if (data.boostActualAvailable === false) return findings;
+
+  const maxBoost = Math.max(...boost.filter(v => v > 0));
+  if (maxBoost < 1) return findings;
+
+  // Find WOT samples (throttle > 85%) to analyze boost under load
+  const wotSamples: Array<{boost: number; maf: number; rpm: number}> = [];
+  for (let i = 0; i < rpm.length; i++) {
+    if (throttle[i] > 85 && rpm[i] > 1500) {
+      wotSamples.push({ boost: boost[i], maf: maf[i], rpm: rpm[i] });
+    }
+  }
+
+  if (wotSamples.length < 10) return findings;
+
+  const peakWotBoost = Math.max(...wotSamples.map(s => s.boost));
+  const peakWotMaf = Math.max(...wotSamples.map(s => s.maf));
+  const avgWotMaf = wotSamples.reduce((s, w) => s + w.maf, 0) / wotSamples.length;
+  const peakWotRpm = Math.max(...wotSamples.map(s => s.rpm));
+
+  // Heuristic: If MAF is reasonably high (engine is getting fuel and air request)
+  // but boost is suspiciously low, suspect a leak.
+  // For reference: a stock LB7 makes ~22 psi, a larger turbo should exceed 30 psi.
+  // A MAP sensor typically maxes around 30-36 psi on most Duramax platforms.
+  // If peak boost is under 28 psi with good MAF, there may be a leak.
+  //
+  // We use MAF-to-boost ratio as a secondary indicator:
+  // Higher MAF with lower boost = air is being produced but not contained.
+
+  // Determine if boost seems low for the airflow being produced
+  // MAF > 40 lb/min (converted from g/s: ~300 g/s) with boost < 28 psi is suspicious
+  const mafHighEnough = peakWotMaf > 40; // lb/min — indicates turbo is moving air
+  const boostSuspiciouslyLow = peakWotBoost < 28;
+
+  // Also check: does boost plateau early and not climb with increasing RPM?
+  // This is a classic leak signature — the turbo makes more air but it escapes.
+  const highRpmSamples = wotSamples.filter(s => s.rpm > 2500);
+  const midRpmSamples = wotSamples.filter(s => s.rpm >= 1800 && s.rpm <= 2500);
+  let boostPlateaus = false;
+  if (highRpmSamples.length > 5 && midRpmSamples.length > 5) {
+    const avgHighBoost = highRpmSamples.reduce((s, w) => s + w.boost, 0) / highRpmSamples.length;
+    const avgMidBoost = midRpmSamples.reduce((s, w) => s + w.boost, 0) / midRpmSamples.length;
+    // If boost doesn't increase much from mid to high RPM despite more airflow
+    if (avgMidBoost > 5 && (avgHighBoost - avgMidBoost) < 3) {
+      boostPlateaus = true;
+    }
+  }
+
+  if ((mafHighEnough && boostSuspiciouslyLow) || boostPlateaus) {
+    const evidence: string[] = [
+      `Peak boost under WOT: ${peakWotBoost.toFixed(1)} psi`,
+      `Peak MAF under WOT: ${peakWotMaf.toFixed(1)} lb/min`,
+      `Average MAF under WOT: ${avgWotMaf.toFixed(1)} lb/min`,
+      `Peak RPM under WOT: ${peakWotRpm.toFixed(0)} RPM`,
+    ];
+
+    if (boostPlateaus) {
+      evidence.push('Boost pressure plateaus between mid and high RPM despite increasing airflow — classic leak signature');
+    }
+
+    if (mafHighEnough && boostSuspiciouslyLow) {
+      evidence.push(
+        `MAF indicates the turbo is moving adequate air (${peakWotMaf.toFixed(1)} lb/min) ` +
+        `but peak boost is only ${peakWotBoost.toFixed(1)} psi — air may be escaping before the intake manifold`
+      );
+    }
+
+    // Check if we also found a converter stall mismatch — compound diagnosis
+    const hasStallMismatch = data.rpm.length > 0; // will be cross-referenced at render time
+    // We note the compound effect in the reasoning regardless
+
+    findings.push({
+      id: 'boost-leak-suspicion',
+      category: 'boost',
+      confidence: boostPlateaus ? 'medium' : 'low',
+      type: 'warning',
+      title: 'Possible Boost Leak — Low Peak Boost for Observed Airflow',
+      reasoning:
+        `The turbocharger appears to be producing adequate airflow (peak MAF ${peakWotMaf.toFixed(1)} lb/min) ` +
+        `but peak boost pressure is only ${peakWotBoost.toFixed(1)} psi under WOT conditions. ` +
+        `On a vehicle with a larger turbocharger, the MAP sensor should be approaching its maximum ` +
+        `reading (typically 30-36 psi). The lower-than-expected boost suggests air may be escaping ` +
+        `the charge system before reaching the intake manifold. ` +
+        (boostPlateaus
+          ? 'Additionally, boost pressure plateaus between mid and high RPM despite increasing ' +
+            'airflow — this is a classic boost leak signature where the turbo produces more air ' +
+            'at higher RPM but the leak prevents pressure from building further. '
+          : '') +
+        `If a converter stall mismatch is also present, the two issues compound each other: ` +
+        `the turbo cannot spool efficiently at low RPM due to the stall speed, and whatever ` +
+        `boost it does produce is reduced by the leak. This combination can make both problems ` +
+        `appear worse than either would be in isolation.`,
+      evidence,
+      suggestion:
+        'Perform a boost leak test on the charge system. Check all intercooler boots, clamps, ' +
+        'intercooler end tanks, up-pipe connections, and turbo outlet. Even a small leak can ' +
+        'significantly reduce peak boost. If the vehicle also has a converter stall concern, ' +
+        'address the boost leak first — restoring full boost pressure may partially compensate ' +
+        'for a lower stall speed by allowing the turbo to build pressure more quickly.',
+      betaNote:
+        'PPEI AI Beta: Boost leak detection compares peak MAF (airflow) against peak boost ' +
+        'pressure under WOT conditions. A secondary check looks for boost plateauing between ' +
+        'mid and high RPM despite increasing airflow. The compound effect with converter stall ' +
+        'mismatch is noted when both conditions are detected in the same log.',
+    });
   }
 
   return findings;

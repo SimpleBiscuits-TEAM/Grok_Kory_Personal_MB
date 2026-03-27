@@ -30,6 +30,7 @@ import DragTimeslip from '@/components/DragTimeslip';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import CompareView from '@/components/CompareView';
+import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -225,6 +226,19 @@ export default function Home() {
             </div>
             {/* Right side — version badge + advanced mode */}
             <div className="flex items-center gap-3">
+              <span style={{
+                fontFamily: '"Share Tech Mono", monospace',
+                fontSize: '0.65rem',
+                color: 'oklch(0.45 0.010 260)',
+                letterSpacing: '0.06em',
+                padding: '2px 8px',
+                border: '1px solid oklch(0.22 0.006 260)',
+                borderRadius: '2px',
+                background: 'oklch(0.12 0.004 260)',
+                userSelect: 'none',
+              }}>
+                {APP_VERSION}
+              </span>
               <Link href="/advanced" style={{ textDecoration: 'none' }}>
                 <div className="ppei-btn-hover" style={{
                   display: 'flex',
@@ -244,7 +258,6 @@ export default function Home() {
                   ADVANCED
                 </div>
               </Link>
-
             </div>
           </div>
         </div>

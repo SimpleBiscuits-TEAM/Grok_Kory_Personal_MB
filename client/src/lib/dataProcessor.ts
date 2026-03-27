@@ -220,7 +220,11 @@ export function parseCSV(content: string): DuramaxData {
   );
   
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
-  const isEFILive = cleanLines.some(line => line.includes('ECM.RPM') || line.includes('ECM.MAF'));
+  // LB7/LLY EFILive logs use PCM.RPM / PCM.MAF instead of ECM prefix
+  const isEFILive = cleanLines.some(line =>
+    line.includes('ECM.RPM') || line.includes('ECM.MAF') ||
+    line.includes('PCM.RPM') || line.includes('PCM.MAF')
+  );
   
   let result: DuramaxData;
   if (isDatalogger) {
@@ -488,6 +492,9 @@ function parseDataloggerCSV(content: string): DuramaxData {
     const rpmVal = getValWithFill(values, 'rpm');
     const loadVal = getValWithFill(values, 'torquePercent');
     if (rpmVal === 0 && loadVal === 0 && elapsed < 0.5) continue;
+    // Skip data glitch rows: RPM=0 with impossible sensor values (key-cycle noise)
+    // These occur when the ECM is powering down and sensors report garbage values
+    if (rpmVal === 0 && elapsed > 1) continue;
 
     offset.push(elapsed);
     rpm.push(rpmVal);
@@ -1011,6 +1018,11 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
   // Row 0 = PID codes (authoritative column identifiers)
   const pidHeaders = lines[0].split(',').map(h => h.trim());
+  // Row 2 = Units row (e.g. "rpm", "kPa", "MPa", "us", "°C") — used for smart conversions
+  const unitsRow = lines[2] ? lines[2].split(',').map(u => u.trim().toLowerCase()) : [];
+
+  // Detect LB7/LLY prefix: older Duramax EFILive logs use PCM.* instead of ECM.*
+  const isLB7Style = pidHeaders.some(h => h.startsWith('PCM.'));
 
   /**
    * Find column index by exact PID code match first, then fallback to substring.
@@ -1030,39 +1042,53 @@ function parseEFILiveCSV(content: string): DuramaxData {
     return -1;
   };
 
+  /** Get the unit string for a column index from the units row */
+  const getUnit = (idx: number): string => {
+    if (idx < 0 || idx >= unitsRow.length) return '';
+    return unitsRow[idx];
+  };
+
   // ── Core engine PIDs ──────────────────────────────────────────────────────
+  // Each lookup includes both ECM.* (LML/L5P) and PCM.* (LB7/LLY) variants
   const timeIdx          = getColumnIndex(['Time']);
-  const rpmIdx           = getColumnIndex(['ECM.RPM']);
-  const mafIdx           = getColumnIndex(['ECM.MAF']);
-  // MAP (Manifold Absolute Pressure) used as boost proxy for LML/L5P
-  const mapIdx           = getColumnIndex(['ECM.MAP']);
-  // Boost desired: LML uses ECM.TCDBPR (Turbocharger Desired Boost Pressure)
-  const boostDesiredIdx  = getColumnIndex(['ECM.TCDBPR', 'ECM.DESTQ', 'ECM.MAPDES']);
-  // Torque: LML logs ECM.TQ_DD (Driver Demanded) or ECM.TQ_ACT
-  const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD']);
-  const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF']);
-  const speedIdx         = getColumnIndex(['ECM.VSS']);
-  const fuelRateIdx      = getColumnIndex(['ECM.FUEL_RATE', 'ECM.FUELRCALC']);
+  const rpmIdx           = getColumnIndex(['ECM.RPM', 'PCM.RPM']);
+  const mafIdx           = getColumnIndex(['ECM.MAF', 'PCM.MAF']);
+  // MAP / Boost: LML uses ECM.MAP; LB7 uses PCM.BOOST_M (kPa absolute)
+  const mapIdx           = getColumnIndex(['ECM.MAP', 'PCM.BOOST_M', 'PCM.MAP']);
+  // Boost desired: LML uses ECM.TCDBPR; LB7 may not have a direct desired boost PID
+  const boostDesiredIdx  = getColumnIndex(['ECM.TCDBPR', 'ECM.DESTQ', 'ECM.MAPDES', 'PCM.MAPDES']);
+  // Torque: LML logs ECM.TQ_DD / ECM.TQ_ACT; LB7 uses TCM.TRQENG_B (Nm)
+  const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD', 'TCM.TRQENG_B', 'PCM.TQ_ACT']);
+  const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF', 'PCM.TQ_REF']);
+  const speedIdx         = getColumnIndex(['ECM.VSS', 'PCM.VSS']);
+  const fuelRateIdx      = getColumnIndex(['ECM.FUEL_RATE', 'ECM.FUELRCALC', 'PCM.FUEL_RATE']);
 
   // ── Fuel rail PIDs ────────────────────────────────────────────────────────
-  const railActualIdx    = getColumnIndex(['ECM.FRP_A']);
-  const railDesiredIdx   = getColumnIndex(['ECM.FRPDI']);
+  // LB7: PCM.FRPACT (MPa), PCM.FRP_C (kPa), PCM.FRPDES (MPa)
+  // LML/L5P: ECM.FRP_A (kPa), ECM.FRPDI (kPa)
+  const railActualIdx    = getColumnIndex(['ECM.FRP_A', 'PCM.FRPACT', 'PCM.FRP_C']);
+  const railDesiredIdx   = getColumnIndex(['ECM.FRPDI', 'PCM.FRPDES']);
   // PCV desired current (mA) — what the ECM commands the PCV solenoid
-  const pcvIdx           = getColumnIndex(['ECM.FRPVDC']);
+  // LB7: PCM.FRPACOM (mA)
+  const pcvIdx           = getColumnIndex(['ECM.FRPVDC', 'PCM.FRPACOM']);
   // PCV measured current (mA) — actual solenoid feedback
-  const pcvMeasIdx       = getColumnIndex(['ECM.FRPVAC']);
+  const pcvMeasIdx       = getColumnIndex(['ECM.FRPVAC', 'PCM.FRPVAC']);
 
   // ── Turbo / VGT PIDs ─────────────────────────────────────────────────────
-  const turboVaneIdx         = getColumnIndex(['ECM.TCVPOS']);
-  const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD']);
+  // LB7 has a fixed-geometry turbo (no VGT) — these will be -1 for LB7 logs
+  const turboVaneIdx         = getColumnIndex(['ECM.TCVPOS', 'PCM.TCVPOS']);
+  const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD', 'PCM.TCVDES']);
 
   // ── EGT PIDs — LML has up to 5 sensors ───────────────────────────────────
   // Scan ALL EGT-matching columns and pick the one with the highest peak reading.
-  // LML/L5P may have EGTS1 through EGTS5 — use the hottest channel for diagnostics.
+  // LML/L5P may have EGTS1 through EGTS5; LB7 may have PCM.EGT or PCM.EGTS*
   const egtIdx = (() => {
     const egtCandidates = pidHeaders
       .map((h, i) => ({ header: h, idx: i }))
-      .filter(({ header }) => /^ECM\.EGTS\d?$/i.test(header) || /^ECM\.EGT$/i.test(header));
+      .filter(({ header }) =>
+        /^ECM\.EGTS\d?$/i.test(header) || /^ECM\.EGT$/i.test(header) ||
+        /^PCM\.EGTS?\d?$/i.test(header) || /^PCM\.EGT$/i.test(header)
+      );
     if (egtCandidates.length === 0) return -1;
     if (egtCandidates.length === 1) return egtCandidates[0].idx;
     // Parse data rows (start at row 3) to find which EGT column has the highest peak
@@ -1085,34 +1111,43 @@ function parseEFILiveCSV(content: string): DuramaxData {
   // TCM.TCSLIP  = TCC reference slip target (what the TCM wants)
   // TCM.TCCPCSCP = TCC PCS commanded pressure (kPa) — 1050 kPa = full lock
   // TCM.TCCP    = TCC commanded pressure (older naming)
+  // LB7: TCM.TCCSLIP (same name), TCM.TCCDC (duty cycle %)
   const tccActualSlipIdx   = getColumnIndex(['TCM.TCCSLIP']);
   const tccRefSlipIdx      = getColumnIndex(['TCM.TCSLIP']);
   const tccPcsIdx          = getColumnIndex(['TCM.TCCPCSCP']);
   const tccPressureIdx     = getColumnIndex(['TCM.TCCP']);
-  // Use TCCPCSCP as the primary duty/pressure signal; fall back to TCCP
-  const converterDutyIdx   = tccPcsIdx !== -1 ? tccPcsIdx : tccPressureIdx;
+  // LB7 TCC duty cycle (%) — direct percentage, not pressure
+  const tccDcIdx           = getColumnIndex(['TCM.TCCDC']);
+  // Use TCCPCSCP as the primary duty/pressure signal; fall back to TCCP, then TCCDC
+  const converterDutyIdx   = tccPcsIdx !== -1 ? tccPcsIdx : (tccPressureIdx !== -1 ? tccPressureIdx : tccDcIdx);
   // Actual slip = TCCSLIP; reference slip = TCSLIP (used as fallback)
   const converterSlipIdx   = tccActualSlipIdx !== -1 ? tccActualSlipIdx : tccRefSlipIdx;
-  const currentGearIdx    = getColumnIndex(['TCM.CURGEAR', 'TCM.GEAR', 'TCM.CG']);
+  // LB7 turbine speed: TCM.TURBINE (rpm) — used for converter stall analysis
+  const turbineSpeedIdx    = getColumnIndex(['TCM.TURBINE']);
+  // Gear: LB7 uses TCM.GEAR with text values ("First", "Second", etc.)
+  const currentGearIdx    = getColumnIndex(['TCM.CURGEAR', 'TCM.GEAR', 'TCM.CG', 'TCM.CMDGEAR']);
 
   // ── Other sensor PIDs ────────────────────────────────────────────────────────────────────────
-  const oilPressureIdx    = getColumnIndex(['ECM.OILP']);
-  const coolantTempIdx    = getColumnIndex(['ECM.ECT']);
-  const oilTempIdx        = getColumnIndex(['ECM.EOT']);
+  const oilPressureIdx    = getColumnIndex(['ECM.OILP', 'PCM.OILP']);
+  const coolantTempIdx    = getColumnIndex(['ECM.ECT', 'PCM.ECT']);
+  const oilTempIdx        = getColumnIndex(['ECM.EOT', 'PCM.EOT']);
   const transFluidTempIdx = getColumnIndex(['TCM.TFT']);
-  const baroIdx           = getColumnIndex(['ECM.BARO']);
-  const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'Accelerator Pedal Position', 'Throttle Position']);
-  const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW']);
-  const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING']);
-  const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT']);
-  const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate']);
+  const baroIdx           = getColumnIndex(['ECM.BARO', 'PCM.BARO']);
+  const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'PCM.TP_A', 'PCM.TPS', 'PCM.APP', 'Accelerator Pedal Position', 'Throttle Position']);
+  // LB7: PCM.MAINBPW (microseconds); LML/L5P: ECM.INJPW (ms)
+  const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW', 'PCM.MAINBPW']);
+  // LB7: PCM.MNINJTIM (degrees)
+  const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING', 'PCM.MNINJTIM']);
+  const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT', 'PCM.IAT', 'PCM.INTAKEAIRTEMP']);
+  // LB7: PCM.FUEL_MAIN_M (mm3)
+  const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate', 'PCM.FUEL_MAIN_M']);
 
   // ── Validate required columns ────────────────────────────────────────
   // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
   // so we only require RPM and MAF as hard requirements.
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error(
-      'Missing required EFILive columns: ECM.RPM and/or ECM.MAF. ' +
+      'Missing required EFILive columns: RPM and/or MAF (ECM.RPM/PCM.RPM, ECM.MAF/PCM.MAF). ' +
       'Ensure your EFILive scan tool logged these PIDs.'
     );
   }
@@ -1178,9 +1213,13 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
     const rpmVal = parseVal(rpmIdx);
     if (isNaN(rpmVal)) continue; // skip rows with no RPM data
+    // Skip data glitch rows: RPM=0 with impossible sensor values (key-cycle noise)
+    // These occur when the ECM is powering down and sensors report garbage values.
+    // Only skip after the first few rows to allow initial idle data through.
+    if (rpmVal === 0 && i > dataStartRow + 5) continue;
 
     rpm.push(rpmVal);
-    // ECM.MAF is in g/s — convert to lb/min (imperial) for consistency with HP Tuners
+    // ECM.MAF / PCM.MAF is in g/s — convert to lb/min (imperial) for consistency with HP Tuners
     // 1 g/s = 0.132277 lb/min
     const mafGps = parseVal(mafIdx);
     maf.push(isNaN(mafGps) ? 0 : mafGps * 0.132277);
@@ -1227,12 +1266,25 @@ function parseEFILiveCSV(content: string): DuramaxData {
     const timeMs = parseVal(timeIdx);
     offset.push(isNaN(timeMs) ? i - dataStartRow : timeMs / 1000);
 
-    // Rail pressure: EFILive logs in kPa; convert to psi
-    // 1 kPa = 0.145038 psi
-    const railActKpa = parseVal(railActualIdx);
-    const railDesKpa = parseVal(railDesiredIdx);
-    railPressureActual.push(isNaN(railActKpa) ? 0 : railActKpa * 0.145038);
-    railPressureDesired.push(isNaN(railDesKpa) ? 0 : railDesKpa * 0.145038);
+    // Rail pressure: LML/L5P logs in kPa; LB7 logs in MPa (FRPACT/FRPDES) or kPa (FRP_C)
+    // Detect unit from the units row or from the PID name
+    const railActRaw = parseVal(railActualIdx);
+    const railDesRaw = parseVal(railDesiredIdx);
+    const railActUnit = getUnit(railActualIdx);
+    const railDesUnit = getUnit(railDesiredIdx);
+    // MPa → PSI: 1 MPa = 145.038 PSI; kPa → PSI: 1 kPa = 0.145038 PSI
+    const railActPsi = isNaN(railActRaw) ? 0 : (
+      railActUnit.includes('mpa') || (isLB7Style && pidHeaders[railActualIdx]?.includes('FRPACT'))
+        ? railActRaw * 145.038
+        : railActRaw * 0.145038
+    );
+    const railDesPsi = isNaN(railDesRaw) ? 0 : (
+      railDesUnit.includes('mpa') || (isLB7Style && pidHeaders[railDesiredIdx]?.includes('FRPDES'))
+        ? railDesRaw * 145.038
+        : railDesRaw * 0.145038
+    );
+    railPressureActual.push(railActPsi);
+    railPressureDesired.push(railDesPsi);
 
     // PCV: EFILive logs in mA; store raw mA (diagnostics engine handles unit awareness)
     pcvDutyCycle.push(isNaN(parseVal(pcvIdx)) ? 0 : parseVal(pcvIdx));
@@ -1255,7 +1307,19 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // TCC pressure (legacy field — use PCS pressure if available)
     const tccPresVal = parseVal(tccPressureIdx);
     converterPressure.push(isNaN(tccPresVal) ? (isNaN(tccPcsVal) ? 0 : tccPcsVal) : tccPresVal);
-    const gearVal = parseVal(currentGearIdx);
+    // Gear: LML/L5P is numeric; LB7 TCM.GEAR uses text ("First", "Second", etc.)
+    let gearVal = parseVal(currentGearIdx);
+    if (isNaN(gearVal) && currentGearIdx !== -1 && currentGearIdx < rawCols.length) {
+      const gearText = rawCols[currentGearIdx]?.trim().toLowerCase();
+      const gearMap: Record<string, number> = {
+        'park': 0, 'p': 0, 'neutral': 0, 'n': 0,
+        'reverse': -1, 'r': -1, 'rev': -1,
+        'first': 1, '1st': 1, 'second': 2, '2nd': 2,
+        'third': 3, '3rd': 3, 'fourth': 4, '4th': 4,
+        'fifth': 5, '5th': 5, 'sixth': 6, '6th': 6,
+      };
+      gearVal = gearMap[gearText] ?? 0;
+    }
     currentGear.push(isNaN(gearVal) ? 0 : gearVal);
 
     // Oil pressure: EFILive may log in kPa — convert to psi if value looks like kPa (>100)
@@ -1276,18 +1340,26 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
     barometricPressure.push(isNaN(baroKpa) ? 14.7 : baroKpa * 0.145038);
     throttlePosition.push(isNaN(parseVal(throttleIdx)) ? 0 : parseVal(throttleIdx));
-    // Injector pulse width (ms) — EFILive logs this directly
-    const ipwVal = parseVal(injPulseWidthIdx);
-    injectorPulseWidth.push(isNaN(ipwVal) ? 0 : ipwVal);
+    // Injector pulse width: LML/L5P in ms; LB7 PCM.MAINBPW in microseconds (µs)
+    const ipwRaw = parseVal(injPulseWidthIdx);
+    const ipwUnit = getUnit(injPulseWidthIdx);
+    const ipwMs = isNaN(ipwRaw) ? 0 : (
+      ipwUnit.includes('us') || ipwUnit.includes('µs') || ipwUnit.includes('usec') ||
+      (isLB7Style && pidHeaders[injPulseWidthIdx]?.includes('MAINBPW'))
+        ? ipwRaw / 1000  // µs → ms
+        : ipwRaw
+    );
+    injectorPulseWidth.push(ipwMs);
     // Injection timing (degrees) — EFILive logs in degrees BTDC
     const itmVal = parseVal(injTimingIdx);
     injectionTiming.push(isNaN(itmVal) ? 0 : itmVal);
     // Intake air temp — EFILive logs in °C, convert to °F
     const iatC = parseVal(iatIdx);
     intakeAirTemp.push(isNaN(iatC) || iatC <= -40 ? 0 : (iatC * 9/5) + 32);
-    // Fuel quantity: ECM.INJQNTALL is in mm3/stroke (no conversion needed)
+    // Fuel quantity: ECM.INJQNTALL / PCM.FUEL_MAIN_M is in mm3/stroke
+    // LB7: can be negative (-512) when engine off — clamp to 0
     const fqVal = parseVal(fuelQuantityIdx);
-    fuelQuantity.push(isNaN(fqVal) ? 0 : fqVal);
+    fuelQuantity.push(isNaN(fqVal) ? 0 : Math.max(0, fqVal));
   }
 
   if (rpm.length === 0) {

@@ -12,6 +12,7 @@ import { HealthReportData } from './healthReport';
 import { ProcessedMetrics } from './dataProcessor';
 import { renderAdvancedAnalytics } from './advancedHealthPdf';
 import { DragAnalysis, DragRun, DragTip } from './dragAnalyzer';
+import { APP_VERSION } from './version';
 
 const PPEI_RED: [number, number, number] = [220, 38, 38];
 const DARK_BG: [number, number, number] = [13, 15, 20];
@@ -1659,5 +1660,5 @@ export function generateHealthReportPdf(
 
   const timestamp = new Date().toISOString().slice(0, 10);
   const cleanName = vehicleName.replace(/[^a-zA-Z0-9]/g, '_');
-  doc.save(`PPEI_Health_Report_${cleanName}_${timestamp}.pdf`);
+  doc.save(`PPEI_Health_Report_${APP_VERSION}_${cleanName}_${timestamp}.pdf`);
 }

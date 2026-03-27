@@ -48,6 +48,7 @@ import DragTimeslip from '@/components/DragTimeslip';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import DataloggerPanel from '@/components/DataloggerPanel';
 import BinaryUploadPanel from '@/components/BinaryUploadPanel';
+import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const ACCESS_CODE = 'PPEIROCKS';
@@ -1116,6 +1117,20 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                 <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>ADVANCED MODE</h1>
                 <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>BETA · AI DIAGNOSTICS · MULTI-VEHICLE · A2L SUPPORT</p>
               </div>
+              <span style={{
+                fontFamily: sFont.mono,
+                fontSize: '0.6rem',
+                color: 'oklch(0.45 0.010 260)',
+                letterSpacing: '0.06em',
+                padding: '2px 8px',
+                border: '1px solid oklch(0.22 0.006 260)',
+                borderRadius: '2px',
+                background: 'oklch(0.12 0.004 260)',
+                userSelect: 'none',
+                alignSelf: 'center',
+              }}>
+                {APP_VERSION}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: `${sColor.green}1f`, border: `1px solid ${sColor.green}4d`, borderRadius: '2px' }}>

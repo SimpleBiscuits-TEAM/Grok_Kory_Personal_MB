@@ -106,15 +106,15 @@ export function resolvePids(
   // ─── Boost Pressure ──────────────────────────────────────────────────────
   // Priority: direct gauge PID → MAP absolute (subtract idle baseline) → zero
   {
-    const directIdx = find(['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST']);
+    const directIdx = find(['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M']);
     const mapAbsIdx = find([
-      'ECM.MAP',                          // EFILive absolute kPa
+      'ECM.MAP', 'PCM.MAP',               // EFILive absolute kPa
       'Intake Manifold Absolute Pressure', // HP Tuners absolute PSIA
       'Manifold Absolute Pressure',
       'MAP',
     ]);
     const baroIdx = find([
-      'ECM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure',
+      'ECM.BARO', 'PCM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure',
       'B-Bus Ambient Air Pressure',
     ]);
 
@@ -178,8 +178,8 @@ export function resolvePids(
   // ─── Boost Desired ────────────────────────────────────────────────────────
   {
     const desIdx = find([
-      'ECM.TCDBPR', 'ECM.MAPDES', 'Desired Boost', 'MAP Commanded',
-      'Boost Desired', 'Boost Target',
+      'ECM.TCDBPR', 'ECM.MAPDES', 'PCM.TCDBPR', 'PCM.MAPDES',
+      'Desired Boost', 'MAP Commanded', 'Boost Desired', 'Boost Target',
     ]);
     const baroIdx = find(['ECM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure']);
     const desArr = desIdx !== -1 ? col(desIdx) : [];
@@ -213,14 +213,27 @@ export function resolvePids(
   // ─── Rail Pressure Actual ─────────────────────────────────────────────────
   {
     const railIdx = find([
-      'ECM.FRP_A', 'Fuel Rail Pressure', 'Rail Pressure', 'FRP Actual',
+      'ECM.FRP_A', 'PCM.FRPACT', 'PCM.FRP_C',
+      'Fuel Rail Pressure', 'Rail Pressure', 'FRP Actual',
     ]);
     const railArr = railIdx !== -1 ? col(railIdx) : [];
 
     if (railIdx !== -1 && !isFlat(railArr)) {
       const maxRail = Math.max(...railArr.filter(v => !isNaN(v)));
-      // EFILive logs kPa (typical idle ~26000 kPa); HP Tuners logs PSI (~3800 psi)
-      if (maxRail > 5000) {
+      const railHeader = headers[railIdx].toUpperCase();
+      // LB7 FRPACT/FRPDES in MPa (typical peak ~180 MPa); LML/L5P in kPa (~180000 kPa)
+      if (maxRail < 500 && (railHeader.includes('FRPACT') || railHeader.includes('FRPDES'))) {
+        // MPa → PSI (1 MPa = 145.038 PSI)
+        channels['railPressureActual'] = railArr.map(v => isNaN(v) ? 0 : v * 145.038);
+        substitutions.push({
+          channel: 'Rail Pressure Actual',
+          primaryAttempted: headers[railIdx],
+          usedPid: headers[railIdx],
+          transform: 'MPa × 145.038 → PSI',
+          reason: 'LB7 EFILive logs rail pressure in MPa. Converted to PSI for consistency.',
+          confidence: 'high',
+        });
+      } else if (maxRail > 5000) {
         channels['railPressureActual'] = railArr.map(v => isNaN(v) ? 0 : v * 0.145038);
         substitutions.push({
           channel: 'Rail Pressure Actual',
@@ -242,15 +255,22 @@ export function resolvePids(
   // ─── Rail Pressure Desired ────────────────────────────────────────────────
   {
     const desIdx = find([
-      'ECM.FRPDI', 'Desired Fuel Pressure', 'FRP Commanded', 'Rail Pressure Desired',
+      'ECM.FRPDI', 'PCM.FRPDES',
+      'Desired Fuel Pressure', 'FRP Commanded', 'Rail Pressure Desired',
     ]);
     const desArr = desIdx !== -1 ? col(desIdx) : [];
 
     if (desIdx !== -1 && !isFlat(desArr)) {
       const maxDes = Math.max(...desArr.filter(v => !isNaN(v)));
-      channels['railPressureDesired'] = desArr.map(v =>
-        isNaN(v) ? 0 : maxDes > 5000 ? v * 0.145038 : v
-      );
+      const desHeader = headers[desIdx].toUpperCase();
+      if (maxDes < 500 && (desHeader.includes('FRPACT') || desHeader.includes('FRPDES'))) {
+        // MPa → PSI
+        channels['railPressureDesired'] = desArr.map(v => isNaN(v) ? 0 : v * 145.038);
+      } else {
+        channels['railPressureDesired'] = desArr.map(v =>
+          isNaN(v) ? 0 : maxDes > 5000 ? v * 0.145038 : v
+        );
+      }
     } else {
       channels['railPressureDesired'] = new Array(rpm.length).fill(0);
     }
@@ -259,8 +279,8 @@ export function resolvePids(
   // ─── PCV / Fuel Pressure Regulator ───────────────────────────────────────
   // Primary: PCV measured current (mA). Fallback: PCV desired current or duty %
   {
-    const pcvMeasIdx = find(['ECM.FRPVAC', 'PCV Measured', 'PCV Current Actual']);
-    const pcvDesIdx  = find(['ECM.FRPVDC', 'ECM.FRPVDC', 'PCV', 'Pressure Regulator', 'PCV Duty']);
+    const pcvMeasIdx = find(['ECM.FRPVAC', 'PCM.FRPACOM', 'PCV Measured', 'PCV Current Actual']);
+    const pcvDesIdx  = find(['ECM.FRPVDC', 'PCM.FRPACOM', 'PCV', 'Pressure Regulator', 'PCV Duty']);
     const pcvMeasArr = pcvMeasIdx !== -1 ? col(pcvMeasIdx) : [];
     const pcvDesArr  = pcvDesIdx  !== -1 ? col(pcvDesIdx)  : [];
 
@@ -285,7 +305,7 @@ export function resolvePids(
 
   // ─── MAF ─────────────────────────────────────────────────────────────────
   {
-    const mafIdx = find(['ECM.MAF', 'Mass Airflow', 'Mass Air Flow', 'MAF']);
+    const mafIdx = find(['ECM.MAF', 'PCM.MAF', 'Mass Airflow', 'Mass Air Flow', 'MAF']);
     const mafArr = mafIdx !== -1 ? col(mafIdx) : [];
     channels['maf'] = mafIdx !== -1 ? mafArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
     if (mafIdx === -1) missing.push('MAF');
@@ -293,7 +313,7 @@ export function resolvePids(
 
   // ─── Vehicle Speed ────────────────────────────────────────────────────────
   {
-    const speedIdx = find(['ECM.VSS', 'Vehicle Speed', 'Speed (MPH)', 'Speed']);
+    const speedIdx = find(['ECM.VSS', 'PCM.VSS', 'Vehicle Speed', 'Speed (MPH)', 'Speed']);
     const speedArr = speedIdx !== -1 ? col(speedIdx) : [];
     channels['vehicleSpeed'] = speedIdx !== -1 ? speedArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
   }
@@ -301,7 +321,7 @@ export function resolvePids(
   // ─── Coolant Temp ─────────────────────────────────────────────────────────
   // EFILive: °C → convert to °F. HP Tuners: already °F
   {
-    const ectIdx = find(['ECM.ECT', 'Engine Coolant Temp', 'Coolant Temperature', 'ECT', 'Coolant Temp']);
+    const ectIdx = find(['ECM.ECT', 'PCM.ECT', 'Engine Coolant Temp', 'Coolant Temperature', 'ECT', 'Coolant Temp']);
     const ectArr = ectIdx !== -1 ? col(ectIdx) : [];
 
     if (ectIdx !== -1 && !isFlat(ectArr)) {
@@ -329,7 +349,7 @@ export function resolvePids(
 
   // ─── Oil Temp ─────────────────────────────────────────────────────────────
   {
-    const eotIdx = find(['ECM.EOT', 'Engine Oil Temp', 'Oil Temperature', 'EOT', 'Oil Temp']);
+    const eotIdx = find(['ECM.EOT', 'PCM.EOT', 'Engine Oil Temp', 'Oil Temperature', 'EOT', 'Oil Temp']);
     const eotArr = eotIdx !== -1 ? col(eotIdx) : [];
     if (eotIdx !== -1 && !isFlat(eotArr)) {
       const maxEot = Math.max(...eotArr.filter(v => !isNaN(v)));
@@ -358,6 +378,7 @@ export function resolvePids(
   {
     const egtKeywords = [
       'ECM.EGTS1', 'ECM.EGTS2', 'ECM.EGTS3', 'ECM.EGTS4', 'ECM.EGTS5', 'ECM.EGTS', 'ECM.EGT',
+      'PCM.EGTS1', 'PCM.EGTS2', 'PCM.EGTS', 'PCM.EGT',
       'Exhaust Gas Temperature', 'EGT1 - Diesel Oxidization CAT (DOC) Inlet',
       'EGT1 - Diesel Oxidization CAT', 'EGT - Turbo Inlet Temperature', 'EGT',
     ];
@@ -396,15 +417,15 @@ export function resolvePids(
 
   // ─── TCC Commanded Pressure / Duty ────────────────────────────────────────
   {
-    const tccPcsIdx = find(['TCM.TCCPCSCP', 'TCM.TCCP', 'Converter Duty', 'Converter PWM', 'TCC Pressure', 'Torque Converter Status']);
+    const tccPcsIdx = find(['TCM.TCCPCSCP', 'TCM.TCCP', 'TCM.TCCDC', 'Converter Duty', 'Converter PWM', 'TCC Pressure', 'Torque Converter Status']);
     const tccArr = tccPcsIdx !== -1 ? col(tccPcsIdx) : [];
     channels['converterDutyCycle'] = tccPcsIdx !== -1 ? tccArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
   }
 
   // ─── Turbo Vane Position ──────────────────────────────────────────────────
   {
-    const vaneIdx = find(['ECM.TCVPOS', 'Turbo Vane Position', 'Turbo A Vane Position']);
-    const vaneDesIdx = find(['ECM.TCVDES', 'ECM.TCVCMD', 'Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo Vane Position Desired']);
+    const vaneIdx = find(['ECM.TCVPOS', 'PCM.TCVPOS', 'Turbo Vane Position', 'Turbo A Vane Position']);
+    const vaneDesIdx = find(['ECM.TCVDES', 'ECM.TCVCMD', 'PCM.TCVDES', 'Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo Vane Position Desired']);
     const vaneArr = vaneIdx !== -1 ? col(vaneIdx) : [];
     const vaneDesArr = vaneDesIdx !== -1 ? col(vaneDesIdx) : [];
     channels['turboVanePosition'] = vaneIdx !== -1 ? vaneArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
@@ -413,14 +434,14 @@ export function resolvePids(
 
   // ─── Oil Pressure ─────────────────────────────────────────────────────────
   {
-    const oilIdx = find(['ECM.OILP', 'Engine Oil Pressure', 'Oil Pressure']);
+    const oilIdx = find(['ECM.OILP', 'PCM.OILP', 'Engine Oil Pressure', 'Oil Pressure']);
     const oilArr = oilIdx !== -1 ? col(oilIdx) : [];
     channels['oilPressure'] = oilIdx !== -1 ? oilArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
   }
 
   // ─── Barometric Pressure ──────────────────────────────────────────────────
   {
-    const baroIdx = find(['ECM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
+    const baroIdx = find(['ECM.BARO', 'PCM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
     const baroArr = baroIdx !== -1 ? col(baroIdx) : [];
     if (baroIdx !== -1 && !isFlat(baroArr)) {
       const maxBaro = Math.max(...baroArr.filter(v => !isNaN(v)));
@@ -435,7 +456,7 @@ export function resolvePids(
 
   // ─── Fuel Rate ────────────────────────────────────────────────────────────
   {
-    const fuelIdx = find(['ECM.FUEL_RATE', 'ECM.FUELRCALC', 'Engine Fuel Rate', 'Fuel Flow Rate', 'Cylinder Fuel Rate']);
+    const fuelIdx = find(['ECM.FUEL_RATE', 'ECM.FUELRCALC', 'PCM.FUEL_RATE', 'Engine Fuel Rate', 'Fuel Flow Rate', 'Cylinder Fuel Rate']);
     const fuelArr = fuelIdx !== -1 ? col(fuelIdx) : [];
     channels['fuelRate'] = fuelIdx !== -1 ? fuelArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
   }
@@ -443,7 +464,7 @@ export function resolvePids(
   // ─── Torque Percent ───────────────────────────────────────────────────────
   // EFILive: ECM.TQ_ACT or ECM.TQ_DD (Nm) → convert to %; HP Tuners: direct %
   {
-    const torqIdx = find(['ECM.TQ_ACT', 'ECM.TQ_DD', 'Actual Engine Torque', 'Torque ECU']);
+    const torqIdx = find(['ECM.TQ_ACT', 'ECM.TQ_DD', 'TCM.TRQENG_B', 'Actual Engine Torque', 'Torque ECU']);
     const maxTorqIdx = find(['ECM.TQ_REF', 'Maximum Engine Torque']);
     const torqArr = torqIdx !== -1 ? col(torqIdx) : [];
     const maxTorqArr = maxTorqIdx !== -1 ? col(maxTorqIdx) : [];
@@ -482,8 +503,8 @@ export function resolvePids(
   // ─── Throttle Position (needed for drag run detection) ────────────────────
   {
     const tpsIdx = find([
-      'ECM.TPS', 'ECM.THROTTLE', 'Accelerator Pedal Position',
-      'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal',
+      'ECM.TPS', 'ECM.THROTTLE', 'PCM.TP_A', 'PCM.TPS',
+      'Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal',
     ]);
     const tpsArr = tpsIdx !== -1 ? col(tpsIdx) : [];
     channels['throttlePosition'] = tpsIdx !== -1 ? tpsArr.map(v => isNaN(v) ? 0 : v) : new Array(rpm.length).fill(0);
