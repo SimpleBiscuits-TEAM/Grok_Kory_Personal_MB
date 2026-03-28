@@ -887,3 +887,9 @@
 ## Bug Fix (2026-03-28 continued)
 - [x] TuneCompare: diff values showing NaN instead of actual values — fix OOB handling
 - [x] TuneCompare: clicking a changed map doesn't select it in left pane — add onSelectMap callback
+
+## Feature (2026-03-28 continued)
+- [x] CalibrationEditor: add undo/redo history stack for copy operations
+- [x] CalibrationEditor: add Undo/Redo buttons to toolbar
+- [x] CalibrationEditor: add keyboard shortcuts (Ctrl+Z / Ctrl+Y) for undo/redo
+- [x] CalibrationEditor: display history state in UI (e.g., "Undo (3 changes)" button label)

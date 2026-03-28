@@ -64,6 +64,10 @@ export default function CalibrationEditor() {
   const [showHealLog, setShowHealLog] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Undo/Redo history
+  const [history, setHistory] = useState<Uint8Array[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,6 +75,8 @@ export default function CalibrationEditor() {
   const ecuDefRef = useRef<EcuDefinition | null>(null);
   const binaryDataRef = useRef<Uint8Array | null>(null);
   const binaryBaseAddressRef = useRef<number>(0);
+  const historyRef = useRef<Uint8Array[]>([]);
+  const historyIndexRef = useRef<number>(-1);
 
   useEffect(() => {
     ecuDefRef.current = ecuDef;
@@ -81,6 +87,57 @@ export default function CalibrationEditor() {
   useEffect(() => {
     binaryBaseAddressRef.current = binaryBaseAddress;
   }, [binaryBaseAddress]);
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
+
+  // Push a new state to history (called after copy operations)
+  const pushToHistory = useCallback((newBinary: Uint8Array) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(new Uint8Array(newBinary));
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  }, [history, historyIndex]);
+
+  // Undo: go back one step
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setBinaryData(new Uint8Array(history[newIndex]));
+      setHistoryIndex(newIndex);
+      setCopyStatus({ message: 'Undo successful', type: 'success' });
+      setTimeout(() => setCopyStatus(null), 2000);
+    }
+  }, [history, historyIndex]);
+
+  // Redo: go forward one step
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setBinaryData(new Uint8Array(history[newIndex]));
+      setHistoryIndex(newIndex);
+      setCopyStatus({ message: 'Redo successful', type: 'success' });
+      setTimeout(() => setCopyStatus(null), 2000);
+    }
+  }, [history, historyIndex]);
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const storeA2LMutation = trpc.editor.storeA2L.useMutation();
   const trpcUtils = trpc.useUtils();
@@ -642,6 +699,35 @@ export default function CalibrationEditor() {
           </div>
         )}
 
+        {/* Undo/Redo buttons */}
+        {history.length > 0 && (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[10px] px-2 border-zinc-700 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleUndo}
+              disabled={historyIndex <= 0}
+              title="Undo (Ctrl+Z)"
+            >
+              ↶ Undo
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-[10px] px-2 border-zinc-700 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleRedo}
+              disabled={historyIndex >= history.length - 1}
+              title="Redo (Ctrl+Y)"
+            >
+              ↷ Redo
+            </Button>
+            <span className="text-[9px] text-zinc-500 font-mono ml-1">
+              {historyIndex + 1}/{history.length}
+            </span>
+          </div>
+        )}
+
         <div className="flex-1" />
 
         {/* Right side actions */}
@@ -759,6 +845,7 @@ export default function CalibrationEditor() {
                           }
                         }
                         setBinaryData(newBinary);
+                        pushToHistory(newBinary);
                         setCopyStatus({ message: `Copied ${changes.length} value(s) to primary binary`, type: 'success' });
                         setTimeout(() => setCopyStatus(null), 3000);
                       } catch (err) {
