@@ -38,6 +38,12 @@ interface MapDiff {
   valuesB: number[];
   maxIncrease: number;
   maxDecrease: number;
+  minValueA: number;
+  maxValueA: number;
+  avgValueA: number;
+  minValueB: number;
+  maxValueB: number;
+  avgValueB: number;
 }
 
 interface TuneCompareProps {
@@ -226,9 +232,21 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         }
       }
 
+      // Calculate Min/Max/Avg for both files
+      const validA = valuesA.filter((_, i) => valuesA[i] !== 0 || valuesB[i] !== 0);
+      const validB = valuesB.filter((_, i) => valuesA[i] !== 0 || valuesB[i] !== 0);
+      
+      const minValueA = validA.length > 0 ? Math.min(...validA) : 0;
+      const maxValueA = validA.length > 0 ? Math.max(...validA) : 0;
+      const avgValueA = validA.length > 0 ? validA.reduce((a, b) => a + b, 0) / validA.length : 0;
+      
+      const minValueB = validB.length > 0 ? Math.min(...validB) : 0;
+      const maxValueB = validB.length > 0 ? Math.max(...validB) : 0;
+      const avgValueB = validB.length > 0 ? validB.reduce((a, b) => a + b, 0) / validB.length : 0;
+
       // Only report maps where we had valid reads AND at least one cell changed
       if (changedCells > 0 && validCells > 0) {
-        diffs.push({ mapIndex: idx, map, changedCells, totalCells, valuesA, valuesB, maxIncrease, maxDecrease });
+        diffs.push({ mapIndex: idx, map, changedCells, totalCells, valuesA, valuesB, maxIncrease, maxDecrease, minValueA, maxValueA, avgValueA, minValueB, maxValueB, avgValueB });
       }
     });
 
@@ -471,6 +489,8 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                       <span className="text-[10px] text-zinc-500">{diff.map.category}</span>
                       <span className="text-[10px] text-amber-400 font-mono">{diff.changedCells}/{diff.totalCells}</span>
                       <span className="text-[10px] text-zinc-600">({pctChanged}%)</span>
+                      <span className="text-[10px] text-zinc-500">A: [{diff.minValueA.toFixed(0)}, {diff.maxValueA.toFixed(0)}, avg {diff.avgValueA.toFixed(1)}]</span>
+                      <span className="text-[10px] text-zinc-500">B: [{diff.minValueB.toFixed(0)}, {diff.maxValueB.toFixed(0)}, avg {diff.avgValueB.toFixed(1)}]</span>
                       {diff.maxIncrease > 0 && <span className="text-[10px] text-emerald-500">+{diff.maxIncrease}</span>}
                       {diff.maxDecrease < 0 && <span className="text-[10px] text-red-500">{diff.maxDecrease}</span>}
                     </button>

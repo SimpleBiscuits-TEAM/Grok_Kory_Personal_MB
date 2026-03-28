@@ -904,3 +904,12 @@
 - [x] TuneCompare: Erika auto-fix attempts (padding, truncation, offset adjustment)
 - [x] TuneCompare: warning banner with offset diagnostics if mismatch persists
 - [x] TuneCompare: show which offsets could be in error and why
+
+## Feature (2026-03-28 batch copy)
+- [ ] TuneCompare: group maps by category (from Magic Mode or A2L)
+- [ ] TuneCompare: add checkboxes for per-category selection
+- [ ] TuneCompare: add "Copy Selected Categories" button
+- [ ] TuneCompare: show count of selected maps before batch copy
+
+## Bug Fix (2026-03-28 NaN issue)
+- [x] TuneCompare: diff values showing NaN for Min/Max/Avg and actual values — added Min/Max/Avg calculation to MapDiff
