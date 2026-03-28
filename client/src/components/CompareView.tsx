@@ -64,7 +64,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
     if (slot === 'A') setDragOverA(false);
     else setDragOverB(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.name.endsWith('.csv')) {
+    if (file) {
       processLogFile(file, slot);
     }
   }, [processLogFile]);
@@ -171,7 +171,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
           onClear={() => { setLogA({ ...emptySlot }); setReport(null); setAiAnalysis(null); }}
           accentColor="oklch(0.70 0.18 200)"
         />
-        <input ref={fileInputARef} type="file" accept=".csv" className="hidden" onChange={(e) => handleFileSelect(e, 'A')} />
+        <input ref={fileInputARef} type="file" accept="*" className="hidden" onChange={(e) => handleFileSelect(e, 'A')} />
 
         {/* Log B */}
         <DropZone
@@ -186,7 +186,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
           onClear={() => { setLogB({ ...emptySlot }); setReport(null); setAiAnalysis(null); }}
           accentColor="oklch(0.52 0.22 25)"
         />
-        <input ref={fileInputBRef} type="file" accept=".csv" className="hidden" onChange={(e) => handleFileSelect(e, 'B')} />
+        <input ref={fileInputBRef} type="file" accept="*" className="hidden" onChange={(e) => handleFileSelect(e, 'B')} />
       </div>
 
       {/* Optional context chat */}

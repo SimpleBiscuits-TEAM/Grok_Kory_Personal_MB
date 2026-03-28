@@ -137,8 +137,9 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
           left: '50%',
           transform: 'translate(-50%, -50%)',
           width: 'min(520px, 95vw)',
-          maxHeight: '90vh',
+          maxHeight: '85vh',
           overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
           background: 'oklch(0.11 0.005 260)',
           border: '1px solid oklch(0.25 0.008 260)',
           borderTop: '3px solid oklch(0.52 0.22 25)',
@@ -228,7 +229,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         </div>
 
         {/* Body */}
-        <div style={{ padding: '1.25rem' }}>
+        <div style={{ padding: '1.25rem', paddingBottom: '2rem' }}>
 
           {/* Success state */}
           {status === 'success' && (
@@ -288,7 +289,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 Help us improve. All feedback is reviewed directly by the team.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                 <div>
                   <label style={labelStyle}>Name (optional)</label>
                   <input
@@ -375,7 +376,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   justifyContent: 'center',
                   gap: '8px',
                   transition: 'background 0.15s',
-                  alignSelf: 'flex-end',
+                  alignSelf: 'stretch',
+                  width: '100%',
                 }}
               >
                 <Send style={{ width: '14px', height: '14px' }} />
@@ -391,7 +393,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 Found a bug or incorrect result? Report it here and we'll investigate.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                 <div>
                   <label style={labelStyle}>Name (optional)</label>
                   <input
@@ -509,7 +511,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   justifyContent: 'center',
                   gap: '8px',
                   transition: 'background 0.15s',
-                  alignSelf: 'flex-end',
+                  alignSelf: 'stretch',
+                  width: '100%',
                 }}
               >
                 <AlertTriangle style={{ width: '14px', height: '14px' }} />

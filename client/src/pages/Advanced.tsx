@@ -931,9 +931,9 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
                 {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
               </h3>
               <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem' }}>Drag & drop your CSV file here, or click to browse</p>
-              <p style={{ fontFamily: sFont.mono, color: sColor.textMuted, fontSize: '0.75rem', marginTop: '4px' }}>HP TUNERS · EFILIVE · BANKS POWER CSV FORMATS</p>
+
             </div>
-            <input ref={fileInputRef} type="file" accept=".csv" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />
+            <input ref={fileInputRef} type="file" accept="*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />
             <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} disabled={loading} style={{
               background: loading ? 'oklch(0.35 0.010 260)' : sColor.red, color: 'white', fontFamily: sFont.heading,
               fontSize: '1.1rem', letterSpacing: '0.1em', padding: '10px 32px', borderRadius: '3px', border: 'none',

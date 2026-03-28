@@ -450,3 +450,9 @@
 - [x] Add clear startup output logging so user can see what's happening
 - [x] Make CAN bus connection happen only when browser sends connect command
 - [x] Handle case where PCAN-USB is plugged in but not connected to vehicle
+
+## Accept All CSV Datalogs + Feedback Mobile Fix
+- [x] Remove accepted file type text/restrictions from analyzer upload area
+- [x] Accept all CSV datalogs regardless of format
+- [x] If a file fails to parse, send bug notification to owner with file details instead of rejecting
+- [x] Fix feedback panel mobile layout — submit button goes off-screen on phones

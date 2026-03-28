@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
+import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
@@ -50,6 +51,7 @@ export default function Home() {
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bugReportMutation = trpc.feedback.submit.useMutation();
 
   // Refs for PDF export
   const dynoRef = useRef<DynoChartHandle>(null);
@@ -109,7 +111,8 @@ export default function Home() {
         });
       }
     } catch (err) {
-      setError('File load error — Contact PPEI and the team will update the tool.');
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setError('File load error \u2014 This file format has been reported to the PPEI team for review. We\'ll update the tool to support it.');
       setData(null);
       setBinnedData(undefined);
       setDiagnostics(null);
@@ -118,6 +121,15 @@ export default function Home() {
       setManualVin('');
       setReasoningReport(null);
       setDragAnalysis(null);
+      // Auto-report unsupported file to owner
+      try {
+        bugReportMutation.mutate({
+          type: 'error',
+          message: `Auto-report: File parse failure\nFilename: ${file.name}\nSize: ${(file.size / 1024).toFixed(1)} KB\nError: ${errorMsg}`,
+          errorType: 'File Upload / Parse Error',
+          context: `Auto-reported parse failure for: ${file.name}`,
+        });
+      } catch { /* silent */ }
     } finally {
       setLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -133,10 +145,8 @@ export default function Home() {
     e.preventDefault();
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.name.endsWith('.csv')) {
+    if (file) {
       processFile(file);
-    } else {
-      setError('File load error — Please upload a CSV file. If the issue persists, contact PPEI and the team will update the tool.');
     }
   }, [processFile]);
 
@@ -412,14 +422,12 @@ export default function Home() {
                   <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your CSV file here, or click to browse
                   </p>
-                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.40 0.008 260)', fontSize: '0.75rem', marginTop: '4px' }}>
-                    CSV DATALOG FORMATS SUPPORTED
-                  </p>
+
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv"
+                  accept="*"
                   onChange={handleFileChange}
                   disabled={loading}
                   className="hidden"
