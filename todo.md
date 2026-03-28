@@ -521,4 +521,37 @@
 - [ ] Export modified binary to user's local browser (download)
 - [ ] Google Drive integration for file reference and save
 - [ ] Support additional cloud storage providers (future)
-- [ ] Name the calibration LLM assistant "Erika" throughout UI, chat panel, and system prompts
+- [x] Name the calibration LLM assistant "Erika" throughout UI, chat panel, and system prompts
+
+## Erika Personality & Forum Knowledge
+- [x] Erika gains knowledge from public forums: PCMHacking, MHHAuto, DuramaxForum, CumminsForums, Powerstroke, BMW, LS, Tesla, 2JZ, Can-Am, powersports forums
+- [x] Erika evaluates and reasons with beyond-expert-level knowledge from those sources
+- [x] Erika cites sources when giving forum-sourced opinions (non-validated info)
+- [x] Erika has a tongue-in-cheek sense of humor, extremely rare mom jokes
+- [x] Erika has a fun personality but gets detailed and expert-level thorough when hammering through a project
+- [x] Erika provides access to complete mapped A2L when user asks (full map list with all parsed characteristics)
+- [x] If maps are missing, Erika explains why (unsupported layout, missing COMPU_METHOD, offset failure), suggests solutions, or says "SOL"
+
+## Editor Smart Search Engine
+- [x] Build intelligent on-the-fly search across all maps, measurements, and categories
+- [x] Instant results as user types (debounced keystroke search)
+- [x] Smart ranking: exact > starts-with > contains > address > description > category > unit > fuzzy (11 scoring tiers)
+- [x] Show map type, category, address, unit, and value status in search results
+- [x] Click result to navigate directly to that map in the editor
+- [x] Search by: map name, description, category, subcategory, address (hex), unit, annotations, camelCase/underscore split
+- [x] Keyboard navigation (↑↓ arrows, Enter to select, Escape to clear)
+- [x] Highlight matched text in results with red highlight spans
+- [x] Show result count and search time (ms)
+
+## Checksum Correction, Flash Procedures & ECU Unlocks (Target: ~4 weeks)
+- [ ] Implement checksum correction on binary export (per ECU family: CRC32, sum, XOR, proprietary)
+- [ ] Research checksum algorithms from PCMHacking source, A2L checksum blocks, functional docs
+- [ ] Detect checksum regions in binary (header checksums, calibration checksums, OS checksums)
+- [ ] Auto-fix checksums before export so modified files are flash-ready
+- [ ] Build flash procedure support (read/write routines per ECU family)
+- [ ] Research flash bootloader routines from PCMHacking, strategy docs, source code
+- [ ] Implement ECU unlock/security access routines (seed-key algorithms per ECU family)
+- [ ] Study A2L, functional documents, strategy docs, and ECU source code for unlock procedures
+- [ ] Support J2534 passthru device communication for flash operations
+- [ ] Build flash progress UI with verification and error handling
+- [ ] Validate exported files have correct checksums before allowing flash

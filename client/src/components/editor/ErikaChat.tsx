@@ -30,7 +30,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: `Hey! I'm **Erika**, your calibration engineering assistant. I can help you with:\n\n- **Finding tables** — "Where is the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo control?"\n- **Designing features** — "How would I implement launch control?"\n- **DTC troubleshooting** — "How do I disable P0087?"\n- **Calibration strategy** — "What tables affect boost at 3000 RPM?"\n\nI have access to the loaded ECU definition and can trace control logic through the calibration maps. What are you working on?`,
+      content: `Hey! I'm **Erika** — your calibration engineering partner. Think of me as that friend who's spent way too many late nights staring at hex dumps and forum threads. I can help you with:\n\n- **Finding tables** — "Where's the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo actually control?"\n- **Designing features** — "How would I build launch control from scratch?"\n- **DTC troubleshooting** — "What's the enable criteria for P0087?"\n- **Calibration strategy** — "What tables interact with boost at 3000 RPM?"\n- **Forum wisdom** — I've absorbed knowledge from PCMHacking, MHHAuto, DuramaxForum, CumminsForums, and more. I'll cite my sources when it's community-sourced info.\n\nLoad up an A2L and binary and let's get to work. What are you wrenching on?`,
       timestamp: Date.now(),
     },
   ]);
@@ -66,14 +66,59 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     }
     parts.push(`Categories: ${Array.from(categories.entries()).map(([k, v]) => `${k}(${v})`).join(', ')}`);
 
-    // Include a sample of map names for context (first 200)
-    const mapNames = ecuDef.maps.slice(0, 200).map(m => `${m.name} [${m.type}] - ${m.description || m.category}`);
-    parts.push(`\nSample map names (first 200 of ${ecuDef.maps.length}):\n${mapNames.join('\n')}`);
+    // Include ALL map names grouped by category for complete A2L access
+    // Group maps by category for organized listing
+    const mapsByCategory = new Map<string, typeof ecuDef.maps>();
+    for (const m of ecuDef.maps) {
+      const cat = m.category || 'Other';
+      if (!mapsByCategory.has(cat)) mapsByCategory.set(cat, []);
+      mapsByCategory.get(cat)!.push(m);
+    }
 
-    // Include measurement names sample
+    // If total maps < 2000, include ALL names (fits in context window)
+    // If > 2000, include first 500 + category summary
+    const totalMaps = ecuDef.maps.length;
+    if (totalMaps <= 2000) {
+      parts.push(`\nCOMPLETE MAP LIST (all ${totalMaps} maps):`);
+      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+        parts.push(`\n### ${cat} (${maps.length} maps)`);
+        for (const m of maps) {
+          const addr = m.address ? `0x${m.address.toString(16).toUpperCase()}` : 'N/A';
+          const hasValues = m.physValues && m.physValues.length > 0 ? '✓' : '✗';
+          parts.push(`  ${m.name} [${m.type}] addr:${addr} values:${hasValues} - ${m.description || m.subcategory || ''}`);
+        }
+      }
+    } else {
+      parts.push(`\nMAP LIST (first 500 of ${totalMaps} — ask for specific categories to see all):`);
+      let count = 0;
+      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+        parts.push(`\n### ${cat} (${maps.length} maps)`);
+        for (const m of maps) {
+          if (count >= 500) break;
+          const addr = m.address ? `0x${m.address.toString(16).toUpperCase()}` : 'N/A';
+          parts.push(`  ${m.name} [${m.type}] addr:${addr} - ${m.description || m.subcategory || ''}`);
+          count++;
+        }
+        if (count >= 500) { parts.push('  ... (ask for more)'); break; }
+      }
+    }
+
+    // Include measurement names
     if (ecuDef.measurements.length > 0) {
-      const measNames = ecuDef.measurements.slice(0, 100).map(m => `${m.name} - ${m.description}`);
-      parts.push(`\nSample measurements (first 100 of ${ecuDef.measurements.length}):\n${measNames.join('\n')}`);
+      const measLimit = Math.min(ecuDef.measurements.length, 500);
+      const measNames = ecuDef.measurements.slice(0, measLimit).map(m => `${m.name} - ${m.description}`);
+      parts.push(`\nMEASUREMENTS (${measLimit} of ${ecuDef.measurements.length}):\n${measNames.join('\n')}`);
+    }
+
+    // Include parse errors so Erika can explain missing maps
+    if (ecuDef.errors.length > 0) {
+      parts.push(`\nPARSE ERRORS (${ecuDef.errors.length} issues — these explain why some maps may be missing):`);
+      for (const err of ecuDef.errors.slice(0, 50)) {
+        parts.push(`  ⚠ ${err}`);
+      }
+      if (ecuDef.errors.length > 50) {
+        parts.push(`  ... and ${ecuDef.errors.length - 50} more errors`);
+      }
     }
 
     // If a map is selected, include its details

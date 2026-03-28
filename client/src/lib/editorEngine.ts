@@ -106,6 +106,8 @@ export interface CalibrationMap {
   // Category for tree organization
   category?: string;
   subcategory?: string;
+  // Unit from COMPU_METHOD
+  unit?: string;
 }
 
 export interface Measurement {
@@ -458,9 +460,23 @@ function parseOneCharacteristic(name: string, body: string): CalibrationMap | nu
     // Categorize by name prefix
     categorizeMap(map);
 
+    // Note: unit is populated later via populateMapUnits() after compuMethods are parsed
+
     return map;
   } catch {
     return null;
+  }
+}
+
+/** Populate unit field on all maps from their COMPU_METHOD */
+function populateMapUnits(maps: CalibrationMap[], compuMethods: Map<string, CompuMethod>): void {
+  for (const m of maps) {
+    if (m.compuMethod && m.compuMethod !== 'NO_COMPU_METHOD') {
+      const cm = compuMethods.get(m.compuMethod);
+      if (cm?.unit) {
+        m.unit = cm.unit;
+      }
+    }
   }
 }
 
@@ -613,9 +629,35 @@ const CATEGORY_PREFIXES: [RegExp, string, string][] = [
   [/^Veh/i, 'Vehicle', 'Vehicle'],
   [/^Trns/i, 'Transmission', 'Transmission'],
   // Cummins style
+  [/^P_EONOx/i, 'Emissions', 'Engine Out NOx'],
+  [/^P_IFC/i, 'Fuel System', 'Injector Flow Compensation'],
+  [/^P_LKG/i, 'Fuel System', 'Leakage'],
+  [/^P_EGR/i, 'Emissions', 'EGR Control'],
+  [/^P_DPF/i, 'Emissions', 'DPF/Regen'],
+  [/^P_SCR/i, 'Emissions', 'SCR/DEF'],
+  [/^P_NOx/i, 'Emissions', 'NOx'],
+  [/^P_Turbo/i, 'Boost Control', 'Turbo'],
+  [/^P_Boost/i, 'Boost Control', 'Boost'],
+  [/^P_Rail/i, 'Fuel System', 'Rail Pressure'],
+  [/^P_Inj/i, 'Fuel System', 'Injector'],
+  [/^P_Fuel/i, 'Fuel System', 'Fuel'],
+  [/^P_Idle/i, 'Idle Control', 'Idle'],
+  [/^P_Torq/i, 'Torque Management', 'Torque'],
+  [/^P_Spd/i, 'Speed', 'Speed'],
+  [/^P_Cool/i, 'Cooling', 'Coolant'],
+  [/^P_Oil/i, 'Cooling', 'Oil'],
+  [/^P_EGT/i, 'Exhaust', 'EGT'],
+  [/^P_Exh/i, 'Exhaust', 'Exhaust'],
+  [/^P_Trans/i, 'Transmission', 'Transmission'],
   [/^P_/i, 'Calibration', 'Parameter'],
+  [/^T_UTM/i, 'Emissions', 'Urea Tank Monitor'],
   [/^T_/i, 'Calibration', 'Table'],
   [/^CFTR/i, 'Diagnostics', 'Fault'],
+  [/^CAGT/i, 'Diagnostics', 'Agent'],
+  [/^AC_/i, 'Accessories', 'AC'],
+  [/^AFM/i, 'Airflow', 'Air Filter Monitor'],
+  [/^APP/i, 'Throttle', 'Accelerator Pedal'],
+  [/^Active_Grill/i, 'Cooling', 'Active Grill Shutter'],
 ];
 
 function categorizeMap(map: CalibrationMap): void {
@@ -711,6 +753,9 @@ export function parseA2LForEditor(content: string, fileName: string): EcuDefinit
   const axisPtsMap = parseAxisPts(content);
   const maps = parseCharacteristics(content);
   const measurements = parseMeasurements(content);
+
+  // Populate unit field from COMPU_METHOD
+  populateMapUnits(maps, compuMethods);
 
   // Count map types
   const mapsByType: Record<string, number> = {};
@@ -1531,29 +1576,208 @@ export function buildMapTree(maps: CalibrationMap[]): MapTreeNode[] {
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
+export interface SearchResult {
+  idx: number;
+  score: number;
+  matchType: 'exact' | 'starts-with' | 'contains' | 'fuzzy' | 'description' | 'address' | 'category' | 'unit';
+  matchedField: string; // which field matched
+  highlights: { start: number; end: number }[]; // character ranges in map name to highlight
+}
+
+/**
+ * Intelligent search engine for calibration maps.
+ * Ranking priority: exact name > starts-with > name contains > address match > 
+ * description match > category match > unit match > fuzzy match
+ */
 export function searchMaps(
   maps: CalibrationMap[],
   query: string
 ): number[] {
   if (!query.trim()) return [];
+  return searchMapsDetailed(maps, query).map(r => r.idx);
+}
 
-  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 1);
-  const scored: { idx: number; score: number }[] = [];
+export function searchMapsDetailed(
+  maps: CalibrationMap[],
+  query: string
+): SearchResult[] {
+  if (!query.trim()) return [];
+
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+  const terms = qLower.split(/\s+/).filter(t => t.length > 0);
+  if (terms.length === 0) return [];
+
+  // Check if query looks like a hex address
+  const isHexQuery = /^0?x?[0-9a-fA-F]{3,}$/.test(q);
+  const hexValue = isHexQuery ? parseInt(q.replace(/^0x/i, ''), 16) : NaN;
+
+  const results: SearchResult[] = [];
 
   for (let i = 0; i < maps.length; i++) {
     const m = maps[i];
-    const text = `${m.name} ${m.description} ${m.annotations.join(' ')} ${m.category} ${m.subcategory}`.toLowerCase();
+    const nameLower = m.name.toLowerCase();
+    const descLower = (m.description || '').toLowerCase();
+    const catLower = (m.category || '').toLowerCase();
+    const subCatLower = (m.subcategory || '').toLowerCase();
+    const unitLower = (m.unit || '').toLowerCase();
+    const annotLower = m.annotations.join(' ').toLowerCase();
 
-    let score = 0;
-    for (const term of terms) {
-      if (text.includes(term)) score += 1;
-      if (m.name.toLowerCase().includes(term)) score += 2; // name match bonus
+    let bestScore = 0;
+    let bestType: SearchResult['matchType'] = 'fuzzy';
+    let bestField = '';
+    let highlights: SearchResult['highlights'] = [];
+
+    // 1. EXACT NAME MATCH (score: 1000)
+    if (nameLower === qLower) {
+      bestScore = 1000;
+      bestType = 'exact';
+      bestField = 'name';
+      highlights = [{ start: 0, end: m.name.length }];
     }
-    // Exact name match bonus
-    if (m.name.toLowerCase() === query.toLowerCase()) score += 10;
 
-    if (score > 0) scored.push({ idx: i, score });
+    // 2. NAME STARTS WITH query (score: 800)
+    if (bestScore < 800 && nameLower.startsWith(qLower)) {
+      bestScore = 800;
+      bestType = 'starts-with';
+      bestField = 'name';
+      highlights = [{ start: 0, end: q.length }];
+    }
+
+    // 3. NAME CONTAINS full query (score: 600)
+    if (bestScore < 600) {
+      const nameIdx = nameLower.indexOf(qLower);
+      if (nameIdx >= 0) {
+        bestScore = 600;
+        bestType = 'contains';
+        bestField = 'name';
+        highlights = [{ start: nameIdx, end: nameIdx + q.length }];
+      }
+    }
+
+    // 4. ALL TERMS match in name (score: 500 + bonus per term)
+    if (bestScore < 500) {
+      const allTermsInName = terms.every(t => nameLower.includes(t));
+      if (allTermsInName) {
+        bestScore = 500 + terms.length * 10;
+        bestType = 'contains';
+        bestField = 'name';
+        highlights = [];
+        for (const t of terms) {
+          const idx = nameLower.indexOf(t);
+          if (idx >= 0) highlights.push({ start: idx, end: idx + t.length });
+        }
+      }
+    }
+
+    // 5. ADDRESS MATCH (score: 700 for exact, 400 for range)
+    if (isHexQuery && !isNaN(hexValue) && bestScore < 700) {
+      if (m.address === hexValue) {
+        bestScore = 700;
+        bestType = 'address';
+        bestField = `0x${hexValue.toString(16).toUpperCase()}`;
+      } else {
+        // Check if address contains the hex string
+        const addrHex = m.address.toString(16).toLowerCase();
+        const qHex = q.replace(/^0x/i, '').toLowerCase();
+        if (addrHex.includes(qHex)) {
+          bestScore = 400;
+          bestType = 'address';
+          bestField = `0x${m.address.toString(16).toUpperCase()}`;
+        }
+      }
+    }
+
+    // 6. DESCRIPTION MATCH (score: 300)
+    if (bestScore < 300 && descLower) {
+      const allTermsInDesc = terms.every(t => descLower.includes(t));
+      if (allTermsInDesc) {
+        bestScore = 300 + terms.length * 5;
+        bestType = 'description';
+        bestField = 'description';
+      }
+    }
+
+    // 7. ANNOTATION MATCH (score: 250)
+    if (bestScore < 250 && annotLower) {
+      const allTermsInAnnot = terms.every(t => annotLower.includes(t));
+      if (allTermsInAnnot) {
+        bestScore = 250;
+        bestType = 'description';
+        bestField = 'annotations';
+      }
+    }
+
+    // 8. CATEGORY/SUBCATEGORY MATCH (score: 200)
+    if (bestScore < 200) {
+      const catMatch = terms.every(t => catLower.includes(t) || subCatLower.includes(t));
+      if (catMatch) {
+        bestScore = 200;
+        bestType = 'category';
+        bestField = `${m.category}/${m.subcategory}`;
+      }
+    }
+
+    // 9. UNIT MATCH (score: 150)
+    if (bestScore < 150 && unitLower) {
+      if (terms.some(t => unitLower.includes(t))) {
+        bestScore = 150;
+        bestType = 'unit';
+        bestField = m.unit || '';
+      }
+    }
+
+    // 10. FUZZY MATCH — any term appears in any field (score: 50-100)
+    if (bestScore < 50) {
+      const allText = `${nameLower} ${descLower} ${catLower} ${subCatLower} ${annotLower} ${unitLower}`;
+      let fuzzyScore = 0;
+      for (const t of terms) {
+        if (allText.includes(t)) fuzzyScore += 25;
+      }
+      if (fuzzyScore > 0) {
+        bestScore = Math.min(fuzzyScore, 100);
+        bestType = 'fuzzy';
+        bestField = 'multiple';
+        // Try to find highlights in name
+        highlights = [];
+        for (const t of terms) {
+          const idx = nameLower.indexOf(t);
+          if (idx >= 0) highlights.push({ start: idx, end: idx + t.length });
+        }
+      }
+    }
+
+    // 11. CAMEL CASE / UNDERSCORE SPLIT MATCH (score: 350)
+    // e.g., searching "fuel rail" matches "KaDFIR_FuelRailPressure"
+    if (bestScore < 350) {
+      const splitName = nameLower
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/_/g, ' ')
+        .toLowerCase();
+      const allTermsInSplit = terms.every(t => splitName.includes(t));
+      if (allTermsInSplit && !terms.every(t => nameLower.includes(t))) {
+        bestScore = 350;
+        bestType = 'contains';
+        bestField = 'name (split)';
+      }
+    }
+
+    if (bestScore > 0) {
+      results.push({
+        idx: i,
+        score: bestScore,
+        matchType: bestType,
+        matchedField: bestField,
+        highlights,
+      });
+    }
   }
 
-  return scored.sort((a, b) => b.score - a.score).map(s => s.idx);
+  // Sort by score descending, then alphabetically by name for ties
+  results.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return maps[a.idx].name.localeCompare(maps[b.idx].name);
+  });
+
+  return results;
 }
