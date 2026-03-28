@@ -38,6 +38,7 @@ import ErikaChat from '@/components/editor/ErikaChat';
 import HexEditor from '@/components/editor/HexEditor';
 import TuneCompare from '@/components/editor/TuneCompare';
 import { TuneManager } from '@/components/editor/TuneManager';
+import DatalogLinker, { DatalogSummary, parseDatalogSummary } from '@/components/editor/DatalogLinker';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
@@ -91,6 +92,9 @@ export default function CalibrationEditor() {
   const [unlockStatus, setUnlockStatus] = useState<{ isDynojettPatched: boolean; isHPTunersPatched: boolean; isLocked: boolean } | null>(null);
   const [autoCorrectChecksums, setAutoCorrectChecksums] = useState(true);
 
+  // Linked datalog for tune reference
+  const [linkedDatalog, setLinkedDatalog] = useState<DatalogSummary | null>(null);
+
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
   const sessionRestored = useRef<boolean>(false);
@@ -109,20 +113,63 @@ export default function CalibrationEditor() {
 
     try {
       const session = getEditorSession();
+      let restoredAnything = false;
+      const restoredParts: string[] = [];
+
+      // Restore ecuDef first (needed for map display)
+      if (session.ecuDefJson) {
+        try {
+          const restoredDef = JSON.parse(session.ecuDefJson) as EcuDefinition;
+          setEcuDef(restoredDef);
+          ecuDefRef.current = restoredDef;
+          restoredParts.push(`${restoredDef.ecuFamily} (${restoredDef.stats.totalMaps} maps)`);
+          restoredAnything = true;
+        } catch (e) {
+          console.warn('[CalibrationEditor] Failed to restore ecuDef:', e);
+        }
+      }
+
+      // Restore binary data
       if (session.binaryData) {
         const restoredBinary = restoreBinaryData(session.binaryData);
         if (restoredBinary) {
           setBinaryData(restoredBinary);
+          binaryDataRef.current = restoredBinary;
           setBinaryFileName(session.binaryFileName || '');
-          toast.success('Editor session restored', {
-            description: `Binary recovered (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)`
-          });
+          if (session.binaryFormat) setBinaryFormat(session.binaryFormat);
+          if (session.binaryBaseAddress) {
+            setBinaryBaseAddress(session.binaryBaseAddress);
+            binaryBaseAddressRef.current = session.binaryBaseAddress;
+          }
+          restoredParts.push(`Binary (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)`);
+          restoredAnything = true;
+
+          // Re-align if both ecuDef and binary are restored
+          const currentDef = ecuDefRef.current;
+          if (currentDef) {
+            const baseAddr = session.binaryBaseAddress || 0;
+            const align = alignOffsets(currentDef, restoredBinary, baseAddr);
+            setAlignment(align);
+            if (align.confidence > 0.15) {
+              for (const map of currentDef.maps) {
+                populateMapValues(map, currentDef, restoredBinary, align.offset);
+              }
+              setEcuDef({ ...currentDef });
+            }
+          }
         }
       }
+
       if (session.selectedMapIndex !== null) {
         setSelectedMapIndex(session.selectedMapIndex);
       }
       setAutoCorrectChecksums(session.autoCorrectChecksums);
+
+      if (restoredAnything) {
+        toast.success('Editor session restored', {
+          description: restoredParts.join(' + ')
+        });
+      }
     } catch (error) {
       console.error('[CalibrationEditor] Failed to restore session:', error);
     }
@@ -131,10 +178,13 @@ export default function CalibrationEditor() {
   // Save session periodically
   useEffect(() => {
     const saveInterval = setInterval(() => {
-      if (binaryData) {
+      if (binaryData || ecuDef) {
         saveEditorSession({
           binaryData: binaryData as any,
           binaryFileName,
+          binaryFormat: binaryFormat || null,
+          binaryBaseAddress,
+          ecuDefJson: ecuDef ? JSON.stringify(ecuDef) : null,
           selectedMapIndex,
           autoCorrectChecksums,
           modifiedMaps: Object.fromEntries(
@@ -148,7 +198,7 @@ export default function CalibrationEditor() {
     }, 10000); // Save every 10 seconds
 
     return () => clearInterval(saveInterval);
-  }, [binaryData, binaryFileName, selectedMapIndex, autoCorrectChecksums, modifiedMaps, ecuDef]);
+  }, [binaryData, binaryFileName, binaryFormat, binaryBaseAddress, selectedMapIndex, autoCorrectChecksums, modifiedMaps, ecuDef]);
 
   // Warn before leaving if unsaved changes
   useEffect(() => {
@@ -964,6 +1014,16 @@ export default function CalibrationEditor() {
           </>
         )}
 
+        {/* Datalog linker - compact mode in toolbar */}
+        <div className="border-l border-zinc-700/50 pl-2 ml-1">
+          <DatalogLinker
+            linkedDatalog={linkedDatalog}
+            onLink={setLinkedDatalog}
+            onUnlink={() => setLinkedDatalog(null)}
+            compact
+          />
+        </div>
+
         <Button
           variant="outline"
           size="sm"
@@ -1188,6 +1248,15 @@ export default function CalibrationEditor() {
                         ))}
                       </>
                     )}
+
+                    {/* Linked Datalog Section */}
+                    <div className="mt-4 pt-3 border-t border-zinc-800">
+                      <DatalogLinker
+                        linkedDatalog={linkedDatalog}
+                        onLink={setLinkedDatalog}
+                        onUnlink={() => setLinkedDatalog(null)}
+                      />
+                    </div>
                   </div>
                 </TabsContent>
 
