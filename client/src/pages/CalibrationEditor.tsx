@@ -672,7 +672,7 @@ export default function CalibrationEditor() {
         <input
           ref={binInputRef}
           type="file"
-          accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP,.SREC,.HEX,*"
+          accept=".bin,.bdc,.s,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.BDC,.S,.PTP,.SREC,.HEX,*"
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];

@@ -969,3 +969,21 @@
 - [x] Build ME17 decompilation template for identifying calibrations (documented in ME17_DECOMPILATION_TEMPLATE.md)
 - [ ] Create A2L generator tool to synthesize definitions from binary
 - [ ] Test decompilation with other Can-Am ME17 files
+
+## Binary Upload Format & Polaris Offset Fix (2026-03-28)
+- [ ] Analyze Polaris S-Record to find correct MG1C400A1T2 base address
+- [ ] Extend binary file upload to accept .hex, .s, .bdc file formats
+- [ ] Add Intel HEX (.hex) parser to binary loading pipeline
+- [ ] Add Motorola S-Record (.s) parser to binary loading pipeline
+- [ ] Fix Polaris MG1C400A1T2 offset in alignment engine
+- [ ] Test with Polaris files and verify correct map values
+
+
+## Erika Decompilation Learning References (2026-03-28)
+- [x] Analyze IDA Pro Nissan ECU decompilation video (SH7058, vector tables, call tables)
+- [x] Create IDA_PRO_NISSAN_ECU_DECOMPILATION.md reference guide
+- [x] Analyze WinOLS & Ghidra ECU decompilation video (DTC maps, hex search, code verification)
+- [x] Create WINOLS_GHIDRA_ECU_DECOMPILATION.md reference guide
+- [ ] Implement hex search and pattern detection in binary analyzer
+- [ ] Implement Ghidra-style address reference scanning
+- [ ] Build reference library of known ECU calibration addresses and patterns

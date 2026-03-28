@@ -1435,10 +1435,15 @@ export function extractBinaryData(
   }
 
   // Check file extension for text formats
-  if (upper.endsWith('.PTP') || upper.endsWith('.SREC') || upper.endsWith('.S19') || upper.endsWith('.S28') || upper.endsWith('.S37')) {
-    const text = new TextDecoder('ascii').decode(buffer);
-    const result = parseSRecord(text);
-    if (result) return { ...result, format: 'srec' };
+  // .s / .s19 / .s28 / .s37 / .srec / .ptp = Motorola S-Record
+  if (upper.endsWith('.PTP') || upper.endsWith('.SREC') ||
+      upper.endsWith('.S19') || upper.endsWith('.S28') || upper.endsWith('.S37') ||
+      upper.endsWith('.S')) {
+    try {
+      const text = new TextDecoder('ascii').decode(buffer);
+      const result = parseSRecord(text);
+      if (result) return { ...result, format: 'srec' };
+    } catch { /* fall through */ }
   }
 
   if (upper.endsWith('.HEX') || upper.endsWith('.IHEX')) {
@@ -1447,11 +1452,30 @@ export function extractBinaryData(
     if (result) return { ...result, format: 'ihex' };
   }
 
-  // Raw binary
+  // .bdc = bFlash raw binary dump (same as .bin, no header stripping needed)
+  // The BDC file IS the raw calibration region — treat as raw binary
+  // (bFlash embeds the S-Record directly: first 16 bytes match S-Record start)
+
+  // For any file, try text-based detection before falling back to raw binary
+  try {
+    const text = new TextDecoder('ascii', { fatal: true }).decode(buffer.slice(0, 512));
+    if (text.trimStart().startsWith('S0') || text.trimStart().startsWith('S2') || text.trimStart().startsWith('S3')) {
+      const fullText = new TextDecoder('ascii').decode(buffer);
+      const result = parseSRecord(fullText);
+      if (result) return { ...result, format: 'srec' };
+    }
+    if (text.trimStart().startsWith(':')) {
+      const fullText = new TextDecoder('ascii').decode(buffer);
+      const result = parseIntelHex(fullText);
+      if (result) return { ...result, format: 'ihex' };
+    }
+  } catch { /* binary file, not text */ }
+
+  // Raw binary (.bin, .bdc, or unknown)
   return {
     data: new Uint8Array(buffer),
     baseAddress: 0,
-    format: 'raw',
+    format: upper.endsWith('.BDC') ? 'bdc' : 'raw',
   };
 }
 
@@ -1719,9 +1743,11 @@ export function alignOffsets(
     );
   } else if (family === 'MG1C' || family.includes('BOSCH')) {
     // Bosch MG1C: A2L addresses typically 0x94xxxxx or 0x60Cxxxxx, binary starts at 0x00
-    // MG1CA920: 0x0060C000 base address (from iHEX files)
+    // MG1CA920: 0x08FD8000 base address (Can-Am)
+    // Polaris MG1C400A1T2: 0x08FC0000 base address
     knownOffsets.push(
-      0x08FD8000,  // MG1CA920 confirmed base
+      0x08FD8000,  // MG1CA920 confirmed base (Can-Am)
+      0x08FC0000,  // Polaris MG1C400A1T2 confirmed base
       0x94400000, 0x94000000, 0x80000000, 0x80010000, 0x80020000,
       0x80040000, 0x80100000, 0x60C00000, 0x0060C000, 0xA0000000, 0x00000000
     );
@@ -2556,6 +2582,7 @@ export function autoHealAlignment(
   log.push('[Erika] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
   const boschBases = [
     // MG1CA920 (Duramax L5P, LM2) — confirmed base addresses
+    // Polaris MG1C400A1T2 — confirmed base address
     0x08FD8000, 0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
     0x08F00000, 0x09000000, 0x08000000, 0x08800000, 0x08C00000,
     // Bosch MED17 / Tricore TC1xxx
