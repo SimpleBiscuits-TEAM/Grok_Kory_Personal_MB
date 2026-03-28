@@ -879,7 +879,10 @@
 - [x] Fix TuneCompare: shows byte differences but reports 0 changed maps — map diff address matching broken
 
 ## Feature (2026-03-28)
-- [ ] TuneCompare: add copy-to-primary button (per-map and per-cell) to apply compare file values into primary binary
+- [x] TuneCompare: add per-cell copy button to apply individual compare values into primary
+- [x] TuneCompare: add per-map copy button to apply all changed cells in a map
+- [x] TuneCompare: add confirmation dialog before applying changes
+- [x] TuneCompare: update primary binary in-memory after copy operation
 
 ## Bug Fix (2026-03-28 continued)
 - [x] TuneCompare: diff values showing NaN instead of actual values — fix OOB handling

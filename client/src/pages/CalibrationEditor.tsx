@@ -62,6 +62,7 @@ export default function CalibrationEditor() {
   const [jokeIndex, setJokeIndex] = useState(0);
   const [healResult, setHealResult] = useState<AutoHealResult | null>(null);
   const [showHealLog, setShowHealLog] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
@@ -738,6 +739,33 @@ export default function CalibrationEditor() {
                     primaryBinary={binaryData}
                     primaryFileName={binaryFileName}
                     onSelectMap={setSelectedMapIndex}
+                    onCopyToP={(changes) => {
+                      if (!binaryData) return;
+                      try {
+                        const newBinary = new Uint8Array(binaryData);
+                        for (const change of changes) {
+                          if (change.offset >= 0 && change.offset + change.size <= newBinary.length) {
+                            if (change.size === 1) {
+                              newBinary[change.offset] = change.value & 0xFF;
+                            } else if (change.size === 2) {
+                              newBinary[change.offset] = change.value & 0xFF;
+                              newBinary[change.offset + 1] = (change.value >> 8) & 0xFF;
+                            } else if (change.size === 4) {
+                              newBinary[change.offset] = change.value & 0xFF;
+                              newBinary[change.offset + 1] = (change.value >> 8) & 0xFF;
+                              newBinary[change.offset + 2] = (change.value >> 16) & 0xFF;
+                              newBinary[change.offset + 3] = (change.value >> 24) & 0xFF;
+                            }
+                          }
+                        }
+                        setBinaryData(newBinary);
+                        setCopyStatus({ message: `Copied ${changes.length} value(s) to primary binary`, type: 'success' });
+                        setTimeout(() => setCopyStatus(null), 3000);
+                      } catch (err) {
+                        setCopyStatus({ message: `Error copying values: ${err instanceof Error ? err.message : 'Unknown error'}`, type: 'error' });
+                        setTimeout(() => setCopyStatus(null), 3000);
+                      }
+                    }}
                   />
                 </TabsContent>
 

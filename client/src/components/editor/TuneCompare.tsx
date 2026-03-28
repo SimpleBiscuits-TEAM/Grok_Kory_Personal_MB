@@ -46,9 +46,10 @@ interface TuneCompareProps {
   primaryBinary: Uint8Array | null;
   primaryFileName: string;
   onSelectMap?: (mapIndex: number) => void;
+  onCopyToP?: (changes: { offset: number; value: number; size: number }[]) => void;
 }
 
-export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, onSelectMap }: TuneCompareProps) {
+export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, onSelectMap, onCopyToP }: TuneCompareProps) {
   const [compareBinary, setCompareBinary] = useState<TuneFile | null>(null);
   const [viewMode, setViewMode] = useState<'maps' | 'hex'>('maps');
   const [searchQuery, setSearchQuery] = useState('');
@@ -397,8 +398,38 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
 
                   {/* Expanded diff table */}
                   {isExpanded && (
-                    <div className="px-3 pb-3 overflow-x-auto">
-                      <table className="border-collapse text-[10px] font-mono">
+                    <div className="px-3 pb-3">
+                      {/* Per-map copy button */}
+                      {onCopyToP && diff.changedCells > 0 && (
+                        <div className="mb-2 flex gap-2">
+                          <button
+                            className="px-2 py-1 text-[10px] bg-emerald-900/50 text-emerald-300 hover:bg-emerald-900 rounded transition-colors flex items-center gap-1"
+                            onClick={() => {
+                              const changes: { offset: number; value: number; size: number }[] = [];
+                              const dataType = resolveDataType(diff.map.recordLayout, ecuDef!.recordLayouts);
+                              const byteSize = dataType.size;
+                              const offsetB = alignment?.offset ?? 0;
+                              
+                              for (let i = 0; i < diff.totalCells; i++) {
+                                if (diff.valuesA[i] !== diff.valuesB[i]) {
+                                  const binAddr = diff.map.address + offsetB + i * byteSize;
+                                  changes.push({ offset: binAddr, value: diff.valuesB[i], size: byteSize });
+                                }
+                              }
+                              
+                              if (confirm(`Copy ${changes.length} changed cells from compare file to primary?`)) {
+                                onCopyToP(changes);
+                              }
+                            }}
+                            title="Copy all changed cells in this map"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copy All ({diff.changedCells})
+                          </button>
+                        </div>
+                      )}
+                      <div className="overflow-x-auto">
+                        <table className="border-collapse text-[10px] font-mono">
                         <tbody>
                           {Array.from({ length: rows }, (_, r) => (
                             <tr key={r}>
@@ -414,7 +445,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                                 return (
                                   <td
                                     key={c}
-                                    className="px-1.5 py-0.5 text-center border border-zinc-800/30"
+                                    className="px-1.5 py-0.5 text-center border border-zinc-800/30 relative group cursor-pointer"
                                     style={{
                                       background: changed
                                         ? delta > 0 ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'
@@ -432,6 +463,25 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                                         {vB}
                                       </span>
                                     ) : vA}
+                                    {/* Per-cell copy button (hidden by default, shown on hover) */}
+                                    {changed && onCopyToP && (
+                                      <button
+                                        className="absolute inset-0 flex items-center justify-center bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity rounded"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const dataType = resolveDataType(diff.map.recordLayout, ecuDef!.recordLayouts);
+                                          const byteSize = dataType.size;
+                                          const offsetB = alignment?.offset ?? 0;
+                                          const binAddr = diff.map.address + offsetB + i * byteSize;
+                                          if (confirm(`Copy value ${vB} to primary at offset 0x${binAddr.toString(16)}?`)) {
+                                            onCopyToP([{ offset: binAddr, value: vB, size: byteSize }]);
+                                          }
+                                        }}
+                                        title="Copy this cell"
+                                      >
+                                        <Copy className="w-2.5 h-2.5" />
+                                      </button>
+                                    )}
                                   </td>
                                 );
                               })}
@@ -439,6 +489,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   )}
                 </div>
