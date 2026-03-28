@@ -26,7 +26,8 @@ import {
   parseA2LForEditor, parseCumminsCSV, extractBinaryData, alignOffsets,
   populateMapValues, EcuDefinition, CalibrationMap, AlignmentResult,
   physicalToRaw, resolveDataType, writeValue, readValue, rawToPhysical,
-  detectEcuFamily, detectEcuFamilyFromBinary
+  detectEcuFamily, detectEcuFamilyFromBinary,
+  validateAlignment, autoHealAlignment, AutoHealResult, AlignmentDiagnostic
 } from '@/lib/editorEngine';
 import MapTreeBrowser from '@/components/editor/MapTreeBrowser';
 import MapDetailPanel from '@/components/editor/MapDetailPanel';
@@ -59,6 +60,8 @@ export default function CalibrationEditor() {
   const [pendingBinFile, setPendingBinFile] = useState<File | null>(null);
   const [jokeTab, setJokeTab] = useState<'mom' | 'dad'>('mom');
   const [jokeIndex, setJokeIndex] = useState(0);
+  const [healResult, setHealResult] = useState<AutoHealResult | null>(null);
+  const [showHealLog, setShowHealLog] = useState(false);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
@@ -117,13 +120,27 @@ export default function CalibrationEditor() {
         const align = alignOffsets(def, currentBinaryData, currentBaseAddress);
         setAlignment(align);
 
-        if (align.confidence > 0.3) {
+        if (align.confidence > 0.15) {
           setLoadingMessage('Populating map values...');
           for (const map of def.maps) {
             populateMapValues(map, def, currentBinaryData, align.offset);
           }
+
+          // Erika self-healing: validate and auto-fix if needed
+          setLoadingMessage('Erika is checking alignment quality...');
+          const heal = autoHealAlignment(def, currentBinaryData, currentBaseAddress, align);
+          setHealResult(heal);
+          if (heal.success && heal.finalAlignment !== align) {
+            setAlignment(heal.finalAlignment);
+            toast.success('Erika Auto-Fixed Alignment', {
+              description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
+            });
+          } else if (align.confidence > 0.5) {
+            toast.success('Offset Alignment', { description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})` });
+          } else {
+            toast.warning('Low Confidence Alignment', { description: `Aligned at ${(align.confidence * 100).toFixed(0)}% confidence (${align.method}). Some values may be incorrect.` });
+          }
           setEcuDef({ ...def }); // trigger re-render
-          toast.success('Offset Alignment', { description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})` });
         }
       }
 
@@ -175,19 +192,48 @@ export default function CalibrationEditor() {
         const align = alignOffsets(def, data, baseAddress);
         setAlignment(align);
 
-        if (align.confidence > 0.3) {
+        if (align.confidence > 0.15) {
           setLoadingMessage('Populating map values...');
           for (const map of def.maps) {
             populateMapValues(map, def, data, align.offset);
           }
+
+          // Erika self-healing
+          setLoadingMessage('Erika is checking alignment quality...');
+          const heal = autoHealAlignment(def, data, baseAddress, align);
+          setHealResult(heal);
+          if (heal.success && heal.finalAlignment !== align) {
+            setAlignment(heal.finalAlignment);
+            toast.success('Erika Auto-Fixed Alignment', {
+              description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
+            });
+          } else if (align.confidence > 0.5) {
+            toast.success('Offset Alignment', {
+              description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
+            });
+          } else {
+            toast.warning('Low Confidence Alignment', {
+              description: `Aligned at ${(align.confidence * 100).toFixed(0)}% confidence (${align.method}). Some values may be incorrect — try a closer A2L match.`
+            });
+          }
           setEcuDef({ ...def });
-          toast.success('Offset Alignment', {
-            description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
-          });
         } else {
-          toast.warning('Alignment Warning', {
-            description: `Low confidence (${(align.confidence * 100).toFixed(0)}%). You can manually upload a closer A2L match.`
-          });
+          // Even if initial alignment failed, try auto-heal with zero offset as starting point
+          setLoadingMessage('Erika is trying to find the correct alignment...');
+          const fallbackAlign: AlignmentResult = { offset: 0, confidence: 0, method: 'none', anchors: [] };
+          const heal = autoHealAlignment(def, data, baseAddress, fallbackAlign);
+          setHealResult(heal);
+          if (heal.success && heal.finalDiagnostic.healthScore > 0.3) {
+            setAlignment(heal.finalAlignment);
+            setEcuDef({ ...def });
+            toast.success('Erika Found Alignment', {
+              description: `Auto-discovered offset with ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% health (${heal.finalAlignment.method})`
+            });
+          } else {
+            toast.warning('Alignment Failed', {
+              description: `Could not align (${(align.confidence * 100).toFixed(0)}%). Upload a matching A2L or try a different binary.`
+            });
+          }
         }
       } else {
         toast.info('No Stored Definition', {
@@ -236,19 +282,48 @@ export default function CalibrationEditor() {
         const align = alignOffsets(currentEcuDef, data, baseAddress);
         setAlignment(align);
 
-        if (align.confidence > 0.3) {
+        if (align.confidence > 0.15) {
           setLoadingMessage('Populating map values...');
           for (const map of currentEcuDef.maps) {
             populateMapValues(map, currentEcuDef, data, align.offset);
           }
+
+          // Erika self-healing
+          setLoadingMessage('Erika is checking alignment quality...');
+          const heal = autoHealAlignment(currentEcuDef, data, baseAddress, align);
+          setHealResult(heal);
+          if (heal.success && heal.finalAlignment !== align) {
+            setAlignment(heal.finalAlignment);
+            toast.success('Erika Auto-Fixed Alignment', {
+              description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
+            });
+          } else if (align.confidence > 0.5) {
+            toast.success('Offset Alignment', {
+              description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
+            });
+          } else {
+            toast.warning('Low Confidence Alignment', {
+              description: `Aligned at ${(align.confidence * 100).toFixed(0)}% confidence (${align.method}). Some values may be incorrect.`
+            });
+          }
           setEcuDef({ ...currentEcuDef });
-          toast.success('Offset Alignment', {
-            description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
-          });
         } else {
-          toast.warning('Alignment Warning', {
-            description: `Low confidence (${(align.confidence * 100).toFixed(0)}%). Offsets may need manual adjustment.`
-          });
+          // Even if initial alignment failed, try auto-heal
+          setLoadingMessage('Erika is trying to find the correct alignment...');
+          const fallbackAlign: AlignmentResult = { offset: 0, confidence: 0, method: 'none', anchors: [] };
+          const heal = autoHealAlignment(currentEcuDef, data, baseAddress, fallbackAlign);
+          setHealResult(heal);
+          if (heal.success && heal.finalDiagnostic.healthScore > 0.3) {
+            setAlignment(heal.finalAlignment);
+            setEcuDef({ ...currentEcuDef });
+            toast.success('Erika Found Alignment', {
+              description: `Auto-discovered offset with ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% health (${heal.finalAlignment.method})`
+            });
+          } else {
+            toast.warning('Alignment Failed', {
+              description: `Could not align (${(align.confidence * 100).toFixed(0)}%). Offsets may need manual adjustment.`
+            });
+          }
         }
       } else {
         // No definition loaded — auto-detect ECU family and fetch from S3
@@ -550,6 +625,19 @@ export default function CalibrationEditor() {
             <span className={`${alignment.confidence > 0.7 ? 'text-emerald-400' : alignment.confidence > 0.3 ? 'text-yellow-400' : 'text-red-400'}`}>
               Align: {(alignment.confidence * 100).toFixed(0)}%
             </span>
+            {healResult && (
+              <button
+                className={`px-1.5 py-0.5 rounded text-[9px] transition-colors ${
+                  healResult.success
+                    ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                    : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                }`}
+                onClick={() => setShowHealLog(!showHealLog)}
+                title="Click to see Erika's alignment analysis"
+              >
+                {healResult.success ? '✓ Healed' : '⚠ Check'}
+              </button>
+            )}
           </div>
         )}
 
@@ -613,6 +701,7 @@ export default function CalibrationEditor() {
                     selectedMapIndex={selectedMapIndex}
                     onSelectMap={setSelectedMapIndex}
                     modifiedMaps={modifiedMaps}
+                    ecuFamily={ecuDef.ecuFamily}
                   />
                 </TabsContent>
 
@@ -692,6 +781,35 @@ export default function CalibrationEditor() {
                               <div key={i} className="pl-6 text-[10px] text-zinc-500">
                                 {a.name}: 0x{a.a2lAddr.toString(16).toUpperCase()} → 0x{a.binOffset.toString(16).toUpperCase()}
                               </div>
+                            ))}
+                          </>
+                        )}
+                      </>
+                    )}
+                    {healResult && (
+                      <>
+                        <div className="mt-3 text-zinc-500 border-t border-zinc-800 pt-2">Erika Self-Healing:</div>
+                        <div className="pl-3 text-zinc-400">
+                          Status: <span className={healResult.success ? 'text-emerald-400' : 'text-amber-400'}>
+                            {healResult.success ? 'Alignment verified/healed' : 'Could not auto-fix'}
+                          </span>
+                        </div>
+                        <div className="pl-3 text-zinc-400">
+                          Health: <span className="text-zinc-300">
+                            {(healResult.originalDiagnostic.healthScore * 100).toFixed(0)}%
+                            {healResult.finalDiagnostic.healthScore !== healResult.originalDiagnostic.healthScore &&
+                              ` → ${(healResult.finalDiagnostic.healthScore * 100).toFixed(0)}%`
+                            }
+                          </span>
+                        </div>
+                        <div className="pl-3 text-zinc-400">
+                          Strategies tried: <span className="text-zinc-300">{healResult.strategiesAttempted.length} ({healResult.strategiesAttempted.join(', ')})</span>
+                        </div>
+                        {healResult.originalDiagnostic.issues.length > 0 && (
+                          <>
+                            <div className="pl-3 text-zinc-500 mt-1">Issues detected:</div>
+                            {healResult.originalDiagnostic.issues.map((issue: string, i: number) => (
+                              <div key={i} className="pl-6 text-[10px] text-amber-500/70">{issue}</div>
                             ))}
                           </>
                         )}

@@ -186,6 +186,112 @@ ${ERIKA_KNOWLEDGE_BASE.slice(0, 20000)}`;
     }),
 
   /**
+   * Magic Mode — AI-powered map name simplification
+   * Takes a batch of engineering map names and returns friendly names + smart categories
+   */
+  simplifyMaps: publicProcedure
+    .input(
+      z.object({
+        maps: z.array(
+          z.object({
+            name: z.string(),
+            description: z.string().optional(),
+            category: z.string().optional(),
+            type: z.string().optional(),
+            unit: z.string().optional(),
+          })
+        ).max(200),
+        ecuFamily: z.string().optional(),
+        batchIndex: z.number().optional(), // for paginated requests
+      })
+    )
+    .mutation(async ({ input }) => {
+      const mapList = input.maps
+        .map((m, i) => `${i}|${m.name}|${m.description || ''}|${m.category || ''}|${m.type || ''}|${m.unit || ''}`)
+        .join('\n');
+
+      const systemPrompt = `You are an expert ECU calibration engineer. Your job is to translate cryptic engineering map names into plain English names that a tuner can understand at a glance.
+
+Rules:
+1. The friendly name should describe WHAT the map controls in simple terms
+2. Keep it concise (2-5 words max)
+3. Assign a smart category from this list: Speed Limits, Fuel System, Boost Control, Torque Management, Transmission, Emissions, Engine Protection, Idle Control, Cooling System, Exhaust, Intake, Ignition/Timing, Sensors, Diagnostics/DTCs, Driver Demand, Rev Limits, Launch Control, Traction Control, Cruise Control, Electrical, Climate/HVAC, Miscellaneous
+4. Use the description, category, type, and unit fields as context clues
+5. If you genuinely cannot determine what a map does, use the original name as the friendly name and category "Unknown"
+6. ECU family context: ${input.ecuFamily || 'Unknown'}
+
+Input format: index|engineeringName|description|category|type|unit
+Output: JSON array matching the input order.
+
+Examples of good translations:
+- "spdlm_rngaccess_thx_Mode_01" → "Speed Limit Mode 1" (Speed Limits)
+- "InjCrv_qBas_MAP" → "Base Fuel Quantity" (Fuel System)
+- "TrbCh_pDes_trb1" → "Target Boost Pressure" (Boost Control)
+- "CoEng_nIdl_Bas" → "Base Idle Speed" (Idle Control)
+- "DFC_TqLimDyn" → "Dynamic Torque Limit" (Torque Management)
+- "Egrh_rEGRDes_MAP" → "Target EGR Rate" (Emissions)
+- "CatMdl_facLamCorr" → "Catalyst Lambda Correction" (Exhaust)`;
+
+      try {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `Translate these ${input.maps.length} map names:\n${mapList}` },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "simplified_maps",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  maps: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        index: { type: "integer", description: "Original index from input" },
+                        friendlyName: { type: "string", description: "Plain English name" },
+                        smartCategory: { type: "string", description: "Category from the allowed list" },
+                        confidence: { type: "string", enum: ["high", "medium", "low"], description: "How confident the translation is" },
+                      },
+                      required: ["index", "friendlyName", "smartCategory", "confidence"],
+                      additionalProperties: false,
+                    },
+                  },
+                },
+                required: ["maps"],
+                additionalProperties: false,
+              },
+            },
+          },
+        });
+
+        const rawContent = response.choices?.[0]?.message?.content;
+        if (!rawContent) {
+          return { success: false as const, error: "No response from AI" };
+        }
+        const content = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent);
+
+        const parsed = JSON.parse(content);
+        return {
+          success: true as const,
+          results: parsed.maps as Array<{
+            index: number;
+            friendlyName: string;
+            smartCategory: string;
+            confidence: string;
+          }>,
+          batchIndex: input.batchIndex,
+        };
+      } catch (err: any) {
+        console.error("[Magic Mode] LLM error:", err);
+        return { success: false as const, error: err.message || "Unknown error" };
+      }
+    }),
+
+  /**
    * Fetch a stored A2L file by ECU family for auto-matching
    */
   fetchA2L: publicProcedure
@@ -199,6 +305,9 @@ ${ERIKA_KNOWLEDGE_BASE.slice(0, 20000)}`;
       const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv' }> = {
         'E41': { fileName: 'E41_a171711502_quasi.a2l', type: 'a2l' },
         'MG1C': { fileName: '1E1101953.a2l', type: 'a2l' },
+        'BRP': { fileName: '1E1101953.a2l', type: 'a2l' },          // CAN-am / BRP uses MG1C A2L
+        'MED17': { fileName: '1E1101953.a2l', type: 'a2l' },        // Bosch MED17 family
+        'MG1CA920': { fileName: '1E1101953.a2l', type: 'a2l' },     // MG1CA920 variant
         'T93': { fileName: '24048502 22  6.6L T93.a2l', type: 'a2l' },
         'CUMMINS': { fileName: 'Cummins 2019 6.7L PK 68RFE 52.19.03.00 (52370931AF).csv', type: 'csv' },
       };

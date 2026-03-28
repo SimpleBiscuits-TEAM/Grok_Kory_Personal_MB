@@ -845,3 +845,29 @@
 ## Bug Fixes (2026-03-28)
 - [x] Fix: Binary + A2L load not populating editor/map tree — Mav R binary loaded with A2L and nothing happened
 - [x] Fix: File picker showing "Custom" filter instead of "All Files" — needs to accept all file types
+- [x] Fix: Maps don't have values after loading binary + A2L (Mav R) — alignment/populateMapValues issue
+- [x] Add map size indicators to MapTreeBrowser (1×1 single, 1×N curve, N×M 3D map)
+
+## Magic Mode - AI Map Name Simplification (2026-03-28)
+- [x] Build Magic Mode toggle in CalibrationEditor (Engineering vs Magic view)
+- [x] AI-powered map name translation: engineering names → plain English (e.g., "spdlm_rngaccess_thx_Mode_01" → "Speed Limit Mode 1")
+- [x] Smart re-categorization: group maps into user-friendly folders (Speed Limits, Fuel, Boost, etc.)
+- [x] Keep original A2L engineering names accessible when toggling back
+- [x] Batch process map names via LLM with context about ECU type and map parameters
+- [x] Cache translated names to avoid re-processing
+
+## Alignment Engine Improvements (2026-03-28)
+- [x] Add CAN-am/BRP ECU offset patterns (MED17.8.5, MG1CA920 base addresses)
+- [x] Add zero-offset fallback strategy for raw flash dumps
+- [x] Widen brute-force search range and improve stepping algorithm
+- [x] Add alignment status indicator in CalibrationEditor UI
+
+## Self-Healing Alignment with Erika Auto-Intervention (2026-03-28)
+- [x] Build validateAlignment() — scan populated values for misalignment signs (all zeros, out-of-range, NaN)
+- [x] Build autoHealAlignment() — progressive retry with alternative strategies when validation fails
+- [x] Erika auto-intervention: detect bad alignment, try fixes, report what she tried and found
+- [x] Signature-based anchor search: scan binary for known calibration byte patterns
+- [x] Self-reporting alignment log: show user what strategies were tried and results
+
+## Version Bump
+- [x] Update version from v0.01 to v0.02

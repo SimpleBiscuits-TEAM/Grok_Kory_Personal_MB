@@ -980,14 +980,21 @@ export function detectEcuFamily(content: string, fileName: string): string {
   // T93 from filename
   if (upper.includes('T93')) return 'T93';
 
-  // MG1C from content or filename
+  // MG1C / MG1CA920 / MED17 from content or filename
   if (upper.includes('MG1C') || content.includes('MG1C')) return 'MG1C';
+  if (upper.includes('MED17') || content.includes('MED17')) return 'MED17';
+  if (upper.includes('MG1CA') || content.includes('MG1CA')) return 'MG1CA920';
+
+  // CAN-am / BRP from filename
+  if (upper.includes('CANAM') || upper.includes('CAN-AM') || upper.includes('BRP') || upper.includes('MAVERICK') || upper.includes('MAV_R') || upper.includes('MAVR') || upper.includes('DEFENDER') || upper.includes('SEADOO') || upper.includes('SEA-DOO')) return 'BRP';
 
   // Cummins from filename
   if (upper.includes('CUMMINS') || upper.includes('68RFE')) return 'CUMMINS';
 
   // Try to detect from A2L content
-  if (content.includes('MDG1C') || content.includes('MG1CA920')) return 'MG1C';
+  if (content.includes('MDG1C') || content.includes('MG1CA920')) return 'MG1CA920';
+  if (content.includes('MED17.8') || content.includes('MED17_8')) return 'MED17';
+  if (content.includes('BRP') || content.includes('Can-Am') || content.includes('CAN_AM')) return 'BRP';
   if (content.includes('E41') || content.includes('L5P')) return 'E41';
 
   // Check for GM-style module info
@@ -1013,7 +1020,7 @@ export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): s
   // Check filename first
   if (upper.includes('E41') || upper.includes('L5P')) return 'E41';
   if (upper.includes('T93') || upper.includes('10L1000') || upper.includes('ALLISON')) return 'T93';
-  if (upper.includes('MG1C') || upper.includes('CANAM') || upper.includes('MAVERICK')) return 'MG1C';
+  if (upper.includes('MG1C') || upper.includes('MG1CA') || upper.includes('CANAM') || upper.includes('CAN-AM') || upper.includes('MAVERICK') || upper.includes('MAV_R') || upper.includes('MAVR') || upper.includes('BRP') || upper.includes('DEFENDER') || upper.includes('SEADOO') || upper.includes('SEA-DOO') || upper.includes('MED17')) return 'BRP';
   if (upper.includes('CUMMINS') || upper.includes('68RFE') || upper.includes('CM2350')) return 'CUMMINS';
   if (/\bE\d{2}\b/.test(upper)) {
     const m = upper.match(/\b(E\d{2})\b/);
@@ -1052,13 +1059,17 @@ export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): s
   
   if (scanText.includes('E41') || scanText.includes('L5P')) return 'E41';
   if (scanText.includes('T93') || scanText.includes('10L1000')) return 'T93';
+  if (scanText.includes('MG1CA920') || scanText.includes('MG1CA')) return 'BRP';
+  if (scanText.includes('MED17.8') || scanText.includes('MED17_8')) return 'BRP';
+  if (scanText.includes('BRP') || scanText.includes('Can-Am') || scanText.includes('CAN_AM')) return 'BRP';
   if (scanText.includes('MG1C') || scanText.includes('MDG1C')) return 'MG1C';
   if (scanText.includes('Cummins') || scanText.includes('CM2350')) return 'CUMMINS';
 
   // Check binary size heuristics
   const sizeMB = data.length / (1024 * 1024);
   if (sizeMB > 3.5 && sizeMB < 4.5) return 'E41'; // L5P cal segment ~4MB
-  if (sizeMB > 1.5 && sizeMB < 2.5) return 'MG1C'; // Can-Am ~2MB
+  if (sizeMB > 1.5 && sizeMB < 2.5) return 'BRP'; // Can-Am ~2MB
+  if (sizeMB > 3.9 && sizeMB < 4.2) return 'BRP'; // Can-Am MG1CA920 ~4MB
 
   return 'UNKNOWN';
 }
@@ -1610,20 +1621,82 @@ export function alignOffsets(
     };
   }
 
+  // Strategy 1.5: Zero-offset fallback — A2L addresses map directly to binary offsets
+  // Common for raw flash dumps where the binary IS the full flash image
+  {
+    const valueMapsZero = ecuDef.maps.filter(m => m.type === 'VALUE' && m.address > 0);
+    const sampleZero = valueMapsZero.slice(0, 50);
+    let zeroMatches = 0;
+    let zeroTotal = 0;
+    const zeroAnchors: AlignmentResult['anchors'] = [];
+
+    for (const map of sampleZero) {
+      if (map.address < 0 || map.address >= binaryData.length - 4) continue;
+      zeroTotal++;
+
+      const dt = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
+      const bigEndian = ecuDef.moduleInfo.byteOrder === 'MSB_FIRST';
+      const raw = readValue(binaryData, map.address, dt, bigEndian);
+      const cm = ecuDef.compuMethods.get(map.compuMethod);
+      const phys = rawToPhysical(raw, cm);
+
+      if (phys >= map.lowerLimit && phys <= map.upperLimit) {
+        zeroMatches++;
+        if (zeroAnchors.length < 5) {
+          zeroAnchors.push({ a2lAddr: map.address, binOffset: map.address, name: map.name });
+        }
+      }
+    }
+
+    if (zeroTotal > 5 && zeroMatches / zeroTotal > 0.5) {
+      return {
+        offset: 0,
+        confidence: zeroMatches / zeroTotal,
+        method: 'zero_offset',
+        anchors: zeroAnchors,
+      };
+    }
+  }
+
   // Strategy 2: Try common offset patterns for known ECU families
   const family = ecuDef.ecuFamily.toUpperCase();
   const knownOffsets: number[] = [];
 
-  if (family === 'MG1C' || family.includes('BOSCH')) {
+  if (family === 'BRP' || family === 'MG1CA920' || family === 'MED17' || family.includes('MED17')) {
+    // CAN-am / BRP: Bosch MED17.8.5 and MG1CA920 ECUs
+    // A2L addresses typically in 0x80xxxxxx or 0xA0xxxxxx range, binary is raw flash
+    // Common base addresses for Bosch MED17 family:
+    knownOffsets.push(
+      0x80000000, 0x80010000, 0x80020000, 0x80040000, 0x80060000, 0x80080000,
+      0x80100000, 0x80140000, 0x80180000, 0x801C0000, 0x80200000,
+      0xA0000000, 0xA0010000, 0xA0020000, 0xA0040000, 0xA0060000,
+      0xA0080000, 0xA0100000, 0xA0140000, 0xA0180000, 0xA0200000,
+      0xA0300000, 0xA0400000,
+      // Tricore TC1xxx flash regions
+      0xAF000000, 0xAF010000, 0xAF020000, 0xAF040000, 0xAF0C0000,
+      0xAFC00000, 0xAFE00000,
+      // Additional MED17/MG1CA patterns
+      0x00000000, 0x00010000, 0x00020000, 0x00040000
+    );
+  } else if (family === 'MG1C' || family.includes('BOSCH')) {
     // Bosch MG1C: A2L addresses typically 0x94xxxxx, binary starts at 0x00
-    // The binary file usually starts at the flash base
-    knownOffsets.push(0x94400000, 0x94000000, 0x80000000, 0x60C00000);
+    knownOffsets.push(
+      0x94400000, 0x94000000, 0x80000000, 0x80010000, 0x80020000,
+      0x80040000, 0x80100000, 0x60C00000, 0xA0000000, 0x00000000
+    );
   } else if (family === 'E41' || family.includes('L5P')) {
     // GM E41: addresses 0x0006xxxx
     knownOffsets.push(0x00060000, 0x00020000, 0x00000000);
   } else if (family === 'T93') {
     // GM T93: addresses 0x09xxxxxx
     knownOffsets.push(0x09000000, 0x09001000, 0x08000000);
+  } else {
+    // Unknown family — try common patterns from all platforms
+    knownOffsets.push(
+      0x00000000, 0x80000000, 0x80010000, 0x80020000, 0x80040000,
+      0xA0000000, 0xA0020000, 0x94000000, 0x94400000, 0x60C00000,
+      0x00020000, 0x00060000
+    );
   }
 
   // Try each known offset and verify by reading a few known values
@@ -1665,22 +1738,33 @@ export function alignOffsets(
     }
   }
 
-  // Strategy 3: Brute-force search with step alignment
-  // Try offsets at 0x1000 boundaries
-  const firstMapAddr = ecuDef.maps[0]?.address || 0;
-  const searchStart = Math.max(0, firstMapAddr - binaryData.length);
-  const searchEnd = firstMapAddr + 0x100000;
+  // Strategy 3: Adaptive brute-force search
+  // Determine search range from actual map addresses
+  const allAddrs = ecuDef.maps.filter(m => m.address > 0).map(m => m.address);
+  if (allAddrs.length === 0) {
+    return { offset: 0, confidence: 0, method: 'none', anchors: [] };
+  }
+  const minAddr = Math.min(...allAddrs);
+  const maxAddr = Math.max(...allAddrs);
+  const addrSpan = maxAddr - minAddr;
 
+  // The base offset must place minAddr somewhere in [0, binaryData.length)
+  // So baseOffset is in range [minAddr - binaryData.length + 1, minAddr]
+  const bruteStart = Math.max(0, minAddr - binaryData.length + 1);
+  const bruteEnd = minAddr + Math.min(binaryData.length, 0x1000000); // search up to 16MB past
+
+  // Use adaptive step: coarse (0x10000) then fine (0x100) around best
   let bestOffset = 0;
   let bestScore = 0;
   let bestAnchors: AlignmentResult['anchors'] = [];
+  const bruteTestMaps = sampleMaps.slice(0, 30);
 
-  for (let tryBase = searchStart; tryBase <= searchEnd; tryBase += 0x1000) {
+  const testBase = (tryBase: number) => {
     let matches = 0;
     let total = 0;
     const anchors: AlignmentResult['anchors'] = [];
 
-    for (const map of sampleMaps.slice(0, 20)) {
+    for (const map of bruteTestMaps) {
       const binOffset = map.address - tryBase;
       if (binOffset < 0 || binOffset >= binaryData.length - 4) continue;
       total++;
@@ -1707,12 +1791,35 @@ export function alignOffsets(
         bestAnchors = anchors;
       }
     }
+  };
+
+  // Coarse pass: 0x10000 step
+  for (let tryBase = bruteStart; tryBase <= bruteEnd; tryBase += 0x10000) {
+    testBase(tryBase);
+  }
+
+  // Fine pass: 0x100 step around the best coarse result
+  if (bestScore > 0.1) {
+    const fineStart = Math.max(0, bestOffset - 0x10000);
+    const fineEnd = bestOffset + 0x10000;
+    for (let tryBase = fineStart; tryBase <= fineEnd; tryBase += 0x100) {
+      testBase(tryBase);
+    }
+  }
+
+  // Ultra-fine pass: 0x10 step around best fine result
+  if (bestScore > 0.2) {
+    const ultraStart = Math.max(0, bestOffset - 0x100);
+    const ultraEnd = bestOffset + 0x100;
+    for (let tryBase = ultraStart; tryBase <= ultraEnd; tryBase += 0x10) {
+      testBase(tryBase);
+    }
   }
 
   return {
     offset: -bestOffset,
     confidence: bestScore,
-    method: bestScore > 0.3 ? 'brute_force' : 'none',
+    method: bestScore > 0.15 ? 'brute_force' : 'none',
     anchors: bestAnchors,
   };
 }
@@ -2103,4 +2210,412 @@ export function searchMapsDetailed(
   });
 
   return results;
+}
+
+
+// ─── Self-Healing Alignment ─────────────────────────────────────────────────
+
+export interface AlignmentDiagnostic {
+  isHealthy: boolean;
+  totalMapsChecked: number;
+  mapsWithValues: number;
+  mapsInRange: number;
+  mapsAllZero: number;
+  mapsOutOfRange: number;
+  mapsNaN: number;
+  healthScore: number;       // 0-1: ratio of maps with plausible values
+  issues: string[];
+}
+
+/**
+ * Validate alignment quality by checking populated map values for signs of misalignment.
+ * Returns a diagnostic report with health score and specific issues found.
+ */
+export function validateAlignment(ecuDef: EcuDefinition): AlignmentDiagnostic {
+  const issues: string[] = [];
+  let totalChecked = 0;
+  let withValues = 0;
+  let inRange = 0;
+  let allZero = 0;
+  let outOfRange = 0;
+  let nanCount = 0;
+
+  // Sample up to 200 maps for validation
+  const sample = ecuDef.maps.slice(0, 200);
+
+  for (const map of sample) {
+    if (!map.physValues || map.physValues.length === 0) continue;
+    totalChecked++;
+    withValues++;
+
+    const vals = map.physValues;
+
+    // Check for NaN/Infinity
+    const hasNaN = vals.some(v => !isFinite(v));
+    if (hasNaN) {
+      nanCount++;
+      continue;
+    }
+
+    // Check if all values are exactly zero (suspicious for non-zero-expected maps)
+    const allAreZero = vals.every(v => v === 0);
+    if (allAreZero && map.upperLimit > 0 && map.lowerLimit < map.upperLimit) {
+      allZero++;
+      continue;
+    }
+
+    // Check if values are within the declared limits (with 20% tolerance)
+    const range = map.upperLimit - map.lowerLimit;
+    const tolerance = Math.max(range * 0.2, 1);
+    const someInRange = vals.some(
+      v => v >= (map.lowerLimit - tolerance) && v <= (map.upperLimit + tolerance)
+    );
+
+    if (someInRange) {
+      inRange++;
+    } else {
+      outOfRange++;
+    }
+  }
+
+  // Calculate health score
+  const healthScore = totalChecked > 0 ? inRange / totalChecked : 0;
+
+  // Diagnose issues
+  if (totalChecked === 0) {
+    issues.push('No maps have populated values — alignment may have completely failed');
+  }
+  if (withValues > 0 && withValues < sample.length * 0.3) {
+    issues.push(`Only ${withValues}/${sample.length} maps have values — many addresses may be out of binary range`);
+  }
+  if (allZero > totalChecked * 0.5) {
+    issues.push(`${allZero}/${totalChecked} maps read as all-zeros — offset is likely pointing to an empty/padding region`);
+  }
+  if (outOfRange > totalChecked * 0.3) {
+    issues.push(`${outOfRange}/${totalChecked} maps have values outside their declared limits — offset is likely wrong`);
+  }
+  if (nanCount > 5) {
+    issues.push(`${nanCount} maps produced NaN/Infinity — data type or byte order mismatch`);
+  }
+
+  return {
+    isHealthy: healthScore > 0.5 && issues.length === 0,
+    totalMapsChecked: totalChecked,
+    mapsWithValues: withValues,
+    mapsInRange: inRange,
+    mapsAllZero: allZero,
+    mapsOutOfRange: outOfRange,
+    mapsNaN: nanCount,
+    healthScore,
+    issues,
+  };
+}
+
+export interface AutoHealResult {
+  success: boolean;
+  originalAlignment: AlignmentResult;
+  finalAlignment: AlignmentResult;
+  originalDiagnostic: AlignmentDiagnostic;
+  finalDiagnostic: AlignmentDiagnostic;
+  strategiesAttempted: string[];
+  log: string[];           // human-readable log of what was tried
+}
+
+/**
+ * Self-healing alignment: if the initial alignment produces bad data,
+ * automatically try alternative strategies to find the correct offset.
+ * 
+ * This is "Erika noticing something is wrong and fixing it herself."
+ */
+export function autoHealAlignment(
+  ecuDef: EcuDefinition,
+  binaryData: Uint8Array,
+  binaryBaseAddress: number,
+  currentAlignment: AlignmentResult
+): AutoHealResult {
+  const log: string[] = [];
+  const strategiesAttempted: string[] = [];
+
+  log.push(`[Erika] Checking alignment quality (method: ${currentAlignment.method}, confidence: ${(currentAlignment.confidence * 100).toFixed(1)}%)...`);
+
+  // First, validate the current alignment
+  const originalDiag = validateAlignment(ecuDef);
+  log.push(`[Erika] Health check: ${originalDiag.mapsInRange}/${originalDiag.totalMapsChecked} maps in range (${(originalDiag.healthScore * 100).toFixed(0)}% healthy)`);
+
+  if (originalDiag.isHealthy && originalDiag.healthScore > 0.6) {
+    log.push('[Erika] Alignment looks good — no intervention needed.');
+    return {
+      success: true,
+      originalAlignment: currentAlignment,
+      finalAlignment: currentAlignment,
+      originalDiagnostic: originalDiag,
+      finalDiagnostic: originalDiag,
+      strategiesAttempted: [],
+      log,
+    };
+  }
+
+  // Something is wrong — start trying alternatives
+  for (const issue of originalDiag.issues) {
+    log.push(`[Erika] Issue detected: ${issue}`);
+  }
+  log.push('[Erika] Alignment looks suspicious. Trying alternative strategies...');
+
+  const valueMaps = ecuDef.maps.filter(m => m.type === 'VALUE' && m.address > 0);
+  const testMaps = valueMaps.slice(0, 50);
+  const bigEndian = ecuDef.moduleInfo.byteOrder === 'MSB_FIRST';
+
+  // Helper: test an offset and return match ratio
+  const testOffset = (offset: number): { score: number; anchors: AlignmentResult['anchors'] } => {
+    let matches = 0;
+    let total = 0;
+    const anchors: AlignmentResult['anchors'] = [];
+
+    for (const map of testMaps) {
+      const binAddr = map.address + offset;
+      if (binAddr < 0 || binAddr >= binaryData.length - 4) continue;
+      total++;
+
+      const dt = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
+      const raw = readValue(binaryData, binAddr, dt, bigEndian);
+      const cm = ecuDef.compuMethods.get(map.compuMethod);
+      const phys = rawToPhysical(raw, cm);
+
+      if (phys >= map.lowerLimit && phys <= map.upperLimit) {
+        matches++;
+        if (anchors.length < 5) {
+          anchors.push({ a2lAddr: map.address, binOffset: binAddr, name: map.name });
+        }
+      }
+    }
+
+    return { score: total > 0 ? matches / total : 0, anchors };
+  };
+
+  // Helper: apply an offset, populate values, and validate
+  const tryAndValidate = (offset: number, method: string): { align: AlignmentResult; diag: AlignmentDiagnostic } => {
+    const { score, anchors } = testOffset(offset);
+    const align: AlignmentResult = { offset, confidence: score, method, anchors };
+
+    // Temporarily populate values to validate
+    for (const map of ecuDef.maps) {
+      map.rawValues = undefined;
+      map.physValues = undefined;
+      map.axisXValues = undefined;
+      map.axisYValues = undefined;
+    }
+    if (score > 0.1) {
+      for (const map of ecuDef.maps) {
+        populateMapValues(map, ecuDef, binaryData, offset);
+      }
+    }
+    const diag = validateAlignment(ecuDef);
+    return { align, diag };
+  };
+
+  let bestResult: { align: AlignmentResult; diag: AlignmentDiagnostic } | null = null;
+  let bestHealth = originalDiag.healthScore;
+
+  // ── Strategy 1: Try zero offset ──
+  strategiesAttempted.push('zero_offset');
+  log.push('[Erika] Strategy 1: Trying zero offset (A2L addresses = binary offsets)...');
+  {
+    const result = tryAndValidate(0, 'auto_heal_zero');
+    log.push(`  → ${(result.diag.healthScore * 100).toFixed(0)}% healthy (${result.diag.mapsInRange}/${result.diag.totalMapsChecked} in range)`);
+    if (result.diag.healthScore > bestHealth) {
+      bestHealth = result.diag.healthScore;
+      bestResult = result;
+    }
+  }
+
+  // ── Strategy 2: Try flipped byte order ──
+  strategiesAttempted.push('byte_order_flip');
+  log.push('[Erika] Strategy 2: Trying flipped byte order...');
+  {
+    const origOrder = ecuDef.moduleInfo.byteOrder;
+    ecuDef.moduleInfo.byteOrder = origOrder === 'MSB_FIRST' ? 'MSB_LAST' : 'MSB_FIRST';
+    const result = tryAndValidate(currentAlignment.offset, 'auto_heal_byteswap');
+    log.push(`  → ${(result.diag.healthScore * 100).toFixed(0)}% healthy with ${ecuDef.moduleInfo.byteOrder}`);
+    if (result.diag.healthScore > bestHealth) {
+      bestHealth = result.diag.healthScore;
+      bestResult = result;
+    } else {
+      ecuDef.moduleInfo.byteOrder = origOrder; // revert
+    }
+  }
+
+  // ── Strategy 3: Scan common Bosch/Tricore base addresses ──
+  strategiesAttempted.push('bosch_tricore_scan');
+  log.push('[Erika] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
+  const boschBases = [
+    0x80000000, 0x80010000, 0x80020000, 0x80040000, 0x80060000, 0x80080000,
+    0x80100000, 0x80140000, 0x80180000, 0x801C0000, 0x80200000, 0x80300000,
+    0x80400000, 0x80800000,
+    0xA0000000, 0xA0010000, 0xA0020000, 0xA0040000, 0xA0060000, 0xA0080000,
+    0xA0100000, 0xA0140000, 0xA0200000, 0xA0300000, 0xA0400000,
+    0xAF000000, 0xAF010000, 0xAF020000, 0xAF040000, 0xAF0C0000,
+    0xAFC00000, 0xAFE00000,
+    0x00000000, 0x00010000, 0x00020000, 0x00040000, 0x00080000,
+    0x00100000, 0x00200000, 0x00400000,
+    0x60000000, 0x60C00000,
+    0x94000000, 0x94400000,
+  ];
+
+  for (const base of boschBases) {
+    const { score, anchors } = testOffset(-base);
+    if (score > bestHealth) {
+      const result = tryAndValidate(-base, `auto_heal_base_0x${base.toString(16).toUpperCase()}`);
+      log.push(`  → 0x${base.toString(16).toUpperCase()}: ${(result.diag.healthScore * 100).toFixed(0)}% healthy`);
+      if (result.diag.healthScore > bestHealth) {
+        bestHealth = result.diag.healthScore;
+        bestResult = result;
+      }
+    }
+  }
+
+  // ── Strategy 4: Signature-based anchor search ──
+  // Look for known calibration signatures in the binary and use them as anchor points
+  strategiesAttempted.push('signature_anchor');
+  log.push('[Erika] Strategy 4: Searching for calibration signatures in binary...');
+  {
+    // Find maps with distinctive default values (non-zero, non-trivial)
+    const anchorCandidates = ecuDef.maps.filter(m => {
+      if (m.type !== 'VALUE') return false;
+      const limit = m.upperLimit;
+      const lower = m.lowerLimit;
+      // Look for maps with narrow ranges (likely to have distinctive values)
+      return limit > lower && (limit - lower) < 1000 && lower !== 0;
+    }).slice(0, 20);
+
+    if (anchorCandidates.length > 0) {
+      // For each candidate, try to find its expected value pattern in the binary
+      const firstCandidate = anchorCandidates[0];
+      const dt = resolveDataType(firstCandidate.recordLayout, ecuDef.recordLayouts);
+
+      // Scan binary for plausible values of this map
+      const midValue = (firstCandidate.lowerLimit + firstCandidate.upperLimit) / 2;
+      const cm = ecuDef.compuMethods.get(firstCandidate.compuMethod);
+
+      for (let scanPos = 0; scanPos < binaryData.length - dt.size; scanPos += dt.size) {
+        const raw = readValue(binaryData, scanPos, dt, bigEndian);
+        const phys = rawToPhysical(raw, cm);
+
+        if (phys >= firstCandidate.lowerLimit && phys <= firstCandidate.upperLimit) {
+          // Found a plausible value — calculate what offset this implies
+          const impliedOffset = scanPos - firstCandidate.address;
+
+          // Verify this offset works for other maps too
+          const { score } = testOffset(impliedOffset);
+          if (score > bestHealth) {
+            const result = tryAndValidate(impliedOffset, 'auto_heal_signature');
+            if (result.diag.healthScore > bestHealth) {
+              bestHealth = result.diag.healthScore;
+              bestResult = result;
+              log.push(`  → Found signature anchor at 0x${scanPos.toString(16).toUpperCase()} → offset 0x${Math.abs(impliedOffset).toString(16).toUpperCase()} (${(result.diag.healthScore * 100).toFixed(0)}% healthy)`);
+              if (bestHealth > 0.7) break; // good enough
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Strategy 5: Adaptive fine-grain sweep around address clusters ──
+  strategiesAttempted.push('cluster_sweep');
+  log.push('[Erika] Strategy 5: Fine-grain sweep around map address clusters...');
+  {
+    // Find the median map address to center the search
+    const addrs = ecuDef.maps.filter(m => m.address > 0).map(m => m.address).sort((a, b) => a - b);
+    if (addrs.length > 0) {
+      const medianAddr = addrs[Math.floor(addrs.length / 2)];
+
+      // The offset must place medianAddr somewhere in the binary
+      // So: medianAddr + offset ∈ [0, binaryData.length)
+      // offset ∈ [-medianAddr, binaryData.length - medianAddr)
+      const sweepCenter = -medianAddr + Math.floor(binaryData.length / 2);
+      const sweepRadius = Math.min(binaryData.length, 0x800000); // 8MB radius
+
+      // Coarse sweep
+      let localBest = bestHealth;
+      let localBestOffset = 0;
+      for (let off = sweepCenter - sweepRadius; off <= sweepCenter + sweepRadius; off += 0x10000) {
+        const { score } = testOffset(off);
+        if (score > localBest) {
+          localBest = score;
+          localBestOffset = off;
+        }
+      }
+
+      // Fine sweep around local best
+      if (localBest > bestHealth) {
+        for (let off = localBestOffset - 0x10000; off <= localBestOffset + 0x10000; off += 0x100) {
+          const { score } = testOffset(off);
+          if (score > localBest) {
+            localBest = score;
+            localBestOffset = off;
+          }
+        }
+
+        const result = tryAndValidate(localBestOffset, 'auto_heal_cluster_sweep');
+        log.push(`  → Cluster sweep found offset 0x${Math.abs(localBestOffset).toString(16).toUpperCase()} (${(result.diag.healthScore * 100).toFixed(0)}% healthy)`);
+        if (result.diag.healthScore > bestHealth) {
+          bestHealth = result.diag.healthScore;
+          bestResult = result;
+        }
+      }
+    }
+  }
+
+  // ── Apply best result ──
+  if (bestResult && bestResult.diag.healthScore > originalDiag.healthScore) {
+    // Re-populate with the winning offset
+    for (const map of ecuDef.maps) {
+      map.rawValues = undefined;
+      map.physValues = undefined;
+      map.axisXValues = undefined;
+      map.axisYValues = undefined;
+    }
+    for (const map of ecuDef.maps) {
+      populateMapValues(map, ecuDef, binaryData, bestResult.align.offset);
+    }
+
+    log.push(`[Erika] ✓ Fixed! Used ${bestResult.align.method} — health improved from ${(originalDiag.healthScore * 100).toFixed(0)}% to ${(bestResult.diag.healthScore * 100).toFixed(0)}%`);
+    log.push(`[Erika] Final offset: 0x${Math.abs(bestResult.align.offset).toString(16).toUpperCase()} (${bestResult.align.offset < 0 ? 'negative' : 'positive'}), confidence: ${(bestResult.align.confidence * 100).toFixed(0)}%`);
+
+    return {
+      success: true,
+      originalAlignment: currentAlignment,
+      finalAlignment: bestResult.align,
+      originalDiagnostic: originalDiag,
+      finalDiagnostic: bestResult.diag,
+      strategiesAttempted,
+      log,
+    };
+  }
+
+  // Nothing worked — restore original values
+  for (const map of ecuDef.maps) {
+    map.rawValues = undefined;
+    map.physValues = undefined;
+    map.axisXValues = undefined;
+    map.axisYValues = undefined;
+  }
+  if (currentAlignment.confidence > 0.1) {
+    for (const map of ecuDef.maps) {
+      populateMapValues(map, ecuDef, binaryData, currentAlignment.offset);
+    }
+  }
+
+  log.push(`[Erika] ✗ Could not find a better alignment. Best health: ${(bestHealth * 100).toFixed(0)}%. The A2L may not match this binary.`);
+  log.push('[Erika] Suggestions: Try uploading a different A2L file, or check if the binary is the correct flash region.');
+
+  return {
+    success: false,
+    originalAlignment: currentAlignment,
+    finalAlignment: currentAlignment,
+    originalDiagnostic: originalDiag,
+    finalDiagnostic: originalDiag,
+    strategiesAttempted,
+    log,
+  };
 }
