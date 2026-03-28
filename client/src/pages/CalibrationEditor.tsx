@@ -142,6 +142,32 @@ export default function CalibrationEditor() {
   const storeA2LMutation = trpc.editor.storeA2L.useMutation();
   const trpcUtils = trpc.useUtils();
 
+  // Download binary file
+  const handleDownloadBinary = useCallback(() => {
+    if (!binaryData) return;
+    
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const defaultName = binaryFileName
+      ? binaryFileName.replace(/\.[^.]+$/, `_modified_${timestamp}${binaryFileName.slice(binaryFileName.lastIndexOf('.'))}`)
+      : `binary_${timestamp}.bin`;
+    
+    const filename = prompt('Enter filename to download:', defaultName);
+    if (!filename) return;
+    
+    const blob = new Blob([new Uint8Array(binaryData)], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    setCopyStatus({ message: `Downloaded ${filename}`, type: 'success' });
+    setTimeout(() => setCopyStatus(null), 2000);
+  }, [binaryData, binaryFileName]);
+
   const selectedMap = useMemo(() => {
     if (ecuDef && selectedMapIndex !== null && selectedMapIndex < ecuDef.maps.length) {
       return ecuDef.maps[selectedMapIndex];
@@ -736,6 +762,18 @@ export default function CalibrationEditor() {
             {modifiedMaps.size} modified
           </span>
         )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1.5 border-zinc-700 bg-transparent hover:bg-zinc-800"
+          onClick={handleDownloadBinary}
+          disabled={!binaryData}
+          title="Download modified binary file"
+        >
+          <FileDown className="w-3.5 h-3.5" />
+          Download
+        </Button>
 
         <Button
           variant="outline"

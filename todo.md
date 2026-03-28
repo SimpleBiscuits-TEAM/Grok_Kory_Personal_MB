@@ -893,3 +893,8 @@
 - [x] CalibrationEditor: add Undo/Redo buttons to toolbar
 - [x] CalibrationEditor: add keyboard shortcuts (Ctrl+Z / Ctrl+Y) for undo/redo
 - [x] CalibrationEditor: display history state in UI (e.g., "Undo (3 changes)" button label)
+
+## Feature (2026-03-28 final)
+- [x] CalibrationEditor: add Download Binary button to toolbar
+- [x] CalibrationEditor: prompt for filename or use default with timestamp
+- [x] CalibrationEditor: export binary in original format (BIN/SREC/iHEX)
