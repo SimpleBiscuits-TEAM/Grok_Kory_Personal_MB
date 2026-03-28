@@ -5,6 +5,8 @@
  * Supports: MG1C400A1T2 (Polaris Spyder/Maverick)
  */
 
+import { recalculateChecksums } from './ecuChecksums';
+
 export interface UnlockPatchResult {
   success: boolean;
   message: string;
@@ -12,6 +14,11 @@ export interface UnlockPatchResult {
   patchesApplied: string[];
   originalSize: number;
   patchedSize: number;
+  checksumInfo?: {
+    applied: boolean;
+    message: string;
+    changes: Array<{ offset: number; before: string; after: string }>;
+  };
 }
 
 export interface PatchLocation {
@@ -136,7 +143,7 @@ export function isHPTunersPatched(binary: Uint8Array): boolean {
 /**
  * Apply Dynojet unlock patch to MG1 binary
  */
-export function applyDynojettPatch(binary: Uint8Array): UnlockPatchResult {
+export function applyDynojettPatch(binary: Uint8Array, correctChecksums: boolean = false): UnlockPatchResult {
   const family = detectECUFamily(binary);
   
   if (!family) {
@@ -160,7 +167,7 @@ export function applyDynojettPatch(binary: Uint8Array): UnlockPatchResult {
   }
   
   // Create a copy to patch
-  const patched = new Uint8Array(binary);
+  let patched = new Uint8Array(binary);
   const patches = DYNOJET_PATCHES[family];
   const appliedPatches: string[] = [];
   
@@ -187,6 +194,24 @@ export function applyDynojettPatch(binary: Uint8Array): UnlockPatchResult {
     appliedPatches.push(patch.description);
   }
   
+  // Apply checksum correction if requested
+  let checksumInfo: UnlockPatchResult['checksumInfo'] | undefined;
+  if (correctChecksums) {
+    const checksumResult = recalculateChecksums(patched);
+    if (checksumResult.success && checksumResult.patchedBinary) {
+      patched = new Uint8Array(checksumResult.patchedBinary);
+      checksumInfo = {
+        applied: true,
+        message: checksumResult.message,
+        changes: checksumResult.checksumLocations.map((loc) => ({
+          offset: loc.offset,
+          before: `0x${(checksumResult.checksumsBefore.get(loc.offset) ?? 0).toString(16).padStart(8, '0')}`,
+          after: `0x${(checksumResult.checksumsAfter.get(loc.offset) ?? 0).toString(16).padStart(8, '0')}`,
+        })),
+      };
+    }
+  }
+  
   return {
     success: true,
     message: `Dynojet unlock successfully applied to ${family}`,
@@ -194,13 +219,14 @@ export function applyDynojettPatch(binary: Uint8Array): UnlockPatchResult {
     patchesApplied: appliedPatches,
     originalSize: binary.length,
     patchedSize: patched.length,
+    checksumInfo,
   };
 }
 
 /**
  * Apply HPTuners unlock patch to MG1 binary
  */
-export function applyHPTunersPatch(binary: Uint8Array): UnlockPatchResult {
+export function applyHPTunersPatch(binary: Uint8Array, correctChecksums: boolean = false): UnlockPatchResult {
   const family = detectECUFamily(binary);
   
   if (!family) {
@@ -224,7 +250,7 @@ export function applyHPTunersPatch(binary: Uint8Array): UnlockPatchResult {
   }
   
   // Create a copy to patch
-  const patched = new Uint8Array(binary);
+  let patched = new Uint8Array(binary);
   const patches = HPTUNERS_PATCHES[family];
   const appliedPatches: string[] = [];
   
@@ -251,6 +277,24 @@ export function applyHPTunersPatch(binary: Uint8Array): UnlockPatchResult {
     appliedPatches.push(patch.description);
   }
   
+  // Apply checksum correction if requested
+  let checksumInfo: UnlockPatchResult['checksumInfo'] | undefined;
+  if (correctChecksums) {
+    const checksumResult = recalculateChecksums(patched);
+    if (checksumResult.success && checksumResult.patchedBinary) {
+      patched = new Uint8Array(checksumResult.patchedBinary);
+      checksumInfo = {
+        applied: true,
+        message: checksumResult.message,
+        changes: checksumResult.checksumLocations.map((loc) => ({
+          offset: loc.offset,
+          before: `0x${(checksumResult.checksumsBefore.get(loc.offset) ?? 0).toString(16).padStart(8, '0')}`,
+          after: `0x${(checksumResult.checksumsAfter.get(loc.offset) ?? 0).toString(16).padStart(8, '0')}`,
+        })),
+      };
+    }
+  }
+  
   return {
     success: true,
     message: `HPTuners unlock successfully applied to ${family}`,
@@ -258,6 +302,7 @@ export function applyHPTunersPatch(binary: Uint8Array): UnlockPatchResult {
     patchesApplied: appliedPatches,
     originalSize: binary.length,
     patchedSize: patched.length,
+    checksumInfo,
   };
 }
 

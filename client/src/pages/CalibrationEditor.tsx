@@ -84,6 +84,7 @@ export default function CalibrationEditor() {
 
   // Unlock patch state
   const [unlockStatus, setUnlockStatus] = useState<{ isDynojettPatched: boolean; isHPTunersPatched: boolean; isLocked: boolean } | null>(null);
+  const [autoCorrectChecksums, setAutoCorrectChecksums] = useState(true);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
@@ -174,30 +175,38 @@ export default function CalibrationEditor() {
   // Apply Dynojet unlock patch
   const handleApplyDynojettPatch = useCallback(() => {
     if (!binaryData) return;
-    const result = applyDynojettPatch(binaryData);
+    const result = applyDynojettPatch(binaryData, autoCorrectChecksums);
     if (result.success && result.patchedBinary) {
       setBinaryData(result.patchedBinary);
+      const messages = [...result.patchesApplied];
+      if (result.checksumInfo?.applied) {
+        messages.push('Checksums updated');
+      }
       toast.success('Dynojet Unlock Applied', {
-        description: result.patchesApplied.join(', ')
+        description: messages.join(' | ')
       });
     } else {
       toast.error('Dynojet Patch Failed', { description: result.message });
     }
-  }, [binaryData, toast]);
+  }, [binaryData, autoCorrectChecksums, toast]);
 
   // Apply HPTuners unlock patch
   const handleApplyHPTunersPatch = useCallback(() => {
     if (!binaryData) return;
-    const result = applyHPTunersPatch(binaryData);
+    const result = applyHPTunersPatch(binaryData, autoCorrectChecksums);
     if (result.success && result.patchedBinary) {
       setBinaryData(result.patchedBinary);
+      const messages = [...result.patchesApplied];
+      if (result.checksumInfo?.applied) {
+        messages.push('Checksums updated');
+      }
       toast.success('HPTuners Unlock Applied', {
-        description: result.patchesApplied.join(', ')
+        description: messages.join(' | ')
       });
     } else {
       toast.error('HPTuners Patch Failed', { description: result.message });
     }
-  }, [binaryData, toast]);
+  }, [binaryData, autoCorrectChecksums, toast]);
 
   // Download binary file
   const handleDownloadBinary = useCallback(() => {
@@ -875,6 +884,16 @@ export default function CalibrationEditor() {
             >
               {unlockStatus.isHPTunersPatched ? '✓ HPTuners' : 'HPTuners'}
             </Button>
+            <label className="flex items-center gap-2 px-2 py-1 text-[11px] cursor-pointer hover:bg-zinc-800 rounded">
+              <input
+                type="checkbox"
+                checked={autoCorrectChecksums}
+                onChange={(e) => setAutoCorrectChecksums(e.target.checked)}
+                className="w-3 h-3"
+                title="Automatically recalculate checksums after applying patches"
+              />
+              <span className="text-zinc-400">Auto-Checksum</span>
+            </label>
           </>
         )}
 
