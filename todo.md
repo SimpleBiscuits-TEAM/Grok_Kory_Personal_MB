@@ -944,3 +944,28 @@
 - [x] Create TuneCompareEnhanced component with original vs comparison toggle
 - [ ] Integrate patch tool into CalibrationEditor tabs
 - [ ] Test patch tool with all Polaris files (stock, unlocked, tuned)
+
+
+## ECU Auto-Detection & A2L Auto-Load (2026-03-28)
+- [x] Create ECU detection engine with binary signature patterns
+- [x] Implement A2L registry system (database or local storage)
+- [x] Create auto-load logic for matching A2L files
+- [x] Add ECU detection UI component with confidence indicator
+- [x] Integrate into CalibrationEditor binary upload flow
+- [ ] Test with Can-Am MG1CA920 and Polaris MG1C400A1T2 files
+
+## Enhanced TuneCompare UI (2026-03-28)
+- [x] Add toggle button to switch between Original and Comparison values in right pane
+- [x] Display Original/Comparison/Difference for single VALUE parameters under stats
+- [x] Implement side-by-side layout for single-column maps
+- [x] Implement top-to-bottom layout for single-row maps
+- [ ] Test with Polaris files and verify all layouts work correctly
+
+
+## Can-Am Spyder ME17 Decompilation (2026-03-28)
+- [x] Analyze Spyder ME17 A2L structure vs MG1 differences (3,276 chars, 88 layouts, base 0x80020000)
+- [x] Parse Spyder HEX file and map A2L addresses to binary data (1,707 addresses verified)
+- [x] Extract calibration definition patterns (maps, curves, values, data types)
+- [x] Build ME17 decompilation template for identifying calibrations (documented in ME17_DECOMPILATION_TEMPLATE.md)
+- [ ] Create A2L generator tool to synthesize definitions from binary
+- [ ] Test decompilation with other Can-Am ME17 files

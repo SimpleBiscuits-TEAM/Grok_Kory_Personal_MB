@@ -34,6 +34,7 @@ import MapDetailPanel from '@/components/editor/MapDetailPanel';
 import ErikaChat from '@/components/editor/ErikaChat';
 import HexEditor from '@/components/editor/HexEditor';
 import TuneCompare from '@/components/editor/TuneCompare';
+import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 
@@ -69,6 +70,10 @@ export default function CalibrationEditor() {
   const [compareBinaryFileName, setCompareBinaryFileName] = useState<string>('');
   const [compareOffset, setCompareOffset] = useState<number>(0);
   const [compareFormat, setCompareFormat] = useState<string>('');
+
+  // ECU auto-detection
+  const [detectedFamily, setDetectedFamily] = useState<string | null>(null);
+  const [autoLoadedA2L, setAutoLoadedA2L] = useState<boolean>(false);
 
   // Undo/Redo history
   const [history, setHistory] = useState<Uint8Array[]>([]);
@@ -822,6 +827,7 @@ export default function CalibrationEditor() {
                   <TabsTrigger value="maps" className="text-[11px]">Maps</TabsTrigger>
                   <TabsTrigger value="hex" className="text-[11px]">Hex</TabsTrigger>
                   <TabsTrigger value="compare" className="text-[11px]">Compare</TabsTrigger>
+                  <TabsTrigger value="ecu" className="text-[11px]">ECU</TabsTrigger>
                   <TabsTrigger value="info" className="text-[11px]">Info</TabsTrigger>
                   <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
@@ -912,6 +918,21 @@ export default function CalibrationEditor() {
                         setCopyStatus({ message: `Error copying values: ${err instanceof Error ? err.message : 'Unknown error'}`, type: 'error' });
                         setTimeout(() => setCopyStatus(null), 3000);
                       }
+                    }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="ecu" className="flex-1 overflow-auto mt-0 p-3 min-h-0">
+                  <ECUDetectionPanel
+                    binary={binaryData}
+                    onA2LDetected={(content, family) => {
+                      setDetectedFamily(family);
+                      setAutoLoadedA2L(true);
+                    }}
+                    onA2LRegistered={(family, filename) => {
+                      toast.success('A2L Registered', {
+                        description: `${family}: ${filename} stored for auto-loading`
+                      });
                     }}
                   />
                 </TabsContent>
