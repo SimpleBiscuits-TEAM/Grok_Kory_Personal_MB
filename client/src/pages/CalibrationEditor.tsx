@@ -40,6 +40,10 @@ import TuneCompare from '@/components/editor/TuneCompare';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
+import {
+  saveEditorSession, getEditorSession, restoreBinaryData,
+  hasUnsavedChanges, clearEditorSession, getSessionInfo
+} from '@/lib/editorSessionPersistence';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -88,6 +92,7 @@ export default function CalibrationEditor() {
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
+  const sessionRestored = useRef<boolean>(false);
 
   // Ref to track latest ecuDef for stale closure prevention
   const ecuDefRef = useRef<EcuDefinition | null>(null);
@@ -95,6 +100,67 @@ export default function CalibrationEditor() {
   const binaryBaseAddressRef = useRef<number>(0);
   const historyRef = useRef<Uint8Array[]>([]);
   const historyIndexRef = useRef<number>(-1);
+
+  // Restore editor session on mount
+  useEffect(() => {
+    if (sessionRestored.current) return;
+    sessionRestored.current = true;
+
+    try {
+      const session = getEditorSession();
+      if (session.binaryData) {
+        const restoredBinary = restoreBinaryData(session.binaryData);
+        if (restoredBinary) {
+          setBinaryData(restoredBinary);
+          setBinaryFileName(session.binaryFileName || '');
+          toast.success('Editor session restored', {
+            description: `Binary recovered (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)`
+          });
+        }
+      }
+      if (session.selectedMapIndex !== null) {
+        setSelectedMapIndex(session.selectedMapIndex);
+      }
+      setAutoCorrectChecksums(session.autoCorrectChecksums);
+    } catch (error) {
+      console.error('[CalibrationEditor] Failed to restore session:', error);
+    }
+  }, []);
+
+  // Save session periodically
+  useEffect(() => {
+    const saveInterval = setInterval(() => {
+      if (binaryData) {
+        saveEditorSession({
+          binaryData: binaryData as any,
+          binaryFileName,
+          selectedMapIndex,
+          autoCorrectChecksums,
+          modifiedMaps: Object.fromEntries(
+            Array.from(modifiedMaps).map(idx => [
+              ecuDef?.maps[idx]?.name || `Map_${idx}`,
+              'modified'
+            ])
+          ),
+        });
+      }
+    }, 10000); // Save every 10 seconds
+
+    return () => clearInterval(saveInterval);
+  }, [binaryData, binaryFileName, selectedMapIndex, autoCorrectChecksums, modifiedMaps, ecuDef]);
+
+  // Warn before leaving if unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     ecuDefRef.current = ecuDef;
