@@ -913,3 +913,8 @@
 
 ## Bug Fix (2026-03-28 NaN issue)
 - [x] TuneCompare: diff values showing NaN for Min/Max/Avg and actual values — added Min/Max/Avg calculation to MapDiff
+
+## Critical Bugs (2026-03-28)
+- [ ] NaN values in TuneCompare: debug data type resolution to ensure it matches A2L definitions
+- [ ] Maps not appearing in right pane when selected from left tree — fix state sync issue
+- [ ] Compare file lost when switching tabs — preserve compare state and add close button

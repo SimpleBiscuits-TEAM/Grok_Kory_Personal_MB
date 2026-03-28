@@ -64,6 +64,12 @@ export default function CalibrationEditor() {
   const [showHealLog, setShowHealLog] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Compare binary (persistent across tab switches)
+  const [compareBinary, setCompareBinary] = useState<Uint8Array | null>(null);
+  const [compareBinaryFileName, setCompareBinaryFileName] = useState<string>('');
+  const [compareOffset, setCompareOffset] = useState<number>(0);
+  const [compareFormat, setCompareFormat] = useState<string>('');
+
   // Undo/Redo history
   const [history, setHistory] = useState<Uint8Array[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -856,12 +862,28 @@ export default function CalibrationEditor() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="compare" className="flex-1 overflow-hidden mt-0 min-h-0">
+                 <TabsContent value="compare" className="flex-1 overflow-auto mt-0 min-h-0">
                   <TuneCompare
                     ecuDef={ecuDef}
                     alignment={alignment}
                     primaryBinary={binaryData}
                     primaryFileName={binaryFileName}
+                    compareBinary={compareBinary}
+                    compareBinaryFileName={compareBinaryFileName}
+                    compareFormat={compareFormat}
+                    compareOffset={compareOffset}
+                    onCompareBinaryLoad={(data: Uint8Array, fileName: string, format: string, offset: number) => {
+                      setCompareBinary(data);
+                      setCompareBinaryFileName(fileName);
+                      setCompareFormat(format);
+                      setCompareOffset(offset);
+                    }}
+                    onCloseCompareBinary={() => {
+                      setCompareBinary(null);
+                      setCompareBinaryFileName('');
+                      setCompareFormat('');
+                      setCompareOffset(0);
+                    }}
                     onSelectMap={setSelectedMapIndex}
                     onCopyToP={(changes) => {
                       if (!binaryData) return;

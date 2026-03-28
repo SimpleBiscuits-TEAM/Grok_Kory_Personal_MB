@@ -51,6 +51,12 @@ interface TuneCompareProps {
   alignment: AlignmentResult | null;
   primaryBinary: Uint8Array | null;
   primaryFileName: string;
+  compareBinary?: Uint8Array | null;
+  compareBinaryFileName?: string;
+  compareFormat?: string;
+  compareOffset?: number;
+  onCompareBinaryLoad?: (data: Uint8Array, fileName: string, format: string, offset: number) => void;
+  onCloseCompareBinary?: () => void;
   onSelectMap?: (mapIndex: number) => void;
   onCopyToP?: (changes: { offset: number; value: number; size: number }[]) => void;
 }

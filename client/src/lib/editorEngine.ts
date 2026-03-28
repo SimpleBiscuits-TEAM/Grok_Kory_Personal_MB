@@ -1572,7 +1572,21 @@ export function writeValue(
  * Resolve the data type from a RECORD_LAYOUT name.
  */
 export function resolveDataType(layoutName: string, layouts: Map<string, RecordLayout>): DataTypeInfo {
-  const layout = layouts.get(layoutName);
+  if (!layoutName) return DATA_TYPES.UWORD;
+  
+  // Try exact match first
+  let layout = layouts.get(layoutName);
+  
+  // Try case-insensitive match if exact match fails
+  if (!layout) {
+    for (const [key, value] of Array.from(layouts.entries())) {
+      if (key.toUpperCase() === layoutName.toUpperCase()) {
+        layout = value;
+        break;
+      }
+    }
+  }
+  
   if (layout?.fncValuesType) {
     const dt = DATA_TYPES[layout.fncValuesType];
     if (dt) return dt;
@@ -1588,6 +1602,8 @@ export function resolveDataType(layoutName: string, layouts: Map<string, RecordL
   if (upper.includes('SWORD') || upper.includes('_SW')) return DATA_TYPES.SWORD;
   if (upper.includes('UBYTE') || upper.includes('_UB')) return DATA_TYPES.UBYTE;
   if (upper.includes('SBYTE') || upper.includes('_SB')) return DATA_TYPES.SBYTE;
+  if (upper.includes('INT64') || upper.includes('_I64')) return DATA_TYPES.A_INT64;
+  if (upper.includes('UINT64') || upper.includes('_U64')) return DATA_TYPES.A_UINT64;
 
   // Default
   return DATA_TYPES.UWORD;
