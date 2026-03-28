@@ -107,47 +107,36 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       extracted = bytes;
     }
 
+    // Automatically handle file size mismatch
+    let finalData = extracted;
+    if (primaryBinary && extracted.length !== primaryBinary.length) {
+      // Strategy 1: Padding (if compare is smaller)
+      if (extracted.length < primaryBinary.length) {
+        const padded = new Uint8Array(primaryBinary.length);
+        padded.set(extracted);
+        padded.fill(0xFF, extracted.length);
+        finalData = padded;
+      }
+      // Strategy 2: Truncation (if compare is larger)
+      else if (extracted.length > primaryBinary.length) {
+        finalData = extracted.slice(0, primaryBinary.length);
+      }
+    }
+
     const tuneFile = {
       name: file.name,
-      data: extracted,
+      data: finalData,
       baseAddress: baseAddr,
       format: fmt
     };
     if (onCompareBinaryLoad) {
-      onCompareBinaryLoad(extracted, file.name, fmt, baseAddr);
+      onCompareBinaryLoad(finalData, file.name, fmt, baseAddr);
     } else {
       setLocalCompareBinary(tuneFile);
     }
     setHexPage(0);
     setErikaAttemptedFix(false);
-    
-    // Check for size mismatch
-    if (primaryBinary && extracted.length !== primaryBinary.length) {
-      const diff = Math.abs(extracted.length - primaryBinary.length);
-      const offsetsAtRisk: string[] = [];
-      
-      // Calculate which maps might be affected
-      if (ecuDef) {
-        for (const map of ecuDef.maps) {
-          const rows = map.rows || 1;
-          const cols = map.cols || 1;
-          const bytesPerCell = 1; // Default to 1 byte per cell
-          const mapEnd = map.address + (rows * cols * bytesPerCell);
-          if (mapEnd > Math.min(primaryBinary.length, extracted.length)) {
-            offsetsAtRisk.push(`${map.name} (0x${map.address.toString(16)})`);
-          }
-        }
-      }
-      
-      setSizeMismatch({
-        primary: primaryBinary.length,
-        compare: extracted.length,
-        difference: diff,
-        offsetsAtRisk: offsetsAtRisk.slice(0, 5)
-      });
-    } else {
-      setSizeMismatch(null);
-    }
+    setSizeMismatch(null);
   }, []);
 
   // ── Erika auto-fix for size mismatches ──
@@ -391,7 +380,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
               <label className="flex items-center gap-1 px-2 py-1.5 bg-zinc-900 rounded border border-dashed border-zinc-700 text-[11px] cursor-pointer hover:border-red-800 transition-colors">
                 <Upload className="w-3 h-3 text-zinc-500" />
                 <span className="text-zinc-500">Load compare file...</span>
-                <input type="file" className="hidden" accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP,*" onChange={handleCompareLoad} />
+                <input type="file" className="hidden" accept=".bin,.bdc,.s,.hex,.ptp,.srec,.s19,.s28,.s37,.ihex,.BIN,.BDC,.S,.HEX,.PTP,*" onChange={handleCompareLoad} />
               </label>
             )}
           </div>
