@@ -1695,10 +1695,11 @@ export function alignOffsets(
       0x00000000, 0x00010000, 0x00020000, 0x00040000
     );
   } else if (family === 'MG1C' || family.includes('BOSCH')) {
-    // Bosch MG1C: A2L addresses typically 0x94xxxxx, binary starts at 0x00
+    // Bosch MG1C: A2L addresses typically 0x94xxxxx or 0x60Cxxxxx, binary starts at 0x00
+    // MG1CA920: 0x0060C000 base address (from iHEX files)
     knownOffsets.push(
       0x94400000, 0x94000000, 0x80000000, 0x80010000, 0x80020000,
-      0x80040000, 0x80100000, 0x60C00000, 0xA0000000, 0x00000000
+      0x80040000, 0x80100000, 0x60C00000, 0x0060C000, 0xA0000000, 0x00000000
     );
   } else if (family === 'E41' || family.includes('L5P')) {
     // GM E41: addresses 0x0006xxxx
@@ -1711,7 +1712,7 @@ export function alignOffsets(
     knownOffsets.push(
       0x00000000, 0x80000000, 0x80010000, 0x80020000, 0x80040000,
       0xA0000000, 0xA0020000, 0x94000000, 0x94400000, 0x60C00000,
-      0x00020000, 0x00060000
+      0x0060C000, 0x00020000, 0x00060000
     );
   }
 
