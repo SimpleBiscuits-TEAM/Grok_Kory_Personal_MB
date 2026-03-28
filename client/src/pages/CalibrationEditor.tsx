@@ -29,6 +29,9 @@ import {
   detectEcuFamily, detectEcuFamilyFromBinary,
   validateAlignment, autoHealAlignment, AutoHealResult, AlignmentDiagnostic
 } from '@/lib/editorEngine';
+import {
+  applyDynojettPatch, applyHPTunersPatch, getUnlockStatus, exportPatchedBinary
+} from '@/lib/mg1UnlockPatches';
 import MapTreeBrowser from '@/components/editor/MapTreeBrowser';
 import MapDetailPanel from '@/components/editor/MapDetailPanel';
 import ErikaChat from '@/components/editor/ErikaChat';
@@ -78,6 +81,9 @@ export default function CalibrationEditor() {
   // Undo/Redo history
   const [history, setHistory] = useState<Uint8Array[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+
+  // Unlock patch state
+  const [unlockStatus, setUnlockStatus] = useState<{ isDynojettPatched: boolean; isHPTunersPatched: boolean; isLocked: boolean } | null>(null);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +158,46 @@ export default function CalibrationEditor() {
 
   const storeA2LMutation = trpc.editor.storeA2L.useMutation();
   const trpcUtils = trpc.useUtils();
+
+  // Update unlock status when binary changes
+  useEffect(() => {
+    if (binaryData) {
+      const status = getUnlockStatus(binaryData);
+      setUnlockStatus({
+        isDynojettPatched: status.isDynojettPatched,
+        isHPTunersPatched: status.isHPTunersPatched,
+        isLocked: status.isLocked,
+      });
+    }
+  }, [binaryData]);
+
+  // Apply Dynojet unlock patch
+  const handleApplyDynojettPatch = useCallback(() => {
+    if (!binaryData) return;
+    const result = applyDynojettPatch(binaryData);
+    if (result.success && result.patchedBinary) {
+      setBinaryData(result.patchedBinary);
+      toast.success('Dynojet Unlock Applied', {
+        description: result.patchesApplied.join(', ')
+      });
+    } else {
+      toast.error('Dynojet Patch Failed', { description: result.message });
+    }
+  }, [binaryData, toast]);
+
+  // Apply HPTuners unlock patch
+  const handleApplyHPTunersPatch = useCallback(() => {
+    if (!binaryData) return;
+    const result = applyHPTunersPatch(binaryData);
+    if (result.success && result.patchedBinary) {
+      setBinaryData(result.patchedBinary);
+      toast.success('HPTuners Unlock Applied', {
+        description: result.patchesApplied.join(', ')
+      });
+    } else {
+      toast.error('HPTuners Patch Failed', { description: result.message });
+    }
+  }, [binaryData, toast]);
 
   // Download binary file
   const handleDownloadBinary = useCallback(() => {
@@ -796,6 +842,41 @@ export default function CalibrationEditor() {
           <FileDown className="w-3.5 h-3.5" />
           Export
         </Button>
+
+        {/* Unlock Patches */}
+        {unlockStatus && (
+          <>
+            <div className="w-px h-5 bg-zinc-700" />
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-7 text-[11px] gap-1.5 border-zinc-700 ${
+                unlockStatus.isDynojettPatched
+                  ? 'bg-emerald-900/30 text-emerald-400 border-emerald-700/50'
+                  : 'bg-transparent hover:bg-zinc-800'
+              }`}
+              onClick={handleApplyDynojettPatch}
+              disabled={!binaryData || unlockStatus.isDynojettPatched}
+              title={unlockStatus.isDynojettPatched ? 'Dynojet unlock already applied' : 'Apply Dynojet unlock patch'}
+            >
+              {unlockStatus.isDynojettPatched ? '✓ Dynojet' : 'Dynojet'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-7 text-[11px] gap-1.5 border-zinc-700 ${
+                unlockStatus.isHPTunersPatched
+                  ? 'bg-emerald-900/30 text-emerald-400 border-emerald-700/50'
+                  : 'bg-transparent hover:bg-zinc-800'
+              }`}
+              onClick={handleApplyHPTunersPatch}
+              disabled={!binaryData || unlockStatus.isHPTunersPatched}
+              title={unlockStatus.isHPTunersPatched ? 'HPTuners unlock already applied' : 'Apply HPTuners unlock patch'}
+            >
+              {unlockStatus.isHPTunersPatched ? '✓ HPTuners' : 'HPTuners'}
+            </Button>
+          </>
+        )}
 
         <Button
           variant="outline"
