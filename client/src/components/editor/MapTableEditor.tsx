@@ -76,6 +76,9 @@ export default function MapTableEditor({ map, compuMethod, onValuesChanged, read
   const [selectedCells, setSelectedCells] = useState<Set<number>>(new Set());
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [editingAxisX, setEditingAxisX] = useState<number | null>(null);
+  const [editingAxisY, setEditingAxisY] = useState<number | null>(null);
+  const [editAxisValue, setEditAxisValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -149,6 +152,60 @@ export default function MapTableEditor({ map, compuMethod, onValuesChanged, read
     }
   }, [selectedCells, startEdit]);
 
+  // Math operations on selected cells
+  const applyMathOperation = useCallback((operation: 'add' | 'subtract' | 'multiply' | 'divide' | 'percentage', value: number) => {
+    if (readOnly || selectedCells.size === 0) return;
+    const newValues = [...values];
+    for (const idx of Array.from(selectedCells)) {
+      const current = newValues[idx];
+      switch (operation) {
+        case 'add':
+          newValues[idx] = current + value;
+          break;
+        case 'subtract':
+          newValues[idx] = current - value;
+          break;
+        case 'multiply':
+          newValues[idx] = current * value;
+          break;
+        case 'divide':
+          if (value !== 0) newValues[idx] = current / value;
+          break;
+        case 'percentage':
+          newValues[idx] = current * (1 + value / 100);
+          break;
+      }
+    }
+    onValuesChanged(map.name, newValues);
+  }, [selectedCells, values, readOnly, map.name, onValuesChanged]);
+
+  // Select entire row
+  const selectRow = useCallback((row: number) => {
+    const newSel = new Set<number>();
+    for (let c = 0; c < cols; c++) {
+      newSel.add(row * cols + c);
+    }
+    setSelectedCells(newSel);
+  }, [cols]);
+
+  // Select entire column
+  const selectColumn = useCallback((col: number) => {
+    const newSel = new Set<number>();
+    for (let r = 0; r < rows; r++) {
+      newSel.add(r * cols + col);
+    }
+    setSelectedCells(newSel);
+  }, [rows, cols]);
+
+  // Select entire map
+  const selectAllCells = useCallback(() => {
+    const newSel = new Set<number>();
+    for (let i = 0; i < values.length; i++) {
+      newSel.add(i);
+    }
+    setSelectedCells(newSel);
+  }, [values.length]);
+
   const handleCellMouseEnter = useCallback((idx: number) => {
     if (!isDragging || selectionStart === null) return;
     const startRow = Math.floor(selectionStart / cols);
@@ -167,6 +224,21 @@ export default function MapTableEditor({ map, compuMethod, onValuesChanged, read
     }
     setSelectedCells(newSel);
   }, [isDragging, selectionStart, cols]);
+
+  // Export methods for parent component access
+  const mathOperations = {
+    add: (v: number) => applyMathOperation('add', v),
+    subtract: (v: number) => applyMathOperation('subtract', v),
+    multiply: (v: number) => applyMathOperation('multiply', v),
+    divide: (v: number) => applyMathOperation('divide', v),
+    percentage: (v: number) => applyMathOperation('percentage', v),
+    selectRow,
+    selectColumn,
+    selectAllCells,
+  };
+
+  // Store in window for parent access
+  (window as any).__mapTableMethods = mathOperations;
 
   useEffect(() => {
     const handleMouseUp = () => setIsDragging(false);
