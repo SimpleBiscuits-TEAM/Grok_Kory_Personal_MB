@@ -938,6 +938,9 @@
 - [x] Dynojet unlock: single-byte patch at 0x030363 (0x23 → 0x03)
 - [x] HPTuners unlock: 10-byte patch across multiple regions (checksums + config flags)
 - [x] Document both unlock mechanisms in POLARIS_UNLOCK_PATCHES.md
-- [ ] Create universal patch tool UI in CalibrationEditor
-- [ ] Map unlock addresses to A2L characteristics for documentation
-- [ ] Test patch tool with all three Polaris files
+- [x] Race Flash tuning: 4,127 regions modified (comprehensive performance tune)
+- [x] Document Race Flash tuning in POLARIS_RACE_FLASH_TUNING.md
+- [x] Create PatchManager component for detecting and applying patches
+- [x] Create TuneCompareEnhanced component with original vs comparison toggle
+- [ ] Integrate patch tool into CalibrationEditor tabs
+- [ ] Test patch tool with all Polaris files (stock, unlocked, tuned)
