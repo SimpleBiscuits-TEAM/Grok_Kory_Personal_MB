@@ -129,6 +129,17 @@
 }
 
 @layer base {
+  /* Lock the viewport so nested scroll containers work correctly.
+   * Without height:100% on html/body/#root, flex children with overflow-y-auto
+   * cannot clamp themselves — the page just grows instead of scrolling. */
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+  #root {
+    height: 100%;
+    overflow: auto;
+  }
   * {
     @apply border-border outline-ring/50;
   }

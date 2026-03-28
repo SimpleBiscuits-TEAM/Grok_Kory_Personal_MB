@@ -684,9 +684,9 @@ export default function CalibrationEditor() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: Map tree or upload */}
         {leftPanelOpen && (
-          <div className="w-72 border-r border-zinc-800 flex flex-col shrink-0">
+          <div className="w-72 border-r border-zinc-800 flex flex-col shrink-0 min-h-0 overflow-hidden">
             {ecuDef ? (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full min-h-0 overflow-hidden">
                 <TabsList className="shrink-0 mx-2 mt-2">
                   <TabsTrigger value="maps" className="text-[11px]">Maps</TabsTrigger>
                   <TabsTrigger value="hex" className="text-[11px]">Hex</TabsTrigger>
@@ -695,7 +695,7 @@ export default function CalibrationEditor() {
                   <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="maps" className="flex-1 overflow-hidden mt-0">
+                <TabsContent value="maps" className="flex-1 overflow-hidden mt-0 min-h-0">
                   <MapTreeBrowser
                     maps={ecuDef.maps}
                     selectedMapIndex={selectedMapIndex}
@@ -705,7 +705,7 @@ export default function CalibrationEditor() {
                   />
                 </TabsContent>
 
-                <TabsContent value="hex" className="flex-1 overflow-hidden mt-0">
+                <TabsContent value="hex" className="flex-1 overflow-hidden mt-0 min-h-0">
                   {binaryData ? (
                     <HexEditor
                       data={binaryData}
@@ -731,7 +731,7 @@ export default function CalibrationEditor() {
                   )}
                 </TabsContent>
 
-                <TabsContent value="compare" className="flex-1 overflow-hidden mt-0">
+                <TabsContent value="compare" className="flex-1 overflow-hidden mt-0 min-h-0">
                   <TuneCompare
                     ecuDef={ecuDef}
                     alignment={alignment}
@@ -740,7 +740,7 @@ export default function CalibrationEditor() {
                   />
                 </TabsContent>
 
-                <TabsContent value="info" className="flex-1 overflow-auto mt-0 p-3">
+                <TabsContent value="info" className="flex-1 overflow-auto mt-0 p-3 min-h-0">
                   <div className="space-y-2 text-xs font-mono">
                     <div className="text-zinc-500">ECU Family: <span className="text-white">{ecuDef.ecuFamily}</span></div>
                     <div className="text-zinc-500">Source: <span className="text-zinc-300">{ecuDef.source} ({ecuDef.fileName})</span></div>
@@ -826,7 +826,7 @@ export default function CalibrationEditor() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3">
+                <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3 min-h-0">
                   <div className="flex flex-col h-full">
                     <div className="flex gap-1 mb-3">
                       <button

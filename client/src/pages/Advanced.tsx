@@ -1115,7 +1115,11 @@ function EditorGate() {
   ];
 
   if (unlocked) {
-    return <CalibrationEditor />;
+    return (
+      <div className="flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
+        <CalibrationEditor />
+      </div>
+    );
   }
 
   return (

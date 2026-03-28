@@ -871,3 +871,6 @@
 
 ## Version Bump
 - [x] Update version from v0.01 to v0.02
+
+## UX Fix (2026-03-28)
+- [x] Fix CalibrationEditor: only map tree list should scroll, not the entire page

@@ -347,9 +347,9 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
   if (searchData) {
     const { results, elapsed } = searchData;
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full min-h-0">
         {/* Search bar */}
-        <div className="p-2 border-b border-zinc-800">
+        <div className="p-2 border-b border-zinc-800 shrink-0">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
             <input
@@ -475,9 +475,9 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
   const activeTree = magicMode && magicMap.size > 0 ? magicTree : tree;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Search bar */}
-      <div className="p-2 border-b border-zinc-800">
+      <div className="p-2 border-b border-zinc-800 shrink-0">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500" />
           <input
@@ -529,7 +529,7 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
 
       {/* Magic Mode loading indicator */}
       {magicLoading && (
-        <div className="px-2 py-1 bg-purple-500/5 border-b border-purple-500/20">
+        <div className="px-2 py-1 bg-purple-500/5 border-b border-purple-500/20 shrink-0">
           <div className="flex items-center gap-2 text-[10px] text-purple-400">
             <Loader2 className="w-3 h-3 animate-spin" />
             <span>Erika is translating map names...</span>
