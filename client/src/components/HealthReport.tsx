@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — HealthReport Component
+ * V-OP by PPEI — HealthReport Component
  * Dark theme: black bg, red/amber/green status indicators
  * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for data
  */

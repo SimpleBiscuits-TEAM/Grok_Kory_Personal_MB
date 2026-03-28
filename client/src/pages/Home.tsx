@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — Performance Analyzer
+ * V-OP by PPEI — Vehicle Optimizer
  * Design: Industrial Performance / Motorsport Dark
  * Colors: Black (#0a0a0a bg) + PPEI Red (oklch 0.52 0.22 25) + White text
  * Typography: Bebas Neue (headings) + Rajdhani (body) + Share Tech Mono (data)
@@ -211,7 +211,7 @@ export default function Home() {
               {/* PPEI Logo */}
               <img
                 src={PPEI_LOGO_URL}
-                alt="PPEI Custom Tuning"
+                alt="V-OP by PPEI"
                 className="ppei-logo"
                 style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
               />
@@ -226,7 +226,7 @@ export default function Home() {
                     lineHeight: 1.1,
                     margin: 0
                   }}>
-                    PERFORMANCE ANALYZER
+                    V-OP
                   </h1>
                   <span style={{
                     fontFamily: '"Share Tech Mono", monospace',
@@ -250,7 +250,7 @@ export default function Home() {
                   margin: 0,
                   marginTop: '2px'
                 }}>
-                  AI-POWERED DIAGNOSTICS
+                  VEHICLE OPTIMIZER BY PPEI
                 </p>
               </div>
             </div>

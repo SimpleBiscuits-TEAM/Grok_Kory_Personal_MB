@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — DiagnosticReport Component
+ * V-OP by PPEI — DiagnosticReport Component
  * Dark theme: black bg, red critical, amber warning, cyan info
  * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for codes
  */

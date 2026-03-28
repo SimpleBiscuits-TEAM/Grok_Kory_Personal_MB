@@ -948,7 +948,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       </ZoomableChart>
 
       <div style={{ textAlign: 'right', marginTop: 8, color: '#222', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>
-        PERFORMANCE ANALYZER · OBD-II ESTIMATED
+        V-OP BY PPEI · OBD-II ESTIMATED
       </div>
     </div>
   );

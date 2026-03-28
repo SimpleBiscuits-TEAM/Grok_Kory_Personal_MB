@@ -20,7 +20,7 @@ function Router() {
   );
 }
 
-// PPEI Custom Tuning — Dark theme by default to match brand identity
+// V-OP by PPEI — Dark theme by default to match brand identity
 function App() {
   return (
     <ErrorBoundary>

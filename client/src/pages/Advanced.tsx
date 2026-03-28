@@ -1266,10 +1266,10 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         <div className="container mx-auto px-4 py-3">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <Link href="/"><img src={PPEI_LOGO_URL} alt="PPEI Custom Tuning" className="ppei-logo" style={{ height: '48px', width: 'auto', objectFit: 'contain', cursor: 'pointer' }} /></Link>
+              <Link href="/"><img src={PPEI_LOGO_URL} alt="V-OP by PPEI" className="ppei-logo" style={{ height: '48px', width: 'auto', objectFit: 'contain', cursor: 'pointer' }} /></Link>
               <div style={{ borderLeft: `3px solid ${sColor.red}`, paddingLeft: '12px' }}>
-                <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>ADVANCED MODE</h1>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>BETA · AI DIAGNOSTICS · MULTI-VEHICLE · A2L SUPPORT</p>
+                <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>V-OP ADVANCED</h1>
+                <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI · AI DIAGNOSTICS</p>
               </div>
               <span style={{
                 fontFamily: sFont.mono,

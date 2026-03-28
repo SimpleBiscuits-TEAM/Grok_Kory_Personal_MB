@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — DTC Code Search Component
+ * V-OP by PPEI — DTC Code Search Component
  * Dark theme: black bg, red/amber/cyan severity indicators
  * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for codes
  */

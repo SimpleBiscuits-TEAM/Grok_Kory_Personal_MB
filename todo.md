@@ -826,3 +826,13 @@
 - [x] Write comprehensive summary: what this system does better than the market
 - [x] Explain why Walmart, truck stops, tire shops, mechanic shops, and everyday people need this tool
 - [x] "The code reader is dead" positioning
+
+## Rebrand: V-OP by PPEI (2026-03-28)
+- [x] Update app title from "Duramax Performance Analyzer" to "V-OP by PPEI"
+- [x] Update all header text — "PERFORMANCE ANALYZER" → "V-OP"
+- [x] Update subtitle — "AI-POWERED DIAGNOSTICS" → "VEHICLE OPTIMIZER"
+- [x] Update page title (index.html, VITE_APP_TITLE — manual update needed in Settings)
+- [x] Update all component references to old branding
+- [x] Update PDF reports and export branding
+- [x] Update Erika's knowledge base references
+- [x] Update document titles (architecture PDF, market summary)

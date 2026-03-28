@@ -114,13 +114,13 @@ export async function generatePerformanceReport(
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text('DURAMAX PERFORMANCE ANALYZER', margin + 27, 22);
+  doc.text('V-OP BY PPEI', margin + 27, 22);
 
   // Subtitle
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(180, 180, 180);
-  doc.text('OBD-II Datalog Analysis Report', margin + 27, 31);
+  doc.text('Vehicle Optimizer — Datalog Analysis Report', margin + 27, 31);
 
   // File + date
   doc.setFontSize(8);

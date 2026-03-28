@@ -1,5 +1,5 @@
 /**
- * PPEI Custom Tuning — AI Reasoning Panel
+ * V-OP by PPEI — AI Reasoning Panel
  * Displays the output of the PPEI AI reasoning engine:
  * - Operating context (warmup detection, format, etc.)
  * - Context-aware findings with evidence chains
