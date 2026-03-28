@@ -24,6 +24,7 @@ import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import { PCANConnection } from '@/lib/pcanConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
+import LiveGaugeDashboard from '@/components/gauges/LiveGaugeDashboard';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
   LogSession, STANDARD_PIDS, GM_EXTENDED_PIDS, ALL_PIDS,
@@ -643,9 +644,14 @@ function PIDSelector({
                 return (
                   <label
                     key={`${pid.service}-${pid.pid}`}
+                    draggable={isSelected && !disabled}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/pid', JSON.stringify({ service: pid.service ?? 0x01, pid: pid.pid }));
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 4px',
-                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      cursor: disabled ? 'not-allowed' : (isSelected ? 'grab' : 'pointer'),
                       opacity: isSupported ? 1 : 0.4,
                       borderRadius: '2px', background: isSelected ? 'oklch(0.15 0.01 25 / 0.3)' : 'transparent',
                     }}
@@ -865,6 +871,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
   // UI state
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
+  const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
 
   // DID Scan state
   const [isScanning, setIsScanning] = useState(false);
@@ -2027,42 +2034,101 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
 
         {/* Right: Live Data */}
         <div>
-          {/* Toggle PID panel button */}
-          <button
-            onClick={() => setShowPidSelector(!showPidSelector)}
-            style={{
-              fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim,
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '4px',
-            }}
-          >
-            <Settings style={{ width: 12, height: 12 }} />
-            {showPidSelector ? 'Hide PID Panel' : 'Show PID Panel'}
-          </button>
+          {/* Toolbar: PID panel toggle + View mode toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+            <button
+              onClick={() => setShowPidSelector(!showPidSelector)}
+              style={{
+                fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim,
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '4px',
+              }}
+            >
+              <Settings style={{ width: 12, height: 12 }} />
+              {showPidSelector ? 'Hide PID Panel' : 'Show PID Panel'}
+            </button>
 
-          {/* Live Gauges */}
-          {(isLogging || liveReadings.size > 0) && (
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
-                LIVE DATA
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {activePids.map(pid => (
-                  <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
-                ))}
-              </div>
+            {/* View Mode Toggle */}
+            <div style={{ display: 'flex', gap: '0' }}>
+              <button
+                onClick={() => setLiveViewMode('list')}
+                style={{
+                  padding: '4px 10px', borderRadius: '3px 0 0 3px', cursor: 'pointer',
+                  fontFamily: sFont.heading, fontSize: '0.7rem', letterSpacing: '0.08em',
+                  border: `1px solid ${liveViewMode === 'list' ? sColor.red : sColor.border}`,
+                  background: liveViewMode === 'list' ? 'oklch(0.18 0.04 25 / 0.3)' : 'transparent',
+                  color: liveViewMode === 'list' ? sColor.red : sColor.textDim,
+                }}
+              >
+                LIST VIEW
+              </button>
+              <button
+                onClick={() => setLiveViewMode('gauges')}
+                style={{
+                  padding: '4px 10px', borderRadius: '0 3px 3px 0', cursor: 'pointer',
+                  fontFamily: sFont.heading, fontSize: '0.7rem', letterSpacing: '0.08em',
+                  border: `1px solid ${liveViewMode === 'gauges' ? 'oklch(0.70 0.14 200)' : sColor.border}`,
+                  borderLeft: 'none',
+                  background: liveViewMode === 'gauges' ? 'oklch(0.15 0.04 200 / 0.3)' : 'transparent',
+                  color: liveViewMode === 'gauges' ? 'oklch(0.70 0.14 200)' : sColor.textDim,
+                }}
+              >
+                GAUGE VIEW
+              </button>
             </div>
+          </div>
+
+          {/* === LIST VIEW (original layout) === */}
+          {liveViewMode === 'list' && (
+            <>
+              {/* Live Gauges */}
+              {(isLogging || liveReadings.size > 0) && (
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
+                    LIVE DATA
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {activePids.map(pid => (
+                      <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Real-Time Chart */}
+              {(isLogging || readingHistory.size > 0) && (
+                <div style={{ marginBottom: '16px' }}>
+                  <LiveChart
+                    pids={activePids}
+                    readingHistory={readingHistory}
+                    liveReadings={liveReadings}
+                    isLogging={isLogging}
+                  />
+                </div>
+              )}
+            </>
           )}
 
-          {/* Real-Time Chart */}
-          {(isLogging || readingHistory.size > 0) && (
+          {/* === GAUGE VIEW (motorsport dashboard) === */}
+          {liveViewMode === 'gauges' && (
             <div style={{ marginBottom: '16px' }}>
-              <LiveChart
-                pids={activePids}
-                readingHistory={readingHistory}
+              <LiveGaugeDashboard
                 liveReadings={liveReadings}
+                activePids={activePids}
+                allAvailablePids={ALL_PIDS}
                 isLogging={isLogging}
               />
+              {/* Still show the chart below gauges */}
+              {(isLogging || readingHistory.size > 0) && (
+                <div style={{ marginTop: '16px' }}>
+                  <LiveChart
+                    pids={activePids}
+                    readingHistory={readingHistory}
+                    liveReadings={liveReadings}
+                    isLogging={isLogging}
+                  />
+                </div>
+              )}
             </div>
           )}
 

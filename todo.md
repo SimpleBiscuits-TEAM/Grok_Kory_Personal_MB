@@ -459,3 +459,15 @@
 
 ## Upload Area Text
 - [x] Add "Currently only CSV supported" text to upload areas on Home, Advanced, and CompareView pages
+
+## Live Gauge Dashboard for Datalogging
+- [x] Build RadialGauge component (motorsport-style circular gauge with needle, tick marks, value readout, carbon fiber texture)
+- [x] Build MiniGauge component (smaller version for secondary PIDs)
+- [x] Build BarGauge component (horizontal/vertical bar style for linear values like throttle position)
+- [x] Build LiveGaugeDashboard layout with configurable grid of gauge slots
+- [x] Add drag-and-drop from PID list to gauge slots for PID assignment
+- [x] Add right-click context menu on gauge slots for PID selection/removal
+- [x] Add layout toggle in DataloggerPanel (LIST view vs GAUGE view) — keep current list layout as default
+- [x] Wire gauge components to live PID data stream from datalogger
+- [x] Style gauges with dark motorsport theme (carbon fiber, chrome bezels, red/cyan accents matching reference image)
+- [x] Write tests for gauge components and PID assignment logic (23 tests)
