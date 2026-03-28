@@ -4,6 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { diagnosticRouter } from "./routers/diagnostic";
 import { compareRouter } from "./routers/compare";
+import { editorRouter } from "./routers/editor";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -26,6 +27,9 @@ export const appRouter = router({
 
   // Datalog Comparison
   compare: compareRouter,
+
+  // ECU Calibration Editor
+  editor: editorRouter,
 
   // Feedback / Error Reports
   feedback: router({

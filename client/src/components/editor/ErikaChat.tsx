@@ -1,0 +1,261 @@
+/**
+ * ErikaChat — AI Calibration Assistant
+ *
+ * Named "Erika" — an LLM-powered chat that understands the loaded A2L/binary,
+ * can trace control logic, help design features, identify tables, and correlate
+ * with datalogs.
+ */
+
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { Send, Bot, User, Loader2, Sparkles, X, Minimize2, Maximize2 } from 'lucide-react';
+import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
+import { trpc } from '@/lib/trpc';
+import { Streamdown } from 'streamdown';
+
+interface ErikaChatProps {
+  ecuDef: EcuDefinition | null;
+  selectedMap: CalibrationMap | null;
+  onNavigateToMap: (mapName: string) => void;
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen, onToggle }: ErikaChatProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: 'assistant',
+      content: `Hey! I'm **Erika**, your calibration engineering assistant. I can help you with:\n\n- **Finding tables** — "Where is the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo control?"\n- **Designing features** — "How would I implement launch control?"\n- **DTC troubleshooting** — "How do I disable P0087?"\n- **Calibration strategy** — "What tables affect boost at 3000 RPM?"\n\nI have access to the loaded ECU definition and can trace control logic through the calibration maps. What are you working on?`,
+      timestamp: Date.now(),
+    },
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const chatMutation = trpc.editor.erikaChat.useMutation();
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Build context summary for the LLM
+  const buildContext = useCallback((): string => {
+    if (!ecuDef) return 'No ECU definition loaded.';
+
+    const parts: string[] = [];
+    parts.push(`ECU Family: ${ecuDef.ecuFamily}`);
+    parts.push(`Source: ${ecuDef.source} (${ecuDef.fileName})`);
+    parts.push(`Total Maps: ${ecuDef.stats.totalMaps}`);
+    parts.push(`Total Measurements: ${ecuDef.stats.totalMeasurements}`);
+    parts.push(`Map Types: ${Object.entries(ecuDef.stats.mapsByType).map(([k, v]) => `${k}:${v}`).join(', ')}`);
+
+    // Include category summary
+    const categories = new Map<string, number>();
+    for (const m of ecuDef.maps) {
+      const cat = m.category || 'Other';
+      categories.set(cat, (categories.get(cat) || 0) + 1);
+    }
+    parts.push(`Categories: ${Array.from(categories.entries()).map(([k, v]) => `${k}(${v})`).join(', ')}`);
+
+    // Include a sample of map names for context (first 200)
+    const mapNames = ecuDef.maps.slice(0, 200).map(m => `${m.name} [${m.type}] - ${m.description || m.category}`);
+    parts.push(`\nSample map names (first 200 of ${ecuDef.maps.length}):\n${mapNames.join('\n')}`);
+
+    // Include measurement names sample
+    if (ecuDef.measurements.length > 0) {
+      const measNames = ecuDef.measurements.slice(0, 100).map(m => `${m.name} - ${m.description}`);
+      parts.push(`\nSample measurements (first 100 of ${ecuDef.measurements.length}):\n${measNames.join('\n')}`);
+    }
+
+    // If a map is selected, include its details
+    if (selectedMap) {
+      parts.push(`\nCurrently selected map: ${selectedMap.name}`);
+      parts.push(`Type: ${selectedMap.type}, Address: 0x${selectedMap.address.toString(16).toUpperCase()}`);
+      parts.push(`Description: ${selectedMap.description || 'none'}`);
+      parts.push(`Category: ${selectedMap.category}/${selectedMap.subcategory}`);
+      if (selectedMap.physValues) {
+        const vals = selectedMap.physValues.slice(0, 50);
+        parts.push(`Values (first 50): ${vals.map(v => v.toFixed(2)).join(', ')}`);
+      }
+      if (selectedMap.axisXValues) {
+        parts.push(`X Axis: ${selectedMap.axisXValues.map(v => v.toFixed(2)).join(', ')}`);
+      }
+      if (selectedMap.axisYValues) {
+        parts.push(`Y Axis: ${selectedMap.axisYValues.map(v => v.toFixed(2)).join(', ')}`);
+      }
+    }
+
+    return parts.join('\n');
+  }, [ecuDef, selectedMap]);
+
+  const sendMessage = useCallback(async () => {
+    const text = input.trim();
+    if (!text || isLoading) return;
+
+    const userMsg: ChatMessage = { role: 'user', content: text, timestamp: Date.now() };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const context = buildContext();
+      const history = messages.slice(-10).map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }));
+
+      const response = await chatMutation.mutateAsync({
+        message: text,
+        context,
+        history,
+      });
+
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: String(response.reply),
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+    } catch (err: any) {
+      const errorMsg: ChatMessage = {
+        role: 'assistant',
+        content: `Sorry, I encountered an error: ${err.message || 'Unknown error'}. Please try again.`,
+        timestamp: Date.now(),
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [input, isLoading, buildContext, messages, chatMutation]);
+
+  if (!isOpen) return null;
+
+  if (isMinimized) {
+    return (
+      <div className="fixed bottom-4 right-4 z-50">
+        <button
+          className="flex items-center gap-2 bg-zinc-900 border border-ppei-red/30 rounded-full px-4 py-2 shadow-lg hover:border-ppei-red/60 transition-colors"
+          onClick={() => setIsMinimized(false)}
+        >
+          <Sparkles className="w-4 h-4 text-ppei-red" />
+          <span className="text-xs font-semibold text-white">Erika</span>
+          {isLoading && <Loader2 className="w-3 h-3 text-ppei-red animate-spin" />}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full border-l border-zinc-800 bg-zinc-950">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-ppei-red" />
+          <span className="text-sm font-bold text-white">Erika</span>
+          <span className="text-[10px] text-zinc-500">Calibration Assistant</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+            onClick={() => setIsMinimized(true)}
+            title="Minimize"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+            onClick={onToggle}
+            title="Close"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* ECU context indicator */}
+      {ecuDef && (
+        <div className="px-3 py-1 border-b border-zinc-800/50 text-[10px] text-zinc-500 font-mono">
+          Context: {ecuDef.ecuFamily} — {ecuDef.stats.totalMaps} maps
+          {selectedMap && <span className="text-cyan-400/60 ml-2">→ {selectedMap.name}</span>}
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {msg.role === 'assistant' && (
+              <div className="w-6 h-6 rounded-full bg-ppei-red/20 flex items-center justify-center shrink-0 mt-0.5">
+                <Bot className="w-3.5 h-3.5 text-ppei-red" />
+              </div>
+            )}
+            <div
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
+                msg.role === 'user'
+                  ? 'bg-ppei-red/20 text-white'
+                  : 'bg-zinc-800/60 text-zinc-300'
+              }`}
+            >
+              <Streamdown>{msg.content}</Streamdown>
+            </div>
+            {msg.role === 'user' && (
+              <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 mt-0.5">
+                <User className="w-3.5 h-3.5 text-zinc-400" />
+              </div>
+            )}
+          </div>
+        ))}
+        {isLoading && (
+          <div className="flex gap-2">
+            <div className="w-6 h-6 rounded-full bg-ppei-red/20 flex items-center justify-center shrink-0">
+              <Bot className="w-3.5 h-3.5 text-ppei-red" />
+            </div>
+            <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
+              <Loader2 className="w-4 h-4 text-ppei-red animate-spin" />
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-3 py-2 border-t border-zinc-800 shrink-0">
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            className="flex-1 bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-ppei-red/50"
+            placeholder="Ask Erika about calibration..."
+            rows={2}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+          />
+          <button
+            className="self-end p-2 bg-ppei-red/20 rounded-lg text-ppei-red hover:bg-ppei-red/30 transition-colors disabled:opacity-50"
+            onClick={sendMessage}
+            disabled={isLoading || !input.trim()}
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="text-[10px] text-zinc-600 mt-1">
+          Enter to send • Shift+Enter for new line
+        </div>
+      </div>
+    </div>
+  );
+}

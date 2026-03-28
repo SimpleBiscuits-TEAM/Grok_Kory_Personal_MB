@@ -288,6 +288,25 @@ export default function Home() {
                   ADVANCED
                 </div>
               </Link>
+              <Link href="/editor" style={{ textDecoration: 'none' }}>
+                <div className="ppei-btn-hover" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: 'oklch(0.16 0.008 260)',
+                  border: '1px solid oklch(0.52 0.22 25 / 0.3)',
+                  color: 'oklch(0.52 0.22 25)',
+                  padding: '4px 12px',
+                  borderRadius: '2px',
+                  fontFamily: '"Bebas Neue", sans-serif',
+                  fontSize: '0.8rem',
+                  letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}>
+                  EDITOR
+                </div>
+              </Link>
             </div>
           </div>
         </div>

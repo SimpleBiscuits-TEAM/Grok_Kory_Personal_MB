@@ -471,3 +471,54 @@
 - [x] Wire gauge components to live PID data stream from datalogger
 - [x] Style gauges with dark motorsport theme (carbon fiber, chrome bezels, red/cyan accents matching reference image)
 - [x] Write tests for gauge components and PID assignment logic (23 tests)
+
+## ECU Calibration Editor (EFILive-style)
+
+### Phase 1: A2L Parser & Binary Mapper
+- [ ] Build A2L parser supporting GM-style (L5P E41, 10L1000 T93) and Bosch DAMOS-style (Can-Am MG1CA920)
+- [ ] Parse CHARACTERISTIC blocks (VALUE, CURVE, MAP types) with address, record layout, compu method, axis descriptors
+- [ ] Parse MEASUREMENT blocks for live data definitions
+- [ ] Parse COMPU_METHOD blocks (RAT_FUNC linear scaling, TAB_INTP lookup tables)
+- [ ] Parse RECORD_LAYOUT blocks to determine data types (UBYTE, UWORD, SWORD, FLOAT32, etc.)
+- [ ] Parse AXIS_PTS and AXIS_DESCR (COM_AXIS, FIX_AXIS, STD_AXIS) for table axes
+- [ ] Build Cummins CSV map format parser as A2L alternative (semicolon-delimited with Address;Name;Size;Values;AxisX;AxisY)
+- [ ] Build binary format readers: raw binary, Motorola S-Record (L5P PTP), Intel HEX (Can-Am), PPEI container format
+- [ ] Reuse existing binaryParser.ts format detection for all formats already supported by the binary upload tool
+- [ ] Build automatic offset alignment engine (anchor pattern matching between A2L addresses and binary data)
+- [ ] Store A2L files in S3 indexed by ECU family for persistent library
+- [ ] Auto-match uploaded binaries to stored A2L by ECU family identification
+
+### Phase 2: Calibration Map Viewer/Editor UI
+- [ ] Build map tree browser (searchable, organized by subsystem/category from A2L naming conventions)
+- [ ] Build 2D table editor with color-coded cells (heat map coloring based on value range)
+- [ ] Build 1D curve editor with inline chart visualization
+- [ ] Build scalar value editor for single-value calibrations
+- [ ] Build 3D surface plot for MAP-type calibrations (RPM x load x value)
+- [ ] Build hex view with highlighted regions showing which bytes belong to which map
+- [ ] Build side-by-side compare between stock and modified binaries (diff highlighting)
+- [ ] Support cell editing with real-unit display (scaling via COMPU_METHOD)
+- [ ] Support undo/redo for all edits
+- [ ] Right-click context menu on cells (copy, paste, interpolate, fill, scale by %)
+
+### Phase 3: Integration & Navigation
+- [ ] Add Editor tab next to Datalogger in Advanced mode
+- [ ] Move existing Binary viewer into Editor as a sub-tab (Hex View)
+- [ ] File upload flow: upload binary → auto-detect ECU family → match A2L → show map tree
+- [ ] Support uploading A2L alongside binary (or use stored A2L from library)
+- [ ] Support uploading Cummins CSV map format as alternative to A2L
+
+### Phase 4: LLM-Assisted Calibration Chat
+- [ ] Build calibration chat panel (AIChatBox integration) connected to editor context
+- [ ] LLM can see currently open map, its values, and the A2L annotation/description
+- [ ] LLM can reference uploaded datalogs to correlate calibration values with logged behavior
+- [ ] LLM helps with: DTC disable guidance, limiter identification, calibration strategy explanation
+- [ ] LLM can suggest calibration changes based on datalog analysis
+- [ ] LLM can study full A2L structure to trace control logic and map relationships (inputs → outputs)
+- [ ] LLM can help user design new features (e.g., launch control, flat-foot shifting, anti-lag) by identifying relevant tables, proposing strategies, and pointing to specific cells
+- [ ] LLM can validate feature implementations by analyzing post-test datalogs against the design intent
+
+### Phase 5: File Export & Cloud Storage
+- [ ] Export modified binary to user's local browser (download)
+- [ ] Google Drive integration for file reference and save
+- [ ] Support additional cloud storage providers (future)
+- [ ] Name the calibration LLM assistant "Erika" throughout UI, chat panel, and system prompts
