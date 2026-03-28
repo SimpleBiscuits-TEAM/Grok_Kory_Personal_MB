@@ -54,8 +54,10 @@ export interface RecordLayout {
   fncValuesLayout?: string;    // COLUMN_DIR or ROW_DIR
   axisXType?: string;
   axisYType?: string;
-  noAxisX?: number;            // for FIX_AXIS
-  noAxisY?: number;
+  noAxisX?: number;            // legacy: unused
+  noAxisY?: number;            // legacy: unused
+  noAxisXType?: string;        // data type of NO_AXIS_PTS_X count field (e.g. UWORD)
+  noAxisYType?: string;        // data type of NO_AXIS_PTS_Y count field
   isStatic?: boolean;
 }
 
@@ -294,13 +296,13 @@ function parseRecordLayouts(content: string): Map<string, RecordLayout> {
     const axisYMatch = body.match(/AXIS_PTS_Y\s+\d+\s+(\S+)/i);
     if (axisYMatch) rl.axisYType = axisYMatch[1];
 
-    // NO_AXIS_PTS_X
+    // NO_AXIS_PTS_X — store the data type name (e.g. UWORD) so we know how many bytes to skip
     const noXMatch = body.match(/NO_AXIS_PTS_X\s+\d+\s+(\S+)/i);
-    if (noXMatch) rl.noAxisX = parseInt(noXMatch[1]) || 0;
+    if (noXMatch) rl.noAxisXType = noXMatch[1];
 
     // NO_AXIS_PTS_Y
     const noYMatch = body.match(/NO_AXIS_PTS_Y\s+\d+\s+(\S+)/i);
-    if (noYMatch) rl.noAxisY = parseInt(noYMatch[1]) || 0;
+    if (noYMatch) rl.noAxisYType = noYMatch[1];
 
     // STATIC_RECORD_LAYOUT
     if (body.includes('STATIC_RECORD_LAYOUT')) rl.isStatic = true;
@@ -330,17 +332,27 @@ function parseAxisPts(content: string): Map<string, AxisPts> {
 
     const tokens = rest.split(/\s+/).filter(t => t.length > 0 && !t.startsWith('/'));
 
+    // ASAP2 AXIS_PTS field order after Name + LongIdentifier:
+    // Address InputQuantity Deposit MaxDiff Conversion MaxAxisPoints LowerLimit UpperLimit
+    // tokens[0] = Address
+    // tokens[1] = InputQuantity (measurement reference — skip for storage)
+    // tokens[2] = Deposit (record layout name)
+    // tokens[3] = MaxDiff
+    // tokens[4] = Conversion (COMPU_METHOD name)
+    // tokens[5] = MaxAxisPoints
+    // tokens[6] = LowerLimit
+    // tokens[7] = UpperLimit
     const address = parseInt(tokens[0], 16) || parseInt(tokens[0]) || 0;
     axisMap.set(name, {
       name,
       description: desc,
       address,
-      recordLayout: tokens[1] || '',
-      maxDiff: parseFloat(tokens[2]) || 0,
-      compuMethod: tokens[3] || 'NO_COMPU_METHOD',
-      maxAxisPoints: parseInt(tokens[4]) || 0,
-      lowerLimit: parseFloat(tokens[5]) || 0,
-      upperLimit: parseFloat(tokens[6]) || 0,
+      recordLayout: tokens[2] || '',
+      maxDiff: parseFloat(tokens[3]) || 0,
+      compuMethod: tokens[4] || 'NO_COMPU_METHOD',
+      maxAxisPoints: parseInt(tokens[5]) || 0,
+      lowerLimit: parseFloat(tokens[6]) || 0,
+      upperLimit: parseFloat(tokens[7]) || 0,
     });
   }
 
@@ -1678,10 +1690,21 @@ export function alignOffsets(
   const family = ecuDef.ecuFamily.toUpperCase();
   const knownOffsets: number[] = [];
 
-  if (family === 'BRP' || family === 'MG1CA920' || family === 'MED17' || family.includes('MED17')) {
-    // CAN-am / BRP: Bosch MED17.8.5 and MG1CA920 ECUs
+  if (family === 'MG1CA920') {
+    // Bosch MG1CA920 (Duramax L5P, LM2, etc.)
+    // A2L addresses in 0x09xxxxxxx range, binary base confirmed at 0x08FD8000
+    // Also try nearby 64KB-aligned variants in case of minor version differences
+    knownOffsets.push(
+      0x08FD8000,  // confirmed base for 1E1101953 / MG1CA920 BIN files
+      0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
+      0x08F00000, 0x09000000, 0x09400000, 0x09440000,
+      0x08000000, 0x08800000, 0x08C00000,
+      // Fallback: MED17-style addresses
+      0x80000000, 0xA0000000, 0x00000000
+    );
+  } else if (family === 'BRP' || family === 'MED17' || family.includes('MED17')) {
+    // CAN-am / BRP: Bosch MED17.8.5 ECUs
     // A2L addresses typically in 0x80xxxxxx or 0xA0xxxxxx range, binary is raw flash
-    // Common base addresses for Bosch MED17 family:
     knownOffsets.push(
       0x80000000, 0x80010000, 0x80020000, 0x80040000, 0x80060000, 0x80080000,
       0x80100000, 0x80140000, 0x80180000, 0x801C0000, 0x80200000,
@@ -1691,13 +1714,14 @@ export function alignOffsets(
       // Tricore TC1xxx flash regions
       0xAF000000, 0xAF010000, 0xAF020000, 0xAF040000, 0xAF0C0000,
       0xAFC00000, 0xAFE00000,
-      // Additional MED17/MG1CA patterns
+      // Additional MED17 patterns
       0x00000000, 0x00010000, 0x00020000, 0x00040000
     );
   } else if (family === 'MG1C' || family.includes('BOSCH')) {
     // Bosch MG1C: A2L addresses typically 0x94xxxxx or 0x60Cxxxxx, binary starts at 0x00
     // MG1CA920: 0x0060C000 base address (from iHEX files)
     knownOffsets.push(
+      0x08FD8000,  // MG1CA920 confirmed base
       0x94400000, 0x94000000, 0x80000000, 0x80010000, 0x80020000,
       0x80040000, 0x80100000, 0x60C00000, 0x0060C000, 0xA0000000, 0x00000000
     );
@@ -1846,6 +1870,63 @@ export function alignOffsets(
 /**
  * Read all values for a calibration map from binary data.
  */
+/**
+ * Compute the byte offset to skip at the start of an AXIS_PTS block.
+ * When the record layout has NO_AXIS_PTS_X, the first bytes are a count field
+ * that must be skipped to reach the actual axis point values.
+ */
+function getAxisPtsDataOffset(axisPt: AxisPts, layouts: Map<string, RecordLayout>): number {
+  const layout = layouts.get(axisPt.recordLayout);
+  if (!layout) {
+    // Try case-insensitive
+    for (const [key, val] of Array.from(layouts.entries())) {
+      if (key.toUpperCase() === axisPt.recordLayout.toUpperCase()) {
+        if (val.noAxisXType) {
+          const countDt = DATA_TYPES[val.noAxisXType];
+          return countDt ? countDt.size : 2; // default UWORD = 2 bytes
+        }
+        return 0;
+      }
+    }
+    return 0;
+  }
+  if (layout.noAxisXType) {
+    const countDt = DATA_TYPES[layout.noAxisXType];
+    return countDt ? countDt.size : 2; // default UWORD = 2 bytes
+  }
+  return 0;
+}
+
+/**
+ * Resolve the data type for reading axis point values from an AXIS_PTS record layout.
+ * Uses axisXType if available, otherwise falls back to fncValuesType, then layout name heuristic.
+ */
+function resolveAxisDataType(axisPt: AxisPts, layouts: Map<string, RecordLayout>): DataTypeInfo {
+  let layout = layouts.get(axisPt.recordLayout);
+  if (!layout) {
+    for (const [key, val] of Array.from(layouts.entries())) {
+      if (key.toUpperCase() === axisPt.recordLayout.toUpperCase()) {
+        layout = val;
+        break;
+      }
+    }
+  }
+  if (layout) {
+    // Prefer axisXType for AXIS_PTS layouts
+    if (layout.axisXType) {
+      const dt = DATA_TYPES[layout.axisXType];
+      if (dt) return dt;
+    }
+    // Fall back to fncValuesType
+    if (layout.fncValuesType) {
+      const dt = DATA_TYPES[layout.fncValuesType];
+      if (dt) return dt;
+    }
+  }
+  // Fall back to name-based heuristic
+  return resolveDataType(axisPt.recordLayout, layouts);
+}
+
 export function populateMapValues(
   map: CalibrationMap,
   ecuDef: EcuDefinition,
@@ -1873,11 +1954,14 @@ export function populateMapValues(
     if (axis?.axisPtsRef) {
       const axisPt = ecuDef.axisPts.get(axis.axisPtsRef);
       if (axisPt) {
-        const axisDt = resolveDataType(axisPt.recordLayout, ecuDef.recordLayouts);
-        const axisAddr = axisPt.address + offsetDelta;
+        const axisDt = resolveAxisDataType(axisPt, ecuDef.recordLayouts);
+        const skipBytes = getAxisPtsDataOffset(axisPt, ecuDef.recordLayouts);
+        const axisAddr = axisPt.address + offsetDelta + skipBytes;
         const axisCm = ecuDef.compuMethods.get(axisPt.compuMethod);
+        // Use axisPt.maxAxisPoints if the AXIS_DESCR count is 0 or missing
+        const axisCount = count > 0 ? count : (axisPt.maxAxisPoints || count);
         const axisRaw: number[] = [];
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < axisCount; i++) {
           axisRaw.push(readValue(binaryData, axisAddr + i * axisDt.size, axisDt, bigEndian));
         }
         map.axisXValues = axisRaw.map(v => rawToPhysical(v, axisCm));
@@ -1909,11 +1993,14 @@ export function populateMapValues(
     if (axisX?.axisPtsRef) {
       const axisPt = ecuDef.axisPts.get(axisX.axisPtsRef);
       if (axisPt) {
-        const axisDt = resolveDataType(axisPt.recordLayout, ecuDef.recordLayouts);
-        const axisAddr = axisPt.address + offsetDelta;
+        const axisDt = resolveAxisDataType(axisPt, ecuDef.recordLayouts);
+        const skipBytes = getAxisPtsDataOffset(axisPt, ecuDef.recordLayouts);
+        const axisAddr = axisPt.address + offsetDelta + skipBytes;
         const axisCm = ecuDef.compuMethods.get(axisPt.compuMethod);
+        // Use axisPt.maxAxisPoints if the AXIS_DESCR count is 0 or missing
+        const axisXCount = xCount > 0 ? xCount : (axisPt.maxAxisPoints || xCount);
         const axisRaw: number[] = [];
-        for (let i = 0; i < xCount; i++) {
+        for (let i = 0; i < axisXCount; i++) {
           axisRaw.push(readValue(binaryData, axisAddr + i * axisDt.size, axisDt, bigEndian));
         }
         map.axisXValues = axisRaw.map(v => rawToPhysical(v, axisCm));
@@ -1924,11 +2011,14 @@ export function populateMapValues(
     if (axisY?.axisPtsRef) {
       const axisPt = ecuDef.axisPts.get(axisY.axisPtsRef);
       if (axisPt) {
-        const axisDt = resolveDataType(axisPt.recordLayout, ecuDef.recordLayouts);
-        const axisAddr = axisPt.address + offsetDelta;
+        const axisDt = resolveAxisDataType(axisPt, ecuDef.recordLayouts);
+        const skipBytes = getAxisPtsDataOffset(axisPt, ecuDef.recordLayouts);
+        const axisAddr = axisPt.address + offsetDelta + skipBytes;
         const axisCm = ecuDef.compuMethods.get(axisPt.compuMethod);
+        // Use axisPt.maxAxisPoints if the AXIS_DESCR count is 0 or missing
+        const axisYCount = yCount > 0 ? yCount : (axisPt.maxAxisPoints || yCount);
         const axisRaw: number[] = [];
-        for (let i = 0; i < yCount; i++) {
+        for (let i = 0; i < axisYCount; i++) {
           axisRaw.push(readValue(binaryData, axisAddr + i * axisDt.size, axisDt, bigEndian));
         }
         map.axisYValues = axisRaw.map(v => rawToPhysical(v, axisCm));
@@ -2465,6 +2555,10 @@ export function autoHealAlignment(
   strategiesAttempted.push('bosch_tricore_scan');
   log.push('[Erika] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
   const boschBases = [
+    // MG1CA920 (Duramax L5P, LM2) — confirmed base addresses
+    0x08FD8000, 0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
+    0x08F00000, 0x09000000, 0x08000000, 0x08800000, 0x08C00000,
+    // Bosch MED17 / Tricore TC1xxx
     0x80000000, 0x80010000, 0x80020000, 0x80040000, 0x80060000, 0x80080000,
     0x80100000, 0x80140000, 0x80180000, 0x801C0000, 0x80200000, 0x80300000,
     0x80400000, 0x80800000,
@@ -2472,8 +2566,10 @@ export function autoHealAlignment(
     0xA0100000, 0xA0140000, 0xA0200000, 0xA0300000, 0xA0400000,
     0xAF000000, 0xAF010000, 0xAF020000, 0xAF040000, 0xAF0C0000,
     0xAFC00000, 0xAFE00000,
+    // Zero-based / small offsets
     0x00000000, 0x00010000, 0x00020000, 0x00040000, 0x00080000,
     0x00100000, 0x00200000, 0x00400000,
+    // EDC16/EDC17 typical bases
     0x60000000, 0x60C00000,
     0x94000000, 0x94400000,
   ];

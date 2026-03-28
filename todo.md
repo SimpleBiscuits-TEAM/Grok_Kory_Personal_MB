@@ -918,3 +918,26 @@
 - [ ] NaN values in TuneCompare: debug data type resolution to ensure it matches A2L definitions
 - [ ] Maps not appearing in right pane when selected from left tree — fix state sync issue
 - [ ] Compare file lost when switching tabs — preserve compare state and add close button
+
+## MG1CA920 BIN Offset & Map Dimension Fixes (2026-03-28)
+- [x] Fix MG1CA920 BIN offset alignment (base 0x08FD8000 confirmed via HEX-to-BIN brute-force)
+- [x] Fix AXIS_PTS reading to skip NO_AXIS_PTS_X count word in RB_Axis layouts
+- [x] Add 0x08FD8000 to autoHeal boschBases list
+- [x] Fix detectEcuFamily routing so MG1CA920 gets its own known offset list
+- [x] Document offset-discovery playbook for reuse across EDC17, EDC16, MED9, and other Bosch platforms
+
+## Polaris MG1C400A1T2 Support & Auto-Match A2L (2026-03-28)
+- [ ] Analyze Polaris MG1C400A1T2 A2L and S-Record to find correct BIN base address
+- [ ] Add Polaris MG1C400A1T2 to alignment engine known offsets and ECU family detection
+- [ ] Implement auto-match A2L-on-binary-drop: store A2L files, auto-detect ECU family from BIN, auto-load matching A2L
+- [ ] Test Polaris maps display correctly (values, dimensions, 2D/3D types)
+- [ ] Update offset discovery playbook with Polaris findings
+
+
+## Polaris MG1C400A1T2 Unlock Patch Analysis (2026-03-28)
+- [x] Dynojet unlock: single-byte patch at 0x030363 (0x23 → 0x03)
+- [x] HPTuners unlock: 10-byte patch across multiple regions (checksums + config flags)
+- [x] Document both unlock mechanisms in POLARIS_UNLOCK_PATCHES.md
+- [ ] Create universal patch tool UI in CalibrationEditor
+- [ ] Map unlock addresses to A2L characteristics for documentation
+- [ ] Test patch tool with all three Polaris files
