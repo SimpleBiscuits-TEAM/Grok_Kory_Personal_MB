@@ -836,3 +836,8 @@
 - [x] Update PDF reports and export branding
 - [x] Update Erika's knowledge base references
 - [x] Update document titles (architecture PDF, market summary)
+
+## Remove All "Duramax Analyzer" References (2026-03-28)
+- [x] Find and replace every "Duramax Performance Analyzer" and "Duramax Analyzer" reference
+- [x] Replace with "V-OP by PPEI" or "V-OP" as appropriate
+- [x] Verify no remaining references in source code, comments, documents, or metadata

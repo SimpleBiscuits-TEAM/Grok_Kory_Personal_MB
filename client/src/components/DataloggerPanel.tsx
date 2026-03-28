@@ -251,7 +251,7 @@ function CustomPresetDialog({
               <input
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="My Duramax Tune"
+                placeholder="My Vehicle Session"
                 style={{
                   width: '100%', padding: '8px 12px', background: 'oklch(0.08 0.004 260)',
                   border: `1px solid ${sColor.border}`, borderRadius: '3px',
@@ -2198,7 +2198,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       </div>
                     </div>
                     <div style={{ marginTop: '8px' }}>
-                      Protocol: ISO 15765-4 CAN 11-bit/500k (GM/Duramax default). Auto-detect available.
+                      Protocol: ISO 15765-4 CAN 11-bit/500k (default). Auto-detect available.
                       <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs enabled for diesel-specific parameters.</span>
                     </div>
                   </div>

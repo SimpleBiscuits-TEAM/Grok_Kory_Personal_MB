@@ -417,7 +417,7 @@ function AIChatPanel({ a2lData }: { a2lData: A2LParseResult | null }) {
   }, [messages]);
 
   const suggestedPrompts = [
-    'What does DTC P0087 mean on an L5P Duramax?',
+    'What does DTC P0087 mean on a diesel truck?',
     'Explain the difference between CP3 and CP4 fuel pumps',
     'How do I interpret Mode 6 boost pressure test results?',
     'What are normal injector balance rates for an LML?',
@@ -432,9 +432,9 @@ function AIChatPanel({ a2lData }: { a2lData: A2LParseResult | null }) {
         {messages.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
             <Brain style={{ width: 48, height: 48, color: sColor.red, margin: '0 auto 16px', opacity: 0.6 }} />
-            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>PPEI AI DIAGNOSTIC ASSISTANT</h3>
+            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>V-OP AI DIAGNOSTIC ASSISTANT</h3>
             <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto 24px' }}>
-              Ask diagnostic questions about Duramax engines, OBD-II PIDs, DTCs, Mode 6 data, or tuning parameters. The AI has access to the full knowledge base.
+              Ask diagnostic questions about any vehicle — diesel, gas, or powersports. OBD-II PIDs, DTCs, Mode 6 data, UDS services, tuning parameters, and more. The AI has access to the full V-OP knowledge base.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', maxWidth: '700px', margin: '0 auto' }}>
               {suggestedPrompts.map((prompt, i) => (

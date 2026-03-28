@@ -10,7 +10,7 @@ import { invokeLLM } from "../_core/llm";
 
 function buildCompareSystemPrompt(): string {
   return [
-    `You are PPEI Performance Comparison Analyst, an expert at evaluating tune changes on Duramax diesel engines.`,
+    `You are the V-OP Performance Comparison Analyst by PPEI, an expert at evaluating tune changes on diesel engines, gas engines, and powersports platforms.`,
     `You are analyzing a side-by-side comparison of two datalogs from the same (or similar) vehicle.`,
     ``,
     `Your job:`,

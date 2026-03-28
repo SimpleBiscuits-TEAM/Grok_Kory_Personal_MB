@@ -1186,7 +1186,7 @@ export function generateHealthReportPdf(
     }
 
     // Find peak torque index (torque = torquePercent/100 * maxTorque if available)
-    // For Duramax, torque lb-ft = (torquePercent / 100) * maxTorque
+    // torque lb-ft = (torquePercent / 100) * maxTorque
     let peakTqIdx = 0;
     let peakTqVal = 0;
     const torquePercent = data.rpm.map((_, i) => {

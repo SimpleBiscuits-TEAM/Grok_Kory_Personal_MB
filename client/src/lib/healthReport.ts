@@ -1,6 +1,6 @@
 /**
  * Vehicle Health Report Generator
- * Uses real-world L5P Duramax operating thresholds sourced from GM service data and ECU calibration.
+ * Uses real-world operating thresholds sourced from GM/Ford/RAM service data and ECU calibrations.
  *
  * L5P Real-World Thresholds (all values in °F or PSI as noted):
  *  - Engine Coolant Temp: Normal 180–210°F | Warning >220°F | Critical >230°F
@@ -740,7 +740,7 @@ function generateRecommendations(
 ): string[] {
   const recommendations: string[] = [];
 
-  if (engine.score < 90) recommendations.push('Have engine diagnostics performed by a qualified Duramax technician');
+  if (engine.score < 90) recommendations.push('Have engine diagnostics performed by a qualified diesel/powertrain technician');
   if (fuel.score < 90) recommendations.push('Inspect fuel system — check lift pump pressure, fuel filter, and rail pressure regulator');
   if (transmission.score < 90) recommendations.push('Have transmission fluid and torque converter inspected by a drivetrain specialist');
   if (thermal.score < 90) recommendations.push('Check oil level, coolant level, and inspect cooling system components');

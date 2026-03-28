@@ -1,5 +1,5 @@
 /**
- * Diagnostic rules engine for Duramax performance analysis
+ * V-OP diagnostic rules engine for vehicle performance analysis
  * Checks for common issues and provides recommendations
  *
  * False-positive prevention strategy:
