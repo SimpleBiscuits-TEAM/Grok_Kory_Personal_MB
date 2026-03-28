@@ -898,3 +898,9 @@
 - [x] CalibrationEditor: add Download Binary button to toolbar
 - [x] CalibrationEditor: prompt for filename or use default with timestamp
 - [x] CalibrationEditor: export binary in original format (BIN/SREC/iHEX)
+
+## Feature (2026-03-28 advanced)
+- [x] TuneCompare: detect file size mismatch between primary and compare binaries
+- [x] TuneCompare: Erika auto-fix attempts (padding, truncation, offset adjustment)
+- [x] TuneCompare: warning banner with offset diagnostics if mismatch persists
+- [x] TuneCompare: show which offsets could be in error and why

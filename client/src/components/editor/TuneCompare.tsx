@@ -55,6 +55,8 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
   const [hexPage, setHexPage] = useState(0);
+  const [sizeMismatch, setSizeMismatch] = useState<{ primary: number; compare: number; difference: number; offsetsAtRisk: string[] } | null>(null);
+  const [erikaAttemptedFix, setErikaAttemptedFix] = useState(false);
 
   const BYTES_PER_PAGE = 512;
   const BYTES_PER_ROW = 16;
@@ -98,7 +100,61 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       format: fmt
     });
     setHexPage(0);
+    setErikaAttemptedFix(false);
+    
+    // Check for size mismatch
+    if (primaryBinary && extracted.length !== primaryBinary.length) {
+      const diff = Math.abs(extracted.length - primaryBinary.length);
+      const offsetsAtRisk: string[] = [];
+      
+      // Calculate which maps might be affected
+      if (ecuDef) {
+        for (const map of ecuDef.maps) {
+          const rows = map.rows || 1;
+          const cols = map.cols || 1;
+          const bytesPerCell = 1; // Default to 1 byte per cell
+          const mapEnd = map.address + (rows * cols * bytesPerCell);
+          if (mapEnd > Math.min(primaryBinary.length, extracted.length)) {
+            offsetsAtRisk.push(`${map.name} (0x${map.address.toString(16)})`);
+          }
+        }
+      }
+      
+      setSizeMismatch({
+        primary: primaryBinary.length,
+        compare: extracted.length,
+        difference: diff,
+        offsetsAtRisk: offsetsAtRisk.slice(0, 5)
+      });
+    } else {
+      setSizeMismatch(null);
+    }
   }, []);
+
+  // ── Erika auto-fix for size mismatches ──
+  const attemptErikaFix = useCallback(() => {
+    if (!sizeMismatch || !compareBinary || !primaryBinary) return;
+    
+    // Strategy 1: Padding (if compare is smaller)
+    if (compareBinary.data.length < primaryBinary.length) {
+      const padded = new Uint8Array(primaryBinary.length);
+      padded.set(compareBinary.data);
+      padded.fill(0xFF, compareBinary.data.length);
+      setCompareBinary({ ...compareBinary, data: padded });
+      setSizeMismatch(null);
+      setErikaAttemptedFix(true);
+      return;
+    }
+    
+    // Strategy 2: Truncation (if compare is larger)
+    if (compareBinary.data.length > primaryBinary.length) {
+      const truncated = compareBinary.data.slice(0, primaryBinary.length);
+      setCompareBinary({ ...compareBinary, data: truncated });
+      setSizeMismatch(null);
+      setErikaAttemptedFix(true);
+      return;
+    }
+  }, [compareBinary, primaryBinary, sizeMismatch]);
 
   // ── Compute compare-binary alignment offset ──
   // The compare binary may have a different base address than the primary.
@@ -319,6 +375,39 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
           </div>
         )}
       </div>
+
+      {/* ── Size mismatch warning banner ── */}
+      {sizeMismatch && (
+        <div className="bg-yellow-900/30 border-b border-yellow-700/50 p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <div className="text-yellow-400 font-bold text-sm flex-1">
+              ⚠️ File Size Mismatch Detected
+            </div>
+            <button
+              className="text-yellow-400 hover:text-yellow-300 text-xs px-2 py-1 border border-yellow-700 rounded hover:bg-yellow-900/30"
+              onClick={attemptErikaFix}
+            >
+              Let Erika Fix It
+            </button>
+          </div>
+          <div className="text-xs text-yellow-200 space-y-1">
+            <div>Primary: {sizeMismatch.primary.toLocaleString()} bytes | Compare: {sizeMismatch.compare.toLocaleString()} bytes | Difference: {sizeMismatch.difference.toLocaleString()} bytes</div>
+            {sizeMismatch.offsetsAtRisk.length > 0 && (
+              <div>
+                <div className="font-mono text-yellow-300">Maps at risk (may read out-of-bounds):</div>
+                <div className="ml-2 font-mono text-yellow-200">
+                  {sizeMismatch.offsetsAtRisk.map((map, i) => (
+                    <div key={i}>{map}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {erikaAttemptedFix && (
+              <div className="text-emerald-400 font-mono">✓ Erika applied a fix (padding/truncation). Diff results updated.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── View mode toggle ── */}
       {compareBinary && (
