@@ -98,43 +98,66 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
     setHexPage(0);
   }, []);
 
+  // ── Compute compare-binary alignment offset ──
+  // The compare binary may have a different base address than the primary.
+  // We re-run alignment for it, but fall back to the primary alignment offset
+  // if we can't determine one independently.
+  const compareOffset = useMemo((): number => {
+    if (!compareBinary || !alignment) return alignment?.offset ?? 0;
+    // If the compare binary was loaded from S-Record/iHEX it carries its own base address
+    if (compareBinary.baseAddress > 0) return -compareBinary.baseAddress;
+    // Otherwise assume same flash layout as primary
+    return alignment.offset;
+  }, [compareBinary, alignment]);
+
   // ── Compute map diffs ──
   const mapDiffs = useMemo((): MapDiff[] => {
     if (!ecuDef || !primaryBinary || !compareBinary || !alignment) return [];
 
     const diffs: MapDiff[] = [];
+    // alignment.offset is defined as: binOffset = a2lAddress + offset
+    // ("delta to ADD to A2L addresses to get binary file offsets")
     const offsetA = alignment.offset;
-    // For compare binary, try same offset
-    const offsetB = offsetA;
+    const offsetB = compareOffset;
+
+    const isBigEndian = (ecuDef.moduleInfo.byteOrder || 'MSB_LAST') === 'MSB_FIRST';
 
     ecuDef.maps.forEach((map, idx) => {
-      if (map.address === undefined) return;
-      const dataType = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
-      if (!dataType) return;
+      if (map.address === undefined || map.address === 0) return;
 
+      // resolveDataType always returns a fallback (UWORD), never null
+      const dataType = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
       const byteSize = dataType.size;
       const totalCells = (map.rows || 1) * (map.cols || 1);
-      if (totalCells < 1 || totalCells > 10000) return;
+      if (totalCells < 1 || totalCells > 50000) return;
 
       const valuesA: number[] = [];
       const valuesB: number[] = [];
       let changedCells = 0;
       let maxIncrease = 0;
       let maxDecrease = 0;
+      let validCells = 0;
 
       for (let i = 0; i < totalCells; i++) {
-        const addrA = map.address - offsetA + i * byteSize;
-        const addrB = map.address - offsetB + i * byteSize;
+        // Correct formula: binAddr = a2lAddress + offset
+        const addrA = map.address + offsetA + i * byteSize;
+        const addrB = map.address + offsetB + i * byteSize;
 
-        if (addrA < 0 || addrA + byteSize > primaryBinary.length) { valuesA.push(0); valuesB.push(0); continue; }
-        if (addrB < 0 || addrB + byteSize > compareBinary.data.length) { valuesA.push(0); valuesB.push(0); continue; }
+        const aInBounds = addrA >= 0 && addrA + byteSize <= primaryBinary.length;
+        const bInBounds = addrB >= 0 && addrB + byteSize <= compareBinary.data.length;
 
-        const isBigEndian = (ecuDef.moduleInfo.byteOrder || 'MSB_LAST') === 'MSB_FIRST';
+        if (!aInBounds || !bInBounds) {
+          valuesA.push(NaN);
+          valuesB.push(NaN);
+          continue;
+        }
+
         const vA = readValue(primaryBinary, addrA, dataType, isBigEndian);
         const vB = readValue(compareBinary.data, addrB, dataType, isBigEndian);
 
         valuesA.push(vA);
         valuesB.push(vB);
+        validCells++;
 
         if (vA !== vB) {
           changedCells++;
@@ -144,13 +167,14 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         }
       }
 
-      if (changedCells > 0) {
+      // Only report maps where we had valid reads AND at least one cell changed
+      if (changedCells > 0 && validCells > 0) {
         diffs.push({ mapIndex: idx, map, changedCells, totalCells, valuesA, valuesB, maxIncrease, maxDecrease });
       }
     });
 
     return diffs;
-  }, [ecuDef, primaryBinary, compareBinary, alignment]);
+  }, [ecuDef, primaryBinary, compareBinary, alignment, compareOffset]);
 
   // ── Compute byte-level diff ──
   const byteDiffs = useMemo(() => {

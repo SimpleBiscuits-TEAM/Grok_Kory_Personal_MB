@@ -874,3 +874,6 @@
 
 ## UX Fix (2026-03-28)
 - [x] Fix CalibrationEditor: only map tree list should scroll, not the entire page
+
+## Bug Fix (2026-03-28)
+- [x] Fix TuneCompare: shows byte differences but reports 0 changed maps — map diff address matching broken
