@@ -555,3 +555,46 @@
 - [ ] Support J2534 passthru device communication for flash operations
 - [ ] Build flash progress UI with verification and error handling
 - [ ] Validate exported files have correct checksums before allowing flash
+
+## WinOLS-Equivalent Hex Editor
+- [ ] Full hex editor view with byte-level editing (like WinOLS hex view)
+- [ ] Selectable byte ranges with mouse drag and shift-click
+- [ ] ASCII/hex dual-pane display (hex on left, ASCII on right)
+- [ ] Go-to-address navigation (jump to hex offset)
+- [ ] Find/replace in hex data (byte patterns, text strings)
+- [ ] Color-coded regions showing mapped A2L areas vs unmapped regions
+- [ ] Highlight modified bytes (show original vs modified in different colors)
+- [ ] 2D map detection from hex selection (WinOLS-style: select a region, define axes, preview as table)
+- [ ] Define new maps from hex selection (user selects bytes, defines data type, rows, cols, axis)
+- [ ] Byte grouping options (8-bit, 16-bit LE/BE, 32-bit LE/BE, float)
+- [ ] Copy/paste hex data
+- [ ] Undo/redo for all hex edits
+- [ ] Bookmarks for frequently accessed addresses
+- [ ] Status bar showing cursor position, selection size, data type preview
+
+## Multi-Tune Comparison & Calibration Diff
+- [ ] Load multiple binary files simultaneously for comparison
+- [ ] Side-by-side hex diff view (highlight byte differences between files)
+- [ ] Calibration diff tab showing only maps that differ between tunes
+- [ ] Per-map diff: color-coded cell differences (green=increased, red=decreased, yellow=changed)
+- [ ] Diff summary: count of changed maps, changed bytes, percentage difference
+- [ ] Copy values from one tune to another (cherry-pick map changes)
+- [ ] Compare stock vs tuned files with change annotations
+- [ ] Export diff report (list of all changed maps with before/after values)
+- [ ] Support comparing more than 2 files (A vs B vs C)
+
+## Aisin TCM Mapping, Tuning & Flashing
+- [ ] Aisin transmission binary support (load Aisin TCM binaries)
+- [ ] Erika studies Aisin documentation, forums, and hex patterns to help discover/define maps from raw hex
+- [ ] Aisin map discovery: Erika analyzes hex data patterns to identify shift tables, pressure curves, TCC maps, line pressure, solenoid duty cycles
+- [ ] User-assisted map definition workflow: user selects hex region, Erika suggests what it might be based on data patterns and known Aisin structures
+- [ ] Aisin flash procedure support (read/write TCM via appropriate protocol)
+- [ ] Aisin-specific diagnostic knowledge for Erika (shift quality, TCC slip, line pressure faults)
+
+## J1939 Flashing Support
+- [ ] J1939 protocol communication layer for ECM/TCM flash operations
+- [ ] J1939 flash read procedure
+- [ ] J1939 flash write procedure with verification
+- [ ] J1939 security access / seed-key support
+- [ ] Support for Cummins ECMs via J1939
+- [ ] Flash progress UI with J1939-specific status reporting
