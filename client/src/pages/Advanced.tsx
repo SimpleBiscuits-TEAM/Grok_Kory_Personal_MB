@@ -16,7 +16,8 @@ import {
   Hash, Terminal, ChevronDown, ChevronRight, X, Zap,
   FileText, Activity, AlertCircle,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
-  BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown
+  BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
+  Radio, Wrench, Key, Settings
 } from 'lucide-react';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
@@ -48,6 +49,11 @@ import DragTimeslip from '@/components/DragTimeslip';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import DataloggerPanel from '@/components/DataloggerPanel';
 import BinaryUploadPanel from '@/components/BinaryUploadPanel';
+import CalibrationEditor from '@/pages/CalibrationEditor';
+import IntelliSpy from '@/components/IntelliSpy';
+import VehicleCoding from '@/components/VehicleCoding';
+import CanAmVinChanger from '@/components/CanAmVinChanger';
+import ServiceProcedures from '@/components/ServiceProcedures';
 import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
@@ -1069,9 +1075,146 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   );
 }
 
+// ─── Editor Passcode Gate ───────────────────────────────────────────────────
+
+const EDITOR_CODE = 'KINGKONG';
+const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
+
+function EditorGate() {
+  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = () => {
+    if (code.toUpperCase() === EDITOR_CODE) {
+      localStorage.setItem(EDITOR_STORAGE_KEY, 'true');
+      setUnlocked(true);
+    } else {
+      setError(true);
+      setShake(true);
+      setAttempts(prev => prev + 1);
+      setTimeout(() => setShake(false), 500);
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  const funnyMessages = [
+    "Wrong code. The ECU is judging you right now.",
+    "Nope. Even your mom's minivan has better security than your guesses.",
+    "Access denied. Try turning the key off and back on... oh wait, wrong tool.",
+    "That ain't it chief. The turbo just spooled down in disappointment.",
+    "Incorrect. The injectors are crying.",
+    "Wrong again. At this rate, you'll need a flash tool just to unlock the door.",
+    "Still no. Your ECU called — it wants a competent operator.",
+    "Denied. Even the DPF has more flow than your password game.",
+  ];
+
+  if (unlocked) {
+    return <CalibrationEditor />;
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      minHeight: '60vh', textAlign: 'center', padding: '2rem',
+    }}>
+      {/* Big lock icon with glow */}
+      <div style={{
+        width: '80px', height: '80px', borderRadius: '50%',
+        background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
+      }}>
+        <Lock style={{ width: 36, height: 36, color: sColor.red }} />
+      </div>
+
+      <h2 style={{
+        fontFamily: sFont.heading, fontSize: '2rem', letterSpacing: '0.12em',
+        color: 'white', marginBottom: '0.5rem',
+      }}>
+        CALIBRATION EDITOR
+      </h2>
+
+      <p style={{
+        fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim,
+        maxWidth: '400px', marginBottom: '0.5rem',
+      }}>
+        This area is restricted to authorized calibrators only.
+      </p>
+
+      <p style={{
+        fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.40 0.010 260)',
+        maxWidth: '400px', marginBottom: '2rem', fontStyle: 'italic',
+      }}>
+        "I asked my ECU for the password. It said 'knock knock.' I said 'who's there?' It threw a P0300."
+      </p>
+
+      <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
+        <div style={{
+          display: 'flex', gap: '8px', marginBottom: '12px',
+        }}>
+          <input
+            ref={inputRef}
+            type="password"
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            placeholder="Enter access code..."
+            style={{
+              flex: 1, padding: '12px 16px',
+              fontFamily: sFont.mono, fontSize: '1rem', letterSpacing: '0.15em',
+              background: sColor.bgDark,
+              border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
+              borderRadius: '3px', color: 'white', outline: 'none',
+              textAlign: 'center', textTransform: 'uppercase',
+              transition: 'border-color 0.2s',
+            }}
+          />
+          <button
+            onClick={handleSubmit}
+            style={{
+              padding: '12px 20px',
+              background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
+              borderRadius: '3px', color: sColor.red,
+              fontFamily: sFont.heading, fontSize: '0.9rem', letterSpacing: '0.08em',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >
+            UNLOCK
+          </button>
+        </div>
+
+        {error && attempts > 0 && (
+          <p style={{
+            fontFamily: sFont.body, fontSize: '0.8rem',
+            color: sColor.red, marginTop: '8px',
+            animation: 'fadeIn 0.3s ease',
+          }}>
+            {funnyMessages[(attempts - 1) % funnyMessages.length]}
+          </p>
+        )}
+      </div>
+
+      {attempts >= 3 && (
+        <p style={{
+          fontFamily: sFont.mono, fontSize: '0.7rem',
+          color: 'oklch(0.35 0.008 260)', marginTop: '2rem',
+        }}>
+          Hint: Think big. Think primate. Think chest-pounding dominance.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1079,12 +1222,17 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 16, height: 16 }} /> },
   { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 16, height: 16 }} /> },
+  { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
   { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
   { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 16, height: 16 }} /> },
   { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 16, height: 16 }} /> },
   { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 16, height: 16 }} /> },
   { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 16, height: 16 }} /> },
+  { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
@@ -1152,11 +1300,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               <button onClick={onLock} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: `${sColor.red}1f`, border: `1px solid ${sColor.red}4d`, borderRadius: '2px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
                 <Lock style={{ width: 14, height: 14 }} /> LOCK
               </button>
-              <Link href="/editor" style={{ textDecoration: 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.16 0.008 260)', border: `1px solid ${sColor.red}4d`, borderRadius: '2px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
-                  EDITOR
-                </div>
-              </Link>
+
               <Link href="/" style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
                   <ArrowLeft style={{ width: 14, height: 14 }} /> ANALYZER
@@ -1253,7 +1397,12 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
         {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
+        {activeTab === 'editor' && <div className="ppei-anim-fade-up"><EditorGate /></div>}
         {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
+        {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
+        {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
+        {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
+        {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
       </main>
 
       {/* Footer */}

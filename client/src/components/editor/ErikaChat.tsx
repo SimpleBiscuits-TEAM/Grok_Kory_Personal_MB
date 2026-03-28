@@ -4,10 +4,14 @@
  * Named "Erika" — an LLM-powered chat that understands the loaded A2L/binary,
  * can trace control logic, help design features, identify tables, and correlate
  * with datalogs.
+ *
+ * Context is aggressively truncated for large A2Ls (50K+ maps) to avoid
+ * PayloadTooLarge errors. Erika gets category summaries + the selected map
+ * details, not the full map list.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Sparkles, X, Minimize2, Maximize2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, X, Minimize2 } from 'lucide-react';
 import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
@@ -26,11 +30,14 @@ interface ChatMessage {
   timestamp: number;
 }
 
+/** Max characters for the context string sent to the LLM */
+const MAX_CONTEXT_CHARS = 60000;
+
 export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen, onToggle }: ErikaChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: `Hey! I'm **Erika** — your calibration engineering partner. Think of me as that friend who's spent way too many late nights staring at hex dumps and forum threads. I can help you with:\n\n- **Finding tables** — "Where's the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo actually control?"\n- **Designing features** — "How would I build launch control from scratch?"\n- **DTC troubleshooting** — "What's the enable criteria for P0087?"\n- **Calibration strategy** — "What tables interact with boost at 3000 RPM?"\n- **Forum wisdom** — I've absorbed knowledge from PCMHacking, MHHAuto, DuramaxForum, CumminsForums, and more. I'll cite my sources when it's community-sourced info.\n\nLoad up an A2L and binary and let's get to work. What are you wrenching on?`,
+      content: `Hey! I'm **Erika** — your calibration engineering partner. Think of me as that friend who's spent way too many late nights staring at hex dumps and forum threads. I might get things wrong sometimes, but hey — if you're so good at this, then don't mind me ;-)\n\nI can help you with:\n\n- **Finding tables** — "Where's the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo actually control?"\n- **Designing features** — "How would I build launch control from scratch?"\n- **DTC troubleshooting** — "What's the enable criteria for P0087?"\n- **Calibration strategy** — "What tables interact with boost at 3000 RPM?"\n\nLoad up an A2L and binary and let's get to work. What are you wrenching on?`,
       timestamp: Date.now(),
     },
   ]);
@@ -47,7 +54,14 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Build context summary for the LLM
+  /**
+   * Build a context summary for the LLM that stays within size limits.
+   * Strategy:
+   *  - Always include: ECU metadata, category summary, selected map details
+   *  - For small A2Ls (<= 800 maps): include all map names
+   *  - For medium A2Ls (800-5000): include map names by category, truncated
+   *  - For large A2Ls (5000+): category summary only + top maps per category
+   */
   const buildContext = useCallback((): string => {
     if (!ecuDef) return 'No ECU definition loaded.';
 
@@ -58,16 +72,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     parts.push(`Total Measurements: ${ecuDef.stats.totalMeasurements}`);
     parts.push(`Map Types: ${Object.entries(ecuDef.stats.mapsByType).map(([k, v]) => `${k}:${v}`).join(', ')}`);
 
-    // Include category summary
-    const categories = new Map<string, number>();
-    for (const m of ecuDef.maps) {
-      const cat = m.category || 'Other';
-      categories.set(cat, (categories.get(cat) || 0) + 1);
-    }
-    parts.push(`Categories: ${Array.from(categories.entries()).map(([k, v]) => `${k}(${v})`).join(', ')}`);
-
-    // Include ALL map names grouped by category for complete A2L access
-    // Group maps by category for organized listing
+    // Group maps by category
     const mapsByCategory = new Map<string, typeof ecuDef.maps>();
     for (const m of ecuDef.maps) {
       const cat = m.category || 'Other';
@@ -75,61 +80,74 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
       mapsByCategory.get(cat)!.push(m);
     }
 
-    // If total maps < 2000, include ALL names (fits in context window)
-    // If > 2000, include first 500 + category summary
+    // Category summary (always included)
+    parts.push(`\nCategories: ${Array.from(mapsByCategory.entries()).map(([k, v]) => `${k}(${v.length})`).join(', ')}`);
+
     const totalMaps = ecuDef.maps.length;
-    if (totalMaps <= 2000) {
+
+    if (totalMaps <= 800) {
+      // Small A2L: include all map names
       parts.push(`\nCOMPLETE MAP LIST (all ${totalMaps} maps):`);
       for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
         parts.push(`\n### ${cat} (${maps.length} maps)`);
         for (const m of maps) {
-          const addr = m.address ? `0x${m.address.toString(16).toUpperCase()}` : 'N/A';
-          const hasValues = m.physValues && m.physValues.length > 0 ? '✓' : '✗';
-          parts.push(`  ${m.name} [${m.type}] addr:${addr} values:${hasValues} - ${m.description || m.subcategory || ''}`);
+          parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
         }
       }
-    } else {
-      parts.push(`\nMAP LIST (first 500 of ${totalMaps} — ask for specific categories to see all):`);
-      let count = 0;
+    } else if (totalMaps <= 5000) {
+      // Medium A2L: include map names but cap per category
+      const maxPerCat = Math.floor(300 / mapsByCategory.size);
+      parts.push(`\nMAP LIST (sampled from ${totalMaps} maps — ask for specific categories to see all):`);
       for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
-        parts.push(`\n### ${cat} (${maps.length} maps)`);
-        for (const m of maps) {
-          if (count >= 500) break;
-          const addr = m.address ? `0x${m.address.toString(16).toUpperCase()}` : 'N/A';
-          parts.push(`  ${m.name} [${m.type}] addr:${addr} - ${m.description || m.subcategory || ''}`);
-          count++;
+        parts.push(`\n### ${cat} (${maps.length} maps, showing first ${Math.min(maps.length, maxPerCat)}):`);
+        for (const m of maps.slice(0, maxPerCat)) {
+          parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
         }
-        if (count >= 500) { parts.push('  ... (ask for more)'); break; }
+        if (maps.length > maxPerCat) parts.push(`  ... and ${maps.length - maxPerCat} more`);
+      }
+    } else {
+      // Large A2L (50K+): category summary + top 5 per category
+      parts.push(`\nLARGE A2L (${totalMaps} maps). Showing top maps per category — ask for specific categories to see more:`);
+      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+        parts.push(`\n### ${cat} (${maps.length} maps):`);
+        for (const m of maps.slice(0, 5)) {
+          parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
+        }
+        if (maps.length > 5) parts.push(`  ... and ${maps.length - 5} more`);
       }
     }
 
-    // Include measurement names
+    // Include measurement names (limited)
     if (ecuDef.measurements.length > 0) {
-      const measLimit = Math.min(ecuDef.measurements.length, 500);
+      const measLimit = Math.min(ecuDef.measurements.length, 100);
       const measNames = ecuDef.measurements.slice(0, measLimit).map(m => `${m.name} - ${m.description}`);
       parts.push(`\nMEASUREMENTS (${measLimit} of ${ecuDef.measurements.length}):\n${measNames.join('\n')}`);
     }
 
-    // Include parse errors so Erika can explain missing maps
+    // Include parse errors (limited)
     if (ecuDef.errors.length > 0) {
-      parts.push(`\nPARSE ERRORS (${ecuDef.errors.length} issues — these explain why some maps may be missing):`);
-      for (const err of ecuDef.errors.slice(0, 50)) {
-        parts.push(`  ⚠ ${err}`);
+      parts.push(`\nPARSE ERRORS (${ecuDef.errors.length} issues):`);
+      for (const err of ecuDef.errors.slice(0, 20)) {
+        parts.push(`  ${err}`);
       }
-      if (ecuDef.errors.length > 50) {
-        parts.push(`  ... and ${ecuDef.errors.length - 50} more errors`);
+      if (ecuDef.errors.length > 20) {
+        parts.push(`  ... and ${ecuDef.errors.length - 20} more errors`);
       }
     }
 
-    // If a map is selected, include its details
+    // If a map is selected, include its full details (always)
     if (selectedMap) {
-      parts.push(`\nCurrently selected map: ${selectedMap.name}`);
+      parts.push(`\n--- CURRENTLY SELECTED MAP ---`);
+      parts.push(`Name: ${selectedMap.name}`);
       parts.push(`Type: ${selectedMap.type}, Address: 0x${selectedMap.address.toString(16).toUpperCase()}`);
       parts.push(`Description: ${selectedMap.description || 'none'}`);
       parts.push(`Category: ${selectedMap.category}/${selectedMap.subcategory}`);
+      if (selectedMap.rows && selectedMap.cols) {
+        parts.push(`Dimensions: ${selectedMap.rows} rows x ${selectedMap.cols} cols`);
+      }
       if (selectedMap.physValues) {
-        const vals = selectedMap.physValues.slice(0, 50);
-        parts.push(`Values (first 50): ${vals.map(v => v.toFixed(2)).join(', ')}`);
+        const vals = selectedMap.physValues.slice(0, 100);
+        parts.push(`Values (first ${vals.length}): ${vals.map(v => v.toFixed(2)).join(', ')}`);
       }
       if (selectedMap.axisXValues) {
         parts.push(`X Axis: ${selectedMap.axisXValues.map(v => v.toFixed(2)).join(', ')}`);
@@ -139,7 +157,13 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
       }
     }
 
-    return parts.join('\n');
+    // Final truncation safety net
+    let result = parts.join('\n');
+    if (result.length > MAX_CONTEXT_CHARS) {
+      result = result.substring(0, MAX_CONTEXT_CHARS) + '\n\n[Context truncated — ask for specific categories or maps]';
+    }
+
+    return result;
   }, [ecuDef, selectedMap]);
 
   const sendMessage = useCallback(async () => {
@@ -153,9 +177,10 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
 
     try {
       const context = buildContext();
-      const history = messages.slice(-10).map(m => ({
+      // Only send last 6 messages to keep payload small
+      const history = messages.slice(-6).map(m => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content.substring(0, 4000), // Truncate long assistant replies
       }));
 
       const response = await chatMutation.mutateAsync({
@@ -173,7 +198,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     } catch (err: any) {
       const errorMsg: ChatMessage = {
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${err.message || 'Unknown error'}. Please try again.`,
+        content: `Hmm, hit a snag: ${err.message || 'Unknown error'}. Try again — if it keeps happening, the payload might be too large. Try selecting a specific map first so I have focused context.`,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMsg]);
@@ -229,7 +254,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
       {/* ECU context indicator */}
       {ecuDef && (
         <div className="px-3 py-1 border-b border-zinc-800/50 text-[10px] text-zinc-500 font-mono">
-          Context: {ecuDef.ecuFamily} — {ecuDef.stats.totalMaps} maps
+          Context: {ecuDef.ecuFamily} — {ecuDef.stats.totalMaps.toLocaleString()} maps
           {selectedMap && <span className="text-cyan-400/60 ml-2">→ {selectedMap.name}</span>}
         </div>
       )}
@@ -244,7 +269,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
               </div>
             )}
             <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-ppei-red/20 text-white'
                   : 'bg-zinc-800/60 text-zinc-300'
@@ -265,7 +290,10 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
               <Bot className="w-3.5 h-3.5 text-ppei-red" />
             </div>
             <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
-              <Loader2 className="w-4 h-4 text-ppei-red animate-spin" />
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-ppei-red animate-spin" />
+                <span className="text-[10px] text-zinc-500">Erika is thinking...</span>
+              </div>
             </div>
           </div>
         )}
@@ -298,7 +326,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
           </button>
         </div>
         <div className="text-[10px] text-zinc-600 mt-1">
-          Enter to send • Shift+Enter for new line
+          Enter to send · Shift+Enter for new line
         </div>
       </div>
     </div>

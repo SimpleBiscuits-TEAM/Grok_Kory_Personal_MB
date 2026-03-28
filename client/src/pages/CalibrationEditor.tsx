@@ -20,16 +20,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Upload, FileDown, Sparkles, FolderOpen, Binary, Table2, AlertCircle,
   CheckCircle, Loader2, Settings2, RotateCcw, Save, FileText, HardDrive,
-  ChevronLeft, ChevronRight, Diff, Cpu, Info
+  ChevronLeft, ChevronRight, Diff, Cpu, Info, Laugh, SmilePlus, RefreshCw, X
 } from 'lucide-react';
 import {
   parseA2LForEditor, parseCumminsCSV, extractBinaryData, alignOffsets,
   populateMapValues, EcuDefinition, CalibrationMap, AlignmentResult,
-  physicalToRaw, resolveDataType, writeValue, readValue, rawToPhysical
+  physicalToRaw, resolveDataType, writeValue, readValue, rawToPhysical,
+  detectEcuFamily, detectEcuFamilyFromBinary
 } from '@/lib/editorEngine';
 import MapTreeBrowser from '@/components/editor/MapTreeBrowser';
 import MapDetailPanel from '@/components/editor/MapDetailPanel';
 import ErikaChat from '@/components/editor/ErikaChat';
+import HexEditor from '@/components/editor/HexEditor';
+import TuneCompare from '@/components/editor/TuneCompare';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 
@@ -50,12 +53,18 @@ export default function CalibrationEditor() {
   const [showErika, setShowErika] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('maps');
-  const [hexViewOffset, setHexViewOffset] = useState(0);
+
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [pendingA2LFile, setPendingA2LFile] = useState<File | null>(null);
+  const [pendingBinFile, setPendingBinFile] = useState<File | null>(null);
+  const [jokeTab, setJokeTab] = useState<'mom' | 'dad'>('mom');
+  const [jokeIndex, setJokeIndex] = useState(0);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
 
   const storeA2LMutation = trpc.editor.storeA2L.useMutation();
+  const trpcUtils = trpc.useUtils();
 
   const selectedMap = useMemo(() => {
     if (ecuDef && selectedMapIndex !== null && selectedMapIndex < ecuDef.maps.length) {
@@ -124,6 +133,58 @@ export default function CalibrationEditor() {
     }
   }, [binaryData, binaryBaseAddress, toast, storeA2LMutation]);
 
+  // ── Auto-fetch A2L helper ──
+  const autoFetchAndAlign = useCallback(async (
+    family: string, data: Uint8Array, baseAddress: number
+  ) => {
+    setLoadingMessage(`Auto-detecting ECU family: ${family}. Fetching definition...`);
+    try {
+      const result = await trpcUtils.editor.fetchA2L.fetch({ ecuFamily: family });
+      if (result.found) {
+        setLoadingMessage(`Parsing ${result.fileName}...`);
+        let def: EcuDefinition;
+        if (result.type === 'csv') {
+          def = parseCumminsCSV(result.content, result.fileName);
+        } else {
+          def = parseA2LForEditor(result.content, result.fileName);
+        }
+        setEcuDef(def);
+        toast.success('Auto-Loaded Definition', {
+          description: `Matched ${family}: ${def.stats.totalMaps} maps from ${result.fileName}`
+        });
+
+        // Align
+        setLoadingMessage('Aligning offsets...');
+        const align = alignOffsets(def, data, baseAddress);
+        setAlignment(align);
+
+        if (align.confidence > 0.3) {
+          setLoadingMessage('Populating map values...');
+          for (const map of def.maps) {
+            populateMapValues(map, def, data, align.offset);
+          }
+          setEcuDef({ ...def });
+          toast.success('Offset Alignment', {
+            description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
+          });
+        } else {
+          toast.warning('Alignment Warning', {
+            description: `Low confidence (${(align.confidence * 100).toFixed(0)}%). You can manually upload a closer A2L match.`
+          });
+        }
+      } else {
+        toast.info('No Stored Definition', {
+          description: `${result.message}. Upload an A2L/CSV manually.`
+        });
+      }
+    } catch (err: any) {
+      console.warn('Auto-fetch A2L failed:', err);
+      toast.info('Auto-Match Unavailable', {
+        description: 'Could not fetch stored definition. Upload an A2L/CSV manually.'
+      });
+    }
+  }, []);
+
   // ── Binary Loading ──
   const handleBinaryLoad = useCallback(async (file: File) => {
     setIsLoading(true);
@@ -147,9 +208,11 @@ export default function CalibrationEditor() {
       setBinaryFormat(format);
       setBinaryBaseAddress(baseAddress);
 
-      toast.success('Binary Loaded', { description: `${file.name}: ${(data.length / 1024).toFixed(1)} KB (${format}${baseAddress > 0 ? `, base: 0x${baseAddress.toString(16).toUpperCase()}` : ''})` });
+      toast.success('Binary Loaded', {
+        description: `${file.name}: ${(data.length / 1024).toFixed(1)} KB (${format}${baseAddress > 0 ? `, base: 0x${baseAddress.toString(16).toUpperCase()}` : ''})`
+      });
 
-      // If definition is loaded, try alignment
+      // If definition is already loaded, try alignment directly
       if (ecuDef) {
         setLoadingMessage('Aligning offsets...');
         const align = alignOffsets(ecuDef, data, baseAddress);
@@ -160,10 +223,24 @@ export default function CalibrationEditor() {
           for (const map of ecuDef.maps) {
             populateMapValues(map, ecuDef, data, align.offset);
           }
-          setEcuDef({ ...ecuDef }); // trigger re-render
-          toast.success('Offset Alignment', { description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})` });
+          setEcuDef({ ...ecuDef });
+          toast.success('Offset Alignment', {
+            description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
+          });
         } else {
-          toast.error('Alignment Warning', { description: `Low confidence alignment (${(align.confidence * 100).toFixed(0)}%). Offsets may need manual adjustment.` });
+          toast.warning('Alignment Warning', {
+            description: `Low confidence (${(align.confidence * 100).toFixed(0)}%). Offsets may need manual adjustment.`
+          });
+        }
+      } else {
+        // No definition loaded — auto-detect ECU family and fetch from S3
+        const family = detectEcuFamilyFromBinary(data, file.name);
+        if (family !== 'UNKNOWN') {
+          await autoFetchAndAlign(family, data, baseAddress);
+        } else {
+          toast.info('ECU Family Unknown', {
+            description: 'Could not auto-detect ECU type. Upload an A2L or CSV definition manually.'
+          });
         }
       }
     } catch (err: any) {
@@ -172,7 +249,7 @@ export default function CalibrationEditor() {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [ecuDef, toast]);
+  }, [ecuDef, autoFetchAndAlign]);
 
   // ── Value Changes ──
   const handleValuesChanged = useCallback((mapName: string, newPhysValues: number[]) => {
@@ -252,38 +329,49 @@ export default function CalibrationEditor() {
     toast.success('Binary Exported', { description: `${changesWritten} values written to ${a.download}` });
   }, [binaryData, ecuDef, alignment, modifiedMaps, binaryFileName, toast]);
 
-  // ── Hex View ──
-  const hexViewContent = useMemo(() => {
-    if (!binaryData) return null;
-    const start = hexViewOffset;
-    const end = Math.min(start + 512, binaryData.length);
-    const lines: string[] = [];
+  // ── Jokes ──
+  const momJokes = [
+    "Your mom's ECU is so slow, it takes 3 seconds to process a misfire.",
+    "Your mom's turbo is so big, it has its own zip code.",
+    "Your mom's injectors are so oversized, they use fire hoses for fuel lines.",
+    "Your mom's tune is so rich, it failed emissions in 3 states simultaneously.",
+    "Your mom's boost leak is so bad, the turbo filed for divorce.",
+    "Your mom's EGT is so high, NASA uses it for re-entry heat shield testing.",
+    "Your mom's DPF is so clogged, it's classified as a geological formation.",
+    "Your mom's rail pressure is so low, the CP4 pump is on antidepressants.",
+    "Your mom's transmission is so confused, it shifts into neutral at WOT.",
+    "Your mom's check engine light is so bright, ships use it as a lighthouse.",
+    "Your mom's MAF sensor is so dirty, it thinks it's breathing through a pillow.",
+    "Your mom's coolant temp is so high, she could brew coffee in the overflow tank.",
+    "Your mom's VGT vanes are so stuck, they've been declared a national monument.",
+    "Your mom's timing is so retarded, even the knock sensor gave up.",
+    "Your mom's DEF tank is so empty, the SCR catalyst filed a missing persons report.",
+  ];
 
-    for (let i = start; i < end; i += 16) {
-      const addr = i.toString(16).toUpperCase().padStart(8, '0');
-      const hexParts: string[] = [];
-      let ascii = '';
+  const dadJokes = [
+    "Why did the ECU go to therapy? It had too many unresolved faults.",
+    "I told my turbo a joke. It didn't laugh, but it did spool up.",
+    "What do you call a Duramax with no boost? A really expensive paperweight.",
+    "Why don't injectors ever win arguments? They always get fired.",
+    "My EGR valve walked into a bar. The bartender said 'We don't serve your type here.' The EGR said 'That's fine, I'll just recirculate.'",
+    "What's a tuner's favorite band? DEF Leppard.",
+    "Why did the DPF break up with the turbo? Too much back pressure in the relationship.",
+    "I asked my scan tool what's wrong. It said 'How much time do you have?'",
+    "What do you call a CP4 that works? Fiction.",
+    "Why did the calibrator cross the road? To get to the other offset.",
+    "My truck's check engine light is on so often, I named it. It's called Steve.",
+    "What's the difference between a tuner and a magician? A magician's tricks actually work the first time.",
+    "Why don't ECUs play poker? They always show their hand... in hex.",
+    "I tried to make a joke about CAN bus. But it got lost in transmission.",
+    "What did the A2L file say to the binary? 'I've got you all mapped out.'",
+  ];
 
-      for (let j = 0; j < 16; j++) {
-        if (i + j < binaryData.length) {
-          hexParts.push(binaryData[i + j].toString(16).toUpperCase().padStart(2, '0'));
-          const b = binaryData[i + j];
-          ascii += (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '.';
-        } else {
-          hexParts.push('  ');
-          ascii += ' ';
-        }
-      }
-
-      lines.push(`${addr}  ${hexParts.slice(0, 8).join(' ')}  ${hexParts.slice(8).join(' ')}  |${ascii}|`);
-    }
-
-    return lines.join('\n');
-  }, [binaryData, hexViewOffset]);
+  const currentJokes = jokeTab === 'mom' ? momJokes : dadJokes;
 
   // ── File drop handlers ──
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     for (const file of files) {
       const name = file.name.toLowerCase();
@@ -297,15 +385,32 @@ export default function CalibrationEditor() {
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
   }, []);
 
   // ── Render ──
   return (
     <div
-      className="flex flex-col h-full bg-zinc-950 text-white"
+      className={`flex flex-col h-full bg-zinc-950 text-white transition-all duration-200 ${isDragOver ? 'ring-2 ring-inset ring-red-500/50' : ''}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
     >
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-3 animate-pulse">
+            <Upload className="w-16 h-16 text-red-500" />
+            <span className="text-lg font-bold text-red-400 tracking-wider" style={{ fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.1em' }}>DROP FILES TO LOAD</span>
+            <span className="text-xs text-zinc-400">A2L / CSV definitions &bull; Binary files (.bin .ptp .hex .srec)</span>
+          </div>
+        </div>
+      )}
       {/* Top toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0 bg-zinc-900/80">
         <img src={PPEI_LOGO_URL} alt="PPEI" className="h-5 w-5 rounded" />
@@ -330,10 +435,26 @@ export default function CalibrationEditor() {
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];
-            if (file) handleDefinitionLoad(file);
+            if (file) setPendingA2LFile(file);
             e.target.value = '';
           }}
         />
+        {pendingA2LFile && (
+          <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5">
+            <span className="text-[10px] text-zinc-300 font-mono truncate max-w-[120px]">{pendingA2LFile.name}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-5 text-[10px] px-1.5 border-emerald-600 text-emerald-400 hover:bg-emerald-900/30"
+              onClick={() => { handleDefinitionLoad(pendingA2LFile); setPendingA2LFile(null); }}
+            >
+              Load
+            </Button>
+            <button className="text-zinc-500 hover:text-zinc-300" onClick={() => setPendingA2LFile(null)}>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
 
         <Button
           variant="outline"
@@ -351,10 +472,26 @@ export default function CalibrationEditor() {
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];
-            if (file) handleBinaryLoad(file);
+            if (file) setPendingBinFile(file);
             e.target.value = '';
           }}
         />
+        {pendingBinFile && (
+          <div className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5">
+            <span className="text-[10px] text-zinc-300 font-mono truncate max-w-[120px]">{pendingBinFile.name}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-5 text-[10px] px-1.5 border-emerald-600 text-emerald-400 hover:bg-emerald-900/30"
+              onClick={() => { handleBinaryLoad(pendingBinFile); setPendingBinFile(null); }}
+            >
+              Load
+            </Button>
+            <button className="text-zinc-500 hover:text-zinc-300" onClick={() => setPendingBinFile(null)}>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
 
         <div className="w-px h-5 bg-zinc-700 mx-1" />
 
@@ -431,7 +568,9 @@ export default function CalibrationEditor() {
                 <TabsList className="shrink-0 mx-2 mt-2">
                   <TabsTrigger value="maps" className="text-[11px]">Maps</TabsTrigger>
                   <TabsTrigger value="hex" className="text-[11px]">Hex</TabsTrigger>
+                  <TabsTrigger value="compare" className="text-[11px]">Compare</TabsTrigger>
                   <TabsTrigger value="info" className="text-[11px]">Info</TabsTrigger>
+                  <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="maps" className="flex-1 overflow-hidden mt-0">
@@ -445,53 +584,37 @@ export default function CalibrationEditor() {
 
                 <TabsContent value="hex" className="flex-1 overflow-hidden mt-0">
                   {binaryData ? (
-                    <div className="flex flex-col h-full">
-                      <div className="p-2 border-b border-zinc-800 flex items-center gap-2">
-                        <input
-                          className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-[10px] font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-ppei-red/50"
-                          placeholder="Go to offset (hex)..."
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              const val = parseInt((e.target as HTMLInputElement).value, 16);
-                              if (!isNaN(val)) setHexViewOffset(Math.max(0, Math.min(val, binaryData.length - 512)));
-                            }
-                          }}
-                        />
-                        <span className="text-[10px] text-zinc-500 font-mono">
-                          {hexViewOffset.toString(16).toUpperCase().padStart(8, '0')}
-                        </span>
-                      </div>
-                      <div className="flex-1 overflow-auto p-2">
-                        <pre className="text-[10px] font-mono text-zinc-400 leading-relaxed whitespace-pre">
-                          {hexViewContent}
-                        </pre>
-                      </div>
-                      <div className="p-2 border-t border-zinc-800 flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[10px] px-2"
-                          onClick={() => setHexViewOffset(Math.max(0, hexViewOffset - 512))}
-                          disabled={hexViewOffset === 0}
-                        >
-                          ← Prev
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-[10px] px-2"
-                          onClick={() => setHexViewOffset(Math.min(binaryData.length - 512, hexViewOffset + 512))}
-                          disabled={hexViewOffset >= binaryData.length - 512}
-                        >
-                          Next →
-                        </Button>
-                      </div>
-                    </div>
+                    <HexEditor
+                      data={binaryData}
+                      ecuDef={ecuDef}
+                      alignment={alignment}
+                      baseAddress={binaryBaseAddress}
+                      onDataChange={(newData: Uint8Array) => {
+                        setBinaryData(new Uint8Array(newData));
+                        toast.success('Hex edit applied');
+                      }}
+                      onMapDetected={(map: Partial<CalibrationMap>) => {
+                        toast.success(`Map defined: ${map.name}`);
+                      }}
+                      onNavigateToMap={(idx: number) => {
+                        setSelectedMapIndex(idx);
+                        toast.info(`Navigated to ${ecuDef.maps[idx]?.name}`);
+                      }}
+                    />
                   ) : (
                     <div className="flex items-center justify-center h-full text-xs text-zinc-500">
                       Load a binary file to view hex
                     </div>
                   )}
+                </TabsContent>
+
+                <TabsContent value="compare" className="flex-1 overflow-hidden mt-0">
+                  <TuneCompare
+                    ecuDef={ecuDef}
+                    alignment={alignment}
+                    primaryBinary={binaryData}
+                    primaryFileName={binaryFileName}
+                  />
                 </TabsContent>
 
                 <TabsContent value="info" className="flex-1 overflow-auto mt-0 p-3">
@@ -548,6 +671,58 @@ export default function CalibrationEditor() {
                         ))}
                       </>
                     )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3">
+                  <div className="flex flex-col h-full">
+                    <div className="flex gap-1 mb-3">
+                      <button
+                        onClick={() => { setJokeTab('mom'); setJokeIndex(0); }}
+                        className={`flex-1 py-1.5 text-[10px] font-bold tracking-wider rounded transition-all ${
+                          jokeTab === 'mom'
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                            : 'bg-zinc-800/50 text-zinc-500 border border-zinc-700 hover:bg-zinc-800'
+                        }`}
+                      >
+                        MOM JOKES
+                      </button>
+                      <button
+                        onClick={() => { setJokeTab('dad'); setJokeIndex(0); }}
+                        className={`flex-1 py-1.5 text-[10px] font-bold tracking-wider rounded transition-all ${
+                          jokeTab === 'dad'
+                            ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                            : 'bg-zinc-800/50 text-zinc-500 border border-zinc-700 hover:bg-zinc-800'
+                        }`}
+                      >
+                        DAD JOKES
+                      </button>
+                    </div>
+
+                    <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+                      <div className={`text-3xl mb-3 ${jokeTab === 'mom' ? 'animate-bounce' : ''}`}>
+                        {jokeTab === 'mom' ? '🔥' : '👴'}
+                      </div>
+                      <p className="text-xs text-zinc-300 leading-relaxed mb-4 min-h-[3rem]">
+                        {currentJokes[jokeIndex % currentJokes.length]}
+                      </p>
+                      <button
+                        onClick={() => setJokeIndex(prev => prev + 1)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold tracking-wider bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-zinc-400 hover:text-white transition-all"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        ANOTHER ONE
+                      </button>
+                      <p className="text-[9px] text-zinc-600 mt-3 italic">
+                        Joke #{(jokeIndex % currentJokes.length) + 1} of {currentJokes.length}
+                      </p>
+                    </div>
+
+                    <div className="text-[9px] text-zinc-700 text-center mt-2 italic">
+                      {jokeTab === 'mom'
+                        ? "Your mom's calibration file is so big, WinOLS crashed trying to open it."
+                        : "I'm not saying my dad's tune is bad, but even the ECU asked for a second opinion."}
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>

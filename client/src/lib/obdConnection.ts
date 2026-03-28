@@ -107,7 +107,7 @@ export type PIDCategory =
   | 'exhaust' | 'def' | 'other'
   | 'oxygen' | 'catalyst' | 'evap' | 'ignition' | 'cooling' | 'intake';
 
-export type PIDManufacturer = 'universal' | 'gm' | 'ford' | 'chrysler' | 'toyota' | 'honda' | 'nissan' | 'hyundai' | 'bmw';
+export type PIDManufacturer = 'universal' | 'gm' | 'ford' | 'chrysler' | 'toyota' | 'honda' | 'nissan' | 'hyundai' | 'bmw' | 'canam' | 'seadoo' | 'polaris' | 'kawasaki';
 
 export type FuelType = 'any' | 'gasoline' | 'diesel';
 
@@ -2208,6 +2208,8 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
 
 // ─── Manufacturer PID Collections ─────────────────────────────────────
 
+import { CANAM_EXTENDED_PIDS, SEADOO_EXTENDED_PIDS, POLARIS_EXTENDED_PIDS, KAWASAKI_EXTENDED_PIDS } from './powersportsPids';
+
 export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
   universal: [],  // Standard PIDs are universal
   gm: GM_EXTENDED_PIDS,
@@ -2218,6 +2220,10 @@ export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
   nissan: [],  // Placeholder for future expansion
   hyundai: [],  // Placeholder for future expansion
   bmw: BMW_EXTENDED_PIDS,
+  canam: CANAM_EXTENDED_PIDS,
+  seadoo: SEADOO_EXTENDED_PIDS,
+  polaris: POLARIS_EXTENDED_PIDS,
+  kawasaki: KAWASAKI_EXTENDED_PIDS,
 };
 
 // ─── Combined PID List (all available PIDs) ───────────────────────────────
@@ -2230,6 +2236,10 @@ export const ALL_PIDS: PIDDefinition[] = [
   ...TOYOTA_EXTENDED_PIDS,
   ...HONDA_EXTENDED_PIDS,
   ...BMW_EXTENDED_PIDS,
+  ...CANAM_EXTENDED_PIDS,
+  ...SEADOO_EXTENDED_PIDS,
+  ...POLARIS_EXTENDED_PIDS,
+  ...KAWASAKI_EXTENDED_PIDS,
 ];
 
 // ─── Custom Preset Management ───────────────────────────────────────────────
@@ -2329,6 +2339,13 @@ export function getPidsForVehicle(manufacturer: PIDManufacturer, fuelType: FuelT
 }
 
 export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: FuelType): PIDPreset[] {
+  // Check for powersports manufacturers first
+  const powersportsManufacturers = ['canam', 'seadoo', 'polaris', 'kawasaki'] as const;
+  if ((powersportsManufacturers as readonly string[]).includes(manufacturer)) {
+    const { getPowersportsPresets } = require('./powersportsPids');
+    return getPowersportsPresets(manufacturer as any);
+  }
+
   return PID_PRESETS.filter(preset => {
     const name = preset.name.toLowerCase();
     // Universal presets always show

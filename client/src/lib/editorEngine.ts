@@ -106,6 +106,9 @@ export interface CalibrationMap {
   // Category for tree organization
   category?: string;
   subcategory?: string;
+  // Tiered editor level (1=Basic, 2=Street, 3=Advanced, 4=Expert, 5=Full)
+  level?: 1 | 2 | 3 | 4 | 5;
+  levelFolder?: string;  // folder name within the level
   // Unit from COMPU_METHOD
   unit?: string;
 }
@@ -665,11 +668,271 @@ function categorizeMap(map: CalibrationMap): void {
     if (regex.test(map.name)) {
       map.category = category;
       map.subcategory = subcategory;
+      assignLevel(map);
       return;
     }
   }
   map.category = 'Other';
   map.subcategory = 'Uncategorized';
+  assignLevel(map);
+}
+
+// ─── Tiered Level Assignment ────────────────────────────────────────────────
+
+export const LEVEL_NAMES: Record<number, string> = {
+  1: 'Basic',
+  2: 'Street Performance',
+  3: 'Advanced Tuning',
+  4: 'Expert / Emissions',
+  5: 'Full A2L',
+};
+
+export const LEVEL_DESCRIPTIONS: Record<number, string> = {
+  1: 'Speed limiter, driver demand, tire size, idle, cruise',
+  2: 'Torque management, injection timing, boost/rail targets, transmission',
+  3: 'Rail pressure control, EGR, turbo/VGT, engine protection',
+  4: 'DPF, SCR, NOx, diagnostics/DTC, OBD monitors',
+  5: 'All maps — raw engineering view grouped by module prefix',
+};
+
+/** Level 1 patterns: Basic tuning — things any truck owner might adjust */
+const LEVEL_1_PATTERNS: [RegExp, string][] = [
+  [/^Ka?(IDLE|IdlC|IdlS)/i, 'Idle Speed Control'],
+  [/^Ka?(SPD|VSPD|VehSpd|SpdLm)/i, 'Speed Limiters'],
+  [/^Ka?(CRSC|CrsC|CrCtl)/i, 'Cruise Control'],
+  [/^Ka?(ACCL|AccLm|SpdAcc)/i, 'Speed / Acceleration Limiters'],
+  [/^Ka?(TIRE|TirS|WhlS|WhlC)/i, 'Tire / Wheel Size'],
+  [/^Ka?(DRVD|DrvDm|PdlI|APP)/i, 'Driver Demand / Pedal'],
+  [/^Ka?(RVLM|RevL)/i, 'Rev Limiter'],
+  // Cummins style
+  [/^P_(Idle|Speed|Cruise|Tire|Pedal|RevLim)/i, 'Basic Parameters'],
+  // Bosch style
+  [/^(VehSpd|CrsCtl|IdlCtl|AccPdl)/i, 'Basic Parameters'],
+];
+
+/** Level 2 patterns: Street performance — common tuning targets */
+const LEVEL_2_PATTERNS: [RegExp, string][] = [
+  [/^Ka?(TQMN|TQM[^N]|TORQ|ETQ[^C]|ETQC)/i, 'Torque Management'],
+  [/^Ka?(DFIT|DFI[^RC])/i, 'Injection Timing'],
+  [/^Ka?(BSTC|BstT|BstS)/i, 'Boost Targets'],
+  [/^Ka?(FRP[^C]|FRPT|RlPT)/i, 'Rail Pressure Targets'],
+  [/^Ka?(TCCM|TCC[^S])/i, 'Torque Converter / TCC'],
+  [/^Ka?(TRNS|SHFT|GEAR|TrSh|GrSh)/i, 'Transmission'],
+  [/^Ka?(TCSM|TcSh)/i, 'Transmission'],
+  // Cummins style
+  [/^P_(Torq|Inj|Boost|Rail|Trans)/i, 'Performance Parameters'],
+  // Bosch style
+  [/^(MoF|TqLim|TqSys|InjCtl|InjCrv|Bst)/i, 'Performance Parameters'],
+];
+
+/** Level 3 patterns: Advanced tuning — deeper engine control */
+const LEVEL_3_PATTERNS: [RegExp, string][] = [
+  [/^Ka?(FRPC|FRP[^T]|RlPC)/i, 'Rail Pressure Control'],
+  [/^Ka?(EGRC|EGR)/i, 'EGR System'],
+  [/^Ka?(VGT|WGDC|TrbC)/i, 'Turbo / VGT Control'],
+  [/^Ka?(PROT|LIMP|EngP)/i, 'Engine Protection'],
+  [/^Ka?(THRT|ETCS|ThAc)/i, 'Air System / Throttle'],
+  [/^Ka?(ASDP|AcSD)/i, 'Active Surge Damper'],
+  [/^Ka?(INJ[^C]|INJC)/i, 'Injector Curves'],
+  [/^Ka?(CYLB|CylB)/i, 'Cylinder Balance'],
+  [/^Ka?(MAF|MAP|BARO)/i, 'Airflow Sensors'],
+  [/^Ka?(COOL|OILT|FANS)/i, 'Cooling System'],
+  // Cummins style
+  [/^P_(EGR|Turbo|Cool|Oil|Rail)/i, 'Advanced Parameters'],
+  // Bosch style
+  [/^(AirPah|Thr|Exh|CoEng|Epm|CrkAng)/i, 'Advanced Parameters'],
+];
+
+/** Level 4 patterns: Expert / emissions — DPF, SCR, diagnostics */
+const LEVEL_4_PATTERNS: [RegExp, string][] = [
+  [/^Ka?(DIAG|DTC|MPRD|MPMR)/i, 'Diagnostics / DTC'],
+  [/^Ka?(NOX|NxSn|NxMd)/i, 'NOx Sensors / Model'],
+  [/^Ka?(DPF|DPFC|PtFl)/i, 'DPF / Particulate Filter'],
+  [/^Ka?(SCR|SCRC|DEF|Urea)/i, 'SCR / DEF Dosing'],
+  [/^Ka?(EGT|EXHT|ExhT)/i, 'Exhaust Temperature'],
+  [/^Ka?(OBDM|OBD)/i, 'OBD Monitors'],
+  [/^Ka?(LMDA|Lam)/i, 'Lambda / O2 Sensors'],
+  [/^Ka?(OXCT|OxCt|Cat)/i, 'Oxidation Catalyst'],
+  [/^Ka?(FFRG|FrzF)/i, 'Freeze Frame'],
+  [/^Ka?(SSMR|SsMn)/i, 'Subsystem Monitoring'],
+  // Cummins style
+  [/^P_(DPF|SCR|NOx|EGT|Exh|Diag)/i, 'Emissions Parameters'],
+  [/^T_UTM/i, 'Urea Tank Monitor'],
+  // Bosch style
+  [/^(Dsm|Dem|Fid|Cat|Exh)/i, 'Emissions Parameters'],
+];
+
+function assignLevel(map: CalibrationMap): void {
+  const name = map.name;
+
+  // Check Level 1 first (most specific / basic)
+  for (const [regex, folder] of LEVEL_1_PATTERNS) {
+    if (regex.test(name)) {
+      map.level = 1;
+      map.levelFolder = folder;
+      return;
+    }
+  }
+
+  // Check Level 2
+  for (const [regex, folder] of LEVEL_2_PATTERNS) {
+    if (regex.test(name)) {
+      map.level = 2;
+      map.levelFolder = folder;
+      return;
+    }
+  }
+
+  // Check Level 3
+  for (const [regex, folder] of LEVEL_3_PATTERNS) {
+    if (regex.test(name)) {
+      map.level = 3;
+      map.levelFolder = folder;
+      return;
+    }
+  }
+
+  // Check Level 4
+  for (const [regex, folder] of LEVEL_4_PATTERNS) {
+    if (regex.test(name)) {
+      map.level = 4;
+      map.levelFolder = folder;
+      return;
+    }
+  }
+
+  // Everything else → Level 5 (Full A2L)
+  // Group by module prefix (first 2-6 chars before underscore or case change)
+  map.level = 5;
+  const prefixMatch = name.match(/^([A-Z][a-z]*[A-Z]?[a-z]*|[A-Z]{2,6}|[A-Z][a-z]+)/i);
+  map.levelFolder = prefixMatch ? prefixMatch[1] : 'Other';
+}
+
+/**
+ * Build a tiered map tree for a specific level.
+ * Returns folder → map nodes structure.
+ */
+export function buildTieredTree(maps: CalibrationMap[], level: 1 | 2 | 3 | 4 | 5): MapTreeNode[] {
+  const folders = new Map<string, number[]>();
+
+  for (let i = 0; i < maps.length; i++) {
+    if (maps[i].level !== level) continue;
+    const folder = maps[i].levelFolder || 'Other';
+    if (!folders.has(folder)) folders.set(folder, []);
+    folders.get(folder)!.push(i);
+  }
+
+  const tree: MapTreeNode[] = [];
+  const sortedFolders = Array.from(folders.keys()).sort();
+
+  for (const folder of sortedFolders) {
+    const indices = folders.get(folder)!;
+
+    // If a folder has too many maps (>100), sub-group by subcategory
+    if (indices.length > 100) {
+      const subGroups = new Map<string, number[]>();
+      for (const idx of indices) {
+        const sub = maps[idx].subcategory || maps[idx].category || 'Other';
+        if (!subGroups.has(sub)) subGroups.set(sub, []);
+        subGroups.get(sub)!.push(idx);
+      }
+
+      if (subGroups.size > 1) {
+        const children: MapTreeNode[] = [];
+        for (const [sub, subIndices] of Array.from(subGroups.entries()).sort()) {
+          // If subgroup still too large (>80), paginate
+          if (subIndices.length > 80) {
+            const pageSize = 50;
+            for (let p = 0; p < subIndices.length; p += pageSize) {
+              const pageIndices = subIndices.slice(p, p + pageSize);
+              const pageNum = Math.floor(p / pageSize) + 1;
+              const totalPages = Math.ceil(subIndices.length / pageSize);
+              children.push({
+                id: `l${level}-${folder}-${sub}-p${pageNum}`,
+                label: `${sub} (${pageNum}/${totalPages})`,
+                children: pageIndices.map(idx => ({
+                  id: `map-${idx}`,
+                  label: maps[idx].name,
+                  mapIndex: idx,
+                })),
+                mapCount: pageIndices.length,
+              });
+            }
+          } else {
+            children.push({
+              id: `l${level}-${folder}-${sub}`,
+              label: sub,
+              children: subIndices.map(idx => ({
+                id: `map-${idx}`,
+                label: maps[idx].name,
+                mapIndex: idx,
+              })),
+              mapCount: subIndices.length,
+            });
+          }
+        }
+        tree.push({
+          id: `l${level}-${folder}`,
+          label: folder,
+          children,
+          mapCount: indices.length,
+        });
+        continue;
+      }
+    }
+
+    // Normal folder (<=100 maps or single subgroup)
+    // Paginate if still too many
+    if (indices.length > 80) {
+      const pageSize = 50;
+      const children: MapTreeNode[] = [];
+      for (let p = 0; p < indices.length; p += pageSize) {
+        const pageIndices = indices.slice(p, p + pageSize);
+        const pageNum = Math.floor(p / pageSize) + 1;
+        const totalPages = Math.ceil(indices.length / pageSize);
+        children.push({
+          id: `l${level}-${folder}-p${pageNum}`,
+          label: `Page ${pageNum}/${totalPages}`,
+          children: pageIndices.map(idx => ({
+            id: `map-${idx}`,
+            label: maps[idx].name,
+            mapIndex: idx,
+          })),
+          mapCount: pageIndices.length,
+        });
+      }
+      tree.push({
+        id: `l${level}-${folder}`,
+        label: folder,
+        children,
+        mapCount: indices.length,
+      });
+    } else {
+      tree.push({
+        id: `l${level}-${folder}`,
+        label: folder,
+        children: indices.map(idx => ({
+          id: `map-${idx}`,
+          label: maps[idx].name,
+          mapIndex: idx,
+        })),
+        mapCount: indices.length,
+      });
+    }
+  }
+
+  return tree;
+}
+
+/**
+ * Get map counts per level for the level selector tabs.
+ */
+export function getLevelCounts(maps: CalibrationMap[]): Record<number, number> {
+  const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const m of maps) {
+    if (m.level) counts[m.level]++;
+  }
+  return counts;
 }
 
 // ─── Module Info Parser ──────────────────────────────────────────────────────
@@ -736,6 +999,66 @@ export function detectEcuFamily(content: string, fileName: string): string {
     if (epk.includes('E90')) return 'E90';
     if (epk.includes('T93')) return 'T93';
   }
+
+  return 'UNKNOWN';
+}
+
+/**
+ * Detect ECU family from binary data by examining headers, signatures, and embedded strings.
+ * This is used for auto-matching binaries to stored A2L definitions.
+ */
+export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): string {
+  const upper = fileName.toUpperCase();
+
+  // Check filename first
+  if (upper.includes('E41') || upper.includes('L5P')) return 'E41';
+  if (upper.includes('T93') || upper.includes('10L1000') || upper.includes('ALLISON')) return 'T93';
+  if (upper.includes('MG1C') || upper.includes('CANAM') || upper.includes('MAVERICK')) return 'MG1C';
+  if (upper.includes('CUMMINS') || upper.includes('68RFE') || upper.includes('CM2350')) return 'CUMMINS';
+  if (/\bE\d{2}\b/.test(upper)) {
+    const m = upper.match(/\b(E\d{2})\b/);
+    if (m) return m[1];
+  }
+
+  // Check for PPEI container header (AA55)
+  if (data.length > 2 && data[0] === 0xAA && data[1] === 0x55) {
+    // PPEI container — likely L5P/Duramax
+    // Try to find JSON metadata in the header
+    try {
+      const headerText = new TextDecoder('ascii', { fatal: false }).decode(data.slice(0, Math.min(4096, data.length)));
+      if (headerText.includes('E41') || headerText.includes('L5P')) return 'E41';
+      if (headerText.includes('T93') || headerText.includes('10L1000')) return 'T93';
+      if (headerText.includes('E46')) return 'E46';
+      if (headerText.includes('E90')) return 'E90';
+    } catch { /* ignore */ }
+    // Default PPEI container to E41 (most common)
+    return 'E41';
+  }
+
+  // Check for Intel HEX format (Can-Am)
+  if (data.length > 1 && data[0] === 0x3A) { // ':' character
+    return 'MG1C';
+  }
+
+  // Check for S-Record format (Motorola)
+  if (data.length > 2 && data[0] === 0x53 && (data[1] === 0x30 || data[1] === 0x32 || data[1] === 0x33)) {
+    // S0, S2, S3 — likely L5P PTP
+    return 'E41';
+  }
+
+  // Scan first 8KB of binary for embedded strings
+  const scanLen = Math.min(data.length, 8192);
+  const scanText = new TextDecoder('ascii', { fatal: false }).decode(data.slice(0, scanLen));
+  
+  if (scanText.includes('E41') || scanText.includes('L5P')) return 'E41';
+  if (scanText.includes('T93') || scanText.includes('10L1000')) return 'T93';
+  if (scanText.includes('MG1C') || scanText.includes('MDG1C')) return 'MG1C';
+  if (scanText.includes('Cummins') || scanText.includes('CM2350')) return 'CUMMINS';
+
+  // Check binary size heuristics
+  const sizeMB = data.length / (1024 * 1024);
+  if (sizeMB > 3.5 && sizeMB < 4.5) return 'E41'; // L5P cal segment ~4MB
+  if (sizeMB > 1.5 && sizeMB < 2.5) return 'MG1C'; // Can-Am ~2MB
 
   return 'UNKNOWN';
 }

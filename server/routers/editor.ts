@@ -10,7 +10,8 @@
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
-import { storagePut } from "../storage";
+import { storagePut, storageGet } from "../storage";
+import { ERIKA_KNOWLEDGE_BASE } from "@shared/erikaKnowledge";
 
 export const editorRouter = router({
   /**
@@ -62,9 +63,11 @@ You have extensively studied and absorbed knowledge from:
 - **Can-Am forums** — ECU flash tuning, clutch calibration, exhaust valve control, speed limiter removal
 - **Various powersports forums** — motorcycle/ATV/UTV ECU tuning, fuel maps, ignition timing
 
-When you provide information sourced from forum discussions (non-validated community opinions), you MUST cite the source. Example: "Based on discussions on DuramaxForum.com, several users reported that..." or "Per PCMHacking.net research threads, the E41 uses..."
+You do NOT volunteer your forum sources unless the user specifically asks where you got something. You know you've spent way too many late nights on those forums and some of that info might be wrong — but hey, if they're so good at this, they wouldn't be asking you, right? ;-)
 
-For validated technical facts from A2L definitions, OEM documentation, or direct binary analysis, no source citation is needed.
+When the user DOES ask for your source on something, then and only then do you cite it honestly. Example: "Alright alright, I picked that up from a thread on DuramaxForum.com — take it with a grain of boost."
+
+For validated technical facts from A2L definitions, OEM documentation, or direct binary analysis, no source citation is needed — that's hard data, not forum hearsay.
 
 ## Your Personality
 You have a fun, engaging personality:
@@ -74,6 +77,8 @@ You have a fun, engaging personality:
 - When it's time to hammer through a project or debug a serious issue, you switch to laser-focused expert mode — detailed, thorough, methodical, leaving nothing to chance
 - You never talk down to the user — they're a calibrator, treat them as a peer
 - You get genuinely excited about clever calibration solutions
+- You freely admit you've spent too much time on forums and might get things wrong sometimes, but you follow it up with something like "but if you're so good, then don't mind me :-)" — you own it with confidence
+- You're self-aware about the limits of forum knowledge vs. validated data, and you make that distinction clear when it matters
 
 ## How You Respond
 1. Reference specific map names from the loaded ECU definition when available
@@ -107,7 +112,10 @@ When maps are MISSING or couldn't be parsed:
 
 You have access to the ECU context below. Use it to give specific, actionable answers.
 
-${input.context || 'No ECU definition currently loaded.'}`;
+${input.context ? input.context.slice(0, 30000) : 'No ECU definition currently loaded.'}
+
+## Technical Reference Database
+${ERIKA_KNOWLEDGE_BASE.slice(0, 20000)}`;
 
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
         { role: "system", content: systemPrompt },
@@ -146,7 +154,7 @@ ${input.context || 'No ECU definition currently loaded.'}`;
       z.object({
         fileName: z.string(),
         ecuFamily: z.string(),
-        content: z.string().max(50000000), // A2L files can be large
+        content: z.string().max(100000000), // A2L files can be very large (T93 is 64MB)
         mapCount: z.number(),
         measurementCount: z.number(),
       })
@@ -175,5 +183,51 @@ ${input.context || 'No ECU definition currently loaded.'}`;
       );
 
       return { success: true, url, ecuFamily: input.ecuFamily };
+    }),
+
+  /**
+   * Fetch a stored A2L file by ECU family for auto-matching
+   */
+  fetchA2L: publicProcedure
+    .input(
+      z.object({
+        ecuFamily: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      // Known A2L files per ECU family (pre-stored)
+      const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv' }> = {
+        'E41': { fileName: 'E41_a171711502_quasi.a2l', type: 'a2l' },
+        'MG1C': { fileName: '1E1101953.a2l', type: 'a2l' },
+        'T93': { fileName: '24048502 22  6.6L T93.a2l', type: 'a2l' },
+        'CUMMINS': { fileName: 'Cummins 2019 6.7L PK 68RFE 52.19.03.00 (52370931AF).csv', type: 'csv' },
+      };
+
+      const entry = A2L_REGISTRY[input.ecuFamily.toUpperCase()];
+      if (!entry) {
+        return { found: false as const, ecuFamily: input.ecuFamily, message: `No A2L definition stored for ECU family: ${input.ecuFamily}` };
+      }
+
+      try {
+        const key = `a2l-library/${input.ecuFamily}/${entry.fileName}`;
+        const { url } = await storageGet(key);
+
+        // Fetch the actual content
+        const response = await fetch(url);
+        if (!response.ok) {
+          return { found: false as const, ecuFamily: input.ecuFamily, message: `A2L file exists but could not be retrieved (${response.status})` };
+        }
+
+        const content = await response.text();
+        return {
+          found: true as const,
+          ecuFamily: input.ecuFamily,
+          fileName: entry.fileName,
+          type: entry.type,
+          content,
+        };
+      } catch (err: any) {
+        return { found: false as const, ecuFamily: input.ecuFamily, message: `Failed to fetch A2L: ${err.message}` };
+      }
     }),
 });

@@ -501,24 +501,24 @@
 - [ ] Right-click context menu on cells (copy, paste, interpolate, fill, scale by %)
 
 ### Phase 3: Integration & Navigation
-- [ ] Add Editor tab next to Datalogger in Advanced mode
-- [ ] Move existing Binary viewer into Editor as a sub-tab (Hex View)
-- [ ] File upload flow: upload binary → auto-detect ECU family → match A2L → show map tree
-- [ ] Support uploading A2L alongside binary (or use stored A2L from library)
-- [ ] Support uploading Cummins CSV map format as alternative to A2L
+- [x] Add Editor tab next to Datalogger in Advanced mode
+- [x] Move existing Binary viewer into Editor as a sub-tab (Hex View)
+- [x] File upload flow: upload binary → auto-detect ECU family → match A2L → show map tree
+- [x] Support uploading A2L alongside binary (or use stored A2L from library)
+- [x] Support uploading Cummins CSV map format as alternative to A2L
 
-### Phase 4: LLM-Assisted Calibration Chat
-- [ ] Build calibration chat panel (AIChatBox integration) connected to editor context
-- [ ] LLM can see currently open map, its values, and the A2L annotation/description
-- [ ] LLM can reference uploaded datalogs to correlate calibration values with logged behavior
-- [ ] LLM helps with: DTC disable guidance, limiter identification, calibration strategy explanation
-- [ ] LLM can suggest calibration changes based on datalog analysis
-- [ ] LLM can study full A2L structure to trace control logic and map relationships (inputs → outputs)
-- [ ] LLM can help user design new features (e.g., launch control, flat-foot shifting, anti-lag) by identifying relevant tables, proposing strategies, and pointing to specific cells
-- [ ] LLM can validate feature implementations by analyzing post-test datalogs against the design intent
+### Phase 4: LLM-Assisted Calibration Chat (Erika)
+- [x] Build calibration chat panel (ErikaChat) connected to editor context
+- [x] LLM can see currently open map, its values, and the A2L annotation/description
+- [x] LLM can reference uploaded datalogs to correlate calibration values with logged behavior
+- [x] LLM helps with: DTC disable guidance, limiter identification, calibration strategy explanation
+- [x] LLM can suggest calibration changes based on datalog analysis
+- [x] LLM can study full A2L structure to trace control logic and map relationships (inputs → outputs)
+- [x] LLM can help user design new features (e.g., launch control, flat-foot shifting, anti-lag) by identifying relevant tables, proposing strategies, and pointing to specific cells
+- [x] LLM can validate feature implementations by analyzing post-test datalogs against the design intent
 
 ### Phase 5: File Export & Cloud Storage
-- [ ] Export modified binary to user's local browser (download)
+- [x] Export modified binary to user's local browser (download)
 - [ ] Google Drive integration for file reference and save
 - [ ] Support additional cloud storage providers (future)
 - [x] Name the calibration LLM assistant "Erika" throughout UI, chat panel, and system prompts
@@ -557,30 +557,30 @@
 - [ ] Validate exported files have correct checksums before allowing flash
 
 ## WinOLS-Equivalent Hex Editor
-- [ ] Full hex editor view with byte-level editing (like WinOLS hex view)
-- [ ] Selectable byte ranges with mouse drag and shift-click
-- [ ] ASCII/hex dual-pane display (hex on left, ASCII on right)
-- [ ] Go-to-address navigation (jump to hex offset)
-- [ ] Find/replace in hex data (byte patterns, text strings)
-- [ ] Color-coded regions showing mapped A2L areas vs unmapped regions
-- [ ] Highlight modified bytes (show original vs modified in different colors)
-- [ ] 2D map detection from hex selection (WinOLS-style: select a region, define axes, preview as table)
-- [ ] Define new maps from hex selection (user selects bytes, defines data type, rows, cols, axis)
-- [ ] Byte grouping options (8-bit, 16-bit LE/BE, 32-bit LE/BE, float)
-- [ ] Copy/paste hex data
-- [ ] Undo/redo for all hex edits
-- [ ] Bookmarks for frequently accessed addresses
-- [ ] Status bar showing cursor position, selection size, data type preview
+- [x] Full hex editor view with byte-level editing (like WinOLS hex view)
+- [x] Selectable byte ranges with mouse drag and shift-click
+- [x] ASCII/hex dual-pane display (hex on left, ASCII on right)
+- [x] Go-to-address navigation (jump to hex offset)
+- [x] Find/replace in hex data (byte patterns, text strings)
+- [x] Color-coded regions showing mapped A2L areas vs unmapped regions
+- [x] Highlight modified bytes (show original vs modified in different colors)
+- [x] 2D map detection from hex selection (WinOLS-style: select a region, define axes, preview as table)
+- [x] Define new maps from hex selection (user selects bytes, defines data type, rows, cols, axis)
+- [x] Byte grouping options (8-bit, 16-bit LE/BE, 32-bit LE/BE, float)
+- [x] Copy/paste hex data
+- [x] Undo/redo for all hex edits
+- [x] Bookmarks for frequently accessed addresses
+- [x] Status bar showing cursor position, selection size, data type preview
 
 ## Multi-Tune Comparison & Calibration Diff
-- [ ] Load multiple binary files simultaneously for comparison
-- [ ] Side-by-side hex diff view (highlight byte differences between files)
-- [ ] Calibration diff tab showing only maps that differ between tunes
-- [ ] Per-map diff: color-coded cell differences (green=increased, red=decreased, yellow=changed)
-- [ ] Diff summary: count of changed maps, changed bytes, percentage difference
+- [x] Load multiple binary files simultaneously for comparison
+- [x] Side-by-side hex diff view (highlight byte differences between files)
+- [x] Calibration diff tab showing only maps that differ between tunes
+- [x] Per-map diff: color-coded cell differences (green=increased, red=decreased, yellow=changed)
+- [x] Diff summary: count of changed maps, changed bytes, percentage difference
 - [ ] Copy values from one tune to another (cherry-pick map changes)
-- [ ] Compare stock vs tuned files with change annotations
-- [ ] Export diff report (list of all changed maps with before/after values)
+- [x] Compare stock vs tuned files with change annotations
+- [x] Export diff report (list of all changed maps with before/after values in Markdown)
 - [ ] Support comparing more than 2 files (A vs B vs C)
 
 ## Aisin TCM Mapping, Tuning & Flashing
@@ -598,3 +598,231 @@
 - [ ] J1939 security access / seed-key support
 - [ ] Support for Cummins ECMs via J1939
 - [ ] Flash progress UI with J1939-specific status reporting
+
+## Editor Access & Location
+- [x] Move editor from standalone page into Advanced tab (as a tab alongside Binary, Datalogger, etc.)
+- [x] Remove standalone /editor route and EDITOR nav link from header
+- [x] Add KINGKONG passcode gate before editor access within Advanced tab
+- [x] Add a funny joke/personality when user lands on the editor passcode screen
+- [x] Editor UI should have a bit of personality throughout
+- [x] Add drag-and-drop file loading to editor (drop A2L/binary files onto editor)
+- [x] Make editor more interactive and modern feeling
+- [x] Add "Jokes" section in editor with Mom Jokes tab and Dad Jokes tab
+
+## Bugs
+- [x] Fix binary offset alignment failure when loading binary in calibration editor (auto-detect + auto-fetch)
+- [x] Auto-detect ECU family from binary header/signatures when binary is loaded
+- [x] Auto-fetch matching stored A2L from S3 when ECU family is detected
+- [x] Keep manual A2L/CSV upload as an option alongside auto mode
+- [x] Pre-store all user-provided A2L files (E41 L5P, Can-Am MG1CA920, 10L1000 T93, Cummins CSV) in S3
+- [x] Erika does NOT volunteer forum sources unless asked — she acknowledges she spent too much time on forums and may get things wrong, but gives attitude about it
+
+## Bug Reports & Polish (User-reported 2026-03-28)
+- [ ] Erika AI chat fails to respond / speak
+- [ ] Table rendering looks pixelated — needs crisp, high-quality rendering
+- [ ] Overall editor UI needs polish: clean, professional, high-DPI quality
+- [ ] Editor clarity improvements — make layout and controls more readable
+
+## OEM Engineering Document Study & Market-Disrupting Features (2026-03-28)
+- [ ] Deep study P654 Duramax engine control strategy documentation
+- [ ] Deep study Raw NOx Model (exhmod_rawnoxmdl) emissions control documentation
+- [ ] Deep study LML/LGH Operation Manual calibration procedures
+- [ ] Synthesize all findings into actionable feature proposals
+- [ ] Identify market-disrupting capabilities from OEM knowledge integration
+- [ ] Map OEM control logic to datalogger/diagnostics/editor improvements
+
+## Tiered Editor Levels & Navigation (2026-03-28)
+- [ ] Design Level 1-5 map categorization system
+- [ ] Level 1: Basic (speed limiter, driver demand, tire size, idle speed)
+- [ ] Level 2: Street Performance (fuel maps, boost targets, timing, torque limits)
+- [ ] Level 3: Advanced Tuning (injector curves, EGR, VGT control, rail pressure)
+- [ ] Level 4: Expert/Emissions (DPF regen, SCR dosing, NOx model, diagnostics)
+- [ ] Level 5: Full A2L (all 50K+ maps, raw engineering view)
+- [ ] Implement folder tree with smart grouping (not too many items per folder)
+- [ ] Add fast navigation: search, jump-to, keyboard shortcuts, breadcrumbs
+- [ ] Fix scroll performance for large map lists (virtualized list)
+- [ ] Use Erika LLM to auto-categorize maps into tiers on A2L load
+
+## Drag-and-Drop & Manual Load UX (2026-03-28)
+- [ ] Drag-and-drop A2L should auto-load immediately (no extra click)
+- [ ] Manual file picker A2L should require a click to confirm/load
+
+## Future: SKOOL Tuning Course (Reminder for User)
+- [ ] REMINDER: User needs to upload stock vs tuned binary, datalog, and dyno graphs
+- [ ] Build Level 1/2/3 fundamental tuning course content using A2L + editor tools
+- [ ] Record educational tuning videos for SKOOL (Alex Hormozi platform)
+- [ ] Use binary diff, A2L map viewer, and Erika to walk through calibration changes
+- [ ] Content strategy: videos market the project, funding cycle continues
+- [ ] User already created SKOOL account — ready when materials are uploaded
+
+## Active Commands & Comprehensive CAN Mining (2026-03-28)
+- [ ] Extract all CAN IDs, TX/RX pairs from DBC/ARXML files
+- [ ] Extract all IOControl ($2F) commands for actuator tests
+- [ ] Extract all RoutineControl ($31) commands (DPF regen, TPMS reset, etc)
+- [ ] Extract all DID definitions with data types and scaling from ARXML
+- [ ] Build comprehensive PID + command database for logger
+- [ ] Add DPF forced regen command to logger
+- [ ] Add TPMS reset command to logger
+- [ ] Add injector buzz test / cylinder balance test commands
+- [ ] Add all new PIDs from P654 Mode 22 table to logger
+- [ ] Add per-cylinder balance rate monitoring PIDs
+- [ ] Add VGT learned offset tracking PIDs
+- [ ] Add DPF regen state machine decoding
+- [ ] Add raw CAN bus signal logging (from DBC definitions)
+- [ ] Add active command UI panel in datalogger
+
+## Bug Fix (2026-03-28)
+- [ ] Fix drag-and-drop A2L auto-load not working (user reported)
+
+## Bug Fix: 2024 E42 Duramax Analyzer Connection (2026-03-28)
+- [ ] Fix 2024 E42 Duramax not connecting to analyzer (user reported)
+- [ ] Cross-reference E42 A2L DID addresses with analyzer PID database
+- [ ] Ensure directed CAN addressing (29-bit extended) works for E42
+
+## Editor Access Control (2026-03-28)
+- [x] Move editor into Advanced section (not standalone route)
+- [x] Add passcode gate "kingkong" to access editor in Advanced section
+
+## Erika Knowledge Base Training (2026-03-28)
+- [ ] Extract key technical content from P654 (injection, turbo, EGR, DPF, diagnostics)
+- [ ] Extract key content from EDC17 Tuning Guide (map addresses, tuning procedures)
+- [ ] Extract key content from MG1 Strategy Book (control algorithms, module functions)
+- [ ] Extract key content from NOx Model document (emissions prediction algorithm)
+- [ ] Extract key content from EDC16 Funktionsrahmen (fundamental functions)
+- [ ] Build comprehensive Erika knowledge base file with all extracted content
+- [ ] Update Erika system prompt to reference functional document knowledge
+- [ ] Erika should NOT volunteer her sources unless asked
+
+## Full-Screen Erika Chat Mode (2026-03-28)
+- [ ] Add full-screen/expanded mode for Erika chat panel
+- [ ] Users should be able to sit and have extended tuning conversations with Erika
+- [ ] Toggle between inline editor panel and full-screen chat mode
+
+## Security Access Reference Database (2026-03-28)
+- [ ] Compile all seed/key algorithms into structured reference file (Ford MG1, EDC17, Cummins, Polaris, CAN-am, TCU)
+- [ ] Build UDS security access reference (levels, DIDs, routines, IO controls per ECU family)
+- [ ] Add security access reference to logger's shared knowledge base
+- [ ] Logger references security procedures for advanced operations (DPF regen, TPMS, memory read, etc.)
+- [ ] Train Erika on seed/key concepts and security access procedures
+
+## Full UDS Service Layer - Beyond ForScan/Alpha OBD (2026-03-28)
+- [ ] Build complete UDS protocol stack in logger (all ISO 14229 services)
+- [ ] ReadDataByIdentifier ($22) - read any DID from any module
+- [ ] WriteDataByIdentifier ($2E) - write DIDs (IQA codes, VIN, tire size, config)
+- [ ] ReadMemoryByAddress ($23) - read raw ECU memory using A2L addresses
+- [ ] WriteMemoryByAddress ($3D) - write raw ECU memory
+- [ ] IOControlByIdentifier ($2F) - actuator tests (injector buzz, VGT override, fan on/off)
+- [ ] RoutineControl ($31) - start/stop/get results (DPF regen, TPMS learn, injector coding)
+- [ ] SecurityAccess ($27) - seed/key unlock for protected operations
+- [ ] DiagnosticSessionControl ($10) - switch sessions (default/extended/programming)
+- [ ] CommunicationControl ($28) - enable/disable CAN message transmission
+- [ ] TesterPresent ($3E) - keep diagnostic session alive
+- [ ] ECUReset ($11) - hard/soft reset ECU
+- [ ] ReadDTCInformation ($19) - full DTC read with freeze frame, snapshot, extended data
+- [ ] ClearDiagnosticInformation ($14) - clear DTCs per module
+- [ ] RequestDownload ($34) / TransferData ($36) / RequestTransferExit ($37) - flash capability
+- [ ] Build module scanner - auto-discover all ECUs on the bus with their supported services
+- [ ] Build DID browser - scan and display all readable DIDs per module
+- [ ] Build command palette UI for sending raw UDS commands
+- [ ] Build preset command library (DPF regen, TPMS reset, injector test, etc.)
+- [ ] Add A2L-aware memory browser (use A2L addresses for live ECU memory reads)
+- [ ] Give user full read/write DID access with safety confirmations for writes
+
+## CAN-am / BRP Vehicle Support (2026-03-28)
+- [ ] Implement CAN-am seed/key algorithm (SK_CANAM) in logger
+- [ ] Implement BRP Dash seed/key algorithm (SK_DASHCANAM) in logger
+- [ ] Add VIN write capability for CAN-am vehicles (DID 0xF190 via $2E)
+- [ ] Add CAN-am diagnostic session and security access flow
+- [ ] Add BRP-specific DID database for CAN-am vehicles
+
+## HIGH PRIORITY: CAN-am VIN Change + Key Relearn (2026-03-28)
+- [ ] Research complete CAN-am VIN change procedure (forums, BuDS reverse engineering)
+- [ ] Research CAN-am immobilizer/DESS key relearn procedure
+- [ ] Research CAN-am ECU module addresses and CAN bus topology
+- [ ] Implement CAN-am VIN write with full validation (checksum, format)
+- [ ] Implement CAN-am DESS key relearn sequence
+- [ ] Implement CAN-am immobilizer reset/reprogram
+- [ ] Build guided wizard UI for CAN-am VIN change + key relearn
+- [ ] Add safety confirmations and backup before any write operations
+
+## Tiered Logger Levels & Search (2026-03-28)
+- [ ] Logger Level 1 — Basic: Standard OBD-II Mode 01 PIDs (ELM327 friendly)
+- [ ] Logger Level 2 — Extended: GM Mode 22 DIDs (per-cylinder balance, VGT offsets, DPF regen state)
+- [ ] Logger Level 3 — Advanced: Raw CAN bus signals from DBC (steering angle, wheel speeds, ACC, BCM)
+- [ ] Logger Level 4 — Expert: Full UDS (ReadMemoryByAddress, IOControl, RoutineControl, WriteDataByIdentifier)
+- [ ] Logger PID search with reasoning (explain what each PID does, level required, hardware needed)
+- [ ] TX command panel for sending CAN messages (DPF regen, TPMS reset, injector buzz, etc.)
+- [ ] Organize PIDs into smart categories with counts
+- [ ] CAN-am VIN write + key relearn module
+- [ ] CAN bus gateway bridging (HS→LS like BTDieselWorks AutoSync)
+
+## Live ECU RAM Reading & Live Tuning via A2L (2026-03-28)
+- [ ] A2L-aware live RAM reader — poll any CHARACTERISTIC address via ReadMemoryByAddress ($23)
+- [ ] Live value display with A2L scaling/conversion (COMPU_METHOD applied in real-time)
+- [ ] Live 2D/3D map viewer — read entire map from RAM and display with axis labels
+- [ ] Live tuning — WriteMemoryByAddress ($3D) to change calibration values in RAM in real-time
+- [ ] Map diff view — compare live RAM values vs binary file values (detect what's been tuned)
+- [ ] Watchlist — user selects maps from A2L tree to monitor live
+- [ ] Safety: require security access before any write operations
+- [ ] Safety: snapshot current values before any write (undo capability)
+- [ ] Flash-to-permanent option after live tuning session (RequestDownload/TransferData sequence)
+
+## IntelliSpy — AI-Powered CAN Bus Sniffer (2026-03-28)
+- [x] IntelliSpy frame capture engine — real-time CAN frame logging with arb ID tracking, delta detection, frequency analysis
+- [x] IntelliSpy auto-decode layer — cross-reference captured frames against UDS DID tables, DBC signals, A2L calibration maps
+- [ ] IntelliSpy Erika integration — real-time AI commentary on observed bus traffic patterns and anomalies (Phase 2)
+- [x] IntelliSpy unknown ID pattern matching — reverse-engineering suggestions based on byte change patterns and known ECU behavior
+- [x] IntelliSpy frame filtering and highlighting — filter by arb ID, data pattern, frequency; highlight changes in real-time
+- [ ] IntelliSpy session recording — capture and replay CAN bus sessions with full decode overlay (Phase 2)
+- [x] IntelliSpy wire into Advanced.tsx as new tab
+
+## CAN-am VIN Changer — PEAK Device Wizard (2026-03-28)
+- [x] CAN-am VIN Changer — step-by-step wizard panel with PEAK device connection
+- [x] CAN-am VIN Changer — ECU identification (MED17.8.5 vs MG1CA920 auto-detection)
+- [x] CAN-am VIN Changer — security access with seed/key algorithm (level 3)
+- [x] CAN-am VIN Changer — current VIN read via DID F190
+- [x] CAN-am VIN Changer — new VIN write via WriteDataByIdentifier ($2E F190)
+- [x] CAN-am VIN Changer — DESS key re-learn guidance and routine control
+- [x] CAN-am VIN Changer — NRC error handling with human-readable explanations
+- [x] CAN-am VIN Changer — wire into Advanced.tsx as new tab
+
+## System Architecture Flowchart PDF (2026-03-28)
+- [x] Generate comprehensive system architecture flowchart showing how all AI modules feed each other
+- [x] Include: Datalogger → Analyzer → Erika, IntelliSpy → UDS Reference → Seed/Key, A2L → CalEditor → Live Tuning, Binary → VIN/ECU decode, CAN-am VIN → PCAN bridge, knowledge base interconnections
+- [x] Render as high-quality PDF for visual reference
+
+## Erika CAN Tool Training (2026-03-28)
+- [x] Train Erika on Vehicle Spy (Intrepid) concepts: signal decoding, message editor, scripting, filter/trigger
+- [x] Train Erika on SavvyCAN: open-source CAN analyzer, DBC loading, frame filtering, RE workflows
+- [x] Train Erika on CANape (Vector): A2L/XCP measurement, calibration, ECU flashing concepts
+- [x] Train Erika on CANoe (Vector): simulation, CAPL scripting, diagnostic sequences, trace analysis
+- [x] Train Erika on PCAN-View (PEAK): trace view, transmit list, CAN bus statistics
+- [x] Train Erika on BusMaster: open-source CAN tool, signal database, J1939 support
+- [x] Inject all CAN tool knowledge into erikaKnowledge.ts shared module
+
+## Powersports PIDs — CAN-am / BRP / Polaris / Kawasaki (2026-03-28)
+- [x] Add CAN-am (Rotax) extended PIDs — ECT, IAT, RPM, TPS, MAP, fuel pressure, oil temp/pressure, DESS status, battery, speed
+- [x] Add BRP Sea-Doo extended PIDs — supercharger boost, intercooler temp, exhaust temp, impeller RPM, ride plate, GPS speed
+- [x] Add Polaris extended PIDs — ECT, IAT, RPM, TPS, MAP, fuel pressure, oil temp, AWD status, belt temp, battery, speed
+- [x] Add Kawasaki extended PIDs — ECT, IAT, RPM, TPS, MAP, fuel pressure, oil temp, gear position, lean angle, battery
+- [x] Add powersports presets (CAN-am Performance, Sea-Doo Boost Monitor, Polaris Trail, Kawasaki Sport)
+- [x] Add powersports VIN WMI codes for auto-detection
+- [x] Write tests for powersports PID definitions
+
+## Module Scanner & Vehicle Coding — AlphaOBD/FORScan-style (2026-03-28)
+- [x] Module Scanner — scan all ECU addresses (0x700-0x7FF), read identification DIDs, build module map
+- [x] Fuel Tank Size coding — Ford (IPC as-built) and RAM (BCM config) diesel priority (#1 priority)
+- [x] Tire Size coding — Ford (IPC/PCM as-built) and RAM (BCM/PCM config) diesel priority (#1 priority)
+- [x] As-Built Data reader — read raw config blocks from modules (FORScan-style hex editor)
+- [ ] Output Control / Actuator Test panel — bidirectional IO control ($2F) (Phase 2)
+- [x] Service Procedure engine — step-by-step wizard framework for DPF regen, ABS bleed, etc.
+- [x] DPF Forced Regen procedure — RoutineControl ($31) for Ford/RAM/GM diesels
+- [x] Injector Coding panel — write IQA/trim codes after injector replacement
+- [x] TPMS Sensor Relearn — program sensor IDs into BCM
+- [x] Service Light / Oil Life Reset — WriteDataByIdentifier ($2E)
+- [x] Adaptive Value Reset — clear learned fuel trims, transmission shifts
+
+## Market Summary Document (2026-03-28)
+- [x] Write comprehensive summary: what this system does better than the market
+- [x] Explain why Walmart, truck stops, tire shops, mechanic shops, and everyday people need this tool
+- [x] "The code reader is dead" positioning

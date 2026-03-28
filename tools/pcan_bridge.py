@@ -37,11 +37,17 @@ Protocol:
         {"type": "ping"}
         {"type": "set_filter", "arb_ids": [2024]}  # Listen for specific IDs
         {"type": "clear_filter"}
+        {"type": "start_monitor"}                    # IntelliSpy: sniff ALL frames
+        {"type": "start_monitor", "arb_ids": [0x7E8]} # IntelliSpy: sniff filtered
+        {"type": "stop_monitor"}                      # IntelliSpy: stop sniffing
 
     Bridge -> Browser:
         {"type": "obd_response", "id": <req_id>, "mode": 1, "pid": 12, "data": [18, 52]}
         {"type": "obd_response", "id": <req_id>, "mode": 9, "pid": 2, "data": [...]}  # VIN bytes
         {"type": "can_frame", "arb_id": 2024, "data": [4, 65, 12, 18, 52, 0, 0, 0], "timestamp": 1234567.89}
+        {"type": "bus_frame", "arb_id": 1824, "data": [...], "dlc": 8, "timestamp": ..., "frame_number": 42}
+        {"type": "monitor_started", "id": <req_id>, "filter": "all" | [0x7E8]}
+        {"type": "monitor_stopped", "id": <req_id>}
         {"type": "error", "id": <req_id>, "message": "Timeout waiting for response"}
         {"type": "pong", "adapter": "pcan", "channel": "PCAN_USBBUS1", "status": "ready|bus_active|bus_error"}
         {"type": "connected", "adapter": "pcan", "channel": "PCAN_USBBUS1", "bitrate": 500000}
@@ -400,6 +406,13 @@ class PCANBridge:
     The WebSocket server starts IMMEDIATELY so the browser can connect
     and verify the bridge is running. The CAN bus is opened lazily
     when the first OBD request arrives (or on explicit 'init_can' message).
+    
+    IntelliSpy Bus Monitor:
+    When a client sends {"type": "start_monitor"}, the bridge enters
+    bus monitor mode — ALL CAN frames on the bus are forwarded to the
+    browser as {"type": "bus_frame", ...} messages in real-time.
+    Send {"type": "stop_monitor"} to stop.
+    Optional filter: {"type": "start_monitor", "arb_ids": [0x7E8, 0x720]}
     """
 
     def __init__(self, interface: str, channel: str, bitrate: int, port: int, tls_port: int, enable_tls: bool):
@@ -414,6 +427,9 @@ class PCANBridge:
         self.clients: set = set()
         self.can_initialized = False
         self.can_error: Optional[str] = None
+        # IntelliSpy bus monitor state
+        self._monitor_clients: dict = {}  # websocket -> {"task": asyncio.Task, "filter": set|None}
+        self._monitor_running = False
 
     def _init_can_bus(self) -> bool:
         """Try to open the CAN bus. Returns True on success."""
@@ -532,6 +548,8 @@ class PCANBridge:
             async for message in websocket:
                 try:
                     msg = json.loads(message)
+                    # Inject websocket reference for monitor routing
+                    msg["_ws"] = websocket
                     response = await self.handle_message(msg)
                     if response:
                         await websocket.send(json.dumps(response))
@@ -635,14 +653,121 @@ class PCANBridge:
                 return {"type": "filter_cleared", "id": req_id}
             return {"type": "error", "id": req_id, "message": "CAN bus not initialized yet"}
 
+        elif msg_type == "start_monitor":
+            # IntelliSpy: Start bus monitor mode — broadcast all CAN frames
+            if not self.can_initialized:
+                success = await self._ensure_can_bus()
+                if not success:
+                    return {
+                        "type": "error",
+                        "id": req_id,
+                        "message": f"CAN bus not available: {self.can_error}"
+                    }
+                if not self.protocol:
+                    self.protocol = OBDProtocol(self.bus)
+                    await self.protocol.start()
+
+            # Optional arb_id filter
+            filter_ids = msg.get("arb_ids", None)
+            filter_set = set(filter_ids) if filter_ids else None
+
+            # Find the websocket for this client (passed via handle_client context)
+            # We store the websocket reference in the msg for routing
+            ws = msg.get("_ws")  # injected by handle_client
+            if ws and ws not in self._monitor_clients:
+                task = asyncio.create_task(self._bus_monitor_loop(ws, filter_set))
+                self._monitor_clients[ws] = {"task": task, "filter": filter_set}
+                log.info(f"IntelliSpy: Bus monitor started for {ws.remote_address} (filter: {filter_ids or 'all'})")
+
+            return {
+                "type": "monitor_started",
+                "id": req_id,
+                "filter": list(filter_set) if filter_set else "all"
+            }
+
+        elif msg_type == "stop_monitor":
+            ws = msg.get("_ws")
+            if ws and ws in self._monitor_clients:
+                self._monitor_clients[ws]["task"].cancel()
+                del self._monitor_clients[ws]
+                log.info(f"IntelliSpy: Bus monitor stopped for {ws.remote_address}")
+            return {"type": "monitor_stopped", "id": req_id}
+
         elif msg_type == "disconnect":
+            # Clean up any monitor tasks for this client
+            ws = msg.get("_ws")
+            if ws and ws in self._monitor_clients:
+                self._monitor_clients[ws]["task"].cancel()
+                del self._monitor_clients[ws]
             return {"type": "disconnected", "id": req_id}
 
         else:
             return {"type": "error", "id": req_id, "message": f"Unknown message type: {msg_type}"}
 
+    async def _bus_monitor_loop(self, websocket, filter_set: Optional[set] = None):
+        """Background task: read ALL CAN frames and forward to a specific client.
+        
+        This runs in parallel with the OBD protocol listener. It reads raw
+        frames from the bus and sends them as 'bus_frame' messages.
+        """
+        loop = asyncio.get_event_loop()
+        frame_count = 0
+        start_time = time.time()
+        
+        try:
+            while True:
+                try:
+                    msg = await loop.run_in_executor(
+                        None, lambda: self.bus.recv(timeout=0.05)
+                    )
+                    if msg is None:
+                        continue
+                    
+                    # Apply optional filter
+                    if filter_set and msg.arbitration_id not in filter_set:
+                        continue
+                    
+                    frame_count += 1
+                    
+                    # Send frame to client
+                    frame_msg = {
+                        "type": "bus_frame",
+                        "arb_id": msg.arbitration_id,
+                        "data": list(msg.data),
+                        "dlc": msg.dlc,
+                        "timestamp": msg.timestamp or time.time(),
+                        "is_extended": msg.is_extended_id,
+                        "is_remote": msg.is_remote_frame,
+                        "is_error": msg.is_error_frame,
+                        "frame_number": frame_count,
+                    }
+                    
+                    await websocket.send(json.dumps(frame_msg))
+                    
+                except asyncio.CancelledError:
+                    raise
+                except websockets.ConnectionClosed:
+                    break
+                except can.CanError as e:
+                    log.warning(f"Monitor CAN read error: {e}")
+                    await asyncio.sleep(0.01)
+                except Exception as e:
+                    log.error(f"Monitor error: {e}")
+                    await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            elapsed = time.time() - start_time
+            rate = frame_count / elapsed if elapsed > 0 else 0
+            log.info(f"IntelliSpy monitor ended: {frame_count} frames in {elapsed:.1f}s ({rate:.0f} frames/sec)")
+
     async def shutdown(self):
         """Clean up resources."""
+        # Stop all monitor tasks
+        for ws, info in list(self._monitor_clients.items()):
+            info["task"].cancel()
+        self._monitor_clients.clear()
+        
         if self.protocol:
             await self.protocol.stop()
         if self.bus:
