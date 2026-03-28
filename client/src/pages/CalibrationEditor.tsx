@@ -737,6 +737,7 @@ export default function CalibrationEditor() {
                     alignment={alignment}
                     primaryBinary={binaryData}
                     primaryFileName={binaryFileName}
+                    onSelectMap={setSelectedMapIndex}
                   />
                 </TabsContent>
 

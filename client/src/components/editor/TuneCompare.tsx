@@ -45,9 +45,10 @@ interface TuneCompareProps {
   alignment: AlignmentResult | null;
   primaryBinary: Uint8Array | null;
   primaryFileName: string;
+  onSelectMap?: (mapIndex: number) => void;
 }
 
-export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName }: TuneCompareProps) {
+export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, onSelectMap }: TuneCompareProps) {
   const [compareBinary, setCompareBinary] = useState<TuneFile | null>(null);
   const [viewMode, setViewMode] = useState<'maps' | 'hex'>('maps');
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,8 +148,9 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         const bInBounds = addrB >= 0 && addrB + byteSize <= compareBinary.data.length;
 
         if (!aInBounds || !bInBounds) {
-          valuesA.push(NaN);
-          valuesB.push(NaN);
+          // readValue returns 0 for OOB, so we do the same for consistency
+          valuesA.push(0);
+          valuesB.push(0);
           continue;
         }
 
@@ -369,18 +371,29 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
               return (
                 <div key={diff.mapIndex} className="hover:bg-zinc-900/30">
                   {/* Summary row */}
-                  <button
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left"
-                    onClick={() => toggleExpanded(diff.mapIndex)}
-                  >
-                    {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
-                    <span className="text-[11px] font-mono text-white flex-1 truncate">{diff.map.name}</span>
-                    <span className="text-[10px] text-zinc-500">{diff.map.category}</span>
-                    <span className="text-[10px] text-amber-400 font-mono">{diff.changedCells}/{diff.totalCells}</span>
-                    <span className="text-[10px] text-zinc-600">({pctChanged}%)</span>
-                    {diff.maxIncrease > 0 && <span className="text-[10px] text-emerald-500">+{diff.maxIncrease}</span>}
-                    {diff.maxDecrease < 0 && <span className="text-[10px] text-red-500">{diff.maxDecrease}</span>}
-                  </button>
+                  <div className="flex items-center gap-1 px-3 py-2 hover:bg-zinc-800/20">
+                    <button
+                      className="flex items-center gap-2 flex-1 text-left"
+                      onClick={() => toggleExpanded(diff.mapIndex)}
+                    >
+                      {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
+                      <span className="text-[11px] font-mono text-white flex-1 truncate">{diff.map.name}</span>
+                      <span className="text-[10px] text-zinc-500">{diff.map.category}</span>
+                      <span className="text-[10px] text-amber-400 font-mono">{diff.changedCells}/{diff.totalCells}</span>
+                      <span className="text-[10px] text-zinc-600">({pctChanged}%)</span>
+                      {diff.maxIncrease > 0 && <span className="text-[10px] text-emerald-500">+{diff.maxIncrease}</span>}
+                      {diff.maxDecrease < 0 && <span className="text-[10px] text-red-500">{diff.maxDecrease}</span>}
+                    </button>
+                    {onSelectMap && (
+                      <button
+                        className="px-2 py-1 text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900 rounded transition-colors shrink-0"
+                        onClick={() => onSelectMap(diff.mapIndex)}
+                        title="View this map in the editor"
+                      >
+                        View
+                      </button>
+                    )}
+                  </div>
 
                   {/* Expanded diff table */}
                   {isExpanded && (

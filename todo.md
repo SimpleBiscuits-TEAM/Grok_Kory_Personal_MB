@@ -877,3 +877,10 @@
 
 ## Bug Fix (2026-03-28)
 - [x] Fix TuneCompare: shows byte differences but reports 0 changed maps — map diff address matching broken
+
+## Feature (2026-03-28)
+- [ ] TuneCompare: add copy-to-primary button (per-map and per-cell) to apply compare file values into primary binary
+
+## Bug Fix (2026-03-28 continued)
+- [x] TuneCompare: diff values showing NaN instead of actual values — fix OOB handling
+- [x] TuneCompare: clicking a changed map doesn't select it in left pane — add onSelectMap callback
