@@ -5,6 +5,13 @@
  * - Bosch MG1 (Polaris Spyder/Maverick)
  * - Bosch ME17 (Can-Am Rotax)
  * - Other Bosch ECUs
+ * 
+ * NOTE: This module uses estimated checksum algorithms based on common Bosch ECU patterns.
+ * When PPEI provides the official checksum tool and flashing data, this module will be
+ * updated with validated algorithms. The current implementation is modular and designed
+ * for easy integration with the official tool.
+ * 
+ * TODO: Integration with official PPEI checksum tool (scheduled for next week)
  */
 
 export interface ChecksumResult {
