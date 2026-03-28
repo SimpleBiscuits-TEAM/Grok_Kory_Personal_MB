@@ -61,8 +61,10 @@ interface TuneCompareProps {
   onCopyToP?: (changes: { offset: number; value: number; size: number }[]) => void;
 }
 
-export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, onSelectMap, onCopyToP }: TuneCompareProps) {
-  const [compareBinary, setCompareBinary] = useState<TuneFile | null>(null);
+export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, compareBinary: propCompareBinary, compareBinaryFileName: propCompareBinaryFileName, compareFormat: propCompareFormat, compareOffset: propCompareOffset, onCompareBinaryLoad, onCloseCompareBinary, onSelectMap, onCopyToP }: TuneCompareProps) {
+  // Use lifted state from parent if provided, otherwise fall back to local state
+  const [localCompareBinary, setLocalCompareBinary] = useState<TuneFile | null>(null);
+  const compareBinary = propCompareBinary ? { name: propCompareBinaryFileName || '', data: propCompareBinary, baseAddress: propCompareOffset || 0, format: propCompareFormat || '' } : localCompareBinary;
   const [viewMode, setViewMode] = useState<'maps' | 'hex'>('maps');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
@@ -105,12 +107,17 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       extracted = bytes;
     }
 
-    setCompareBinary({
+    const tuneFile = {
       name: file.name,
       data: extracted,
       baseAddress: baseAddr,
       format: fmt
-    });
+    };
+    if (onCompareBinaryLoad) {
+      onCompareBinaryLoad(extracted, file.name, fmt, baseAddr);
+    } else {
+      setLocalCompareBinary(tuneFile);
+    }
     setHexPage(0);
     setErikaAttemptedFix(false);
     
@@ -152,7 +159,11 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       const padded = new Uint8Array(primaryBinary.length);
       padded.set(compareBinary.data);
       padded.fill(0xFF, compareBinary.data.length);
-      setCompareBinary({ ...compareBinary, data: padded });
+      if (onCompareBinaryLoad && compareBinary) {
+        onCompareBinaryLoad(padded, compareBinary.name, compareBinary.format, compareBinary.baseAddress);
+      } else {
+        setLocalCompareBinary({ ...compareBinary, data: padded });
+      }
       setSizeMismatch(null);
       setErikaAttemptedFix(true);
       return;
@@ -161,7 +172,11 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
     // Strategy 2: Truncation (if compare is larger)
     if (compareBinary.data.length > primaryBinary.length) {
       const truncated = compareBinary.data.slice(0, primaryBinary.length);
-      setCompareBinary({ ...compareBinary, data: truncated });
+      if (onCompareBinaryLoad && compareBinary) {
+        onCompareBinaryLoad(truncated, compareBinary.name, compareBinary.format, compareBinary.baseAddress);
+      } else {
+        setLocalCompareBinary({ ...compareBinary, data: truncated });
+      }
       setSizeMismatch(null);
       setErikaAttemptedFix(true);
       return;
@@ -362,7 +377,13 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                 <span className="text-zinc-500">B:</span>{' '}
                 <span className="text-amber-400 font-mono">{compareBinary.name}</span>
                 <span className="text-zinc-600 ml-1">({(compareBinary.data.length / 1024).toFixed(0)} KB)</span>
-                <button className="ml-auto text-zinc-500 hover:text-red-400" onClick={() => setCompareBinary(null)}>
+                <button className="ml-auto text-zinc-500 hover:text-red-400" onClick={() => {
+                  if (onCloseCompareBinary) {
+                    onCloseCompareBinary();
+                  } else {
+                    setLocalCompareBinary(null);
+                  }
+                }}>
                   <X className="w-3 h-3" />
                 </button>
               </div>
