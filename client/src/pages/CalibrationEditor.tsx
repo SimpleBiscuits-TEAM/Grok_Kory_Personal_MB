@@ -63,6 +63,21 @@ export default function CalibrationEditor() {
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
 
+  // Ref to track latest ecuDef for stale closure prevention
+  const ecuDefRef = useRef<EcuDefinition | null>(null);
+  const binaryDataRef = useRef<Uint8Array | null>(null);
+  const binaryBaseAddressRef = useRef<number>(0);
+
+  useEffect(() => {
+    ecuDefRef.current = ecuDef;
+  }, [ecuDef]);
+  useEffect(() => {
+    binaryDataRef.current = binaryData;
+  }, [binaryData]);
+  useEffect(() => {
+    binaryBaseAddressRef.current = binaryBaseAddress;
+  }, [binaryBaseAddress]);
+
   const storeA2LMutation = trpc.editor.storeA2L.useMutation();
   const trpcUtils = trpc.useUtils();
 
@@ -94,16 +109,18 @@ export default function CalibrationEditor() {
 
       toast.success('Definition Loaded', { description: `${def.ecuFamily}: ${def.stats.totalMaps} maps, ${def.stats.totalMeasurements} measurements (${def.parseTime.toFixed(0)}ms)` });
 
-      // If binary is already loaded, try alignment
-      if (binaryData) {
+      // If binary is already loaded, try alignment (use refs for latest values)
+      const currentBinaryData = binaryDataRef.current;
+      const currentBaseAddress = binaryBaseAddressRef.current;
+      if (currentBinaryData) {
         setLoadingMessage('Aligning offsets...');
-        const align = alignOffsets(def, binaryData, binaryBaseAddress);
+        const align = alignOffsets(def, currentBinaryData, currentBaseAddress);
         setAlignment(align);
 
         if (align.confidence > 0.3) {
           setLoadingMessage('Populating map values...');
           for (const map of def.maps) {
-            populateMapValues(map, def, binaryData, align.offset);
+            populateMapValues(map, def, currentBinaryData, align.offset);
           }
           setEcuDef({ ...def }); // trigger re-render
           toast.success('Offset Alignment', { description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})` });
@@ -131,7 +148,7 @@ export default function CalibrationEditor() {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [binaryData, binaryBaseAddress, toast, storeA2LMutation]);
+  }, [toast, storeA2LMutation]);
 
   // ── Auto-fetch A2L helper ──
   const autoFetchAndAlign = useCallback(async (
@@ -212,18 +229,19 @@ export default function CalibrationEditor() {
         description: `${file.name}: ${(data.length / 1024).toFixed(1)} KB (${format}${baseAddress > 0 ? `, base: 0x${baseAddress.toString(16).toUpperCase()}` : ''})`
       });
 
-      // If definition is already loaded, try alignment directly
-      if (ecuDef) {
+      // Use ref to get latest ecuDef (prevents stale closure when drag-dropping both files)
+      const currentEcuDef = ecuDefRef.current;
+      if (currentEcuDef) {
         setLoadingMessage('Aligning offsets...');
-        const align = alignOffsets(ecuDef, data, baseAddress);
+        const align = alignOffsets(currentEcuDef, data, baseAddress);
         setAlignment(align);
 
         if (align.confidence > 0.3) {
           setLoadingMessage('Populating map values...');
-          for (const map of ecuDef.maps) {
-            populateMapValues(map, ecuDef, data, align.offset);
+          for (const map of currentEcuDef.maps) {
+            populateMapValues(map, currentEcuDef, data, align.offset);
           }
-          setEcuDef({ ...ecuDef });
+          setEcuDef({ ...currentEcuDef });
           toast.success('Offset Alignment', {
             description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})`
           });
@@ -249,7 +267,7 @@ export default function CalibrationEditor() {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [ecuDef, autoFetchAndAlign]);
+  }, [autoFetchAndAlign]);
 
   // ── Value Changes ──
   const handleValuesChanged = useCallback((mapName: string, newPhysValues: number[]) => {
@@ -369,17 +387,33 @@ export default function CalibrationEditor() {
   const currentJokes = jokeTab === 'mom' ? momJokes : dadJokes;
 
   // ── File drop handlers ──
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     const files = Array.from(e.dataTransfer.files);
-    for (const file of files) {
-      const name = file.name.toLowerCase();
-      if (name.endsWith('.a2l') || name.endsWith('.csv')) {
-        handleDefinitionLoad(file);
-      } else {
-        handleBinaryLoad(file);
-      }
+    
+    // Sort: process definition files first, then binaries
+    // This ensures ecuDef is set before binary alignment
+    const defFiles = files.filter(f => {
+      const n = f.name.toLowerCase();
+      return n.endsWith('.a2l') || n.endsWith('.csv');
+    });
+    const binFiles = files.filter(f => {
+      const n = f.name.toLowerCase();
+      return !n.endsWith('.a2l') && !n.endsWith('.csv');
+    });
+    
+    // Load definition first (await it so ecuDefRef is updated)
+    for (const file of defFiles) {
+      await handleDefinitionLoad(file);
+    }
+    // Small delay to let React re-render and update refs
+    if (defFiles.length > 0 && binFiles.length > 0) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    // Then load binaries (they'll read ecuDefRef.current)
+    for (const file of binFiles) {
+      await handleBinaryLoad(file);
     }
   }, [handleDefinitionLoad, handleBinaryLoad]);
 
@@ -431,7 +465,7 @@ export default function CalibrationEditor() {
         <input
           ref={a2lInputRef}
           type="file"
-          accept=".a2l,.csv,.A2L,.CSV"
+          accept=".a2l,.csv,.A2L,.CSV,*"
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];
@@ -468,7 +502,7 @@ export default function CalibrationEditor() {
         <input
           ref={binInputRef}
           type="file"
-          accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP,.SREC,.HEX"
+          accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP,.SREC,.HEX,*"
           className="hidden"
           onChange={e => {
             const file = e.target.files?.[0];

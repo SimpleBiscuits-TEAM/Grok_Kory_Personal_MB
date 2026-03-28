@@ -1,12 +1,12 @@
-# PPEI Duramax Performance Analyzer — System Architecture
+# V-OP by PPEI — System Architecture
 
-## AI-Powered Vehicle Diagnostics Platform
+## AI-Powered Vehicle Optimization Platform
 
 ---
 
 ## System Overview
 
-The PPEI Duramax Performance Analyzer is a browser-based, AI-powered vehicle diagnostics platform that connects directly to vehicles through OBD-II adapters and professional CAN bus hardware. Unlike traditional code readers that simply display fault codes, this system provides deep analysis, real-time monitoring, AI-assisted diagnostics, and active vehicle programming capabilities.
+V-OP by PPEI is a browser-based, AI-powered vehicle optimization platform that connects directly to vehicles through OBD-II adapters and professional CAN bus hardware. Unlike traditional code readers that simply display fault codes, V-OP provides deep analysis, real-time monitoring, AI-assisted diagnostics, and active vehicle programming capabilities.
 
 The platform operates across seven interconnected layers, each feeding data and intelligence into the next. The result is a system where every module makes every other module smarter.
 
@@ -121,7 +121,7 @@ Five analysis modules process data from the tools and produce actionable intelli
 
 **Diagnostics Engine** runs pattern-based fault detection across 20+ conditions including rail pressure deviation, boost pressure faults, EGT anomalies, MAF correlation, TCC slip analysis, VGT position faults, and coolant temperature trends. Includes transient exclusion, gear shift filtering, and minimum sustained duration requirements to eliminate false positives.
 
-**Reasoning Engine** applies AI-powered contextual analysis to diagnostic findings, explaining not just what the fault is but why it matters, what likely caused it, and what to do about it. Cross-references vehicle-specific knowledge (Gen 1 vs Gen 2 Duramax, Allison vs 10L1000 transmission) for targeted recommendations.
+**Reasoning Engine** applies AI-powered contextual analysis to diagnostic findings, explaining not just what the fault is but why it matters, what likely caused it, and what to do about it. Cross-references vehicle-specific knowledge for targeted recommendations across all supported platforms.
 
 **Health Report** generates a scored assessment of overall vehicle health with section-by-section grades (engine, fuel system, turbo, transmission, emissions, cooling). Produces exportable PDF reports with charts, condition cards, and maintenance recommendations.
 
@@ -143,7 +143,7 @@ Erika is the AI brain that ties every layer together. She has access to:
 - Service procedure knowledge (DPF regen, injector coding, TPMS relearn, transmission adaptive reset)
 - Complete NRC code reference with common causes and solutions
 
-Erika doesn't just answer questions — she receives context from the active diagnostic session, sees the fault analysis results, and provides targeted guidance based on the specific vehicle, the specific data, and the specific conditions detected.
+Erika doesn't just answer questions. She receives context from the active diagnostic session, sees the fault analysis results, and provides targeted guidance based on the specific vehicle, the specific data, and the specific conditions detected.
 
 ---
 
@@ -179,5 +179,5 @@ Every module enriches every other module. The VIN decoder tells the datalogger w
 
 ---
 
-*PPEI Custom Tuning — Duramax Performance Analyzer*
-*Built with AI. Built for the shop floor.*
+*V-OP by PPEI — Vehicle Optimizer*
+*Redefining the Limits.*

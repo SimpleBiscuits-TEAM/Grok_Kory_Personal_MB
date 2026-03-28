@@ -263,7 +263,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
               <label className="flex items-center gap-1 px-2 py-1.5 bg-zinc-900 rounded border border-dashed border-zinc-700 text-[11px] cursor-pointer hover:border-red-800 transition-colors">
                 <Upload className="w-3 h-3 text-zinc-500" />
                 <span className="text-zinc-500">Load compare file...</span>
-                <input type="file" className="hidden" accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP" onChange={handleCompareLoad} />
+                <input type="file" className="hidden" accept=".bin,.ptp,.srec,.hex,.s19,.s28,.s37,.ihex,.BIN,.PTP,*" onChange={handleCompareLoad} />
               </label>
             )}
           </div>

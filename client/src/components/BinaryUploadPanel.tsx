@@ -548,7 +548,7 @@ export default function BinaryUploadPanel() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".bin,.BIN,.hex,.HEX,.ori,.ORI"
+            accept=".bin,.BIN,.hex,.HEX,.ori,.ORI,*"
             onChange={handleFileUpload}
             style={{ display: 'none' }}
           />
@@ -784,7 +784,7 @@ export default function BinaryUploadPanel() {
                   <input
                     ref={sourceInputRef}
                     type="file"
-                    accept=".bin,.BIN,.hex,.HEX,.ori,.ORI"
+                    accept=".bin,.BIN,.hex,.HEX,.ori,.ORI,*"
                     onChange={handleSourceUpload}
                     style={{ display: 'none' }}
                   />

@@ -570,7 +570,7 @@ function A2LPanel({ a2lData, setA2lData }: { a2lData: A2LParseResult | null; set
         <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto 24px' }}>
           Upload an ASAP2 (.a2l) calibration file to browse measurements, characteristics, and conversion methods. Data will be cross-referenced with the AI assistant.
         </p>
-        <input ref={fileInputRef} type="file" accept=".a2l,.A2L" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
+        <input ref={fileInputRef} type="file" accept=".a2l,.A2L,*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
         <button onClick={() => fileInputRef.current?.click()} disabled={loading} style={{
           background: loading ? 'oklch(0.35 0.010 260)' : sColor.red, color: 'white', fontFamily: sFont.heading,
           fontSize: '1.1rem', letterSpacing: '0.1em', padding: '12px 32px', borderRadius: '3px', border: 'none',

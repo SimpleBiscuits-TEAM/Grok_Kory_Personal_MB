@@ -841,3 +841,7 @@
 - [x] Find and replace every "Duramax Performance Analyzer" and "Duramax Analyzer" reference
 - [x] Replace with "V-OP by PPEI" or "V-OP" as appropriate
 - [x] Verify no remaining references in source code, comments, documents, or metadata
+
+## Bug Fixes (2026-03-28)
+- [x] Fix: Binary + A2L load not populating editor/map tree — Mav R binary loaded with A2L and nothing happened
+- [x] Fix: File picker showing "Custom" filter instead of "All Files" — needs to accept all file types
