@@ -66,6 +66,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const [localCompareBinary, setLocalCompareBinary] = useState<TuneFile | null>(null);
   const compareBinary = propCompareBinary ? { name: propCompareBinaryFileName || '', data: propCompareBinary, baseAddress: propCompareOffset || 0, format: propCompareFormat || '' } : localCompareBinary;
   const [viewMode, setViewMode] = useState<'maps' | 'hex'>('maps');
+  const [binaryViewMode, setBinaryViewMode] = useState<'original' | 'compare'>('original');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
   const [hexPage, setHexPage] = useState(0);
@@ -458,6 +459,27 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
           >
             <FileText className="w-3 h-3 inline mr-1" />Hex Diff
           </button>
+
+          {/* Binary view toggle (Original/Compare) */}
+          <div className="ml-auto flex items-center gap-1 border-l border-zinc-800 pl-2">
+            <span className="text-[10px] text-zinc-600">View:</span>
+            <button
+              className={`px-2 py-0.5 rounded text-[10px] ${binaryViewMode === 'original' ? 'bg-cyan-900/50 text-cyan-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+              onClick={() => setBinaryViewMode('original')}
+              title="Show original binary values"
+            >
+              Original
+            </button>
+            <button
+              className={`px-2 py-0.5 rounded text-[10px] ${binaryViewMode === 'compare' ? 'bg-amber-900/50 text-amber-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+              onClick={() => setBinaryViewMode('compare')}
+              title="Show comparison binary values"
+              disabled={!compareBinary}
+            >
+              Compare
+            </button>
+          </div>
+
           {viewMode === 'maps' && (
             <div className="flex-1 ml-2">
               <Input
@@ -566,28 +588,37 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                                 const vB = diff.valuesB[i];
                                 const changed = vA !== vB;
                                 const delta = vB - vA;
+                                const displayValue = binaryViewMode === 'original' ? vA : vB;
 
                                 return (
                                   <td
                                     key={c}
                                     className="px-1.5 py-0.5 text-center border border-zinc-800/30 relative group cursor-pointer"
                                     style={{
-                                      background: changed
+                                      background: binaryViewMode === 'original'
+                                        ? 'transparent'
+                                        : changed
                                         ? delta > 0 ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'
                                         : 'transparent',
-                                      color: changed
+                                      color: binaryViewMode === 'original'
+                                        ? '#6b7280'
+                                        : changed
                                         ? delta > 0 ? '#4ade80' : '#f87171'
                                         : '#6b7280'
                                     }}
-                                    title={changed ? `A: ${vA} → B: ${vB} (${delta > 0 ? '+' : ''}${delta})` : `${vA} (unchanged)`}
+                                    title={binaryViewMode === 'original' ? `Original: ${vA}` : changed ? `Compare: ${vB} (was ${vA}, ${delta > 0 ? '+' : ''}${delta})` : `Compare: ${vB} (unchanged)`}
                                   >
-                                    {changed ? (
+                                    {binaryViewMode === 'original' ? (
+                                      <span>{vA}</span>
+                                    ) : changed ? (
                                       <span>
                                         <span className="text-zinc-600 line-through">{vA}</span>
                                         <span className="mx-0.5">→</span>
                                         {vB}
                                       </span>
-                                    ) : vA}
+                                    ) : (
+                                      <span>{vB}</span>
+                                    )}
                                     {/* Per-cell copy button (hidden by default, shown on hover) */}
                                     {changed && onCopyToP && (
                                       <button
