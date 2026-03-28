@@ -422,6 +422,9 @@ export default function Home() {
                   <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your CSV file here, or click to browse
                   </p>
+                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.45 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
+                    CURRENTLY ONLY CSV SUPPORTED
+                  </p>
 
                 </div>
                 <input

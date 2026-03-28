@@ -931,6 +931,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
                 {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
               </h3>
               <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem' }}>Drag & drop your CSV file here, or click to browse</p>
+              <p style={{ fontFamily: sFont.mono, color: 'oklch(0.45 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>CURRENTLY ONLY CSV SUPPORTED</p>
 
             </div>
             <input ref={fileInputRef} type="file" accept="*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />

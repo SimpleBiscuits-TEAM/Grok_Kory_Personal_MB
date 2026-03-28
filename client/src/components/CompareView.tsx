@@ -552,6 +552,13 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
       }}>
         {slot.loading ? 'Processing...' : 'Drop CSV or click to browse'}
       </p>
+      <p style={{
+        fontFamily: '"Share Tech Mono", monospace',
+        fontSize: '0.65rem',
+        color: 'oklch(0.40 0.010 260)',
+        marginTop: '0.35rem',
+        letterSpacing: '0.05em',
+      }}>CURRENTLY ONLY CSV SUPPORTED</p>
       {slot.error && (
         <p style={{
           fontFamily: '"Rajdhani", sans-serif',

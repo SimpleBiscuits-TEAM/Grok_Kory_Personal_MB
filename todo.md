@@ -456,3 +456,6 @@
 - [x] Accept all CSV datalogs regardless of format
 - [x] If a file fails to parse, send bug notification to owner with file details instead of rejecting
 - [x] Fix feedback panel mobile layout — submit button goes off-screen on phones
+
+## Upload Area Text
+- [x] Add "Currently only CSV supported" text to upload areas on Home, Advanced, and CompareView pages
