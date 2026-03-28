@@ -1,0 +1,1 @@
+ALTER TABLE `projects` MODIFY COLUMN `user_id` int NOT NULL;

@@ -5,6 +5,8 @@ import { publicProcedure, router } from "./_core/trpc";
 import { diagnosticRouter } from "./routers/diagnostic";
 import { compareRouter } from "./routers/compare";
 import { editorRouter } from "./routers/editor";
+import { projectsRouter } from "./routers/projects";
+import { tunesRouter } from "./routers/tunes";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -30,6 +32,12 @@ export const appRouter = router({
 
   // ECU Calibration Editor
   editor: editorRouter,
+
+  // User Projects & Tune Management
+  projects: projectsRouter,
+
+  // Tune Folders & Saved Tunes
+  tunes: tunesRouter,
 
   // Feedback / Error Reports
   feedback: router({

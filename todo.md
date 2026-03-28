@@ -987,3 +987,34 @@
 - [ ] Implement hex search and pattern detection in binary analyzer
 - [ ] Implement Ghidra-style address reference scanning
 - [ ] Build reference library of known ECU calibration addresses and patterns
+
+## Tune Management System (2026-03-28)
+- [x] Create tune_folders and saved_tunes database tables with auto-organization indexes
+- [x] Build tRPC procedures for folder CRUD (create, rename, move, delete)
+- [x] Build tRPC procedures for tune CRUD (save, load, update, delete, search, favorites)
+- [x] Implement auto-organize mutation (Make > Model > Year > ECU Family hierarchy)
+- [x] Rebuild TuneManager UI with Save, Open, Export tabs
+- [x] Add folder tree sidebar with hierarchical navigation
+- [x] Add tune cards with metadata display (vehicle, ECU, stage, power, fuel)
+- [x] Add search functionality across all tunes
+- [x] Add favorite toggle for quick access
+- [x] Add export to local device (Binary, S-Record, Intel HEX formats)
+- [x] Wire TuneManager into CalibrationEditor
+- [ ] Add tune version history (save multiple versions of same tune)
+- [ ] Add batch operations (move/delete multiple tunes)
+- [ ] Implement drag-and-drop for folder organization
+
+## Future: Auto-Delivery Tune System
+- [ ] Build tune dispatch matching API (vehicle part number + OS version)
+- [ ] Implement hardware device registration and authentication
+- [ ] Create presigned S3 URL delivery pipeline
+- [ ] Add delivery audit trail and logging
+- [ ] Integrate with flash container (when provided)
+
+## Editor Data Loss Fix & Datalog Linking (2026-03-28)
+- [ ] Fix editor state loss when navigating away and returning
+- [ ] Implement global editor state store that persists across route changes
+- [ ] Prevent editor component unmount from clearing state
+- [ ] Add datalog link/unlink to tune files in editor
+- [ ] Allow uploading datalog CSV to reference alongside tune binary
+- [ ] Display linked datalog data in editor for tuner reference

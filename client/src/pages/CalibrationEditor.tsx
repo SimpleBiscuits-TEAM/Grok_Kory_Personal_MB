@@ -37,6 +37,7 @@ import MapDetailPanel from '@/components/editor/MapDetailPanel';
 import ErikaChat from '@/components/editor/ErikaChat';
 import HexEditor from '@/components/editor/HexEditor';
 import TuneCompare from '@/components/editor/TuneCompare';
+import { TuneManager } from '@/components/editor/TuneManager';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
@@ -995,6 +996,7 @@ export default function CalibrationEditor() {
                   <TabsTrigger value="compare" className="text-[11px]">Compare</TabsTrigger>
                   <TabsTrigger value="ecu" className="text-[11px]">ECU</TabsTrigger>
                   <TabsTrigger value="info" className="text-[11px]">Info</TabsTrigger>
+                  <TabsTrigger value="tunes" className="text-[11px]">Tunes</TabsTrigger>
                   <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
 
@@ -1187,6 +1189,34 @@ export default function CalibrationEditor() {
                       </>
                     )}
                   </div>
+                </TabsContent>
+
+                <TabsContent value="tunes" className="flex-1 overflow-auto mt-0 p-3 min-h-0">
+                  <TuneManager
+                    currentBinary={binaryData}
+                    currentA2L={ecuDef ? JSON.stringify(ecuDef) : null}
+                    vehicleInfo={{
+                      make: detectedFamily || '',
+                      model: binaryFileName || '',
+                      ecuFamily: detectedFamily || '',
+                      ecuId: ecuDef?.moduleInfo?.epromId || '',
+                    }}
+                    onTuneLoaded={(binary, a2l, metadata) => {
+                      setBinaryData(binary);
+                      setBinaryFileName(metadata?.name || 'loaded_tune.bin');
+                      if (a2l) {
+                        try {
+                          const parsed = JSON.parse(a2l);
+                          setEcuDef(parsed);
+                        } catch (e) {
+                          console.warn('Could not parse A2L from saved tune');
+                        }
+                      }
+                      toast.success('Tune loaded', {
+                        description: `Loaded: ${metadata?.name || 'Unknown tune'}`
+                      });
+                    }}
+                  />
                 </TabsContent>
 
                 <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3 min-h-0">
