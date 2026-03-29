@@ -41,9 +41,9 @@ const DEFAULT_TEST_ITEMS: { category: string; title: string; description: string
   { category: 'Protocols', title: 'Multi-protocol CSV export', description: 'Export J1939 and K-Line data to CSV with proper headers', priority: 'medium' },
 
   // AI Chat
-  { category: 'AI Chat', title: 'Mara responds to diagnostic questions', description: 'Ask "What causes P0087?" and verify meaningful response', priority: 'high' },
-  { category: 'AI Chat', title: 'Mara uses uploaded datalog context', description: 'Upload a datalog, then ask about it in AI chat', priority: 'high' },
-  { category: 'AI Chat', title: 'Mara uses A2L context', description: 'Upload an A2L file, then ask about calibration parameters', priority: 'medium' },
+  { category: 'AI Chat', title: 'Knox responds to diagnostic questions', description: 'Ask "What causes P0087?" and verify meaningful response', priority: 'high' },
+  { category: 'AI Chat', title: 'Knox uses uploaded datalog context', description: 'Upload a datalog, then ask about it in AI chat', priority: 'high' },
+  { category: 'AI Chat', title: 'Knox uses A2L context', description: 'Upload an A2L file, then ask about calibration parameters', priority: 'medium' },
 
   // Editor
   { category: 'Editor', title: 'Editor Lite access gate', description: 'Verify editor requires correct access code', priority: 'high' },

@@ -1,7 +1,7 @@
 /**
- * Mara's Learning Engine
+ * Knox's Learning Engine
  * Learns from uploaded binaries and A2L files to build dynamic knowledge base
- * Every upload makes Mara smarter and more helpful for tuning guidance
+ * Every upload makes Knox smarter and more helpful for tuning guidance
  */
 
 export interface LearnedParameter {
@@ -48,7 +48,7 @@ export interface LearnedMap {
   lastUpdated: number;
 }
 
-export interface MaraKnowledgeBase {
+export interface KnoxKnowledgeBase {
   parameters: Map<string, LearnedParameter>;
   maps: Map<string, LearnedMap>;
   ecuFamilies: Set<string>;
@@ -58,10 +58,10 @@ export interface MaraKnowledgeBase {
 }
 
 /**
- * Mara's Learning Engine
+ * Knox's Learning Engine
  */
-export class MaraLearningEngine {
-  private knowledgeBase: MaraKnowledgeBase = {
+export class KnoxLearningEngine {
+  private knowledgeBase: KnoxKnowledgeBase = {
     parameters: new Map(),
     maps: new Map(),
     ecuFamilies: new Set(),
@@ -244,7 +244,7 @@ export class MaraLearningEngine {
   }
 
   /**
-   * Get parameter guidance for Mara to provide to user
+   * Get parameter guidance for Knox to provide to user
    */
   getParameterGuidance(parameterName: string, ecuFamily?: string): string {
     const key = ecuFamily ? `${ecuFamily}:${parameterName}` : parameterName;

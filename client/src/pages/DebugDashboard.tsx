@@ -278,11 +278,11 @@ export default function DebugDashboard() {
                       )}
                     </div>
 
-                    {/* Mara's Analysis */}
+                    {/* Knox's Analysis */}
                     {s.rootCause && (
                       <div className="bg-zinc-800/50 rounded p-3 border-l-2 border-purple-500">
                         <h4 className="text-xs text-purple-400 uppercase tracking-wider font-[Share_Tech_Mono] mb-1">
-                          Mara's Analysis
+                          Knox's Analysis
                         </h4>
                         <p className="text-sm text-zinc-300 font-[Rajdhani]">
                           <strong>Root Cause:</strong> {s.rootCause}

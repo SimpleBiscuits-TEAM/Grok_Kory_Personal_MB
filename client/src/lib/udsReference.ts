@@ -9,7 +9,7 @@
  *  - Module address database
  *  - UDS service definitions
  *
- * This powers the tiered datalogger, CAN-am VIN changer, and Mara's knowledge.
+ * This powers the tiered datalogger, CAN-am VIN changer, and Knox's knowledge.
  */
 
 // ─── UDS Service Definitions ────────────────────────────────────────────────

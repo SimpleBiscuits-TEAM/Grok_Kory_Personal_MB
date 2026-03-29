@@ -23,7 +23,6 @@ describe('Binary Signature Detector', () => {
 
   describe('analyzeBinary', () => {
     it('should detect MG1C with DEADBEEF marker', () => {
-      // Create a buffer with DEADBEEF marker at offset 0xC100
       const buffer = Buffer.alloc(0xC200);
       buffer.write('DEADBEEF', 0xC100, 'hex');
 
@@ -35,8 +34,8 @@ describe('Binary Signature Detector', () => {
       expect(result.analysis.estimatedArchitecture).toBe('Motorola 68K');
     });
 
-    it('should detect ME17 with ASCII signature', () => {
-      // Create a buffer with ME17 ASCII signature (4D453137)
+    it('should detect ME17 family when only ME17 signature present', () => {
+      // ME17 signature alone: ME17 weight=1.0 vs CANAM_ME17 weight=0.9
       const buffer = Buffer.alloc(1024);
       buffer.write('ME17', 0x100, 'ascii');
 
@@ -49,9 +48,7 @@ describe('Binary Signature Detector', () => {
 
     it('should detect Can-Am MG1 with part number', () => {
       const buffer = Buffer.alloc(0xC200);
-      // Add DEADBEEF marker
       buffer.write('DEADBEEF', 0xC100, 'hex');
-      // Add Can-Am part number pattern
       buffer.write('1E110195', 0x500, 'hex');
 
       const result = analyzeBinary(buffer, 'canam_mg1.bin');
@@ -62,9 +59,7 @@ describe('Binary Signature Detector', () => {
 
     it('should detect Can-Am ME17 with ROTAX marker', () => {
       const buffer = Buffer.alloc(1024);
-      // Add ME17 signature
       buffer.write('ME17', 0x100, 'ascii');
-      // Add ROTAX marker (524F544158 = "ROTAX")
       buffer.write('ROTAX', 0x200, 'ascii');
 
       const result = analyzeBinary(buffer, 'canam_me17.bin');
@@ -99,7 +94,7 @@ describe('Binary Signature Detector', () => {
 
     it('should handle buffer with no matching patterns', () => {
       const buffer = Buffer.alloc(1024);
-      buffer.fill(0xff); // Fill with 0xFF (no recognizable patterns)
+      buffer.fill(0x42);
 
       const result = analyzeBinary(buffer, 'unknown.bin');
 
@@ -111,7 +106,7 @@ describe('Binary Signature Detector', () => {
   describe('detectECUFamily', () => {
     it('should return null when confidence is below threshold', () => {
       const buffer = Buffer.alloc(1024);
-      buffer.fill(0x00);
+      buffer.fill(0x42);
 
       const result = detectECUFamily(buffer, 'test.bin', 0.5);
 
@@ -136,11 +131,9 @@ describe('Binary Signature Detector', () => {
       const buffer = Buffer.alloc(1024);
       buffer.write('ME17', 0x100, 'ascii');
 
-      // Should detect with low threshold
       const resultLow = detectECUFamily(buffer, 'test.bin', 0.1);
       expect(resultLow).not.toBeNull();
 
-      // Should not detect with very high threshold
       const resultHigh = detectECUFamily(buffer, 'test.bin', 0.99);
       expect(resultHigh).toBeNull();
     });
@@ -163,7 +156,6 @@ describe('Binary Signature Detector', () => {
   describe('Multiple pattern matching', () => {
     it('should increase confidence with multiple matching patterns', () => {
       const buffer = Buffer.alloc(1024);
-      // Add multiple ME17 patterns
       buffer.write('ME17', 0x100, 'ascii');
       buffer.write('ME17', 0x200, 'ascii');
       buffer.write('ME17', 0x300, 'ascii');
@@ -178,13 +170,11 @@ describe('Binary Signature Detector', () => {
   describe('ECU family specificity', () => {
     it('should prefer specific families over generic ones', () => {
       const buffer = Buffer.alloc(0xC200);
-      // Add both MG1C and Can-Am MG1 patterns
       buffer.write('DEADBEEF', 0xC100, 'hex');
       buffer.write('1E110195', 0x500, 'hex');
 
       const result = analyzeBinary(buffer, 'canam.bin');
 
-      // Should detect as Can-Am MG1 (more specific) rather than generic MG1C
       expect(result.detectedFamily).toBe('CANAM_MG1');
     });
   });

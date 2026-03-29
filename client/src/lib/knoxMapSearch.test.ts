@@ -1,8 +1,8 @@
 /**
- * Tests for maraMapSearch — Client-side RAG for A2L calibration maps
+ * Tests for knoxMapSearch — Client-side RAG for A2L calibration maps
  */
 import { describe, it, expect } from 'vitest';
-import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext } from './maraMapSearch';
+import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext } from './knoxMapSearch';
 import type { CalibrationMap } from './editorEngine';
 
 function makeMap(overrides: Partial<CalibrationMap> & { name: string }): CalibrationMap {

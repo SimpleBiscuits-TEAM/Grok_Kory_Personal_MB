@@ -2052,3 +2052,47 @@
 - [x] Added SUPPORT tab to Advanced.tsx (super_admin only)
 - [x] Registered supportAdminRouter and adminMessagingRouter in main routers.ts
 - [x] Server running clean, TypeScript 0 errors, no longtext error
+
+
+## LB7 Diagnostics Fixes & Knox Knowledge Update (2026-03-29)
+- [x] Fix transmission identification: LB7/LLY = Allison 1000 5-speed (AL5), 2006-2019 = Allison 1000 6-speed, 2020+ = 10L1000
+- [x] Fix TCC fault data not appearing in vehicle health report for LB7
+- [x] Fix HP4 reference: CP3 pump for LB7 through LML, HP4 only for 2017+ L5P
+- [x] Fix PCV "duty cycle" 1714% → should be mA (milliamps), not percentage
+- [x] Update PCV/regulator knowledge: higher mA = more bypass (less rail pressure), lower mA = more fuel flow, 400mA ≈ 97% available fuel
+- [x] Update Knox knowledge base (knoxKnowledge.ts) with all corrections
+- [x] Update diagnostics engine with correct transmission/pump identification
+- [x] Update health report generation with correct component references
+- [x] Retain all corrections in Knox's permanent knowledge for future analyses
+
+
+## LB7 Diagnostics Fixes & Knox Knowledge Update (2026-03-29) - Duplicate
+- [x] Fix transmission ID: LB7/LLY (2001-2006) = Allison 1000 5-speed (AL5), 2006-2019 = Allison 1000 6-speed, 2020+ = 10L1000
+- [x] Fix fuel pump ID: LB7 through LML = CP3 pump, 2017+ L5P only = HP4
+- [x] Fix PCV "duty cycle" 1714% → should be mA (milliamps), not percentage
+- [x] Add PCV/regulator knowledge: higher mA = more bypass (less rail pressure), lower mA = more fuel flow, 400mA ≈ 97% available fuel
+- [x] Fix TCC fault warnings NOT appearing in health report (detection works, report doesn't include it)
+- [x] Fix health report referencing 10L1000 for LB7 (should be Allison 1000 5-speed)
+- [x] Fix health report referencing HP4 for LB7 (should be CP3)
+- [x] Update Knox knowledge base (knoxKnowledge.ts) with all corrections
+- [x] Update diagnostics engine with correct transmission/pump identification by year
+- [x] Update health report to always include TCC fault data when detected
+- [x] Retain all corrections in Knox's permanent knowledge
+
+
+## Rename Mara to Knox (Knowledge Network for Optimized Execution) (2026-03-29)
+- [x] Find all Mara references in codebase (135+ references across 22+ files)
+- [x] Rename files (MaraChat→KnoxChat, maraMapSearch→knoxMapSearch, maraKnowledge→knoxKnowledge, etc.)
+- [x] Replace all UI-facing references
+- [x] Replace all code references (variables, imports, comments, system prompts)
+- [x] Update first introduction: "I'm Knox — Knowledge Network for Optimized Execution"
+- [x] After first intro, just "Knox" unless someone asks what it stands for
+- [x] Verify TypeScript compilation (0 errors)
+- [x] Verify tests still pass (885 passed)
+
+## Health Report TCC Fault Fix (2026-03-29)
+- [x] TCC fault detection works but warnings not included in health report output
+- [x] Add TCC diagnostic findings to recommendations when detected
+- [x] Fix transmission ID for LB7 (Allison 1000 5-speed, not 10L1000)
+- [x] Fix fuel pump reference for LB7 (CP3, not HP4)
+- [x] Fix PCV units (mA not percentage)

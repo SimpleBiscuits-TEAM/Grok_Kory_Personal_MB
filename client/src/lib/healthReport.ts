@@ -553,7 +553,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
 
   // ── Low Rail Pressure ──────────────────────────────────────────────────────────────
   // Pump saturation-aware: on tuned trucks, desired rail pressure is set above
-  // the pump's (CP4/HP4) physical capacity. Only flag when actual is well below
+  // the pump's (CP3/CP4/HP4 depending on platform) physical capacity. Only flag when actual is well below
   // the pump's demonstrated peak AND the deviation exceeds both absolute and
   // percentage thresholds.
   let p0087Status = '✓ PASS';
@@ -736,7 +736,7 @@ function generateRecommendations(
   fuel: FuelSystemSection,
   transmission: TransmissionSection,
   thermal: ThermalSection,
-  _diagnostics: DiagnosticSummarySection
+  diagnostics: DiagnosticSummarySection
 ): string[] {
   const recommendations: string[] = [];
 
@@ -744,6 +744,31 @@ function generateRecommendations(
   if (fuel.score < 90) recommendations.push('Inspect fuel system — check lift pump pressure, fuel filter, and rail pressure regulator');
   if (transmission.score < 90) recommendations.push('Have transmission fluid and torque converter inspected by a drivetrain specialist');
   if (thermal.score < 90) recommendations.push('Check oil level, coolant level, and inspect cooling system components');
+
+  // ── TCC / Converter Slip specific recommendations ──
+  if (diagnostics.detectedCodes.includes('TCC_SLIP_CRITICAL')) {
+    recommendations.push('⚠ CRITICAL: Torque converter clutch is slipping excessively after lockup — this indicates internal wear or clutch degradation. Have the torque converter inspected immediately by a transmission specialist. Continued driving may cause further damage.');
+  } else if (diagnostics.detectedCodes.includes('TCC_SLIP_WARNING')) {
+    recommendations.push('⚠ WARNING: Elevated torque converter slip detected after lockup. This may indicate early TCC wear or low transmission fluid. Check trans fluid level and condition, and monitor for worsening slip.');
+  }
+
+  // ── Fuel pressure specific recommendations ──
+  if (diagnostics.detectedCodes.includes('LOW_RAIL_PRESSURE')) {
+    recommendations.push('Low fuel rail pressure detected — inspect lift pump output, fuel filter condition, and CP3/CP4 pump health. Check PCV (Pressure Control Valve) current readings for regulator issues.');
+  }
+  if (diagnostics.detectedCodes.includes('HIGH_RAIL_PRESSURE')) {
+    recommendations.push('High fuel rail pressure detected — inspect fuel pressure regulator (FPR) and PCV solenoid for sticking or wiring issues.');
+  }
+
+  // ── Boost specific recommendations ──
+  if (diagnostics.detectedCodes.includes('LOW_BOOST')) {
+    recommendations.push('Low boost pressure detected — inspect turbocharger, intercooler piping for leaks, and VGT actuator operation.');
+  }
+
+  // ── EGT specific recommendations ──
+  if (diagnostics.detectedCodes.includes('HIGH_EGT')) {
+    recommendations.push('Elevated exhaust gas temperatures detected — review tune calibration with your tuner and check for restricted airflow or fueling issues.');
+  }
 
   if (recommendations.length === 0) {
     recommendations.push('Continue following GM maintenance schedule — oil change every 7,500 miles with dexos2 5W-30');

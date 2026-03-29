@@ -274,7 +274,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
-  // P0089 - Fuel Pressure Regulator Performance — diesel high-pressure pump (HP4 on L5P, CP4 on LML, CP3 on LBZ/LMM)
+  // P0089 - Fuel Pressure Regulator Performance —
   if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkFuelPressureRegulatorPerformance(railPressureActual, railPressureDesired, rpm));
   }
@@ -388,7 +388,7 @@ function checkLowRailPressure(
             code: 'LOW-RAIL-PRESSURE-MAXED',
             severity: 'critical',
             title: 'Low Rail Pressure - System Maxed Out',
-            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA. Pump peak in this log: ${peakActualRail.toFixed(0)} psi.`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV current is ${pcvValue.toFixed(0)} mA. Pump peak in this log: ${peakActualRail.toFixed(0)} psi.`,
             recommendation:
               'The fuel rail system is at maximum capacity. Check for fuel pump issues, fuel filter restrictions, or fuel line blockages. Consider upgrading the fuel system.',
           });
@@ -397,7 +397,7 @@ function checkLowRailPressure(
             code: 'LOW-RAIL-PRESSURE-TUNING',
             severity: 'warning',
             title: 'Low Rail Pressure - Possible Tuning Issue',
-            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV duty cycle is ${pcvValue.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
+            description: `Rail pressure is ${offset.toFixed(0)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for more than ${minDuration} seconds at steady-state (transients, decel, pump ramp-up, and low-throttle excluded). PCV current is ${pcvValue.toFixed(0)} mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
             recommendation:
               'A tuning adjustment may resolve this issue. Contact your tuner to review fuel pressure calibration and PCV settings.',
           });
@@ -440,7 +440,7 @@ function checkLowRailPressure(
           code: 'LOW-RAIL-PRESSURE-MAXED',
           severity: 'warning',
           title: 'Low Rail Pressure - Scattered Deviation',
-          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered, not consecutive). PCV avg: ${avgPcv.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
+          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered, not consecutive). PCV avg current: ${avgPcv.toFixed(0)} mA. Pump peak: ${peakActualRail.toFixed(0)} psi.`,
           recommendation:
             'Fuel rail pressure shows intermittent low-pressure events. Check fuel pump, lift pump, and filter condition.',
         });
@@ -449,7 +449,7 @@ function checkLowRailPressure(
           code: 'LOW-RAIL-PRESSURE-TUNING',
           severity: 'info',
           title: 'Low Rail Pressure - Scattered Deviation (Tuning)',
-          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered). PCV avg: ${avgPcv.toFixed(0)}mA. Pump peak: ${peakActualRail.toFixed(0)} psi. This may be normal for high-HP tunes.`,
+          description: `${totalViolations} samples exceed ${ABS_THRESHOLD} psi / ${(PCT_THRESHOLD * 100).toFixed(0)}% deviation threshold (scattered). PCV avg current: ${avgPcv.toFixed(0)} mA. Pump peak: ${peakActualRail.toFixed(0)} psi. This may be normal for high-HP tunes.`,
           recommendation:
             'Contact your tuner to review fuel pressure calibration if concerned.',
         });
@@ -557,7 +557,7 @@ function checkHighRailPressure(
           title: 'High Rail Pressure Detected',
           description: `Actual rail pressure is ${offset.toFixed(0)} psi higher than desired for more than ${minDuration} seconds at steady-state (transients, deceleration, and commanded pressure drops excluded).`,
           recommendation:
-            'Check PCV (pressure regulator duty cycle) settings. This is generally a regulator adjustment by the tuner. Contact your tuner to review fuel pressure calibration.',
+            'Check PCV (Pressure Control Valve) current settings. This is generally a regulator adjustment by the tuner. Contact your tuner to review fuel pressure calibration.',
         });
 
         consecutiveViolations = 0;
@@ -612,9 +612,9 @@ function checkHighRailPressure(
             code: 'HIGH-IDLE-RAIL-PRESSURE',
             severity: 'info',
             title: 'High Idle Rail Pressure - PCV Adjustment Needed',
-            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. PCV duty cycle is ${avgIdlePcv.toFixed(0)}mA (below 1600mA).`,
+            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. PCV current is ${avgIdlePcv.toFixed(0)} mA (below 1600 mA). Higher mA = more fuel bypass, lower mA = more fuel flowing to rail.`,
             recommendation:
-              'An adjustment in tuning can resolve this. Contact your tuner to increase PCV duty cycle at idle for better pressure control.',
+              'An adjustment in tuning can resolve this. Contact your tuner to adjust PCV current at idle for better pressure control.',
           });
         }
       }

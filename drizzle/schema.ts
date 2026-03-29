@@ -72,7 +72,7 @@ export const debugSessions = mysqlTable("debug_sessions", {
   reporterId: int("reporterId").notNull(), // FK to users.id
   status: mysqlEnum("status", [
     "submitted",       // User submitted the bug report
-    "analyzing",       // Mara is analyzing the bug
+    "analyzing",       // Knox is analyzing the bug
     "tier1_auto_fix",  // Classified as Tier 1, auto-fixing
     "tier2_pending",   // Classified as Tier 2, awaiting admin approval
     "tier2_approved",  // Admin approved the Tier 2 fix
@@ -94,10 +94,10 @@ export const debugSessions = mysqlTable("debug_sessions", {
   featureArea: varchar("featureArea", { length: 128 }), // e.g., "datalogger", "editor", "analyzer"
   screenshotUrl: text("screenshotUrl"),
   browserInfo: text("browserInfo"), // user agent, viewport, etc.
-  // Mara's analysis
-  analysisResult: text("analysisResult"), // JSON: Mara's diagnosis
+  // Knox's analysis
+  analysisResult: text("analysisResult"), // JSON: Knox's diagnosis
   rootCause: text("rootCause"),
-  proposedFix: text("proposedFix"), // JSON: what Mara proposes to change
+  proposedFix: text("proposedFix"), // JSON: what Knox proposes to change
   fixApplied: text("fixApplied"), // JSON: what was actually changed
   estimatedTokens: int("estimatedTokens"), // estimated token cost
   actualTokens: int("actualTokens"), // actual tokens used
@@ -123,7 +123,7 @@ export type InsertDebugSession = typeof debugSessions.$inferInsert;
 export const debugAuditLog = mysqlTable("debug_audit_log", {
   id: int("id").autoincrement().primaryKey(),
   sessionId: int("sessionId").notNull(), // FK to debugSessions.id
-  actorId: int("actorId"), // FK to users.id (null = system/Mara)
+  actorId: int("actorId"), // FK to users.id (null = system/Knox)
   actorType: mysqlEnum("actorType", ["user", "admin", "mara", "system"]).notNull(),
   action: varchar("action", { length: 128 }).notNull(), // e.g., "submitted", "analyzed", "fix_applied", "retest_confirmed"
   details: text("details"), // JSON: action-specific data

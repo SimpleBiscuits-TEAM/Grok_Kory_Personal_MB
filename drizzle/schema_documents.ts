@@ -158,7 +158,7 @@ export type InsertCalibrationMap = typeof calibrationMaps.$inferInsert;
 
 /**
  * Document Knowledge Index
- * Extracted knowledge chunks from documents for semantic search and Mara's learning
+ * Extracted knowledge chunks from documents for semantic search and Knox's learning
  */
 export const documentKnowledgeIndex = mysqlTable(
   "document_knowledge_index",

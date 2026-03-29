@@ -74,7 +74,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
   const [hexPage, setHexPage] = useState(0);
   const [sizeMismatch, setSizeMismatch] = useState<{ primary: number; compare: number; difference: number; offsetsAtRisk: string[] } | null>(null);
-  const [maraAttemptedFix, setMaraAttemptedFix] = useState(false);
+  const [knoxAttemptedFix, setKnoxAttemptedFix] = useState(false);
   const [showMapDiffModal, setShowMapDiffModal] = useState(false);
   const [displayMode, setDisplayMode] = useState<'original' | 'compare'>('original');
 
@@ -160,12 +160,12 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       setLocalCompareBinary(tuneFile);
     }
     setHexPage(0);
-    setMaraAttemptedFix(false);
+    setKnoxAttemptedFix(false);
     setSizeMismatch(null);
   }, []);
 
-  // ── Mara auto-fix for size mismatches ──
-  const attemptMaraFix = useCallback(() => {
+  // ── Knox auto-fix for size mismatches ──
+  const attemptKnoxFix = useCallback(() => {
     if (!sizeMismatch || !compareBinary || !primaryBinary) return;
     
     // Strategy 1: Padding (if compare is smaller)
@@ -179,7 +179,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         setLocalCompareBinary({ ...compareBinary, data: padded });
       }
       setSizeMismatch(null);
-      setMaraAttemptedFix(true);
+      setKnoxAttemptedFix(true);
       return;
     }
     
@@ -192,7 +192,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         setLocalCompareBinary({ ...compareBinary, data: truncated });
       }
       setSizeMismatch(null);
-      setMaraAttemptedFix(true);
+      setKnoxAttemptedFix(true);
       return;
     }
   }, [compareBinary, primaryBinary, sizeMismatch]);
@@ -444,9 +444,9 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
             </div>
             <button
               className="text-yellow-400 hover:text-yellow-300 text-xs px-2 py-1 border border-yellow-700 rounded hover:bg-yellow-900/30"
-              onClick={attemptMaraFix}
+              onClick={attemptKnoxFix}
             >
-              Let Mara Fix It
+              Let Knox Fix It
             </button>
           </div>
           <div className="text-xs text-yellow-200 space-y-1">
@@ -461,8 +461,8 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                 </div>
               </div>
             )}
-            {maraAttemptedFix && (
-              <div className="text-emerald-400 font-mono">✓ Mara applied a fix (padding/truncation). Diff results updated.</div>
+            {knoxAttemptedFix && (
+              <div className="text-emerald-400 font-mono">✓ Knox applied a fix (padding/truncation). Diff results updated.</div>
             )}
           </div>
         </div>

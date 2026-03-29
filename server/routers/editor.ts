@@ -2,7 +2,7 @@
  * Editor Router — tRPC procedures for the ECU Calibration Editor
  *
  * Handles:
- *  - Mara AI chat (calibration assistant)
+ *  - Knox AI chat (calibration assistant)
  *  - A2L file storage/retrieval (S3-backed)
  *  - Binary file export
  */
@@ -11,13 +11,13 @@ import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
-import { MARA_KNOWLEDGE_BASE } from "@shared/maraKnowledge";
+import { KNOX_KNOWLEDGE_BASE } from "@shared/knoxKnowledge";
 
 export const editorRouter = router({
   /**
-   * Mara AI Chat — calibration engineering assistant
+   * Knox AI Chat — calibration engineering assistant
    */
-  maraChat: publicProcedure
+  knoxChat: publicProcedure
     .input(
       z.object({
         message: z.string().min(1).max(10000),
@@ -34,8 +34,8 @@ export const editorRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const systemPrompt = `You are Mara (Multi-Agent Reasoning Architect), an expert ECU calibration engineer and AI assistant with a personality.
-Your name is Mara. You introduced your full name on first meeting. After that, just go by "Mara" unless someone specifically asks what it stands for.
+      const systemPrompt = `You are Knox (Knowledge Network for Optimized Execution), an expert ECU calibration engineer and AI assistant with a personality.
+Your name is Knox — Knowledge Network for Optimized Execution. Introduce your full name on first meeting. After that, just go by "Knox" unless someone specifically asks what it stands for.
 
 ## Your Expertise
 You have beyond-expert-level knowledge of:
@@ -116,7 +116,7 @@ You have access to the ECU context below. Use it to give specific, actionable an
 ${input.context ? input.context.slice(0, 30000) : 'No ECU definition currently loaded.'}
 
 ## Technical Reference Database
-${MARA_KNOWLEDGE_BASE.slice(0, 20000)}`;
+${KNOX_KNOWLEDGE_BASE.slice(0, 20000)}`;
 
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
         { role: "system", content: systemPrompt },
@@ -140,7 +140,7 @@ ${MARA_KNOWLEDGE_BASE.slice(0, 20000)}`;
 
         return { reply };
       } catch (err: any) {
-        console.error("[Mara] LLM error:", err);
+        console.error("[Knox] LLM error:", err);
         return {
           reply: `I'm experiencing a connection issue. Error: ${err.message || "Unknown"}. Please try again in a moment.`,
         };

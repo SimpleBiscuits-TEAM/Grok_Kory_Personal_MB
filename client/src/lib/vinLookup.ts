@@ -212,7 +212,8 @@ function getTransmissionInfo(year: number, engineCode: string): { name: string; 
   } else if (year >= 2006) {
     return { name: 'Allison 1000 6-Speed Automatic', code: 'MYD' };
   } else {
-    return { name: 'Allison 1000 5-Speed Automatic', code: 'MYD' };
+    // LB7 (2001-2004) and LLY (2004.5-2005) use Allison 1000 5-Speed (AL5)
+    return { name: 'Allison 1000 5-Speed Automatic (AL5)', code: 'AL5' };
   }
 }
 
@@ -319,20 +320,60 @@ function getEngineDetail(year: number, engineChar: string, isGm: boolean = true)
       defTankCapacity: 'N/A (pre-SCR)',
     };
   }
-  // Default / LBZ
+  // LBZ (2006–2007)
+  if (year >= 2006 && year <= 2007) {
+    return {
+      name: 'Duramax LBZ 6.6L Turbodiesel V8',
+      code: 'LBZ',
+      displacement: '6.6L (402 cu in)',
+      hp: 360,
+      torque: 650,
+      peakTorqueRpm: 1600,
+      peakHpRpm: 3100,
+      redline: 3500,
+      injectionSystem: 'Bosch CP3 High-Pressure Common Rail',
+      maxRailPressure: '23,000 psi (160 MPa)',
+      turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
+      aftertreatment: 'EGR only (no DPF)',
+      oilCapacity: '10 qts (9.5L) with filter',
+      coolantCapacity: '~23 qts (21.7L)',
+      defTankCapacity: 'N/A',
+    };
+  }
+  // LLY (2004.5–2006)
+  if (year >= 2004 && year <= 2005) {
+    return {
+      name: 'Duramax LLY 6.6L Turbodiesel V8',
+      code: 'LLY',
+      displacement: '6.6L (402 cu in)',
+      hp: 310,
+      torque: 605,
+      peakTorqueRpm: 1600,
+      peakHpRpm: 3000,
+      redline: 3500,
+      injectionSystem: 'Bosch CP3 High-Pressure Common Rail',
+      maxRailPressure: '23,000 psi (160 MPa)',
+      turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
+      aftertreatment: 'EGR only (no DPF)',
+      oilCapacity: '10 qts (9.5L) with filter',
+      coolantCapacity: '~23 qts (21.7L)',
+      defTankCapacity: 'N/A',
+    };
+  }
+  // LB7 (2001–2004) — first-gen Duramax
   return {
-    name: 'Duramax LBZ 6.6L Turbodiesel V8',
-    code: 'LBZ',
+    name: 'Duramax LB7 6.6L Turbodiesel V8',
+    code: 'LB7',
     displacement: '6.6L (402 cu in)',
-    hp: 360,
-    torque: 650,
-    peakTorqueRpm: 1600,
+    hp: 300,
+    torque: 520,
+    peakTorqueRpm: 1800,
     peakHpRpm: 3100,
     redline: 3500,
-    injectionSystem: 'Bosch CP3 High-Pressure Common Rail',
+    injectionSystem: 'Bosch CP3.3 High-Pressure Common Rail',
     maxRailPressure: '23,000 psi (160 MPa)',
-    turbocharger: 'Garrett Variable Geometry Turbocharger (VGT)',
-    aftertreatment: 'EGR only',
+    turbocharger: 'Garrett GT3788VA Variable Geometry Turbocharger (VGT)',
+    aftertreatment: 'None (pre-emissions)',
     oilCapacity: '10 qts (9.5L) with filter',
     coolantCapacity: '~23 qts (21.7L)',
     defTankCapacity: 'N/A',

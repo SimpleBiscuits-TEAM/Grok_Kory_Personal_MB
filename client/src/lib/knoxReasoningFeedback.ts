@@ -1,10 +1,10 @@
 /**
- * Mara's Reasoning Feedback Loop
+ * Knox's Reasoning Feedback Loop
  * Continuously improves diagnostics and fault detection based on learned insights
  * Every A2L and binary upload refines the reasoning engine
  */
 
-import type { LearnedParameter, LearnedMap } from './maraLearningEngine';
+import type { LearnedParameter, LearnedMap } from './knoxLearningEngine';
 
 export interface ReasoningModelUpdate {
   type: 'THRESHOLD' | 'FAULT_DETECTION' | 'SAFETY_LIMIT' | 'TUNING_RECOMMENDATION';
@@ -30,10 +30,10 @@ export interface DiagnosticThreshold {
 }
 
 /**
- * Mara's Reasoning Feedback System
+ * Knox's Reasoning Feedback System
  * Updates reasoning models based on learned insights from A2L and binary files
  */
-export class MaraReasoningFeedback {
+export class KnoxReasoningFeedback {
   private diagnosticThresholds: Map<string, DiagnosticThreshold> = new Map();
   private modelUpdates: ReasoningModelUpdate[] = [];
   private faultDetectionRules: Map<string, any> = new Map();

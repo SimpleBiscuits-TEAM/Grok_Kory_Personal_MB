@@ -220,7 +220,7 @@ describe('Self-Healing Debug System', () => {
       };
 
       expect(VALID_ACTOR_TYPES).toContain(entry.actorType);
-      expect(entry.actorId).toBeNull(); // Mara has no user ID
+      expect(entry.actorId).toBeNull(); // Knox has no user ID
       expect(entry.tokensUsed).toBeGreaterThan(0);
       expect(() => JSON.parse(entry.details!)).not.toThrow();
     });

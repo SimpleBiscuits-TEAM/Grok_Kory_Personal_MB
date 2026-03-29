@@ -28,6 +28,8 @@ export interface BinaryAnalysisResult {
 
 /**
  * Known ECU signatures and patterns
+ * Note: All hex strings must be valid hex (0-9, A-F only). Invalid hex produces empty buffers
+ * which match everything.
  */
 const ECU_SIGNATURES = {
   MG1C: {
@@ -70,7 +72,7 @@ const ECU_SIGNATURES = {
   CANAM_ME17: {
     patterns: [
       { name: 'ME17_SIGNATURE', hex: '4D453137', description: 'Can-Am ME17 ASCII signature', weight: 0.9 },
-      { name: 'CANAM_ME17_PART', hex: 'VM7E270175', description: 'Can-Am ME17 part number', weight: 1.0 },
+      { name: 'CANAM_ME17_PART', hex: '564D3745323730313735', description: 'Can-Am ME17 part number (VM7E270175 ASCII)', weight: 1.0 },
       { name: 'ROTAX_MARKER', hex: '524F544158', description: 'ROTAX engine marker', weight: 1.0 },
     ],
     architecture: 'x86/ARM',
@@ -81,9 +83,21 @@ const ECU_SIGNATURES = {
 
 /**
  * Convert hex string to buffer for pattern matching
+ * Returns null if the hex string is invalid or produces an empty buffer
  */
-function hexToBuffer(hexString: string): Buffer {
-  return Buffer.from(hexString, 'hex');
+function hexToBuffer(hexString: string): Buffer | null {
+  // Validate hex string: must be non-empty, even length, and only valid hex chars
+  if (!hexString || hexString.length === 0 || hexString.length % 2 !== 0) {
+    return null;
+  }
+  if (!/^[0-9A-Fa-f]+$/.test(hexString)) {
+    return null;
+  }
+  const buf = Buffer.from(hexString, 'hex');
+  if (buf.length === 0) {
+    return null;
+  }
+  return buf;
 }
 
 /**
@@ -91,6 +105,8 @@ function hexToBuffer(hexString: string): Buffer {
  */
 function findPattern(buffer: Buffer, pattern: Buffer, maxMatches = 10): number[] {
   const matches: number[] = [];
+  if (buffer.length === 0 || pattern.length === 0) return matches;
+
   let offset = 0;
 
   while (offset < buffer.length && matches.length < maxMatches) {
@@ -121,6 +137,11 @@ export function analyzeBinary(binaryBuffer: Buffer, fileName: string): BinaryAna
     },
   };
 
+  // Don't attempt detection on empty or tiny buffers
+  if (binaryBuffer.length === 0) {
+    return result;
+  }
+
   // Score each ECU family based on pattern matches
   const familyScores: Record<string, { score: number; matches: SignatureMatch[] }> = {};
 
@@ -129,12 +150,14 @@ export function analyzeBinary(binaryBuffer: Buffer, fileName: string): BinaryAna
 
     for (const pattern of config.patterns) {
       const patternBuffer = hexToBuffer(pattern.hex);
+      if (!patternBuffer) continue; // Skip invalid patterns
+
       const offsets = findPattern(binaryBuffer, patternBuffer);
 
       if (offsets.length > 0) {
         // Weight-based scoring: specific patterns worth more than generic ones
-        const weight = (pattern as any).weight || 0.5; // Default weight if not specified
-        const matchScore = Math.min(offsets.length * 0.2, 1.0) * weight; // Max 1.0 per pattern, scaled by weight
+        const weight = pattern.weight || 0.5;
+        const matchScore = Math.min(offsets.length * 0.2, 1.0) * weight;
         familyScores[ecuFamily].score += matchScore;
 
         // Track DEADBEEF marker
@@ -166,7 +189,10 @@ export function analyzeBinary(binaryBuffer: Buffer, fileName: string): BinaryAna
 
   for (const [ecuFamily, { score, matches }] of Object.entries(familyScores)) {
     const priority = (ECU_SIGNATURES[ecuFamily as keyof typeof ECU_SIGNATURES] as any).priority || 0;
-    
+
+    // Only consider families that actually matched something (score > 0)
+    if (score <= 0) continue;
+
     // Choose family if: score is higher, OR score is equal but priority is higher
     if (score > bestScore || (score === bestScore && priority > bestPriority)) {
       bestScore = score;

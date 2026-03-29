@@ -474,8 +474,8 @@ export function getCalibrationContext(
       relevance: 'high',
     },
     pcv_maxed: {
-      title: 'PCV Duty Cycle Maxed — FHPC at Limit',
-      context: 'The FHPC subsystem controls PCV (Pressure Control Valve) duty cycle to regulate rail pressure. When PCV is at or near 100%, the fuel system is at its maximum capacity. The HP4 pump physically cannot deliver more pressure. This is the wall. On tuned trucks, this means the fuel demand exceeds what the stock fuel system can supply. Solutions: reduce fuel demand in the tune, upgrade to a CP3 conversion, or add a lift pump to improve HP4 inlet pressure.',
+      title: 'PCV Current High — Fuel Pressure Regulator at Limit',
+      context: 'The PCV (Pressure Control Valve) regulates fuel rail pressure by controlling how much fuel bypasses back to the tank. PCV values are measured in milliamps (mA), not percentage. Higher mA = more fuel bypassed (lower rail pressure). Lower mA = more fuel flowing to the rail (higher pressure). At ~400 mA, the CP3 is receiving roughly 97% of available fuel. When PCV current stays very low under load, the fuel system is at its maximum delivery capacity. On tuned trucks, this means fuel demand exceeds what the stock fuel system can supply. Solutions: check lift pump output, inspect fuel filter, upgrade to larger injectors matched to desired HP, or add a lift pump to improve CP3 inlet pressure. Note: HP4 pumps are only on 2017+ L5P trucks. LB7 through LMM use CP3, LML uses CP4.2.',
       subsystem: 'FHPC',
       relevance: 'high',
     },

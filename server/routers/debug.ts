@@ -1,12 +1,12 @@
 /**
  * Debug System Router — Self-Healing Debug Loop
  * 
- * Admin-controlled debug permissions + user bug reporting + Mara auto-analysis
+ * Admin-controlled debug permissions + user bug reporting + Knox auto-analysis
  * 
  * Flow:
  * 1. Admin grants debug access to specific users
  * 2. Authorized users submit bug reports
- * 3. Mara analyzes and classifies (Tier 1 auto-fix / Tier 2 approval needed)
+ * 3. Knox analyzes and classifies (Tier 1 auto-fix / Tier 2 approval needed)
  * 4. Fixes are applied and users are notified to retest
  * 5. Users confirm fixed or report still broken
  */
@@ -228,7 +228,7 @@ export const debugRouter = router({
         content: `${ctx.user.name} submitted a bug report in ${input.featureArea || 'unknown area'}:\n\n${input.description.slice(0, 200)}...`,
       });
 
-      // Trigger Mara analysis asynchronously (don't block the response)
+      // Trigger Knox analysis asynchronously (don't block the response)
       analyzeAndClassify(sessionId).catch(err => {
         console.error("[Debug] Analysis failed:", err);
       });
@@ -454,11 +454,11 @@ export const debugRouter = router({
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Mara Analysis Engine
+// Knox Analysis Engine
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Mara analyzes the bug report and classifies it as Tier 1 or Tier 2.
+ * Knox analyzes the bug report and classifies it as Tier 1 or Tier 2.
  * 
  * Tier 1 (Auto-fix): UI rendering, data display, text contrast, wrong units, minor logic
  * Tier 2 (Approval): Backend changes, security, database, new functionality
@@ -484,7 +484,7 @@ async function analyzeAndClassify(sessionId: number) {
       messages: [
         {
           role: "system",
-          content: `You are Mara (Multi-Agent Reasoning Architect), an AI diagnostic engineer for the PPEI V-OP vehicle analyzer tool. 
+          content: `You are Knox (Knowledge Network for Optimized Execution), an AI diagnostic engineer for the PPEI V-OP vehicle analyzer tool. 
 You are analyzing a bug report submitted by a tester. Your job is to:
 
 1. Understand the bug from the description
@@ -583,7 +583,7 @@ ${bug.retestCount ? `Retest Count: ${bug.retestCount}` : ''}`
     if (analysis.tier === "tier2") {
       await notifyOwner({
         title: `Tier 2 Bug - Approval Needed: ${bug.title}`,
-        content: `Mara classified bug #${sessionId} as Tier 2 (${analysis.category}).\n\nRoot Cause: ${analysis.rootCause}\n\nProposed Fix: ${analysis.proposedFix}\n\nEstimated Tokens: ${analysis.estimatedTokens}\n\nPlease approve or reject in the Debug Dashboard.`,
+        content: `Knox classified bug #${sessionId} as Tier 2 (${analysis.category}).\n\nRoot Cause: ${analysis.rootCause}\n\nProposed Fix: ${analysis.proposedFix}\n\nEstimated Tokens: ${analysis.estimatedTokens}\n\nPlease approve or reject in the Debug Dashboard.`,
       });
     } else {
       // Tier 1: Mark as awaiting retest (the actual fix would be applied by the Manus agent)
@@ -599,7 +599,7 @@ ${bug.retestCount ? `Retest Count: ${bug.retestCount}` : ''}`
       // Notify the reporter
       await notifyOwner({
         title: `Bug Fix Ready: ${bug.title}`,
-        content: `Mara analyzed bug #${sessionId} and identified the issue:\n\n${analysis.explanation}\n\nThe fix has been queued. The tester will be notified to retest.`,
+        content: `Knox analyzed bug #${sessionId} and identified the issue:\n\n${analysis.explanation}\n\nThe fix has been queued. The tester will be notified to retest.`,
       });
     }
 

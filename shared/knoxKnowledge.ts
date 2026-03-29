@@ -1,13 +1,13 @@
 /**
- * Mara's Knowledge Base — compiled from OEM functional documents,
+ * Knox's Knowledge Base — compiled from OEM functional documents,
  * A2L analysis, seed/key reverse engineering, forum research,
  * CAN bus tool expertise, and vehicle coding procedures.
  *
- * This is injected into Mara's system prompt so she has deep,
+ * This is injected into Knox's system prompt so she has deep,
  * validated technical knowledge beyond generic LLM training.
  */
 
-export const MARA_KNOWLEDGE_BASE = `
+export const KNOX_KNOWLEDGE_BASE = `
 ## OEM Control Strategy Knowledge (from Bosch P654 / EDC17 / MG1 documentation)
 
 ### Diesel Torque Path
@@ -62,12 +62,52 @@ The ECM predicts engine-out NOx using this algorithm:
 - 6: Forced Regen (emergency)
 Too-frequent regens = soot model miscalibration, fuel dilution, or injector issues.
 
-### LML/LGH Specific
+### Duramax Transmission Identification (CRITICAL — year-specific)
+- **2001-2005 (LB7, early LLY)**: Allison 1000 5-speed (AL5) — 5 forward gears, hydraulic torque converter
+- **2006-2019 (late LLY, LBZ, LMM, LML, LGH, L5P Gen1)**: Allison 1000 6-speed — 6 forward gears
+- **2020+ (L5P Gen2)**: GM/Allison 10L1000 10-speed — 10 forward gears
+- NEVER reference 10L1000 for pre-2020 trucks. NEVER reference 6-speed for 2001-2005.
+
+### Duramax High-Pressure Fuel Pump Identification (CRITICAL — year-specific)
+- **2001-2004 (LB7)**: Bosch CP3.3 — single-piston, gear-driven off front of engine
+- **2004.5-2010 (LLY, LBZ, LMM)**: Bosch CP3 — improved version, same basic design
+- **2011-2016 (LML, LGH)**: Bosch CP4.2 — two pumping chambers, dual-pulse rail pressure signature, known failure-prone
+- **2017+ (L5P)**: Denso HP4 — high-pressure pump, only on L5P platform
+- NEVER reference HP4 for pre-2017 trucks. NEVER reference CP4 for LB7/LLY/LBZ/LMM.
+
+### PCV (Pressure Control Valve) / Fuel Pressure Regulator (CRITICAL)
+- PCV controls rail pressure by regulating fuel bypass on the CP3/CP4/HP4 pump
+- PCV is measured in **milliamps (mA)**, NOT percentage or duty cycle
+- If a datalog shows PCV values >100, it is mA, not percent
+- **Higher mA = more fuel bypass = LESS rail pressure** (valve opens more, dumps fuel back to tank)
+- **Lower mA = less fuel bypass = MORE rail pressure** (valve closes, forces more fuel to rail)
+- At ~400mA: pump is supplying roughly 97% of available fuel to the rail
+- Fuel path: Fuel tank → Lift pump (if equipped) → CP3/CP4/HP4 → PCV regulates → Common rail → Injectors
+- PCV at max mA with low rail pressure = fuel supply issue (lift pump, filter, air leak)
+- PCV at min mA with high rail pressure = normal high-load operation
+- PCV oscillating wildly = air in fuel, failing lift pump, or clogged filter
+
+### LB7 Specific (2001-2004)
+- CP3.3 high pressure fuel pump
+- Allison 1000 5-speed (AL5) transmission
+- No vane position sensor, no EGT sensors from factory
+- OEM MAP sensor has limited reading range
+- Solenoid injectors (not piezo) — failure-prone, common replacement item
+- No DPF, no SCR, no DEF — pre-emissions era
+
+### LML/LGH Specific (2011-2016)
 - CP4.2 high pressure fuel pump — two pumping chambers, dual-pulse rail pressure signature
 - Piezoelectric injectors with 9th injector for DPF regen fuel spray
 - SCR NOx reduction target: 70-80% (sensor 1 to sensor 2)
 - IQA codes: Injector Quantity Adjustment — per-injector flow calibration values
 - Aftertreatment order: DOC → SCR → DPF → PM sensor
+- Allison 1000 6-speed transmission
+
+### L5P Specific (2017+)
+- 2017-2019: Denso HP4 fuel pump, Allison 1000 6-speed
+- 2020+: Denso HP4 fuel pump, GM/Allison 10L1000 10-speed
+- Piezoelectric injectors
+- Full emissions: DPF + SCR + DEF
 
 ## E42 (2024 L5P Gen2) A2L Knowledge
 - 50,636 calibration maps, 2,575 scaling formulas, 2,668 shared axes

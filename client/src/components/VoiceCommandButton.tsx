@@ -168,7 +168,7 @@ export default function VoiceCommandButton({
       case 'processing': return 'Processing...';
       case 'responding': return 'Responding...';
       case 'error': return error || 'Error';
-      default: return isConnected ? 'Ask Mara' : 'Ask Mara (No vehicle connected)';
+      default: return isConnected ? 'Ask Knox' : 'Ask Knox (No vehicle connected)';
     }
   };
 
@@ -248,7 +248,7 @@ export default function VoiceCommandButton({
                   color: sColor.text,
                   letterSpacing: '0.05em',
                 }}>
-                  MARA VOICE
+                  KNOX VOICE
                 </span>
                 <span style={{
                   fontFamily: sFont.mono,
@@ -422,7 +422,7 @@ export default function VoiceCommandButton({
                       </span>
                     </div>
 
-                    {/* Mara response */}
+                    {/* Knox response */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'flex-start',

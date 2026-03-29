@@ -534,13 +534,13 @@ function getRailPressureAnalysis(
   if (maxActual <= oemPeakPsi) {
     commentary = `Peak rail pressure of ${maxActual.toFixed(0)} PSI stayed at or below the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. The fuel system isn't being pushed beyond factory spec.`;
   } else if (overOem <= 3000) {
-    commentary = `Rail pressure peaked at ${maxActual.toFixed(0)} PSI — about ${overOem.toFixed(0)} PSI above the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. Elevated, but within a reasonable range for a tuned truck. The high-pressure pump (HP4/CP3 depending on platform) can handle this.`;
+    commentary = `Rail pressure peaked at ${maxActual.toFixed(0)} PSI — about ${overOem.toFixed(0)} PSI above the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. Elevated, but within a reasonable range for a tuned truck. The high-pressure pump (HP4 on L5P, CP4.2 on LML, CP3 on older platforms) can handle this.`;
   } else {
-    commentary = `Rail pressure hit ${maxActual.toFixed(0)} PSI — that's ${overOem.toFixed(0)} PSI above OEM peak (${oemPeakPsi.toFixed(0)} PSI). Getting spicy. Past 3,000 PSI above OEM, you're asking a lot of the high-pressure fuel pump and injector seals. If the PCV duty cycle is pegged high, the pump is working overtime to maintain these pressures.`;
+    commentary = `Rail pressure hit ${maxActual.toFixed(0)} PSI — that's ${overOem.toFixed(0)} PSI above OEM peak (${oemPeakPsi.toFixed(0)} PSI). Getting spicy. Past 3,000 PSI above OEM, you're asking a lot of the high-pressure fuel pump and injector seals. If the PCV current (mA) is running high, the regulator is bypassing more fuel and the pump is working overtime to maintain these pressures.`;
   }
 
   if (maxPcv > 80) {
-    commentary += ` PCV duty cycle hit ${maxPcv.toFixed(0)}% — the fuel pressure regulator is working hard. If it's consistently above 80%, the pump may be struggling to maintain commanded pressure.`;
+    commentary += ` PCV current hit ${maxPcv.toFixed(0)} mA — the Pressure Control Valve is commanding significant fuel bypass. Higher mA = more fuel bypassed (less rail pressure), lower mA = more fuel flowing to the rail. At ~400 mA the CP3 is receiving roughly 97% of available fuel. If PCV current stays very low under load, the pump may be at its limit trying to maintain commanded pressure.`;
   }
 
   // Check desired vs actual deviation
@@ -1066,8 +1066,8 @@ export function renderAdvancedAnalytics(
     if (hasPcv) {
       railSeries.push({
         data: data.pcvDutyCycle,
-        label: 'PCV Duty',
-        unit: '%',
+        label: 'PCV Current',
+        unit: 'mA',
         color: AMBER,
       });
     }
