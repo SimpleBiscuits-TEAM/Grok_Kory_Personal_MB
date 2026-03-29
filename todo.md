@@ -2177,3 +2177,8 @@
 - [x] Fix Float32Array sessionStorage serialization (Array.from for serialize, new Float32Array for deserialize)
 - [x] Write wp8Parser vitest (21 tests: magic detection, channel parsing, vehicle type detection, CSV conversion, serialization roundtrip, real file integration)
 - [x] Update upload zone labels (CSV & WP8 DYNOJET SUPPORTED)
+
+## Test Notifications Bug (2026-03-29)
+- [x] Investigate test notifications being sent to user without explanation (vitest notifications.test.ts was writing to production DB)
+- [x] Fix test to clean up after itself (afterAll cleanup + expiring notification + admin-only audience)
+- [x] Purged 43 test notification records and delivery records from production database

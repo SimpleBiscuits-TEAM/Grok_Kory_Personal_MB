@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterAll } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { getDb } from "./db";
+import { adminNotifications, notificationDeliveries } from "../drizzle/schema_notifications";
+import { eq } from "drizzle-orm";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
+
+const TEST_PREFIX = "__vitest_notif__";
 
 function createAdminContext(): TrpcContext {
   const user: AuthenticatedUser = {
@@ -46,6 +51,24 @@ function createUserContext(): TrpcContext {
   };
 }
 
+// ── Cleanup: remove any test notifications created during this run ──────
+
+const createdNotifIds: string[] = [];
+
+afterAll(async () => {
+  const db = await getDb();
+  if (!db) return;
+
+  for (const id of createdNotifIds) {
+    try {
+      await db.delete(notificationDeliveries).where(eq(notificationDeliveries.notificationId, id));
+      await db.delete(adminNotifications).where(eq(adminNotifications.id, id));
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+});
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe("notifications router", () => {
@@ -57,21 +80,25 @@ describe("notifications router", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it("admin can create and send notification", async () => {
+  it("admin can create and send notification (with cleanup)", async () => {
     const ctx = createAdminContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.notifications.createAndSend({
-      title: "Test Notification",
-      message: "This is a test push notification",
-      priority: "medium",
-      targetAudience: "all",
+      title: `${TEST_PREFIX} Vitest Notification`,
+      message: "This notification is created by vitest and will be cleaned up automatically",
+      priority: "low",
+      targetAudience: "admins", // Only target admins to minimize impact
+      expiresAt: Date.now() + 1000, // Expire in 1 second so it won't show up
     });
 
     expect(result).toHaveProperty("id");
     expect(result).toHaveProperty("sent");
     expect(result).toHaveProperty("total");
     expect(typeof result.id).toBe("string");
+
+    // Track for cleanup
+    createdNotifIds.push(result.id);
   });
 
   it("regular user can check unread count", async () => {

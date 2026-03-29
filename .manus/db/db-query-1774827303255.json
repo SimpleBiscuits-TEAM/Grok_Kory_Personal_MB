@@ -1,0 +1,190 @@
+{
+  "query": "SELECT id, title, message, priority, status, sentAt, createdAt FROM admin_notifications ORDER BY createdAt DESC LIMIT 20;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute SELECT id, title, message, priority, status, sentAt, createdAt FROM admin_notifications ORDER BY createdAt DESC LIMIT 20;",
+  "rows": [
+    {
+      "id": "notif_785b1b83-5efc-4907-8b07-4b46c623f432",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774824600446",
+      "createdAt": "1774824600446"
+    },
+    {
+      "id": "notif_b41fa004-f57b-44d1-a151-008c11288ce7",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774824064561",
+      "createdAt": "1774824064561"
+    },
+    {
+      "id": "notif_fa610709-aa91-45bc-afa0-0cc0a4915e21",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774821942852",
+      "createdAt": "1774821942852"
+    },
+    {
+      "id": "notif_67ab949c-037c-4871-a13a-8a4781925efd",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774821721244",
+      "createdAt": "1774821721244"
+    },
+    {
+      "id": "notif_22435d25-592a-449f-a340-0f91d6799c42",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774821532147",
+      "createdAt": "1774821532147"
+    },
+    {
+      "id": "notif_e0f200ec-7715-4ba6-90f4-69954af98dd8",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774818834112",
+      "createdAt": "1774818834112"
+    },
+    {
+      "id": "notif_94d8c178-fc64-43e7-9abc-f6843c4c6aa8",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774818326418",
+      "createdAt": "1774818326418"
+    },
+    {
+      "id": "notif_5a5991cd-bcfe-4044-980c-c3db0ea629cd",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774817265563",
+      "createdAt": "1774817265563"
+    },
+    {
+      "id": "notif_64dd3192-c207-45ae-abcf-59e7ca006825",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774816939764",
+      "createdAt": "1774816939764"
+    },
+    {
+      "id": "notif_1a38a94e-9299-41a9-b7dc-6514a9ffc3e2",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774816900945",
+      "createdAt": "1774816900945"
+    },
+    {
+      "id": "notif_873d95f7-99d9-48c1-81ba-0d2f98d89972",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774816879451",
+      "createdAt": "1774816879451"
+    },
+    {
+      "id": "notif_3da62f99-186b-437c-a870-5dc9e627fec8",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774816866195",
+      "createdAt": "1774816866195"
+    },
+    {
+      "id": "notif_4f343a2e-56f6-4cca-b126-62a91a9af9c3",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808870500",
+      "createdAt": "1774808870500"
+    },
+    {
+      "id": "notif_8b27547d-582a-4cf9-813f-312daa01abaa",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808855889",
+      "createdAt": "1774808855889"
+    },
+    {
+      "id": "notif_d76a4d13-c472-4c2e-900b-f59d26f3817c",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808841094",
+      "createdAt": "1774808841094"
+    },
+    {
+      "id": "notif_67dde458-0b52-464e-95ac-6e30371312cb",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808824021",
+      "createdAt": "1774808824021"
+    },
+    {
+      "id": "notif_a0002e69-57cd-422d-8956-c167772e1d0b",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808301284",
+      "createdAt": "1774808301284"
+    },
+    {
+      "id": "notif_831826aa-2cd8-4db3-bf96-953a52e326f0",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808285926",
+      "createdAt": "1774808285926"
+    },
+    {
+      "id": "notif_039f1798-a683-4099-87f7-1c090fe4e291",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808265077",
+      "createdAt": "1774808265077"
+    },
+    {
+      "id": "notif_26baea76-b882-444c-b89e-9828039b905b",
+      "title": "Test Notification",
+      "message": "This is a test push notification",
+      "priority": "medium",
+      "status": "sent",
+      "sentAt": "1774808249749",
+      "createdAt": "1774808249749"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\ttitle\tmessage\tpriority\tstatus\tsentAt\tcreatedAt\nnotif_785b1b83-5efc-4907-8b07-4b46c623f432\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774824600446\t1774824600446\nnotif_b41fa004-f57b-44d1-a151-008c11288ce7\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774824064561\t1774824064561\nnotif_fa610709-aa91-45bc-afa0-0cc0a4915e21\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774821942852\t1774821942852\nnotif_67ab949c-037c-4871-a13a-8a4781925efd\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774821721244\t1774821721244\nnotif_22435d25-592a-449f-a340-0f91d6799c42\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774821532147\t1774821532147\nnotif_e0f200ec-7715-4ba6-90f4-69954af98dd8\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774818834112\t1774818834112\nnotif_94d8c178-fc64-43e7-9abc-f6843c4c6aa8\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774818326418\t1774818326418\nnotif_5a5991cd-bcfe-4044-980c-c3db0ea629cd\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774817265563\t1774817265563\nnotif_64dd3192-c207-45ae-abcf-59e7ca006825\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774816939764\t1774816939764\nnotif_1a38a94e-9299-41a9-b7dc-6514a9ffc3e2\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774816900945\t1774816900945\nnotif_873d95f7-99d9-48c1-81ba-0d2f98d89972\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774816879451\t1774816879451\nnotif_3da62f99-186b-437c-a870-5dc9e627fec8\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774816866195\t1774816866195\nnotif_4f343a2e-56f6-4cca-b126-62a91a9af9c3\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808870500\t1774808870500\nnotif_8b27547d-582a-4cf9-813f-312daa01abaa\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808855889\t1774808855889\nnotif_d76a4d13-c472-4c2e-900b-f59d26f3817c\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808841094\t1774808841094\nnotif_67dde458-0b52-464e-95ac-6e30371312cb\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808824021\t1774808824021\nnotif_a0002e69-57cd-422d-8956-c167772e1d0b\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808301284\t1774808301284\nnotif_831826aa-2cd8-4db3-bf96-953a52e326f0\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808285926\t1774808285926\nnotif_039f1798-a683-4099-87f7-1c090fe4e291\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808265077\t1774808265077\nnotif_26baea76-b882-444c-b89e-9828039b905b\tTest Notification\tThis is a test push notification\tmedium\tsent\t1774808249749\t1774808249749\n",
+  "stderr": "",
+  "execution_time_ms": 56
+}

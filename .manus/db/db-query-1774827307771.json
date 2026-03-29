@@ -1,0 +1,25 @@
+{
+  "query": "SELECT COUNT(*) as total FROM admin_notifications; SELECT COUNT(*) as test_count FROM admin_notifications WHERE title = 'Test Notification'; SELECT COUNT(*) as non_test FROM admin_notifications WHERE title != 'Test Notification';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute SELECT COUNT(*) as total FROM admin_notifications; SELECT COUNT(*) as test_count FROM admin_notifications WHERE title = 'Test Notification'; SELECT COUNT(*) as non_test FROM admin_notifications WHERE title != 'Test Notification';",
+  "rows": [
+    {
+      "total": "43"
+    },
+    {
+      "total": "test_count"
+    },
+    {
+      "total": "43"
+    },
+    {
+      "total": "non_test"
+    },
+    {
+      "total": "0"
+    }
+  ],
+  "messages": [],
+  "stdout": "total\n43\ntest_count\n43\nnon_test\n0\n",
+  "stderr": "",
+  "execution_time_ms": 79
+}
