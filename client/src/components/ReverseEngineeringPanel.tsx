@@ -43,6 +43,7 @@ interface PipelineResult {
     valid: boolean; errors: string[]; warnings: string[];
     stats: { characteristicCount: number; totalSize: number; addressOverlaps: number; duplicateNames: number };
   };
+  osNumber?: string;
   message: string;
 }
 
@@ -112,7 +113,10 @@ export default function ReverseEngineeringPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${ecuName || result.detection.family || 'generated'}_definition.a2l`;
+    // Use OS number if available, otherwise use ECU name or family
+    const osNumber = (result as any).osNumber;
+    const filename = osNumber || ecuName || result.detection.family || 'generated';
+    a.download = `${filename}.a2l`;
     a.click();
     URL.revokeObjectURL(url);
   }, [result, ecuName]);

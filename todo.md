@@ -2023,3 +2023,14 @@
 - [x] Implement A2L file download with proper filename (uses ecuName or detected family)
 - [x] Test export with generated A2L file (ready for UI testing)
 - [x] Verify file integrity and format (Blob created as text/plain with .a2l extension)
+
+
+## OS Number Extraction & A2L Caching (2026-03-29)
+- [x] Create function to extract OS number from binary (osNumberExtractor.ts)
+- [x] Create database table for storing generated A2L files (generated_a2l table)
+- [x] Update ReverseEngineeringPanel to use OS number for A2L filename
+- [x] Save generated A2L to database after generation (in reverseEngineer endpoint)
+- [x] Implement A2L lookup when binary with matching OS is uploaded (cache check)
+- [x] Return cached A2L if found, skip regeneration
+- [x] Updated binaryAnalysis router with OS extraction and caching logic
+- [x] TypeScript compilation clean, ready for testing

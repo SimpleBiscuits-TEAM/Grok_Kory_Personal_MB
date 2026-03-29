@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -172,3 +172,27 @@ export const adminMessages = mysqlTable("admin_messages", {
 
 export type AdminMessage = typeof adminMessages.$inferSelect;
 export type InsertAdminMessage = typeof adminMessages.$inferInsert;
+
+
+// ── Generated A2L Cache ──────────────────────────────────────────────────────
+/**
+ * Generated A2L files — stores auto-generated A2L definitions from binary reverse engineering.
+ * Indexed by OS number for fast lookup when matching binaries are uploaded.
+ * Allows reuse of previously generated definitions without regenerating.
+ */
+export const generatedA2L = mysqlTable("generated_a2l", {
+  id: int("id").autoincrement().primaryKey(),
+  osNumber: varchar("osNumber", { length: 32 }).notNull().unique(), // e.g., 1G0100914SB3VUM8
+  ecuFamily: varchar("ecuFamily", { length: 64 }).notNull(), // e.g., MG1C, ME17
+  version: varchar("version", { length: 32 }).default("1.0.0").notNull(),
+  a2lContent: text("a2lContent").notNull(), // Full A2L definition (can be 10+ MB)
+  fileSize: int("fileSize").notNull(), // Size in bytes
+  mapCount: int("mapCount").notNull(), // Number of discovered maps
+  confidence: decimal("confidence", { precision: 3, scale: 2 }).notNull(), // Detection confidence 0.00-1.00
+  binaryHash: varchar("binaryHash", { length: 64 }), // SHA256 hash of original binary for verification
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type GeneratedA2L = typeof generatedA2L.$inferSelect;
+export type InsertGeneratedA2L = typeof generatedA2L.$inferInsert;

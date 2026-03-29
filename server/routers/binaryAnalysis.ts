@@ -8,6 +8,16 @@ import { protectedProcedure, publicProcedure, router } from '../_core/trpc';
 import { TRPCError } from '@trpc/server';
 import { detectECUFamily, getAvailableFamilies, analyzeBinary } from '../lib/binarySignatureDetector';
 import { discoverMapsInBinary, generateA2L, validateA2L, type DiscoveredMap } from '../lib/a2lGenerator';
+import { extractOSNumber, extractBinaryMetadata } from '../lib/osNumberExtractor';
+import { getDb } from '../db';
+import { generatedA2L } from '../../drizzle/schema';
+import { eq } from 'drizzle-orm';
+import { createHash } from 'crypto';
+
+// Helper function to compute SHA256 hash of binary
+function computeBinaryHash(binary: Buffer): string {
+  return createHash('sha256').update(binary).digest('hex');
+}
 
 export const binaryAnalysisRouter = router({
   /**
@@ -202,6 +212,30 @@ export const binaryAnalysisRouter = router({
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'Binary file exceeds 10MB limit' });
         }
 
+        // Step 0: Extract OS number and metadata
+        const metadata = extractBinaryMetadata(binaryBuffer);
+        const osNumber = metadata.osNumber;
+        const binaryHash = computeBinaryHash(binaryBuffer);
+
+        // Check if we already have a cached A2L for this OS number
+        if (osNumber) {
+          const db = await getDb();
+          if (db) {
+            const cached = await db.select().from(generatedA2L).where(eq(generatedA2L.osNumber, osNumber)).limit(1);
+            if (cached.length > 0) {
+              const cachedA2L = cached[0];
+              return {
+                success: true,
+                detection: { family: cachedA2L.ecuFamily, confidence: Number(cachedA2L.confidence) },
+                discovery: { mapCount: cachedA2L.mapCount, maps: [], totalMaps: cachedA2L.mapCount },
+                a2l: { content: cachedA2L.a2lContent, fileSize: cachedA2L.fileSize },
+                osNumber,
+                message: `Loaded cached A2L for OS ${osNumber}: ${cachedA2L.ecuFamily} (${cachedA2L.mapCount} maps)`,
+              };
+            }
+          }
+        }
+
         // Step 1: Detect ECU family
         const detection = detectECUFamily(binaryBuffer, input.fileName);
         const ecuFamily = detection?.family || input.ecuName || 'UNKNOWN';
@@ -224,6 +258,27 @@ export const binaryAnalysisRouter = router({
         // Step 5: Validate
         const validation = validateA2L(maps);
 
+        // Step 6: Save to cache if OS number was found
+        if (osNumber) {
+          try {
+            const db = await getDb();
+            if (db) {
+              await db.insert(generatedA2L).values({
+                osNumber,
+                ecuFamily,
+                version: input.version || '1.0.0',
+                a2lContent,
+                fileSize: a2lContent.length,
+                mapCount: maps.length,
+                confidence: detectionConfidence.toString() as any,
+                binaryHash,
+              });
+            }
+          } catch (err) {
+            console.warn(`Failed to cache A2L for OS ${osNumber}:`, err);
+          }
+        }
+
         return {
           success: true,
           detection: {
@@ -233,7 +288,7 @@ export const binaryAnalysisRouter = router({
           },
           discovery: {
             mapCount: maps.length,
-            maps: maps.slice(0, 100), // Limit to first 100 for response size
+            maps: maps.slice(0, 100),
             totalMaps: maps.length,
           },
           a2l: {
@@ -241,7 +296,8 @@ export const binaryAnalysisRouter = router({
             fileSize: a2lContent.length,
           },
           validation,
-          message: `Reverse engineered ${ecuFamily}: detected with ${(detectionConfidence * 100).toFixed(1)}% confidence, discovered ${maps.length} maps, generated ${a2lContent.length} byte A2L`,
+          osNumber: osNumber || undefined,
+          message: `Reverse engineered ${ecuFamily}: detected with ${(detectionConfidence * 100).toFixed(1)}% confidence, discovered ${maps.length} maps, generated ${a2lContent.length} byte A2L${osNumber ? ` (OS: ${osNumber})` : ''}`,
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
