@@ -1428,3 +1428,30 @@
 - [ ] Implement cross-protocol fault correlation (same issue, different protocols)
 - [ ] Test CSV export for all protocols (OBD-II, J1939, K-Line)
 - [ ] Verify all existing tests still pass (target: 750+ tests)
+
+
+## Protocol Integration Phase 2 (COMPLETED)
+- [x] Create CSV export utilities for J1939 datalogs (protocolCSVExport.ts)
+- [x] Create CSV export utilities for K-Line datalogs (protocolCSVExport.ts)
+- [x] Create CSV export utilities for OBD-II datalogs (protocolCSVExport.ts)
+- [x] Implement unified CSV export function for all protocols
+- [x] Add CSV filename generation with protocol and VIN
+- [x] Create real-time gauge components for J1939 parameters (ProtocolGaugeDashboard.tsx)
+- [x] Create real-time gauge components for K-Line parameters (ProtocolGaugeDashboard.tsx)
+- [x] Create real-time gauge components for OBD-II parameters (ProtocolGaugeDashboard.tsx)
+- [x] Implement compact gauge row for sidebar/header display
+- [x] Add protocol-specific color coding (J1939=purple, K-Line=orange, OBD-II=blue)
+- [x] Implement gauge range detection based on parameter units
+- [x] Add gauge sorting by importance (RPM, Speed, Temperature first)
+
+## Next Steps: DataloggerPanel Integration
+- [ ] Add ProtocolSelector component to DataloggerPanel
+- [ ] Route logging data through appropriate protocol module based on selection
+- [ ] Integrate ProtocolGaugeDashboard into DataloggerPanel display
+- [ ] Add CSV export button to DataloggerPanel with protocol-specific formatting
+- [ ] Add protocol indicator badge to connection status
+- [ ] Test protocol switching during active logging
+- [ ] Verify CSV export includes proper metadata (VIN, vehicle info, timestamps)
+- [ ] Test gauge updates with simulated J1939 and K-Line data
+- [ ] Add protocol-specific preset groups to DataloggerPanel
+- [ ] Implement protocol auto-detection on connection
