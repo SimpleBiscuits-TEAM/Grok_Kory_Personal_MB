@@ -1149,3 +1149,18 @@
 - [ ] Create training library from recorded support sessions
 - [ ] Add session tagging and searchability for training content
 - [ ] Implement customer satisfaction survey after support session
+
+
+## Guest Session Join UI (2026-03-29)
+- [x] Create SupportJoin page (/support/join/:inviteLink) with lobby UI
+- [x] Build session lobby with customer name display, PPEI branding, connection status
+- [x] Add device permission checks (camera, microphone, screen share) in lobby
+- [x] Build active session view with video/audio/screen share panels
+- [x] Add real-time chat sidebar in session view
+- [x] Build session controls toolbar (mute audio, toggle video, share screen, end session)
+- [ ] Create PPEI Support Dashboard page for employees to manage sessions
+- [ ] Add "Generate Support Link" flow with customer name/email input
+- [ ] Build active sessions list with status indicators
+- [ ] Build session history with recordings and metrics
+- [x] Add routes to App.tsx for support pages
+- [ ] Write tests for support session UI components
