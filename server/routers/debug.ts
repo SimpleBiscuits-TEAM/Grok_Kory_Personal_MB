@@ -299,6 +299,14 @@ export const debugRouter = router({
         });
       }
 
+      // Notify admin when tester confirms fix — ready to publish
+      if (input.isFixed) {
+        await notifyOwner({
+          title: `Bug Fixed & Confirmed: ${session[0].title}`,
+          content: `Tester ${ctx.user.name} confirmed bug #${input.sessionId} is fixed.\n\nFeature Area: ${session[0].featureArea || 'N/A'}\n\nYou can now publish the latest version.`,
+        });
+      }
+
       return { success: true, status: newStatus };
     }),
 

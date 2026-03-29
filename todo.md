@@ -1892,3 +1892,5 @@
 - [x] 36 vitest tests passing for debug system
 - [ ] Rollback capability if fix breaks something
 - [ ] Integration with Manus agent for actual code fixes
+- [x] Notify admin when tester submits a bug report (already built in)
+- [x] Notify admin when bug is confirmed fixed by tester (added)
