@@ -1012,9 +1012,27 @@
 - [ ] Integrate with flash container (when provided)
 
 ## Editor Data Loss Fix & Datalog Linking (2026-03-28)
-- [ ] Fix editor state loss when navigating away and returning
-- [ ] Implement global editor state store that persists across route changes
-- [ ] Prevent editor component unmount from clearing state
-- [ ] Add datalog link/unlink to tune files in editor
-- [ ] Allow uploading datalog CSV to reference alongside tune binary
-- [ ] Display linked datalog data in editor for tuner reference
+- [x] Fix editor state loss when navigating away and returning
+- [x] Implement global editor state store that persists across route changes
+- [x] Prevent editor component unmount from clearing state (display:none instead of conditional render)
+- [x] Add datalog link/unlink to tune files in editor
+- [x] Allow uploading datalog CSV to reference alongside tune binary
+- [x] Display linked datalog data in editor for tuner reference
+
+## Map Table Editor Modernization (2026-03-29)
+- [x] Refined 5-stop heatmap gradient (navy > teal > emerald > amber > crimson) with smoothstep interpolation
+- [x] Right-click context menu with smoothing (5 algorithms x 3 presets + custom)
+- [x] Math operations submenu (Add, Subtract, Multiply, Divide, Percentage, Fill)
+- [x] Selection submenu (Select All, Invert, Clear)
+- [x] Inline cell editing (double-click to edit, Enter to confirm)
+- [x] Multi-cell selection (click+drag, Shift+click for range)
+- [x] Axis header click to select row/column, corner click to select all
+- [x] Editable axis values (double-click axis headers)
+- [x] Undo/Redo stack (Ctrl+Z / Ctrl+Y, 50 levels)
+- [x] Copy/Paste (Ctrl+C / Ctrl+V)
+- [x] Interpolate, Flatten to Average, Set to Min/Max, Mirror, Reset to Original
+- [x] Modified cell highlighting with gold left accent bar
+- [x] Selection status bar (count, min, max, avg, sum)
+- [x] Color legend bar with gradient scale
+- [x] Keyboard shortcuts (+/- to increment/decrement, Delete to reset)
+- [x] Custom smoothing dialog with method, strength, iterations controls
