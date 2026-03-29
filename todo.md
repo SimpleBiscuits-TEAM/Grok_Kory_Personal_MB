@@ -1455,3 +1455,219 @@
 - [ ] Test gauge updates with simulated J1939 and K-Line data
 - [ ] Add protocol-specific preset groups to DataloggerPanel
 - [ ] Implement protocol auto-detection on connection
+
+
+## TIER 1: High-Impact Quick Wins
+
+### Protocol Auto-Detection
+- [x] Implement protocol detection scanner (OBD-II → J1939 → K-Line sequence)
+- [x] Add confidence scoring for detected protocols
+- [x] Display detected protocol with confidence in DataloggerPanel
+- [x] Create protocolDetection.ts with auto-detection logic
+- [x] Add protocol detection UI component (ProtocolAutoDetectionUI)
+- [x] Write tests for protocol detection accuracy
+
+### Unified Data Pipeline
+- [x] Create ProtocolDataNormalizer to convert J1939/K-Line/OBD-II to common format
+- [x] Update diagnostics engine to work with normalized data (unifiedDiagnostics.ts)
+- [x] Create unified diagnostics with threshold + pattern analysis
+- [x] Add cross-protocol correlation detection
+- [x] Add operating state detection (idle, load, cruise, warmup, decel)
+- [x] Write tests for data normalization across all protocols (771 tests passing)
+
+### Protocol-Specific Presets
+- [x] Create J1939 preset groups (Heavy Duty Truck Monitoring, Engine Focus, Transmission Focus)
+- [x] Create K-Line preset groups (Legacy Vehicle Diagnostics, European Cars, Older Trucks)
+- [x] Expand OBD-II presets with protocol-aware filtering
+- [x] Add preset auto-selection based on detected protocol
+- [x] Create preset merge utility for multi-protocol sessions
+- [x] Write tests for preset filtering by protocol
+
+---
+
+## TIER 2: Feature Completeness
+
+### Multi-Protocol Comparative Analysis
+- [ ] Create ComparisonEngine module for side-by-side protocol analysis
+- [ ] Implement simultaneous logging UI (if hardware supports multiple protocols)
+- [ ] Add data alignment algorithm (timestamp sync across protocols)
+- [ ] Create comparison report showing protocol differences
+- [ ] Add latency analysis (J1939 vs K-Line vs OBD-II response times)
+- [ ] Create protocol-specific insights panel
+- [ ] Write tests for data alignment and comparison logic
+
+### DBC File Import
+- [ ] Create DBCParser module (parse DBC format)
+- [ ] Implement DBC upload UI component
+- [ ] Add custom CAN message definition storage (database)
+- [ ] Create dynamic parameter generation from DBC
+- [ ] Add DBC-based preset auto-generation
+- [ ] Implement DBC validation and error handling
+- [ ] Write tests for DBC parsing (standard and edge cases)
+
+### ML Fault Prediction
+- [ ] Create trend analysis module (detect parameter drift over time)
+- [ ] Implement predictive model for emerging faults
+- [ ] Add historical datalog pattern matching
+- [ ] Create fault probability scoring
+- [ ] Add trend visualization (parameter trajectory charts)
+- [ ] Implement alert thresholds for predicted faults
+- [ ] Write tests for trend detection and prediction accuracy
+
+### Cross-Protocol Fault Correlation
+- [ ] Create FaultCorrelationEngine module
+- [ ] Implement J1939 DM1 ↔ OBD-II DTC mapping
+- [ ] Implement K-Line fault ↔ OBD-II DTC mapping
+- [ ] Add root cause analysis across protocols
+- [ ] Create correlation confidence scoring
+- [ ] Add multi-protocol fault report generation
+- [ ] Write tests for fault correlation accuracy
+
+---
+
+## TIER 3: Professional Features
+
+### Cloud Streaming & Real-Time Remote Diagnostics
+- [ ] Create CloudStreamingService (tRPC procedures)
+- [ ] Implement real-time datalog streaming to Manus cloud
+- [ ] Add remote technician access control
+- [ ] Create remote monitoring dashboard
+- [ ] Implement fleet-wide data aggregation
+- [ ] Add historical datalog database
+- [ ] Write tests for streaming reliability and latency
+
+### Protocol-Specific Threshold Tuning
+- [ ] Create ThresholdTuner module with protocol awareness
+- [ ] Implement J1939-specific thresholds (higher bandwidth tolerance)
+- [ ] Implement K-Line-specific thresholds (lower bandwidth tolerance)
+- [ ] Add noise floor calibration per protocol
+- [ ] Create threshold optimization algorithm
+- [ ] Add threshold visualization and adjustment UI
+- [ ] Write tests for threshold effectiveness
+
+### Hardware Compatibility Matrix
+- [ ] Create HardwareDatabase with adapter specifications
+- [ ] Implement adapter detection logic
+- [ ] Add protocol support matrix (which adapters support which protocols)
+- [ ] Create compatibility warning system
+- [ ] Build adapter recommendation engine
+- [ ] Add firmware version tracking for adapters
+- [ ] Write tests for adapter detection and compatibility
+
+### Bi-Directional Control Commands
+- [ ] Implement J1939 command sending (Request PGN, Acknowledge, etc.)
+- [ ] Implement K-Line command sending (Mode 10, Mode 11, etc.)
+- [ ] Add OBD-II command support (Mode 04 clear DTC, Mode 10 enable tests)
+- [ ] Create command safety verification system
+- [ ] Add command logging and audit trail
+- [ ] Implement command confirmation dialogs
+- [ ] Write tests for command execution and safety
+
+---
+
+## TIER 4: Data Intelligence
+
+### Performance Benchmarking System
+- [ ] Create BenchmarkDatabase (fleet-wide parameter ranges)
+- [ ] Implement anomaly detection (compare to fleet average)
+- [ ] Add vehicle-specific benchmarks (by make/model/year)
+- [ ] Create benchmark visualization dashboard
+- [ ] Implement trend comparison (this vehicle vs fleet average)
+- [ ] Add benchmark export/import for fleet sharing
+- [ ] Write tests for anomaly detection accuracy
+
+### Predictive Maintenance Scheduling
+- [ ] Create MaintenancePredictor module
+- [ ] Implement trend analysis for maintenance triggers
+- [ ] Add oil temperature trending (predict oil change interval)
+- [ ] Add fuel consumption trending (detect injector wear)
+- [ ] Add pressure trending (detect pump degradation)
+- [ ] Create maintenance calendar integration
+- [ ] Write tests for maintenance prediction accuracy
+
+### Expanded Knowledge Base
+- [ ] Expand J1939 PGN library (6 → 50+ PGNs)
+  - [ ] Heavy-duty truck PGNs (Cummins, Volvo, Freightliner)
+  - [ ] Agricultural equipment PGNs (John Deere, AGCO)
+  - [ ] Construction equipment PGNs
+- [ ] Expand K-Line ISO 9141-2 parameter database
+  - [ ] European legacy cars (BMW, Mercedes, Audi, VW)
+  - [ ] Japanese legacy cars (Toyota, Honda, Nissan)
+  - [ ] Ford legacy vehicles
+- [ ] Add protocol-specific diagnostic guides
+- [ ] Create manufacturer-specific troubleshooting trees
+- [ ] Write tests for knowledge base completeness
+
+---
+
+## TIER 5: UX & Polish
+
+### Protocol-Aware Gauge Customization
+- [ ] Create GaugeCustomizer component
+- [ ] Implement custom gauge layout saving (per protocol)
+- [ ] Add gauge preset templates (Highway, Idle, Diagnostics, etc.)
+- [ ] Create gauge drag-and-drop reordering
+- [ ] Add gauge size customization
+- [ ] Implement gauge color theme customization
+- [ ] Write tests for gauge layout persistence
+
+### Live Fault Severity Alerts
+- [ ] Create AlertSystem with audio/visual notifications
+- [ ] Implement severity-based alert tones (critical, warning, info)
+- [ ] Add fault type-specific alert sounds
+- [ ] Create alert history log
+- [ ] Add alert muting/snooze functionality
+- [ ] Implement alert customization per protocol
+- [ ] Write tests for alert triggering and delivery
+
+### Protocol Migration Assistant
+- [ ] Create ProtocolMigrationEngine
+- [ ] Implement parameter mapping between protocols
+- [ ] Add data conversion on protocol switch
+- [ ] Create migration confirmation dialog
+- [ ] Add migration preview (show what will be mapped)
+- [ ] Implement migration rollback capability
+- [ ] Write tests for parameter mapping accuracy
+
+### Offline Mode for All Protocols
+- [ ] Extend offline mode to J1939 datalogs
+- [ ] Extend offline mode to K-Line datalogs
+- [ ] Add offline datalog browser
+- [ ] Create offline analysis report generation
+- [ ] Add offline export functionality
+- [ ] Implement offline mode indicators in UI
+- [ ] Write tests for offline analysis accuracy
+
+---
+
+## Implementation Order (Recommended)
+1. TIER 1 (Phases 1-3): Foundation for everything else
+2. TIER 2 (Phases 2-3): Builds on TIER 1
+3. TIER 3 (Phases 4-5): Requires TIER 1 + 2 foundation
+4. TIER 4 (Phase 6): Requires all previous tiers
+5. TIER 5 (Phase 7): Polish and UX improvements
+6. Integration & Testing (Phase 8): Comprehensive end-to-end testing
+
+
+## TIER 1 - What's New Feature
+
+- [x] Create WhatsNewManager module for tracking dismissed notifications
+- [x] Design WhatsNewPanel component with dismissible cards
+- [x] Implement localStorage persistence for dismissed notifications
+- [x] Create notification types for protocol updates, new presets, features
+- [x] Add WhatsNewPanel to Home page on login
+- [x] Add useWhatsNew hook for auto-show control
+
+
+## Admin Push Notifications
+
+- [x] Create AdminNotificationManager for server-side notification handling
+- [x] Create tRPC procedures for admin notification sending (create, send, createAndSend)
+- [x] Implement notification delivery tracking and analytics
+- [x] Create AdminNotificationPanel UI component with compose form
+- [x] Add role-based access control (admin only via adminProcedure)
+- [x] Implement notification scheduling and targeting (all/admins/users)
+- [x] Create notification history with status filtering and analytics
+- [x] Create NotificationBell component for user notification dropdown
+- [x] Add DB schema (admin_notifications + notification_deliveries tables)
+- [x] Write tests for admin notification system (5 tests passing)

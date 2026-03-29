@@ -8,6 +8,7 @@ import { editorRouter } from "./routers/editor";
 import { projectsRouter } from "./routers/projects";
 import { tunesRouter } from "./routers/tunes";
 import { supportRouter } from "./routers/support";
+import { notificationsRouter } from "./routers/notifications";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -42,6 +43,9 @@ export const appRouter = router({
 
   // Support Sessions for PPEI employees
   support: supportRouter,
+
+  // Admin Push Notifications
+  notifications: notificationsRouter,
 
   // Feedback / Error Reports
   feedback: router({

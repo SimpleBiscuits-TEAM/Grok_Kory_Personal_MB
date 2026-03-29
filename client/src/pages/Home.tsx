@@ -33,10 +33,15 @@ import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import CompareView from '@/components/CompareView';
 import { APP_VERSION } from '@/lib/version';
+import { NotificationBell } from '@/components/AdminNotificationPanel';
+import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
+import { useAuth } from '@/_core/hooks/useAuth';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 export default function Home() {
+  const { user, isAuthenticated } = useAuth();
+  const { showPanel: showWhatsNew, setShowPanel: setShowWhatsNew } = useWhatsNew();
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
@@ -272,6 +277,7 @@ export default function Home() {
               }}>
                 {APP_VERSION}
               </span>
+              {isAuthenticated && <NotificationBell />}
               <Link href="/advanced" style={{ textDecoration: 'none' }}>
                 <div className="ppei-btn-hover" style={{
                   display: 'flex',
@@ -298,6 +304,11 @@ export default function Home() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
+        {/* What's New Panel */}
+        {isAuthenticated && showWhatsNew && (
+          <WhatsNewPanel onClose={() => setShowWhatsNew(false)} autoHide={false} />
+        )}
+
         {!data ? (
           /* ── Upload Section ── */
           <div className="max-w-3xl mx-auto">
