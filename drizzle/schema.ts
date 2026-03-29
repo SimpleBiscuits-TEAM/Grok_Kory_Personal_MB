@@ -133,3 +133,42 @@ export const debugAuditLog = mysqlTable("debug_audit_log", {
 
 export type DebugAuditLog = typeof debugAuditLog.$inferSelect;
 export type InsertDebugAuditLog = typeof debugAuditLog.$inferInsert;
+
+// ── Admin Messaging System ───────────────────────────────────────────────────
+
+/**
+ * Admin conversations — tracks ongoing conversations between admin and users/testers.
+ * Organized by user for easy management.
+ */
+export const adminConversations = mysqlTable("admin_conversations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(), // FK to users.id (the user being communicated with)
+  adminId: int("adminId").notNull(), // FK to users.id (the admin managing this conversation)
+  subject: varchar("subject", { length: 255 }).notNull(), // conversation topic
+  isActive: boolean("isActive").default(true).notNull(),
+  isRead: boolean("isRead").default(false).notNull(),
+  lastMessageAt: timestamp("lastMessageAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AdminConversation = typeof adminConversations.$inferSelect;
+export type InsertAdminConversation = typeof adminConversations.$inferInsert;
+
+/**
+ * Admin messages — individual messages within a conversation.
+ * Supports both admin-to-user and user-to-admin messages.
+ */
+export const adminMessages = mysqlTable("admin_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  conversationId: int("conversationId").notNull(), // FK to adminConversations.id
+  senderId: int("senderId").notNull(), // FK to users.id (who sent this message)
+  senderType: mysqlEnum("senderType", ["admin", "user"]).notNull(),
+  content: text("content").notNull(),
+  isRead: boolean("isRead").default(false).notNull(),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AdminMessage = typeof adminMessages.$inferSelect;
+export type InsertAdminMessage = typeof adminMessages.$inferInsert;

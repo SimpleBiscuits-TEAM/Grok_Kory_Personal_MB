@@ -1901,3 +1901,55 @@
 - [x] Fix text contrast (brightened subtitle 0.60→0.72, helper text 0.55→0.65, CSV note 0.45→0.50)
 - [x] Keep "Redefining the Limits" header
 - [x] Added "Advanced Mode" feature card (Calibration Editor, Live Gauges, Voice Commands, Tune Compare)
+
+
+## Phase 2: Binary Signature Detection Engine
+- [ ] Analyze Can-Am MG1 hex file (1E1101953SA2VLMJ.hex) to extract signature patterns
+- [ ] Analyze Polaris MG1 .s file (MG1C4E0A1T2.s) to extract memory layout and function signatures
+- [ ] Extract Bosch MG1 signatures from function documents
+- [ ] Implement binary signature database with pattern matching
+- [ ] Implement ECU family detection (MG1C, ME17, MED17, etc.)
+- [ ] Create tRPC endpoint: analyzeUnknownBinary (upload binary, return detected family + confidence)
+- [ ] Write vitest tests for signature detection
+- [ ] Test with Can-Am MG1 binary file
+- [x] Spyder_991_2011.a2l (2.1 MB - Can-Am ME17 with calibration maps)
+- [x] Spyder_991_2011.hex (2.5 MB - Can-Am ME17 hex file)
+- [x] CAN_AM_ROTAX_ME17.8.5_VM7E270175A0_10SW052195.ols (4.7 MB - WinOLS project with calibration map structure)
+
+
+## Admin Messaging System
+- [ ] Database schema: admin_conversations table (tracks conversations with users)
+- [ ] Database schema: admin_messages table (stores individual messages)
+- [ ] tRPC endpoint: getConversations (list all conversations with preview)
+- [ ] tRPC endpoint: getMessages (fetch full conversation history)
+- [ ] tRPC endpoint: sendMessage (admin sends message to user)
+- [ ] tRPC endpoint: markAsRead (mark conversation as read)
+- [ ] Admin UI: Conversation list sidebar (sorted by last message, unread count)
+- [ ] Admin UI: Chat panel (message history, input, send button)
+- [ ] Admin UI: User info header (name, role, status, debug access)
+- [ ] Real-time updates: WebSocket or polling for new messages
+- [ ] Search: Filter conversations by user name or message content
+- [ ] Notifications: Alert admin when user sends message
+
+
+## Remote Vehicle Control & Diagnostics System
+- [ ] Database schema: vehicle_functions table (available functions per vehicle type)
+- [ ] Database schema: function_rules table (role-based permissions for each function)
+- [ ] Database schema: remote_commands table (audit trail of all remote operations)
+- [ ] OBD connection bridge: Route commands through active OBD connection
+- [ ] Function rules engine: Evaluate permissions before executing commands
+- [ ] Voice command extension: Support "turn on headlights", "start vehicle", etc.
+- [ ] Remote Control UI: Dashboard showing available functions and status
+- [ ] Remote start capability: Secure implementation with authentication
+- [ ] Command execution: Send control commands to vehicle ECU safely
+- [ ] Telemetry streaming: Real-time vehicle data updates
+- [ ] Audit logging: Track all remote operations with timestamps and user info
+- [ ] Security: Encryption, authentication, rate limiting for remote commands
+- [x] Vehicle Telemetry Engine: Real-time data streaming from vehicles
+- [x] Multi-client subscription support for live data
+- [x] Event-driven architecture for vehicle updates
+- [ ] Extended voice command system for remote operations
+- [ ] Remote Control UI panel for live viewing and control
+- [ ] tRPC endpoints for remote vehicle commands
+- [ ] WebSocket integration for real-time telemetry
+- [ ] Audit logging for all remote operations

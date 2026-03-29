@@ -14,6 +14,7 @@ import { notificationPrefsRouter } from "./routers/notificationPrefs";
 import { offsetProfilesRouter } from "./routers/offsetProfiles";
 import { voiceRouter } from "./routers/voice";
 import { debugRouter } from "./routers/debug";
+import { binaryAnalysisRouter } from "./routers/binaryAnalysis";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -65,6 +66,9 @@ export const appRouter = router({
 
   // Self-Healing Debug System
   debug: debugRouter,
+
+  // Binary Reverse Engineering
+  binaryAnalysis: binaryAnalysisRouter,
 
   // Feedback / Error Reports
   feedback: router({
