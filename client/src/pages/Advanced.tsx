@@ -18,7 +18,7 @@ import {
   FileText, Activity, AlertCircle,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings, Inbox
+  Radio, Wrench, Key, Settings, Inbox, Fuel
 } from 'lucide-react';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
@@ -63,6 +63,8 @@ import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
+import HondaTalonTuner from '@/components/HondaTalonTuner';
+import { WP8ParseResult } from '@/lib/wp8Parser';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
@@ -1244,7 +1246,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1263,6 +1265,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
+  { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1287,7 +1290,34 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
   const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
+  const [injectedWP8, setInjectedWP8] = useState<WP8ParseResult | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Pick up WP8 data from sessionStorage (set by Home.tsx on .wp8 upload)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'talon') {
+      setActiveTab('talon');
+      const raw = sessionStorage.getItem('pendingWP8');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          // Reconstruct Float32Array from serialized regular arrays
+          if (parsed.rows) {
+            parsed.rows = parsed.rows.map((r: any) => ({
+              timestamp: r.timestamp,
+              values: new Float32Array(Array.isArray(r.values) ? r.values : []),
+            }));
+          }
+          setInjectedWP8(parsed as WP8ParseResult);
+          sessionStorage.removeItem('pendingWP8');
+        } catch { /* ignore parse errors */ }
+      }
+      // Clean URL params
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   const engine = useMemo(() => getSearchEngine(), []);
   const stats = useMemo(() => engine.getStats(), [engine]);
@@ -1455,6 +1485,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
         {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
         {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
+        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
         {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}

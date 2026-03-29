@@ -8,7 +8,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
@@ -79,10 +79,41 @@ export default function Home() {
 
   const { exportToPdf, isExporting, exportError } = usePdfExport();
 
+  const [, setLocation] = useLocation();
+
   const processFile = useCallback(async (file: File) => {
     setLoading(true);
     setError(null);
     try {
+      // Detect .wp8 files (Dynojet Power Vision datalogs)
+      if (file.name.toLowerCase().endsWith('.wp8')) {
+        const { parseWP8 } = await import('@/lib/wp8Parser');
+        const buffer = await file.arrayBuffer();
+        const wp8Result = parseWP8(buffer);
+        if (wp8Result.vehicleType === 'HONDA_TALON') {
+          // Store WP8 data in sessionStorage for the Advanced page to pick up
+          // Float32Array doesn't serialize to JSON properly, so convert to regular arrays
+          const serializableRows = wp8Result.rows.slice(0, 5000).map(r => ({
+            timestamp: r.timestamp,
+            values: Array.from(r.values),
+          }));
+          sessionStorage.setItem('pendingWP8', JSON.stringify({
+            magic: wp8Result.magic,
+            partNumber: wp8Result.partNumber,
+            channels: wp8Result.channels,
+            totalRows: wp8Result.totalRows,
+            rawSize: wp8Result.rawSize,
+            vehicleType: wp8Result.vehicleType,
+            rows: serializableRows,
+          }));
+          setLoading(false);
+          setLocation('/advanced?tab=talon');
+          return;
+        }
+        // Non-Honda-Talon WP8: fall through to error
+        throw new Error('WP8 file detected but not a Honda Talon datalog. Only Honda Talon .wp8 files are currently supported.');
+      }
+
       const content = await file.text();
       const rawData = parseCSV(content);
       const processed = processData(rawData);
@@ -448,17 +479,17 @@ export default function Home() {
                     {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
                   </h3>
                   <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.65 0.010 260)', fontSize: '0.9rem' }}>
-                    Drag &amp; drop your CSV file here, or click to browse
+                    Drag &amp; drop your datalog file here, or click to browse
                   </p>
                   <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.50 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
-                    CURRENTLY ONLY CSV SUPPORTED
+                    CSV &amp; WP8 (DYNOJET) SUPPORTED
                   </p>
 
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="*"
+                  accept=".csv,.bin,.wp8,*"
                   onChange={handleFileChange}
                   disabled={loading}
                   className="hidden"
@@ -485,7 +516,7 @@ export default function Home() {
                   {loading ? (
                     <><Loader2 style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite' }} />PROCESSING...</>
                   ) : (
-                    <><Upload style={{ width: '16px', height: '16px' }} />SELECT CSV FILE</>
+                    <><Upload style={{ width: '16px', height: '16px' }} />SELECT FILE</>
                   )}
                 </button>
               </div>

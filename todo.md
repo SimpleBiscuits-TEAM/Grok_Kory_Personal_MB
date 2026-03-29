@@ -2158,3 +2158,22 @@
 - [ ] Update diagnostics to detect stall/turbo mismatch: analyze boost buildup rate vs RPM during acceleration
 - [x] Ensure TCC lag detection does NOT flag converter-unlocked-during-acceleration as a fault (that's normal)
 - [ ] Add health report recommendation for stall/turbo mismatch when detected
+
+## Honda Talon Integration (2026-03-29)
+- [ ] Analyze .djt (Dynojet tune) file format from sample file
+- [x] Research .wp8 (Dynojet datalog) file format
+- [ ] Build .djt parser to extract fuel tables
+- [x] Build .wp8 parser to read datalog channels (wp8Parser.ts with FECEFACE magic, channel extraction, Float32 row parsing)
+- [x] Auto-detect Honda Talon from .wp8 file headers (part number 0801EB/0801EA + DCT/Alpha N channels)
+- [x] Add .wp8 file support to Analyzer upload zone (accept attribute + file extension detection)
+- [x] When Honda Talon detected, route to Honda Talon Tuner page (sessionStorage + navigate to /advanced?tab=talon)
+- [x] Build Honda Talon Tuner page in Advanced section (HondaTalonTuner component with injectedWP8 state)
+- [x] Four fuel map upload cards: Alpha-N Cyl 1, Alpha-N Cyl 2, Speed Density Cyl 1, Speed Density Cyl 2
+- [x] Heat-map grid editor for each fuel table with double-click cell editing
+- [x] Datalog viewer with table and chart views for .wp8 data
+- [x] Status bar showing loaded/empty state for all tables and datalog
+- [x] Fix WP8 parser part number offset (scan from 0x0C for first printable ASCII, not hardcoded 0x10)
+- [x] Fix WP8 parser channel scanner (add 03 10 row marker termination to prevent overshooting data section)
+- [x] Fix Float32Array sessionStorage serialization (Array.from for serialize, new Float32Array for deserialize)
+- [x] Write wp8Parser vitest (21 tests: magic detection, channel parsing, vehicle type detection, CSV conversion, serialization roundtrip, real file integration)
+- [x] Update upload zone labels (CSV & WP8 DYNOJET SUPPORTED)
