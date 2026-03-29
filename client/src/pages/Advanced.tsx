@@ -58,6 +58,7 @@ import ServiceProcedures from '@/components/ServiceProcedures';
 import QAChecklistPanel from '@/components/QAChecklistPanel';
 import AdminNotificationPanel from '@/components/AdminNotificationPanel';
 import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
+import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
@@ -1223,7 +1224,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'qa' | 'notifications' | 'notifprefs';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'qa' | 'notifications' | 'notifprefs' | 'offsets';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1247,6 +1248,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
 ];
 
@@ -1430,6 +1432,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
         {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 

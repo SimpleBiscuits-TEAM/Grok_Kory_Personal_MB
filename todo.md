@@ -1732,3 +1732,42 @@
 - [x] Pre-populate default test list covering all V-OP features (50 tests)
 - [x] Integrate QA checklist into Admin tab in Advanced Mode
 - [x] Add progress bar with color-coded status breakdown
+
+
+## Binary Offset Detection & Correction System
+- [ ] Create binary offset detection engine with table signature matching
+- [ ] Implement multi-offset detection (scan for known table patterns)
+- [ ] Build offset validation algorithm (verify detected offsets against known values)
+- [ ] Create offset calibration UI component with manual entry
+- [ ] Add offset persistence per ECU/vehicle type in database
+- [ ] Create offset auto-correction pipeline for editor file uploads
+- [ ] Implement offset validation and correction utilities
+- [ ] Add offset history tracking and audit log
+- [ ] Build offset correction report UI
+- [ ] Write comprehensive tests for offset detection
+- [ ] Integrate into editor file upload workflow
+- [ ] Test with Polaris Pro R a2L/.s file pair
+
+
+## Option A: Full Database-Backed Offset System (COMPLETED)
+- [x] Create offset profiles DB schema (offsetProfiles, offsetCorrectionHistory tables)
+- [x] Implement offset detection engine with multi-location marker search
+- [x] Build offset calibration UI panel with auto-detect and manual entry
+- [x] Create tRPC router for offset CRUD and profile management
+- [x] Wire offset profiles router into main appRouter
+- [x] Integrate OffsetCalibrationPanel into Advanced Mode admin tab
+- [x] Fix MG1 ECU family detection to search multiple marker locations
+- [x] Write comprehensive offset system tests (offsetSystem.test.ts)
+
+## MG1 Patch Detection Fix (COMPLETED)
+- [x] Fixed "Could not detect MG1 ECU family" error
+- [x] Enhanced detectECUFamily to search multiple marker locations (0x1000, 0x0000, 0x8000, 0x10000, 0x20000)
+- [x] Added full binary search as fallback for unknown layouts
+- [x] Supports both MG1C400A1T2 and MG1CA920 variants
+- [x] Dynojet and HPTuners patches now work with offset-adjusted binaries
+
+## Next: Map Description Display (PENDING)
+- [ ] Update map listing to show descriptions instead of map names
+- [ ] Create map description lookup from a2L metadata
+- [ ] Sort maps by description for better UX
+- [ ] Add search by description functionality

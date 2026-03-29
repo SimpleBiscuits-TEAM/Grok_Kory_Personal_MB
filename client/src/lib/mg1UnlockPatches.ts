@@ -86,22 +86,65 @@ const HPTUNERS_PATCHES: Record<string, PatchLocation[]> = {
 
 /**
  * Detect ECU family from binary
+ * Searches for MG1C marker at multiple possible locations to handle different binary layouts
  */
 function detectECUFamily(binary: Uint8Array): string | null {
-  // Look for MG1C marker
-  const marker = binary.slice(0x1000, 0x1004);
-  const markerStr = new TextDecoder('ascii').decode(marker);
+  // Common marker locations for MG1 ECUs (accounting for different file layouts and offsets)
+  const markerLocations = [
+    0x1000,      // Standard location
+    0x0000,      // Beginning of file
+    0x8000,      // Alternative location
+    0x10000,     // Another common location
+    0x20000,     // Larger offset
+  ];
   
-  if (markerStr.startsWith('MG1C')) {
-    // Extract full ECU ID (typically at 0x1000-0x1012)
-    const ecuIdBytes = binary.slice(0x1000, 0x1012);
+  // Helper: search for pattern in binary
+  const searchForMarker = (data: Uint8Array, pattern: string): number => {
+    const patternBytes = new TextEncoder().encode(pattern);
+    for (let i = 0; i < data.length - patternBytes.length; i++) {
+      let match = true;
+      for (let j = 0; j < patternBytes.length; j++) {
+        if (data[i + j] !== patternBytes[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    return -1;
+  };
+  
+  // Try known locations first
+  for (const offset of markerLocations) {
+    if (offset + 18 > binary.length) continue;
+    
+    const marker = binary.slice(offset, offset + 4);
+    const markerStr = new TextDecoder('ascii', { fatal: false }).decode(marker);
+    
+    if (markerStr.startsWith('MG1C')) {
+      // Extract full ECU ID
+      const ecuIdBytes = binary.slice(offset, Math.min(offset + 18, binary.length));
+      const ecuId = new TextDecoder('ascii', { fatal: false }).decode(ecuIdBytes).trim();
+      
+      // Return the family based on full ID
+      if (ecuId.includes('MG1C400A1T2')) return 'MG1C400A1T2';
+      if (ecuId.includes('MG1CA920')) return 'MG1CA920';
+      
+      // Fallback to MG1C400A1T2 if just MG1C marker is present
+      return 'MG1C400A1T2';
+    }
+  }
+  
+  // If not found at known locations, search the entire binary
+  const markerPos = searchForMarker(binary, 'MG1C');
+  if (markerPos !== -1 && markerPos + 18 <= binary.length) {
+    const ecuIdBytes = binary.slice(markerPos, markerPos + 18);
     const ecuId = new TextDecoder('ascii', { fatal: false }).decode(ecuIdBytes).trim();
     
-    // Return the family based on full ID
     if (ecuId.includes('MG1C400A1T2')) return 'MG1C400A1T2';
     if (ecuId.includes('MG1CA920')) return 'MG1CA920';
     
-    // Fallback to MG1C400A1T2 if just MG1C marker is present
+    // Found MG1C marker, default to MG1C400A1T2
     return 'MG1C400A1T2';
   }
   

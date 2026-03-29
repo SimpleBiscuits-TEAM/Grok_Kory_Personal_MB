@@ -11,6 +11,7 @@ import { supportRouter } from "./routers/support";
 import { notificationsRouter } from "./routers/notifications";
 import { qaRouter } from "./routers/qa";
 import { notificationPrefsRouter } from "./routers/notificationPrefs";
+import { offsetProfilesRouter } from "./routers/offsetProfiles";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -54,6 +55,9 @@ export const appRouter = router({
 
   // User Notification Preferences
   notificationPrefs: notificationPrefsRouter,
+
+  // Binary Offset Profiles
+  offsetProfiles: offsetProfilesRouter,
 
   // Feedback / Error Reports
   feedback: router({
