@@ -15,6 +15,8 @@ import { offsetProfilesRouter } from "./routers/offsetProfiles";
 import { voiceRouter } from "./routers/voice";
 import { debugRouter } from "./routers/debug";
 import { binaryAnalysisRouter } from "./routers/binaryAnalysis";
+import { adminMessagingRouter } from "./routers/adminMessaging";
+import { supportAdminRouter } from "./routers/supportAdmin";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -69,6 +71,12 @@ export const appRouter = router({
 
   // Binary Reverse Engineering
   binaryAnalysis: binaryAnalysisRouter,
+
+  // Admin Messaging (staff-customer chat)
+  adminMessaging: adminMessagingRouter,
+
+  // PPEI Support Admin Panel (super_admin only)
+  supportAdmin: supportAdminRouter,
 
   // Feedback / Error Reports
   feedback: router({

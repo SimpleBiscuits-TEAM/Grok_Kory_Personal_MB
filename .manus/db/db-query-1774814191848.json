@@ -1,0 +1,40 @@
+{
+  "query": "SHOW TABLES LIKE 'admin%'; SHOW TABLES LIKE 'support%'; SHOW TABLES LIKE 'feedback';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute SHOW TABLES LIKE 'admin%'; SHOW TABLES LIKE 'support%'; SHOW TABLES LIKE 'feedback';",
+  "rows": [
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "admin_audit_log"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "admin_conversations"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "admin_messages"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "admin_notifications"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (support%)"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "support_metrics"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "support_session_recordings"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "support_sessions"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (feedback)"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)": "feedback"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (admin%)\nadmin_audit_log\nadmin_conversations\nadmin_messages\nadmin_notifications\nTables_in_S5fEZ6uPndYXxpVXwwyEPy (support%)\nsupport_metrics\nsupport_session_recordings\nsupport_sessions\nTables_in_S5fEZ6uPndYXxpVXwwyEPy (feedback)\nfeedback\n",
+  "stderr": "",
+  "execution_time_ms": 166
+}

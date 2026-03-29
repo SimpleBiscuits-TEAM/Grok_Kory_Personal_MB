@@ -2034,3 +2034,21 @@
 - [x] Return cached A2L if found, skip regeneration
 - [x] Updated binaryAnalysis router with OS extraction and caching logic
 - [x] TypeScript compilation clean, ready for testing
+
+
+## PPEI Support Admin Panel (2026-03-29)
+- [x] Created supportAdminRouter (super_admin only - all endpoints gated)
+- [x] Dashboard stats endpoint (feedback, sessions, conversations, users, unread counts)
+- [x] Feedback listing with type filters and search
+- [x] Support session listing with status filters (active/ended/expired)
+- [x] Conversation listing, message history, send message, start conversation
+- [x] User listing with search for starting new conversations
+- [x] Built SupportAdminPanel UI with 5 sub-panels (Dashboard, Feedback, Sessions, Messages, Users)
+- [x] Dashboard sub-panel with 6 stat cards (PPEI theme)
+- [x] Feedback inbox with type/search filters, star ratings, error details
+- [x] Sessions panel with status badges and customer info
+- [x] Conversations panel with full chat interface (auto-scroll, real-time refresh)
+- [x] Users panel with message initiation (subject + initial message form)
+- [x] Added SUPPORT tab to Advanced.tsx (super_admin only)
+- [x] Registered supportAdminRouter and adminMessagingRouter in main routers.ts
+- [x] Server running clean, TypeScript 0 errors, no longtext error

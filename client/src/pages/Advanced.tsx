@@ -18,7 +18,7 @@ import {
   FileText, Activity, AlertCircle,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings
+  Radio, Wrench, Key, Settings, Inbox
 } from 'lucide-react';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
@@ -61,6 +61,7 @@ import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
 import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
+import SupportAdminPanel from '@/components/SupportAdminPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
@@ -1226,7 +1227,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1260,7 +1261,11 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [query, setQuery] = useState('');
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const allTabs = isAdmin ? [...tabs, ...adminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
+  const isSuperAdmin = user?.role === 'super_admin';
+  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
+    { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  ] : [];
+  const allTabs = isAdmin ? [...tabs, ...adminTabs, ...superAdminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
@@ -1437,6 +1442,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'reverseeng' && isAdmin && <div className="ppei-anim-fade-up"><ReverseEngineeringPanel /></div>}
+        {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 
