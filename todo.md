@@ -1171,7 +1171,7 @@
 ## Editor Enhancements (2026-03-29)
 - [ ] Build "Erika's Help" tab in editor — Erika renders actual calibration maps/tables from binary when requested via chat
 - [ ] Modified tables tracking — every modified table gets its own tab with translated labels/folders
-- [ ] Editor sign-in prompt — prompt sign-in on editor entry, allow dismiss with "missing features" notification
+- [x] Editor sign-in prompt — prompt sign-in on editor entry, allow dismiss with "missing features" notification
 - [ ] Inline interpolation controls — move interpolation options below table view for quick access
 - [ ] Inline value editor — keep value editor visible below/beside table view for quick edits
 - [ ] Right-click "Reference Point" — shows what other maps reference this map and where it points, uses decompiler
@@ -1194,3 +1194,26 @@
 - [x] Integrate diagnostics engine results into Erika's context automatically (pipe diagnostics.ts findings)
 - [x] Build RAG system for A2L maps - embed map names/descriptions, retrieve relevant ones per query
 - [x] Eliminate A2L truncation problem with intelligent retrieval
+
+## Optional Sign-In Prompt (2026-03-29)
+- [ ] Build SignInPrompt component — modal/dialog that appears on first visit
+- [ ] Show feature comparison (signed in vs guest) with clear benefits
+- [ ] Allow user to dismiss and continue as guest
+- [ ] Store dismissal in localStorage so it doesn't reappear every visit
+- [ ] Add subtle persistent reminder banner for unsigned users showing missed features
+- [ ] Integrate prompt into Home page and Editor page
+- [ ] Wire up to existing Manus OAuth login flow
+
+## Optional Sign-In Prompt (2026-03-29)
+- [ ] Build SignInPrompt component — clean modal on first visit, no feature details
+- [ ] Allow dismiss and continue as guest
+- [ ] Store dismissal in localStorage
+- [ ] Add subtle persistent reminder for unsigned users
+- [ ] Integrate into Home and Editor pages
+- [ ] Wire to Manus OAuth login flow
+
+## Editor Search Performance (2026-03-29)
+- [x] Optimize map tree search — debounce input (150ms) + pre-computed lowercase fields
+
+## Humor Style Update (2026-03-29)
+- [x] Update Erika's editor personality to include real mom and dad jokes — no Tony Stark style burns

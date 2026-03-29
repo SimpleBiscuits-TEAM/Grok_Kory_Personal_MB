@@ -163,12 +163,23 @@ function buildMagicTree(maps: CalibrationMap[], magicMap: Map<string, MagicModeM
 }
 
 export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, modifiedMaps, ecuFamily }: MapTreeBrowserProps) {
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [activeResultIdx, setActiveResultIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const resultsContainerRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounce search input → actual query (150ms)
+  const handleSearchInput = useCallback((value: string) => {
+    setSearchInput(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(value);
+    }, 150);
+  }, []);
 
   // Magic Mode state
   const [magicMode, setMagicMode] = useState(false);
@@ -185,14 +196,24 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
     return buildMagicTree(maps, magicMap);
   }, [maps, magicMode, magicMap]);
 
-  // Intelligent search with timing
+  // Pre-compute lowercase fields once when maps change
+  const mapsLower = useMemo(() => maps.map(m => ({
+    name: m.name.toLowerCase(),
+    desc: (m.description || '').toLowerCase(),
+    cat: (m.category || '').toLowerCase(),
+    subCat: (m.subcategory || '').toLowerCase(),
+    unit: (m.unit || '').toLowerCase(),
+    annot: m.annotations.join(' ').toLowerCase(),
+  })), [maps]);
+
+  // Intelligent search with timing — uses debounced query
   const searchData = useMemo(() => {
     if (!searchQuery.trim()) return null;
     const start = performance.now();
     const results = searchMapsDetailed(maps, searchQuery);
     const elapsed = performance.now() - start;
     return { results, elapsed };
-  }, [maps, searchQuery]);
+  }, [maps, searchQuery, mapsLower]);
 
   // Reset active index when search changes
   useEffect(() => {
@@ -329,7 +350,9 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
   }, [searchData, activeResultIdx, onSelectMap]);
 
   const clearSearch = useCallback(() => {
+    setSearchInput('');
     setSearchQuery('');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     searchInputRef.current?.focus();
   }, []);
 
@@ -356,12 +379,12 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
               ref={searchInputRef}
               className="w-full bg-zinc-800/80 border border-zinc-700 rounded pl-7 pr-7 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-ppei-red/50"
               placeholder="Search maps, addresses, units..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={e => handleSearchInput(e.target.value)}
               onKeyDown={handleSearchKeyDown}
               autoFocus
             />
-            {searchQuery && (
+            {searchInput && (
               <button
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                 onClick={clearSearch}
@@ -484,8 +507,8 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
             ref={searchInputRef}
             className="w-full bg-zinc-800/80 border border-zinc-700 rounded pl-7 pr-2 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-ppei-red/50"
             placeholder="Search maps, addresses, units..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={e => handleSearchInput(e.target.value)}
             onKeyDown={handleSearchKeyDown}
           />
         </div>

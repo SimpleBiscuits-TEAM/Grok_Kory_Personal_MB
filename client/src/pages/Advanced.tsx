@@ -10,6 +10,7 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { SignInBanner } from '@/components/SignInPrompt';
 import { Link } from 'wouter';
 import {
   Search, Lock, ArrowLeft, Database, BookOpen,
@@ -1264,6 +1265,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="min-h-screen" style={{ background: sColor.bg, color: sColor.text }}>
+      <SignInBanner />
       {/* Header */}
       <header style={{ background: sColor.bgDark, borderBottom: `1px solid oklch(0.20 0.008 260)`, boxShadow: '0 2px 20px oklch(0 0 0 / 0.5)' }}>
         <div className="ppei-accent-animated" style={{ height: '3px' }} />
