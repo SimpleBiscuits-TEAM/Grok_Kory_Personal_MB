@@ -64,6 +64,13 @@
       "when": 1774788404832,
       "tag": "0008_easy_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1774790275087,
+      "tag": "0009_absent_bloodstrike",
+      "breakpoints": true
     }
   ]
 }

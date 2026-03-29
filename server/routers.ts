@@ -9,6 +9,8 @@ import { projectsRouter } from "./routers/projects";
 import { tunesRouter } from "./routers/tunes";
 import { supportRouter } from "./routers/support";
 import { notificationsRouter } from "./routers/notifications";
+import { qaRouter } from "./routers/qa";
+import { notificationPrefsRouter } from "./routers/notificationPrefs";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -46,6 +48,12 @@ export const appRouter = router({
 
   // Admin Push Notifications
   notifications: notificationsRouter,
+
+  // QA Test Checklists
+  qa: qaRouter,
+
+  // User Notification Preferences
+  notificationPrefs: notificationPrefsRouter,
 
   // Feedback / Error Reports
   feedback: router({

@@ -1671,3 +1671,64 @@
 - [x] Create NotificationBell component for user notification dropdown
 - [x] Add DB schema (admin_notifications + notification_deliveries tables)
 - [x] Write tests for admin notification system (5 tests passing)
+
+
+## Step 1: Wire Admin Notification Panel into Advanced Mode
+- [x] Add Admin tab to Advanced Mode tab interface
+- [x] Show Admin tab only for admin-role users
+- [x] Integrate AdminNotificationPanel into Admin tab
+- [x] Add notification management section with compose/history/analytics
+
+## Step 2: User Notification Preferences
+- [x] Create DB schema for user notification preferences
+- [x] Create tRPC procedures for reading/updating preferences
+- [x] Build notification preferences UI component (NotificationPrefsPanel)
+- [x] Add preferences to Advanced Mode as accessible tab for all users
+- [x] Add priority filter (low/medium/high/critical)
+- [x] Add mute/unmute functionality with duration options
+
+## TIER 2: Multi-Protocol Comparative Analysis
+- [x] Create ComparisonEngine module for side-by-side protocol analysis
+- [x] Implement data alignment algorithm (timestamp sync across protocols)
+- [x] Create comparison report showing protocol differences
+- [x] Implement quality scoring per protocol
+- [x] Add CSV export for comparison reports
+- [x] Write tests for comparison logic (4 tests passing)
+
+## TIER 2: DBC File Import
+- [x] Create DBCParser module (parse DBC format)
+- [x] Parse messages (BO_), signals (SG_), comments (CM_), value tables (VAL_)
+- [x] Implement CAN frame decoder with Intel/Motorola byte order
+- [x] Add DBC search by signal name/comment
+- [x] Create bridge to NormalizedReading format
+- [x] Write tests for DBC parsing (10 tests passing)
+
+## TIER 2: ML Fault Prediction
+- [x] Create trend analysis module (linear regression + moving average)
+- [x] Implement predictive model with 9 known fault signatures
+- [x] Add anomaly detection via z-score method
+- [x] Create fault probability scoring with limit approach detection
+- [x] Add predictions for 30s/60s/300s ahead
+- [x] Write tests for trend detection (7 tests passing)
+
+## TIER 2: Cross-Protocol Fault Correlation
+- [x] Create FaultCorrelationEngine module
+- [x] Implement J1939 SPN/FMI to OBD-II DTC mapping (25+ SPNs)
+- [x] Implement K-Line fault to OBD-II DTC mapping (13 mappings)
+- [x] Add root cause analysis across protocols
+- [x] Create correlation confidence scoring
+- [x] Add temporal correlation detection (faults within 5s)
+- [x] Add FMI descriptions and SPN info lookup
+- [x] Write tests for fault correlation (8 tests passing)
+
+
+## QA Test Checklist for PPEI Admin Panel
+- [x] Create DB schema for test_checklists and test_items tables (qa_checklists, qa_test_items, qa_item_comments)
+- [x] Create tRPC procedures for CRUD on test checklists and items
+- [x] Build QA TestChecklist UI component with checkable items (QAChecklistPanel)
+- [x] Add error/comment field per test item for team notes
+- [x] Add status tracking (pass/fail/blocked/skipped) per item
+- [x] Add team member assignment and timestamps
+- [x] Pre-populate default test list covering all V-OP features (50 tests)
+- [x] Integrate QA checklist into Admin tab in Advanced Mode
+- [x] Add progress bar with color-coded status breakdown

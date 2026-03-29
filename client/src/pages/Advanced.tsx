@@ -9,7 +9,7 @@
  *   - Access gated behind code "PPEIROCKS"
  */
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { SignInBanner } from '@/components/SignInPrompt';
 import { Link } from 'wouter';
 import {
@@ -55,6 +55,10 @@ import IntelliSpy from '@/components/IntelliSpy';
 import VehicleCoding from '@/components/VehicleCoding';
 import CanAmVinChanger from '@/components/CanAmVinChanger';
 import ServiceProcedures from '@/components/ServiceProcedures';
+import QAChecklistPanel from '@/components/QAChecklistPanel';
+import AdminNotificationPanel from '@/components/AdminNotificationPanel';
+import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
+import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
@@ -1219,7 +1223,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'qa' | 'notifications' | 'notifprefs';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1240,9 +1244,18 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
 ];
 
+const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+];
+
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>('analyzer');
   const [query, setQuery] = useState('');
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const allTabs = isAdmin ? [...tabs, ...adminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
@@ -1320,17 +1333,23 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
       <main className="container mx-auto px-4 py-6">
         {/* Tab navigation */}
         <div style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: `1px solid oklch(0.20 0.008 260)`, overflowX: 'auto' }}>
-          {tabs.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-              display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
-              fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
-              color: activeTab === tab.id ? 'white' : 'oklch(0.50 0.010 260)',
-              background: activeTab === tab.id ? 'oklch(0.16 0.008 260)' : 'transparent',
-              border: 'none', borderBottom: activeTab === tab.id ? `2px solid ${sColor.red}` : '2px solid transparent',
-              cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
-            }}>
-              {tab.icon} {tab.label}
-            </button>
+          {allTabs.map((tab, idx) => (
+            <Fragment key={tab.id}>
+              {/* Admin section divider */}
+              {isAdmin && idx === tabs.length && (
+                <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
+              )}
+              <button onClick={() => setActiveTab(tab.id)} style={{
+                display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
+                color: activeTab === tab.id ? 'white' : 'oklch(0.50 0.010 260)',
+                background: activeTab === tab.id ? 'oklch(0.16 0.008 260)' : 'transparent',
+                border: 'none', borderBottom: activeTab === tab.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+                cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
+              }}>
+                {tab.icon} {tab.label}
+              </button>
+            </Fragment>
           ))}
         </div>
 
@@ -1409,6 +1428,9 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
         {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
         {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
+        {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
+        {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 
       {/* Footer */}
