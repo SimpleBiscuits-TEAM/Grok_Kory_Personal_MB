@@ -1771,3 +1771,18 @@
 - [ ] Create map description lookup from a2L metadata
 - [ ] Sort maps by description for better UX
 - [ ] Add search by description functionality
+
+
+## Calibration Editor UI Refactor (PARTIAL - CHECKPOINT SAVED)
+- [x] Create Map Diff modal component with scrollable list (MapDiffModal.tsx)
+- [ ] Move Original/Compare buttons to right side of map display
+- [ ] Original button shows values from original file
+- [ ] Compare button shows values from comparison file
+- [ ] Map Diff button opens modal showing all map differences
+- [ ] Refactor TuneCompare layout for new button placement
+- [x] Add MG1 file detection logic (mg1Detection.ts)
+- [x] Conditionally show/hide Dynojet patch button (MG1 only) - PatchManager.tsx updated
+- [x] Conditionally show/hide HPTuners patch button (MG1 only) - PatchManager.tsx updated
+- [x] Add state to TuneCompare for Original/Compare/MapDiff modes
+- [ ] Wire isMG1 prop to PatchManager in Advanced.tsx
+- [ ] Test Original/Compare/Map Diff/MG1 patch visibility

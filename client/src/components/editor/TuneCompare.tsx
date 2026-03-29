@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import type { EcuDefinition, CalibrationMap, AlignmentResult } from '@/lib/editorEngine';
 import { extractBinaryData, alignOffsets, populateMapValues, readValue, resolveDataType } from '@/lib/editorEngine';
+import MapDiffModal from './MapDiffModal';
+import { isMG1File, canApplyDynojePatch, canApplyHPTunersPatch } from '@/lib/mg1Detection';
 
 interface TuneFile {
   name: string;
@@ -72,9 +74,29 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const [hexPage, setHexPage] = useState(0);
   const [sizeMismatch, setSizeMismatch] = useState<{ primary: number; compare: number; difference: number; offsetsAtRisk: string[] } | null>(null);
   const [erikaAttemptedFix, setErikaAttemptedFix] = useState(false);
+  const [showMapDiffModal, setShowMapDiffModal] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'original' | 'compare'>('original');
 
   const BYTES_PER_PAGE = 512;
   const BYTES_PER_ROW = 16;
+
+  // Check if primary binary is MG1
+  const isMG1 = useMemo(() => {
+    if (!primaryBinary) return false;
+    return isMG1File(primaryFileName, primaryBinary);
+  }, [primaryBinary, primaryFileName]);
+
+  // Check if Dynojet patch is available
+  const canPatchDynojet = useMemo(() => {
+    if (!primaryBinary) return false;
+    return canApplyDynojePatch(primaryFileName, primaryBinary);
+  }, [primaryBinary, primaryFileName]);
+
+  // Check if HPTuners patch is available
+  const canPatchHPTuners = useMemo(() => {
+    if (!primaryBinary) return false;
+    return canApplyHPTunersPatch(primaryFileName, primaryBinary);
+  }, [primaryBinary, primaryFileName]);
 
   // ── Load compare file ──
   const handleCompareLoad = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

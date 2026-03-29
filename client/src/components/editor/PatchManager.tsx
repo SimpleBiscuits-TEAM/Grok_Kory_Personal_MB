@@ -56,12 +56,14 @@ interface PatchStatus {
 
 interface PatchManagerProps {
   binary: Uint8Array | null;
+  isMG1?: boolean;
   onPatchApply?: (patchId: string, binary: Uint8Array) => void;
   onPatchRemove?: (patchId: string, binary: Uint8Array) => void;
 }
 
 export const PatchManager: React.FC<PatchManagerProps> = ({
   binary,
+  isMG1 = false,
   onPatchApply,
   onPatchRemove,
 }) => {
@@ -151,12 +153,12 @@ export const PatchManager: React.FC<PatchManagerProps> = ({
     }
   };
 
-  if (!binary) {
+  if (!binary || !isMG1) {
     return (
       <Card className="p-4 bg-amber-50 border-amber-200">
         <div className="flex items-center gap-2 text-amber-800">
           <AlertCircle className="w-4 h-4" />
-          <span>Load a binary file to detect and apply patches</span>
+          <span>{!binary ? 'Load a binary file to detect and apply patches' : 'Patches only available for Polaris MG1 files'}</span>
         </div>
       </Card>
     );
