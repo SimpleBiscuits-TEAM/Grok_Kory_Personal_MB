@@ -66,34 +66,38 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
 
   return (
     <div style={{
-      background: sColor.bgCard, border: `1px solid ${sColor.border}`,
-      borderLeft: `3px solid ${isMode22 ? sColor.orange : getColor(pct)}`, borderRadius: '3px',
-      padding: '12px 16px', minWidth: '180px',
+      background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '14px',
+      minWidth: '160px',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
         {isMode22 && (
-          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'oklch(0.15 0.02 55 / 0.4)', padding: '1px 4px', borderRadius: '2px' }}>
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'rgba(255,127,0,0.2)', padding: '2px 6px', borderRadius: '3px', fontWeight: 700 }}>
             M22
           </span>
         )}
-        <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, letterSpacing: '0.08em', textTransform: 'uppercase', flex: 1 }}>
           {pid.shortName}
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '1.8rem', fontWeight: 700, color: sColor.text, lineHeight: 1 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '10px' }}>
+        <span style={{ fontFamily: sFont.mono, fontSize: '1.9rem', fontWeight: 700, color: getColor(pct), lineHeight: 1, transition: 'color 0.3s ease-out' }}>
           {reading ? (Number.isInteger(value) ? value : value.toFixed(1)) : '---'}
         </span>
-        <span style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim }}>
+        <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim }}>
           {pid.unit}
         </span>
       </div>
-      <div style={{ marginTop: '6px', height: '3px', background: 'oklch(0.15 0.005 260)', borderRadius: '2px', overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.15s ease-out' }} />
+      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginBottom: '8px' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.2s ease-out', borderRadius: '3px', boxShadow: `0 0 12px ${getColor(pct)}80` }} />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.min}</span>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.max}{pid.unit}</span>
+        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.max}</span>
       </div>
     </div>
   );

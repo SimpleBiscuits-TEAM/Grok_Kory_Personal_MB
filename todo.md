@@ -1294,3 +1294,12 @@
 - [ ] Build parameter validator to prevent out-of-range writes
 - [ ] Integrate Cummins tuning into CalibrationEditor UI
 - [ ] Write tests for Cummins parameter database and tuning engine
+
+
+## Mobile UI & Gauge Modernization (2026-03-29)
+- [ ] Audit current gauge components and identify Windows 98-style elements
+- [ ] Design modern gauge system with smooth animations and glassmorphism
+- [ ] Build responsive mobile-first gauge components
+- [ ] Optimize datalogger UI for mobile screens
+- [ ] Test gauges on mobile devices and tablets
+- [ ] Optimize performance for smooth animations on mobile
