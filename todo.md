@@ -1303,3 +1303,128 @@
 - [ ] Optimize datalogger UI for mobile screens
 - [ ] Test gauges on mobile devices and tablets
 - [ ] Optimize performance for smooth animations on mobile
+
+## J1939 Protocol Support (Heavy-Duty Trucks)
+- [ ] Research J1939 protocol specification (29-bit CAN, PGN addressing, multi-packet messages)
+- [ ] Create J1939 PGN database (engine, transmission, brake, fuel system, emissions)
+- [ ] Implement J1939 parameter extraction (PGN parsing, byte order, scaling/offset)
+- [ ] Add J1939 logging support to OBDConnection (CAN sniffer integration)
+- [ ] Create J1939-specific presets (Engine Parameters, Transmission, Emissions, Diagnostics)
+- [ ] Implement J1939 DM1/DM2 fault code reading (active/inactive faults)
+- [ ] Add J1939 datalog export format (CSV with PGN names and descriptions)
+- [ ] Build J1939 diagnostics analyzer (fault pattern recognition, threshold validation)
+- [ ] Add J1939 vehicle detection (Cummins ISX/ISB, Duramax, Powertrain controllers)
+- [ ] Write comprehensive J1939 tests (PGN parsing, multi-packet assembly, fault detection)
+
+## K-Line Protocol Support (Older Vehicles)
+- [ ] Research K-Line specification (ISO 9141-2, 10.4 kbaud, single-wire protocol)
+- [ ] Implement K-Line initialization (5-baud wakeup, tester present)
+- [ ] Create K-Line PID database (OBD-II Mode 01/02, manufacturer-specific modes)
+- [ ] Implement K-Line communication (request/response, timeout handling, error recovery)
+- [ ] Add K-Line logging support to OBDConnection (serial port integration)
+- [ ] Create K-Line-specific presets (Engine Basics, Fuel System, Emissions)
+- [ ] Implement K-Line DTC reading (Mode 03/04 support)
+- [ ] Add K-Line datalog export format (CSV with PID names and descriptions)
+- [ ] Build K-Line diagnostics analyzer (fault detection, threshold validation)
+- [ ] Add K-Line vehicle detection (pre-2010 vehicles, legacy systems)
+- [ ] Write comprehensive K-Line tests (initialization, PID reading, DTC handling)
+
+## J1939 and K-Line Logging Components
+- [ ] Create J1939LoggingPanel component (PGN selector, real-time parameter display)
+- [ ] Create K-LineLoggingPanel component (PID selector, real-time parameter display)
+- [ ] Implement protocol auto-detection (CAN vs K-Line vs OBD-II)
+- [ ] Add protocol selector to DataloggerPanel (dropdown for J1939, K-Line, OBD-II)
+- [ ] Create unified logging interface (protocol-agnostic parameter display)
+- [ ] Add real-time gauges for J1939/K-Line parameters
+- [ ] Implement CSV export for J1939 and K-Line datalogs
+
+## J1939 and K-Line Diagnostics
+- [ ] Implement J1939 DM1 (active faults) analysis
+- [ ] Implement J1939 DM2 (previously active faults) analysis
+- [ ] Create J1939 fault pattern database (Cummins, Duramax, Volvo, Freightliner)
+- [ ] Build K-Line fault detection engine (Mode 03/04 parsing)
+- [ ] Create K-Line fault pattern database (OEM-specific codes)
+- [ ] Add J1939 diagnostic report generation
+- [ ] Add K-Line diagnostic report generation
+- [ ] Implement cross-protocol fault correlation (same issue, different protocols)
+
+## Integration and Testing
+- [ ] Integrate J1939 support into Advanced Mode tabs
+- [ ] Integrate K-Line support into Advanced Mode tabs
+- [ ] Update VIN detection for J1939/K-Line vehicles
+- [ ] Update vehicle presets for J1939/K-Line protocols
+- [ ] Write integration tests for J1939 logging
+- [ ] Write integration tests for K-Line logging
+- [ ] Test protocol auto-detection logic
+- [ ] Test CSV export for all protocols (OBD-II, J1939, K-Line)
+- [ ] Verify all existing tests still pass (target: 750+ tests)
+
+
+## J1939 Protocol Implementation (COMPLETED)
+- [x] Research J1939 protocol specification (29-bit CAN, PGN addressing, multi-packet messages)
+- [x] Create J1939 PGN database (engine, transmission, brake, fuel system, emissions)
+- [x] Implement J1939 parameter extraction (PGN parsing, byte order, scaling/offset)
+- [x] Create J1939 DM1/DM2 fault code reading (active/inactive faults)
+- [x] Build J1939 diagnostics analyzer (fault pattern recognition, threshold validation)
+- [x] Add J1939 vehicle detection (Cummins ISX/ISB, Duramax, Powertrain controllers)
+- [x] Create J1939LoggingPanel component (PGN selector, real-time parameter display)
+- [x] Implement J1939 diagnostic report generation
+
+## K-Line Protocol Implementation (COMPLETED)
+- [x] Research K-Line specification (ISO 9141-2, 10.4 kbaud, single-wire protocol)
+- [x] Implement K-Line initialization (5-baud wakeup, tester present)
+- [x] Create K-Line PID database (OBD-II Mode 01/02, manufacturer-specific modes)
+- [x] Implement K-Line communication (request/response, timeout handling, error recovery)
+- [x] Implement K-Line DTC reading (Mode 03/04 support)
+- [x] Build K-Line diagnostics analyzer (fault detection, threshold validation)
+- [x] Add K-Line vehicle detection (pre-2010 vehicles, legacy systems)
+- [x] Create KLineLoggingPanel component (PID selector, real-time parameter display)
+- [x] Add K-Line diagnostic report generation
+
+## Protocol Detection and Management (COMPLETED)
+- [x] Implement protocol auto-detection (CAN vs K-Line vs OBD-II)
+- [x] Create protocol detection module with confidence scoring
+- [x] Implement protocol compatibility matrix (year/make/region)
+- [x] Create ProtocolSelector component for UI integration
+- [x] Add protocol-specific features and adapter recommendations
+- [x] Implement protocol health scoring and diagnostics
+
+## J1939 and K-Line Logging Components (COMPLETED)
+- [x] Create J1939LoggingPanel component (PGN selector, real-time parameter display)
+- [x] Create KLineLoggingPanel component (PID selector, real-time parameter display)
+- [x] Implement protocol auto-detection (CAN vs K-Line vs OBD-II)
+- [x] Create ProtocolSelector component for Advanced Mode
+
+## J1939 and K-Line Diagnostics (COMPLETED)
+- [x] Implement J1939 engine parameter analysis (speed, load, torque)
+- [x] Implement J1939 transmission parameter analysis (temperature, lockup status)
+- [x] Implement J1939 temperature parameter analysis (coolant, oil, turbo)
+- [x] Implement J1939 DM1 (active faults) analysis
+- [x] Implement J1939 DM2 (previously active faults) analysis
+- [x] Create J1939 fault pattern database (Cummins, Duramax, Volvo, Freightliner)
+- [x] Build K-Line fault detection engine (Mode 03/04 parsing)
+- [x] Create K-Line fault pattern database (OEM-specific codes)
+- [x] Add J1939 diagnostic report generation
+- [x] Add K-Line diagnostic report generation
+
+## Next Steps: J1939 and K-Line Integration
+- [ ] Add J1939 logging support to OBDConnection (CAN sniffer integration)
+- [ ] Add K-Line logging support to OBDConnection (serial port integration)
+- [ ] Create J1939-specific presets (Engine Parameters, Transmission, Emissions, Diagnostics)
+- [ ] Create K-Line-specific presets (Engine Basics, Fuel System, Emissions)
+- [ ] Add protocol selector to DataloggerPanel (dropdown for J1939, K-Line, OBD-II)
+- [ ] Create unified logging interface (protocol-agnostic parameter display)
+- [ ] Add real-time gauges for J1939/K-Line parameters
+- [ ] Implement CSV export for J1939 and K-Line datalogs
+- [ ] Add J1939 datalog export format (CSV with PGN names and descriptions)
+- [ ] Add K-Line datalog export format (CSV with PID names and descriptions)
+- [ ] Integrate J1939 support into Advanced Mode tabs
+- [ ] Integrate K-Line support into Advanced Mode tabs
+- [ ] Update vehicle presets for J1939/K-Line protocols
+- [ ] Write integration tests for J1939 logging
+- [ ] Write integration tests for K-Line logging
+- [ ] Write comprehensive J1939 tests (PGN parsing, multi-packet assembly, fault detection)
+- [ ] Write comprehensive K-Line tests (initialization, PID reading, DTC handling)
+- [ ] Implement cross-protocol fault correlation (same issue, different protocols)
+- [ ] Test CSV export for all protocols (OBD-II, J1939, K-Line)
+- [ ] Verify all existing tests still pass (target: 750+ tests)
