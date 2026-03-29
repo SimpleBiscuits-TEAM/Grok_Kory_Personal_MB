@@ -1844,33 +1844,39 @@
 
 
 ## Binary Reverse Engineering Engine - Phase 2: Implementation
-- [ ] Parse Can-Am MG1 A2L file and extract all 46K+ calibration maps
-- [ ] Index A2L maps by address, name, category, and data type
-- [ ] Create tRPC endpoints for document upload/storage/retrieval
-- [ ] Extract knowledge chunks from 8 Bosch function documents
-- [ ] Build binary signature detection engine (magic bytes, patterns, offsets)
-- [ ] Implement ECU family auto-detection from binary headers
-- [ ] Discover calibration map patterns in raw binaries
-- [ ] Cross-reference discovered maps against A2L library
-- [ ] Implement A2L definition auto-generation for unknown ECUs
-- [ ] Integrate reverse engineering UI into CalibrationEditor
-- [ ] Test with Can-Am MG1 binary file (StockRead_1G0100914SB3VUM8_UL_exported.bin)
-- [ ] Validate generated A2L against original binary
+- [x] Parse Can-Am MG1 A2L file and extract all 46K+ calibration maps
+- [x] Index A2L maps by address, name, category, and data type
+- [x] Create tRPC endpoints for document upload/storage/retrieval
+- [x] Extract knowledge chunks from 8 Bosch function documents
+- [x] Build binary signature detection engine (magic bytes, patterns, offsets)
+- [x] Implement ECU family auto-detection from binary headers
+- [x] Discover calibration map patterns in raw binaries
+- [x] Cross-reference discovered maps against A2L library
+- [x] Implement A2L definition auto-generation for unknown ECUs
+- [x] Integrate reverse engineering UI into CalibrationEditor (ReverseEngineeringPanel.tsx)
+- [x] Test with Can-Am MG1 binary file
+- [x] Validate generated A2L against original binary
+
+## Binary Reverse Engineering Engine - Phase 5-6: Complete
+- [x] Phase 5: A2L Auto-Generation (a2lGenerator.ts)
+- [x] Phase 6: Integration & Testing (reverseEngineeringRouter.ts, ReverseEngineeringPanel.tsx)
+- [x] Added REVERSE ENG tab to Advanced.tsx
+- [x] Verified Can-Am MG1 binary signatures (DEADBEEF, MG1C_HEADER, MG1C_POINTER)
 
 
 ## Voice Command Interface - Real-time Vehicle Data Queries
-- [ ] Design voice command system architecture
-- [ ] Create PID mapping database (fuel level, temperature, pressure, etc.)
-- [ ] Implement speech-to-text capture (browser Web Audio API)
-- [ ] Implement natural language intent recognition (LLM-powered)
-- [ ] Create PID query engine for vehicle data polling
-- [ ] Implement real-time vehicle data retrieval
-- [ ] Implement text-to-speech response generation
-- [ ] Create voice command UI button in analyzer dashboard
-- [ ] Add voice command history/transcript display
-- [ ] Test with sample queries: "fuel tank level", "engine temperature", "boost pressure"
-- [ ] Add error handling for disconnected vehicles
-- [ ] Add voice command permissions and privacy controls
+- [x] Design voice command system architecture
+- [x] Create PID mapping database (fuel level, temperature, pressure, etc.)
+- [x] Implement speech-to-text capture (browser Web Audio API)
+- [x] Implement natural language intent recognition (LLM-powered)
+- [x] Create PID query engine for vehicle data polling
+- [x] Implement real-time vehicle data retrieval
+- [x] Implement text-to-speech response generation
+- [x] Create voice command UI button in analyzer dashboard
+- [x] Add voice command history/transcript display
+- [x] Test with sample queries: "fuel tank level", "engine temperature", "boost pressure"
+- [x] Add error handling for disconnected vehicles
+- [x] Add voice command permissions and privacy controls
 
 ## Self-Healing Debug System
 - [x] Database schema: debug_permissions table (admin grants access to specific users)
@@ -1953,3 +1959,15 @@
 - [ ] tRPC endpoints for remote vehicle commands
 - [ ] WebSocket integration for real-time telemetry
 - [ ] Audit logging for all remote operations
+
+
+## Bug Fix: Pro Accounts Switching to Lite
+- [ ] Investigate why Erik and Kory Pro accounts keep reverting to Lite tier
+- [ ] Fix account tier persistence logic
+- [ ] Verify Pro status stays after login/refresh
+
+
+## Bug Fix: Pro Accounts Switching to Lite
+- [ ] Investigate why Erik and Kory Pro accounts keep reverting to Lite tier
+- [ ] Fix account tier persistence logic
+- [ ] Verify Pro status stays after login/refresh

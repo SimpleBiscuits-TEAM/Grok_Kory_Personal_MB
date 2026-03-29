@@ -1,0 +1,122 @@
+{
+  "query": "DESCRIBE users; SELECT id, openId, name, email, role, createdAt FROM users ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute DESCRIBE users; SELECT id, openId, name, email, role, createdAt FROM users ORDER BY id;",
+  "rows": [
+    {
+      "Field": "id",
+      "Type": "int",
+      "Null": "NO",
+      "Key": "PRI",
+      "Default": "NULL",
+      "Extra": "auto_increment"
+    },
+    {
+      "Field": "openId",
+      "Type": "varchar(64)",
+      "Null": "NO",
+      "Key": "UNI",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "name",
+      "Type": "text",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "email",
+      "Type": "varchar(320)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "loginMethod",
+      "Type": "varchar(64)",
+      "Null": "YES",
+      "Key": "",
+      "Default": "NULL",
+      "Extra": ""
+    },
+    {
+      "Field": "role",
+      "Type": "enum('user','admin','super_admin')",
+      "Null": "NO",
+      "Key": "",
+      "Default": "user",
+      "Extra": ""
+    },
+    {
+      "Field": "createdAt",
+      "Type": "timestamp",
+      "Null": "NO",
+      "Key": "",
+      "Default": "CURRENT_TIMESTAMP",
+      "Extra": ""
+    },
+    {
+      "Field": "updatedAt",
+      "Type": "timestamp",
+      "Null": "NO",
+      "Key": "",
+      "Default": "CURRENT_TIMESTAMP",
+      "Extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+    },
+    {
+      "Field": "lastSignedIn",
+      "Type": "timestamp",
+      "Null": "NO",
+      "Key": "",
+      "Default": "CURRENT_TIMESTAMP",
+      "Extra": ""
+    },
+    {
+      "Field": "id",
+      "Type": "openId",
+      "Null": "name",
+      "Key": "email",
+      "Default": "role",
+      "Extra": "createdAt"
+    },
+    {
+      "Field": "1",
+      "Type": "V2pCAkSwLyG7ZZ2xtxe89a",
+      "Null": "Kory Willis",
+      "Key": "kory@latuning.com",
+      "Default": "admin",
+      "Extra": "2026-03-26 20:35:54"
+    },
+    {
+      "Field": "120001",
+      "Type": "firEtjYyGRNJ9ENvVTrCq3",
+      "Null": "Carmen Savant",
+      "Key": "7t22yqvgtk@privaterelay.appleid.com",
+      "Default": "user",
+      "Extra": "2026-03-27 00:51:24"
+    },
+    {
+      "Field": "270001",
+      "Type": "ksBHGV5iqfKpCgoi3TKgYG",
+      "Null": "erik",
+      "Key": "erik@ppei.com",
+      "Default": "user",
+      "Extra": "2026-03-28 15:40:51"
+    },
+    {
+      "Field": "510001",
+      "Type": "nWh2tQUgLAjdSidvActMnF",
+      "Null": "Erik Fontenot",
+      "Key": "erikfontenot@yahoo.com",
+      "Default": "user",
+      "Extra": "2026-03-28 19:58:44"
+    }
+  ],
+  "messages": [],
+  "stdout": "Field\tType\tNull\tKey\tDefault\tExtra\nid\tint\tNO\tPRI\tNULL\tauto_increment\nopenId\tvarchar(64)\tNO\tUNI\tNULL\t\nname\ttext\tYES\t\tNULL\t\nemail\tvarchar(320)\tYES\t\tNULL\t\nloginMethod\tvarchar(64)\tYES\t\tNULL\t\nrole\tenum('user','admin','super_admin')\tNO\t\tuser\t\ncreatedAt\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t\nupdatedAt\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\tDEFAULT_GENERATED on update CURRENT_TIMESTAMP\nlastSignedIn\ttimestamp\tNO\t\tCURRENT_TIMESTAMP\t\nid\topenId\tname\temail\trole\tcreatedAt\n1\tV2pCAkSwLyG7ZZ2xtxe89a\tKory Willis\tkory@latuning.com\tadmin\t2026-03-26 20:35:54\n120001\tfirEtjYyGRNJ9ENvVTrCq3\tCarmen Savant\t7t22yqvgtk@privaterelay.appleid.com\tuser\t2026-03-27 00:51:24\n270001\tksBHGV5iqfKpCgoi3TKgYG\terik\terik@ppei.com\tuser\t2026-03-28 15:40:51\n510001\tnWh2tQUgLAjdSidvActMnF\tErik Fontenot\terikfontenot@yahoo.com\tuser\t2026-03-28 19:58:44\n",
+  "stderr": "",
+  "execution_time_ms": 147
+}
