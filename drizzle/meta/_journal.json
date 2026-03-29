@@ -50,6 +50,13 @@
       "when": 1774746293226,
       "tag": "0006_perfect_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1774748530237,
+      "tag": "0007_plain_synch",
+      "breakpoints": true
     }
   ]
 }

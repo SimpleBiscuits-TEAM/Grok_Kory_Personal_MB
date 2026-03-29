@@ -1164,3 +1164,6 @@
 - [ ] Build session history with recordings and metrics
 - [x] Add routes to App.tsx for support pages
 - [ ] Write tests for support session UI components
+
+## Bug Fixes (2026-03-29)
+- [x] Fix Erika chat scroll behavior — new messages should not jump to bottom, view should follow where reply starts
