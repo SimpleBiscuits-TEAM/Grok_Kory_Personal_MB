@@ -1243,10 +1243,10 @@
 
 
 ## Binary-to-Definition Cross-Reference Reasoning (2026-03-29)
-- [ ] Build A2L pattern database system (learn map signatures from uploaded A2L files)
-- [ ] Implement hex pattern matching and cross-reference lookup (find matching byte sequences)
-- [ ] Build confidence scoring combining pattern match + axis analysis
+- [x] Build A2L pattern database system (learn map signatures from uploaded A2L files)
+- [x] Implement hex pattern matching and cross-reference lookup (find matching byte sequences)
+- [x] Build confidence scoring combining pattern match + axis analysis
 - [ ] Integrate cross-reference reasoning into binary analysis workflow
-- [ ] Write tests for pattern database and cross-reference matching
+- [x] Write tests for pattern database and cross-reference matching (18 tests, all passing)
 - [ ] Display confidence scores in UI (80% match vs 40% axis-only guess)
 - [ ] Allow user to refine guesses by selecting from similar known maps

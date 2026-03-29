@@ -125,7 +125,8 @@ class BinaryPatternDatabase {
     const existing = this.signatures.get(key);
     if (existing) {
       // Merge ECU families and increase frequency
-      existing.ecuFamilies = [...new Set([...existing.ecuFamilies, ...signature.ecuFamilies])];
+      const merged = new Set([...existing.ecuFamilies, ...signature.ecuFamilies]);
+      existing.ecuFamilies = Array.from(merged);
       existing.frequency = Math.min(1, existing.frequency + 0.1);
     } else {
       this.signatures.set(key, signature);
@@ -207,7 +208,7 @@ class BinaryPatternDatabase {
 
     // Strategy 3: Axis pattern match (same axis types and ranges)
     const axisKey = `${this.classifyAxisRange(axisXRange)}|${this.classifyAxisRange(axisYRange)}`;
-    for (const [, sigs] of this.ecuFamilyIndex) {
+    for (const sigs of Array.from(this.ecuFamilyIndex.values())) {
       for (const sig of sigs) {
         if (hexMatches.includes(sig) || structMatches.includes(sig)) continue;
 
