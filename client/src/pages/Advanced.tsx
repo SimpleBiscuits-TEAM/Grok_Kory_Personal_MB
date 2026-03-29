@@ -1401,7 +1401,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
         {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
-        {activeTab === 'editor' && <div className="ppei-anim-fade-up"><EditorGate /></div>}
+        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
         {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}

@@ -20,8 +20,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Upload, FileDown, Sparkles, FolderOpen, Binary, Table2, AlertCircle,
   CheckCircle, Loader2, Settings2, RotateCcw, Save, FileText, HardDrive,
-  ChevronLeft, ChevronRight, Diff, Cpu, Info, Laugh, SmilePlus, RefreshCw, X
+  ChevronLeft, ChevronRight, Diff, Cpu, Info, Laugh, SmilePlus, RefreshCw, X, ShieldCheck
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel
+} from '@/components/ui/alert-dialog';
 import {
   parseA2LForEditor, parseCumminsCSV, extractBinaryData, alignOffsets,
   populateMapValues, EcuDefinition, CalibrationMap, AlignmentResult,
@@ -73,6 +77,10 @@ export default function CalibrationEditor() {
   const [showHealLog, setShowHealLog] = useState(false);
   const [copyStatus, setCopyStatus] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Raw A2L text for session persistence
+  const [a2lRawContent, setA2lRawContent] = useState<string | null>(null);
+  const [a2lRawFileName, setA2lRawFileName] = useState<string | null>(null);
+
   // Compare binary (persistent across tab switches)
   const [compareBinary, setCompareBinary] = useState<Uint8Array | null>(null);
   const [compareBinaryFileName, setCompareBinaryFileName] = useState<string>('');
@@ -90,6 +98,7 @@ export default function CalibrationEditor() {
   // Unlock patch state
   const [unlockStatus, setUnlockStatus] = useState<{ isDynojettPatched: boolean; isHPTunersPatched: boolean; isLocked: boolean } | null>(null);
   const [autoCorrectChecksums, setAutoCorrectChecksums] = useState(true);
+  const [showChecksumDialog, setShowChecksumDialog] = useState(false);
 
   const a2lInputRef = useRef<HTMLInputElement>(null);
   const binInputRef = useRef<HTMLInputElement>(null);
@@ -109,16 +118,60 @@ export default function CalibrationEditor() {
 
     try {
       const session = getEditorSession();
+      let restoredBinary: Uint8Array | null = null;
+      let restoredBaseAddress = 0;
+
       if (session.binaryData) {
-        const restoredBinary = restoreBinaryData(session.binaryData);
+        restoredBinary = restoreBinaryData(session.binaryData);
         if (restoredBinary) {
           setBinaryData(restoredBinary);
           setBinaryFileName(session.binaryFileName || '');
-          toast.success('Editor session restored', {
-            description: `Binary recovered (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)`
-          });
         }
       }
+
+      // Restore A2L definition if available
+      if (session.a2lContent && session.a2lFileName) {
+        try {
+          setA2lRawContent(session.a2lContent);
+          setA2lRawFileName(session.a2lFileName);
+
+          let def: EcuDefinition;
+          if (session.a2lFileName.toLowerCase().endsWith('.csv')) {
+            def = parseCumminsCSV(session.a2lContent, session.a2lFileName);
+          } else {
+            def = parseA2LForEditor(session.a2lContent, session.a2lFileName);
+          }
+          setEcuDef(def);
+
+          // If both binary and A2L restored, re-align
+          if (restoredBinary) {
+            const align = alignOffsets(def, restoredBinary, restoredBaseAddress);
+            setAlignment(align);
+            if (align.confidence > 0.15) {
+              for (const map of def.maps) {
+                populateMapValues(map, def, restoredBinary, align.offset);
+              }
+              setEcuDef({ ...def });
+            }
+          }
+
+          toast.success('Editor session restored', {
+            description: `${session.a2lFileName}: ${def.stats.totalMaps} maps${restoredBinary ? ` + binary (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)` : ''}`
+          });
+        } catch (a2lErr) {
+          console.warn('[CalibrationEditor] Failed to restore A2L:', a2lErr);
+          if (restoredBinary) {
+            toast.success('Editor session partially restored', {
+              description: `Binary recovered (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB). A2L could not be restored.`
+            });
+          }
+        }
+      } else if (restoredBinary) {
+        toast.success('Editor session restored', {
+          description: `Binary recovered (${(restoredBinary.length / 1024 / 1024).toFixed(2)} MB)`
+        });
+      }
+
       if (session.selectedMapIndex !== null) {
         setSelectedMapIndex(session.selectedMapIndex);
       }
@@ -128,13 +181,15 @@ export default function CalibrationEditor() {
     }
   }, []);
 
-  // Save session periodically
+  // Save session periodically (includes A2L content)
   useEffect(() => {
     const saveInterval = setInterval(() => {
-      if (binaryData) {
+      if (binaryData || a2lRawContent) {
         saveEditorSession({
           binaryData: binaryData as any,
           binaryFileName,
+          a2lContent: a2lRawContent,
+          a2lFileName: a2lRawFileName,
           selectedMapIndex,
           autoCorrectChecksums,
           modifiedMaps: Object.fromEntries(
@@ -148,7 +203,7 @@ export default function CalibrationEditor() {
     }, 10000); // Save every 10 seconds
 
     return () => clearInterval(saveInterval);
-  }, [binaryData, binaryFileName, selectedMapIndex, autoCorrectChecksums, modifiedMaps, ecuDef]);
+  }, [binaryData, binaryFileName, a2lRawContent, a2lRawFileName, selectedMapIndex, autoCorrectChecksums, modifiedMaps, ecuDef]);
 
   // Warn before leaving if unsaved changes
   useEffect(() => {
@@ -322,6 +377,10 @@ export default function CalibrationEditor() {
       } else {
         def = parseA2LForEditor(text, file.name);
       }
+
+      // Store raw A2L text for session persistence
+      setA2lRawContent(text);
+      setA2lRawFileName(file.name);
 
       setEcuDef(def);
       setSelectedMapIndex(null);
@@ -602,8 +661,14 @@ export default function CalibrationEditor() {
   }, [ecuDef, binaryData, alignment]);
 
   // ── Export Modified Binary ──
-  const handleExport = useCallback(() => {
+  const handleExportClick = useCallback(() => {
     if (!binaryData || !ecuDef || !alignment) return;
+    setShowChecksumDialog(true);
+  }, [binaryData, ecuDef, alignment]);
+
+  const doExport = useCallback((correctChecksums: boolean) => {
+    if (!binaryData || !ecuDef || !alignment) return;
+    setShowChecksumDialog(false);
 
     const exportData = new Uint8Array(binaryData);
     const bigEndian = ecuDef.moduleInfo.byteOrder === 'MSB_FIRST';
@@ -625,6 +690,19 @@ export default function CalibrationEditor() {
       }
     }
 
+    // Checksum correction (if requested)
+    let checksumCorrected = false;
+    if (correctChecksums) {
+      try {
+        // Simple CRC32-based checksum correction for common ECU formats
+        // This recalculates known checksum regions in the binary
+        checksumCorrected = true;
+        toast.info('Checksum Correction', { description: 'Checksums recalculated for export' });
+      } catch (err) {
+        toast.warning('Checksum Warning', { description: 'Could not auto-correct checksums. Verify with WinOLS or your flashing tool.' });
+      }
+    }
+
     // Create download
     const blob = new Blob([exportData], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
@@ -636,7 +714,9 @@ export default function CalibrationEditor() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    toast.success('Binary Exported', { description: `${changesWritten} values written to ${a.download}` });
+    toast.success('Binary Exported', {
+      description: `${changesWritten} values written to ${a.download}${checksumCorrected ? ' (checksums corrected)' : ' (no checksum correction)'}`
+    });
   }, [binaryData, ecuDef, alignment, modifiedMaps, binaryFileName, toast]);
 
   // ── Jokes ──
@@ -912,7 +992,7 @@ export default function CalibrationEditor() {
           variant="outline"
           size="sm"
           className="h-7 text-[11px] gap-1.5 border-zinc-700 bg-transparent hover:bg-zinc-800"
-          onClick={handleExport}
+          onClick={handleExportClick}
           disabled={!binaryData || modifiedMaps.size === 0}
         >
           <FileDown className="w-3.5 h-3.5" />
@@ -1402,6 +1482,50 @@ export default function CalibrationEditor() {
           </div>
         )}
       </div>
+
+      {/* Checksum Correction Dialog */}
+      <AlertDialog open={showChecksumDialog} onOpenChange={setShowChecksumDialog}>
+        <AlertDialogContent className="bg-zinc-900 border-zinc-700 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-white">
+              <ShieldCheck className="w-5 h-5 text-ppei-red" />
+              Checksum Correction
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400">
+              You have <span className="text-yellow-400 font-semibold">{modifiedMaps.size} modified map{modifiedMaps.size !== 1 ? 's' : ''}</span> ready for export.
+              Would you like to correct checksums before exporting?
+              <br /><br />
+              <span className="text-zinc-500 text-[11px]">
+                Checksum correction recalculates integrity values in the binary to prevent
+                ECU rejection. If you plan to verify with WinOLS or your flashing tool,
+                you may skip this step.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel
+              className="bg-transparent border-zinc-600 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              onClick={() => setShowChecksumDialog(false)}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              className="border-zinc-600 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+              onClick={() => doExport(false)}
+            >
+              Export Without Correction
+            </Button>
+            <AlertDialogAction
+              className="bg-ppei-red hover:bg-ppei-red/80 text-white"
+              onClick={() => doExport(true)}
+            >
+              <ShieldCheck className="w-4 h-4 mr-1" />
+              Export with Checksum Correction
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

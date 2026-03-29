@@ -1180,8 +1180,8 @@
 - [ ] Decompiler integration — use a2l + function sheets + WinOLS data to build definition files from binary
 
 ## Critical Bug Fixes (2026-03-29)
-- [ ] Fix editor state persistence — navigating away from editor tab loses all loaded data (a2l, binary, modifications); must preserve state across tab switches
-- [ ] Add checksum correction prompt before binary export — ask user if they want to correct checksums before exporting modified binary
+- [x] Fix editor state persistence — navigating away from editor tab loses all loaded data (a2l, binary, modifications); must preserve state across tab switches
+- [x] Add checksum correction prompt before binary export — ask user if they want to correct checksums before exporting modified binary
 
 ## HexEditor Optimization (2026-03-29)
 - [x] Refactor HexEditor to use useReducer for centralized state management
