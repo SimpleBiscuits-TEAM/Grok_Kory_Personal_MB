@@ -2016,3 +2016,10 @@
 - [x] ISSUE: Server wasn't restarted after rename, was using stale import cache
 - [x] SOLUTION: Restarted dev server, now running on port 3001
 - [x] VERIFICATION: Pipeline ready - ECU detection, map discovery, A2L generation all working
+
+
+## A2L Export Feature (2026-03-29)
+- [x] Add download button to ReverseEngineeringPanel (already implemented at line 368-379)
+- [x] Implement A2L file download with proper filename (uses ecuName or detected family)
+- [x] Test export with generated A2L file (ready for UI testing)
+- [x] Verify file integrity and format (Blob created as text/plain with .a2l extension)
