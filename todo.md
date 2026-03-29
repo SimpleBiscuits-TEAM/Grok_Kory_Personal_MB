@@ -1250,3 +1250,14 @@
 - [x] Write tests for pattern database and cross-reference matching (18 tests, all passing)
 - [ ] Display confidence scores in UI (80% match vs 40% axis-only guess)
 - [ ] Allow user to refine guesses by selecting from similar known maps
+
+
+## Live Tuning System (2026-03-29)
+- [x] Build access rights detection system (A2L metadata, pattern database, memory heuristics) (28 tests passing)
+- [ ] Implement write capability testing (OBD-II Mode 22, UDS services)
+- [ ] Build live tuning engine for RAM address read/write
+- [ ] Add UI components (access badges, right-click context menu, live tune dialog)
+- [ ] Integrate live tuning into CalibrationEditor with real-time value sync
+- [ ] Write tests for access detection and live tuning
+- [ ] Support fuel tank and tire size modification (Ford/Ram diesel priority)
+- [ ] Support J1939 flashing and Aisin mapping
