@@ -5,6 +5,7 @@
  */
 import React, { useState, useRef, useEffect } from 'react';
 import { trpc } from '@/lib/trpc';
+import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 import {
   MessageSquare, Inbox, Users, BarChart3, Search, Send,
   ChevronRight, Clock, Star, AlertCircle, CheckCircle,
@@ -622,6 +623,11 @@ function ConversationsPanel() {
               fontSize: '0.85rem',
               outline: 'none',
             }}
+          />
+          <SpeechToTextButton
+            onTranscript={(text) => setNewMessage(prev => prev ? prev + ' ' + text : text)}
+            variant="dark"
+            size="sm"
           />
           <button
             onClick={() => {

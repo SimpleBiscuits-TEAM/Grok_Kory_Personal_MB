@@ -29,6 +29,7 @@ import { VEHICLE_PLATFORMS, getVehiclePlatform, VehiclePlatform, VehicleDTC } fr
 import { parseA2L, searchA2L, a2lToSearchContext, A2LParseResult, A2LMeasurement, A2LCharacteristic } from '@/lib/a2lParser';
 import { trpc } from '@/lib/trpc';
 import type { Message } from '@/components/AIChatBox';
+import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 
 // Normal mode imports for merged analyzer
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
@@ -515,6 +516,11 @@ function AIChatPanel({ a2lData }: { a2lData: A2LParseResult | null }) {
             flex: 1, padding: '10px 14px', fontFamily: sFont.body, fontSize: '0.88rem', background: sColor.bgInput,
             border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '3px', color: 'white', outline: 'none', resize: 'none',
           }}
+        />
+        <SpeechToTextButton
+          onTranscript={(text) => setInput(prev => prev ? prev + ' ' + text : text)}
+          disabled={isLoading}
+          variant="dark"
         />
         <button onClick={() => sendMessage(input)} disabled={!input.trim() || isLoading} style={{
           padding: '10px 20px', background: input.trim() && !isLoading ? sColor.red : 'oklch(0.25 0.008 260)',

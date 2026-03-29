@@ -14,6 +14,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Send, Bot, User, Loader2, Sparkles, X, Minimize2, Activity, Brain } from 'lucide-react';
+import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
@@ -485,6 +486,13 @@ export default function KnoxChat({
                 sendMessage();
               }
             }}
+          />
+          <SpeechToTextButton
+            onTranscript={(text) => setInput(prev => prev ? prev + ' ' + text : text)}
+            disabled={isLoading}
+            size="sm"
+            variant="dark"
+            className="self-end"
           />
           <button
             className="self-end p-2 bg-ppei-red/20 rounded-lg text-ppei-red hover:bg-ppei-red/30 transition-colors disabled:opacity-50"

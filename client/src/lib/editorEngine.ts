@@ -1039,6 +1039,41 @@ export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): s
     if (m) return m[1];
   }
 
+  // ── Binary signature detection (hex patterns) ──
+  // Check for DEADBEEF marker at start — strong MG1C/BRP indicator
+  if (data.length >= 0x200) {
+    const hasDeadbeef = data[0] === 0xDE && data[1] === 0xAD && data[2] === 0xBE && data[3] === 0xEF;
+    if (hasDeadbeef) {
+      // Check for MG1C-specific pointers (0x08FF / 0x08FD patterns in header region)
+      let mg1cPtrCount = 0;
+      const headerScan = Math.min(data.length, 0x1000); // scan first 4KB for pointers
+      for (let i = 0x100; i < headerScan - 3; i += 4) {
+        const hi16 = (data[i] << 8) | data[i + 1];
+        if (hi16 === 0x08FD || hi16 === 0x08FF) {
+          mg1cPtrCount++;
+        }
+      }
+
+      if (mg1cPtrCount >= 3) {
+        // Confirmed MG1C binary — now check if it's Can-Am/BRP (ROTAX) or generic MG1C
+        // Scan up to 512KB for ROTAX/BRP/Can-Am strings
+        const deepScanLen = Math.min(data.length, 512 * 1024);
+        const deepText = new TextDecoder('ascii', { fatal: false }).decode(data.slice(0, deepScanLen));
+        if (deepText.includes('ROTAX') || deepText.includes('BRP') || deepText.includes('Can-Am') ||
+            deepText.includes('CAN_AM') || deepText.includes('MG1CA') || deepText.includes('MG1CA920') ||
+            deepText.includes('MED17.8') || deepText.includes('MED17_8') ||
+            deepText.includes('SEADOO') || deepText.includes('SEA-DOO') ||
+            deepText.includes('MAVERICK') || deepText.includes('DEFENDER')) {
+          return 'BRP';
+        }
+        return 'MG1C';
+      }
+
+      // DEADBEEF present but not enough MG1C pointers — still likely MG1C family
+      return 'MG1C';
+    }
+  }
+
   // Check for PPEI container header (AA55)
   if (data.length > 2 && data[0] === 0xAA && data[1] === 0x55) {
     // PPEI container — likely L5P/Duramax
@@ -1065,15 +1100,15 @@ export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): s
     return 'E41';
   }
 
-  // Scan first 8KB of binary for embedded strings
-  const scanLen = Math.min(data.length, 8192);
+  // Scan first 256KB of binary for embedded strings (expanded from 8KB)
+  const scanLen = Math.min(data.length, 256 * 1024);
   const scanText = new TextDecoder('ascii', { fatal: false }).decode(data.slice(0, scanLen));
   
   if (scanText.includes('E41') || scanText.includes('L5P')) return 'E41';
   if (scanText.includes('T93') || scanText.includes('10L1000')) return 'T93';
   if (scanText.includes('MG1CA920') || scanText.includes('MG1CA')) return 'BRP';
   if (scanText.includes('MED17.8') || scanText.includes('MED17_8')) return 'BRP';
-  if (scanText.includes('BRP') || scanText.includes('Can-Am') || scanText.includes('CAN_AM')) return 'BRP';
+  if (scanText.includes('ROTAX') || scanText.includes('BRP') || scanText.includes('Can-Am') || scanText.includes('CAN_AM')) return 'BRP';
   if (scanText.includes('MG1C') || scanText.includes('MDG1C')) return 'MG1C';
   if (scanText.includes('Cummins') || scanText.includes('CM2350')) return 'CUMMINS';
 
@@ -1082,6 +1117,7 @@ export function detectEcuFamilyFromBinary(data: Uint8Array, fileName: string): s
   if (sizeMB > 3.5 && sizeMB < 4.5) return 'E41'; // L5P cal segment ~4MB
   if (sizeMB > 1.5 && sizeMB < 2.5) return 'BRP'; // Can-Am ~2MB
   if (sizeMB > 3.9 && sizeMB < 4.2) return 'BRP'; // Can-Am MG1CA920 ~4MB
+  if (sizeMB > 5.5 && sizeMB < 6.5) return 'MG1C'; // Full MG1C dump ~6MB
 
   return 'UNKNOWN';
 }

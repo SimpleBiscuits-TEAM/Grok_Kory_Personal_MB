@@ -388,4 +388,39 @@ export const voiceRouter = router({
         intent,
       };
     }),
+
+  /**
+   * Simple transcription endpoint for chat speech-to-text.
+   * Records audio, uploads to S3, transcribes, returns text only.
+   * No intent analysis — just speech-to-text for any chat input.
+   */
+  transcribeOnly: protectedProcedure
+    .input(z.object({
+      audioBase64: z.string().min(1),
+      mimeType: z.string().default("audio/webm"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const audioBuffer = Buffer.from(input.audioBase64, "base64");
+
+      // Upload to S3
+      const ext = input.mimeType.split("/")[1]?.replace(/;.*/, "") || "webm";
+      const key = `chat-audio/${ctx.user.id}/${Date.now()}.${ext}`;
+      const { url: audioUrl } = await storagePut(key, audioBuffer, input.mimeType);
+
+      // Transcribe
+      const transcription = await transcribeAudio({
+        audioUrl,
+        language: "en",
+        prompt: "Transcribe this message",
+      });
+
+      if ("error" in transcription) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: transcription.error,
+        });
+      }
+
+      return { text: transcription.text };
+    }),
 });

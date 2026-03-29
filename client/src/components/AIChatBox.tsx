@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Loader2, Send, User, Sparkles } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
+import { SpeechToTextButton } from "@/components/SpeechToTextButton";
 
 /**
  * Message type matching server-side LLM Message interface
@@ -316,6 +317,10 @@ export function AIChatBox({
           placeholder={placeholder}
           className="flex-1 max-h-32 resize-none min-h-9"
           rows={1}
+        />
+        <SpeechToTextButton
+          onTranscript={(text) => setInput(prev => prev ? prev + ' ' + text : text)}
+          disabled={isLoading}
         />
         <Button
           type="submit"

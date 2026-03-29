@@ -2096,3 +2096,24 @@
 - [x] Fix transmission ID for LB7 (Allison 1000 5-speed, not 10L1000)
 - [x] Fix fuel pump reference for LB7 (CP3, not HP4)
 - [x] Fix PCV units (mA not percentage)
+
+
+## Binary Reverse Engineering Engine - Debug ECU Detection (2026-03-29)
+- [x] Debug: StockRead_1G0100914SB3VUM8_UL_exported.bin still returns "ECU family unknown"
+- [x] Analyze binary file structure and hex signatures (DEADBEEF at 0x0, MG1C pointers at 0x104/0x10C, ROTAX at 0x1D821)
+- [x] Test binary signature detector against actual file (server-side detector works, client-side was the problem)
+- [x] Identify missing or incorrect patterns in detector (client detectEcuFamilyFromBinary only scanned 8KB, missed all signatures)
+- [x] Fix detector: added DEADBEEF+MG1C pointer hex signature check, expanded text scan to 256KB, added 6MB size heuristic
+- [ ] Verify A2L generation works end-to-end with the file (requires user testing)
+
+## Talk-to-Text in All Chat Interfaces + Datalog Analysis Readout (2026-03-29)
+- [x] Add talk-to-text (speech-to-text) input to ALL chat interfaces
+  - [x] Created reusable SpeechToTextButton component (MediaRecorder > S3 > Whisper > text)
+  - [x] Added transcribeOnly server endpoint (speech-to-text only, no intent analysis)
+  - [x] Integrated into AIChatBox (generic AI chat component)
+  - [x] Integrated into KnoxChat (calibration editor chat)
+  - [x] Integrated into Advanced.tsx diagnostic chat
+  - [x] Integrated into SupportJoin.tsx customer chat
+  - [x] Integrated into SupportAdminPanel.tsx admin chat
+- [ ] When datalog is uploaded, talk-to-text should be able to trigger analysis and read out findings
+- [ ] Knox should verbally summarize what needs adjustment based on datalog analysis
