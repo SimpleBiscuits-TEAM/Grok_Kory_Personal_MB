@@ -5,16 +5,21 @@
  * can trace control logic, help design features, identify tables, and correlate
  * with datalogs.
  *
- * Context is aggressively truncated for large A2Ls (50K+ maps) to avoid
- * PayloadTooLarge errors. Erika gets category summaries + the selected map
- * details, not the full map list.
+ * Enhancements:
+ *  - Diagnostic integration: automatically injects DiagnosticReport + ReasoningReport
+ *    findings into context so Erika knows what the analyzer found
+ *  - RAG map search: builds a TF-IDF index over map names/descriptions and retrieves
+ *    the most relevant maps for each user query (eliminates truncation problem)
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Sparkles, X, Minimize2 } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { Send, Bot, User, Loader2, Sparkles, X, Minimize2, Activity, Brain } from 'lucide-react';
 import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
+import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext, MapSearchIndex } from '@/lib/erikaMapSearch';
+import type { DiagnosticReport } from '@/lib/diagnostics';
+import type { ReasoningReport } from '@/lib/reasoningEngine';
 
 interface ErikaChatProps {
   ecuDef: EcuDefinition | null;
@@ -22,6 +27,10 @@ interface ErikaChatProps {
   onNavigateToMap: (mapName: string) => void;
   isOpen: boolean;
   onToggle: () => void;
+  /** Optional: diagnostic report from the analyzer */
+  diagnosticReport?: DiagnosticReport | null;
+  /** Optional: reasoning report from the AI reasoning engine */
+  reasoningReport?: ReasoningReport | null;
 }
 
 interface ChatMessage {
@@ -32,8 +41,20 @@ interface ChatMessage {
 
 /** Max characters for the context string sent to the LLM */
 const MAX_CONTEXT_CHARS = 60000;
+/** Reserve chars for RAG results */
+const RAG_BUDGET_CHARS = 15000;
+/** Reserve chars for diagnostics */
+const DIAG_BUDGET_CHARS = 8000;
 
-export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen, onToggle }: ErikaChatProps) {
+export default function ErikaChat({
+  ecuDef,
+  selectedMap,
+  onNavigateToMap,
+  isOpen,
+  onToggle,
+  diagnosticReport,
+  reasoningReport,
+}: ErikaChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
@@ -52,6 +73,12 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
 
   const chatMutation = trpc.editor.erikaChat.useMutation();
 
+  // ─── Build RAG search index when ECU definition changes ─────────────────
+  const searchIndex = useMemo<MapSearchIndex | null>(() => {
+    if (!ecuDef || ecuDef.maps.length === 0) return null;
+    return buildMapSearchIndex(ecuDef.maps);
+  }, [ecuDef]);
+
   // Scroll so the NEW message's top is visible (not the very bottom)
   useEffect(() => {
     if (messages.length <= prevMessageCountRef.current) {
@@ -68,15 +95,81 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     });
   }, [messages]);
 
+  // ─── Build diagnostic context string ────────────────────────────────────
+  const buildDiagnosticContext = useCallback((): string => {
+    const parts: string[] = [];
+
+    if (diagnosticReport && diagnosticReport.issues.length > 0) {
+      parts.push('\n--- DIAGNOSTIC ANALYSIS RESULTS (from V-OP Analyzer) ---');
+      parts.push(`Summary: ${diagnosticReport.summary}`);
+      parts.push(`Issues found: ${diagnosticReport.issues.length}`);
+      for (const issue of diagnosticReport.issues.slice(0, 15)) {
+        parts.push(`  [${issue.severity.toUpperCase()}] ${issue.code}: ${issue.title}`);
+        parts.push(`    ${issue.description}`);
+        parts.push(`    Recommendation: ${issue.recommendation}`);
+        if (issue.detectedAt) parts.push(`    Detected at: ${issue.detectedAt}`);
+      }
+      if (diagnosticReport.issues.length > 15) {
+        parts.push(`  ... and ${diagnosticReport.issues.length - 15} more issues`);
+      }
+    }
+
+    if (reasoningReport) {
+      parts.push('\n--- AI REASONING ENGINE RESULTS ---');
+      parts.push(`Summary: ${reasoningReport.summary}`);
+
+      // Operating context
+      const ctx = reasoningReport.operatingContext;
+      parts.push(`Operating Context: ${ctx.platform} platform, ${ctx.logDuration.toFixed(1)}s log`);
+      parts.push(`  Max RPM: ${ctx.maxRpmObserved}, Max Speed: ${ctx.maxVehicleSpeedMph} mph`);
+      parts.push(`  Coolant: ${ctx.minCoolantTempF.toFixed(0)}-${ctx.maxCoolantTempF.toFixed(0)}F`);
+      if (ctx.warmupPhaseDetected) parts.push(`  Warmup detected, completed at ${ctx.warmupCompletedAt.toFixed(0)}s`);
+      if (ctx.tccFullLockDetected) parts.push(`  TCC full lock detected (${ctx.tccFullLockSamples} samples)`);
+
+      // Findings
+      if (reasoningReport.findings.length > 0) {
+        parts.push(`\nFindings (${reasoningReport.findings.length}):`);
+        for (const f of reasoningReport.findings.slice(0, 10)) {
+          parts.push(`  [${f.type.toUpperCase()}/${f.confidence}] ${f.title}`);
+          parts.push(`    Reasoning: ${f.reasoning}`);
+          if (f.evidence.length > 0) {
+            parts.push(`    Evidence: ${f.evidence.slice(0, 3).join('; ')}`);
+          }
+          if (f.suggestion) parts.push(`    Suggestion: ${f.suggestion}`);
+        }
+        if (reasoningReport.findings.length > 10) {
+          parts.push(`  ... and ${reasoningReport.findings.length - 10} more findings`);
+        }
+      }
+
+      // Beta improvements
+      if (reasoningReport.betaImprovements.length > 0) {
+        parts.push(`\nBeta Improvement Suggestions (${reasoningReport.betaImprovements.length}):`);
+        for (const b of reasoningReport.betaImprovements.slice(0, 5)) {
+          parts.push(`  [${b.priority}] ${b.area}: ${b.observation}`);
+          parts.push(`    Suggestion: ${b.suggestion}`);
+        }
+      }
+    }
+
+    let result = parts.join('\n');
+    if (result.length > DIAG_BUDGET_CHARS) {
+      result = result.substring(0, DIAG_BUDGET_CHARS) + '\n[Diagnostic context truncated]';
+    }
+    return result;
+  }, [diagnosticReport, reasoningReport]);
+
   /**
    * Build a context summary for the LLM that stays within size limits.
    * Strategy:
    *  - Always include: ECU metadata, category summary, selected map details
+   *  - RAG: retrieve maps relevant to the user's query
+   *  - Diagnostics: inject analyzer findings when available
    *  - For small A2Ls (<= 800 maps): include all map names
    *  - For medium A2Ls (800-5000): include map names by category, truncated
    *  - For large A2Ls (5000+): category summary only + top maps per category
    */
-  const buildContext = useCallback((): string => {
+  const buildContext = useCallback((userQuery?: string): string => {
     if (!ecuDef) return 'No ECU definition loaded.';
 
     const parts: string[] = [];
@@ -95,14 +188,33 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     }
 
     // Category summary (always included)
-    parts.push(`\nCategories: ${Array.from(mapsByCategory.entries()).map(([k, v]) => `${k}(${v.length})`).join(', ')}`);
+    const catEntries: string[] = [];
+    mapsByCategory.forEach((v, k) => catEntries.push(`${k}(${v.length})`));
+    parts.push(`\nCategories: ${catEntries.join(', ')}`);
 
     const totalMaps = ecuDef.maps.length;
 
+    // ─── RAG: retrieve relevant maps for the user's query ─────────────────
+    if (userQuery && searchIndex && totalMaps > 800) {
+      const ragResults = searchMaps(searchIndex, userQuery, ecuDef.maps, 25);
+      if (ragResults.length > 0) {
+        const ragContext = formatSearchResultsForContext(ragResults, userQuery);
+        if (ragContext.length <= RAG_BUDGET_CHARS) {
+          parts.push(ragContext);
+        } else {
+          parts.push(ragContext.substring(0, RAG_BUDGET_CHARS) + '\n[RAG results truncated]');
+        }
+      }
+    }
+
+    // ─── Standard map list (tiered by size) ───────────────────────────────
     if (totalMaps <= 800) {
       // Small A2L: include all map names
       parts.push(`\nCOMPLETE MAP LIST (all ${totalMaps} maps):`);
-      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+      const sortedEntries: [string, CalibrationMap[]][] = [];
+      mapsByCategory.forEach((v, k) => sortedEntries.push([k, v]));
+      sortedEntries.sort((a, b) => a[0].localeCompare(b[0]));
+      for (const [cat, maps] of sortedEntries) {
         parts.push(`\n### ${cat} (${maps.length} maps)`);
         for (const m of maps) {
           parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
@@ -112,7 +224,10 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
       // Medium A2L: include map names but cap per category
       const maxPerCat = Math.floor(300 / mapsByCategory.size);
       parts.push(`\nMAP LIST (sampled from ${totalMaps} maps — ask for specific categories to see all):`);
-      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+      const sortedEntries: [string, CalibrationMap[]][] = [];
+      mapsByCategory.forEach((v, k) => sortedEntries.push([k, v]));
+      sortedEntries.sort((a, b) => a[0].localeCompare(b[0]));
+      for (const [cat, maps] of sortedEntries) {
         parts.push(`\n### ${cat} (${maps.length} maps, showing first ${Math.min(maps.length, maxPerCat)}):`);
         for (const m of maps.slice(0, maxPerCat)) {
           parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
@@ -122,7 +237,10 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     } else {
       // Large A2L (50K+): category summary + top 5 per category
       parts.push(`\nLARGE A2L (${totalMaps} maps). Showing top maps per category — ask for specific categories to see more:`);
-      for (const [cat, maps] of Array.from(mapsByCategory.entries()).sort()) {
+      const sortedEntries: [string, CalibrationMap[]][] = [];
+      mapsByCategory.forEach((v, k) => sortedEntries.push([k, v]));
+      sortedEntries.sort((a, b) => a[0].localeCompare(b[0]));
+      for (const [cat, maps] of sortedEntries) {
         parts.push(`\n### ${cat} (${maps.length} maps):`);
         for (const m of maps.slice(0, 5)) {
           parts.push(`  ${m.name} [${m.type}] - ${m.description || m.subcategory || ''}`);
@@ -171,6 +289,12 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
       }
     }
 
+    // ─── Inject diagnostic/reasoning context ──────────────────────────────
+    const diagContext = buildDiagnosticContext();
+    if (diagContext) {
+      parts.push(diagContext);
+    }
+
     // Final truncation safety net
     let result = parts.join('\n');
     if (result.length > MAX_CONTEXT_CHARS) {
@@ -178,7 +302,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     }
 
     return result;
-  }, [ecuDef, selectedMap]);
+  }, [ecuDef, selectedMap, searchIndex, buildDiagnosticContext]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -190,7 +314,8 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     setIsLoading(true);
 
     try {
-      const context = buildContext();
+      // Build context with RAG retrieval based on user's query
+      const context = buildContext(text);
       // Only send last 6 messages to keep payload small
       const history = messages.slice(-6).map(m => ({
         role: m.role as 'user' | 'assistant',
@@ -238,6 +363,8 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
     );
   }
 
+  const hasDiagnostics = (diagnosticReport && diagnosticReport.issues.length > 0) || reasoningReport;
+
   return (
     <div className="flex flex-col h-full border-l border-zinc-800 bg-zinc-950">
       {/* Header */}
@@ -265,13 +392,37 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
         </div>
       </div>
 
-      {/* ECU context indicator */}
-      {ecuDef && (
-        <div className="px-3 py-1 border-b border-zinc-800/50 text-[10px] text-zinc-500 font-mono">
-          Context: {ecuDef.ecuFamily} — {ecuDef.stats.totalMaps.toLocaleString()} maps
-          {selectedMap && <span className="text-cyan-400/60 ml-2">→ {selectedMap.name}</span>}
-        </div>
-      )}
+      {/* ECU + Diagnostics context indicator */}
+      <div className="px-3 py-1 border-b border-zinc-800/50 text-[10px] font-mono space-y-0.5">
+        {ecuDef ? (
+          <div className="text-zinc-500">
+            Context: {ecuDef.ecuFamily} — {ecuDef.stats.totalMaps.toLocaleString()} maps
+            {selectedMap && <span className="text-cyan-400/60 ml-2">→ {selectedMap.name}</span>}
+            {searchIndex && <span className="text-emerald-400/50 ml-2">RAG ready</span>}
+          </div>
+        ) : (
+          <div className="text-zinc-600">No ECU loaded</div>
+        )}
+        {hasDiagnostics && (
+          <div className="flex items-center gap-1.5">
+            <Activity className="w-3 h-3 text-amber-400/70" />
+            <span className="text-amber-400/70">
+              Diagnostics active
+              {diagnosticReport && diagnosticReport.issues.length > 0 && (
+                <span> — {diagnosticReport.issues.length} issue{diagnosticReport.issues.length !== 1 ? 's' : ''}</span>
+              )}
+            </span>
+            {reasoningReport && (
+              <>
+                <Brain className="w-3 h-3 text-purple-400/70 ml-1" />
+                <span className="text-purple-400/70">
+                  {reasoningReport.findings.length} finding{reasoningReport.findings.length !== 1 ? 's' : ''}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Messages */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
@@ -345,6 +496,7 @@ export default function ErikaChat({ ecuDef, selectedMap, onNavigateToMap, isOpen
         </div>
         <div className="text-[10px] text-zinc-600 mt-1">
           Enter to send · Shift+Enter for new line
+          {hasDiagnostics && <span className="text-amber-400/40 ml-2">· Diagnostics linked</span>}
         </div>
       </div>
     </div>

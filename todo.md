@@ -1167,3 +1167,30 @@
 
 ## Bug Fixes (2026-03-29)
 - [x] Fix Erika chat scroll behavior — new messages should not jump to bottom, view should follow where reply starts
+
+## Editor Enhancements (2026-03-29)
+- [ ] Build "Erika's Help" tab in editor — Erika renders actual calibration maps/tables from binary when requested via chat
+- [ ] Modified tables tracking — every modified table gets its own tab with translated labels/folders
+- [ ] Editor sign-in prompt — prompt sign-in on editor entry, allow dismiss with "missing features" notification
+- [ ] Inline interpolation controls — move interpolation options below table view for quick access
+- [ ] Inline value editor — keep value editor visible below/beside table view for quick edits
+- [ ] Right-click "Reference Point" — shows what other maps reference this map and where it points, uses decompiler
+- [ ] Deep Erika integration — Erika assists with reference tracing, interpolation decisions, map explanations
+- [ ] WinOLS project parser — parse .ols files to extract calibration definitions for definition builder
+- [ ] Decompiler integration — use a2l + function sheets + WinOLS data to build definition files from binary
+
+## Critical Bug Fixes (2026-03-29)
+- [ ] Fix editor state persistence — navigating away from editor tab loses all loaded data (a2l, binary, modifications); must preserve state across tab switches
+- [ ] Add checksum correction prompt before binary export — ask user if they want to correct checksums before exporting modified binary
+
+## HexEditor Optimization (2026-03-29)
+- [x] Refactor HexEditor to use useReducer for centralized state management
+- [x] Consolidate 15+ useState calls into single reducer
+- [x] Fix undo/redo to properly track multi-batch modified bytes
+- [x] Memoize sub-components (HexRow, HexByte) for render performance
+- [x] Preserve all existing features: search/replace, bookmarks, go-to, A2L regions, map detection, cursor preview, nibble editing, ASCII mode, byte grouping
+
+## Erika AI Improvements (2026-03-29)
+- [x] Integrate diagnostics engine results into Erika's context automatically (pipe diagnostics.ts findings)
+- [x] Build RAG system for A2L maps - embed map names/descriptions, retrieve relevant ones per query
+- [x] Eliminate A2L truncation problem with intelligent retrieval
