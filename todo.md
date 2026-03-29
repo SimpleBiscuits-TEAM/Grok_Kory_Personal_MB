@@ -1894,3 +1894,10 @@
 - [ ] Integration with Manus agent for actual code fixes
 - [x] Notify admin when tester submits a bug report (already built in)
 - [x] Notify admin when bug is confirmed fixed by tester (added)
+
+## Home Page Improvements
+- [x] Reduce dead space on home page (tightened spacing, added second feature card)
+- [x] Add fulfilling content after sign-in (welcome bar with name, quick action buttons)
+- [x] Fix text contrast (brightened subtitle 0.60→0.72, helper text 0.55→0.65, CSV note 0.45→0.50)
+- [x] Keep "Redefining the Limits" header
+- [x] Added "Advanced Mode" feature card (Calibration Editor, Live Gauges, Voice Commands, Tune Compare)

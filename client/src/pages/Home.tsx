@@ -325,8 +325,8 @@ export default function Home() {
               </h2>
               <p style={{
                 fontFamily: '"Rajdhani", sans-serif',
-                fontSize: '1rem',
-                color: 'oklch(0.60 0.010 260)',
+                fontSize: '1.05rem',
+                color: 'oklch(0.72 0.010 260)',
                 letterSpacing: '0.03em'
               }}>
                 Upload your datalog to generate a full diagnostic analysis, dyno chart, and PDF report
@@ -434,10 +434,10 @@ export default function Home() {
                   }}>
                     {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
                   </h3>
-                  <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)', fontSize: '0.9rem' }}>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.65 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your CSV file here, or click to browse
                   </p>
-                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.45 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
+                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.50 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
                     CURRENTLY ONLY CSV SUPPORTED
                   </p>
 
@@ -479,7 +479,7 @@ export default function Home() {
             </div>
 
             {/* Feature cards */}
-            <div className="mt-8 grid md:grid-cols-2 gap-4 ppei-anim-fade-up ppei-delay-400">
+            <div className="mt-6 grid md:grid-cols-2 gap-4 ppei-anim-fade-up ppei-delay-400">
               <div className="ppei-card-hover" style={{
                 background: 'oklch(0.13 0.006 260)',
                 border: '1px solid oklch(0.22 0.008 260)',
@@ -517,10 +517,122 @@ export default function Home() {
                 </ul>
               </div>
 
+              <div className="ppei-card-hover" style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderTop: '3px solid oklch(0.65 0.20 145)',
+                borderRadius: '3px',
+                padding: '1.25rem'
+              }}>
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1.1rem',
+                  letterSpacing: '0.08em',
+                  color: 'white',
+                  marginBottom: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
+                  ADVANCED MODE
+                </h3>
+                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Calibration Editor
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Live Gauge Dashboard
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Voice Commands
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Tune Compare & Patch
+                  </li>
+                </ul>
+              </div>
             </div>
 
+            {/* Quick Actions for signed-in users */}
+            {isAuthenticated && (
+              <div className="mt-6 ppei-anim-fade-up ppei-delay-600">
+                <div style={{
+                  background: 'oklch(0.12 0.006 260)',
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderLeft: '4px solid oklch(0.52 0.22 25)',
+                  borderRadius: '3px',
+                  padding: '1rem 1.25rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <p style={{
+                        fontFamily: '"Bebas Neue", sans-serif',
+                        fontSize: '1rem',
+                        letterSpacing: '0.06em',
+                        color: 'white',
+                        margin: 0
+                      }}>
+                        WELCOME BACK{user?.name ? `, ${user.name.toUpperCase()}` : ''}
+                      </p>
+                      <p style={{
+                        fontFamily: '"Rajdhani", sans-serif',
+                        fontSize: '0.85rem',
+                        color: 'oklch(0.55 0.010 260)',
+                        margin: 0
+                      }}>
+                        Upload a datalog above or jump to Advanced Mode for calibration tools
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Link href="/advanced">
+                        <button className="ppei-btn-hover" style={{
+                          background: 'oklch(0.16 0.008 260)',
+                          color: 'oklch(0.80 0.010 260)',
+                          fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem',
+                          letterSpacing: '0.08em',
+                          padding: '6px 16px',
+                          borderRadius: '3px',
+                          border: '1px solid oklch(0.28 0.008 260)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <Cpu style={{ width: '14px', height: '14px' }} />
+                          ADVANCED MODE
+                        </button>
+                      </Link>
+                      <Link href="/advanced">
+                        <button className="ppei-btn-hover" style={{
+                          background: 'oklch(0.16 0.008 260)',
+                          color: 'oklch(0.80 0.010 260)',
+                          fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem',
+                          letterSpacing: '0.08em',
+                          padding: '6px 16px',
+                          borderRadius: '3px',
+                          border: '1px solid oklch(0.28 0.008 260)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <Search style={{ width: '14px', height: '14px' }} />
+                          DTC LOOKUP
+                        </button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Bottom brand tagline */}
-            <div className="mt-8 text-center ppei-anim-fade-in ppei-delay-600">
+            <div className="mt-6 text-center ppei-anim-fade-in ppei-delay-600">
               <p style={{
                 fontFamily: '"Bebas Neue", "Impact", sans-serif',
                 fontSize: '0.9rem',
