@@ -1261,3 +1261,36 @@
 - [ ] Write tests for access detection and live tuning
 - [ ] Support fuel tank and tire size modification (Ford/Ram diesel priority)
 - [ ] Support J1939 flashing and Aisin mapping
+
+
+## Cummins Live Tuning System (2026-03-29)
+- [ ] Build Cummins Parameter Database (RAM addresses, DID mappings, scaling factors)
+- [ ] Implement OBD-II Mode 3D (Write Memory) support for RAM address writes
+- [ ] Build RAM-only tuning engine with read/write operations
+- [ ] Build parameter validator to prevent out-of-range writes
+- [ ] Integrate Cummins tuning into CalibrationEditor UI
+- [ ] Write tests for Cummins parameter database and tuning engine
+- [ ] Support fuel tank and tire size modification (Ford/Ram diesel priority)
+- [ ] Support J1939 flashing and Aisin mapping
+
+
+## Erika Knowledge Base Training (2026-03-29)
+- [ ] Build Erika's learning engine to ingest binaries and A2L files
+- [ ] Extract parameter metadata from A2L files for Erika's knowledge base
+- [ ] Build pattern recognition system for Erika to learn map structures
+- [ ] Train Erika on Cummins diesel tuning parameters and best practices
+- [ ] Train Erika on powersports ECU tuning (Can-Am, Polaris, Arctic Cat, Yamaha, Honda)
+- [ ] Add OBD-II and UDS protocol explanations to Erika's context
+- [ ] Enable Erika to guide users through live tuning operations
+- [ ] Add parameter recommendations and safety warnings to Erika's responses
+- [ ] Integrate Cummins and powersports parameter databases into Erika's chat context
+- [ ] Train Erika on fuel injection, timing, boost, EGR, DPF, DEF, torque limiting, speed limiting
+- [ ] Train Erika on VIN modification, key relearning, and immobilizer procedures
+
+## Cummins Live Tuning System (2026-03-29)
+- [x] Build Cummins Parameter Database with RAM addresses and scaling
+- [ ] Implement OBD-II Mode 3D (Write Memory) support
+- [ ] Build RAM-only tuning engine with read/write operations
+- [ ] Build parameter validator to prevent out-of-range writes
+- [ ] Integrate Cummins tuning into CalibrationEditor UI
+- [ ] Write tests for Cummins parameter database and tuning engine
