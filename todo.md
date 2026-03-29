@@ -2002,3 +2002,17 @@
 - [x] MG1C now correctly detected with 1.0 confidence (was failing due to ME17 tie)
 - [x] Tested with StockRead_1G0100914SB3VUM8_UL_exported.bin (5.91 MB Bosch MG1C)
 - [x] Full pipeline ready: detect → discover maps → generate A2L → validate
+
+
+## Bug: Binary Upload Still Failing Despite Detector Fix (2026-03-29)
+- [x] Test detectECUFamily endpoint with StockRead binary
+- [x] Check if error is in base64 encoding/decoding (NOT the issue)
+- [x] Check if error is in the UI component (NOT the issue)
+- [x] Check if error is in the tRPC procedure (NOT the issue)
+- [x] Verify the endpoint is actually being called (Server was crashing)
+- [x] Test with curl/direct API call to isolate the issue (Found root cause)
+- [x] ROOT CAUSE: editor.ts importing @shared/erikaKnowledge (renamed to maraKnowledge)
+- [x] FIX: editor.ts already had correct import (MARA_KNOWLEDGE_BASE from @shared/maraKnowledge)
+- [x] ISSUE: Server wasn't restarted after rename, was using stale import cache
+- [x] SOLUTION: Restarted dev server, now running on port 3001
+- [x] VERIFICATION: Pipeline ready - ECU detection, map discovery, A2L generation all working
