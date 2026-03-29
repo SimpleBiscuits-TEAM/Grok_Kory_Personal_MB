@@ -1786,3 +1786,11 @@
 - [x] Add state to TuneCompare for Original/Compare/MapDiff modes
 - [ ] Wire isMG1 prop to PatchManager in Advanced.tsx
 - [ ] Test Original/Compare/Map Diff/MG1 patch visibility
+
+## Can-Am MG1 A2L Retrieval Issue
+- [x] Fix 403 Forbidden error when loading Can-Am MG1 binary files
+- [x] Investigate A2L retrieval mechanism for Can-Am ECUs
+- [x] Add Can-Am MG1 ECU family support with alias matching (CANAM, CAN-AM, MG1_CANAM)
+- [x] Improve error handling with better 403 diagnostics and manual upload fallback
+- [x] Add logging and timeout protection to A2L retrieval
+- [ ] Test Can-Am MG1 file loading and A2L mapping (user testing)

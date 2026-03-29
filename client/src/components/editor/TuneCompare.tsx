@@ -57,13 +57,14 @@ interface TuneCompareProps {
   compareBinaryFileName?: string;
   compareFormat?: string;
   compareOffset?: number;
+  isMG1?: boolean;
   onCompareBinaryLoad?: (data: Uint8Array, fileName: string, format: string, offset: number) => void;
   onCloseCompareBinary?: () => void;
   onSelectMap?: (mapIndex: number) => void;
   onCopyToP?: (changes: { offset: number; value: number; size: number }[]) => void;
 }
 
-export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, compareBinary: propCompareBinary, compareBinaryFileName: propCompareBinaryFileName, compareFormat: propCompareFormat, compareOffset: propCompareOffset, onCompareBinaryLoad, onCloseCompareBinary, onSelectMap, onCopyToP }: TuneCompareProps) {
+export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryFileName, compareBinary: propCompareBinary, compareBinaryFileName: propCompareBinaryFileName, compareFormat: propCompareFormat, compareOffset: propCompareOffset, isMG1 = false, onCompareBinaryLoad, onCloseCompareBinary, onSelectMap, onCopyToP }: TuneCompareProps) {
   // Use lifted state from parent if provided, otherwise fall back to local state
   const [localCompareBinary, setLocalCompareBinary] = useState<TuneFile | null>(null);
   const compareBinary = propCompareBinary ? { name: propCompareBinaryFileName || '', data: propCompareBinary, baseAddress: propCompareOffset || 0, format: propCompareFormat || '' } : localCompareBinary;
@@ -80,23 +81,24 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const BYTES_PER_PAGE = 512;
   const BYTES_PER_ROW = 16;
 
-  // Check if primary binary is MG1
-  const isMG1 = useMemo(() => {
+  // Use isMG1 prop if provided, otherwise detect from primary binary
+  const detectedIsMG1 = useMemo(() => {
+    if (isMG1) return true; // Use prop if explicitly provided
     if (!primaryBinary) return false;
     return isMG1File(primaryFileName, primaryBinary);
-  }, [primaryBinary, primaryFileName]);
+  }, [isMG1, primaryBinary, primaryFileName]);
 
   // Check if Dynojet patch is available
   const canPatchDynojet = useMemo(() => {
-    if (!primaryBinary) return false;
+    if (!primaryBinary || !detectedIsMG1) return false;
     return canApplyDynojePatch(primaryFileName, primaryBinary);
-  }, [primaryBinary, primaryFileName]);
+  }, [primaryBinary, primaryFileName, detectedIsMG1]);
 
   // Check if HPTuners patch is available
   const canPatchHPTuners = useMemo(() => {
-    if (!primaryBinary) return false;
+    if (!primaryBinary || !detectedIsMG1) return false;
     return canApplyHPTunersPatch(primaryFileName, primaryBinary);
-  }, [primaryBinary, primaryFileName]);
+  }, [primaryBinary, primaryFileName, detectedIsMG1]);
 
   // ── Load compare file ──
   const handleCompareLoad = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -502,6 +504,15 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
             </button>
           </div>
 
+          {/* Map Diff Modal Button */}
+          <button
+            className="px-2 py-0.5 rounded text-[10px] bg-purple-900/50 text-purple-400 hover:bg-purple-900 transition-colors ml-1"
+            onClick={() => setShowMapDiffModal(true)}
+            title="View all map differences in scrollable modal"
+          >
+            <Diff className="w-3 h-3 inline mr-1" />All Diffs
+          </button>
+
           {viewMode === 'maps' && (
             <div className="flex-1 ml-2">
               <Input
@@ -514,6 +525,14 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
           )}
         </div>
       )}
+
+      {/* ── Map Diff Modal ── */}
+      <MapDiffModal
+        isOpen={showMapDiffModal}
+        onClose={() => setShowMapDiffModal(false)}
+        diffs={mapDiffs}
+        title="All Map Differences"
+      />
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-auto">
@@ -545,7 +564,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                       onClick={() => toggleExpanded(diff.mapIndex)}
                     >
                       {isExpanded ? <ChevronDown className="w-3 h-3 text-zinc-500" /> : <ChevronRight className="w-3 h-3 text-zinc-500" />}
-                      <span className="text-[11px] font-mono text-white flex-1 truncate">{diff.map.name}</span>
+                      <span className="text-[11px] font-mono text-white flex-1 truncate">{diff.map.description || diff.map.name}</span>
                       <span className="text-[10px] text-zinc-500">{diff.map.category}</span>
                       <span className="text-[10px] text-amber-400 font-mono">{diff.changedCells}/{diff.totalCells}</span>
                       <span className="text-[10px] text-zinc-600">({pctChanged}%)</span>
@@ -554,9 +573,26 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                       {diff.maxIncrease > 0 && <span className="text-[10px] text-emerald-500">+{diff.maxIncrease}</span>}
                       {diff.maxDecrease < 0 && <span className="text-[10px] text-red-500">{diff.maxDecrease}</span>}
                     </button>
+                    {/* Right-side Original/Compare buttons */}
+                    <div className="flex items-center gap-1 border-l border-zinc-800 pl-2 shrink-0">
+                      <button
+                        className={`px-2 py-0.5 rounded text-[10px] ${displayMode === 'original' ? 'bg-cyan-900/50 text-cyan-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+                        onClick={() => setDisplayMode('original')}
+                        title="Show original binary values for this map"
+                      >
+                        Original
+                      </button>
+                      <button
+                        className={`px-2 py-0.5 rounded text-[10px] ${displayMode === 'compare' ? 'bg-amber-900/50 text-amber-400' : 'text-zinc-500 hover:bg-zinc-800'}`}
+                        onClick={() => setDisplayMode('compare')}
+                        title="Show comparison binary values for this map"
+                      >
+                        Compare
+                      </button>
+                    </div>
                     {onSelectMap && (
                       <button
-                        className="px-2 py-1 text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900 rounded transition-colors shrink-0"
+                        className="px-2 py-1 text-[10px] bg-red-900/50 text-red-300 hover:bg-red-900 rounded transition-colors shrink-0 ml-1"
                         onClick={() => onSelectMap(diff.mapIndex)}
                         title="View this map in the editor"
                       >

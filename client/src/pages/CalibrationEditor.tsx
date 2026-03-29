@@ -1126,11 +1126,13 @@ export default function CalibrationEditor() {
                     compareBinaryFileName={compareBinaryFileName}
                     compareFormat={compareFormat}
                     compareOffset={compareOffset}
+                    isMG1={detectedFamily?.includes('MG1') || binaryFileName.toLowerCase().includes('mg1')}
                     onCompareBinaryLoad={(data: Uint8Array, fileName: string, format: string, offset: number) => {
                       setCompareBinary(data);
                       setCompareBinaryFileName(fileName);
                       setCompareFormat(format);
                       setCompareOffset(offset);
+                      // Update isMG1 detection for compare file
                     }}
                     onCloseCompareBinary={() => {
                       setCompareBinary(null);

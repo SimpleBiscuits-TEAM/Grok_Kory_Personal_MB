@@ -302,32 +302,93 @@ Examples of good translations:
     )
     .query(async ({ input }) => {
       // Known A2L files per ECU family (pre-stored)
-      const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv' }> = {
+      const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv'; aliases?: string[] }> = {
         'E41': { fileName: 'E41_a171711502_quasi.a2l', type: 'a2l' },
-        'MG1C': { fileName: '1E1101953.a2l', type: 'a2l' },
-        'BRP': { fileName: '1E1101953.a2l', type: 'a2l' },          // CAN-am / BRP uses MG1C A2L
+        'MG1C': { fileName: '1E1101953.a2l', type: 'a2l', aliases: ['MG1', 'POLARIS_MG1'] },
+        'BRP': { fileName: '1E1101953.a2l', type: 'a2l', aliases: ['CANAM', 'CAN-AM', 'MG1_CANAM'] },  // CAN-Am / BRP uses MG1C A2L
         'MED17': { fileName: '1E1101953.a2l', type: 'a2l' },        // Bosch MED17 family
         'MG1CA920': { fileName: '1E1101953.a2l', type: 'a2l' },     // MG1CA920 variant
         'T93': { fileName: '24048502 22  6.6L T93.a2l', type: 'a2l' },
         'CUMMINS': { fileName: 'Cummins 2019 6.7L PK 68RFE 52.19.03.00 (52370931AF).csv', type: 'csv' },
       };
 
-      const entry = A2L_REGISTRY[input.ecuFamily.toUpperCase()];
+      // Try to find entry by family or alias
+      let entry = A2L_REGISTRY[input.ecuFamily.toUpperCase()];
       if (!entry) {
-        return { found: false as const, ecuFamily: input.ecuFamily, message: `No A2L definition stored for ECU family: ${input.ecuFamily}` };
+        // Try aliases
+        for (const [family, reg] of Object.entries(A2L_REGISTRY)) {
+          if (reg.aliases?.some(alias => alias === input.ecuFamily.toUpperCase())) {
+            entry = reg;
+            break;
+          }
+        }
+      }
+
+      if (!entry) {
+        return {
+          found: false as const,
+          ecuFamily: input.ecuFamily,
+          message: `No A2L definition stored for ECU family: ${input.ecuFamily}. Please upload an A2L or CSV file manually.`,
+          suggestion: 'manual_upload'
+        };
       }
 
       try {
         const key = `a2l-library/${input.ecuFamily}/${entry.fileName}`;
-        const { url } = await storageGet(key);
+        console.log(`[A2L] Attempting to fetch: ${key}`);
 
-        // Fetch the actual content
-        const response = await fetch(url);
+        let url: string;
+        try {
+          const result = await storageGet(key);
+          url = result.url;
+        } catch (storageErr: any) {
+          console.error(`[A2L] Storage retrieval failed for ${key}:`, storageErr.message);
+          return {
+            found: false as const,
+            ecuFamily: input.ecuFamily,
+            message: `A2L file reference exists but storage access failed. Please upload an A2L file manually.`,
+            suggestion: 'manual_upload',
+            error: storageErr.message
+          };
+        }
+
+        // Fetch the actual content with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+        let response: Response;
+        try {
+          response = await fetch(url, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
         if (!response.ok) {
-          return { found: false as const, ecuFamily: input.ecuFamily, message: `A2L file exists but could not be retrieved (${response.status})` };
+          const statusText = response.statusText || 'Unknown error';
+          console.error(`[A2L] HTTP ${response.status} ${statusText} when fetching A2L from presigned URL`);
+
+          if (response.status === 403) {
+            return {
+              found: false as const,
+              ecuFamily: input.ecuFamily,
+              message: `A2L file access denied (403 Forbidden). The file may not be available for this ECU family. Please upload an A2L file manually.`,
+              suggestion: 'manual_upload',
+              error: `HTTP ${response.status}: ${statusText}`
+            };
+          }
+
+          return {
+            found: false as const,
+            ecuFamily: input.ecuFamily,
+            message: `A2L file exists but could not be retrieved (HTTP ${response.status}). Please upload an A2L file manually.`,
+            suggestion: 'manual_upload',
+            error: statusText
+          };
         }
 
         const content = await response.text();
+        console.log(`[A2L] Successfully retrieved A2L for ${input.ecuFamily} (${content.length} bytes)`);
+
         return {
           found: true as const,
           ecuFamily: input.ecuFamily,
@@ -336,7 +397,14 @@ Examples of good translations:
           content,
         };
       } catch (err: any) {
-        return { found: false as const, ecuFamily: input.ecuFamily, message: `Failed to fetch A2L: ${err.message}` };
+        console.error(`[A2L] Unexpected error fetching A2L for ${input.ecuFamily}:`, err);
+        return {
+          found: false as const,
+          ecuFamily: input.ecuFamily,
+          message: `Failed to fetch A2L: ${err.message}. Please upload an A2L file manually.`,
+          suggestion: 'manual_upload',
+          error: err.message
+        };
       }
     }),
 });
