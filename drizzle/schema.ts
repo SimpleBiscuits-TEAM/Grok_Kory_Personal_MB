@@ -72,7 +72,7 @@ export const debugSessions = mysqlTable("debug_sessions", {
   reporterId: int("reporterId").notNull(), // FK to users.id
   status: mysqlEnum("status", [
     "submitted",       // User submitted the bug report
-    "analyzing",       // Erika is analyzing the bug
+    "analyzing",       // Mara is analyzing the bug
     "tier1_auto_fix",  // Classified as Tier 1, auto-fixing
     "tier2_pending",   // Classified as Tier 2, awaiting admin approval
     "tier2_approved",  // Admin approved the Tier 2 fix
@@ -94,10 +94,10 @@ export const debugSessions = mysqlTable("debug_sessions", {
   featureArea: varchar("featureArea", { length: 128 }), // e.g., "datalogger", "editor", "analyzer"
   screenshotUrl: text("screenshotUrl"),
   browserInfo: text("browserInfo"), // user agent, viewport, etc.
-  // Erika's analysis
-  analysisResult: text("analysisResult"), // JSON: Erika's diagnosis
+  // Mara's analysis
+  analysisResult: text("analysisResult"), // JSON: Mara's diagnosis
   rootCause: text("rootCause"),
-  proposedFix: text("proposedFix"), // JSON: what Erika proposes to change
+  proposedFix: text("proposedFix"), // JSON: what Mara proposes to change
   fixApplied: text("fixApplied"), // JSON: what was actually changed
   estimatedTokens: int("estimatedTokens"), // estimated token cost
   actualTokens: int("actualTokens"), // actual tokens used
@@ -123,8 +123,8 @@ export type InsertDebugSession = typeof debugSessions.$inferInsert;
 export const debugAuditLog = mysqlTable("debug_audit_log", {
   id: int("id").autoincrement().primaryKey(),
   sessionId: int("sessionId").notNull(), // FK to debugSessions.id
-  actorId: int("actorId"), // FK to users.id (null = system/Erika)
-  actorType: mysqlEnum("actorType", ["user", "admin", "erika", "system"]).notNull(),
+  actorId: int("actorId"), // FK to users.id (null = system/Mara)
+  actorType: mysqlEnum("actorType", ["user", "admin", "mara", "system"]).notNull(),
   action: varchar("action", { length: 128 }).notNull(), // e.g., "submitted", "analyzed", "fix_applied", "retest_confirmed"
   details: text("details"), // JSON: action-specific data
   tokensUsed: int("tokensUsed").default(0),

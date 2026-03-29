@@ -15,7 +15,7 @@
  *   - Arbitration ID filtering (include/exclude)
  *   - Frame freeze/pause for analysis
  *   - Export captured frames to CSV
- *   - AI-powered frame analysis (ask Erika about unknown frames)
+ *   - AI-powered frame analysis (ask Mara about unknown frames)
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -805,7 +805,7 @@ export default function IntelliSpy() {
                       AI FRAME DECODER
                     </h3>
                     <p className="text-xs text-zinc-500">
-                      Select frames from the live view or stats panel, then ask Erika to analyze them.
+                      Select frames from the live view or stats panel, then ask Mara to analyze them.
                     </p>
                   </div>
                 </div>
@@ -858,7 +858,7 @@ export default function IntelliSpy() {
                       </div>
                       <p className="text-xs text-zinc-600 mt-2">
                         These IDs were not found in the module database. They may be manufacturer-specific
-                        broadcast messages, body electronics, or proprietary modules. Ask Erika to analyze
+                        broadcast messages, body electronics, or proprietary modules. Ask Mara to analyze
                         the data patterns to help identify them.
                       </p>
                     </div>

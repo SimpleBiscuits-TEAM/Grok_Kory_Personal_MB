@@ -34,7 +34,7 @@ const VALID_STATUSES = [
 ];
 
 const VALID_TIERS = ['tier1', 'tier2'];
-const VALID_ACTOR_TYPES = ['user', 'admin', 'erika', 'system'];
+const VALID_ACTOR_TYPES = ['user', 'admin', 'mara', 'system'];
 
 describe('Self-Healing Debug System', () => {
   describe('Permission Management', () => {
@@ -212,7 +212,7 @@ describe('Self-Healing Debug System', () => {
       const entry = {
         sessionId: 1,
         actorId: null,
-        actorType: 'erika' as const,
+        actorType: 'mara' as const,
         action: 'analysis_complete',
         details: JSON.stringify({ tier: 'tier1', confidence: 0.85 }),
         tokensUsed: 150,
@@ -220,7 +220,7 @@ describe('Self-Healing Debug System', () => {
       };
 
       expect(VALID_ACTOR_TYPES).toContain(entry.actorType);
-      expect(entry.actorId).toBeNull(); // Erika has no user ID
+      expect(entry.actorId).toBeNull(); // Mara has no user ID
       expect(entry.tokensUsed).toBeGreaterThan(0);
       expect(() => JSON.parse(entry.details!)).not.toThrow();
     });
@@ -228,7 +228,7 @@ describe('Self-Healing Debug System', () => {
     it('should track all actor types', () => {
       expect(VALID_ACTOR_TYPES).toContain('user');
       expect(VALID_ACTOR_TYPES).toContain('admin');
-      expect(VALID_ACTOR_TYPES).toContain('erika');
+      expect(VALID_ACTOR_TYPES).toContain('mara');
       expect(VALID_ACTOR_TYPES).toContain('system');
     });
 

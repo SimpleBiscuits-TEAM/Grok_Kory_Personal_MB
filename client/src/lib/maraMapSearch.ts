@@ -1,5 +1,5 @@
 /**
- * erikaMapSearch — Client-side RAG for A2L calibration maps
+ * maraMapSearch — Client-side RAG for A2L calibration maps
  *
  * Builds a lightweight inverted index over map names, descriptions, categories,
  * and subcategories. Given a user query, returns the top-N most relevant maps

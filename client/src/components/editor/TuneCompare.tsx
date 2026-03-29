@@ -74,7 +74,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
   const [hexPage, setHexPage] = useState(0);
   const [sizeMismatch, setSizeMismatch] = useState<{ primary: number; compare: number; difference: number; offsetsAtRisk: string[] } | null>(null);
-  const [erikaAttemptedFix, setErikaAttemptedFix] = useState(false);
+  const [maraAttemptedFix, setMaraAttemptedFix] = useState(false);
   const [showMapDiffModal, setShowMapDiffModal] = useState(false);
   const [displayMode, setDisplayMode] = useState<'original' | 'compare'>('original');
 
@@ -160,12 +160,12 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
       setLocalCompareBinary(tuneFile);
     }
     setHexPage(0);
-    setErikaAttemptedFix(false);
+    setMaraAttemptedFix(false);
     setSizeMismatch(null);
   }, []);
 
-  // ── Erika auto-fix for size mismatches ──
-  const attemptErikaFix = useCallback(() => {
+  // ── Mara auto-fix for size mismatches ──
+  const attemptMaraFix = useCallback(() => {
     if (!sizeMismatch || !compareBinary || !primaryBinary) return;
     
     // Strategy 1: Padding (if compare is smaller)
@@ -179,7 +179,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         setLocalCompareBinary({ ...compareBinary, data: padded });
       }
       setSizeMismatch(null);
-      setErikaAttemptedFix(true);
+      setMaraAttemptedFix(true);
       return;
     }
     
@@ -192,7 +192,7 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
         setLocalCompareBinary({ ...compareBinary, data: truncated });
       }
       setSizeMismatch(null);
-      setErikaAttemptedFix(true);
+      setMaraAttemptedFix(true);
       return;
     }
   }, [compareBinary, primaryBinary, sizeMismatch]);
@@ -444,9 +444,9 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
             </div>
             <button
               className="text-yellow-400 hover:text-yellow-300 text-xs px-2 py-1 border border-yellow-700 rounded hover:bg-yellow-900/30"
-              onClick={attemptErikaFix}
+              onClick={attemptMaraFix}
             >
-              Let Erika Fix It
+              Let Mara Fix It
             </button>
           </div>
           <div className="text-xs text-yellow-200 space-y-1">
@@ -461,8 +461,8 @@ export default function TuneCompare({ ecuDef, alignment, primaryBinary, primaryF
                 </div>
               </div>
             )}
-            {erikaAttemptedFix && (
-              <div className="text-emerald-400 font-mono">✓ Erika applied a fix (padding/truncation). Diff results updated.</div>
+            {maraAttemptedFix && (
+              <div className="text-emerald-400 font-mono">✓ Mara applied a fix (padding/truncation). Diff results updated.</div>
             )}
           </div>
         </div>

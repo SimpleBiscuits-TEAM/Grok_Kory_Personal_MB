@@ -1,10 +1,10 @@
 /**
- * Erika's Reasoning Feedback Loop
+ * Mara's Reasoning Feedback Loop
  * Continuously improves diagnostics and fault detection based on learned insights
  * Every A2L and binary upload refines the reasoning engine
  */
 
-import type { LearnedParameter, LearnedMap } from './erikaLearningEngine';
+import type { LearnedParameter, LearnedMap } from './maraLearningEngine';
 
 export interface ReasoningModelUpdate {
   type: 'THRESHOLD' | 'FAULT_DETECTION' | 'SAFETY_LIMIT' | 'TUNING_RECOMMENDATION';
@@ -30,10 +30,10 @@ export interface DiagnosticThreshold {
 }
 
 /**
- * Erika's Reasoning Feedback System
+ * Mara's Reasoning Feedback System
  * Updates reasoning models based on learned insights from A2L and binary files
  */
-export class ErikaReasoningFeedback {
+export class MaraReasoningFeedback {
   private diagnosticThresholds: Map<string, DiagnosticThreshold> = new Map();
   private modelUpdates: ReasoningModelUpdate[] = [];
   private faultDetectionRules: Map<string, any> = new Map();

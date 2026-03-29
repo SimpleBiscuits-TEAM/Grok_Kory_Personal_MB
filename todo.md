@@ -1986,9 +1986,10 @@
 
 
 ## Rename Erika to MARA (Multi-Agent Reasoning Architect)
-- [ ] Find all references to "Erika" in codebase
-- [ ] Replace all UI-facing references (labels, titles, chat names)
-- [ ] Replace all code references (variable names, comments, system prompts)
-- [ ] Update todo.md references
-- [ ] Verify TypeScript compilation
-- [ ] Verify tests still pass
+- [x] Find all references to "Erika" in codebase (135 references across 22 files)
+- [x] Replace all UI-facing references (labels, titles, chat names)
+- [x] Replace all code references (variable names, comments, system prompts)
+- [x] Rename files (ErikaChat→MaraChat, erikaMapSearch→maraMapSearch, etc.)
+- [x] Update system prompts (editor.ts, debug.ts) with full name intro
+- [x] Verify TypeScript compilation (0 errors)
+- [x] Verify tests still pass (869 passed, 16 pre-existing failures)

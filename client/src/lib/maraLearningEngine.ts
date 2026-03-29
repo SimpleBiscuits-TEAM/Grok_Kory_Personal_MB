@@ -1,7 +1,7 @@
 /**
- * Erika's Learning Engine
+ * Mara's Learning Engine
  * Learns from uploaded binaries and A2L files to build dynamic knowledge base
- * Every upload makes Erika smarter and more helpful for tuning guidance
+ * Every upload makes Mara smarter and more helpful for tuning guidance
  */
 
 export interface LearnedParameter {
@@ -48,7 +48,7 @@ export interface LearnedMap {
   lastUpdated: number;
 }
 
-export interface ErikaKnowledgeBase {
+export interface MaraKnowledgeBase {
   parameters: Map<string, LearnedParameter>;
   maps: Map<string, LearnedMap>;
   ecuFamilies: Set<string>;
@@ -58,10 +58,10 @@ export interface ErikaKnowledgeBase {
 }
 
 /**
- * Erika's Learning Engine
+ * Mara's Learning Engine
  */
-export class ErikaLearningEngine {
-  private knowledgeBase: ErikaKnowledgeBase = {
+export class MaraLearningEngine {
+  private knowledgeBase: MaraKnowledgeBase = {
     parameters: new Map(),
     maps: new Map(),
     ecuFamilies: new Set(),
@@ -244,7 +244,7 @@ export class ErikaLearningEngine {
   }
 
   /**
-   * Get parameter guidance for Erika to provide to user
+   * Get parameter guidance for Mara to provide to user
    */
   getParameterGuidance(parameterName: string, ecuFamily?: string): string {
     const key = ecuFamily ? `${ecuFamily}:${parameterName}` : parameterName;

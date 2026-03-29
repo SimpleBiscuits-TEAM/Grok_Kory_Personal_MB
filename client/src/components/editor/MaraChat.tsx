@@ -1,13 +1,13 @@
 /**
- * ErikaChat — AI Calibration Assistant
+ * MaraChat — AI Calibration Assistant
  *
- * Named "Erika" — an LLM-powered chat that understands the loaded A2L/binary,
+ * Named "Mara" — an LLM-powered chat that understands the loaded A2L/binary,
  * can trace control logic, help design features, identify tables, and correlate
  * with datalogs.
  *
  * Enhancements:
  *  - Diagnostic integration: automatically injects DiagnosticReport + ReasoningReport
- *    findings into context so Erika knows what the analyzer found
+ *    findings into context so Mara knows what the analyzer found
  *  - RAG map search: builds a TF-IDF index over map names/descriptions and retrieves
  *    the most relevant maps for each user query (eliminates truncation problem)
  */
@@ -17,11 +17,11 @@ import { Send, Bot, User, Loader2, Sparkles, X, Minimize2, Activity, Brain } fro
 import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
-import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext, MapSearchIndex } from '@/lib/erikaMapSearch';
+import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext, MapSearchIndex } from '@/lib/maraMapSearch';
 import type { DiagnosticReport } from '@/lib/diagnostics';
 import type { ReasoningReport } from '@/lib/reasoningEngine';
 
-interface ErikaChatProps {
+interface MaraChatProps {
   ecuDef: EcuDefinition | null;
   selectedMap: CalibrationMap | null;
   onNavigateToMap: (mapName: string) => void;
@@ -46,7 +46,7 @@ const RAG_BUDGET_CHARS = 15000;
 /** Reserve chars for diagnostics */
 const DIAG_BUDGET_CHARS = 8000;
 
-export default function ErikaChat({
+export default function MaraChat({
   ecuDef,
   selectedMap,
   onNavigateToMap,
@@ -54,11 +54,11 @@ export default function ErikaChat({
   onToggle,
   diagnosticReport,
   reasoningReport,
-}: ErikaChatProps) {
+}: MaraChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: `Hey! I'm **Erika** — your calibration engineering partner. Think of me as that friend who's spent way too many late nights staring at hex dumps and forum threads. I might get things wrong sometimes, but hey — if you're so good at this, then don't mind me ;-)\n\nI can help you with:\n\n- **Finding tables** — "Where's the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo actually control?"\n- **Designing features** — "How would I build launch control from scratch?"\n- **DTC troubleshooting** — "What's the enable criteria for P0087?"\n- **Calibration strategy** — "What tables interact with boost at 3000 RPM?"\n\nLoad up an A2L and binary and let's get to work. What are you wrenching on?`,
+      content: `Hey! I'm **Mara** — **M**ulti-**A**gent **R**easoning **A**rchitect — your calibration engineering partner. Think of me as that friend who's spent way too many late nights staring at hex dumps and forum threads. I might get things wrong sometimes, but hey — if you're so good at this, then don't mind me ;-)\n\nI can help you with:\n\n- **Finding tables** — "Where's the fuel rail pressure limiter?"\n- **Understanding maps** — "What does KaDFIR_FaultInfo actually control?"\n- **Designing features** — "How would I build launch control from scratch?"\n- **DTC troubleshooting** — "What's the enable criteria for P0087?"\n- **Calibration strategy** — "What tables interact with boost at 3000 RPM?"\n\nLoad up an A2L and binary and let's get to work. What are you wrenching on?`,
       timestamp: Date.now(),
     },
   ]);
@@ -71,7 +71,7 @@ export default function ErikaChat({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(1);
 
-  const chatMutation = trpc.editor.erikaChat.useMutation();
+  const chatMutation = trpc.editor.maraChat.useMutation();
 
   // ─── Build RAG search index when ECU definition changes ─────────────────
   const searchIndex = useMemo<MapSearchIndex | null>(() => {
@@ -356,7 +356,7 @@ export default function ErikaChat({
           onClick={() => setIsMinimized(false)}
         >
           <Sparkles className="w-4 h-4 text-ppei-red" />
-          <span className="text-xs font-semibold text-white">Erika</span>
+          <span className="text-xs font-semibold text-white">Mara</span>
           {isLoading && <Loader2 className="w-3 h-3 text-ppei-red animate-spin" />}
         </button>
       </div>
@@ -371,7 +371,7 @@ export default function ErikaChat({
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-ppei-red" />
-          <span className="text-sm font-bold text-white">Erika</span>
+          <span className="text-sm font-bold text-white">Mara</span>
           <span className="text-[10px] text-zinc-500">Calibration Assistant</span>
         </div>
         <div className="flex items-center gap-1">
@@ -461,7 +461,7 @@ export default function ErikaChat({
             <div className="bg-zinc-800/60 rounded-lg px-3 py-2">
               <div className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 text-ppei-red animate-spin" />
-                <span className="text-[10px] text-zinc-500">Erika is thinking...</span>
+                <span className="text-[10px] text-zinc-500">Mara is thinking...</span>
               </div>
             </div>
           </div>
@@ -475,7 +475,7 @@ export default function ErikaChat({
           <textarea
             ref={inputRef}
             className="flex-1 bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-ppei-red/50"
-            placeholder="Ask Erika about calibration..."
+            placeholder="Ask Mara about calibration..."
             rows={2}
             value={input}
             onChange={e => setInput(e.target.value)}

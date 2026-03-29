@@ -1,13 +1,13 @@
 /**
- * Erika's Knowledge Base — compiled from OEM functional documents,
+ * Mara's Knowledge Base — compiled from OEM functional documents,
  * A2L analysis, seed/key reverse engineering, forum research,
  * CAN bus tool expertise, and vehicle coding procedures.
  *
- * This is injected into Erika's system prompt so she has deep,
+ * This is injected into Mara's system prompt so she has deep,
  * validated technical knowledge beyond generic LLM training.
  */
 
-export const ERIKA_KNOWLEDGE_BASE = `
+export const MARA_KNOWLEDGE_BASE = `
 ## OEM Control Strategy Knowledge (from Bosch P654 / EDC17 / MG1 documentation)
 
 ### Diesel Torque Path

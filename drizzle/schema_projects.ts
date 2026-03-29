@@ -300,9 +300,9 @@ export const adminAuditLog = mysqlTable('admin_audit_log', {
   targetIdx: index('idx_audit_target').on(table.targetType, table.targetId),
 }));
 
-// ── Erika Map Changes ───────────────────────────────────────────────────
+// ── Mara Map Changes ───────────────────────────────────────────────────
 // Tracks AI-suggested map changes with approval workflow
-export const erikaMapChanges = mysqlTable('erika_map_changes', {
+export const maraMapChanges = mysqlTable('mara_map_changes', {
   id: varchar('id', { length: 36 }).primaryKey(),
   userId: int('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   projectId: varchar('project_id', { length: 36 }).references(() => projects.id, { onDelete: 'set null' }),
@@ -314,14 +314,14 @@ export const erikaMapChanges = mysqlTable('erika_map_changes', {
   originalValues: json('original_values'), // Array of original cell values
   proposedValues: json('proposed_values'), // Array of proposed cell values
   cellRange: json('cell_range'), // {startRow, startCol, endRow, endCol}
-  reasoning: text('reasoning'), // Erika's explanation for the change
+  reasoning: text('reasoning'), // Mara's explanation for the change
   // Approval workflow
   status: mysqlEnum('status', ['pending', 'approved', 'rejected', 'auto_approved']).default('pending'),
   approvedAt: timestamp('approved_at'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
-  userChangesIdx: index('idx_erika_user_changes').on(table.userId, table.status),
-  projectChangesIdx: index('idx_erika_project_changes').on(table.projectId),
+  userChangesIdx: index('idx_mara_user_changes').on(table.userId, table.status),
+  projectChangesIdx: index('idx_mara_project_changes').on(table.projectId),
 }));
 
 

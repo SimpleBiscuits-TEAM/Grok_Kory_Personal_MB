@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 // ─── Status display helpers ─────────────────────────────────────────────────
 const STATUS_INFO: Record<string, { label: string; color: string; icon: typeof Bug }> = {
   submitted: { label: 'Submitted', color: 'text-blue-400', icon: Clock },
-  analyzing: { label: 'Erika Analyzing...', color: 'text-yellow-400', icon: Loader2 },
+  analyzing: { label: 'Mara Analyzing...', color: 'text-yellow-400', icon: Loader2 },
   tier1_auto_fix: { label: 'Auto-Fixing...', color: 'text-green-400', icon: Loader2 },
   tier2_pending: { label: 'Awaiting Admin Approval', color: 'text-orange-400', icon: Clock },
   tier2_approved: { label: 'Approved — Fixing', color: 'text-green-400', icon: CheckCircle },
@@ -84,7 +84,7 @@ export default function DebugReportButton() {
   // Submit bug report
   const submitReport = trpc.debug.submitReport.useMutation({
     onSuccess: (data) => {
-      toast.success(`Bug report #${data.sessionId} submitted! Erika is analyzing...`);
+      toast.success(`Bug report #${data.sessionId} submitted! Mara is analyzing...`);
       setShowForm(false);
       resetForm();
       sessionsQuery.refetch();
@@ -95,7 +95,7 @@ export default function DebugReportButton() {
   // Submit retest feedback
   const submitRetest = trpc.debug.submitRetest.useMutation({
     onSuccess: (data) => {
-      toast.success(data.status === 'confirmed_fixed' ? 'Marked as fixed!' : 'Feedback submitted — Erika will re-analyze');
+      toast.success(data.status === 'confirmed_fixed' ? 'Marked as fixed!' : 'Feedback submitted — Mara will re-analyze');
       sessionsQuery.refetch();
     },
     onError: (e) => toast.error(e.message),
@@ -314,7 +314,7 @@ export default function DebugReportButton() {
 
                         {s.rootCause && (
                           <div className="bg-zinc-900/50 rounded p-2 border-l-2 border-purple-500">
-                            <p className="text-[10px] text-purple-400 font-[Share_Tech_Mono] uppercase">Erika's Analysis</p>
+                            <p className="text-[10px] text-purple-400 font-[Share_Tech_Mono] uppercase">Mara's Analysis</p>
                             <p className="text-xs text-zinc-300 font-[Rajdhani] mt-0.5">{s.rootCause}</p>
                           </div>
                         )}

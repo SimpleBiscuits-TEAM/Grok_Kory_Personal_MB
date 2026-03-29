@@ -8,7 +8,7 @@
  *  - 2D table editor with color-coded cells
  *  - 3D surface visualization
  *  - Hex view (from existing BinaryUploadPanel)
- *  - Erika AI calibration assistant
+ *  - Mara AI calibration assistant
  *  - File export (download modified binary)
  *  - Side-by-side compare (stock vs modified)
  */
@@ -38,7 +38,7 @@ import {
 } from '@/lib/mg1UnlockPatches';
 import MapTreeBrowser from '@/components/editor/MapTreeBrowser';
 import MapDetailPanel from '@/components/editor/MapDetailPanel';
-import ErikaChat from '@/components/editor/ErikaChat';
+import MaraChat from '@/components/editor/MaraChat';
 import HexEditor from '@/components/editor/HexEditor';
 import TuneCompare from '@/components/editor/TuneCompare';
 import { TuneManager } from '@/components/editor/TuneManager';
@@ -64,7 +64,7 @@ export default function CalibrationEditor() {
   const [modifiedMaps, setModifiedMaps] = useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [showErika, setShowErika] = useState(false);
+  const [showMara, setShowMara] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('maps');
 
@@ -402,13 +402,13 @@ export default function CalibrationEditor() {
             populateMapValues(map, def, currentBinaryData, align.offset);
           }
 
-          // Erika self-healing: validate and auto-fix if needed
-          setLoadingMessage('Erika is checking alignment quality...');
+          // Mara self-healing: validate and auto-fix if needed
+          setLoadingMessage('Mara is checking alignment quality...');
           const heal = autoHealAlignment(def, currentBinaryData, currentBaseAddress, align);
           setHealResult(heal);
           if (heal.success && heal.finalAlignment !== align) {
             setAlignment(heal.finalAlignment);
-            toast.success('Erika Auto-Fixed Alignment', {
+            toast.success('Mara Auto-Fixed Alignment', {
               description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
             });
           } else if (align.confidence > 0.5) {
@@ -474,13 +474,13 @@ export default function CalibrationEditor() {
             populateMapValues(map, def, data, align.offset);
           }
 
-          // Erika self-healing
-          setLoadingMessage('Erika is checking alignment quality...');
+          // Mara self-healing
+          setLoadingMessage('Mara is checking alignment quality...');
           const heal = autoHealAlignment(def, data, baseAddress, align);
           setHealResult(heal);
           if (heal.success && heal.finalAlignment !== align) {
             setAlignment(heal.finalAlignment);
-            toast.success('Erika Auto-Fixed Alignment', {
+            toast.success('Mara Auto-Fixed Alignment', {
               description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
             });
           } else if (align.confidence > 0.5) {
@@ -495,14 +495,14 @@ export default function CalibrationEditor() {
           setEcuDef({ ...def });
         } else {
           // Even if initial alignment failed, try auto-heal with zero offset as starting point
-          setLoadingMessage('Erika is trying to find the correct alignment...');
+          setLoadingMessage('Mara is trying to find the correct alignment...');
           const fallbackAlign: AlignmentResult = { offset: 0, confidence: 0, method: 'none', anchors: [] };
           const heal = autoHealAlignment(def, data, baseAddress, fallbackAlign);
           setHealResult(heal);
           if (heal.success && heal.finalDiagnostic.healthScore > 0.3) {
             setAlignment(heal.finalAlignment);
             setEcuDef({ ...def });
-            toast.success('Erika Found Alignment', {
+            toast.success('Mara Found Alignment', {
               description: `Auto-discovered offset with ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% health (${heal.finalAlignment.method})`
             });
           } else {
@@ -564,13 +564,13 @@ export default function CalibrationEditor() {
             populateMapValues(map, currentEcuDef, data, align.offset);
           }
 
-          // Erika self-healing
-          setLoadingMessage('Erika is checking alignment quality...');
+          // Mara self-healing
+          setLoadingMessage('Mara is checking alignment quality...');
           const heal = autoHealAlignment(currentEcuDef, data, baseAddress, align);
           setHealResult(heal);
           if (heal.success && heal.finalAlignment !== align) {
             setAlignment(heal.finalAlignment);
-            toast.success('Erika Auto-Fixed Alignment', {
+            toast.success('Mara Auto-Fixed Alignment', {
               description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy (${heal.finalAlignment.method})`
             });
           } else if (align.confidence > 0.5) {
@@ -585,14 +585,14 @@ export default function CalibrationEditor() {
           setEcuDef({ ...currentEcuDef });
         } else {
           // Even if initial alignment failed, try auto-heal
-          setLoadingMessage('Erika is trying to find the correct alignment...');
+          setLoadingMessage('Mara is trying to find the correct alignment...');
           const fallbackAlign: AlignmentResult = { offset: 0, confidence: 0, method: 'none', anchors: [] };
           const heal = autoHealAlignment(currentEcuDef, data, baseAddress, fallbackAlign);
           setHealResult(heal);
           if (heal.success && heal.finalDiagnostic.healthScore > 0.3) {
             setAlignment(heal.finalAlignment);
             setEcuDef({ ...currentEcuDef });
-            toast.success('Erika Found Alignment', {
+            toast.success('Mara Found Alignment', {
               description: `Auto-discovered offset with ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% health (${heal.finalAlignment.method})`
             });
           } else {
@@ -930,7 +930,7 @@ export default function CalibrationEditor() {
                     : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
                 }`}
                 onClick={() => setShowHealLog(!showHealLog)}
-                title="Click to see Erika's alignment analysis"
+                title="Click to see Mara's alignment analysis"
               >
                 {healResult.success ? '✓ Healed' : '⚠ Check'}
               </button>
@@ -1047,11 +1047,11 @@ export default function CalibrationEditor() {
         <Button
           variant="outline"
           size="sm"
-          className={`h-7 text-[11px] gap-1.5 border-zinc-700 ${showErika ? 'bg-ppei-red/20 text-ppei-red border-ppei-red/30' : 'bg-transparent hover:bg-zinc-800'}`}
-          onClick={() => setShowErika(!showErika)}
+          className={`h-7 text-[11px] gap-1.5 border-zinc-700 ${showMara ? 'bg-ppei-red/20 text-ppei-red border-ppei-red/30' : 'bg-transparent hover:bg-zinc-800'}`}
+          onClick={() => setShowMara(!showMara)}
         >
           <Sparkles className="w-3.5 h-3.5" />
-          Erika
+          Mara
         </Button>
       </div>
 
@@ -1235,7 +1235,7 @@ export default function CalibrationEditor() {
                     )}
                     {healResult && (
                       <>
-                        <div className="mt-3 text-zinc-500 border-t border-zinc-800 pt-2">Erika Self-Healing:</div>
+                        <div className="mt-3 text-zinc-500 border-t border-zinc-800 pt-2">Mara Self-Healing:</div>
                         <div className="pl-3 text-zinc-400">
                           Status: <span className={healResult.success ? 'text-emerald-400' : 'text-amber-400'}>
                             {healResult.success ? 'Alignment verified/healed' : 'Could not auto-fix'}
@@ -1456,7 +1456,7 @@ export default function CalibrationEditor() {
                 </Card>
                 <Card className="p-3 bg-zinc-900/50 border-zinc-800 text-center">
                   <Sparkles className="w-5 h-5 text-ppei-red mx-auto mb-1" />
-                  <div className="text-[10px] text-zinc-400">Erika AI</div>
+                  <div className="text-[10px] text-zinc-400">Mara AI</div>
                   <div className="text-[9px] text-zinc-600">Calibration assistant</div>
                 </Card>
               </div>
@@ -1467,10 +1467,10 @@ export default function CalibrationEditor() {
           )}
         </div>
 
-        {/* Right panel: Erika chat */}
-        {showErika && (
+        {/* Right panel: Mara chat */}
+        {showMara && (
           <div className="w-80 shrink-0">
-            <ErikaChat
+            <MaraChat
               ecuDef={ecuDef}
               selectedMap={selectedMap}
               onNavigateToMap={(name) => {
@@ -1478,8 +1478,8 @@ export default function CalibrationEditor() {
                 const idx = ecuDef.maps.findIndex(m => m.name === name);
                 if (idx !== -1) setSelectedMapIndex(idx);
               }}
-              isOpen={showErika}
-              onToggle={() => setShowErika(false)}
+              isOpen={showMara}
+              onToggle={() => setShowMara(false)}
             />
           </div>
         )}

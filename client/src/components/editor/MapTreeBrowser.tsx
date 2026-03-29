@@ -555,7 +555,7 @@ export default function MapTreeBrowser({ maps, selectedMapIndex, onSelectMap, mo
         <div className="px-2 py-1 bg-purple-500/5 border-b border-purple-500/20 shrink-0">
           <div className="flex items-center gap-2 text-[10px] text-purple-400">
             <Loader2 className="w-3 h-3 animate-spin" />
-            <span>Erika is translating map names...</span>
+            <span>Mara is translating map names...</span>
             <span className="ml-auto text-purple-500">{Math.round((magicProgress.done / Math.max(magicProgress.total, 1)) * 100)}%</span>
           </div>
           <div className="mt-1 h-0.5 bg-zinc-800 rounded-full overflow-hidden">

@@ -2458,7 +2458,7 @@ export interface AutoHealResult {
  * Self-healing alignment: if the initial alignment produces bad data,
  * automatically try alternative strategies to find the correct offset.
  * 
- * This is "Erika noticing something is wrong and fixing it herself."
+ * This is "Mara noticing something is wrong and fixing it herself."
  */
 export function autoHealAlignment(
   ecuDef: EcuDefinition,
@@ -2469,14 +2469,14 @@ export function autoHealAlignment(
   const log: string[] = [];
   const strategiesAttempted: string[] = [];
 
-  log.push(`[Erika] Checking alignment quality (method: ${currentAlignment.method}, confidence: ${(currentAlignment.confidence * 100).toFixed(1)}%)...`);
+  log.push(`[Mara] Checking alignment quality (method: ${currentAlignment.method}, confidence: ${(currentAlignment.confidence * 100).toFixed(1)}%)...`);
 
   // First, validate the current alignment
   const originalDiag = validateAlignment(ecuDef);
-  log.push(`[Erika] Health check: ${originalDiag.mapsInRange}/${originalDiag.totalMapsChecked} maps in range (${(originalDiag.healthScore * 100).toFixed(0)}% healthy)`);
+  log.push(`[Mara] Health check: ${originalDiag.mapsInRange}/${originalDiag.totalMapsChecked} maps in range (${(originalDiag.healthScore * 100).toFixed(0)}% healthy)`);
 
   if (originalDiag.isHealthy && originalDiag.healthScore > 0.6) {
-    log.push('[Erika] Alignment looks good — no intervention needed.');
+    log.push('[Mara] Alignment looks good — no intervention needed.');
     return {
       success: true,
       originalAlignment: currentAlignment,
@@ -2490,9 +2490,9 @@ export function autoHealAlignment(
 
   // Something is wrong — start trying alternatives
   for (const issue of originalDiag.issues) {
-    log.push(`[Erika] Issue detected: ${issue}`);
+    log.push(`[Mara] Issue detected: ${issue}`);
   }
-  log.push('[Erika] Alignment looks suspicious. Trying alternative strategies...');
+  log.push('[Mara] Alignment looks suspicious. Trying alternative strategies...');
 
   const valueMaps = ecuDef.maps.filter(m => m.type === 'VALUE' && m.address > 0);
   const testMaps = valueMaps.slice(0, 50);
@@ -2551,7 +2551,7 @@ export function autoHealAlignment(
 
   // ── Strategy 1: Try zero offset ──
   strategiesAttempted.push('zero_offset');
-  log.push('[Erika] Strategy 1: Trying zero offset (A2L addresses = binary offsets)...');
+  log.push('[Mara] Strategy 1: Trying zero offset (A2L addresses = binary offsets)...');
   {
     const result = tryAndValidate(0, 'auto_heal_zero');
     log.push(`  → ${(result.diag.healthScore * 100).toFixed(0)}% healthy (${result.diag.mapsInRange}/${result.diag.totalMapsChecked} in range)`);
@@ -2563,7 +2563,7 @@ export function autoHealAlignment(
 
   // ── Strategy 2: Try flipped byte order ──
   strategiesAttempted.push('byte_order_flip');
-  log.push('[Erika] Strategy 2: Trying flipped byte order...');
+  log.push('[Mara] Strategy 2: Trying flipped byte order...');
   {
     const origOrder = ecuDef.moduleInfo.byteOrder;
     ecuDef.moduleInfo.byteOrder = origOrder === 'MSB_FIRST' ? 'MSB_LAST' : 'MSB_FIRST';
@@ -2579,7 +2579,7 @@ export function autoHealAlignment(
 
   // ── Strategy 3: Scan common Bosch/Tricore base addresses ──
   strategiesAttempted.push('bosch_tricore_scan');
-  log.push('[Erika] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
+  log.push('[Mara] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
   const boschBases = [
     // MG1CA920 (Duramax L5P, LM2) — confirmed base addresses
     // Polaris MG1C400A1T2 — confirmed base address
@@ -2616,7 +2616,7 @@ export function autoHealAlignment(
   // ── Strategy 4: Signature-based anchor search ──
   // Look for known calibration signatures in the binary and use them as anchor points
   strategiesAttempted.push('signature_anchor');
-  log.push('[Erika] Strategy 4: Searching for calibration signatures in binary...');
+  log.push('[Mara] Strategy 4: Searching for calibration signatures in binary...');
   {
     // Find maps with distinctive default values (non-zero, non-trivial)
     const anchorCandidates = ecuDef.maps.filter(m => {
@@ -2662,7 +2662,7 @@ export function autoHealAlignment(
 
   // ── Strategy 5: Adaptive fine-grain sweep around address clusters ──
   strategiesAttempted.push('cluster_sweep');
-  log.push('[Erika] Strategy 5: Fine-grain sweep around map address clusters...');
+  log.push('[Mara] Strategy 5: Fine-grain sweep around map address clusters...');
   {
     // Find the median map address to center the search
     const addrs = ecuDef.maps.filter(m => m.address > 0).map(m => m.address).sort((a, b) => a - b);
@@ -2719,8 +2719,8 @@ export function autoHealAlignment(
       populateMapValues(map, ecuDef, binaryData, bestResult.align.offset);
     }
 
-    log.push(`[Erika] ✓ Fixed! Used ${bestResult.align.method} — health improved from ${(originalDiag.healthScore * 100).toFixed(0)}% to ${(bestResult.diag.healthScore * 100).toFixed(0)}%`);
-    log.push(`[Erika] Final offset: 0x${Math.abs(bestResult.align.offset).toString(16).toUpperCase()} (${bestResult.align.offset < 0 ? 'negative' : 'positive'}), confidence: ${(bestResult.align.confidence * 100).toFixed(0)}%`);
+    log.push(`[Mara] ✓ Fixed! Used ${bestResult.align.method} — health improved from ${(originalDiag.healthScore * 100).toFixed(0)}% to ${(bestResult.diag.healthScore * 100).toFixed(0)}%`);
+    log.push(`[Mara] Final offset: 0x${Math.abs(bestResult.align.offset).toString(16).toUpperCase()} (${bestResult.align.offset < 0 ? 'negative' : 'positive'}), confidence: ${(bestResult.align.confidence * 100).toFixed(0)}%`);
 
     return {
       success: true,
@@ -2746,8 +2746,8 @@ export function autoHealAlignment(
     }
   }
 
-  log.push(`[Erika] ✗ Could not find a better alignment. Best health: ${(bestHealth * 100).toFixed(0)}%. The A2L may not match this binary.`);
-  log.push('[Erika] Suggestions: Try uploading a different A2L file, or check if the binary is the correct flash region.');
+  log.push(`[Mara] ✗ Could not find a better alignment. Best health: ${(bestHealth * 100).toFixed(0)}%. The A2L may not match this binary.`);
+  log.push('[Mara] Suggestions: Try uploading a different A2L file, or check if the binary is the correct flash region.');
 
   return {
     success: false,
