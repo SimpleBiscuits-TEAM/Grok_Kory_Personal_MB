@@ -1993,3 +1993,12 @@
 - [x] Update system prompts (editor.ts, debug.ts) with full name intro
 - [x] Verify TypeScript compilation (0 errors)
 - [x] Verify tests still pass (869 passed, 16 pre-existing failures)
+
+
+## Binary Signature Detector Fix (2026-03-29)
+- [x] Fixed ECU family detection to use weighted pattern scoring
+- [x] Reduced weight of generic patterns (0000FFFF, FFFFFFFF) to avoid false positives
+- [x] Added priority-based tie-breaking for equal scores
+- [x] MG1C now correctly detected with 1.0 confidence (was failing due to ME17 tie)
+- [x] Tested with StockRead_1G0100914SB3VUM8_UL_exported.bin (5.91 MB Bosch MG1C)
+- [x] Full pipeline ready: detect → discover maps → generate A2L → validate
