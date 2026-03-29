@@ -1217,3 +1217,36 @@
 
 ## Humor Style Update (2026-03-29)
 - [x] Update Erika's editor personality to include real mom and dad jokes — no Tony Stark style burns
+
+
+## Airflow Outlook Table Replacement (2026-03-29)
+- [x] Replace Boost Efficiency chart with Airflow Outlook table showing actual boost, desired boost, actual vane position, desired vane position, and MAF
+- [x] Update section headers in Home.tsx and Advanced.tsx
+- [x] Update PDF export to reference Airflow Outlook
+
+## Binary-to-Definition Engine (2026-03-29)
+- [x] Research PCMTec, HUD ECU Hacker, and Polaris/Can-Am patent documents
+- [x] Build binary signature scanning and map pattern discovery engine
+- [x] Implement patent-based description generator for maps and parameters
+- [x] Write comprehensive tests for the binary analysis engine (16 tests, all passing)
+- [ ] Integrate binary-to-definition into CalibrationEditor workflow (allow binary upload without A2L)
+- [ ] Build UI for binary analysis results display (discovered maps, confidence scores)
+- [ ] Add ability to refine auto-discovered maps with manual axis corrections
+
+## Datalog-to-Calibration Crosshair (2026-03-29)
+- [ ] Build DatalogOverlay component with timeline scrubber
+- [ ] Implement PID-to-map correlation engine (match datalog values to map axes)
+- [ ] Add visual indicators on map tree showing active operating point
+- [ ] Add cell highlighting on map tables showing current datalog values
+- [ ] Integrate overlay into CalibrationEditor with live sync
+- [ ] Write tests for correlation engine
+
+
+## Binary-to-Definition Cross-Reference Reasoning (2026-03-29)
+- [ ] Build A2L pattern database system (learn map signatures from uploaded A2L files)
+- [ ] Implement hex pattern matching and cross-reference lookup (find matching byte sequences)
+- [ ] Build confidence scoring combining pattern match + axis analysis
+- [ ] Integrate cross-reference reasoning into binary analysis workflow
+- [ ] Write tests for pattern database and cross-reference matching
+- [ ] Display confidence scores in UI (80% match vs 40% axis-only guess)
+- [ ] Allow user to refine guesses by selecting from similar known maps

@@ -260,10 +260,10 @@ doc.addPage();
   addText('DYNO RESULTS — HP & TORQUE', 13, 'bold', [30, 58, 138]);
   await addImg(refs.dynoRef.current, '', true);
 
-  // ── BOOST EFFICIENCY CHART ─────────────────────────────────────────────────
+  // ── AIRFLOW OUTLOOK TABLE ──────────────────────────────────────────────────
   if (refs.boostEffRef?.current) {
     checkBreak(10);
-    addText('BOOST EFFICIENCY — Actual PSIG vs Turbo Vane Position (%)', 13, 'bold', [107, 70, 193]);
+    addText('AIRFLOW OUTLOOK — Boost, VGT Vane Position & MAF by RPM', 13, 'bold', [107, 70, 193]);
     await addImg(refs.boostEffRef.current, '', true);
   }
 

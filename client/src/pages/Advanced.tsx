@@ -1039,7 +1039,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
       {dragAnalysis && <div><SectionHeader icon={<Flag style={{ width: 18, height: 18, color: sColor.red }} />} title="DRAG RACING ANALYZER" /><div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1.25rem' }}><DragTimeslip analysis={dragAnalysis} /></div></div>}
 
       <div><SectionHeader icon={<BarChart3 style={{ width: 18, height: 18, color: sColor.red }} />} title="DYNO RESULTS" /><div ref={dynoContainerRef}><DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} /></div></div>
-      <div><SectionHeader icon={<Gauge style={{ width: 18, height: 18, color: sColor.red }} />} title="BOOST EFFICIENCY" /><BoostEfficiencyChart ref={boostEffRef} data={data} /></div>
+      <div><SectionHeader icon={<Gauge style={{ width: 18, height: 18, color: sColor.red }} />} title="AIRFLOW OUTLOOK" /><BoostEfficiencyChart ref={boostEffRef} data={data} /></div>
 
       {hasFaults && (
         <div className="space-y-6">

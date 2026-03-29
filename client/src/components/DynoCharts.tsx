@@ -1459,53 +1459,106 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
 });
 MafFaultChart.displayName = 'MafFaultChart';
 
-// ─── BOOST EFFICIENCY CHART ───────────────────────────────────────────────────
-// Line graph: X = RPM, Left Y = Boost PSIG (actual + desired), Right Y = Vane % (actual + desired)
-// Shows how efficiently the VGT builds boost across the RPM range.
-interface BoostEfficiencyProps {
+// ─── AIRFLOW OUTLOOK TABLE ──────────────────────────────────────────────────
+// Replaces Boost Efficiency chart. Shows actual boost, desired boost,
+// actual vane position, desired vane position, and MAF in a data table
+// binned by RPM with color-coded delta indicators.
+interface AirflowOutlookProps {
   data: ProcessedMetrics;
 }
 
-export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyProps>(({ data }, ref) => {
+export const AirflowOutlookTable = forwardRef<HTMLDivElement, AirflowOutlookProps>(({ data }, ref) => {
   const hasBoost = data.boost.some(v => v > 0);
   const hasVane = data.turboVanePosition.some(v => v > 0);
-  const hasData = hasBoost || hasVane;
+  const hasMaf = data.maf.some(v => v > 0);
+  const hasData = hasBoost || hasVane || hasMaf;
+  const hasDesiredBoost = data.boostDesired.some(v => v > 0);
+  const hasDesiredVane = data.turboVaneDesired.some(v => v > 0);
 
-  // Bin all 4 channels by RPM bucket (100 RPM bins), only above 600 RPM
-  const chartData = useMemo(() => {
+  // Bin by 250 RPM buckets above 600 RPM
+  const tableData = useMemo(() => {
     if (!hasData) return [];
-    const bucketSize = 100;
-    type Bucket = { boostActualSum: number; boostDesiredSum: number; vaneActualSum: number; vaneDesiredSum: number; count: number };
-    const map: Record<number, Bucket> = {};
+    const bucketSize = 250;
+    type Bucket = {
+      boostActSum: number; boostDesSum: number;
+      vaneActSum: number; vaneDesSum: number;
+      mafSum: number; count: number;
+      boostActPeak: number; mafPeak: number;
+    };
+    const buckets: Record<number, Bucket> = {};
     for (let i = 0; i < data.rpm.length; i++) {
       const rpm = data.rpm[i];
       if (!rpm || rpm < 600) continue;
-      const bucket = Math.round(rpm / bucketSize) * bucketSize;
-      if (!map[bucket]) map[bucket] = { boostActualSum: 0, boostDesiredSum: 0, vaneActualSum: 0, vaneDesiredSum: 0, count: 0 };
-      map[bucket].boostActualSum += data.boost[i] || 0;
-      map[bucket].boostDesiredSum += data.boostDesired[i] || 0;
-      map[bucket].vaneActualSum += data.turboVanePosition[i] || 0;
-      map[bucket].vaneDesiredSum += data.turboVaneDesired[i] || 0;
-      map[bucket].count++;
+      const key = Math.round(rpm / bucketSize) * bucketSize;
+      if (!buckets[key]) buckets[key] = {
+        boostActSum: 0, boostDesSum: 0,
+        vaneActSum: 0, vaneDesSum: 0,
+        mafSum: 0, count: 0,
+        boostActPeak: 0, mafPeak: 0,
+      };
+      const b = buckets[key];
+      b.boostActSum += data.boost[i] || 0;
+      b.boostDesSum += data.boostDesired[i] || 0;
+      b.vaneActSum += data.turboVanePosition[i] || 0;
+      b.vaneDesSum += data.turboVaneDesired[i] || 0;
+      b.mafSum += data.maf[i] || 0;
+      b.count++;
+      if ((data.boost[i] || 0) > b.boostActPeak) b.boostActPeak = data.boost[i] || 0;
+      if ((data.maf[i] || 0) > b.mafPeak) b.mafPeak = data.maf[i] || 0;
     }
-    return Object.entries(map)
-      .map(([rpmStr, b]) => ({
-        rpm: Number(rpmStr),
-        boostActual: b.count > 0 ? b.boostActualSum / b.count : null,
-        boostDesired: b.count > 0 && data.boostDesired.some(v => v > 0) ? b.boostDesiredSum / b.count : null,
-        vaneActual: b.count > 0 && hasVane ? b.vaneActualSum / b.count : null,
-        vaneDesired: b.count > 0 && data.turboVaneDesired.some(v => v > 0) ? b.vaneDesiredSum / b.count : null,
-      }))
+    return Object.entries(buckets)
+      .map(([rpmStr, b]) => {
+        const boostAct = b.count > 0 ? b.boostActSum / b.count : 0;
+        const boostDes = b.count > 0 ? b.boostDesSum / b.count : 0;
+        const vaneAct = b.count > 0 ? b.vaneActSum / b.count : 0;
+        const vaneDes = b.count > 0 ? b.vaneDesSum / b.count : 0;
+        const mafAvg = b.count > 0 ? b.mafSum / b.count : 0;
+        return {
+          rpm: Number(rpmStr),
+          boostAct, boostDes,
+          boostDelta: boostDes > 0 ? boostAct - boostDes : null,
+          vaneAct, vaneDes,
+          vaneDelta: vaneDes > 0 ? vaneAct - vaneDes : null,
+          mafAvg,
+          boostPeak: b.boostActPeak,
+          mafPeak: b.mafPeak,
+          samples: b.count,
+        };
+      })
       .sort((a, b) => a.rpm - b.rpm);
-  }, [data, hasData, hasVane]);
+  }, [data, hasData]);
 
-  const maxBoost = chartData.length
-    ? Math.max(...chartData.map(d => Math.max(d.boostActual ?? 0, d.boostDesired ?? 0)), 10)
-    : 50;
-  const boostYMax = Math.ceil(maxBoost * 1.12 / 5) * 5;
+  // Summary stats
+  const peakBoostAct = tableData.length ? Math.max(...tableData.map(d => d.boostPeak)) : 0;
+  const peakBoostDes = hasDesiredBoost && tableData.length ? Math.max(...tableData.map(d => d.boostDes)) : 0;
+  const peakMaf = tableData.length ? Math.max(...tableData.map(d => d.mafPeak)) : 0;
+  const peakVaneAct = hasVane && tableData.length ? Math.max(...tableData.map(d => d.vaneAct)) : 0;
 
-  const hasDesiredBoost = data.boostDesired.some(v => v > 0);
-  const hasDesiredVane = data.turboVaneDesired.some(v => v > 0);
+  // Delta color helper
+  const deltaColor = (delta: number | null, threshold: number) => {
+    if (delta === null) return '#555';
+    if (Math.abs(delta) < threshold) return '#4ade80'; // green — on target
+    if (delta < 0) return '#f87171'; // red — under target
+    return '#facc15'; // yellow — over target
+  };
+
+  const cellStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
+    padding: '6px 10px',
+    fontFamily: 'monospace',
+    fontSize: 11,
+    textAlign: 'right' as const,
+    borderBottom: '1px solid #1a1e2a',
+    whiteSpace: 'nowrap' as const,
+    ...extra,
+  });
+
+  const thStyle = (color: string): React.CSSProperties => ({
+    ...cellStyle({ color, fontWeight: 'bold' }),
+    position: 'sticky' as const,
+    top: 0,
+    background: '#0d0f14',
+    zIndex: 1,
+  });
 
   return (
     <div ref={ref} style={{
@@ -1518,146 +1571,129 @@ export const BoostEfficiencyChart = forwardRef<HTMLDivElement, BoostEfficiencyPr
       {/* Header */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ color: '#a78bfa', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
-          BOOST EFFICIENCY
+          AIRFLOW OUTLOOK
         </div>
         <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
-          Actual &amp; Desired Boost (PSIG) + Vane Position (%) vs Engine RPM — binned averages
+          Boost, VGT Vane Position &amp; MAF binned by RPM — averages per 250 RPM bucket
         </div>
       </div>
 
       {!hasData ? (
         <div style={{ color: '#444', fontFamily: 'monospace', fontSize: 12, padding: '40px 0', textAlign: 'center' }}>
-          Boost pressure or turbo vane position not logged in this file.
+          Boost, vane position, or MAF data not logged in this file.
         </div>
       ) : (
         <>
-          {/* Legend */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
+          {/* Summary cards */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
             {[
-              { color: '#a78bfa', label: 'Boost Actual (PSIG)', show: hasBoost },
-              { color: '#7c3aed', label: 'Boost Desired (PSIG)', show: hasDesiredBoost, dashed: true },
-              { color: '#fb923c', label: 'Vane Actual (%)', show: hasVane },
-              { color: '#fbbf24', label: 'Vane Desired (%)', show: hasDesiredVane, dashed: true },
-            ].filter(l => l.show).map(l => (
-              <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <svg width="22" height="8">
-                  <line x1="0" y1="4" x2="22" y2="4"
-                    stroke={l.color} strokeWidth="2"
-                    strokeDasharray={l.dashed ? '4 3' : undefined} />
-                </svg>
-                <span style={{ color: '#888', fontFamily: 'monospace', fontSize: 10 }}>{l.label}</span>
+              { label: 'Peak Boost', value: `${peakBoostAct.toFixed(1)} PSIG`, color: '#a78bfa' },
+              hasDesiredBoost ? { label: 'Peak Desired', value: `${peakBoostDes.toFixed(1)} PSIG`, color: '#7c3aed' } : null,
+              hasMaf ? { label: 'Peak MAF', value: `${peakMaf.toFixed(1)} g/s`, color: '#38bdf8' } : null,
+              hasVane ? { label: 'Peak Vane', value: `${peakVaneAct.toFixed(1)}%`, color: '#fb923c' } : null,
+            ].filter(Boolean).map((s: any) => (
+              <div key={s.label} style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid #1e2330',
+                borderRadius: 8,
+                padding: '8px 14px',
+                minWidth: 120,
+              }}>
+                <div style={{ color: '#555', fontFamily: 'monospace', fontSize: 9, letterSpacing: 1, marginBottom: 2 }}>
+                  {s.label}
+                </div>
+                <div style={{ color: s.color, fontFamily: 'monospace', fontSize: 16, fontWeight: 'bold' }}>
+                  {s.value}
+                </div>
               </div>
             ))}
           </div>
 
-          <ZoomableChart data={chartData} height={360}>
-            {(visibleData) => (
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={visibleData} margin={{ top: 10, right: 55, bottom: 30, left: 10 }}>
-                <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
-                <XAxis
-                  dataKey="rpm"
-                  stroke="#333"
-                  tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                  tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`}
-                  label={{ value: 'ENGINE RPM', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 10, fontFamily: 'monospace' }}
-                />
-                {/* Left Y: Boost PSIG */}
-                <YAxis
-                  yAxisId="boost"
-                  orientation="left"
-                  stroke="#333"
-                  tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                  domain={[0, boostYMax]}
-                  label={{ value: 'BOOST (PSIG)', angle: -90, position: 'insideLeft', offset: 14, fill: '#a78bfa', fontSize: 10, fontFamily: 'monospace' }}
-                />
-                {/* Right Y: Vane % */}
-                {hasVane && (
-                  <YAxis
-                    yAxisId="vane"
-                    orientation="right"
-                    stroke="#333"
-                    tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                    domain={[0, 100]}
-                    tickFormatter={(v) => `${v}%`}
-                    label={{ value: 'VANE POS (%)', angle: 90, position: 'insideRight', offset: 14, fill: '#fb923c', fontSize: 10, fontFamily: 'monospace' }}
-                  />
-                )}
-                <Tooltip
-                  content={({ active, payload, label }: any) => {
-                    if (!active || !payload?.length) return null;
-                    return (
-                      <div style={{
-                        background: 'rgba(13,15,20,0.97)', border: '1px solid #a78bfa',
-                        borderRadius: 6, padding: '10px 14px', fontFamily: 'monospace', fontSize: 11, color: '#e0e0e0',
-                      }}>
-                        <div style={{ color: '#a78bfa', fontWeight: 'bold', marginBottom: 6 }}>
-                          {label ? `${Number(label).toFixed(0)} RPM` : ''}
-                        </div>
-                        {payload.map((p: any, i: number) =>
-                          p.value != null && (
-                            <div key={i} style={{ color: p.color, marginBottom: 2 }}>
-                              {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                                {typeof p.value === 'number' ? p.value.toFixed(1) : p.value}
-                              </span>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    );
-                  }}
-                />
-                {/* Boost Actual */}
-                {hasBoost && (
-                  <Line yAxisId="boost" type="monotone" dataKey="boostActual"
-                    stroke="#a78bfa" strokeWidth={2.5} dot={false} isAnimationActive={false}
-                    name="Boost Actual (PSIG)" connectNulls />
-                )}
-                {/* Boost Desired */}
-                {hasDesiredBoost && (
-                  <Line yAxisId="boost" type="monotone" dataKey="boostDesired"
-                    stroke="#7c3aed" strokeWidth={1.5} strokeDasharray="6 3"
-                    dot={false} isAnimationActive={false}
-                    name="Boost Desired (PSIG)" connectNulls />
-                )}
-                {/* Vane Actual */}
-                {hasVane && (
-                  <Line yAxisId="vane" type="monotone" dataKey="vaneActual"
-                    stroke="#fb923c" strokeWidth={2} dot={false} isAnimationActive={false}
-                    name="Vane Actual (%)" connectNulls />
-                )}
-                {/* Vane Desired */}
-                {hasDesiredVane && (
-                  <Line yAxisId="vane" type="monotone" dataKey="vaneDesired"
-                    stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="6 3"
-                    dot={false} isAnimationActive={false}
-                    name="Vane Desired (%)" connectNulls />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-            )}
-          </ZoomableChart>
+          {/* Data table */}
+          <div style={{ overflowX: 'auto', maxHeight: 420 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #2a2e3a' }}>
+                  <th style={{ ...thStyle('#888'), textAlign: 'left' }}>RPM</th>
+                  {hasBoost && <th style={thStyle('#a78bfa')}>Boost Act</th>}
+                  {hasDesiredBoost && <th style={thStyle('#7c3aed')}>Boost Des</th>}
+                  {hasDesiredBoost && <th style={thStyle('#888')}>Δ Boost</th>}
+                  {hasVane && <th style={thStyle('#fb923c')}>Vane Act</th>}
+                  {hasDesiredVane && <th style={thStyle('#fbbf24')}>Vane Des</th>}
+                  {hasDesiredVane && <th style={thStyle('#888')}>Δ Vane</th>}
+                  {hasMaf && <th style={thStyle('#38bdf8')}>MAF (g/s)</th>}
+                  <th style={thStyle('#555')}>Samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableData.map((row) => (
+                  <tr key={row.rpm} style={{ transition: 'background 0.15s' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(167,139,250,0.05)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <td style={cellStyle({ textAlign: 'left', color: '#ccc', fontWeight: 'bold' })}>
+                      {row.rpm.toLocaleString()}
+                    </td>
+                    {hasBoost && (
+                      <td style={cellStyle({ color: '#a78bfa' })}>
+                        {row.boostAct.toFixed(1)}
+                      </td>
+                    )}
+                    {hasDesiredBoost && (
+                      <td style={cellStyle({ color: '#7c3aed' })}>
+                        {row.boostDes.toFixed(1)}
+                      </td>
+                    )}
+                    {hasDesiredBoost && (
+                      <td style={cellStyle({ color: deltaColor(row.boostDelta, 1.5), fontWeight: 'bold' })}>
+                        {row.boostDelta !== null ? `${row.boostDelta >= 0 ? '+' : ''}${row.boostDelta.toFixed(1)}` : '—'}
+                      </td>
+                    )}
+                    {hasVane && (
+                      <td style={cellStyle({ color: '#fb923c' })}>
+                        {row.vaneAct.toFixed(1)}%
+                      </td>
+                    )}
+                    {hasDesiredVane && (
+                      <td style={cellStyle({ color: '#fbbf24' })}>
+                        {row.vaneDes.toFixed(1)}%
+                      </td>
+                    )}
+                    {hasDesiredVane && (
+                      <td style={cellStyle({ color: deltaColor(row.vaneDelta, 3), fontWeight: 'bold' })}>
+                        {row.vaneDelta !== null ? `${row.vaneDelta >= 0 ? '+' : ''}${row.vaneDelta.toFixed(1)}%` : '—'}
+                      </td>
+                    )}
+                    {hasMaf && (
+                      <td style={cellStyle({ color: '#38bdf8' })}>
+                        {row.mafAvg.toFixed(1)}
+                      </td>
+                    )}
+                    <td style={cellStyle({ color: '#444' })}>
+                      {row.samples}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-          {/* Stats row */}
-          <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
-            {[
-              { label: 'Peak Boost Actual', value: `${Math.max(...chartData.map(d => d.boostActual ?? 0)).toFixed(1)} PSIG`, color: '#a78bfa' },
-              hasDesiredBoost ? { label: 'Peak Boost Desired', value: `${Math.max(...chartData.map(d => d.boostDesired ?? 0)).toFixed(1)} PSIG`, color: '#7c3aed' } : null,
-              hasVane ? { label: 'Max Vane Actual', value: `${Math.max(...chartData.map(d => d.vaneActual ?? 0)).toFixed(1)}%`, color: '#fb923c' } : null,
-              hasDesiredVane ? { label: 'Max Vane Desired', value: `${Math.max(...chartData.map(d => d.vaneDesired ?? 0)).toFixed(1)}%`, color: '#fbbf24' } : null,
-            ].filter(Boolean).map((s: any) => (
-              <div key={s.label} style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                <span style={{ color: '#444' }}>{s.label}: </span>
-                <span style={{ color: s.color, fontWeight: 'bold' }}>{s.value}</span>
-              </div>
-            ))}
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#555' }}>Delta:</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#4ade80' }}>● On target</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#f87171' }}>● Under target</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#facc15' }}>● Over target</span>
           </div>
         </>
       )}
     </div>
   );
 });
-BoostEfficiencyChart.displayName = 'BoostEfficiencyChart';
+AirflowOutlookTable.displayName = 'AirflowOutlookTable';
+
+// Backward-compatible alias so existing imports still work
+export const BoostEfficiencyChart = AirflowOutlookTable;
 
 // ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
 export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {

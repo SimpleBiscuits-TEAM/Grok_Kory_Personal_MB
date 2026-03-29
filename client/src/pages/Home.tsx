@@ -796,9 +796,9 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Boost Efficiency */}
+            {/* Airflow Outlook */}
             <div className="ppei-section-reveal ppei-delay-400">
-              <SectionHeader icon={<Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="BOOST EFFICIENCY" />
+              <SectionHeader icon={<Gauge style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="AIRFLOW OUTLOOK" />
               <BoostEfficiencyChart ref={boostEffRef} data={data} />
             </div>
 
