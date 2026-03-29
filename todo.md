@@ -1012,14 +1012,9 @@
 - [ ] Integrate with flash container (when provided)
 
 ## Editor Data Loss Fix & Datalog Linking (2026-03-28)
-- [x] Fix editor state loss when navigating away and returning
-- [x] Implement global editor state store that persists across route changes
-- [x] Prevent editor component unmount from clearing state (display:none instead of conditional render)
-- [x] Persist ecuDef JSON + binary + format + baseAddress to localStorage
-- [x] Re-align binary with ecuDef on session restore
-- [x] Add datalog link/unlink to tune files in editor
-- [x] Allow uploading datalog CSV to reference alongside tune binary
-- [x] Display linked datalog data in editor for tuner reference
-- [x] Compact DatalogLinker in toolbar + full panel in Info tab
-- [x] Parse datalog summary (PIDs, duration, sample rate, key metrics)
-- [x] Extract vehicle metadata from CSV comment headers
+- [ ] Fix editor state loss when navigating away and returning
+- [ ] Implement global editor state store that persists across route changes
+- [ ] Prevent editor component unmount from clearing state
+- [ ] Add datalog link/unlink to tune files in editor
+- [ ] Allow uploading datalog CSV to reference alongside tune binary
+- [ ] Display linked datalog data in editor for tuner reference

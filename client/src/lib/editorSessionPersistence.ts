@@ -8,16 +8,11 @@
 export interface EditorSessionState {
   binaryData: string | null; // Base64 encoded
   binaryFileName: string | null;
-  binaryFormat: string | null;
-  binaryBaseAddress: number;
   a2lContent: string | null;
   a2lFileName: string | null;
-  ecuDefJson: string | null; // Serialized EcuDefinition
   selectedMapIndex: number | null;
   modifiedMaps: Record<string, string>; // Map name -> hex values
   autoCorrectChecksums: boolean;
-  linkedDatalogCsv: string | null; // Linked datalog CSV content
-  linkedDatalogFileName: string | null;
   timestamp: number;
 }
 
@@ -37,38 +32,15 @@ export function saveEditorSession(state: Partial<EditorSessionState>): void {
     };
 
     // Convert binary data to base64 for storage
-    if (state.binaryData !== undefined && state.binaryData !== null && typeof state.binaryData !== 'string') {
-      const uint8 = state.binaryData as unknown as Uint8Array;
-      // Use chunked conversion to avoid call stack overflow on large binaries
-      const chunks: string[] = [];
-      const chunkSize = 8192;
-      for (let i = 0; i < uint8.length; i += chunkSize) {
-        const slice = uint8.subarray(i, Math.min(i + chunkSize, uint8.length));
-        chunks.push(String.fromCharCode.apply(null, Array.from(slice)));
-      }
-      newSession.binaryData = btoa(chunks.join(''));
+    if (state.binaryData && typeof state.binaryData !== 'string' && 'length' in state.binaryData) {
+      const binaryArray = Array.from(state.binaryData as Uint8Array);
+      const binaryString = String.fromCharCode(...binaryArray);
+      newSession.binaryData = btoa(binaryString);
     }
 
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(newSession));
   } catch (error) {
-    // If localStorage is full, try saving without binary data
-    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-      console.warn('[Editor Session] Storage full, saving without binary data');
-      try {
-        const currentSession2 = getEditorSession();
-        const fallback: EditorSessionState = {
-          ...currentSession2,
-          ...state,
-          binaryData: null, // Skip binary to fit in storage
-          timestamp: Date.now(),
-        };
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(fallback));
-      } catch {
-        console.error('[Editor Session] Failed to save even without binary');
-      }
-    } else {
-      console.error('[Editor Session] Failed to save session:', error);
-    }
+    console.error('[Editor Session] Failed to save session:', error);
   }
 }
 
@@ -167,16 +139,11 @@ function getEmptySession(): EditorSessionState {
   return {
     binaryData: null,
     binaryFileName: null,
-    binaryFormat: null,
-    binaryBaseAddress: 0,
     a2lContent: null,
     a2lFileName: null,
-    ecuDefJson: null,
     selectedMapIndex: null,
     modifiedMaps: {},
     autoCorrectChecksums: true,
-    linkedDatalogCsv: null,
-    linkedDatalogFileName: null,
     timestamp: Date.now(),
   };
 }

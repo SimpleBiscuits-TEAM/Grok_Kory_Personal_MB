@@ -1400,9 +1400,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'mode6' && <div className="ppei-anim-fade-up"><Mode6Panel /></div>}
         {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
         {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
-        {/* Editor & Datalogger stay mounted (hidden) to preserve state across tab switches */}
-        <div style={{ display: activeTab === 'datalogger' ? 'block' : 'none' }} className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>
-        <div style={{ display: activeTab === 'editor' ? 'block' : 'none' }} className="ppei-anim-fade-up"><EditorGate /></div>
+        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
+        {activeTab === 'editor' && <div className="ppei-anim-fade-up"><EditorGate /></div>}
         {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
