@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE `datalog_cache` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`fileName` varchar(512) NOT NULL,\n\t`s3Key` varchar(512) NOT NULL,\n\t`s3Url` text NOT NULL,\n\t`fileSize` int NOT NULL,\n\t`sourcePage` varchar(128) DEFAULT 'analyzer',\n\t`uploadedBy` varchar(128),\n\t`uploaderName` varchar(256),\n\t`expiresAt` timestamp NOT NULL,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `datalog_cache_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute CREATE TABLE `datalog_cache` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`fileName` varchar(512) NOT NULL,\n\t`s3Key` varchar(512) NOT NULL,\n\t`s3Url` text NOT NULL,\n\t`fileSize` int NOT NULL,\n\t`sourcePage` varchar(128) DEFAULT 'analyzer',\n\t`uploadedBy` varchar(128),\n\t`uploaderName` varchar(256),\n\t`expiresAt` timestamp NOT NULL,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `datalog_cache_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 262
+}

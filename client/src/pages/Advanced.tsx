@@ -823,6 +823,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [lastInjectedId, setLastInjectedId] = useState<string | null>(null);
+  const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
 
   const dynoRef = useRef<DynoChartHandle>(null);
   const dynoContainerRef = useRef<HTMLDivElement>(null);
@@ -890,6 +891,16 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   const processFile = useCallback(async (file: File) => {
     const content = await file.text();
     await processCSVContent(content, file.name);
+    // Cache datalog to S3 for dev/debug (fire-and-forget)
+    try {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(',')[1] || '';
+        if (base64) cacheDatalogMutation.mutate({ fileName: file.name, fileBase64: base64, sourcePage: 'advanced' });
+      };
+      reader.readAsDataURL(file);
+    } catch { /* silent */ }
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [processCSVContent]);
 

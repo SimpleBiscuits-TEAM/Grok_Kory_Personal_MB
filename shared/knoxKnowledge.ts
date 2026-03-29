@@ -500,6 +500,36 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - Relearn period: 50-100 miles of mixed driving
 - UDS: $31 01 FF00 (RoutineControl) to TCM after security access
 
+## Torque Converter Stall Speed vs Turbo Mismatch Analysis
+
+### Converter Stall Speed Fundamentals
+- **Stall speed** = max RPM the engine can reach with converter unlocked and output shaft held stationary
+- Too LOW stall = engine can't rev high enough to spool the turbo efficiently
+- Too HIGH stall = wasted energy as heat, reduced drivability
+- Stall speed MUST be matched to the turbo's power curve — larger turbos need higher stall converters
+
+### Diagnosing Low Stall / Turbo Mismatch
+- **Symptom**: Turbo lag during acceleration, converter is UNLOCKED the entire time during the lag
+- **Key distinction**: This is NOT a TCC fault — the converter is mechanically sound, just mismatched
+- **Root cause A**: Converter stall speed too low for the turbo — engine can't rev high enough to spool
+- **Root cause B**: Turbo has a boost leak preventing it from spooling at the RPM the converter allows
+- **Detection**: Analyze boost buildup rate vs RPM during WOT acceleration. If boost is slow to build while RPM is limited by converter coupling, stall is likely too low
+- **Recommendation**: For performance builds with larger turbos, upgrade to a converter with stall speed matched to the turbo's power curve. If stall speed is appropriate, check for boost leaks (intercooler boots, charge pipes, wastegate seal)
+
+### TCC Behavior During Turbo Spool (CRITICAL — do not flag as fault)
+- Converter being UNLOCKED during acceleration is NORMAL — do not flag as TCC fault
+- TCC should only lock after the engine is in the power band and boost is built
+- TCC apply lag detection should only trigger when TCC is COMMANDED to lock but fails to achieve lockup
+- If TCC is not commanded (duty cycle = 0 or low), any slip is normal converter operation
+- Do NOT confuse turbo spool lag with TCC apply lag — they are completely different issues
+
+### Stall Speed Guidelines by Application
+- Stock Duramax: ~1800-2200 RPM stall (matched to stock turbo)
+- Mild performance (compound turbo, 500-600 HP): ~2400-2800 RPM stall
+- High performance (large single, 700+ HP): ~3000-3500 RPM stall
+- Drag/sled pull (massive turbo): ~3500-4500+ RPM stall
+- Can-Am/BRP Rotax: Factory converter matched to CVT, not typically adjustable
+
 ## NRC (Negative Response Code) Reference
 When a UDS request fails, the ECU returns a Negative Response with one of these codes:
 | NRC | Hex | Meaning | Common Cause |

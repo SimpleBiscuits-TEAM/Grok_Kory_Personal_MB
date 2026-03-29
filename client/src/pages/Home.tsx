@@ -58,6 +58,7 @@ export default function Home() {
   const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
+  const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
 
   // Refs for PDF export
   const dynoRef = useRef<DynoChartHandle>(null);
@@ -116,6 +117,18 @@ export default function Home() {
           setHealthReport(reportWithVin);
         });
       }
+      // Cache datalog to S3 for dev/debug (fire-and-forget, non-blocking)
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const base64 = dataUrl.split(',')[1] || '';
+          if (base64) {
+            cacheDatalogMutation.mutate({ fileName: file.name, fileBase64: base64, sourcePage: 'analyzer' });
+          }
+        };
+        reader.readAsDataURL(file);
+      } catch { /* silent — caching is best-effort */ }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setError('File load error \u2014 This file format has been reported to the PPEI team for review. We\'ll update the tool to support it.');

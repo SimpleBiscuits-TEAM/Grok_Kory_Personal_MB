@@ -954,9 +954,10 @@ function checkConverterSlip(
   // (ControlledOn with high slip converging to zero), high slip is NORMAL
   // and should never be flagged.
   const SLIP_NOISE_FLOOR = 40;
-  const MIN_CONSECUTIVE = 25;
+  const MIN_CONSECUTIVE = 15; // Lowered from 25 for better sensitivity
   const SETTLE_THRESHOLD = 20; // RPM — below this = fully locked
   const SETTLE_SAMPLES = 10;   // Must stay below threshold for this many samples
+  const CUMULATIVE_THRESHOLD = 40; // Total samples of elevated slip (catches intermittent)
 
   let slipEventCount = 0;
   let maxSlipObserved = 0;
@@ -965,6 +966,14 @@ function checkConverterSlip(
   let totalLockedSamples = 0;
   let hasSettled = false;
   let settledCount = 0;
+  // TCC apply lag tracking — only counts lag when slip is NOT converging
+  // Converging slip = normal apply sequence; stalled/rising slip = real lag
+  let tccApplyStart = -1;
+  let maxApplyLag = 0;
+  let applyLagEvents = 0;
+  const LAG_THRESHOLD = 125; // ~5s at 25Hz — generous to avoid false positives
+  let stalledLagSamples = 0; // Samples where slip is stalled/rising during apply
+  const STALLED_LAG_THRESHOLD = 50; // ~2s of stalled slip = real lag
 
   for (let i = 0; i < slip.length; i++) {
     const isFullyLocked = lockSignal(i) >= FULL_LOCK_THRESHOLD;
@@ -975,6 +984,7 @@ function checkConverterSlip(
       consecutiveSlip = 0;
       hasSettled = false;
       settledCount = 0;
+      tccApplyStart = -1;
       continue;
     }
 
@@ -984,10 +994,38 @@ function checkConverterSlip(
       continue;
     }
 
+    // Track TCC apply lag — only count stalled/rising slip as real lag
+    if (tccApplyStart === -1 && !hasSettled) {
+      tccApplyStart = i;
+      stalledLagSamples = 0;
+    } else if (!hasSettled && tccApplyStart >= 0 && absSlip > SETTLE_THRESHOLD) {
+      // Check if slip is stalled or rising (not converging)
+      // Look back ~10 samples: if slip hasn't decreased significantly, it's stalled
+      const lookback = Math.min(10, i - tccApplyStart);
+      if (lookback > 0) {
+        const prevSlip = Math.abs(slip[i - lookback]);
+        if (absSlip >= prevSlip - 10) {
+          // Slip hasn't decreased by more than 10 RPM over lookback — stalled
+          stalledLagSamples++;
+        }
+      }
+    }
+
     // Track settle state: has the converter reached full lockup?
     if (absSlip < SETTLE_THRESHOLD) {
       settledCount++;
-      if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+      if (settledCount >= SETTLE_SAMPLES) {
+        if (!hasSettled && tccApplyStart >= 0) {
+          const totalLag = i - tccApplyStart;
+          if (totalLag > maxApplyLag) maxApplyLag = totalLag;
+          // Only count as a lag event if there were significant stalled samples
+          // (not just a normal converging apply that took a while)
+          if (totalLag > LAG_THRESHOLD && stalledLagSamples > STALLED_LAG_THRESHOLD) {
+            applyLagEvents++;
+          }
+        }
+        hasSettled = true;
+      }
     } else if (!hasSettled) {
       // High slip but converter hasn't settled yet — this is the apply sequence
       settledCount = 0;
@@ -1017,9 +1055,8 @@ function checkConverterSlip(
   const slipRate = (slipWhileLockedCount / totalLockedSamples) * 100;
 
   // Critical: frequent sustained slip events under full lock command
-  // Thresholds significantly raised to prevent false positives:
-  // - Need 20+ confirmed events (was 12) and >35% slip rate (was 25%)
-  if (slipEventCount >= 20 || slipRate > 35) {
+  // Thresholds: 20+ confirmed events OR >35% slip rate OR cumulative >40 samples
+  if (slipEventCount >= 20 || slipRate > 35 || slipWhileLockedCount >= CUMULATIVE_THRESHOLD * 2) {
     const lockDesc = isEFILiveKpa
       ? `TCC PCS commanded pressure at full lock (≥1050 kPa)`
       : `TCC commanded at ≥90% duty cycle (full lock)`;
@@ -1039,8 +1076,8 @@ function checkConverterSlip(
         'converter wear, a faulty TCC solenoid, or degraded transmission fluid. Have the converter ' +
         'and TCC solenoid inspected. Consider a transmission fluid service. Contact your transmission specialist.',
     });
-  } else if (slipEventCount >= 10 || slipRate > 20) {
-    // Warning: occasional sustained slip events (raised from 6 events / 15% rate)
+  } else if (slipEventCount >= 10 || slipRate > 20 || slipWhileLockedCount >= CUMULATIVE_THRESHOLD) {
+    // Warning: occasional sustained slip events or cumulative threshold met
     const lockDesc = isEFILiveKpa ? `TCC PCS at full lock (≥1050 kPa)` : `TCC at ≥90% duty`;
     issues.push({
       code: 'CONVERTER-SLIP-WARN',
@@ -1055,6 +1092,40 @@ function checkConverterSlip(
       recommendation:
         'Monitor converter slip closely. Check transmission fluid level and condition. ' +
         'If slip events increase under load, have the TCC solenoid and converter inspected.',
+    });
+  }
+
+  // ── TCC Apply Lag Detection ──
+  // Excessive time from TCC commanded to lockup achieved indicates worn clutch plates,
+  // low apply pressure, or degraded fluid.
+  if (applyLagEvents >= 3) {
+    const maxLagSec = (maxApplyLag / 25).toFixed(1);
+    issues.push({
+      code: 'TCC-APPLY-LAG',
+      severity: 'critical',
+      title: 'Excessive TCC Apply Lag (Slow Lockup)',
+      description:
+        `TCC was commanded to lock but took excessively long to achieve lockup ` +
+        `(${applyLagEvents} events exceeding ${(LAG_THRESHOLD / 25).toFixed(1)}s, ` +
+        `max lag: ${maxLagSec}s). Normal TCC apply is <2 seconds. ` +
+        `This indicates worn clutch plates, low apply pressure, or degraded transmission fluid.`,
+      recommendation:
+        'Have the transmission inspected by a specialist. Check transmission fluid level and condition. ' +
+        'The TCC solenoid and apply circuit should be tested. Worn converter clutch plates may require converter replacement.',
+    });
+  } else if (applyLagEvents >= 1 || (maxApplyLag / 25) > 5.0) {
+    const maxLagSec = (maxApplyLag / 25).toFixed(1);
+    issues.push({
+      code: 'TCC-APPLY-LAG-WARN',
+      severity: 'warning',
+      title: 'TCC Apply Lag Detected',
+      description:
+        `TCC lockup is slower than normal (max lag: ${maxLagSec}s, ` +
+        `${applyLagEvents} slow event(s)). Normal TCC apply is <2 seconds. ` +
+        `May indicate early wear or marginal fluid condition.`,
+      recommendation:
+        'Check transmission fluid level and condition. Monitor for worsening lag on future datalogs. ' +
+        'If lag increases, have the TCC solenoid and converter inspected.',
     });
   }
 

@@ -303,12 +303,12 @@ Examples of good translations:
     )
     .query(async ({ input }) => {
       // Known A2L files per ECU family (pre-stored)
-      const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv'; aliases?: string[] }> = {
+      const A2L_REGISTRY: Record<string, { fileName: string; type: 'a2l' | 'csv'; aliases?: string[]; storageFolders?: string[] }> = {
         'E41': { fileName: 'E41_a171711502_quasi.a2l', type: 'a2l' },
         'MG1C': { fileName: '1E1101953.a2l', type: 'a2l', aliases: ['MG1', 'POLARIS_MG1'] },
-        'BRP': { fileName: '1E1101953.a2l', type: 'a2l', aliases: ['CANAM', 'CAN-AM', 'MG1_CANAM'] },  // CAN-Am / BRP uses MG1C A2L
-        'MED17': { fileName: '1E1101953.a2l', type: 'a2l' },        // Bosch MED17 family
-        'MG1CA920': { fileName: '1E1101953.a2l', type: 'a2l' },     // MG1CA920 variant
+        'BRP': { fileName: '1E1101953.a2l', type: 'a2l', aliases: ['CANAM', 'CAN-AM', 'MG1_CANAM'], storageFolders: ['BRP', 'MG1C'] },  // CAN-Am / BRP uses MG1C A2L, try BRP folder first then MG1C
+        'MED17': { fileName: '1E1101953.a2l', type: 'a2l', storageFolders: ['MED17', 'MG1C'] },        // Bosch MED17 family
+        'MG1CA920': { fileName: '1E1101953.a2l', type: 'a2l', storageFolders: ['MG1CA920', 'MG1C'] },     // MG1CA920 variant
         'T93': { fileName: '24048502 22  6.6L T93.a2l', type: 'a2l' },
         'CUMMINS': { fileName: 'Cummins 2019 6.7L PK 68RFE 52.19.03.00 (52370931AF).csv', type: 'csv' },
       };
@@ -335,21 +335,40 @@ Examples of good translations:
       }
 
       try {
-        const key = `a2l-library/${input.ecuFamily}/${entry.fileName}`;
-        console.log(`[A2L] Attempting to fetch: ${key}`);
+        // Build list of S3 paths to try (primary folder + fallbacks)
+        const foldersToTry = entry.storageFolders || [input.ecuFamily.toUpperCase()];
+        let url: string | null = null;
+        let lastError = '';
 
-        let url: string;
-        try {
-          const result = await storageGet(key);
-          url = result.url;
-        } catch (storageErr: any) {
-          console.error(`[A2L] Storage retrieval failed for ${key}:`, storageErr.message);
+        for (const folder of foldersToTry) {
+          const key = `a2l-library/${folder}/${entry.fileName}`;
+          console.log(`[A2L] Attempting to fetch: ${key}`);
+          try {
+            const result = await storageGet(key);
+            // Verify the URL actually works (some S3 paths return 403)
+            const headResp = await fetch(result.url, { method: 'HEAD' });
+            if (headResp.ok) {
+              url = result.url;
+              console.log(`[A2L] Found A2L at ${key}`);
+              break;
+            } else {
+              console.warn(`[A2L] ${key} returned HTTP ${headResp.status}, trying next folder...`);
+              lastError = `HTTP ${headResp.status} from ${key}`;
+            }
+          } catch (storageErr: any) {
+            console.warn(`[A2L] Storage retrieval failed for ${key}: ${storageErr.message}, trying next folder...`);
+            lastError = storageErr.message;
+          }
+        }
+
+        if (!url) {
+          console.error(`[A2L] All storage paths failed for ${input.ecuFamily}. Last error: ${lastError}`);
           return {
             found: false as const,
             ecuFamily: input.ecuFamily,
             message: `A2L file reference exists but storage access failed. Please upload an A2L file manually.`,
             suggestion: 'manual_upload',
-            error: storageErr.message
+            error: lastError
           };
         }
 

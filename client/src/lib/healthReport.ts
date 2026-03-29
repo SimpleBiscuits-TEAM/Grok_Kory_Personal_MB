@@ -381,6 +381,17 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
     let maxCriticalConsecutive = 0;
     let warnConsecutive = 0;
     let maxWarnConsecutive = 0;
+    // Cumulative counters — catch intermittent slip that doesn't sustain consecutively
+    let totalCriticalSamples = 0;
+    let totalWarnSamples = 0;
+    // TCC apply lag detection — only counts lag when slip is NOT converging
+    // Converging slip = normal apply sequence; stalled/rising slip = real lag
+    let tccApplyStart = -1;
+    let maxApplyLag = 0;
+    let applyLagEvents = 0;
+    const LAG_THRESHOLD_SAMPLES = 125; // ~5 seconds at 25Hz — generous to avoid false positives
+    let stalledLagSamples = 0;
+    const STALLED_LAG_THRESH = 50; // ~2s of stalled slip = real lag
 
     for (let i = 0; i < slip.length; i++) {
       const isLocked = dutyCycle.length > i ? dutyCycle[i] > 90 : true;
@@ -391,13 +402,37 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
         settledCount = 0;
         criticalConsecutive = 0;
         warnConsecutive = 0;
+        tccApplyStart = -1;
         continue;
+      }
+
+      // Track TCC apply lag — only count stalled/rising slip as real lag
+      if (tccApplyStart === -1 && !hasSettled) {
+        tccApplyStart = i;
+        stalledLagSamples = 0;
+      } else if (!hasSettled && tccApplyStart >= 0 && slip[i] > SETTLE_THRESHOLD) {
+        // Check if slip is stalled or rising (not converging)
+        const lookback = Math.min(10, i - tccApplyStart);
+        if (lookback > 0 && slip[i] >= slip[i - lookback] - 10) {
+          stalledLagSamples++;
+        }
       }
 
       // Track settle state
       if (slip[i] < SETTLE_THRESHOLD) {
         settledCount++;
-        if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+        if (settledCount >= SETTLE_SAMPLES) {
+          // Record apply lag if this is the first time settling this cycle
+          if (!hasSettled && tccApplyStart >= 0) {
+            const lagSamples = i - tccApplyStart;
+            if (lagSamples > maxApplyLag) maxApplyLag = lagSamples;
+            // Only count as lag if there were significant stalled samples
+            if (lagSamples > LAG_THRESHOLD_SAMPLES && stalledLagSamples > STALLED_LAG_THRESH) {
+              applyLagEvents++;
+            }
+          }
+          hasSettled = true;
+        }
       } else if (!hasSettled) {
         // High slip but converter hasn't settled yet — this is the apply sequence
         settledCount = 0;
@@ -409,24 +444,55 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
 
       if (hasSettled && slip[i] > 60) {
         criticalConsecutive++;
+        totalCriticalSamples++;
         if (criticalConsecutive > maxCriticalConsecutive) maxCriticalConsecutive = criticalConsecutive;
       } else { criticalConsecutive = 0; }
       if (hasSettled && slip[i] > 40) {
         warnConsecutive++;
+        totalWarnSamples++;
         if (warnConsecutive > maxWarnConsecutive) maxWarnConsecutive = warnConsecutive;
       } else { warnConsecutive = 0; }
     }
 
-    if (maxCriticalConsecutive >= 25) {
+    // ── Slip fault detection (consecutive OR cumulative) ──
+    // Consecutive: 15+ samples sustained (lowered from 25 for better sensitivity)
+    // Cumulative: 40+ total samples of elevated slip after settle (catches intermittent issues)
+    if (maxCriticalConsecutive >= 15 || totalCriticalSamples >= 40) {
       slipStatus = '✗ FAIL — Excessive converter slip after lockup (clutch degradation suspected)';
       score -= 30;
-      findings.push(`Converter slip >60 RPM sustained for ${maxCriticalConsecutive} samples after TCC had settled. Internal wear suspected.`);
-    } else if (maxWarnConsecutive >= 25) {
+      const detail = maxCriticalConsecutive >= 15
+        ? `${maxCriticalConsecutive} consecutive samples >60 RPM`
+        : `${totalCriticalSamples} total samples >60 RPM (intermittent)`;
+      findings.push(`Converter slip after TCC settled: ${detail}. Internal wear suspected.`);
+    } else if (maxWarnConsecutive >= 15 || totalWarnSamples >= 40) {
       slipStatus = `⚠ WARNING — Elevated converter slip after lockup (max: ${maxLockedSlip.toFixed(0)} RPM)`;
       score -= 10;
-      findings.push(`Converter slip >40 RPM sustained for ${maxWarnConsecutive} samples after TCC had settled — monitor and inspect`);
+      const detail = maxWarnConsecutive >= 15
+        ? `${maxWarnConsecutive} consecutive samples >40 RPM`
+        : `${totalWarnSamples} total samples >40 RPM (intermittent)`;
+      findings.push(`Converter slip after TCC settled: ${detail} — monitor and inspect`);
     } else {
       findings.push(`Torque converter healthy — max locked slip ${maxLockedSlip.toFixed(1)} RPM, avg ${avgSlip.toFixed(1)} RPM`);
+    }
+
+    // ── TCC Apply Lag Detection ──
+    // If the converter takes too long to lock up after being commanded, that's a
+    // separate issue from slip-after-lockup — it indicates worn clutch plates,
+    // low apply pressure, or degraded fluid.
+    if (maxApplyLag > 0) {
+      const maxLagMs = (maxApplyLag / 25 * 1000); // Convert samples to ms at 25Hz
+      const maxLagSec = maxLagMs / 1000;
+      if (applyLagEvents >= 3) {
+        slipStatus = slipStatus.includes('✗') ? slipStatus : '✗ FAIL — Excessive TCC apply lag (slow lockup)';
+        score -= 20;
+        findings.push(`TCC apply lag: ${applyLagEvents} events where lockup took >${(LAG_THRESHOLD_SAMPLES / 25).toFixed(1)}s. Max lag: ${maxLagSec.toFixed(1)}s. Possible worn clutch plates or low apply pressure.`);
+      } else if (applyLagEvents >= 1 || maxLagSec > 5.0) {
+        if (!slipStatus.includes('✗') && !slipStatus.includes('⚠')) {
+          slipStatus = `⚠ WARNING — TCC apply lag detected (max: ${maxLagSec.toFixed(1)}s to lockup)`;
+        }
+        score -= 8;
+        findings.push(`TCC apply lag: max ${maxLagSec.toFixed(1)}s to achieve lockup (${applyLagEvents} slow events). Normal is <2s. Monitor for worsening.`);
+      }
     }
   } else {
     slipStatus = '— Converter slip not logged in this file';
@@ -673,10 +739,11 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     p0101Status = '— Insufficient idle data';
   }
 
-  // ── Converter Slip (settle-then-rise detection) ────────────────────────────────
+  // ── Converter Slip (settle-then-rise + TCC apply lag detection) ─────────────────
   // Only flag slip as a fault when the converter has ALREADY SETTLED (<20 RPM for 10+
   // samples) and then rises back above threshold. During the initial apply sequence
   // (ControlledOn with high slip converging to zero), high slip is NORMAL.
+  // Also detect TCC apply lag — excessive time from TCC commanded to lockup achieved.
   let converterSlipStatus = '✓ PASS';
   const slipVals = data.converterSlip.map(s => Math.abs(s));
   const dcVals = data.converterDutyCycle || [];
@@ -687,33 +754,79 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     const SETTLE_SAMPLES = 10;
     let critConsec = 0, maxCritConsec = 0;
     let warnConsec = 0, maxWarnConsec = 0;
+    // Cumulative counters for intermittent slip detection
+    let totalCritSamples = 0;
+    let totalWarnSamples = 0;
+    // TCC apply lag tracking — only counts lag when slip is NOT converging
+    let tccApplyStart = -1;
+    let maxApplyLag = 0;
+    let applyLagEvents = 0;
+    const LAG_THRESH = 125; // ~5s at 25Hz — generous to avoid false positives
+    let stalledLagSamples = 0;
+    const STALLED_LAG_THRESH = 50; // ~2s of stalled slip = real lag
+
     for (let i = 0; i < slipVals.length; i++) {
       const isLocked = dcVals.length > i ? dcVals[i] > 90 : true;
       if (!isLocked) {
         hasSettled = false; settledCount = 0;
         critConsec = 0; warnConsec = 0;
+        tccApplyStart = -1;
         continue;
+      }
+      // Track TCC apply lag — only count stalled/rising slip as real lag
+      if (tccApplyStart === -1 && !hasSettled) {
+        tccApplyStart = i;
+        stalledLagSamples = 0;
+      } else if (!hasSettled && tccApplyStart >= 0 && slipVals[i] > SETTLE_THRESH) {
+        const lookback = Math.min(10, i - tccApplyStart);
+        if (lookback > 0 && slipVals[i] >= slipVals[i - lookback] - 10) {
+          stalledLagSamples++;
+        }
       }
       if (slipVals[i] < SETTLE_THRESH) {
         settledCount++;
-        if (settledCount >= SETTLE_SAMPLES) hasSettled = true;
+        if (settledCount >= SETTLE_SAMPLES) {
+          if (!hasSettled && tccApplyStart >= 0) {
+            const lag = i - tccApplyStart;
+            if (lag > maxApplyLag) maxApplyLag = lag;
+            if (lag > LAG_THRESH && stalledLagSamples > STALLED_LAG_THRESH) {
+              applyLagEvents++;
+            }
+          }
+          hasSettled = true;
+        }
       } else if (!hasSettled) {
         settledCount = 0; critConsec = 0; warnConsec = 0;
         continue; // Normal apply sequence
       }
       if (hasSettled && slipVals[i] > 60) {
-        critConsec++; if (critConsec > maxCritConsec) maxCritConsec = critConsec;
+        critConsec++; totalCritSamples++;
+        if (critConsec > maxCritConsec) maxCritConsec = critConsec;
       } else { critConsec = 0; }
       if (hasSettled && slipVals[i] > 40) {
-        warnConsec++; if (warnConsec > maxWarnConsec) maxWarnConsec = warnConsec;
+        warnConsec++; totalWarnSamples++;
+        if (warnConsec > maxWarnConsec) maxWarnConsec = warnConsec;
       } else { warnConsec = 0; }
     }
-    if (maxCritConsec >= 25) {
+    // Consecutive (15+) OR cumulative (40+) thresholds
+    if (maxCritConsec >= 15 || totalCritSamples >= 40) {
       converterSlipStatus = '✗ DETECTED — Excessive Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_CRITICAL');
-    } else if (maxWarnConsec >= 25) {
+    } else if (maxWarnConsec >= 15 || totalWarnSamples >= 40) {
       converterSlipStatus = '⚠ WARNING — Elevated Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_WARNING');
+    }
+    // TCC apply lag detection
+    if (applyLagEvents >= 3) {
+      if (!converterSlipStatus.includes('DETECTED')) {
+        converterSlipStatus = '✗ DETECTED — Excessive TCC Apply Lag (Slow Lockup)';
+      }
+      detectedCodes.push('TCC_APPLY_LAG');
+    } else if (applyLagEvents >= 1 || (maxApplyLag / 25) > 5.0) {
+      if (!converterSlipStatus.includes('DETECTED') && !converterSlipStatus.includes('WARNING')) {
+        converterSlipStatus = '⚠ WARNING — TCC Apply Lag Detected';
+      }
+      detectedCodes.push('TCC_APPLY_LAG_WARN');
     }
   } else {
     converterSlipStatus = '— Converter slip not logged';
@@ -750,6 +863,13 @@ function generateRecommendations(
     recommendations.push('⚠ CRITICAL: Torque converter clutch is slipping excessively after lockup — this indicates internal wear or clutch degradation. Have the torque converter inspected immediately by a transmission specialist. Continued driving may cause further damage.');
   } else if (diagnostics.detectedCodes.includes('TCC_SLIP_WARNING')) {
     recommendations.push('⚠ WARNING: Elevated torque converter slip detected after lockup. This may indicate early TCC wear or low transmission fluid. Check trans fluid level and condition, and monitor for worsening slip.');
+  }
+
+  // ── TCC Apply Lag specific recommendations ──
+  if (diagnostics.detectedCodes.includes('TCC_APPLY_LAG')) {
+    recommendations.push('⚠ CRITICAL: Excessive TCC apply lag detected — the torque converter is taking too long to achieve lockup after being commanded. This indicates worn clutch plates, low apply pressure, or degraded transmission fluid. Have the transmission inspected by a specialist.');
+  } else if (diagnostics.detectedCodes.includes('TCC_APPLY_LAG_WARN')) {
+    recommendations.push('⚠ WARNING: TCC apply lag detected — the torque converter is slower than normal to achieve lockup. Check transmission fluid level and condition. Monitor for worsening lag on future datalogs.');
   }
 
   // ── Fuel pressure specific recommendations ──

@@ -196,3 +196,25 @@ export const generatedA2L = mysqlTable("generated_a2l", {
 
 export type GeneratedA2L = typeof generatedA2L.$inferSelect;
 export type InsertGeneratedA2L = typeof generatedA2L.$inferInsert;
+
+/**
+ * Cached datalog uploads for development/debugging.
+ * Any CSV/datalog uploaded through the public analyzer is cached to S3
+ * and tracked here for 8 hours so developers and testers can retrieve
+ * the exact file that caused an issue.
+ */
+export const datalogCache = mysqlTable("datalog_cache", {
+  id: int("id").autoincrement().primaryKey(),
+  fileName: varchar("fileName", { length: 512 }).notNull(),
+  s3Key: varchar("s3Key", { length: 512 }).notNull(),
+  s3Url: text("s3Url").notNull(),
+  fileSize: int("fileSize").notNull(), // bytes
+  sourcePage: varchar("sourcePage", { length: 128 }).default("analyzer"), // analyzer, advanced, compare
+  uploadedBy: varchar("uploadedBy", { length: 128 }), // user openId if signed in, null if anonymous
+  uploaderName: varchar("uploaderName", { length: 256 }), // display name if available
+  expiresAt: timestamp("expiresAt").notNull(), // 8 hours from upload
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type DatalogCache = typeof datalogCache.$inferSelect;
+export type InsertDatalogCache = typeof datalogCache.$inferInsert;

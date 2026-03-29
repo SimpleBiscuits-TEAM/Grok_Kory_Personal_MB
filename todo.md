@@ -2117,3 +2117,44 @@
   - [x] Integrated into SupportAdminPanel.tsx admin chat
 - [ ] When datalog is uploaded, talk-to-text should be able to trigger analysis and read out findings
 - [ ] Knox should verbally summarize what needs adjustment based on datalog analysis
+
+## Binary ECU Detection Still Failing in Editor Tab (2026-03-29)
+- [x] Debug with 2026MavRXRs(Sunoco260GTPlus_Rev_0_2_VLM4).bin - was A2L fetch 403 (BRP folder missing in S3)
+- [x] Debug with StockRead_1G0100914SB3VUM8_UL_exported.bin - same issue
+- [x] Trace the exact code path: detection works (returns BRP), but fetchA2L fails on S3 path
+- [x] Fix: added storageFolder fallback (BRP -> MG1C) in A2L_REGISTRY
+- [x] User confirmed: auto-detection and A2L loading now works
+- [ ] A2L definition doesn't line up with binary - needs deeper disassembly/decompile (separate feature)
+
+## TCC Potential Error Missing from Health Report (2026-03-29)
+- [x] TCC fault detection works but TCC potential error not appearing in health report output
+- [x] Health score should adjust downward when TCC lag/slip is detected
+- [x] Verify TCC findings are included in recommendations section
+- [x] Fix health score calculation to account for TCC issues
+- [x] Lowered thresholds: 15 consecutive OR 40 cumulative samples (was 25 consecutive only)
+- [x] Added TCC apply lag detection (stalled/rising slip = real lag, converging slip = normal apply)
+- [x] Fixed false positive: converging slip during normal apply no longer triggers lag warning
+- [x] Added TCC_APPLY_LAG and TCC_APPLY_LAG_WARN codes to fault chart filter
+
+
+## Dev-Mode Datalog Caching for Debugging (2026-03-29)
+- [x] Add server endpoint to cache uploaded datalogs to S3 with 8-hour TTL
+- [x] Store metadata: filename, upload time, file size, uploader (if signed in), source page
+- [x] Add admin endpoint to list recent cached datalogs (last 8 hours)
+- [x] Add admin endpoint to retrieve/download a cached datalog by ID
+- [x] Wire frontend to automatically cache datalogs on upload (public analyzer + advanced)
+- [ ] Show cached datalogs in admin panel or debug tools for testers (future)
+
+
+## Fix: Maximum call stack size exceeded in saveEditorSession (2026-03-29)
+- [x] Fix stack overflow when saving editor session (String.fromCharCode spread on 6MB array exceeded call stack)
+- [x] Chunked base64 encoding (8KB chunks), split binary/A2L into separate localStorage keys, graceful quota handling
+
+
+## Converter Stall Speed vs Turbo Mismatch Detection (2026-03-29)
+- [x] Add Knox knowledge: low converter stall speed causes turbo lag — converter unlocked but not multiplying enough torque for turbo to spool
+- [x] Add Knox knowledge: two root causes — (a) converter stall too low for turbo, (b) turbo boost leak preventing spool at available RPM
+- [x] Add Knox knowledge: converter functioning fine mechanically, just mismatched to turbo power curve
+- [ ] Update diagnostics to detect stall/turbo mismatch: analyze boost buildup rate vs RPM during acceleration
+- [x] Ensure TCC lag detection does NOT flag converter-unlocked-during-acceleration as a fault (that's normal)
+- [ ] Add health report recommendation for stall/turbo mismatch when detected

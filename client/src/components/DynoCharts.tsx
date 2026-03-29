@@ -1700,7 +1700,8 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   // Match all TCC/converter slip codes
   const issue = diagnostics.issues.find(i =>
     i.code === 'TCC-STUCK-OFF' || i.code === 'TCC-STUCK-ON' ||
-    i.code === 'CONVERTER-SLIP' || i.code === 'CONVERTER-SLIP-WARN'
+    i.code === 'CONVERTER-SLIP' || i.code === 'CONVERTER-SLIP-WARN' ||
+    i.code === 'TCC-APPLY-LAG' || i.code === 'TCC-APPLY-LAG-WARN'
   );
   if (!issue) return null;
 
@@ -1736,8 +1737,8 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       description={issue.description}
       recommendation={issue.recommendation}
       ruleEvaluated={usePressure
-        ? 'TCC slip > 40 RPM while line pressure >= 80 psi for 25+ consecutive locked samples'
-        : 'TCC slip > 40 RPM while duty cycle > 90% for 25+ consecutive locked samples, or slip < 7 RPM while duty cycle < 15% at RPM > 2000'}
+        ? 'TCC slip > 40 RPM while line pressure >= 80 psi for 15+ consecutive (or 40+ cumulative) locked samples, OR TCC apply lag > 3s'
+        : 'TCC slip > 40 RPM while duty cycle > 90% for 15+ consecutive (or 40+ cumulative) locked samples, TCC apply lag > 3s, or slip < 7 RPM while duty cycle < 15% at RPM > 2000'}
       badges={undefined}
     >
       <FaultEventList
