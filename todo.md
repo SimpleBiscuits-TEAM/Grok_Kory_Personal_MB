@@ -1794,3 +1794,101 @@
 - [x] Improve error handling with better 403 diagnostics and manual upload fallback
 - [x] Add logging and timeout protection to A2L retrieval
 - [ ] Test Can-Am MG1 file loading and A2L mapping (user testing)
+
+
+## Binary Reverse Engineering Engine - Phase 1: Document Storage Database
+
+### Database Schema Design
+- [ ] Create `reference_documents` table (PDFs, function sheets, patents)
+  - id, filename, file_type, ecu_family, upload_date, storage_url, extracted_text, metadata_json
+- [ ] Create `a2l_library` table (existing A2L definitions)
+  - id, filename, ecu_family, version, map_count, storage_url, parsed_content_json
+- [ ] Create `binary_signatures` table (ECU family detection patterns)
+  - id, ecu_family, magic_bytes, pattern_offset, pattern_hex, confidence_score
+- [ ] Create `calibration_maps` table (extracted from A2Ls and documents)
+  - id, map_name, ecu_family, address, size, data_type, description, source_document_id
+- [ ] Create `document_knowledge_index` table (extracted knowledge from documents)
+  - id, document_id, keyword, content_excerpt, relevance_score, map_references_json
+
+### Implementation Tasks
+- [ ] Design database migrations for document storage schema
+- [ ] Implement PDF text extraction and chunking for indexing
+- [ ] Build document upload/storage API endpoint (tRPC procedure)
+- [ ] Implement full-text search for documents and A2Ls
+- [ ] Create Erika knowledge base integration layer
+- [ ] Build UI for document management (upload, view, organize by ECU family)
+- [ ] Implement document versioning and change tracking
+
+### Reference Documents to Store
+- [ ] FunktionsrahmenMG1W12TSI002_VAG3.0V6Turbo.pdf (Bosch MG1 function sheet)
+- [ ] Additional Bosch function sheets (when provided)
+- [ ] Patent documents (when provided)
+- [ ] Ghidra/IDA Pro reverse engineering guides (when provided)
+
+
+## Bosch Reference Documents Permanently Stored (1.3 GB)
+- [x] FunktionsrahmenMG1W12TSI002_VAG3.0V6Turbo.pdf (411 MB)
+- [x] FunktionsrahmenMG1W16_BugattiVeron.pdf (228 MB)
+- [x] 550I_FR_8AC25A0B(German).pdf (94 MB)
+- [x] BWMN557572720B-MEVD17.2.X(German).pdf (319 KB)
+- [x] EA8882.0LULEVMED17.5(German).pdf (57 MB)
+- [x] Funktionsrahmen_MED17.1.62_audiR5TFSI (225 MB)
+- [x] StrategyBookST180_MED17.pdf (87 MB)
+- [x] MED17V8T+FunctionFrame (150 MB)
+- [x] 1E1101953.a2l (19 MB - Can-Am MG1 with 46K+ maps)
+- [x] MG1C400A1T2_groups_34.a2l (9.5 MB - Polaris MG1 with 30K+ maps)
+- [x] MG1C4E0A1T2.s (18 MB - Polaris MG1 symbol/assembly file with 393K lines)
+- [x] 1E1101953SA2VLMJ.hex (7.7 MB - Can-Am MG1 hex file with 104K lines)
+- [ ] YouTube video transcripts (Ghidra/IDA Pro - pending)
+- [ ] Patent documents (pending)
+
+
+## Binary Reverse Engineering Engine - Phase 2: Implementation
+- [ ] Parse Can-Am MG1 A2L file and extract all 46K+ calibration maps
+- [ ] Index A2L maps by address, name, category, and data type
+- [ ] Create tRPC endpoints for document upload/storage/retrieval
+- [ ] Extract knowledge chunks from 8 Bosch function documents
+- [ ] Build binary signature detection engine (magic bytes, patterns, offsets)
+- [ ] Implement ECU family auto-detection from binary headers
+- [ ] Discover calibration map patterns in raw binaries
+- [ ] Cross-reference discovered maps against A2L library
+- [ ] Implement A2L definition auto-generation for unknown ECUs
+- [ ] Integrate reverse engineering UI into CalibrationEditor
+- [ ] Test with Can-Am MG1 binary file (StockRead_1G0100914SB3VUM8_UL_exported.bin)
+- [ ] Validate generated A2L against original binary
+
+
+## Voice Command Interface - Real-time Vehicle Data Queries
+- [ ] Design voice command system architecture
+- [ ] Create PID mapping database (fuel level, temperature, pressure, etc.)
+- [ ] Implement speech-to-text capture (browser Web Audio API)
+- [ ] Implement natural language intent recognition (LLM-powered)
+- [ ] Create PID query engine for vehicle data polling
+- [ ] Implement real-time vehicle data retrieval
+- [ ] Implement text-to-speech response generation
+- [ ] Create voice command UI button in analyzer dashboard
+- [ ] Add voice command history/transcript display
+- [ ] Test with sample queries: "fuel tank level", "engine temperature", "boost pressure"
+- [ ] Add error handling for disconnected vehicles
+- [ ] Add voice command permissions and privacy controls
+
+## Self-Healing Debug System
+- [x] Database schema: debug_permissions table (admin grants access to specific users)
+- [x] Database schema: debug_sessions table (tracks bug reports, analysis, fixes, status)
+- [x] Database schema: debug_audit_log table (full audit trail of all debug activity)
+- [x] Admin panel: Grant/revoke debug access to specific users (/debug route)
+- [x] Admin panel: Set token budget per user/session (100-100K range)
+- [x] Admin panel: View all debug sessions dashboard with search
+- [x] Admin panel: Approve/reject Tier 2 fixes
+- [x] User UI: Debug button appears only for authorized users (floating purple bug icon)
+- [x] User UI: Bug report form (title, description, steps, expected/actual, feature area)
+- [x] User UI: Retest confirmation flow (fixed/still broken with feedback)
+- [x] Erika analysis engine: Classify bugs as Tier 1 (auto-fix) or Tier 2 (approval needed)
+- [x] Auto-fix pipeline: Mark sessions for fix and notify user to retest
+- [x] Notification: Alert admin for Tier 2 approval requests via notifyOwner
+- [x] Token budget tracking and enforcement per permission
+- [x] Escalation: Auto-escalate after 3 failed retests
+- [x] Audit trail: Full logging of all actions (user, admin, erika, system)
+- [x] 36 vitest tests passing for debug system
+- [ ] Rollback capability if fix breaks something
+- [ ] Integration with Manus agent for actual code fixes

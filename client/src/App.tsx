@@ -7,6 +7,8 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Advanced from "./pages/Advanced";
 import SupportJoin from "./pages/SupportJoin";
+import DebugDashboard from "./pages/DebugDashboard";
+import DebugReportButton from "./components/DebugReportButton";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -15,6 +17,7 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/advanced"} component={Advanced} />
       <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
+      <Route path={"/debug"} component={DebugDashboard} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -32,6 +35,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
+          <DebugReportButton />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

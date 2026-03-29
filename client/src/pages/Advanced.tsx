@@ -58,6 +58,7 @@ import ServiceProcedures from '@/components/ServiceProcedures';
 import QAChecklistPanel from '@/components/QAChecklistPanel';
 import AdminNotificationPanel from '@/components/AdminNotificationPanel';
 import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
+import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
@@ -1435,6 +1436,9 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
+
+      {/* Voice Command Button */}
+      <VoiceCommandButton position="bottom-right" />
 
       {/* Footer */}
       <footer style={{ borderTop: `1px solid ${sColor.borderLight}`, marginTop: '3rem', padding: '1.5rem 0' }}>
