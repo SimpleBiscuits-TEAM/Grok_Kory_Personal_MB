@@ -31,8 +31,28 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'super_admin')) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }),
+);
+
+// Super admin procedure — ONLY Kory Willis (owner) can access
+// Hidden from public, not visible in any user-facing UI
+export const superAdminProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+
+    if (!ctx.user || ctx.user.role !== 'super_admin') {
+      // Return generic 404 to hide existence of super admin routes
+      throw new TRPCError({ code: "NOT_FOUND", message: "Not found" });
     }
 
     return next({

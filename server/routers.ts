@@ -7,6 +7,7 @@ import { compareRouter } from "./routers/compare";
 import { editorRouter } from "./routers/editor";
 import { projectsRouter } from "./routers/projects";
 import { tunesRouter } from "./routers/tunes";
+import { supportRouter } from "./routers/support";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -38,6 +39,9 @@ export const appRouter = router({
 
   // Tune Folders & Saved Tunes
   tunes: tunesRouter,
+
+  // Support Sessions for PPEI employees
+  support: supportRouter,
 
   // Feedback / Error Reports
   feedback: router({

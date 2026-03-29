@@ -35,7 +35,7 @@ interface ServiceProcedure {
   id: string;
   name: string;
   description: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   category: 'emission' | 'drivetrain' | 'body' | 'safety';
   securityLevel: number;  // UDS security access level required
   makes: ('ford' | 'ram' | 'gm' | 'all')[];

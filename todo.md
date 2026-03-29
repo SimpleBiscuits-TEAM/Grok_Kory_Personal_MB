@@ -1036,3 +1036,116 @@
 - [x] Color legend bar with gradient scale
 - [x] Keyboard shortcuts (+/- to increment/decrement, Delete to reset)
 - [x] Custom smoothing dialog with method, strength, iterations controls
+
+## 3D Surface Visualization & Advanced Editor Features (2026-03-29)
+- [ ] Add 3D WebGL surface visualization for map data
+- [ ] Toggle between table view and 3D surface view
+- [ ] Split-screen view: original vs modified maps side by side
+- [ ] Diff highlighting in split-screen compare view
+- [ ] Erika map editing: AI can make changes to maps when directed
+- [ ] Approval workflow: user approve/reject each Erika change
+- [ ] "Approve All" and "Disable Approval" options
+- [ ] Summary of all maps Erika changed
+- [ ] User default map list: clickable option to load custom layout
+- [ ] Map importance selector: user marks which maps are most important
+- [ ] Save user layouts to database
+- [ ] Load saved layouts from database
+
+## Data Security Requirements (2026-03-29)
+- [ ] Hard delete tune files from database AND S3 on user delete (no soft delete)
+- [ ] Hard delete layouts from database on user delete (no soft delete)
+- [ ] Ensure deleted data is permanently inaccessible by anyone under any conditions
+- [ ] No recycle bin, no archive, no recovery — permanent removal only
+- [ ] Cascade delete all related records (versions, metadata, comparisons)
+
+## Tune Sharing Between Tuners (2026-03-29)
+- [ ] Tuner can share tune files with other tuners
+- [ ] Share by username/email with permission levels (view-only, edit, full access)
+- [ ] Shared tunes appear in recipient's library under "Shared With Me" folder
+- [ ] Owner can revoke sharing at any time
+- [ ] Database schema for tune_shares (owner_id, recipient_id, tune_id, permission_level)
+- [ ] Shared tunes respect hard delete — if owner deletes, shared access removed too
+
+## Account Deletion & Authority (2026-03-29)
+- [ ] User can delete their own account (hard delete all data: tunes, layouts, shares, everything)
+- [ ] Only Kory Willis (super_admin) can delete another user's account
+- [ ] super_admin role: separate from admin, only assignable by Kory Willis
+- [ ] No other admin or user can delete accounts besides self or super_admin
+- [ ] Authority assignment: only super_admin can grant/revoke admin privileges
+- [ ] Account deletion cascades: remove all tunes, files, S3 objects, layouts, shares, versions, metadata
+- [ ] Confirmation dialog with typed confirmation for account deletion
+
+## Geofencing Restrictions (2026-03-29)
+- [ ] Admin (super_admin) can draw geofence zones on a map
+- [ ] Geofence zones stored in database (polygon coordinates)
+- [ ] Users inside geofenced zones are blocked from uploading/downloading tunes
+- [ ] Geofence check runs on every tune upload/download request (server-side)
+- [ ] User location obtained via browser geolocation API
+- [ ] Admin UI to create, edit, delete geofence zones with Google Maps drawing tools
+- [ ] Visual display of all active geofence zones on admin map
+- [ ] Block message shown to users in restricted zones
+- [ ] Can also restrict specific users regardless of location
+
+## Super Admin Panel (2026-03-29)
+- [ ] Dedicated Super Admin dashboard (Kory Willis only)
+- [ ] User management: view all users, roles, activity, storage usage
+- [ ] Account deletion: only super_admin can delete other users
+- [ ] Role management: assign/revoke admin, tuner roles
+- [ ] Geofence management: create/edit/delete global geofence zones (GOD MODE override)
+- [ ] Tuner geofences: tuners can create their own geofence zones for their clients
+- [ ] Super_admin can override or remove any tuner geofence
+- [ ] Tune library oversight: view all tunes across all users
+- [ ] System settings: global configuration, feature flags
+- [ ] Activity log: audit trail of all admin actions
+- [ ] User ban/suspend: temporarily or permanently restrict users
+- [ ] Storage quotas: set and monitor per-user storage limits
+
+## Admin Invisibility (2026-03-29)
+- [ ] Super admin account hidden from all public-facing user lists
+- [ ] Super admin panel accessible only via hidden route (no nav links visible to anyone)
+- [ ] Super admin does not appear in user search, sharing, or any public directory
+- [ ] No UI element, navigation item, or footer link reveals admin panel existence
+- [ ] Access via secret URL path known only to Kory Willis
+
+
+## Live Session Sharing & Collaboration (2026-03-29)
+- [ ] Add live_sessions and session_participants tables to database with WebRTC support
+- [ ] Add session_messages table for real-time chat
+- [ ] Add session_recordings table for storing recording metadata (screen + webcam + audio + chat)
+- [ ] Implement tRPC procedures for session CRUD (create, join, leave, end)
+- [ ] Build WebSocket server for real-time chat and state sync
+- [ ] Implement WebRTC peer-to-peer with screen share, webcam, and audio
+- [ ] Build screen capture with editor overlay
+- [ ] Build webcam video with mute/unmute controls
+- [ ] Build picture-in-picture (screen + webcam overlay)
+- [ ] Build audio with mute/unmute controls
+- [ ] Build audio quality settings (bandwidth adaptation)
+- [ ] Implement session recording (capture screen + webcam + audio + chat)
+- [ ] Support solo session recording (tuner recording themselves without participants)
+- [ ] Build session playback component with timeline and full sync
+- [ ] Add access control (view-only, chat, control-sharing, audio, video)
+- [ ] Implement educational course marking and tagging
+- [ ] Add session recording download/export to local device (MP4 + WebM formats)
+- [ ] Allow tuners to mark recordings as educational content
+- [ ] Build educational course library (searchable by topic, tuner, vehicle type)
+- [ ] Build session list UI with active/archived sessions
+- [ ] Add invite link generation for easy sharing
+- [ ] Implement session activity log (who joined, when, duration, video/audio events)
+
+
+## Support Sessions for PPEI Employees (2026-03-29)
+- [ ] Add support_sessions table (link, expiration, customer_name, status, created_by, created_at)
+- [ ] Add support_session_recordings table (session_id, video_url, duration, created_at)
+- [ ] Add support_metrics table (session_id, response_time, resolution_status, customer_feedback)
+- [ ] Implement tRPC procedures for support session CRUD (create, join, end, list)
+- [ ] Build invite link generation system with 24-hour expiration
+- [ ] Create PPEI support dashboard with active sessions list
+- [ ] Add "Generate Support Link" button to tuner dashboard
+- [ ] Implement guest session mode (no authentication required)
+- [ ] Build session permission levels (view-only, chat, control-sharing)
+- [ ] Implement real-time cursor tracking for PPEI employee
+- [ ] Add customer request queue/ticketing system
+- [ ] Build support metrics dashboard (response time, resolution rate, feedback)
+- [ ] Create training library from recorded support sessions
+- [ ] Add session tagging and searchability for training content
+- [ ] Implement customer satisfaction survey after support session

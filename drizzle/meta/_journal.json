@@ -36,6 +36,20 @@
       "when": 1774736223473,
       "tag": "0004_cool_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1774745337743,
+      "tag": "0005_yielding_lake",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1774746293226,
+      "tag": "0006_perfect_morbius",
+      "breakpoints": true
     }
   ]
 }

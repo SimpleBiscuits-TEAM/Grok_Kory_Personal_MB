@@ -217,3 +217,183 @@ export const savedTunes = mysqlTable('saved_tunes', {
   favoriteIdx: index('idx_favorite').on(table.userId, table.isFavorite),
   dispatchReadyIdx: index('idx_dispatch_ready').on(table.isDispatchReady, table.dispatchPriority),
 }));
+
+// ── Geofence Zones ──────────────────────────────────────────────────────
+// Super admin (Kory) can create global geofence zones
+// Tuners can create their own geofence zones for their clients
+export const geofenceZones = mysqlTable('geofence_zones', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  createdBy: int('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  // Polygon coordinates stored as JSON array of {lat, lng} points
+  polygonCoords: json('polygon_coords').notNull(), // [{lat: number, lng: number}, ...]
+  // Scope: 'global' = super_admin zone, 'tuner' = tuner-created zone
+  scope: mysqlEnum('scope', ['global', 'tuner']).default('tuner'),
+  // What actions are restricted
+  blockUpload: boolean('block_upload').default(true),
+  blockDownload: boolean('block_download').default(true),
+  // Restrict specific user (null = applies to all users in zone)
+  restrictedUserId: int('restricted_user_id').references(() => users.id, { onDelete: 'set null' }),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+}, (table) => ({
+  createdByIdx: index('idx_geofence_created_by').on(table.createdBy),
+  scopeIdx: index('idx_geofence_scope').on(table.scope, table.isActive),
+}));
+
+// ── User Map Layouts ────────────────────────────────────────────────────
+// Users can build custom map layouts ("default map list") by selecting important maps
+// Layouts are saved to database and can be loaded in the editor
+export const userMapLayouts = mysqlTable('user_map_layouts', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  userId: int('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  // ECU family this layout applies to (layouts are ECU-specific)
+  ecuFamily: varchar('ecu_family', { length: 100 }),
+  // Ordered list of map names/identifiers the user selected
+  mapList: json('map_list').notNull(), // [{mapName: string, mapAddress: number, priority: number}, ...]
+  isDefault: boolean('is_default').default(false), // User's default layout for this ECU
+  sortOrder: int('sort_order').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+}, (table) => ({
+  userLayoutsIdx: index('idx_user_layouts').on(table.userId, table.ecuFamily),
+  defaultIdx: index('idx_default_layout').on(table.userId, table.isDefault),
+}));
+
+// ── Tune Sharing ────────────────────────────────────────────────────────
+// Tuners can share tune files with other tuners
+// Owner controls access: view-only or full access
+export const tuneShares = mysqlTable('tune_shares', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  tuneId: varchar('tune_id', { length: 36 }).notNull().references(() => savedTunes.id, { onDelete: 'cascade' }),
+  ownerId: int('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  sharedWithId: int('shared_with_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // Permission level
+  permission: mysqlEnum('permission', ['view', 'download', 'edit']).default('view'),
+  // Optional expiration
+  expiresAt: timestamp('expires_at'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  tuneShareIdx: index('idx_tune_share').on(table.tuneId, table.sharedWithId),
+  ownerSharesIdx: index('idx_owner_shares').on(table.ownerId),
+  sharedWithIdx: index('idx_shared_with').on(table.sharedWithId, table.isActive),
+}));
+
+// ── Admin Audit Log ─────────────────────────────────────────────────────
+// Tracks all admin actions for accountability
+export const adminAuditLog = mysqlTable('admin_audit_log', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  adminId: int('admin_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  action: varchar('action', { length: 100 }).notNull(), // e.g., 'delete_user', 'create_geofence', 'override_geofence'
+  targetType: varchar('target_type', { length: 50 }), // 'user', 'tune', 'geofence', etc.
+  targetId: varchar('target_id', { length: 255 }),
+  details: text('details'), // JSON with action-specific details
+  ipAddress: varchar('ip_address', { length: 45 }),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  adminActionIdx: index('idx_admin_action').on(table.adminId, table.createdAt),
+  targetIdx: index('idx_audit_target').on(table.targetType, table.targetId),
+}));
+
+// ── Erika Map Changes ───────────────────────────────────────────────────
+// Tracks AI-suggested map changes with approval workflow
+export const erikaMapChanges = mysqlTable('erika_map_changes', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  userId: int('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: varchar('project_id', { length: 36 }).references(() => projects.id, { onDelete: 'set null' }),
+  mapName: varchar('map_name', { length: 255 }).notNull(),
+  mapAddress: int('map_address'),
+  // Change details
+  changeType: varchar('change_type', { length: 50 }).notNull(), // 'modify', 'smooth', 'scale', 'fill'
+  changeDescription: text('change_description').notNull(),
+  originalValues: json('original_values'), // Array of original cell values
+  proposedValues: json('proposed_values'), // Array of proposed cell values
+  cellRange: json('cell_range'), // {startRow, startCol, endRow, endCol}
+  reasoning: text('reasoning'), // Erika's explanation for the change
+  // Approval workflow
+  status: mysqlEnum('status', ['pending', 'approved', 'rejected', 'auto_approved']).default('pending'),
+  approvedAt: timestamp('approved_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  userChangesIdx: index('idx_erika_user_changes').on(table.userId, table.status),
+  projectChangesIdx: index('idx_erika_project_changes').on(table.projectId),
+}));
+
+
+// ── Support Sessions ────────────────────────────────────────────────────────
+// PPEI employees can generate invite links for customers to join support sessions
+// Customers don't need accounts - they join via link
+export const supportSessions = mysqlTable('support_sessions', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  inviteLink: varchar('invite_link', { length: 255 }).notNull().unique(),
+  createdBy: int('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  customerName: varchar('customer_name', { length: 255 }).notNull(),
+  customerEmail: varchar('customer_email', { length: 255 }),
+  // Session state
+  status: mysqlEnum('status', ['active', 'ended', 'expired']).default('active'),
+  expiresAt: timestamp('expires_at').notNull(),
+  startedAt: timestamp('started_at'),
+  endedAt: timestamp('ended_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  createdByIdx: index('idx_support_created_by').on(table.createdBy),
+  statusIdx: index('idx_support_status').on(table.status),
+  inviteLinkIdx: index('idx_support_invite_link').on(table.inviteLink),
+}));
+
+// ── Support Session Recordings ──────────────────────────────────────────────
+// Stores metadata for recorded support sessions (screen + webcam + audio + chat)
+export const supportSessionRecordings = mysqlTable('support_session_recordings', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  sessionId: varchar('session_id', { length: 36 }).notNull().references(() => supportSessions.id, { onDelete: 'cascade' }),
+  // Recording files stored in S3
+  screenRecordingUrl: varchar('screen_recording_url', { length: 500 }),
+  webcamRecordingUrl: varchar('webcam_recording_url', { length: 500 }),
+  audioRecordingUrl: varchar('audio_recording_url', { length: 500 }),
+  // Combined video with all streams
+  combinedVideoUrl: varchar('combined_video_url', { length: 500 }),
+  chatTranscript: json('chat_transcript'), // Array of {timestamp, sender, message}
+  // Recording metadata
+  duration: int('duration'), // Duration in seconds
+  fileSize: varchar('file_size', { length: 50 }), // Total file size in bytes (stored as string for large numbers)
+  // Educational content tagging
+  isEducational: boolean('is_educational').default(false),
+  courseTitle: varchar('course_title', { length: 255 }),
+  courseTopic: varchar('course_topic', { length: 255 }), // e.g., 'Boost Control', 'Fuel Tuning'
+  tags: json('tags'), // Array of string tags for searchability
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('idx_recording_session').on(table.sessionId),
+  educationalIdx: index('idx_recording_educational').on(table.isEducational),
+  topicIdx: index('idx_recording_topic').on(table.courseTopic),
+}));
+
+// ── Support Metrics ─────────────────────────────────────────────────────────
+// Tracks support session quality and performance metrics
+export const supportMetrics = mysqlTable('support_metrics', {
+  id: varchar('id', { length: 36 }).primaryKey(),
+  sessionId: varchar('session_id', { length: 36 }).notNull().references(() => supportSessions.id, { onDelete: 'cascade' }),
+  // Response and resolution
+  responseTime: int('response_time'), // Seconds from invite sent to customer joined
+  resolutionStatus: mysqlEnum('resolution_status', ['resolved', 'partial', 'escalated', 'pending']).default('pending'),
+  resolutionNotes: text('resolution_notes'),
+  // Customer feedback
+  customerSatisfaction: int('customer_satisfaction'), // 1-5 star rating
+  customerFeedback: text('customer_feedback'),
+  // Session activity
+  totalParticipants: int('total_participants'),
+  totalDuration: int('total_duration'), // Seconds
+  screenShareTime: int('screen_share_time'), // Seconds
+  audioTime: int('audio_time'), // Seconds
+  videoTime: int('video_time'), // Seconds
+  chatMessages: int('chat_messages'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  sessionIdx: index('idx_metrics_session').on(table.sessionId),
+  resolutionIdx: index('idx_metrics_resolution').on(table.resolutionStatus),
+}));
