@@ -1799,7 +1799,7 @@
 ## Binary Reverse Engineering Engine - Phase 1: Document Storage Database
 
 ### Database Schema Design
-- [ ] Create `reference_documents` table (PDFs, function sheets, patents)
+- [x] Create `reference_documents` table (PDFs, function sheets, patents)
   - id, filename, file_type, ecu_family, upload_date, storage_url, extracted_text, metadata_json
 - [ ] Create `a2l_library` table (existing A2L definitions)
   - id, filename, ecu_family, version, map_count, storage_url, parsed_content_json
@@ -1971,3 +1971,24 @@
 - [ ] Investigate why Erik and Kory Pro accounts keep reverting to Lite tier
 - [ ] Fix account tier persistence logic
 - [ ] Verify Pro status stays after login/refresh
+
+
+## Reverse Engineering Pipeline Test Results (2026-03-29)
+- [x] Full pipeline test passed with Can-Am MG1 binary (1E1101953SA2VLMJMG1CA920.bin)
+- [x] ECU Family Detected: MG1C (DEADBEEF marker, MG1C_HEADER, MG1C_POINTER)
+- [x] Maps Discovered: 40,114 calibration maps
+- [x] A2L Generated: 12.28 MB definition file (ASAP2 format)
+- [x] All 8 vitest tests passing (signature detection, map discovery, A2L generation, validation, full pipeline)
+- [x] Created a2lGenerator.ts (map discovery + A2L generation + validation)
+- [x] Extended binaryAnalysis router with discoverMaps, generateA2L, reverseEngineer endpoints
+- [x] Created ReverseEngineeringPanel.tsx (admin UI with upload, analysis, download)
+- [x] Added REVERSE ENG tab to Advanced.tsx (admin-only)
+
+
+## Rename Erika to MARA (Multi-Agent Reasoning Architect)
+- [ ] Find all references to "Erika" in codebase
+- [ ] Replace all UI-facing references (labels, titles, chat names)
+- [ ] Replace all code references (variable names, comments, system prompts)
+- [ ] Update todo.md references
+- [ ] Verify TypeScript compilation
+- [ ] Verify tests still pass
