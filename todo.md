@@ -2259,3 +2259,13 @@
 - [x] Make all current admins super_admins in DB (Erik, Carmen, Kory all super_admin)
 - [ ] Merge Support tab into User Management tab (kept as separate tabs for now - cleaner UX)
 - [x] Add visible logout button for logged-in users (LOG OUT button in Home.tsx header)
+
+## V-OP Pro Tab Restructure (2026-03-29)
+- [x] Remove PIDs tab from V-OP Pro
+- [x] Remove Search tab from V-OP Pro
+- [x] Remove Vehicles tab from V-OP Pro
+- [x] Remove Mode 6 tab from V-OP Pro
+- [x] Remove UDS tab from V-OP Pro
+- [x] Remove Services tab from V-OP Pro
+- [x] Move Coding to V-OP Lite (Home.tsx) as collapsible "BASIC EDITOR (NON-ECU)" section with VehicleCoding component
+- [x] Move USER MGMT out of tabs to header area for admins (with pending request badge count)

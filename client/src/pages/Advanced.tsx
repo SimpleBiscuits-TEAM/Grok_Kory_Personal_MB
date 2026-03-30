@@ -1432,30 +1432,22 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'a2l' | 'intellispy' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
-  { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 16, height: 16 }} /> },
-  { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
   { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
-  { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 16, height: 16 }} /> },
-  { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 16, height: 16 }} /> },
-  { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 16, height: 16 }} /> },
-  { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 16, height: 16 }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
   { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'users', label: 'USER MGMT', icon: <Users style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
@@ -1568,6 +1560,28 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                   <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.blue }}>A2L LOADED</span>
                 </div>
               )}
+              {isAdmin && (
+                <button onClick={() => setActiveTab('users')} style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px',
+                  background: activeTab === 'users' ? `${sColor.red}33` : 'oklch(0.18 0.006 260)',
+                  border: `1px solid ${activeTab === 'users' ? sColor.red : 'oklch(0.25 0.008 260)'}`,
+                  borderRadius: '2px',
+                  color: activeTab === 'users' ? sColor.red : 'oklch(0.70 0.010 260)',
+                  fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer',
+                  position: 'relative',
+                }}>
+                  <Users style={{ width: 14, height: 14 }} /> USER MGMT
+                  {pendingCount > 0 && (
+                    <span style={{
+                      position: 'absolute', top: '-4px', right: '-4px',
+                      background: sColor.red, color: 'white',
+                      fontSize: '0.5rem', fontFamily: sFont.mono,
+                      padding: '1px 4px', borderRadius: '8px',
+                      lineHeight: 1.2, minWidth: '14px', textAlign: 'center',
+                    }}>{pendingCount}</span>
+                  )}
+                </button>
+              )}
               <button onClick={onLock} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: `${sColor.red}1f`, border: `1px solid ${sColor.red}4d`, borderRadius: '2px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
                 <Lock style={{ width: 14, height: 14 }} /> LOCK
               </button>
@@ -1625,74 +1639,12 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
-        {activeTab === 'search' && (
-          <div className="ppei-anim-fade-up">
-            <div style={{ background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', padding: '20px', marginBottom: '16px' }}>
-              <div style={{ position: 'relative' }}>
-                <Search style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '18px', height: '18px', color: sColor.textMuted }} />
-                <input ref={searchInputRef} type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-                  placeholder='Search knowledge base (e.g. "boost pressure PID", "P0087 L5P", "CP4 failure")'
-                  style={{ width: '100%', padding: '14px 14px 14px 44px', fontFamily: sFont.mono, fontSize: '0.95rem', background: sColor.bgDark, border: `2px solid oklch(0.25 0.008 260)`, borderRadius: '3px', color: 'white', outline: 'none', boxSizing: 'border-box' }}
-                  onFocus={(e) => { (e.target).style.borderColor = sColor.red; }}
-                  onBlur={(e) => { (e.target).style.borderColor = 'oklch(0.25 0.008 260)'; }}
-                />
-                {query && <button onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}><X style={{ width: 16, height: 16, color: 'oklch(0.50 0.010 260)' }} /></button>}
-              </div>
-              <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
-                <button onClick={() => setCategoryFilter('all')} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === 'all' ? `${sColor.red}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === 'all' ? `${sColor.red}80` : sColor.border}`, borderRadius: '2px', color: categoryFilter === 'all' ? sColor.red : sColor.textDim, cursor: 'pointer' }}>ALL</button>
-                {Object.entries(categoryConfig).map(([key, cfg]) => (
-                  <button key={key} onClick={() => setCategoryFilter(key as KBCategory)} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === key ? `${cfg.color}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === key ? `${cfg.color}66` : sColor.border}`, borderRadius: '2px', color: categoryFilter === key ? cfg.color : sColor.textDim, cursor: 'pointer' }}>{cfg.label.toUpperCase()}</button>
-                ))}
-              </div>
-            </div>
-            {searchResults?.intent?.description && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: `${sColor.green}14`, border: `1px solid ${sColor.green}33`, borderRadius: '3px', marginBottom: '12px' }}>
-                <Zap style={{ width: 14, height: 14, color: sColor.green }} />
-                <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.green }}>{searchResults.intent.description}</span>
-                <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', marginLeft: 'auto' }}>{searchResults.results.length} results</span>
-              </div>
-            )}
-            {searchResults && searchResults.results.length > 0 && <div>{searchResults.results.map((result) => <ResultCard key={result.document.id} result={result} isExpanded={expandedResults.has(result.document.id)} onToggle={() => toggleResult(result.document.id)} />)}</div>}
-            {searchResults && searchResults.results.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                <Search style={{ width: 32, height: 32, color: 'oklch(0.30 0.008 260)', margin: '0 auto 12px' }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)' }}>NO RESULTS FOUND</p>
-              </div>
-            )}
-            {!searchResults && (
-              <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                <Database style={{ width: 40, height: 40, color: 'oklch(0.25 0.008 260)', margin: '0 auto 16px' }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>KNOWLEDGE BASE READY</p>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto' }}>
-                  Search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs, and multi-vehicle databases. Now includes L5P, LML, LBZ, LLY, LB7, and LS/LT platforms.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginTop: '24px', maxWidth: '600px', marginLeft: 'auto', marginRight: 'auto' }}>
-                  {Object.entries(stats.categories).map(([cat, count]) => {
-                    const cfg = categoryConfig[cat] || categoryConfig.standard;
-                    return (
-                      <div key={cat} style={{ padding: '10px', background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.borderLight}`, borderTop: `2px solid ${cfg.color}`, borderRadius: '3px', textAlign: 'center' }}>
-                        <div style={{ fontFamily: sFont.mono, fontSize: '1.2rem', color: cfg.color, fontWeight: 700 }}>{count}</div>
-                        <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: 'oklch(0.50 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{cfg.label}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'vehicles' && <div className="ppei-anim-fade-up"><VehiclePanel /></div>}
         {activeTab === 'a2l' && <div className="ppei-anim-fade-up"><A2LPanel a2lData={a2lData} setA2lData={setA2lData} /></div>}
-        {activeTab === 'pids' && <div className="ppei-anim-fade-up"><PidReferencePanel /></div>}
-        {activeTab === 'mode6' && <div className="ppei-anim-fade-up"><Mode6Panel /></div>}
-        {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
-        {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
         <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
         {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
-        {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
+
         {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
         {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}

@@ -11,7 +11,7 @@ import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut, Wrench, ChevronDown, ChevronUp } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
@@ -35,6 +35,7 @@ import CompareView from '@/components/CompareView';
 import { APP_VERSION } from '@/lib/version';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
+import VehicleCoding from '@/components/VehicleCoding';
 import { useAuth } from '@/_core/hooks/useAuth';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
@@ -56,6 +57,7 @@ export default function Home() {
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
+  const [showBasicEditor, setShowBasicEditor] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -625,6 +627,43 @@ export default function Home() {
                   </li>
                 </ul>
               </div>
+            </div>
+
+            {/* Basic Editor (Non-ECU) */}
+            <div className="mt-6 ppei-anim-fade-up ppei-delay-500">
+              <button
+                onClick={() => setShowBasicEditor(!showBasicEditor)}
+                style={{
+                  width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '1rem 1.25rem',
+                  background: 'oklch(0.13 0.006 260)',
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderLeft: '4px solid oklch(0.70 0.18 200)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  color: 'white',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Wrench style={{ width: 18, height: 18, color: 'oklch(0.70 0.18 200)' }} />
+                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>BASIC EDITOR (NON-ECU)</span>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>Fuel Tank & Tire Size Correction</span>
+                </div>
+                {showBasicEditor ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
+              </button>
+              {showBasicEditor && (
+                <div style={{
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderTop: 'none',
+                  borderRadius: '0 0 3px 3px',
+                  background: 'oklch(0.10 0.004 260)',
+                  height: 'calc(100vh - 200px)',
+                  overflow: 'auto',
+                }}>
+                  <VehicleCoding />
+                </div>
+              )}
             </div>
 
             {/* Quick Actions for signed-in users */}
