@@ -2321,3 +2321,8 @@
 - [x] Debug WP8 file upload error — "format incorrect" when uploading UTV96_YawPowerCoils_Rev_0_4_Run_6.wp8
 - [x] Fix WP8 parser to handle V2 protobuf-encoded format (Dynoware RT) — added full V2 parser alongside existing V1 parser
 - [x] Test with the provided WP8 file — 171 channels, 3343 timestamps, Honda Talon detected correctly
+
+## WP8 V2 Honda Talon Redirect Bug
+- [x] Fix WP8 V2 file not redirecting to Honda Talon Tuner page after successful parse — talon was only a devSubTab, added top-level activeTab === 'talon' rendering
+- [x] Verify sessionStorage data handoff works for V2 format
+- [x] Test end-to-end: upload V2 WP8 → detect Honda Talon → redirect to Advanced?tab=talon — Honda Talon tab now dynamically appears in tab bar when WP8 data is loaded

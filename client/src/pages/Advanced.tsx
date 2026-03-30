@@ -1477,7 +1477,6 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
     { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   ] : [];
-  const allTabs = isAdmin ? [...tabs, ...adminTabs, ...superAdminTabs] : [...tabs];
   const [devSubTab, setDevSubTab] = useState<string>('search');
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
@@ -1485,12 +1484,19 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const [injectedWP8, setInjectedWP8] = useState<WP8ParseResult | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Dynamically add Honda Talon tab when WP8 data is loaded or activeTab is talon
+  const talonTab = { id: 'talon' as TabId, label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> };
+  const showTalonTab = activeTab === 'talon' || injectedWP8 !== null;
+  const allTabs = isAdmin
+    ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...adminTabs, ...superAdminTabs]
+    : [...tabs, ...(showTalonTab ? [talonTab] : [])];
 
   // Pick up WP8 data from sessionStorage (set by Home.tsx on .wp8 upload)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
     if (tabParam === 'talon') {
+      // Show Honda Talon as a top-level tab for any user who uploads a WP8 file
       setActiveTab('talon');
       const raw = sessionStorage.getItem('pendingWP8');
       if (raw) {
@@ -1737,6 +1743,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             </div>
           </div>
         </div>}
+        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
       </main>
 
