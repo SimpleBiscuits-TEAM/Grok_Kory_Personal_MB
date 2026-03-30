@@ -19,6 +19,9 @@ import { adminMessagingRouter } from "./routers/adminMessaging";
 import { supportAdminRouter } from "./routers/supportAdmin";
 import { datalogCacheRouter } from "./routers/datalogCache";
 import { accessManagementRouter } from "./routers/accessManagement";
+import { fleetRouter } from "./routers/fleet";
+import { dragRouter } from "./routers/drag";
+import { communityRouter } from "./routers/community";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -85,6 +88,15 @@ export const appRouter = router({
 
   // Access Management (user approval, role management)
   access: accessManagementRouter,
+
+  // V-OP Fleet Management (Goose AI)
+  fleet: fleetRouter,
+
+  // V-OP Drag Racing (Regional Callouts, Leagues, BTC)
+  drag: dragRouter,
+
+  // V-OP Community Forum
+  community: communityRouter,
 
   // Feedback / Error Reports
   feedback: router({

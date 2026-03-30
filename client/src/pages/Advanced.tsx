@@ -18,9 +18,10 @@ import {
   FileText, Activity, AlertCircle, Clock, ShieldX, Users,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings, Inbox, Fuel
+  Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck
 } from 'lucide-react';
 import { getLoginUrl } from '@/const';
+import { useLocation } from 'wouter';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
   OBD_PIDS, OBD_SERVICES, GM_MODE6_MONITORS, UDS_SERVICE_MAPPING,
@@ -70,6 +71,7 @@ import { WP8ParseResult } from '@/lib/wp8Parser';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
+import PpeiHeader from '@/components/PpeiHeader';
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const ACCESS_CODE = 'PPEIROCKS';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
@@ -1432,22 +1434,29 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet';
 
+/* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
+  { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+];
+
+/* ── Internal/dev tabs (admin only) ── */
+const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 16, height: 16 }} /> },
   { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 16, height: 16 }} /> },
-  { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
   { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
   { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 16, height: 16 }} /> },
   { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 16, height: 16 }} /> },
   { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 16, height: 16 }} /> },
   { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 16, height: 16 }} /> },
-  { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
@@ -1455,24 +1464,21 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'users', label: 'USER MGMT', icon: <Users style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
-  { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
-  { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  { id: 'reverseeng' as TabId, label: 'REVERSE ENG', icon: <Cpu style={{ width: 16, height: 16, color: 'oklch(0.65 0.22 25)' }} /> },
-  { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>('analyzer');
   const [query, setQuery] = useState('');
+  const [, navigate] = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
   const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
     { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   ] : [];
-  const allTabs = isAdmin ? [...tabs, ...adminTabs, ...superAdminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
+  const allTabs = isAdmin ? [...tabs, ...adminTabs, ...superAdminTabs] : [...tabs];
+  const [devSubTab, setDevSubTab] = useState<string>('search');
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
@@ -1523,33 +1529,15 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   return (
     <div className="min-h-screen" style={{ background: sColor.bg, color: sColor.text }}>
       <SignInBanner />
-      {/* Header */}
-      <header style={{ background: sColor.bgDark, borderBottom: `1px solid oklch(0.20 0.008 260)`, boxShadow: '0 2px 20px oklch(0 0 0 / 0.5)' }}>
-        <div className="ppei-accent-animated" style={{ height: '3px' }} />
-        <div className="container mx-auto px-4 py-3">
+      {/* Shared PPEI Header */}
+      <PpeiHeader />
+
+      {/* Advanced mode sub-header with status badges */}
+      <div style={{ background: sColor.bgDark, borderBottom: `1px solid oklch(0.20 0.008 260)`, padding: '6px 0' }}>
+        <div className="container mx-auto px-4">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <Link href="/"><img src={PPEI_LOGO_URL} alt="V-OP by PPEI" className="ppei-logo" style={{ height: '48px', width: 'auto', objectFit: 'contain', cursor: 'pointer' }} /></Link>
-              <div style={{ borderLeft: `3px solid ${sColor.red}`, paddingLeft: '12px' }}>
-                <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>V-OP PRO</h1>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI · AI DIAGNOSTICS</p>
-              </div>
-              <span style={{
-                fontFamily: sFont.mono,
-                fontSize: '0.6rem',
-                color: 'oklch(0.45 0.010 260)',
-                letterSpacing: '0.06em',
-                padding: '2px 8px',
-                border: '1px solid oklch(0.22 0.006 260)',
-                borderRadius: '2px',
-                background: 'oklch(0.12 0.004 260)',
-                userSelect: 'none',
-                alignSelf: 'center',
-              }}>
-                {APP_VERSION}
-              </span>
-            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em', color: sColor.red }}>ADVANCED MODE</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: `${sColor.green}1f`, border: `1px solid ${sColor.green}4d`, borderRadius: '2px' }}>
                 <Database style={{ width: 12, height: 12, color: sColor.green }} />
                 <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.green }}>{stats.totalDocuments} DOCS</span>
@@ -1560,19 +1548,13 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                   <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.blue }}>A2L LOADED</span>
                 </div>
               )}
-              <button onClick={onLock} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: `${sColor.red}1f`, border: `1px solid ${sColor.red}4d`, borderRadius: '2px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
-                <Lock style={{ width: 14, height: 14 }} /> LOCK
-              </button>
-
-              <Link href="/" style={{ textDecoration: 'none' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
-                  <ArrowLeft style={{ width: 14, height: 14 }} /> V-OP LITE
-                </div>
-              </Link>
             </div>
+            <button onClick={onLock} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: `${sColor.red}1f`, border: `1px solid ${sColor.red}4d`, borderRadius: '2px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
+              <Lock style={{ width: 14, height: 14 }} /> LOCK
+            </button>
           </div>
         </div>
-      </header>
+      </div>
 
       <main className="container mx-auto px-4 py-6">
         {/* Tab navigation */}
@@ -1583,7 +1565,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               {isAdmin && idx === tabs.length && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
-              <button onClick={() => setActiveTab(tab.id)} style={{
+              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } setActiveTab(tab.id); }} style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
                 color: activeTab === tab.id ? 'white' : 'oklch(0.50 0.010 260)',
@@ -1602,84 +1584,160 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
-        {activeTab === 'search' && (
+        {/* DEV TOOLS — consolidated admin panel */}
+        {activeTab === ('devtools' as TabId) && isAdmin && (
           <div className="ppei-anim-fade-up">
-            <div style={{ background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', padding: '20px', marginBottom: '16px' }}>
-              <div style={{ position: 'relative' }}>
-                <Search style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '18px', height: '18px', color: sColor.textMuted }} />
-                <input ref={searchInputRef} type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-                  placeholder='Search knowledge base (e.g. "boost pressure PID", "P0087 L5P", "CP4 failure")'
-                  style={{ width: '100%', padding: '14px 14px 14px 44px', fontFamily: sFont.mono, fontSize: '0.95rem', background: sColor.bgDark, border: `2px solid oklch(0.25 0.008 260)`, borderRadius: '3px', color: 'white', outline: 'none', boxSizing: 'border-box' }}
-                  onFocus={(e) => { (e.target).style.borderColor = sColor.red; }}
-                  onBlur={(e) => { (e.target).style.borderColor = 'oklch(0.25 0.008 260)'; }}
-                />
-                {query && <button onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}><X style={{ width: 16, height: 16, color: 'oklch(0.50 0.010 260)' }} /></button>}
-              </div>
-              <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
-                <button onClick={() => setCategoryFilter('all')} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === 'all' ? `${sColor.red}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === 'all' ? `${sColor.red}80` : sColor.border}`, borderRadius: '2px', color: categoryFilter === 'all' ? sColor.red : sColor.textDim, cursor: 'pointer' }}>ALL</button>
-                {Object.entries(categoryConfig).map(([key, cfg]) => (
-                  <button key={key} onClick={() => setCategoryFilter(key as KBCategory)} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === key ? `${cfg.color}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === key ? `${cfg.color}66` : sColor.border}`, borderRadius: '2px', color: categoryFilter === key ? cfg.color : sColor.textDim, cursor: 'pointer' }}>{cfg.label.toUpperCase()}</button>
-                ))}
-              </div>
+            {/* Dev sub-tab navigation */}
+            <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', borderBottom: `1px solid oklch(0.20 0.008 260)`, overflowX: 'auto', flexWrap: 'wrap' }}>
+              {[
+                { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 13, height: 13 }} /> },
+                { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 13, height: 13 }} /> },
+                { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 13, height: 13 }} /> },
+                { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 13, height: 13 }} /> },
+                { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 13, height: 13 }} /> },
+                { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 13, height: 13 }} /> },
+                { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 13, height: 13 }} /> },
+                { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 13, height: 13 }} /> },
+                { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 13, height: 13 }} /> },
+                { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 13, height: 13 }} /> },
+                { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 13, height: 13 }} /> },
+                { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 13, height: 13 }} /> },
+                { id: 'users', label: 'USER MGMT', icon: <Users style={{ width: 13, height: 13 }} /> },
+                { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 13, height: 13 }} /> },
+                { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 13, height: 13 }} /> },
+                { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 13, height: 13 }} /> },
+                { id: 'reverseeng', label: 'REVERSE ENG', icon: <Cpu style={{ width: 13, height: 13 }} /> },
+                { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 13, height: 13 }} /> },
+              ].map(st => (
+                <button key={st.id} onClick={() => setDevSubTab(st.id)} style={{
+                  display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
+                  fontFamily: sFont.heading, fontSize: '0.72rem', letterSpacing: '0.05em',
+                  color: devSubTab === st.id ? 'white' : 'oklch(0.45 0.010 260)',
+                  background: devSubTab === st.id ? 'oklch(0.18 0.010 260)' : 'transparent',
+                  border: 'none', borderBottom: devSubTab === st.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+                  cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
+                }}>
+                  {st.icon} {st.label}
+                </button>
+              ))}
             </div>
-            {searchResults?.intent?.description && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: `${sColor.green}14`, border: `1px solid ${sColor.green}33`, borderRadius: '3px', marginBottom: '12px' }}>
-                <Zap style={{ width: 14, height: 14, color: sColor.green }} />
-                <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.green }}>{searchResults.intent.description}</span>
-                <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', marginLeft: 'auto' }}>{searchResults.results.length} results</span>
-              </div>
-            )}
-            {searchResults && searchResults.results.length > 0 && <div>{searchResults.results.map((result) => <ResultCard key={result.document.id} result={result} isExpanded={expandedResults.has(result.document.id)} onToggle={() => toggleResult(result.document.id)} />)}</div>}
-            {searchResults && searchResults.results.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                <Search style={{ width: 32, height: 32, color: 'oklch(0.30 0.008 260)', margin: '0 auto 12px' }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)' }}>NO RESULTS FOUND</p>
-              </div>
-            )}
-            {!searchResults && (
-              <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                <Database style={{ width: 40, height: 40, color: 'oklch(0.25 0.008 260)', margin: '0 auto 16px' }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>KNOWLEDGE BASE READY</p>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto' }}>
-                  Search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs, and multi-vehicle databases. Now includes L5P, LML, LBZ, LLY, LB7, and LS/LT platforms.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginTop: '24px', maxWidth: '600px', marginLeft: 'auto', marginRight: 'auto' }}>
-                  {Object.entries(stats.categories).map(([cat, count]) => {
-                    const cfg = categoryConfig[cat] || categoryConfig.standard;
-                    return (
-                      <div key={cat} style={{ padding: '10px', background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.borderLight}`, borderTop: `2px solid ${cfg.color}`, borderRadius: '3px', textAlign: 'center' }}>
-                        <div style={{ fontFamily: sFont.mono, fontSize: '1.2rem', color: cfg.color, fontWeight: 700 }}>{count}</div>
-                        <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: 'oklch(0.50 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{cfg.label}</div>
-                      </div>
-                    );
-                  })}
+
+            {/* Dev sub-tab content */}
+            {devSubTab === 'search' && (
+              <div>
+                <div style={{ background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', padding: '20px', marginBottom: '16px' }}>
+                  <div style={{ position: 'relative' }}>
+                    <Search style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', width: '18px', height: '18px', color: sColor.textMuted }} />
+                    <input ref={searchInputRef} type="text" value={query} onChange={(e) => setQuery(e.target.value)}
+                      placeholder='Search knowledge base (e.g. "boost pressure PID", "P0087 L5P", "CP4 failure")'
+                      style={{ width: '100%', padding: '14px 14px 14px 44px', fontFamily: sFont.mono, fontSize: '0.95rem', background: sColor.bgDark, border: `2px solid oklch(0.25 0.008 260)`, borderRadius: '3px', color: 'white', outline: 'none', boxSizing: 'border-box' }}
+                      onFocus={(e) => { (e.target).style.borderColor = sColor.red; }}
+                      onBlur={(e) => { (e.target).style.borderColor = 'oklch(0.25 0.008 260)'; }}
+                    />
+                    {query && <button onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}><X style={{ width: 16, height: 16, color: 'oklch(0.50 0.010 260)' }} /></button>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
+                    <button onClick={() => setCategoryFilter('all')} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === 'all' ? `${sColor.red}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === 'all' ? `${sColor.red}80` : sColor.border}`, borderRadius: '2px', color: categoryFilter === 'all' ? sColor.red : sColor.textDim, cursor: 'pointer' }}>ALL</button>
+                    {Object.entries(categoryConfig).map(([key, cfg]) => (
+                      <button key={key} onClick={() => setCategoryFilter(key as KBCategory)} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === key ? `${cfg.color}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === key ? `${cfg.color}66` : sColor.border}`, borderRadius: '2px', color: categoryFilter === key ? cfg.color : sColor.textDim, cursor: 'pointer' }}>{cfg.label.toUpperCase()}</button>
+                    ))}
+                  </div>
                 </div>
+                {searchResults?.intent?.description && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: `${sColor.green}14`, border: `1px solid ${sColor.green}33`, borderRadius: '3px', marginBottom: '12px' }}>
+                    <Zap style={{ width: 14, height: 14, color: sColor.green }} />
+                    <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.green }}>{searchResults.intent.description}</span>
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', marginLeft: 'auto' }}>{searchResults.results.length} results</span>
+                  </div>
+                )}
+                {searchResults && searchResults.results.length > 0 && <div>{searchResults.results.map((result) => <ResultCard key={result.document.id} result={result} isExpanded={expandedResults.has(result.document.id)} onToggle={() => toggleResult(result.document.id)} />)}</div>}
+                {searchResults && searchResults.results.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
+                    <Search style={{ width: 32, height: 32, color: 'oklch(0.30 0.008 260)', margin: '0 auto 12px' }} />
+                    <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)' }}>NO RESULTS FOUND</p>
+                  </div>
+                )}
+                {!searchResults && (
+                  <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
+                    <Database style={{ width: 40, height: 40, color: 'oklch(0.25 0.008 260)', margin: '0 auto 16px' }} />
+                    <p style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>KNOWLEDGE BASE READY</p>
+                    <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto' }}>
+                      Search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs, and multi-vehicle databases. Now includes L5P, LML, LBZ, LLY, LB7, and LS/LT platforms.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginTop: '24px', maxWidth: '600px', marginLeft: 'auto', marginRight: 'auto' }}>
+                      {Object.entries(stats.categories).map(([cat, count]) => {
+                        const cfg = categoryConfig[cat] || categoryConfig.standard;
+                        return (
+                          <div key={cat} style={{ padding: '10px', background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.borderLight}`, borderTop: `2px solid ${cfg.color}`, borderRadius: '3px', textAlign: 'center' }}>
+                            <div style={{ fontFamily: sFont.mono, fontSize: '1.2rem', color: cfg.color, fontWeight: 700 }}>{count}</div>
+                            <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: 'oklch(0.50 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{cfg.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+            {devSubTab === 'vehicles' && <VehiclePanel />}
+            {devSubTab === 'a2l' && <A2LPanel a2lData={a2lData} setA2lData={setA2lData} />}
+            {devSubTab === 'pids' && <PidReferencePanel />}
+            {devSubTab === 'mode6' && <Mode6Panel />}
+            {devSubTab === 'uds' && <UDSPanel />}
+            {devSubTab === 'services' && <OBDServicesPanel />}
+            {devSubTab === 'binary' && <BinaryUploadPanel />}
+            {devSubTab === 'coding' && <div style={{ height: 'calc(100vh - 280px)' }}><VehicleCoding /></div>}
+            {devSubTab === 'canam' && <div style={{ height: 'calc(100vh - 280px)' }}><CanAmVinChanger /></div>}
+            {devSubTab === 'procedures' && <div style={{ height: 'calc(100vh - 280px)' }}><ServiceProcedures /></div>}
+            {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} />}
+            {devSubTab === 'users' && <UserManagementPanel />}
+            {devSubTab === 'qa' && <QAChecklistPanel />}
+            {devSubTab === 'notifications' && <AdminNotificationPanel onClose={() => setActiveTab('analyzer')} />}
+            {devSubTab === 'offsets' && <OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} />}
+            {devSubTab === 'reverseeng' && <ReverseEngineeringPanel />}
+            {devSubTab === 'notifprefs' && <NotificationPrefsPanel />}
           </div>
         )}
-
-        {activeTab === 'vehicles' && <div className="ppei-anim-fade-up"><VehiclePanel /></div>}
-        {activeTab === 'a2l' && <div className="ppei-anim-fade-up"><A2LPanel a2lData={a2lData} setA2lData={setA2lData} /></div>}
-        {activeTab === 'pids' && <div className="ppei-anim-fade-up"><PidReferencePanel /></div>}
-        {activeTab === 'mode6' && <div className="ppei-anim-fade-up"><Mode6Panel /></div>}
-        {activeTab === 'uds' && <div className="ppei-anim-fade-up"><UDSPanel /></div>}
-        {activeTab === 'services' && <div className="ppei-anim-fade-up"><OBDServicesPanel /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
         <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
         {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
-        {activeTab === 'coding' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><VehicleCoding /></div>}
-        {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
-        {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
-        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
-        {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
-        {activeTab === 'reverseeng' && isAdmin && <div className="ppei-anim-fade-up"><ReverseEngineeringPanel /></div>}
-        {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
+        {activeTab === 'flash' && <div className="ppei-anim-fade-up">
+          <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' }}>
+            <div style={{ background: 'oklch(0.13 0.008 260)', border: '1px solid oklch(0.22 0.010 260)', borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '2rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem' }}>
+                <ShieldCheck style={{ width: 32, height: 32, color: sColor.red }} />
+                <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>PPEI EXCLUSIVE FLASH</h2>
+              </div>
+              <div style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim, lineHeight: 1.7 }}>
+                <p style={{ marginBottom: '1rem' }}>This is a <strong style={{ color: 'white' }}>bespoke product built for and by PPEI</strong> for the exclusive use of PPEI calibrations and OEM flashes.</p>
+                <p style={{ marginBottom: '1rem' }}>V-OP Flash <strong style={{ color: 'white' }}>does not flash any third-party tunes</strong>. Only aftermarket calibrations approved and built by PPEI will be flashed by this device.</p>
+                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1.5rem' }}>
+                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: sColor.red, marginBottom: '0.75rem' }}>WHAT V-OP FLASH SUPPORTS</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                    {['PPEI Custom Calibrations', 'OEM Stock Flashes', 'PPEI Performance Tunes', 'PPEI Economy Tunes', 'PPEI Tow Tunes', 'Multi-Tune Switching'].map(item => (
+                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.65 0.20 145)' }}>
+                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1rem' }}>
+                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.75 0.18 60)', marginBottom: '0.75rem' }}>OPEN TO ALL USERS</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                    {['Datalogger', 'Diagnostics / Health Analysis', 'AI Chat (Knox)', 'IntelliSpy Live Monitor', 'Drag Racing Terminal', 'Community Forums'].map(item => (
+                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.70 0.18 200)' }}>
+                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <p style={{ marginTop: '1.5rem', fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.40 0.010 260)', textAlign: 'center' }}>V-OP Flash requires a connected V-OP OBD device and an active PPEI account.</p>
+              </div>
+            </div>
+          </div>
+        </div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
-        {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 
       {/* Voice Command Button */}

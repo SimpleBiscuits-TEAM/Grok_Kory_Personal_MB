@@ -6,6 +6,9 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Advanced from "./pages/Advanced";
+import Fleet from "./pages/Fleet";
+import DragRacing from "./pages/DragRacing";
+import Community from "./pages/Community";
 import SupportJoin from "./pages/SupportJoin";
 import DebugDashboard from "./pages/DebugDashboard";
 import DebugReportButton from "./components/DebugReportButton";
@@ -16,6 +19,9 @@ function Router() {
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/advanced"} component={Advanced} />
+      <Route path={"/fleet"} component={Fleet} />
+      <Route path={"/drag"} component={DragRacing} />
+      <Route path={"/community"} component={Community} />
       <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
       <Route path={"/debug"} component={DebugDashboard} />
       <Route path={"/404"} component={NotFound} />

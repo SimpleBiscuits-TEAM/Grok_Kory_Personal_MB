@@ -2226,3 +2226,67 @@
 - [ ] Legal research: Sweepstakes model for drag racing
 - [ ] Legal research: Fantasy sports precedent applied to drag racing
 - [ ] V-OP Drag: 1% rake + $200/month subscription model (ultra-competitive pricing)
+- [ ] V-OP Community — modern forum system with real-time messaging
+- [ ] Community categories (Drag Racing, Fleet Management, General, etc.)
+- [ ] User-created channels/threads within categories
+- [ ] Real-time message delivery (modern speed, old school forum feel)
+- [ ] Pinned posts, suggested groups/forums
+- [ ] Community tab in V-OP navigation
+- [ ] Default channels: Drag Racing, Fleet Management, Performance Tuning, General Discussion
+- [ ] Drag racing freemium: 3 free runs then subscription required
+- [ ] Forum 30-day trial access for new users
+- [ ] MoTeC datalog import support
+- [ ] FuelTech datalog import support
+- [ ] Haltech, AEM, Holley standalone datalog import support
+- [ ] Enhanced AI analysis for standalone ECU data (more PIDs = deeper insights)
+- [ ] Fix protocol notification persistence — dismiss once, stay dismissed unless genuinely new
+- [ ] Knox + Goose collaboration for drag racing analysis
+- [ ] Goose trains as drag racing specialist, scrapes forums for tips/data
+- [ ] Fix: binary PIDs, UDS, etc showing on page again — clean up Advanced page tabs/UI
+- [ ] V-OP Drag: Photo upload → AI vehicle rendering for race simulation video
+- [ ] V-OP Drag: Side-by-side animated race video using real OBD data + user vehicle photos
+- [ ] V-OP Drag: Scheduled race reveal events — both racers agree on time, invite friends
+- [ ] V-OP Drag: Discord/streaming integration for live race reveals
+- [ ] V-OP Drag: Betting pool settlement on race reveal
+- [ ] Add golf cart category to fleet types and drag racing classes
+- [ ] EcoBattery integration — Bluetooth data scraping or API partnership for golf cart diagnostics
+- [ ] Unified DRAG RACING tab covering all vehicle types (diesel, powersports, golf cart, ag)
+- [ ] Golf cart analyzer — battery health, motor efficiency, cell balance, controller diagnostics
+- [ ] Golf cart drag racing — speed, acceleration, voltage sag, motor current
+- [ ] Consolidate all admin/dev tabs into one DEV TOOLS tab — admin sees same tabs as regular user + DEV TOOLS
+
+## V-OP Drag Racing — Regional Callouts & User-Created Leagues (2026-03-30)
+- [x] Add regional callouts schema (dragCallouts table — location-based challenges)
+- [x] Add user-created leagues schema (dragLeagues, dragLeagueSeasons, dragLeagueStandings tables)
+- [x] Add BTC wallet/payment fields to drag profiles (btcAddress, btcBalance, paymentMethod)
+- [x] Regional callouts: "Fastest in Louisiana", "King of 70601", city/state/zip challenges
+- [x] User-created leagues: anyone can create a series with custom rules, classes, entry fees
+- [x] League commissioner role — creator manages brackets, scoring, championships
+- [x] Multi-round championship point scoring and season standings
+- [ ] Playoff brackets for league championships
+- [ ] Facebook sharing integration — timeslips, callouts, standings as shareable cards
+- [ ] Challenge links — share direct URL, opponent clicks to accept
+- [ ] "Fastest in [Location]" badges on profiles
+
+## V-OP Drag Racing — Bitcoin Wagering (2026-03-30)
+- [ ] Bitcoin payment integration for subscriptions ($20/mo base, $200/mo with wagering)
+- [ ] BTC escrow system for head-to-head challenges
+- [ ] 1% rake on all BTC wager pools
+- [ ] Lightning Network support for instant small bets
+- [ ] USDC stablecoin option for non-volatile payments
+- [x] Crypto wallet connection UI (BTC address entry/QR)
+- [ ] Platform wallet for collecting rake and subscription payments
+- [x] Subscription tiers: Free (3 runs), $20/mo (full platform), $200/mo (BTC wagering)
+
+## Big Build — Fleet + Drag + Community + DEV TOOLS (2026-03-30)
+- [x] Build Fleet tRPC router (CRUD for orgs, vehicles, drivers, trips, alerts, sensors, remote sessions)
+- [x] Build Drag tRPC router (profiles, runs, challenges, callouts, leagues, tournaments, leaderboards)
+- [x] Build Community tRPC router (categories, channels, threads, posts, likes, memberships)
+- [x] Build Fleet page UI — Goose AI chat, 8-tab dashboard (Goose, Dashboard, Vehicles, Drivers, Alerts, Reports, Diagnostics, Settings)
+- [x] Build Drag Racing page UI — time slips, AI race reports, callouts, leagues, leaderboards, BTC wagering
+- [x] Build Community page UI — real-time forum, categories, channels, threads, modern messaging feel
+- [ ] Build DEV TOOLS consolidated admin tab (all internal tools as sub-tabs)
+- [x] Wire all new pages into App.tsx navigation
+- [x] Write tests for Fleet, Drag, and Community routers
+- [x] Push database schema migrations
+- [x] Checkpoint and publish

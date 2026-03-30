@@ -1,0 +1,34 @@
+Screenshot observations 2026-03-30:
+
+Home page screenshot (webdev-preview-1774857286.png):
+- Shared PpeiHeader is now rendering correctly on the Home page
+- Navigation shows: ANALYZE (active/red border), ADVANCED, FLEET, DRAG, COMMUNITY
+- PPEI logo on left, V-OP BETA title, version badge v0.02 on right
+- Notification bell visible
+- "REDEFINING THE LIMITS" hero text in red
+- Upload datalog area with SELECT FILE button
+- FEEDBACK/REPORT button in bottom right
+- Dark industrial theme consistent
+- All nav links visible and properly styled
+
+Fleet page screenshot:
+- Shared PpeiHeader with FLEET tab active
+- Dashboard tab active showing Fleet Overview
+- 4 stat cards: Vehicles 0, Drivers 0, Active Alerts 0, Trips Today 0
+- Goose AI Insights section with empty state message
+- TALK TO GOOSE button (yellow/red)
+- Sub-tabs: Dashboard, Vehicles, Drivers, Alerts, Fuel, Goose AI
+
+Drag Racing page screenshot:
+- Shared PpeiHeader with DRAG tab active
+- V-OP DRAG RACING title with tagline about regional callouts
+- POST CALLOUT and CREATE LEAGUE buttons
+- Sub-tabs: Leaderboard, Callouts, Leagues, My Runs, Profile
+- Global Leaderboard with empty state
+- V-OP DRAG RACING PLANS section with 3 tiers: Free, $20/mo, $200/mo BTC Wagering
+
+Community page screenshot:
+- Shared PpeiHeader with COMMUNITY tab active
+- V-OP COMMUNITY title with stats: 0 Channels, 0 Threads, 0 Posts
+- 4 default categories: Drag Racing, Fleet Management, Tuning & Performance, General Discussion
+- Each category has icon, title, description, and chevron

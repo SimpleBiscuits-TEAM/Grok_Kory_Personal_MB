@@ -1,0 +1,25 @@
+{
+  "query": "SHOW TABLES LIKE 'drag_%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute SHOW TABLES LIKE 'drag_%';",
+  "rows": [
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)": "drag_challenges"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)": "drag_leaderboard"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)": "drag_profiles"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)": "drag_runs"
+    },
+    {
+      "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)": "drag_tournaments"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_S5fEZ6uPndYXxpVXwwyEPy (drag_%)\ndrag_challenges\ndrag_leaderboard\ndrag_profiles\ndrag_runs\ndrag_tournaments\n",
+  "stderr": "",
+  "execution_time_ms": 202
+}

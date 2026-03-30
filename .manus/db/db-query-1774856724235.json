@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `drag_callouts` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`creatorId` int NOT NULL,\n\t`title` varchar(255) NOT NULL,\n\t`description` text,\n\t`locationType` enum('state','city','zip','county','region','country') NOT NULL,\n\t`locationValue` varchar(128) NOT NULL,\n\t`locationState` varchar(64),\n\t`vehicleClass` varchar(64),\n\t`raceType` enum('eighth','quarter') NOT NULL DEFAULT 'quarter',\n\t`currentChampionId` int,\n\t`challengeCount` int DEFAULT 0,\n\t`isActive` boolean DEFAULT true,\n\t`shareUrl` text,\n\t`coverImageUrl` text,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `drag_callouts_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute CREATE TABLE IF NOT EXISTS `drag_callouts` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`creatorId` int NOT NULL,\n\t`title` varchar(255) NOT NULL,\n\t`description` text,\n\t`locationType` enum('state','city','zip','county','region','country') NOT NULL,\n\t`locationValue` varchar(128) NOT NULL,\n\t`locationState` varchar(64),\n\t`vehicleClass` varchar(64),\n\t`raceType` enum('eighth','quarter') NOT NULL DEFAULT 'quarter',\n\t`currentChampionId` int,\n\t`challengeCount` int DEFAULT 0,\n\t`isActive` boolean DEFAULT true,\n\t`shareUrl` text,\n\t`coverImageUrl` text,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `drag_callouts_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 121
+}

@@ -36,8 +36,7 @@ import { APP_VERSION } from '@/lib/version';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
+import PpeiHeader from '@/components/PpeiHeader';
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -249,103 +248,8 @@ export default function Home() {
       <SignInModal />
       <SignInBanner />
 
-      {/* ── PPEI Header ── */}
-      <header style={{
-        background: 'oklch(0.08 0.004 260)',
-        borderBottom: '1px solid oklch(0.20 0.008 260)',
-        boxShadow: '0 2px 20px oklch(0 0 0 / 0.5)'
-      }}>
-              {/* Top accent bar */}
-        <div className="ppei-accent-animated" style={{ height: '3px' }} />
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              {/* PPEI Logo */}
-              <img
-                src={PPEI_LOGO_URL}
-                alt="V-OP by PPEI"
-                className="ppei-logo"
-                style={{ height: '64px', width: 'auto', objectFit: 'contain' }}
-              />
-              {/* Title block */}
-              <div style={{ borderLeft: '3px solid oklch(0.52 0.22 25)', paddingLeft: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <h1 style={{
-                    fontFamily: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
-                    fontSize: '1.6rem',
-                    letterSpacing: '0.08em',
-                    color: 'white',
-                    lineHeight: 1.1,
-                    margin: 0
-                  }}>
-                    V-OP
-                  </h1>
-                  <span style={{
-                    fontFamily: '"Share Tech Mono", monospace',
-                    fontSize: '0.55rem',
-                    fontWeight: 'bold',
-                    letterSpacing: '0.08em',
-                    color: 'oklch(0.52 0.22 25)',
-                    background: 'rgba(255,77,0,0.12)',
-                    border: '1px solid rgba(255,77,0,0.3)',
-                    borderRadius: '3px',
-                    padding: '2px 6px',
-                    lineHeight: 1.4,
-                    marginTop: '2px',
-                  }}>BETA</span>
-                </div>
-                <p style={{
-                  fontFamily: '"Rajdhani", "Segoe UI", sans-serif',
-                  fontSize: '0.8rem',
-                  color: 'oklch(0.60 0.010 260)',
-                  letterSpacing: '0.05em',
-                  margin: 0,
-                  marginTop: '2px'
-                }}>
-                  VEHICLE OPTIMIZER BY PPEI
-                </p>
-              </div>
-            </div>
-            {/* Right side — version badge + advanced mode */}
-            <div className="flex items-center gap-3">
-              <span style={{
-                fontFamily: '"Share Tech Mono", monospace',
-                fontSize: '0.65rem',
-                color: 'oklch(0.45 0.010 260)',
-                letterSpacing: '0.06em',
-                padding: '2px 8px',
-                border: '1px solid oklch(0.22 0.006 260)',
-                borderRadius: '2px',
-                background: 'oklch(0.12 0.004 260)',
-                userSelect: 'none',
-              }}>
-                {APP_VERSION}
-              </span>
-              {isAuthenticated && <NotificationBell />}
-              <Link href="/advanced" style={{ textDecoration: 'none' }}>
-                <div className="ppei-btn-hover" style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  background: 'oklch(0.16 0.008 260)',
-                  border: '1px solid oklch(0.28 0.008 260)',
-                  color: 'oklch(0.65 0.010 260)',
-                  padding: '4px 12px',
-                  borderRadius: '2px',
-                  fontFamily: '"Bebas Neue", sans-serif',
-                  fontSize: '0.8rem',
-                  letterSpacing: '0.08em',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}>
-                  ADVANCED
-                </div>
-              </Link>
-
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* ── PPEI Header (shared across all pages) ── */}
+      <PpeiHeader />
 
       <main className="container mx-auto px-4 py-8">
         {/* What's New Panel */}
