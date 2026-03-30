@@ -2428,3 +2428,34 @@
 - [ ] Fix E86B segment swapper part number scanning (double-AFAF headers have PN at +0x10)
 - [x] MG1 DEADBEEF multi-segment binary alignment (already comprehensive, verified working)
 - [x] Segment swapper: block swap if main OS part number doesn't match between files (hard block at UI + library level)
+
+## 2022 Ford Powerstroke 6.7L Stock Flash Reference (2026-03-30)
+- [ ] Analyze BUSMASTER log file format for Ford ECM flash capture
+- [ ] Extract calibration IDs, part numbers, memory regions from flash log
+- [ ] Store reference data with Knox learning engine for future Ford Powerstroke development
+- [ ] Analyze modified EZLynk BUSMASTER flash log and compare against stock
+- [ ] Identify EZLynk security bypass mechanism in flash protocol
+- [ ] Document calibration differences between stock and modified flash
+- [ ] Analyze 6.7L strategy document (67LSTRATEGYDOC.pdf) for Knox knowledge
+- [ ] Analyze DSML3A diagnostic specification for Knox knowledge
+- [ ] Parse Ford 6.7L PID XML (II17-196.7LFordPIDs.Channels.xml) for future PID expansion
+- [ ] Analyze 6.7L strategy document (67LSTRATEGYDOC.pdf) for Knox knowledge
+- [ ] Analyze DSML3A diagnostic specification for Knox knowledge
+- [ ] Parse Ford 6.7L PID XML (II17-196.7LFordPIDs.Channels.xml) for future PID expansion
+- [ ] Analyze 6.7L_Diesel.pdf reference document for Knox knowledge
+- [ ] Compare stock vs modified BUSMASTER flash logs and document EZLynk security bypass
+
+## Editor Calculator Tools
+- [ ] Add Tire Size & Shift Point Calculator tool to editor (based on TireSize&ShiftPointCalculator.xls)
+- [ ] Add GM A6 (Allison 6-speed) Shift Calculator tool to editor (based on GMA6SHIFTCALCULATORv1.1.xlsx)
+
+## Knox Knowledge Extraction
+- [x] Create knox_documents DB table and catalog 97+ documents
+- [ ] Extract A2L map counts, key parameters, address ranges from all A2L files
+- [ ] Compare stock vs modified BUSMASTER flash logs (EZLynk security bypass analysis)
+- [ ] Extract key knowledge from strategy docs for Knox learning
+
+## Cummins EFD Tools
+- [ ] Build EFD to BIN converter tool in editor tab (waiting for target BIN format from user)
+- [x] Store 67 Cummins EFD files (2013-2021 RAM 6.7L) with Knox for decompilation learning
+- [x] Train Knox to understand EFD parameter mapping → memory addresses for definition file building (BIN format analyzed: PowerPC BE, 4MB flat flash, cal at 0x6B43C)
