@@ -169,30 +169,29 @@ export default defineConfig({
     emptyOutDir: true,
     // ── Security Hardening ──────────────────────────────────────────────
     sourcemap: false,            // NEVER ship source maps to production
-    minify: 'terser',            // Use terser for aggressive minification
-    terserOptions: {
-      compress: {
-        drop_console: true,      // Strip all console.* calls from production
-        drop_debugger: true,     // Strip debugger statements
-        passes: 2,               // Multiple compression passes
-        pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.table'],
-      },
-      mangle: {
-        toplevel: true,          // Mangle top-level variable names
-        properties: {
-          regex: /^_/,           // Mangle properties starting with underscore
-        },
-      },
-      format: {
-        comments: false,         // Strip all comments
-      },
-    } as any,
+    minify: 'esbuild',            // Use esbuild for fast, memory-efficient minification
+    // esbuild drop options for security hardening
+    target: 'es2020',
     rollupOptions: {
       output: {
         // Randomize chunk names to make static analysis harder
         chunkFileNames: 'assets/[hash].js',
         entryFileNames: 'assets/[hash].js',
         assetFileNames: 'assets/[hash].[ext]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          // Split large vendor libraries to keep chunks under deploy memory limits
+          if (id.includes('react-dom')) return 'v-react-dom';
+          if (id.includes('react/') || id.includes('react-is') || id.includes('scheduler')) return 'v-react';
+          if (id.includes('recharts') || id.includes('d3-')) return 'v-charts';
+          if (id.includes('@radix-ui')) return 'v-radix';
+          if (id.includes('lucide')) return 'v-icons';
+          if (id.includes('@trpc') || id.includes('@tanstack')) return 'v-trpc';
+          if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('dom-to-image')) return 'v-pdf';
+          if (id.includes('drizzle') || id.includes('mysql2')) return 'v-db';
+          if (id.includes('zod')) return 'v-zod';
+          if (id.includes('superjson') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge')) return 'v-util';
+        },
       },
     },
   },
