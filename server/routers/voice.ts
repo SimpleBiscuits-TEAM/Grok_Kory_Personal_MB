@@ -16,7 +16,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { transcribeAudio } from "../_core/voiceTranscription";
 import { invokeLLM } from "../_core/llm";
-import { storagePut } from "../storage";
+import { secureUpload, secureDownload } from "../lib/secureFileAccess";
 import { TRPCError } from "@trpc/server";
 
 // ── PID Knowledge Base ──────────────────────────────────────────────────────
@@ -361,10 +361,21 @@ export const voiceRouter = router({
       // Decode base64 to buffer
       const audioBuffer = Buffer.from(input.audioBase64, "base64");
 
-      // Upload to S3
+      // Upload to S3 via secure broker
       const ext = input.mimeType.split("/")[1] || "webm";
-      const key = `voice-commands/${ctx.user.id}/${Date.now()}.${ext}`;
-      const { url: audioUrl } = await storagePut(key, audioBuffer, input.mimeType);
+      const uploadResult = await secureUpload({
+        data: audioBuffer,
+        fileName: `voice-${Date.now()}.${ext}`,
+        fileType: 'audio',
+        contentType: input.mimeType,
+        userId: ctx.user.id,
+      });
+      // Get a short-lived URL for transcription service
+      const { url: audioUrl } = await secureDownload({
+        s3Key: uploadResult.s3Key,
+        userId: ctx.user.id,
+        fileType: 'audio',
+      });
 
       // Transcribe
       const transcription = await transcribeAudio({
@@ -402,10 +413,21 @@ export const voiceRouter = router({
     .mutation(async ({ input, ctx }) => {
       const audioBuffer = Buffer.from(input.audioBase64, "base64");
 
-      // Upload to S3
+      // Upload to S3 via secure broker
       const ext = input.mimeType.split("/")[1]?.replace(/;.*/, "") || "webm";
-      const key = `chat-audio/${ctx.user.id}/${Date.now()}.${ext}`;
-      const { url: audioUrl } = await storagePut(key, audioBuffer, input.mimeType);
+      const chatUploadResult = await secureUpload({
+        data: audioBuffer,
+        fileName: `chat-${Date.now()}.${ext}`,
+        fileType: 'audio',
+        contentType: input.mimeType,
+        userId: ctx.user.id,
+      });
+      // Get a short-lived URL for transcription service
+      const { url: audioUrl } = await secureDownload({
+        s3Key: chatUploadResult.s3Key,
+        userId: ctx.user.id,
+        fileType: 'audio',
+      });
 
       // Transcribe
       const transcription = await transcribeAudio({

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 
 /**
@@ -60,7 +60,7 @@ export const compareRouter = router({
   /**
    * Generate an AI-powered comparison analysis from structured comparison data.
    */
-  analyze: publicProcedure
+  analyze: protectedProcedure
     .input(
       z.object({
         comparisonContext: z.string().max(50000),

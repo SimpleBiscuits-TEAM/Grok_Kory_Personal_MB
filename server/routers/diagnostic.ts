@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 
 /**
@@ -53,7 +53,7 @@ export const diagnosticRouter = router({
    * Accepts conversation history + optional knowledge base context.
    * Returns the assistant's response.
    */
-  chat: publicProcedure
+  chat: protectedProcedure
     .input(
       z.object({
         messages: z.array(messageSchema),
@@ -104,7 +104,7 @@ export const diagnosticRouter = router({
    * Analyze a specific diagnostic question with structured output.
    * Used for quick lookups like "What is PID 0x0C?" or "Explain DTC P0087"
    */
-  quickLookup: publicProcedure
+  quickLookup: protectedProcedure
     .input(
       z.object({
         query: z.string(),

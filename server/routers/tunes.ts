@@ -4,7 +4,7 @@ import { tuneFolders, savedTunes } from '../../drizzle/schema_projects';
 import { eq, and, isNull, desc, asc, like, or } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db';
-import { storagePut } from '../storage';
+import { secureUpload } from '../lib/secureFileAccess';
 
 export const tunesRouter = router({
   // ==================== FOLDERS ====================
@@ -517,19 +517,33 @@ export const tunesRouter = router({
         targetFolderId = ecuFolderId || yearFolderId || modelFolderId || makeFolderId;
       }
 
-      // Upload binary to S3
+      // Upload binary to S3 via secure broker
       const binaryBuffer = Buffer.from(input.binaryBase64, 'base64');
-      const binaryKey = `tunes/${ctx.user.id}/${tuneId}/binary-${Date.now()}.bin`;
-      const { url: s3BinaryUrl } = await storagePut(binaryKey, binaryBuffer, 'application/octet-stream');
+      const { s3Key: binaryKey, fileHash: binaryFileHash, fileSize: binaryFileSize } = await secureUpload({
+        data: binaryBuffer,
+        fileName: `binary-${tuneId}.bin`,
+        fileType: 'binary',
+        contentType: 'application/octet-stream',
+        userId: ctx.user.id,
+        projectId: tuneId,
+      });
+      const s3BinaryUrl = '[BROKERED_ACCESS]';
 
-      // Upload A2L to S3 if provided
+      // Upload A2L to S3 via secure broker if provided
       let s3A2lKey: string | undefined;
       let s3A2lUrl: string | undefined;
       if (input.a2lData) {
-        s3A2lKey = `tunes/${ctx.user.id}/${tuneId}/definition-${Date.now()}.a2l`;
         const a2lBuffer = Buffer.from(input.a2lData, 'utf-8');
-        const { url } = await storagePut(s3A2lKey, a2lBuffer, 'text/plain');
-        s3A2lUrl = url;
+        const a2lResult = await secureUpload({
+          data: a2lBuffer,
+          fileName: `definition-${tuneId}.a2l`,
+          fileType: 'a2l',
+          contentType: 'text/plain',
+          userId: ctx.user.id,
+          projectId: tuneId,
+        });
+        s3A2lKey = a2lResult.s3Key;
+        s3A2lUrl = '[BROKERED_ACCESS]';
       }
 
       // Save tune record

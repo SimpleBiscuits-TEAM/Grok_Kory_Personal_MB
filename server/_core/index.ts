@@ -3,10 +3,13 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { knoxShieldMiddleware } from "../lib/knoxShieldMiddleware";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -30,11 +33,57 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "100mb" }));
-  app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
-  // Canonical domain redirect: ppei.ai → www.ppei.ai
+  // ── Security Headers (helmet) ──────────────────────────────────────────
+  // Sets Content-Security-Policy, Strict-Transport-Security, X-Frame-Options,
+  // X-Content-Type-Options, Referrer-Policy, and more.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:", "https:"],
+          connectSrc: ["'self'", "https:", "wss:"],
+          mediaSrc: ["'self'", "blob:"],
+          workerSrc: ["'self'", "blob:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+        },
+      },
+      // Enable HSTS for HTTPS deployments
+      strictTransportSecurity: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: true,
+        preload: true,
+      },
+      // Prevent clickjacking
+      frameguard: { action: "deny" },
+      // Prevent MIME type sniffing
+      noSniff: true,
+      // Hide X-Powered-By
+      hidePoweredBy: true,
+      // Referrer policy
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+      // Cross-Origin policies
+      crossOriginEmbedderPolicy: false, // Disabled to allow loading external images
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    })
+  );
+
+  // ── Body Parser ────────────────────────────────────────────────────────
+  // JSON limit reduced from 100mb to 2mb. Large file uploads should use
+  // direct-to-S3 presigned URLs, not base64-encoded JSON bodies.
+  // The urlencoded limit stays at 10mb for form submissions with file data.
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // ── Canonical Domain Redirect ──────────────────────────────────────────
+  // ppei.ai → www.ppei.ai
   app.use((req, res, next) => {
     const host = req.hostname || req.headers.host?.split(':')[0] || '';
     if (host === 'ppei.ai') {
@@ -43,9 +92,62 @@ async function startServer() {
     }
     next();
   });
-  // OAuth callback under /api/oauth/callback
+
+  // ── Global API Rate Limiting ───────────────────────────────────────────
+  // 200 requests per minute per IP across all API endpoints.
+  // Individual routers may have stricter per-user limits via secureFileAccess.
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 200,
+    standardHeaders: true, // Return rate limit info in RateLimit-* headers
+    legacyHeaders: false,
+    message: { error: "Too many requests. Please slow down." },
+    // Skip rate limiting in development
+    skip: () => process.env.NODE_ENV === "development",
+    // Use X-Forwarded-For behind reverse proxy
+    keyGenerator: (req) => {
+      return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+    },
+  });
+  app.use("/api/", apiLimiter);
+
+  // ── LLM Route Rate Limiting (stricter) ─────────────────────────────────
+  // LLM-powered routes get a tighter limit to prevent credit abuse.
+  // 30 LLM requests per minute per IP.
+  const llmLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "AI request rate limit exceeded. Please wait a moment." },
+    skip: () => process.env.NODE_ENV === "development",
+    keyGenerator: (req) => {
+      return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+    },
+  });
+  // Apply stricter limits to known LLM-heavy tRPC procedures
+  app.use("/api/trpc/diagnostic.chat", llmLimiter);
+  app.use("/api/trpc/diagnostic.quickLookup", llmLimiter);
+  app.use("/api/trpc/compare.analyze", llmLimiter);
+  app.use("/api/trpc/editor.knoxChat", llmLimiter);
+  app.use("/api/trpc/editor.simplifyMaps", llmLimiter);
+  app.use("/api/trpc/fleet.gooseChat", llmLimiter);
+
+  // ── Knox Shield Validation ─────────────────────────────────────────────
+  // Validates X-Knox-Shield and X-Knox-Timestamp headers from the client.
+  // Flags suspicious requests but does not block them (defense-in-depth).
+  app.use(knoxShieldMiddleware);
+
+  // ── OAuth ──────────────────────────────────────────────────────────────
   registerOAuthRoutes(app);
-  // tRPC API
+
+  // ── tRPC API ───────────────────────────────────────────────────────────
   app.use(
     "/api/trpc",
     createExpressMiddleware({
@@ -53,7 +155,8 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+
+  // ── Static / Vite ──────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {
