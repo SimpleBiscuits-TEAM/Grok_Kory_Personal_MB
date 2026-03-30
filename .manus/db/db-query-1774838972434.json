@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS monica_messages (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  sessionId INT NOT NULL,\n  userId INT NULL,\n  role ENUM('user', 'monica', 'system') NOT NULL,\n  content TEXT NOT NULL,\n  metadata TEXT NULL,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute CREATE TABLE IF NOT EXISTS monica_messages (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  sessionId INT NOT NULL,\n  userId INT NULL,\n  role ENUM('user', 'monica', 'system') NOT NULL,\n  content TEXT NOT NULL,\n  metadata TEXT NULL,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 109
+}

@@ -19,9 +19,12 @@ import { adminMessagingRouter } from "./routers/adminMessaging";
 import { supportAdminRouter } from "./routers/supportAdmin";
 import { datalogCacheRouter } from "./routers/datalogCache";
 import { accessManagementRouter } from "./routers/accessManagement";
+import { monicaRouter } from "./routers/monica";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
+import { storagePut } from "./storage";
+import { protectedProcedure } from "./_core/trpc";
 
 export const appRouter = router({
   system: systemRouter,
@@ -86,6 +89,9 @@ export const appRouter = router({
   // Access Management (user approval, role management)
   access: accessManagementRouter,
 
+  // AI Monica — Customer-facing debug assistant
+  monica: monicaRouter,
+
   // Feedback / Error Reports
   feedback: router({
     submit: publicProcedure
@@ -99,6 +105,7 @@ export const appRouter = router({
           errorType: z.string().optional(),
           stepsToReproduce: z.string().optional(),
           context: z.string().optional(),
+          attachments: z.array(z.string()).optional(), // Array of uploaded file URLs
         })
       )
       .mutation(async ({ input }) => {
@@ -112,6 +119,7 @@ export const appRouter = router({
           errorType: input.errorType || null,
           stepsToReproduce: input.stepsToReproduce || null,
           context: input.context || null,
+          attachments: input.attachments ? JSON.stringify(input.attachments) : null,
         });
 
         // Also notify owner
@@ -131,6 +139,26 @@ export const appRouter = router({
         }
 
         return { success: saved };
+      }),
+
+    /** Upload a feedback attachment (video, screen recording, image) to S3 */
+    uploadAttachment: publicProcedure
+      .input(z.object({
+        filename: z.string(),
+        mimeType: z.string(),
+        /** Base64-encoded file data */
+        data: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        const buffer = Buffer.from(input.data, 'base64');
+        const maxSize = 50 * 1024 * 1024; // 50MB limit
+        if (buffer.length > maxSize) {
+          throw new Error('File too large. Maximum size is 50MB.');
+        }
+        const suffix = Math.random().toString(36).slice(2, 10);
+        const key = `feedback-attachments/${Date.now()}-${suffix}-${input.filename}`;
+        const { url } = await storagePut(key, buffer, input.mimeType);
+        return { url, filename: input.filename, mimeType: input.mimeType, size: buffer.length };
       }),
   }),
 });

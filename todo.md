@@ -2295,3 +2295,24 @@
 - [x] Make Analyzer its own collapsible section in Lite named "Data Re-Imagined"
 - [ ] Create patent document PDF for V-OP Powered by PPEI
 - [x] Fix CSS shorthand conflict: border vs borderBottom in Basic Editor sub-tab buttons (Home.tsx)
+- [x] Reposition Feedback panel higher on screen (not buried at bottom)
+- [x] Add video/screen recording upload support to Feedback panel
+- [x] Add speech-to-text (mic button) input to Feedback panel (already existed)
+- [x] Enforce strict debug-only rule on Knox: reject feature requests, layout changes — only process legitimate bugs
+- [x] Add attachments column to feedback DB schema
+- [x] Add file upload endpoint for feedback attachments (video/screen recording)
+- [x] Update FeedbackPanel to accept video/screen recording uploads
+- [x] Build Monica: customer-facing debug AI agent (sandboxed, no proprietary access)
+- [x] Monica backend: tRPC procedures for debug chat, status updates, follow-up questions
+- [x] Monica frontend: chat UI in debug panel for testers to communicate
+- [x] Monica keeps testers informed on bug status, PPEI approval needs, etc.
+- [x] Update Knox to treat missing PIDs, datalogger issues, PID mapping errors as legitimate bugs (not feature requests)
+- [x] Datalogger is priority #1 debug target — ensure Knox handles datalogger bugs properly
+- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
+- [ ] Add Flash tab to V-OP Pro with fun "we're cooking" placeholder
+- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
+- [ ] Add PCAN as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
+- [ ] Add Flash tab to V-OP Pro with V-OP and PCAN channels only (no OBDLink) — fun "we're cooking" placeholder
+- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
+- [ ] Add PCAN as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
+- [ ] Add Flash tab to V-OP Pro with fun "we're cooking" placeholder

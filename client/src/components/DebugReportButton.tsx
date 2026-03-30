@@ -14,6 +14,7 @@ import {
   AlertTriangle, ChevronDown, ChevronUp, Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import MonicaChat from './MonicaChat';
 
 // ─── Status display helpers ─────────────────────────────────────────────────
 const STATUS_INFO: Record<string, { label: string; color: string; icon: typeof Bug }> = {
@@ -353,6 +354,9 @@ export default function DebugReportButton() {
                             </div>
                           </div>
                         )}
+
+                        {/* AI Monica Chat */}
+                        <MonicaChat sessionId={s.id} sessionStatus={s.status} />
 
                         <div className="text-[10px] text-zinc-600 font-[Share_Tech_Mono]">
                           {s.featureArea && <span>Area: {s.featureArea} · </span>}

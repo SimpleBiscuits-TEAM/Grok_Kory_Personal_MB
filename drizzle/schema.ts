@@ -44,6 +44,7 @@ export const feedback = mysqlTable("feedback", {
   errorType: varchar("errorType", { length: 255 }),
   stepsToReproduce: text("stepsToReproduce"),
   context: text("context"),
+  attachments: text("attachments"), // JSON array of { url, filename, mimeType, size }
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -226,3 +227,24 @@ export const datalogCache = mysqlTable("datalog_cache", {
 
 export type DatalogCache = typeof datalogCache.$inferSelect;
 export type InsertDatalogCache = typeof datalogCache.$inferInsert;
+
+
+// ── AI Monica — Customer-Facing Debug Assistant ─────────────────────────────
+
+/**
+ * Monica chat messages — conversation history between testers and AI Monica.
+ * Monica is sandboxed: she can read Knox's analysis but has NO access to
+ * proprietary data (A2L files, functional docs, calibration internals).
+ */
+export const monicaMessages = mysqlTable("monica_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(), // FK to debugSessions.id
+  userId: int("userId"), // FK to users.id (null = Monica)
+  role: mysqlEnum("role", ["user", "monica", "system"]).notNull(),
+  content: text("content").notNull(),
+  metadata: text("metadata"), // JSON: any extra context (e.g., Knox status pulled)
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type MonicaMessage = typeof monicaMessages.$inferSelect;
+export type InsertMonicaMessage = typeof monicaMessages.$inferInsert;

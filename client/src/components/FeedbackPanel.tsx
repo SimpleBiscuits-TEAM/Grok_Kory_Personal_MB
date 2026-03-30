@@ -8,8 +8,8 @@
  * Tab 2: Error / Bug Report
  */
 
-import React, { useState, useCallback } from 'react';
-import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown, Mic, MicOff } from 'lucide-react';
+import React, { useState, useCallback, useRef } from 'react';
+import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown, Mic, MicOff, Video, Paperclip, Trash2, Loader2 } from 'lucide-react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { trpc } from '@/lib/trpc';
 
@@ -40,6 +40,57 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
   const [errDescription, setErrDescription] = useState('');
   const [errSteps, setErrSteps] = useState('');
 
+  // File attachments (video, screen recordings, images)
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+  const ACCEPTED_TYPES = 'video/*,image/*,audio/*,.webm,.mp4,.mov,.avi,.png,.jpg,.jpeg,.gif,.mp3,.wav';
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const valid = files.filter(f => {
+      if (f.size > MAX_FILE_SIZE) {
+        alert(`File "${f.name}" is too large (max 50MB)`);
+        return false;
+      }
+      return true;
+    });
+    setAttachments(prev => [...prev, ...valid].slice(0, 5)); // max 5 files
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadAttachments = async (): Promise<string[]> => {
+    if (attachments.length === 0) return [];
+    setUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const file of attachments) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/trpc/feedback.uploadFile', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.result?.data?.url) urls.push(data.result.data.url);
+        }
+      }
+      return urls;
+    } catch {
+      return [];
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const submitMutation = trpc.feedback.submit.useMutation();
 
   // Voice input for feedback message
@@ -60,6 +111,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     setStatus('idle');
     setFbName(''); setFbEmail(''); setFbRating(null); setFbMessage('');
     setErrName(''); setErrEmail(''); setErrType(''); setErrDescription(''); setErrSteps('');
+    setAttachments([]);
   };
 
   const handleClose = () => {
@@ -73,6 +125,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     e.preventDefault();
     setStatus('sending');
     try {
+      const uploadedUrls = await uploadAttachments();
       const result = await submitMutation.mutateAsync({
         type: 'feedback',
         name: fbName || undefined,
@@ -80,6 +133,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         rating: fbRating ?? undefined,
         message: fbMessage,
         context: context || undefined,
+        attachments: uploadedUrls.length > 0 ? uploadedUrls : undefined,
       });
       setStatus(result.success ? 'success' : 'error');
     } catch {
@@ -91,6 +145,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     e.preventDefault();
     setStatus('sending');
     try {
+      const uploadedUrls = await uploadAttachments();
       const result = await submitMutation.mutateAsync({
         type: 'error',
         name: errName || undefined,
@@ -99,6 +154,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         errorType: errType || undefined,
         stepsToReproduce: errSteps || undefined,
         context: context || undefined,
+        attachments: uploadedUrls.length > 0 ? uploadedUrls : undefined,
       });
       setStatus(result.success ? 'success' : 'error');
     } catch {
@@ -150,11 +206,11 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         className="ppei-anim-scale-in"
         style={{
           position: 'fixed',
-          top: '50%',
+          top: '5%',
           left: '50%',
-          transform: 'translate(-50%, -50%)',
+          transform: 'translateX(-50%)',
           width: 'min(520px, 95vw)',
-          maxHeight: '85vh',
+          maxHeight: '90vh',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
           background: 'oklch(0.11 0.005 260)',
@@ -417,11 +473,99 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 )}
               </div>
 
+              {/* Attachments */}
+              <div>
+                <label style={labelStyle}>Attachments (optional)</label>
+                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', margin: '0 0 6px' }}>
+                  Upload screen recordings, videos, or screenshots to help describe the issue (max 50MB each, up to 5 files)
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_TYPES}
+                  multiple
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      background: 'oklch(0.16 0.008 260)',
+                      border: '1px solid oklch(0.28 0.008 260)',
+                      borderRadius: '3px',
+                      color: 'oklch(0.65 0.010 260)',
+                      cursor: 'pointer',
+                      padding: '6px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontFamily: '"Share Tech Mono", monospace',
+                      fontSize: '0.7rem',
+                      letterSpacing: '0.04em',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Paperclip style={{ width: '12px', height: '12px' }} />
+                    ATTACH FILES
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      background: 'oklch(0.16 0.008 260)',
+                      border: '1px solid oklch(0.28 0.008 260)',
+                      borderRadius: '3px',
+                      color: 'oklch(0.65 0.010 260)',
+                      cursor: 'pointer',
+                      padding: '6px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontFamily: '"Share Tech Mono", monospace',
+                      fontSize: '0.7rem',
+                      letterSpacing: '0.04em',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <Video style={{ width: '12px', height: '12px' }} />
+                    SCREEN RECORDING
+                  </button>
+                </div>
+                {attachments.length > 0 && (
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {attachments.map((file, i) => (
+                      <div key={i} style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: 'oklch(0.13 0.006 260)',
+                        border: '1px solid oklch(0.22 0.008 260)',
+                        borderRadius: '3px',
+                        padding: '4px 8px',
+                      }}>
+                        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.60 0.010 260)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
+                          {file.type.startsWith('video') ? '\uD83C\uDFA5' : file.type.startsWith('image') ? '\uD83D\uDDBC\uFE0F' : '\uD83C\uDFA4'} {file.name} ({(file.size / 1024 / 1024).toFixed(1)}MB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(i)}
+                          style={{ background: 'transparent', border: 'none', color: 'oklch(0.52 0.22 25)', cursor: 'pointer', padding: '2px', display: 'flex' }}
+                        >
+                          <Trash2 style={{ width: '12px', height: '12px' }} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <button
                 type="submit"
-                disabled={status === 'sending' || !fbMessage.trim()}
+                disabled={status === 'sending' || uploading || !fbMessage.trim()}
                 style={{
-                  background: status === 'sending' || !fbMessage.trim() ? 'oklch(0.30 0.010 260)' : 'oklch(0.52 0.22 25)',
+                  background: status === 'sending' || uploading || !fbMessage.trim() ? 'oklch(0.30 0.010 260)' : 'oklch(0.52 0.22 25)',
                   color: 'white',
                   fontFamily: '"Bebas Neue", "Impact", sans-serif',
                   fontSize: '1rem',
@@ -429,7 +573,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   padding: '10px 24px',
                   borderRadius: '3px',
                   border: 'none',
-                  cursor: status === 'sending' || !fbMessage.trim() ? 'not-allowed' : 'pointer',
+                  cursor: status === 'sending' || uploading || !fbMessage.trim() ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -439,8 +583,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   width: '100%',
                 }}
               >
-                <Send style={{ width: '14px', height: '14px' }} />
-                {status === 'sending' ? 'SENDING...' : 'SEND FEEDBACK'}
+                {uploading ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <Send style={{ width: '14px', height: '14px' }} />}
+                {uploading ? 'UPLOADING...' : status === 'sending' ? 'SENDING...' : 'SEND FEEDBACK'}
               </button>
             </form>
           )}
