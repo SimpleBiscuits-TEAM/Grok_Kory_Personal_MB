@@ -643,8 +643,8 @@ These are small Android computers that plug into the car's USB port:
 ### VOP CarPlay Integration Architecture
 VOP can leverage CarPlay and screen mirroring to display live tuning data on the car's head unit:
 - **Tuner Display Mode**: Dedicated VOP route optimized for car screen resolution (800x480 to 1920x720). Dark theme, large gauges showing RPM, boost, AFR, coolant temp, knock count. Works with any mirroring method.
-- **CAN Bus + VOP**: PiCAN2 + SocketCAN on Raspberry Pi enables direct CAN data reading. VOP can display real-time ECU parameters on car screen while Erika provides voice analysis feedback.
-- **Voice Integration**: Erika voice commands for hands-free tuning queries during driving/testing.
+- **CAN Bus + VOP**: PiCAN2 + SocketCAN on Raspberry Pi enables direct CAN data reading. VOP can display real-time ECU parameters on car screen while Knox provides voice analysis feedback.
+- **Voice Integration**: Knox voice commands for hands-free tuning queries during driving/testing.
 
 ### CarPlay Security Considerations (from USENIX VehicleSec25)
 - iAP2 authentication is ONE-WAY: phone authenticates head-unit, but head-unit does NOT authenticate phone
@@ -723,12 +723,12 @@ The VOP 3.0 hardware enables a streamlined CarPlay integration path:
 
 This eliminates the need for Carlinkit dongles, Raspberry Pi, or any third-party hardware. The VOP 3.0 board IS the complete bridge from vehicle to display.
 
-### Erika Voice Integration
-With VOP 3.0 streaming live data to the phone, Erika can provide real-time voice feedback during driving/testing:
+### Knox Voice Integration
+With VOP 3.0 streaming live data to the phone, Knox can provide real-time voice feedback during driving/testing:
 - "Boost is building normally, 22 PSI at 3000 RPM"
 - "AFR is running lean at 14.2:1 under load, recommend richening the fuel map"
 - "Cylinder 4 balance rate is 8% off — possible injector degradation"
 - "Coolant temp is climbing, 215F and rising — monitor closely"
-Voice commands: "Erika, what's my current boost?" / "Erika, how's my fuel pressure?" / "Erika, start a datalog"
+Voice commands: "Knox, what's my current boost?" / "Knox, how's my fuel pressure?" / "Knox, start a datalog"
 
 `;

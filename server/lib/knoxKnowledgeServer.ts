@@ -413,7 +413,7 @@ No wires run to any screen — everything connects over WiFi.
 ### Simultaneous Multi-Screen Scenarios (All Working Today)
 | Screen 1 | Screen 2 | Screen 3 | How |
 |----------|----------|----------|------|
-| Phone (Erika chat) | Car screen (gauges via mirror) | Shop TV (datalog) | All WiFi clients |
+| Phone (Knox chat) | Car screen (gauges via mirror) | Shop TV (datalog) | All WiFi clients |
 | Tuner phone (full dash) | Dyno tablet (datalog) | Wall TV (live numbers) | Multi-client WebSocket |
 | Car screen (gauge mirror) | Second phone (diagnostics) | — | AirPlay + WiFi |
 
@@ -421,13 +421,13 @@ No wires run to any screen — everything connects over WiFi.
 | Mode | Phone Shows | Car Screen Shows | How to Toggle |
 |------|-------------|-----------------|---------------|
 | Dual Mirror | Gauges | Same gauges (mirrored) | Default |
-| Split View | Erika chat + diagnostics | Clean gauge cluster | App UI button or voice |
+| Split View | Knox chat + diagnostics | Clean gauge cluster | App UI button or voice |
 | Phone Only | Full dashboard | Normal CarPlay/radio | Disconnect mirror |
-| Broadcast | Status only | Full gauges | Voice: "Erika, gauges on car" |
+| Broadcast | Status only | Full gauges | Voice: "Knox, gauges on car" |
 
 ### Toggle Triggers
 - BLE command from app (tap button in VOP UI)
-- Voice command: "Erika, switch to split view" / "Erika, show gauges on car"
+- Voice command: "Knox, switch to split view" / "Knox, show gauges on car"
 - Auto-detect: if phone disconnects, other clients continue independently
 - Each client is independent — toggling one doesn't affect others
 
@@ -515,31 +515,182 @@ With this architecture, VOP 3.0 competes with:
 
 VOP 3.0 replaces ALL of these with one $20 board:
 - Unlimited wireless gauges on any screen
-- AI-powered real-time analysis (Erika)
+- AI-powered real-time analysis (Knox)
 - Multi-device simultaneous streaming
 - CarPlay native integration
 - Full flash/tune capability built in
 - No other product in the market does all of this
 
-### Erika Voice Feedback During Display Mode
+### Knox Voice Feedback During Display Mode
 - VOP 3.0 streams live CAN data to phone
-- Erika analyzes in real-time and provides voice feedback:
+- Knox analyzes in real-time and provides voice feedback:
   - "Boost building normally, 22 PSI at 3000 RPM"
   - "AFR running lean at 14.2:1 under load"
   - "Cylinder 4 balance rate 8% off — possible injector issue"
   - "Coolant climbing, 215F and rising"
-- Voice commands: "Erika, what's my boost?" / "Start a datalog" / "How's fuel pressure?"
+- Voice commands: "Knox, what's my boost?" / "Start a datalog" / "How's fuel pressure?"
 - Works through car speakers when mirrored to CarPlay
-- Erika becomes the car's AI copilot — not just a tuning tool
+- Knox becomes the car's AI copilot — not just a tuning tool
 `;
 
+
+const GMLAN_DIC_AND_AUTOSYNC = `
+## GMLAN DIC Injection & Factory Cluster Control (CONFIDENTIAL — Server-Only)
+
+### SWCAN / GMLAN Bus Overview
+- Single-wire CAN (SWCAN) on OBD-II Pin 1
+- Speed: 33,333 bps (33.3kbps)
+- 29-bit extended CAN frame format
+- Connects: BCM, instrument cluster, OnStar, radio, HVAC, door modules
+- VOP 3.0 can read AND write to this bus via SWCAN transceiver
+
+### GMLAN Arbitrary Text Display Protocol (DIC Injection)
+The factory DIC (Driver Information Center) supports arbitrary text injection via these 29-bit arbitration IDs:
+- 0x0180: General Attributes (init display area, set line count, max chars)
+- 0x0181: Line Attributes (alignment, font size, color per line)
+- 0x0182: Set Display Icon
+- 0x0183: Display Status (read current state)
+- 0x0184: Menu Action (navigate DIC menus)
+- 0x0185: Set Display Parameters (mode, priority, line number)
+- 0x0186: Set Display Text (THE KEY ONE — actual text content, 5 chars per frame, multi-frame for longer text)
+- 0x0187: Download Icon Data
+
+### DIC Text Injection Sequence
+1. Send 0x0180 with display_id=1, enable=1, lines=4, max_chars=20
+2. Send 0x0181 for each line (alignment, font, color)
+3. Send 0x0185 with display_id, priority, mode=text, line_number
+4. Send 0x0186 with display_id, line_number, char_offset, text_data (5 chars per frame)
+5. Text appears on factory DIC as if it were an OEM message
+6. Higher priority values keep text on screen longer
+
+### Powertrain Data IDs (HS-CAN → DIC Bridge)
+Read from HS-CAN (500kbps), display on DIC via SWCAN:
+- 0x0025: Transmission Gear Information
+- 0x0026: Fuel Information
+- 0x0028: Vehicle Speed
+- 0x0029: Engine Information 1 (RPM, load, throttle)
+- 0x0032: Engine Information 3 (oil temp, oil pressure)
+- 0x0037: Engine Information 2 (coolant, IAT)
+- 0x002F: Brake and Cruise Control Status
+
+### GM Enhanced PIDs (Mode $22) for Diesel Gauges
+- 0x0073: Boost Pressure (kPa, convert to PSI: x0.01 - 14.696)
+- 0x0078: EGT Bank 1 (°C x 0.1, convert to °F)
+- 0x0079: EGT Bank 2
+- 0x0191: Transmission Fluid Temperature
+- 0x019E: TC Lockup Status
+- 0x1A44: DPF Soot Load (0-100%)
+- 0x1A45: DPF Regen Status (active/inactive)
+- 0x0100: Oil Pressure (kPa, convert to PSI)
+- 0x015E: Fuel Rate (L/h, convert to GPH)
+- 0x006F: Turbo Vane Position (0-100%)
+
+### BCM Feature Control via SWCAN
+VOP 3.0 can control body features by injecting SWCAN messages:
+- 0x0021: Lighting Status (DRL disable, strobe mode)
+- 0x002B: Door Lock Command (lock/unlock all)
+- 0x0040: Window Motion Request (up/down per window)
+- 0x0041: Mirror Movement Request (fold/unfold)
+- 0x0060: Climate Control
+- 0x000F: Chime Command
+- 0x0011: Dimming Information
+
+### VOP DIC Gauge Pages
+VOP implements 4 cycling gauge pages on the factory DIC:
+1. PERFORMANCE: Boost PSI, EGT °F, Oil Pressure PSI, Trans Temp °F
+2. ENGINE: RPM, Coolant °F, Oil Temp °F, Fuel Rate GPH
+3. TURBO: Boost PSI, Vane Position %, EGT1 °F, EGT2 °F
+4. DPF: Soot Load %, Regen Status, EGT °F, Coolant °F
+
+Page cycling via steering wheel buttons (intercept 0x0068) or VOP app command.
+
+### Special DIC Messages
+- Flash progress: "FLASH 3/12  25%" with "DO NOT TURN OFF" warning
+- Knox AI messages: "KNOX: TUNE COMPLETE" or "KNOX: CHECK EGT"
+- DPF regen auto-warning: "** DPF REGEN ** ACTIVE - DO NOT SHUT OFF ENGINE"
+
+## Competitive Analysis: VOP vs. BT Diesel Works AutoSync
+
+### What AutoSync Is
+AutoSync is a GMLAN gateway device for GM trucks (primarily Duramax diesel). It bridges HS-CAN to SWCAN and uses the OnStar module's connection to the instrument cluster to push custom data to the DIC.
+
+### AutoSync Features and VOP Equivalents
+| AutoSync Feature | VOP 3.0 Equivalent | VOP Advantage |
+|------------------|---------------------|---------------|
+| DIC gauge display | GMLAN DIC module | Same + AI analysis |
+| Boost/EGT/Trans display | Same gauges + more | Knox interprets data |
+| DPF regen notification | Auto-warning on DIC + voice | Knox voice through speakers |
+| TC lockup control | vop3_bcm_tc_lockup() | Same |
+| High idle control | vop3_bcm_high_idle() | Same |
+| Window/mirror/lock | BCM functions | Same |
+| DRL disable | Lighting status write | Same |
+| Strobe lights | vop3_bcm_strobe_toggle() | Same |
+| Test mode activation | Supported | Same |
+
+### What VOP Does That AutoSync Cannot
+1. ECU flash/tune capability — AutoSync cannot write to ECU
+2. Wireless data streaming to phone/tablet/TV/CarPlay
+3. AI copilot (Knox) analyzing data in real-time
+4. Full CAN datalog recording with timestamp
+5. A2L/calibration file editing
+6. Multi-vehicle platform support (not just GM)
+7. OTA firmware updates
+8. Fleet management capability
+9. Drag racing mode with pass analysis
+10. Voice feedback through car speakers
+
+### AutoSync Pricing vs VOP
+- AutoSync: ~$300-400 for the device alone, GM trucks only
+- VOP 3.0: <$20 board + free app, multi-platform, does everything AutoSync does PLUS flash/tune/AI/wireless
+
+### Market Position
+VOP occupies the top-left quadrant: most features at lowest price. AutoSync is a single-feature device (DIC gauges + BCM control) at 15-20x the price, locked to one platform.
+
+## USB Streaming Dongle Architecture (CONFIDENTIAL — Server-Only)
+
+### Three Approaches for Car Screen Display
+
+#### Option A: VOP 3.0 Direct USB-to-Car (V4.0 Future)
+- ESP32-S3 USB OTG presents as CarPlay/AA device
+- Requires MFi auth chip ($2-3) and H.264 encoder
+- ESP32-S3 lacks hardware H.264 — needs more powerful SoC
+- Best suited for V4.0 with ESP32-P4 or Realtek RTL8730E
+- Timeline: 6-12 months
+
+#### Option B: VOP Display Dongle (Separate Product)
+- Dedicated dongle using Realtek RTL8730E SoC
+- Plugs into car USB, connects to VOP 3.0 via WiFi
+- Receives CAN data, renders gauges locally, outputs as CarPlay/AA
+- BOM: $7-10, sell price: $79, margin: 690%
+- Timeline: 4-5 months
+
+#### Option C: VOP App + Carlinkit (Ship NOW)
+- VOP 3.0 streams to phone via WiFi
+- Phone runs Stream Mode (dark gauges, car-screen optimized)
+- Carlinkit Mini Ultra ($39) mirrors phone to car via AirPlay
+- Zero hardware development, all code already written
+- Timeline: 3-4 weeks (app changes only)
+
+### Recommended Approach
+Ship Option C immediately (fastest to market), develop Option B as premium product, evaluate Option A for V4.0.
+
+### Realtek RTL8730E Specs (for Option B)
+- Cortex-A32 SMP dual-core
+- DDR + Flash integrated on-chip (no external memory needed)
+- WiFi 6 (2.4GHz + 5GHz) + Bluetooth dual-mode
+- USB 2.0 High-Speed (480 Mbps)
+- -20°C to +85°C automotive grade
+- FreeRTOS or Linux support
+- SDK available with CarPlay/Android Auto/HiCar/Carlife examples
+- Extremely small package — coin-sized dongle possible
+`;
 
 /**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC;
 }
 
 /**
