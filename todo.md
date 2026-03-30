@@ -2346,3 +2346,8 @@
 ## Version Bump + Text Contrast Fix (2026-03-30)
 - [x] Update version to v0.03
 - [x] Improve text contrast for dim text (subtitle, version badge, helper text too dark to read)
+
+## Remove PPEIROCKS + Domain Redirect + Contrast Sweep (2026-03-30)
+- [x] Remove legacy PPEIROCKS passcode from Advanced — make it auth-only (sign in + admin approval)
+- [x] Add bare domain redirect from ppei.ai to www.ppei.ai in server
+- [x] Sweep all pages for dim text contrast (oklch lightness < 0.60) and brighten — 246 fixes across 36 files

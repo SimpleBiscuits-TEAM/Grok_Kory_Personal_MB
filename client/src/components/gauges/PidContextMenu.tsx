@@ -113,7 +113,7 @@ export default function PidContextMenu({
           background: 'oklch(0.07 0.004 260)', border: '1px solid oklch(0.22 0.008 260)',
           borderRadius: '3px', padding: '4px 8px',
         }}>
-          <Search style={{ width: 12, height: 12, color: 'oklch(0.40 0.008 260)', flexShrink: 0 }} />
+          <Search style={{ width: 12, height: 12, color: 'oklch(0.58 0.008 260)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={filter}
@@ -153,7 +153,7 @@ export default function PidContextMenu({
           <div key={category}>
             <div style={{
               padding: '4px 10px', background: 'oklch(0.08 0.004 260)',
-              fontFamily: sFont.mono, fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)',
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: 'oklch(0.60 0.010 260)',
               letterSpacing: '0.08em', textTransform: 'uppercase',
               position: 'sticky', top: 0, zIndex: 1,
             }}>
@@ -182,14 +182,14 @@ export default function PidContextMenu({
                     </div>
                     <div style={{
                       fontFamily: sFont.mono, fontSize: '0.55rem',
-                      color: 'oklch(0.40 0.008 260)',
+                      color: 'oklch(0.58 0.008 260)',
                     }}>
                       {p.name}
                     </div>
                   </div>
                   <span style={{
                     fontFamily: sFont.mono, fontSize: '0.55rem',
-                    color: 'oklch(0.40 0.008 260)',
+                    color: 'oklch(0.58 0.008 260)',
                   }}>
                     {p.unit}
                   </span>
@@ -199,7 +199,7 @@ export default function PidContextMenu({
           </div>
         ))}
         {filtered.length === 0 && (
-          <div style={{ padding: '16px', textAlign: 'center', fontFamily: sFont.body, fontSize: '0.75rem', color: 'oklch(0.40 0.008 260)' }}>
+          <div style={{ padding: '16px', textAlign: 'center', fontFamily: sFont.body, fontSize: '0.75rem', color: 'oklch(0.58 0.008 260)' }}>
             No PIDs match "{filter}"
           </div>
         )}

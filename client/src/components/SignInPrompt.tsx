@@ -136,7 +136,7 @@ export function SignInModal() {
             className="mt-3 w-full py-2.5 px-6 transition-all"
             style={{
               background: 'transparent',
-              color: 'oklch(0.50 0.010 260)',
+              color: 'oklch(0.63 0.010 260)',
               fontFamily: '"Rajdhani", sans-serif',
               fontSize: '0.85rem',
               letterSpacing: '0.03em',
@@ -150,7 +150,7 @@ export function SignInModal() {
             }}
             onMouseLeave={e => {
               (e.target as HTMLElement).style.borderColor = 'oklch(0.22 0.006 260)';
-              (e.target as HTMLElement).style.color = 'oklch(0.50 0.010 260)';
+              (e.target as HTMLElement).style.color = 'oklch(0.63 0.010 260)';
             }}
           >
             Continue without signing in

@@ -58,7 +58,7 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
         justifyContent: 'space-between',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Flag style={{ width: '14px', height: '14px', color: isBest ? 'oklch(0.52 0.22 25)' : 'oklch(0.55 0.010 260)' }} />
+          <Flag style={{ width: '14px', height: '14px', color: isBest ? 'oklch(0.52 0.22 25)' : 'oklch(0.68 0.010 260)' }} />
           <span style={{ fontSize: '0.75rem', letterSpacing: '0.08em', color: 'oklch(0.70 0.010 260)' }}>
             RUN {runIndex + 1}
           </span>
@@ -102,18 +102,18 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
               padding: '0.6rem 0.5rem',
               textAlign: 'center',
             }}>
-              <div style={{ fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)', letterSpacing: '0.06em', marginBottom: '3px' }}>
+              <div style={{ fontSize: '0.6rem', color: 'oklch(0.60 0.010 260)', letterSpacing: '0.06em', marginBottom: '3px' }}>
                 {label}
               </div>
               <div style={{
                 fontSize: value !== null ? '1.1rem' : '0.85rem',
-                color: value !== null ? (highlight ? 'white' : 'oklch(0.70 0.010 260)') : 'oklch(0.35 0.008 260)',
+                color: value !== null ? (highlight ? 'white' : 'oklch(0.70 0.010 260)') : 'oklch(0.55 0.008 260)',
                 fontWeight: highlight ? 700 : 400,
               }}>
                 {value !== null ? value.toFixed(3) : '---'}
               </div>
               {value !== null && (
-                <div style={{ fontSize: '0.55rem', color: 'oklch(0.40 0.008 260)', marginTop: '1px' }}>{unit}</div>
+                <div style={{ fontSize: '0.55rem', color: 'oklch(0.58 0.008 260)', marginTop: '1px' }}>{unit}</div>
               )}
             </div>
           ))}
@@ -135,8 +135,8 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
             { label: '1/4 TRAP', value: run.speed1320ft },
           ].map(({ label, value }) => (
             <div key={label} style={{ background: 'oklch(0.11 0.005 260)', padding: '0.5rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)', letterSpacing: '0.06em', marginBottom: '2px' }}>{label}</div>
-              <div style={{ fontSize: '1rem', color: value !== null ? 'white' : 'oklch(0.35 0.008 260)' }}>
+              <div style={{ fontSize: '0.6rem', color: 'oklch(0.60 0.010 260)', letterSpacing: '0.06em', marginBottom: '2px' }}>{label}</div>
+              <div style={{ fontSize: '1rem', color: value !== null ? 'white' : 'oklch(0.55 0.008 260)' }}>
                 {value !== null ? `${value.toFixed(1)} mph` : '---'}
               </div>
             </div>
@@ -162,7 +162,7 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
               padding: '0.4rem 0.5rem',
               textAlign: 'center',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', marginBottom: '2px', color: 'oklch(0.45 0.010 260)', fontSize: '0.6rem', letterSpacing: '0.05em' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', marginBottom: '2px', color: 'oklch(0.60 0.010 260)', fontSize: '0.6rem', letterSpacing: '0.05em' }}>
                 {icon} {label}
               </div>
               <div style={{ fontSize: '0.85rem', color: 'white' }}>{value}</div>
@@ -202,7 +202,7 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
         {/* Gear shifts */}
         {run.shifts.length > 0 && (
           <div style={{ marginTop: '0.75rem', borderTop: '1px solid oklch(0.20 0.006 260)', paddingTop: '0.6rem' }}>
-            <div style={{ fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)', letterSpacing: '0.06em', marginBottom: '5px' }}>GEAR SHIFTS</div>
+            <div style={{ fontSize: '0.6rem', color: 'oklch(0.60 0.010 260)', letterSpacing: '0.06em', marginBottom: '5px' }}>GEAR SHIFTS</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
               {run.shifts.map((shift, idx) => (
                 <div key={idx} style={{
@@ -363,7 +363,7 @@ export default function DragTimeslip({ analysis }: DragTimeslipProps) {
                     <Icon className={`w-4 h-4 shrink-0 ${cfg.color}`} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.6rem', color: 'oklch(0.50 0.010 260)', letterSpacing: '0.06em' }}>
+                        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.6rem', color: 'oklch(0.63 0.010 260)', letterSpacing: '0.06em' }}>
                           {categoryLabels[tip.category]}
                         </span>
                         <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'white', fontWeight: 600 }}>
@@ -378,8 +378,8 @@ export default function DragTimeslip({ analysis }: DragTimeslipProps) {
                         </span>
                       )}
                       {isExpanded
-                        ? <ChevronUp style={{ width: '14px', height: '14px', color: 'oklch(0.50 0.010 260)' }} />
-                        : <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.50 0.010 260)' }} />
+                        ? <ChevronUp style={{ width: '14px', height: '14px', color: 'oklch(0.63 0.010 260)' }} />
+                        : <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.63 0.010 260)' }} />
                       }
                     </div>
                   </button>

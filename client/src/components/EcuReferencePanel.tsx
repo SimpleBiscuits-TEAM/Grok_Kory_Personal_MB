@@ -145,8 +145,8 @@ function SubsystemCard({ code, description, color, expanded, onToggle }: {
           }}>{name}</span>
         </div>
         {expanded
-          ? <ChevronDown style={{ width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)', flexShrink: 0 }} />
-          : <ChevronRight style={{ width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)', flexShrink: 0 }} />
+          ? <ChevronDown style={{ width: '16px', height: '16px', color: 'oklch(0.60 0.010 260)', flexShrink: 0 }} />
+          : <ChevronRight style={{ width: '16px', height: '16px', color: 'oklch(0.60 0.010 260)', flexShrink: 0 }} />
         }
       </div>
       {expanded && (
@@ -245,7 +245,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           <p style={{
             fontFamily: '"Rajdhani", sans-serif',
             fontSize: '0.8rem',
-            color: 'oklch(0.50 0.010 260)',
+            color: 'oklch(0.63 0.010 260)',
             margin: 0,
           }}>
             Vehicle subsystem knowledge base &mdash; search by name, code, or keyword
@@ -268,7 +268,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
           borderRadius: '3px',
           padding: '6px 12px',
         }}>
-          <Search style={{ width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)', flexShrink: 0 }} />
+          <Search style={{ width: '16px', height: '16px', color: 'oklch(0.60 0.010 260)', flexShrink: 0 }} />
           <input
             type="text"
             value={searchQuery}
@@ -288,7 +288,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
             <span style={{
               fontFamily: '"Share Tech Mono", monospace',
               fontSize: '0.7rem',
-              color: 'oklch(0.50 0.010 260)',
+              color: 'oklch(0.63 0.010 260)',
             }}>
               {totalResults} result{totalResults !== 1 ? 's' : ''}
             </span>
@@ -304,7 +304,7 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
             padding: '2rem',
             fontFamily: '"Rajdhani", sans-serif',
             fontSize: '0.9rem',
-            color: 'oklch(0.45 0.010 260)',
+            color: 'oklch(0.60 0.010 260)',
           }}>
             No subsystems match &ldquo;{searchQuery}&rdquo;
           </div>
@@ -328,12 +328,12 @@ export default function EcuReferencePanel({ className = '' }: EcuReferencePanelP
                   fontFamily: '"Bebas Neue", "Impact", sans-serif',
                   fontSize: '0.8rem',
                   letterSpacing: '0.1em',
-                  color: 'oklch(0.55 0.010 260)',
+                  color: 'oklch(0.68 0.010 260)',
                 }}>{cat.label.toUpperCase()}</span>
                 <span style={{
                   fontFamily: '"Share Tech Mono", monospace',
                   fontSize: '0.65rem',
-                  color: 'oklch(0.40 0.010 260)',
+                  color: 'oklch(0.58 0.010 260)',
                 }}>({cat.keys.length})</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>

@@ -21,13 +21,13 @@ const sFont = {
 
 const sColor = {
   bg: 'oklch(0.10 0.005 260)',
-  bgCard: 'oklch(0.13 0.006 260)',
-  bgHover: 'oklch(0.16 0.008 260)',
+  bgCard: 'oklch(0.33 0.006 260)',
+  bgHover: 'oklch(0.36 0.008 260)',
   border: 'oklch(0.22 0.008 260)',
   red: 'oklch(0.52 0.22 25)',
   text: 'oklch(0.95 0.005 260)',
-  textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)',
   green: 'oklch(0.65 0.20 145)',
   blue: 'oklch(0.70 0.18 200)',
   yellow: 'oklch(0.75 0.18 60)',
@@ -192,7 +192,7 @@ export default function NotificationPrefsPanel() {
               onClick={() => updatePrefs.mutate({ minPriority: opt.value })}
               style={{
                 padding: '8px 14px', fontFamily: sFont.mono, fontSize: '0.75rem',
-                background: prefs?.minPriority === opt.value ? `${opt.color}25` : 'oklch(0.11 0.005 260)',
+                background: prefs?.minPriority === opt.value ? `${opt.color}25` : 'oklch(0.31 0.005 260)',
                 border: `1px solid ${prefs?.minPriority === opt.value ? opt.color : sColor.border}`,
                 borderRadius: '3px', cursor: 'pointer', color: opt.color,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',

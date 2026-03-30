@@ -293,12 +293,12 @@ export default function Home() {
                 onClick={() => setMode('analyze')}
                 style={{
                   background: mode === 'analyze' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'analyze' ? 'white' : 'oklch(0.55 0.010 260)',
+                  color: mode === 'analyze' ? 'white' : 'oklch(0.68 0.010 260)',
                   fontFamily: '"Bebas Neue", sans-serif',
                   fontSize: '1rem',
                   letterSpacing: '0.08em',
                   padding: '10px 28px',
-                  border: mode === 'analyze' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.28 0.008 260)',
+                  border: mode === 'analyze' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
                   borderRadius: '3px 0 0 3px',
                   cursor: 'pointer',
                   transition: 'all 0.15s',
@@ -314,12 +314,12 @@ export default function Home() {
                 onClick={() => setMode('compare')}
                 style={{
                   background: mode === 'compare' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'compare' ? 'white' : 'oklch(0.55 0.010 260)',
+                  color: mode === 'compare' ? 'white' : 'oklch(0.68 0.010 260)',
                   fontFamily: '"Bebas Neue", sans-serif',
                   fontSize: '1rem',
                   letterSpacing: '0.08em',
                   padding: '10px 28px',
-                  border: mode === 'compare' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.28 0.008 260)',
+                  border: mode === 'compare' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
                   borderRadius: '0 3px 3px 0',
                   cursor: 'pointer',
                   transition: 'all 0.15s',
@@ -346,7 +346,7 @@ export default function Home() {
               onDragLeave={handleDragLeave}
               className={`ppei-dropzone ppei-anim-scale-in ppei-delay-200${isDragOver ? ' active' : ''}${loading ? ' ppei-loading-scan' : ''}`}
               style={{
-                border: isDragOver ? '2px dashed oklch(0.52 0.22 25)' : '2px dashed oklch(0.30 0.008 260)',
+                border: isDragOver ? '2px dashed oklch(0.52 0.22 25)' : '2px dashed oklch(0.50 0.008 260)',
                 background: isDragOver ? 'oklch(0.14 0.012 25)' : 'oklch(0.11 0.005 260)',
                 borderRadius: '4px',
                 transition: 'all 0.2s',
@@ -370,7 +370,7 @@ export default function Home() {
                   {loading ? (
                     <Loader2 style={{ width: '36px', height: '36px', color: 'oklch(0.52 0.22 25)', animation: 'spin 1s linear infinite' }} />
                   ) : (
-                    <Upload style={{ width: '36px', height: '36px', color: isDragOver ? 'oklch(0.52 0.22 25)' : 'oklch(0.55 0.010 260)' }} />
+                    <Upload style={{ width: '36px', height: '36px', color: isDragOver ? 'oklch(0.52 0.22 25)' : 'oklch(0.68 0.010 260)' }} />
                   )}
                 </div>
                 <div className="text-center">
@@ -527,7 +527,7 @@ export default function Home() {
                       <p style={{
                         fontFamily: '"Rajdhani", sans-serif',
                         fontSize: '0.85rem',
-                        color: 'oklch(0.55 0.010 260)',
+                        color: 'oklch(0.68 0.010 260)',
                         margin: 0
                       }}>
                         Upload a datalog above or jump to Advanced Mode for calibration tools
@@ -586,7 +586,7 @@ export default function Home() {
                 fontFamily: '"Bebas Neue", "Impact", sans-serif',
                 fontSize: '0.9rem',
                 letterSpacing: '0.15em',
-                color: 'oklch(0.35 0.008 260)'
+                color: 'oklch(0.55 0.008 260)'
               }}>
                 POWERED BY PPEI · CUSTOM TUNING · REDEFINING THE LIMITS
               </p>
@@ -623,7 +623,7 @@ export default function Home() {
                   <p style={{
                     fontFamily: '"Rajdhani", sans-serif',
                     fontSize: '0.8rem',
-                    color: 'oklch(0.55 0.010 260)',
+                    color: 'oklch(0.68 0.010 260)',
                     margin: 0
                   }}>
                     {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
@@ -726,7 +726,7 @@ export default function Home() {
                     <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
                       NO VIN DETECTED IN DATALOG
                     </p>
-                    <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>
+                    <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.68 0.010 260)', margin: 0 }}>
                       Optionally enter your VIN to unlock vehicle identification and factory spec lookup
                     </p>
                   </div>
@@ -756,7 +756,7 @@ export default function Home() {
                     onClick={applyManualVin}
                     disabled={manualVin.length !== 17}
                     style={{
-                      background: manualVin.length === 17 ? 'oklch(0.70 0.18 200)' : 'oklch(0.25 0.008 260)',
+                      background: manualVin.length === 17 ? 'oklch(0.70 0.18 200)' : 'oklch(0.45 0.008 260)',
                       color: 'white',
                       fontFamily: '"Bebas Neue", "Impact", sans-serif',
                       fontSize: '0.95rem',
@@ -914,7 +914,7 @@ export default function Home() {
                   }}>
                     FAULT ZONE ANALYSIS
                   </h2>
-                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.50 0.010 260)' }}>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.63 0.010 260)' }}>
                     — actual vs desired with shaded delta error
                   </span>
                 </div>
@@ -993,7 +993,7 @@ export default function Home() {
             fontFamily: '"Bebas Neue", "Impact", sans-serif',
             fontSize: '0.85rem',
             letterSpacing: '0.12em',
-            color: 'oklch(0.35 0.008 260)'
+            color: 'oklch(0.55 0.008 260)'
           }}>
             PPEI CUSTOM TUNING · REDEFINING THE LIMITS · PPEI.COM
           </p>

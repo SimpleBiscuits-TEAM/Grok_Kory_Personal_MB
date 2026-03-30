@@ -23,7 +23,7 @@ const sColor = {
   bg: 'oklch(0.08 0.004 260)',
   border: 'oklch(0.20 0.008 260)',
   textDim: 'oklch(0.60 0.010 260)',
-  textMuted: 'oklch(0.45 0.010 260)',
+  textMuted: 'oklch(0.58 0.010 260)',
   navBg: 'oklch(0.16 0.008 260)',
   navBorder: 'oklch(0.28 0.008 260)',
   navText: 'oklch(0.65 0.010 260)',

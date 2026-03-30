@@ -111,8 +111,8 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
         </div>
         <div style={{ flexShrink: 0, marginLeft: '12px' }}>
           {expanded
-            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
-            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.63 0.010 260)' }} />
+            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.63 0.010 260)' }} />
           }
         </div>
       </div>
@@ -121,7 +121,7 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
       {expanded && (
         <div style={{ background: 'oklch(0.11 0.005 260)', padding: '12px 14px', borderTop: '1px solid oklch(0.20 0.006 260)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div>
-            <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0, marginBottom: '6px' }}>DESCRIPTION</h4>
+            <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.60 0.010 260)', margin: 0, marginBottom: '6px' }}>DESCRIPTION</h4>
             <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.88rem', color: 'oklch(0.70 0.010 260)', margin: 0, lineHeight: 1.6 }}>{dtc.description}</p>
           </div>
 
@@ -134,7 +134,7 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
 
           {dtc.enableCriteria && (
             <div style={{ background: 'oklch(0.14 0.006 260)', border: '1px solid oklch(0.22 0.008 260)', borderRadius: '2px', padding: '10px 12px' }}>
-              <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.50 0.010 260)', margin: 0, marginBottom: '4px' }}>ENABLE CRITERIA</h4>
+              <h4 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.72rem', letterSpacing: '0.1em', color: 'oklch(0.63 0.010 260)', margin: 0, marginBottom: '4px' }}>ENABLE CRITERIA</h4>
               <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>{dtc.enableCriteria}</p>
             </div>
           )}
@@ -176,8 +176,8 @@ function DtcResult({ dtc, autoExpand = false }: { dtc: DtcDefinition; autoExpand
 
           {dtc.internalId && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '8px', borderTop: '1px solid oklch(0.20 0.006 260)' }}>
-              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.40 0.008 260)' }} />
-              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)' }}>ECU Fault ID: {dtc.internalId}</span>
+              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.58 0.008 260)' }} />
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.58 0.008 260)' }}>ECU Fault ID: {dtc.internalId}</span>
             </div>
           )}
         </div>
@@ -208,15 +208,15 @@ function EcuParamResult({ param }: { param: EcuParameter }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.85rem', fontWeight: 'bold', color: 'white' }}>{param.internalName}</span>
               <Pill label={catLabel} color="oklch(0.70 0.20 300)" />
-              <Pill label={param.unit} color="oklch(0.55 0.010 260)" />
+              <Pill label={param.unit} color="oklch(0.68 0.010 260)" />
             </div>
             <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', fontWeight: 600, color: 'oklch(0.75 0.010 260)', margin: 0, marginTop: '2px' }}>{param.displayName}</p>
           </div>
         </div>
         <div style={{ flexShrink: 0, marginLeft: '12px' }}>
           {expanded
-            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
-            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.50 0.010 260)' }} />
+            ? <ChevronDown style={{ width: '18px', height: '18px', color: 'oklch(0.63 0.010 260)' }} />
+            : <ChevronRight style={{ width: '18px', height: '18px', color: 'oklch(0.63 0.010 260)' }} />
           }
         </div>
       </div>
@@ -252,8 +252,8 @@ function EcuParamResult({ param }: { param: EcuParameter }) {
 
           {param.ecuAddress && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '8px', borderTop: '1px solid oklch(0.20 0.006 260)' }}>
-              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.40 0.008 260)' }} />
-              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)' }}>ECU Address: {param.ecuAddress}</span>
+              <Cpu style={{ width: '12px', height: '12px', color: 'oklch(0.58 0.008 260)' }} />
+              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.58 0.008 260)' }}>ECU Address: {param.ecuAddress}</span>
             </div>
           )}
         </div>
@@ -317,9 +317,9 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
         fontFamily: '"Bebas Neue", "Impact", sans-serif',
         fontSize: '0.8rem',
         letterSpacing: '0.08em',
-        border: `1px solid ${searchMode === mode ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+        border: `1px solid ${searchMode === mode ? 'oklch(0.52 0.22 25)' : 'oklch(0.48 0.008 260)'}`,
         background: searchMode === mode ? 'oklch(0.52 0.22 25)' : 'transparent',
-        color: searchMode === mode ? 'white' : 'oklch(0.55 0.010 260)',
+        color: searchMode === mode ? 'white' : 'oklch(0.68 0.010 260)',
         cursor: 'pointer',
         transition: 'all 0.15s'
       }}
@@ -357,7 +357,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
           <h3 style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
             DIAGNOSTIC CODE LOOKUP
           </h3>
-          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)', margin: 0 }}>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.63 0.010 260)', margin: 0 }}>
             Search by code (P0087), keyword (fuel rail, boost), or browse by system
           </p>
         </div>
@@ -366,7 +366,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
       <div style={{ padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         {/* Search Input */}
         <div style={{ position: 'relative' }}>
-          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)' }} />
+          <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', width: '16px', height: '16px', color: 'oklch(0.60 0.010 260)' }} />
           <input
             type="text"
             placeholder="Search by code (P0087), parameter name, or keyword (fuel rail, boost leak)..."
@@ -391,7 +391,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
               onClick={() => setQuery('')}
               style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
-              <X style={{ width: '16px', height: '16px', color: 'oklch(0.45 0.010 260)' }} />
+              <X style={{ width: '16px', height: '16px', color: 'oklch(0.60 0.010 260)' }} />
             </button>
           )}
         </div>
@@ -414,9 +414,9 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                 fontFamily: '"Rajdhani", sans-serif',
                 fontSize: '0.75rem',
                 fontWeight: 600,
-                border: `1px solid ${!activeSystem ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+                border: `1px solid ${!activeSystem ? 'oklch(0.52 0.22 25)' : 'oklch(0.48 0.008 260)'}`,
                 background: !activeSystem ? 'oklch(0.52 0.22 25)' : 'transparent',
-                color: !activeSystem ? 'white' : 'oklch(0.55 0.010 260)',
+                color: !activeSystem ? 'white' : 'oklch(0.68 0.010 260)',
                 cursor: 'pointer',
                 transition: 'all 0.15s'
               }}
@@ -431,9 +431,9 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                   fontFamily: '"Rajdhani", sans-serif',
                   fontSize: '0.75rem',
                   fontWeight: 600,
-                  border: `1px solid ${activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.28 0.008 260)'}`,
+                  border: `1px solid ${activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.48 0.008 260)'}`,
                   background: activeSystem === sys ? 'oklch(0.70 0.18 200 / 0.15)' : 'transparent',
-                  color: activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.55 0.010 260)',
+                  color: activeSystem === sys ? 'oklch(0.70 0.18 200)' : 'oklch(0.68 0.010 260)',
                   cursor: 'pointer',
                   transition: 'all 0.15s'
                 }}
@@ -445,11 +445,11 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
         {/* Empty State */}
         {!hasQuery && (
           <div style={{ textAlign: 'center', padding: '2.5rem 0' }}>
-            <Search style={{ width: '40px', height: '40px', margin: '0 auto 12px', color: 'oklch(0.30 0.008 260)' }} />
-            <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)', margin: 0, marginBottom: '4px' }}>
+            <Search style={{ width: '40px', height: '40px', margin: '0 auto 12px', color: 'oklch(0.50 0.008 260)' }} />
+            <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.63 0.010 260)', margin: 0, marginBottom: '4px' }}>
               ENTER A CODE OR KEYWORD TO SEARCH
             </p>
-            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.40 0.008 260)', margin: 0 }}>
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.58 0.008 260)', margin: 0 }}>
               Examples:{' '}
               <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>P0087</span>,{' '}
               <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.70 0.18 200)' }}>fuel rail</span>,{' '}
@@ -484,7 +484,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
         {hasQuery && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.50 0.010 260)', margin: 0 }}>
+              <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.63 0.010 260)', margin: 0 }}>
                 {totalResults === 0 ? 'NO RESULTS FOUND' : `${totalResults} RESULT${totalResults !== 1 ? 'S' : ''} FOUND`}
               </p>
               {(query || activeSystem) && (
@@ -498,9 +498,9 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {totalResults === 0 ? (
                 <div style={{ textAlign: 'center', padding: '2rem 0' }}>
-                  <Search style={{ width: '32px', height: '32px', margin: '0 auto 8px', color: 'oklch(0.30 0.008 260)' }} />
-                  <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>NO CODES OR PARAMETERS FOUND</p>
-                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.40 0.008 260)', margin: 0 }}>Try a different code or keyword</p>
+                  <Search style={{ width: '32px', height: '32px', margin: '0 auto 8px', color: 'oklch(0.50 0.008 260)' }} />
+                  <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.60 0.010 260)', margin: 0 }}>NO CODES OR PARAMETERS FOUND</p>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.58 0.008 260)', margin: 0 }}>Try a different code or keyword</p>
                 </div>
               ) : (
                 <>
@@ -518,7 +518,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                     return (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {searchMode === 'all' && paramResults.length > 0 && (
-                          <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>
+                          <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.60 0.010 260)', margin: 0 }}>
                             FAULT CODES ({dtcResults.length})
                           </p>
                         )}
@@ -535,7 +535,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                                 border: '1px solid oklch(0.70 0.18 200 / 0.3)',
                                 color: 'oklch(0.70 0.18 200)'
                               }}>{sys}</span>
-                              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.40 0.008 260)' }}>
+                              <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.58 0.008 260)' }}>
                                 {grouped[sys].length} code{grouped[sys].length !== 1 ? 's' : ''}
                               </span>
                             </div>
@@ -553,7 +553,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
                   {(searchMode === 'all' || searchMode === 'params') && paramResults.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {searchMode === 'all' && dtcResults.length > 0 && (
-                        <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.45 0.010 260)', margin: 0 }}>
+                        <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.60 0.010 260)', margin: 0 }}>
                           ECU PARAMETERS ({paramResults.length})
                         </p>
                       )}
@@ -575,7 +575,7 @@ export default function DtcSearch({ prefilledCode }: { prefilledCode?: string })
           borderRadius: '2px',
           padding: '10px 12px'
         }}>
-          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.40 0.008 260)', margin: 0, lineHeight: 1.6 }}>
+          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.58 0.008 260)', margin: 0, lineHeight: 1.6 }}>
             Covers 2017–2023 L5P 6.6L Duramax. Verify with live scan data before performing repairs.
           </p>
         </div>

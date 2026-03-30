@@ -125,13 +125,13 @@ const sFont = {
 };
 const sColor = {
   bg: 'oklch(0.06 0.003 260)',
-  bgCard: 'oklch(0.10 0.005 260)',
+  bgCard: 'oklch(0.30 0.005 260)',
   border: 'oklch(0.22 0.008 260)',
   red: 'oklch(0.52 0.22 25)',
   cyan: 'oklch(0.70 0.14 200)',
   text: 'oklch(0.95 0.005 260)',
-  textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.40 0.008 260)',
+  textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.55 0.008 260)',
 };
 
 // ─── Component ─────────────────────────────────────────────────────────────

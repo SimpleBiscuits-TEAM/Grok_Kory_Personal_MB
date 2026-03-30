@@ -117,7 +117,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
         onClick={onBack}
         style={{
           background: 'transparent',
-          color: 'oklch(0.55 0.010 260)',
+          color: 'oklch(0.68 0.010 260)',
           fontFamily: '"Bebas Neue", sans-serif',
           fontSize: '0.9rem',
           letterSpacing: '0.08em',
@@ -131,7 +131,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
           transition: 'color 0.15s',
         }}
         onMouseEnter={e => (e.currentTarget.style.color = 'white')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.55 0.010 260)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
       >
         ← BACK TO ANALYZER
       </button>
@@ -149,7 +149,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
         <p style={{
           fontFamily: '"Rajdhani", sans-serif',
           fontSize: '0.95rem',
-          color: 'oklch(0.55 0.010 260)',
+          color: 'oklch(0.68 0.010 260)',
           letterSpacing: '0.03em'
         }}>
           Upload two datalogs to compare tune changes, tuner differences, or before/after modifications
@@ -232,7 +232,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
             <p style={{
               fontFamily: '"Rajdhani", sans-serif',
               fontSize: '0.8rem',
-              color: 'oklch(0.50 0.010 260)',
+              color: 'oklch(0.63 0.010 260)',
               marginBottom: '0.5rem',
             }}>
               Tell the AI what you changed between tests — tune revision, turbo swap, injector upgrade, etc. This helps generate smarter analysis.
@@ -348,12 +348,12 @@ export default function CompareView({ onBack }: CompareViewProps) {
                 fontFamily: '"Bebas Neue", sans-serif',
                 fontSize: '0.9rem',
                 letterSpacing: '0.06em',
-                color: 'oklch(0.55 0.010 260)',
+                color: 'oklch(0.68 0.010 260)',
               }}>PID COVERAGE: </span>
               <span style={{
                 fontFamily: '"Rajdhani", sans-serif',
                 fontSize: '0.85rem',
-                color: 'oklch(0.50 0.010 260)',
+                color: 'oklch(0.63 0.010 260)',
               }}>
                 {report.pidCoverage.commonPids.length} common PIDs
                 {report.pidCoverage.aOnlyPids.length > 0 && ` · ${report.pidCoverage.aOnlyPids.length} only in Log A`}
@@ -395,7 +395,7 @@ export default function CompareView({ onBack }: CompareViewProps) {
                 {analyzeMutation.isPending ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <Loader2 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', animation: 'spin 1s linear infinite' }} />
-                    <span style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.55 0.010 260)' }}>
+                    <span style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.68 0.010 260)' }}>
                       AI is analyzing the comparison...
                     </span>
                   </div>
@@ -453,7 +453,7 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              color: 'oklch(0.45 0.010 260)',
+              color: 'oklch(0.60 0.010 260)',
               padding: '2px',
             }}
           >
@@ -472,7 +472,7 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
         <p style={{
           fontFamily: '"Rajdhani", sans-serif',
           fontSize: '0.75rem',
-          color: 'oklch(0.50 0.010 260)',
+          color: 'oklch(0.63 0.010 260)',
           margin: '4px 0 0 0',
         }}>
           {slot.data.stats.duration.toFixed(1)}s · {slot.data.rpm.length.toLocaleString()} samples · {slot.data.fileFormat}
@@ -504,7 +504,7 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
       onDrop={onDrop}
       onClick={() => !slot.loading && onClick()}
       style={{
-        border: isDragOver ? `2px dashed ${accentColor}` : '2px dashed oklch(0.28 0.008 260)',
+        border: isDragOver ? `2px dashed ${accentColor}` : '2px dashed oklch(0.48 0.008 260)',
         background: isDragOver ? `oklch(0.14 0.012 25)` : 'oklch(0.11 0.005 260)',
         borderRadius: '4px',
         transition: 'all 0.2s',
@@ -528,7 +528,7 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
         {slot.loading ? (
           <Loader2 style={{ width: '24px', height: '24px', color: accentColor, animation: 'spin 1s linear infinite' }} />
         ) : (
-          <Upload style={{ width: '24px', height: '24px', color: isDragOver ? accentColor : 'oklch(0.50 0.010 260)' }} />
+          <Upload style={{ width: '24px', height: '24px', color: isDragOver ? accentColor : 'oklch(0.63 0.010 260)' }} />
         )}
       </div>
       <p style={{
@@ -541,21 +541,21 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
       <p style={{
         fontFamily: '"Rajdhani", sans-serif',
         fontSize: '0.8rem',
-        color: 'oklch(0.50 0.010 260)',
+        color: 'oklch(0.63 0.010 260)',
         letterSpacing: '0.04em',
         marginBottom: '0.5rem',
       }}>{sublabel}</p>
       <p style={{
         fontFamily: '"Rajdhani", sans-serif',
         fontSize: '0.8rem',
-        color: 'oklch(0.40 0.008 260)',
+        color: 'oklch(0.58 0.008 260)',
       }}>
         {slot.loading ? 'Processing...' : 'Drop CSV or click to browse'}
       </p>
       <p style={{
         fontFamily: '"Share Tech Mono", monospace',
         fontSize: '0.65rem',
-        color: 'oklch(0.40 0.010 260)',
+        color: 'oklch(0.58 0.010 260)',
         marginTop: '0.35rem',
         letterSpacing: '0.05em',
       }}>CURRENTLY ONLY CSV SUPPORTED</p>
@@ -574,7 +574,7 @@ function DropZone({ label, sublabel, slot, isDragOver, onDragOver, onDragLeave, 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.65rem', color: 'oklch(0.45 0.010 260)', margin: 0 }}>{label}</p>
+      <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.65rem', color: 'oklch(0.60 0.010 260)', margin: 0 }}>{label}</p>
       <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'white', margin: 0 }}>{value}</p>
     </div>
   );
@@ -594,7 +594,7 @@ function DeltaCard({ label, aVal, bVal, delta, unit, precision, invertColor }: {
   const isNeutral = Math.abs(delta) < 0.01;
 
   // For most metrics, positive = good (green). For EGT and PW, positive = bad (red).
-  let deltaColor = 'oklch(0.55 0.010 260)';
+  let deltaColor = 'oklch(0.68 0.010 260)';
   if (!isNeutral) {
     if (invertColor) {
       deltaColor = isPositive ? 'oklch(0.65 0.18 25)' : 'oklch(0.65 0.20 145)';
@@ -616,18 +616,18 @@ function DeltaCard({ label, aVal, bVal, delta, unit, precision, invertColor }: {
         fontFamily: '"Bebas Neue", sans-serif',
         fontSize: '0.75rem',
         letterSpacing: '0.06em',
-        color: 'oklch(0.50 0.010 260)',
+        color: 'oklch(0.63 0.010 260)',
         margin: '0 0 6px 0',
       }}>{label}</p>
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
         <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.70 0.18 200)' }}>
           {aVal.toFixed(precision)}
         </span>
-        <ArrowRight style={{ width: '12px', height: '12px', color: 'oklch(0.40 0.008 260)' }} />
+        <ArrowRight style={{ width: '12px', height: '12px', color: 'oklch(0.58 0.008 260)' }} />
         <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.8rem', color: 'oklch(0.52 0.22 25)' }}>
           {bVal.toFixed(precision)}
         </span>
-        <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)' }}>{unit}</span>
+        <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.58 0.008 260)' }}>{unit}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
         <DeltaIcon style={{ width: '12px', height: '12px', color: deltaColor }} />
@@ -680,7 +680,7 @@ function EventCard({ ec, expanded, onToggle, labelA, labelB }: {
       >
         {expanded
           ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.52 0.22 25)', flexShrink: 0 }} />
-          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.010 260)', flexShrink: 0 }} />
+          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.60 0.010 260)', flexShrink: 0 }} />
         }
         <span style={{
           fontFamily: '"Bebas Neue", sans-serif',
@@ -691,7 +691,7 @@ function EventCard({ ec, expanded, onToggle, labelA, labelB }: {
         <span style={{
           fontFamily: '"Rajdhani", sans-serif',
           fontSize: '0.8rem',
-          color: 'oklch(0.50 0.010 260)',
+          color: 'oklch(0.63 0.010 260)',
           marginLeft: 'auto',
           whiteSpace: 'nowrap',
         }}>
@@ -715,18 +715,18 @@ function EventCard({ ec, expanded, onToggle, labelA, labelB }: {
             }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid oklch(0.25 0.008 260)' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'oklch(0.50 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>PID</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'oklch(0.63 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>PID</th>
                   <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.70 0.18 200)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>A (AVG)</th>
                   <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.52 0.22 25)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>B (AVG)</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.50 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>DELTA</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.50 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>A (PEAK)</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.50 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>B (PEAK)</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.63 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>DELTA</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.63 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>A (PEAK)</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: 'oklch(0.63 0.010 260)', fontFamily: '"Bebas Neue", sans-serif', letterSpacing: '0.05em', fontSize: '0.75rem' }}>B (PEAK)</th>
                 </tr>
               </thead>
               <tbody>
                 {ec.deltas.filter(d => d.available === 'both').map((d) => {
                   const isEgtOrPw = d.pid === 'exhaustGasTemp' || d.pid === 'injectorPulseWidth';
-                  let deltaColor = 'oklch(0.55 0.010 260)';
+                  let deltaColor = 'oklch(0.68 0.010 260)';
                   if (Math.abs(d.delta) > 0.01) {
                     if (isEgtOrPw) {
                       deltaColor = d.delta > 0 ? 'oklch(0.65 0.18 25)' : 'oklch(0.65 0.20 145)';
@@ -742,8 +742,8 @@ function EventCard({ ec, expanded, onToggle, labelA, labelB }: {
                       <td style={{ padding: '5px 8px', textAlign: 'right', color: deltaColor, fontWeight: 600 }}>
                         {d.delta >= 0 ? '+' : ''}{d.delta.toFixed(1)} ({d.deltaPct >= 0 ? '+' : ''}{d.deltaPct.toFixed(1)}%)
                       </td>
-                      <td style={{ padding: '5px 8px', textAlign: 'right', color: 'oklch(0.55 0.010 260)' }}>{d.aMax.toFixed(1)}</td>
-                      <td style={{ padding: '5px 8px', textAlign: 'right', color: 'oklch(0.55 0.010 260)' }}>{d.bMax.toFixed(1)}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', color: 'oklch(0.68 0.010 260)' }}>{d.aMax.toFixed(1)}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'right', color: 'oklch(0.68 0.010 260)' }}>{d.bMax.toFixed(1)}</td>
                     </tr>
                   );
                 })}

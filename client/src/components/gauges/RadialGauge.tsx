@@ -138,7 +138,7 @@ export default function RadialGauge({
         style={{
           width: cfg.diameter, height: cfg.diameter,
           borderRadius: '50%',
-          border: `2px dashed ${isDragOver ? 'oklch(0.65 0.18 220)' : 'oklch(0.25 0.008 260)'}`,
+          border: `2px dashed ${isDragOver ? 'oklch(0.65 0.18 220)' : 'oklch(0.45 0.008 260)'}`,
           background: isDragOver ? 'oklch(0.12 0.02 220 / 0.3)' : 'oklch(0.08 0.004 260)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexDirection: 'column', cursor: 'pointer',
@@ -147,13 +147,13 @@ export default function RadialGauge({
       >
         <span style={{
           fontFamily: '"Bebas Neue", sans-serif', fontSize: size === 'large' ? '1rem' : '0.75rem',
-          color: 'oklch(0.35 0.008 260)', letterSpacing: '0.1em',
+          color: 'oklch(0.55 0.008 260)', letterSpacing: '0.1em',
         }}>
           {isDragOver ? 'DROP PID' : '+ ADD PID'}
         </span>
         <span style={{
           fontFamily: '"Rajdhani", sans-serif', fontSize: '0.6rem',
-          color: 'oklch(0.30 0.006 260)', marginTop: '4px',
+          color: 'oklch(0.50 0.006 260)', marginTop: '4px',
         }}>
           Drag or right-click
         </span>
@@ -186,10 +186,10 @@ export default function RadialGauge({
           </pattern>
           {/* Bezel gradient */}
           <linearGradient id={`bezel-${size}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="oklch(0.45 0.005 260)" />
-            <stop offset="30%" stopColor="oklch(0.25 0.004 260)" />
-            <stop offset="70%" stopColor="oklch(0.35 0.005 260)" />
-            <stop offset="100%" stopColor="oklch(0.20 0.003 260)" />
+            <stop offset="0%" stopColor="oklch(0.60 0.005 260)" />
+            <stop offset="30%" stopColor="oklch(0.45 0.004 260)" />
+            <stop offset="70%" stopColor="oklch(0.55 0.005 260)" />
+            <stop offset="100%" stopColor="oklch(0.40 0.003 260)" />
           </linearGradient>
           {/* Glow filter for needle */}
           <filter id={`glow-${size}`}>

@@ -6,7 +6,7 @@
  *   - Multi-vehicle knowledge base (L5P, LML, LBZ, LLY, LB7, LS/LT)
  *   - Full-text search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs
  *   - Complete datalog analyzer (merged from normal mode)
- *   - Access gated behind code "PPEIROCKS"
+ *   - Access gated behind sign-in + PPEI approval (no legacy passcode)
  */
 
 import React, { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
@@ -73,35 +73,28 @@ import { APP_VERSION } from '@/lib/version';
 
 import PpeiHeader from '@/components/PpeiHeader';
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-const ACCESS_CODE = 'PPEIROCKS';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 
 const sFont = { heading: '"Bebas Neue", "Impact", sans-serif', body: '"Rajdhani", sans-serif', mono: '"Share Tech Mono", monospace' };
 const sColor = {
-  bg: 'oklch(0.10 0.005 260)', bgDark: 'oklch(0.08 0.004 260)', bgCard: 'oklch(0.13 0.006 260)',
-  bgInput: 'oklch(0.10 0.005 260)', border: 'oklch(0.22 0.008 260)', borderLight: 'oklch(0.18 0.006 260)',
+  bg: 'oklch(0.10 0.005 260)', bgDark: 'oklch(0.08 0.004 260)', bgCard: 'oklch(0.33 0.006 260)',
+  bgInput: 'oklch(0.30 0.005 260)', border: 'oklch(0.22 0.008 260)', borderLight: 'oklch(0.18 0.006 260)',
   red: 'oklch(0.52 0.22 25)', green: 'oklch(0.65 0.20 145)', blue: 'oklch(0.70 0.18 200)',
-  yellow: 'oklch(0.75 0.18 60)', text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  yellow: 'oklch(0.75 0.18 60)', text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)',
 };
 
 // ─── V-OP Pro Access Gate ────────────────────────────────────────────────────
 
 /**
- * AccessGate — Three paths to V-OP Pro:
+ * AccessGate — Two paths to V-OP Pro:
  * 1. Logged in with approved access / admin / super_admin → auto-unlock
- * 2. Logged in but not approved → "Contact PPEI" / request access screen
- * 3. Not logged in → login button + temporary PPEIROCKS code (deprecated Friday)
+ * 2. Not logged in or not approved → sign-in + request access screen
  */
 function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
-  const [code, setCode] = useState('');
-  const [error, setError] = useState(false);
-  const [shake, setShake] = useState(false);
-  const [showCodeInput, setShowCodeInput] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const accessQuery = trpc.access.myAccess.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -111,8 +104,6 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
     onSuccess: () => accessQuery.refetch(),
   });
 
-  useEffect(() => { if (showCodeInput) inputRef.current?.focus(); }, [showCodeInput]);
-
   // Auto-unlock if user has access
   useEffect(() => {
     if (accessQuery.data?.canAccessAdvanced) {
@@ -121,24 +112,12 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
     }
   }, [accessQuery.data, onUnlock]);
 
-  // Also auto-unlock if legacy code was stored
+  // Also auto-unlock if previously approved (cached)
   useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY) === 'true') {
+    if (isAuthenticated && localStorage.getItem(STORAGE_KEY) === 'true') {
       onUnlock();
     }
-  }, [onUnlock]);
-
-  const handleCodeSubmit = () => {
-    if (code.toUpperCase() === ACCESS_CODE) {
-      localStorage.setItem(STORAGE_KEY, 'true');
-      onUnlock();
-    } else {
-      setError(true);
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
-      setTimeout(() => setError(false), 2000);
-    }
-  };
+  }, [isAuthenticated, onUnlock]);
 
   if (authLoading) {
     return (
@@ -241,10 +220,10 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
     );
   }
 
-  // ── Not logged in → Login button + temporary PPEIROCKS code ──
+  // ── Not logged in → Sign in required ──
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
-      <div className={`ppei-anim-scale-in ${shake ? 'ppei-shake' : ''}`} style={{
+      <div className="ppei-anim-scale-in" style={{
         background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
         borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
         textAlign: 'center',
@@ -255,7 +234,7 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
         <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', marginBottom: '0.5rem' }}>
           V-OP PRO
         </h2>
-        <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, marginBottom: '2rem', lineHeight: 1.6 }}>
+        <p style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: 'oklch(0.75 0.010 260)', marginBottom: '2rem', lineHeight: 1.6 }}>
           Sign in to access V-OP Pro features. Access requires approval from PPEI.
         </p>
 
@@ -269,68 +248,11 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
           <Lock style={{ width: 18, height: 18 }} /> SIGN IN
         </a>
 
-        {/* Deprecation notice + legacy code input */}
-        <div style={{
-          borderTop: `1px solid ${sColor.border}`, paddingTop: '1.5rem', marginTop: '0.5rem',
-        }}>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: '6px',
-            padding: '6px 12px', background: 'oklch(0.75 0.18 60 / 0.10)', border: '1px solid oklch(0.75 0.18 60 / 0.25)',
-            borderRadius: '3px', marginBottom: '12px',
-          }}>
-            <AlertCircle style={{ width: 12, height: 12, color: sColor.yellow }} />
-            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.yellow }}>
-              PASSCODE ACCESS ENDS FRIDAY — SIGN IN TO KEEP ACCESS
-            </span>
-          </div>
-
-          {!showCodeInput ? (
-            <button
-              onClick={() => setShowCodeInput(true)}
-              style={{
-                background: 'transparent', border: `1px solid ${sColor.border}`,
-                borderRadius: '3px', padding: '8px 20px', cursor: 'pointer',
-                color: sColor.textMuted, fontFamily: sFont.mono, fontSize: '0.7rem',
-                letterSpacing: '0.06em', display: 'block', margin: '0 auto',
-              }}
-            >
-              HAVE A PASSCODE?
-            </button>
-          ) : (
-            <div style={{ display: 'flex', gap: '8px', maxWidth: '320px', margin: '0 auto' }}>
-              <input
-                ref={inputRef}
-                type="password"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCodeSubmit()}
-                placeholder="Access Code"
-                style={{
-                  flex: 1, padding: '10px 14px', fontFamily: sFont.mono, fontSize: '0.85rem',
-                  background: sColor.bgInput, border: `2px solid ${error ? sColor.red : sColor.border}`,
-                  borderRadius: '3px', color: 'white', outline: 'none', letterSpacing: '0.15em', textAlign: 'center',
-                }}
-              />
-              <button onClick={handleCodeSubmit} style={{
-                background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '0.85rem',
-                letterSpacing: '0.08em', padding: '10px 18px', borderRadius: '3px', border: 'none', cursor: 'pointer',
-              }}>
-                UNLOCK
-              </button>
-            </div>
-          )}
-          {error && (
-            <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.red, textAlign: 'center', marginTop: '8px' }}>
-              Invalid access code
-            </p>
-          )}
-        </div>
-
-        <div style={{ marginTop: '1.5rem' }}>
+        <div style={{ marginTop: '1rem' }}>
           <Link href="/" style={{ textDecoration: 'none' }}>
             <span style={{
               fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-              color: sColor.textMuted, cursor: 'pointer',
+              color: 'oklch(0.60 0.010 260)', cursor: 'pointer',
             }}>
               ← BACK TO V-OP LITE
             </span>
@@ -492,8 +414,8 @@ function Mode6Panel() {
                       </div>
                       <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: 'oklch(0.80 0.010 260)', margin: 0 }}>{m.description}</p>
                       <div style={{ display: 'flex', gap: '16px', marginTop: '2px' }}>
-                        <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)' }}>Range: {m.range}</span>
-                        <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)' }}>Res: {m.resolution}</span>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.63 0.010 260)' }}>Range: {m.range}</span>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.63 0.010 260)' }}>Res: {m.resolution}</span>
                       </div>
                     </div>
                   ))}
@@ -632,7 +554,7 @@ function AIChatPanel({ a2lData }: { a2lData: A2LParseResult | null }) {
         {messages.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
             <Brain style={{ width: 48, height: 48, color: sColor.red, margin: '0 auto 16px', opacity: 0.6 }} />
-            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>V-OP AI DIAGNOSTIC ASSISTANT</h3>
+            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.63 0.010 260)', marginBottom: '8px' }}>V-OP AI DIAGNOSTIC ASSISTANT</h3>
             <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto 24px' }}>
               Ask diagnostic questions about any vehicle — diesel, gas, or powersports. OBD-II PIDs, DTCs, Mode 6 data, UDS services, tuning parameters, and more. The AI has access to the full V-OP knowledge base.
             </p>
@@ -669,7 +591,7 @@ function AIChatPanel({ a2lData }: { a2lData: A2LParseResult | null }) {
                   </div>
                   <div style={{
                     fontFamily: sFont.body, fontSize: '0.88rem', color: 'oklch(0.85 0.010 260)', lineHeight: 1.6,
-                    background: msg.role === 'user' ? 'oklch(0.12 0.006 260)' : 'oklch(0.11 0.005 260)',
+                    background: msg.role === 'user' ? 'oklch(0.12 0.006 260)' : 'oklch(0.31 0.005 260)',
                     border: `1px solid ${sColor.borderLight}`, borderRadius: '3px', padding: '12px',
                   }}>
                     {msg.role === 'assistant' ? (
@@ -770,8 +692,8 @@ function A2LPanel({ a2lData, setA2lData }: { a2lData: A2LParseResult | null; set
   if (!a2lData) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem' }}>
-        <FileCode2 style={{ width: 48, height: 48, color: 'oklch(0.30 0.008 260)', margin: '0 auto 16px' }} />
-        <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>A2L CALIBRATION FILE VIEWER</h3>
+        <FileCode2 style={{ width: 48, height: 48, color: 'oklch(0.50 0.008 260)', margin: '0 auto 16px' }} />
+        <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.63 0.010 260)', marginBottom: '8px' }}>A2L CALIBRATION FILE VIEWER</h3>
         <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto 24px' }}>
           Upload an ASAP2 (.a2l) calibration file to browse measurements, characteristics, and conversion methods. Data will be cross-referenced with the AI assistant.
         </p>
@@ -1137,7 +1059,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
           onDragLeave={() => setIsDragOver(false)}
           className={`ppei-dropzone${isDragOver ? ' active' : ''}${loading ? ' ppei-loading-scan' : ''}`}
           style={{
-            border: isDragOver ? `2px dashed ${sColor.red}` : `2px dashed oklch(0.30 0.008 260)`,
+            border: isDragOver ? `2px dashed ${sColor.red}` : `2px dashed oklch(0.50 0.008 260)`,
             background: isDragOver ? 'oklch(0.14 0.012 25)' : 'oklch(0.11 0.005 260)',
             borderRadius: '4px', cursor: loading ? 'not-allowed' : 'pointer',
             boxShadow: isDragOver ? `0 0 30px ${sColor.red}33` : 'none',
@@ -1153,7 +1075,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
                 {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
               </h3>
               <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem' }}>Drag & drop your CSV file here, or click to browse</p>
-              <p style={{ fontFamily: sFont.mono, color: 'oklch(0.45 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>CURRENTLY ONLY CSV SUPPORTED</p>
+              <p style={{ fontFamily: sFont.mono, color: 'oklch(0.60 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>CURRENTLY ONLY CSV SUPPORTED</p>
 
             </div>
             <input ref={fileInputRef} type="file" accept="*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />
@@ -1368,7 +1290,7 @@ function EditorGate() {
       </p>
 
       <p style={{
-        fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.40 0.010 260)',
+        fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)',
         maxWidth: '400px', marginBottom: '2rem', fontStyle: 'italic',
       }}>
         "I asked my ECU for the password. It said 'knock knock.' I said 'who's there?' It threw a P0300."
@@ -1423,7 +1345,7 @@ function EditorGate() {
       {attempts >= 3 && (
         <p style={{
           fontFamily: sFont.mono, fontSize: '0.7rem',
-          color: 'oklch(0.35 0.008 260)', marginTop: '2rem',
+          color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
         }}>
           Hint: Think big. Think primate. Think chest-pounding dominance.
         </p>
@@ -1574,7 +1496,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } setActiveTab(tab.id); }} style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
-                color: activeTab === tab.id ? 'white' : 'oklch(0.50 0.010 260)',
+                color: activeTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
                 background: activeTab === tab.id ? 'oklch(0.16 0.008 260)' : 'transparent',
                 border: 'none', borderBottom: activeTab === tab.id ? `2px solid ${sColor.red}` : '2px solid transparent',
                 cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
@@ -1618,7 +1540,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                 <button key={st.id} onClick={() => setDevSubTab(st.id)} style={{
                   display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
                   fontFamily: sFont.heading, fontSize: '0.72rem', letterSpacing: '0.05em',
-                  color: devSubTab === st.id ? 'white' : 'oklch(0.45 0.010 260)',
+                  color: devSubTab === st.id ? 'white' : 'oklch(0.60 0.010 260)',
                   background: devSubTab === st.id ? 'oklch(0.18 0.010 260)' : 'transparent',
                   border: 'none', borderBottom: devSubTab === st.id ? `2px solid ${sColor.red}` : '2px solid transparent',
                   cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
@@ -1640,7 +1562,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                       onFocus={(e) => { (e.target).style.borderColor = sColor.red; }}
                       onBlur={(e) => { (e.target).style.borderColor = 'oklch(0.25 0.008 260)'; }}
                     />
-                    {query && <button onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}><X style={{ width: 16, height: 16, color: 'oklch(0.50 0.010 260)' }} /></button>}
+                    {query && <button onClick={() => { setQuery(''); searchInputRef.current?.focus(); }} style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}><X style={{ width: 16, height: 16, color: 'oklch(0.63 0.010 260)' }} /></button>}
                   </div>
                   <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
                     <button onClick={() => setCategoryFilter('all')} style={{ padding: '4px 10px', fontFamily: sFont.body, fontSize: '0.75rem', fontWeight: 600, background: categoryFilter === 'all' ? `${sColor.red}33` : 'oklch(0.16 0.006 260)', border: `1px solid ${categoryFilter === 'all' ? `${sColor.red}80` : sColor.border}`, borderRadius: '2px', color: categoryFilter === 'all' ? sColor.red : sColor.textDim, cursor: 'pointer' }}>ALL</button>
@@ -1653,20 +1575,20 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', background: `${sColor.green}14`, border: `1px solid ${sColor.green}33`, borderRadius: '3px', marginBottom: '12px' }}>
                     <Zap style={{ width: 14, height: 14, color: sColor.green }} />
                     <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.green }}>{searchResults.intent.description}</span>
-                    <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', marginLeft: 'auto' }}>{searchResults.results.length} results</span>
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.63 0.010 260)', marginLeft: 'auto' }}>{searchResults.results.length} results</span>
                   </div>
                 )}
                 {searchResults && searchResults.results.length > 0 && <div>{searchResults.results.map((result) => <ResultCard key={result.document.id} result={result} isExpanded={expandedResults.has(result.document.id)} onToggle={() => toggleResult(result.document.id)} />)}</div>}
                 {searchResults && searchResults.results.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                    <Search style={{ width: 32, height: 32, color: 'oklch(0.30 0.008 260)', margin: '0 auto 12px' }} />
-                    <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)' }}>NO RESULTS FOUND</p>
+                    <Search style={{ width: 32, height: 32, color: 'oklch(0.50 0.008 260)', margin: '0 auto 12px' }} />
+                    <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', color: 'oklch(0.63 0.010 260)' }}>NO RESULTS FOUND</p>
                   </div>
                 )}
                 {!searchResults && (
                   <div style={{ textAlign: 'center', padding: '3rem', background: 'oklch(0.12 0.006 260)', border: `1px solid oklch(0.20 0.008 260)`, borderRadius: '3px' }}>
-                    <Database style={{ width: 40, height: 40, color: 'oklch(0.25 0.008 260)', margin: '0 auto 16px' }} />
-                    <p style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>KNOWLEDGE BASE READY</p>
+                    <Database style={{ width: 40, height: 40, color: 'oklch(0.45 0.008 260)', margin: '0 auto 16px' }} />
+                    <p style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'oklch(0.63 0.010 260)', marginBottom: '8px' }}>KNOWLEDGE BASE READY</p>
                     <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, maxWidth: '500px', margin: '0 auto' }}>
                       Search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs, and multi-vehicle databases. Now includes L5P, LML, LBZ, LLY, LB7, and LS/LT platforms.
                     </p>
@@ -1676,7 +1598,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                         return (
                           <div key={cat} style={{ padding: '10px', background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.borderLight}`, borderTop: `2px solid ${cfg.color}`, borderRadius: '3px', textAlign: 'center' }}>
                             <div style={{ fontFamily: sFont.mono, fontSize: '1.2rem', color: cfg.color, fontWeight: 700 }}>{count}</div>
-                            <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: 'oklch(0.50 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{cfg.label}</div>
+                            <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: 'oklch(0.63 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{cfg.label}</div>
                           </div>
                         );
                       })}
@@ -1738,7 +1660,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                     ))}
                   </div>
                 </div>
-                <p style={{ marginTop: '1.5rem', fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.40 0.010 260)', textAlign: 'center' }}>V-OP Flash requires a connected V-OP OBD device and an active PPEI account.</p>
+                <p style={{ marginTop: '1.5rem', fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)', textAlign: 'center' }}>V-OP Flash requires a connected V-OP OBD device and an active PPEI account.</p>
               </div>
             </div>
           </div>
@@ -1754,7 +1676,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
       <footer style={{ borderTop: `1px solid ${sColor.borderLight}`, marginTop: '3rem', padding: '1.5rem 0' }}>
         <div style={{ height: '2px', background: `linear-gradient(90deg, ${sColor.red} 0%, oklch(0.65 0.20 40) 40%, ${sColor.yellow} 60%, ${sColor.green} 80%, ${sColor.blue} 100%)`, marginBottom: '1rem' }} />
         <div className="container mx-auto px-4 text-center">
-          <p style={{ fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.12em', color: 'oklch(0.35 0.008 260)' }}>
+          <p style={{ fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.12em', color: 'oklch(0.55 0.008 260)' }}>
             PPEI CUSTOM TUNING · V-OP PRO · PPEI.COM
           </p>
         </div>
@@ -1766,8 +1688,18 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
   const handleLock = () => { localStorage.removeItem(STORAGE_KEY); setUnlocked(false); };
-  if (!unlocked) return <AccessGate onUnlock={() => setUnlocked(true)} />;
+
+  // Clear stale localStorage if user is not authenticated
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated && localStorage.getItem(STORAGE_KEY) === 'true') {
+      localStorage.removeItem(STORAGE_KEY);
+      setUnlocked(false);
+    }
+  }, [authLoading, isAuthenticated]);
+
+  if (!unlocked || !isAuthenticated) return <AccessGate onUnlock={() => setUnlocked(true)} />;
   return <AdvancedDashboard onLock={handleLock} />;
 }

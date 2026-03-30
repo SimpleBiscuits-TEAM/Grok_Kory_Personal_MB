@@ -21,7 +21,7 @@ function VinRow({ label, value }: { label: string; value: string }) {
       padding: '6px 0',
       borderBottom: '1px solid oklch(0.20 0.006 260)'
     }}>
-      <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.50 0.010 260)', width: '160px', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.63 0.010 260)', width: '160px', flexShrink: 0 }}>{label}</span>
       <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.75rem', color: 'oklch(0.80 0.010 260)', textAlign: 'right' }}>{value}</span>
     </div>
   );
@@ -57,7 +57,7 @@ export default function HealthReport({ report }: HealthReportProps) {
         }}>
           {/* Header banner */}
           <div style={{
-            background: 'linear-gradient(135deg, oklch(0.10 0.005 260) 0%, oklch(0.16 0.010 260) 100%)',
+            background: 'linear-gradient(135deg, oklch(0.10 0.005 260) 0%, oklch(0.36 0.010 260) 100%)',
             borderBottom: '1px solid oklch(0.22 0.008 260)',
             padding: '1rem 1.25rem',
             display: 'flex',
@@ -80,13 +80,13 @@ export default function HealthReport({ report }: HealthReportProps) {
                   letterSpacing: '0.06em',
                   color: 'white'
                 }}>{v.year} {v.make} {v.model}</div>
-                <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)' }}>
+                <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.68 0.010 260)' }}>
                   {v.series} · {v.trim} · {v.bodyStyle}
                 </div>
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.45 0.010 260)', letterSpacing: '0.08em', marginBottom: '4px' }}>VIN</div>
+              <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.60 0.010 260)', letterSpacing: '0.08em', marginBottom: '4px' }}>VIN</div>
               <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.85rem', color: 'oklch(0.70 0.18 200)', letterSpacing: '0.12em' }}>{v.vin}</div>
               {v.nhtsaVerified ? (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '6px', padding: '2px 8px', background: 'oklch(0.65 0.20 145 / 0.15)', border: '1px solid oklch(0.65 0.20 145 / 0.4)', borderRadius: '3px' }}>
@@ -107,7 +107,7 @@ export default function HealthReport({ report }: HealthReportProps) {
             <div style={{ padding: '1rem', borderRight: '1px solid oklch(0.20 0.006 260)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <Zap style={{ width: '14px', height: '14px', color: 'oklch(0.52 0.22 25)' }} />
-                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.50 0.010 260)' }}>ENGINE & DRIVETRAIN</span>
+                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.63 0.010 260)' }}>ENGINE & DRIVETRAIN</span>
               </div>
               <VinRow label="Engine" value={v.engine} />
               <VinRow label="Engine Code" value={v.engineCode} />
@@ -127,7 +127,7 @@ export default function HealthReport({ report }: HealthReportProps) {
             <div style={{ padding: '1rem', borderRight: '1px solid oklch(0.20 0.006 260)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <Fuel style={{ width: '14px', height: '14px', color: 'oklch(0.75 0.18 40)' }} />
-                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.50 0.010 260)' }}>PERFORMANCE & CAPACITIES</span>
+                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.63 0.010 260)' }}>PERFORMANCE & CAPACITIES</span>
               </div>
               <VinRow label="Factory Horsepower" value={`${v.factoryHp} HP @ ${v.peakHpRpm} RPM`} />
               <VinRow label="Factory Torque" value={`${v.factoryTorque} lb·ft @ ${v.peakTorqueRpm} RPM`} />
@@ -145,7 +145,7 @@ export default function HealthReport({ report }: HealthReportProps) {
             <div style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <Hash style={{ width: '14px', height: '14px', color: 'oklch(0.70 0.18 200)' }} />
-                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.50 0.010 260)' }}>VIN POSITION BREAKDOWN</span>
+                <span style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.1em', color: 'oklch(0.63 0.010 260)' }}>VIN POSITION BREAKDOWN</span>
               </div>
               <div style={{
                 background: 'oklch(0.10 0.005 260)',
@@ -154,7 +154,7 @@ export default function HealthReport({ report }: HealthReportProps) {
                 padding: '8px 10px',
                 marginBottom: '10px'
               }}>
-                <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.45 0.010 260)', marginBottom: '4px' }}>World Manufacturer Identifier (WMI)</div>
+                <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.7rem', color: 'oklch(0.60 0.010 260)', marginBottom: '4px' }}>World Manufacturer Identifier (WMI)</div>
                 <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.9rem', color: 'oklch(0.70 0.18 200)', fontWeight: 'bold' }}>{v.wmi}</div>
                 <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.60 0.010 260)' }}>{v.manufacturer}</div>
               </div>
@@ -171,8 +171,8 @@ export default function HealthReport({ report }: HealthReportProps) {
               <VinRow label="Pos 11 — Plant" value={v.pos11_plant} />
               <VinRow label="Pos 12–17 — Sequence" value={v.pos12_17_sequence} />
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid oklch(0.20 0.006 260)' }}>
-                <MapPin style={{ width: '12px', height: '12px', color: 'oklch(0.45 0.010 260)' }} />
-                <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)' }}>Assembly Plant: {v.plant}</span>
+                <MapPin style={{ width: '12px', height: '12px', color: 'oklch(0.60 0.010 260)' }} />
+                <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.60 0.010 260)' }}>Assembly Plant: {v.plant}</span>
               </div>
             </div>
           </div>
@@ -225,7 +225,7 @@ export default function HealthReport({ report }: HealthReportProps) {
               {report.overallStatus === 'fair' && 'Service recommended. Address findings before next heavy use.'}
               {report.overallStatus === 'poor' && 'Immediate service required. Do not operate under heavy load.'}
             </p>
-            <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.40 0.008 260)', margin: 0, marginTop: '4px' }}>
+            <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.58 0.008 260)', margin: 0, marginTop: '4px' }}>
               {report.timestamp.toLocaleString()}
             </p>
           </div>
@@ -237,7 +237,7 @@ export default function HealthReport({ report }: HealthReportProps) {
             color: scoreColor(report.overallScore),
             lineHeight: 1
           }}>{report.overallScore}</div>
-          <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)' }}>/ 100</div>
+          <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.60 0.010 260)' }}>/ 100</div>
         </div>
       </div>
 
@@ -316,7 +316,7 @@ export default function HealthReport({ report }: HealthReportProps) {
               {report.diagnosticSummary.detectedCodes.length} AREA{report.diagnosticSummary.detectedCodes.length > 1 ? 'S' : ''} DETECTED
             </div>
           </div>
-          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', marginBottom: '1rem' }}>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.68 0.010 260)', marginBottom: '1rem' }}>
             The following conditions were analyzed in the datalog. Review the Fault Zone Analysis charts for detailed visualization.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
@@ -402,8 +402,8 @@ function SystemCard({ icon, title, children }: { icon: React.ReactNode; title: s
           flex: 1,
         }}>{title}</h4>
         {expanded
-          ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.010 260)', transition: 'transform 0.15s' }} />
-          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.010 260)', transition: 'transform 0.15s' }} />
+          ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.60 0.010 260)', transition: 'transform 0.15s' }} />
+          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.60 0.010 260)', transition: 'transform 0.15s' }} />
         }
       </div>
       {expanded && children}
@@ -414,7 +414,7 @@ function SystemCard({ icon, title, children }: { icon: React.ReactNode; title: s
 function FindingsList({ findings }: { findings: string[] }) {
   return (
     <div style={{ borderTop: '1px solid oklch(0.20 0.006 260)', paddingTop: '0.75rem' }}>
-      <div style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.08em', color: 'oklch(0.45 0.010 260)', marginBottom: '6px' }}>FINDINGS:</div>
+      <div style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.08em', color: 'oklch(0.60 0.010 260)', marginBottom: '6px' }}>FINDINGS:</div>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {findings.map((f, i) => (
           <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)' }}>
@@ -444,7 +444,7 @@ function SystemScoreCard({ title, score, status }: { title: string; score: numbe
         lineHeight: 1
       }}>{score}</div>
       <div style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.8rem', letterSpacing: '0.08em', color: 'oklch(0.65 0.010 260)', marginTop: '4px' }}>{title}</div>
-      <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', marginTop: '2px' }}>{status}</div>
+      <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.60 0.010 260)', marginTop: '2px' }}>{status}</div>
     </div>
   );
 }
@@ -456,7 +456,7 @@ function StatusItem({ label, status }: { label: string; status: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
       {isNotLogged ? (
-        <span style={{ width: '16px', height: '16px', flexShrink: 0, color: 'oklch(0.40 0.008 260)', fontSize: '0.85rem', fontWeight: 'bold' }}>—</span>
+        <span style={{ width: '16px', height: '16px', flexShrink: 0, color: 'oklch(0.58 0.008 260)', fontSize: '0.85rem', fontWeight: 'bold' }}>—</span>
       ) : isGood ? (
         <CheckCircle style={{ width: '16px', height: '16px', color: 'oklch(0.65 0.20 145)', flexShrink: 0, marginTop: '2px' }} />
       ) : isWarn ? (
@@ -465,8 +465,8 @@ function StatusItem({ label, status }: { label: string; status: string }) {
         <AlertCircle style={{ width: '16px', height: '16px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />
       )}
       <div>
-        <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', fontWeight: 600, color: isNotLogged ? 'oklch(0.40 0.008 260)' : 'oklch(0.80 0.010 260)' }}>{label}</div>
-        <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: isNotLogged ? 'oklch(0.35 0.008 260)' : 'oklch(0.55 0.010 260)' }}>{status}</div>
+        <div style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', fontWeight: 600, color: isNotLogged ? 'oklch(0.58 0.008 260)' : 'oklch(0.80 0.010 260)' }}>{label}</div>
+        <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: isNotLogged ? 'oklch(0.55 0.008 260)' : 'oklch(0.68 0.010 260)' }}>{status}</div>
       </div>
     </div>
   );

@@ -366,7 +366,7 @@ export default function Fleet() {
                         fontSize: '0.65rem',
                         padding: '2px 8px',
                         borderRadius: '2px',
-                        background: v.status === 'active' ? 'oklch(0.25 0.08 145)' : 'oklch(0.25 0.08 60)',
+                        background: v.status === 'active' ? 'oklch(0.25 0.08 145)' : 'oklch(0.45 0.08 60)',
                         color: v.status === 'active' ? sColor.green : sColor.amber,
                         letterSpacing: '0.05em',
                       }}>
@@ -460,7 +460,7 @@ export default function Fleet() {
                         fontSize: '0.6rem',
                         padding: '2px 6px',
                         borderRadius: '2px',
-                        background: a.severity === 'critical' ? 'oklch(0.25 0.08 25)' : 'oklch(0.25 0.08 60)',
+                        background: a.severity === 'critical' ? 'oklch(0.25 0.08 25)' : 'oklch(0.45 0.08 60)',
                         color: a.severity === 'critical' ? sColor.red : sColor.amber,
                       }}>
                         {a.severity?.toUpperCase()}

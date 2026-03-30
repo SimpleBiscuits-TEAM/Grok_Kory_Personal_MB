@@ -149,7 +149,7 @@ export default function DragRacing() {
 
       {/* Hero Banner */}
       <div style={{
-        background: 'linear-gradient(135deg, oklch(0.12 0.02 25) 0%, oklch(0.08 0.004 260) 100%)',
+        background: 'linear-gradient(135deg, oklch(0.12 0.02 25) 0%, oklch(0.28 0.004 260) 100%)',
         borderBottom: `1px solid ${sColor.border}`,
         padding: '2rem 0',
       }}>
@@ -253,7 +253,7 @@ export default function DragRacing() {
                     <div className="flex items-center gap-4">
                       <div style={{
                         width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        background: idx === 0 ? 'oklch(0.30 0.12 80)' : idx === 1 ? 'oklch(0.25 0.04 260)' : idx === 2 ? 'oklch(0.25 0.08 50)' : 'oklch(0.16 0.006 260)',
+                        background: idx === 0 ? 'oklch(0.30 0.12 80)' : idx === 1 ? 'oklch(0.45 0.04 260)' : idx === 2 ? 'oklch(0.45 0.08 50)' : 'oklch(0.36 0.006 260)',
                         borderRadius: '2px',
                         fontFamily: sFont.heading, fontSize: '1.3rem',
                         color: idx === 0 ? sColor.gold : idx === 1 ? 'oklch(0.80 0.005 260)' : idx === 2 ? 'oklch(0.70 0.12 50)' : sColor.textDim,
@@ -612,7 +612,7 @@ export default function DragRacing() {
                           <span style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white' }}>{l.name}</span>
                           <span style={{
                             fontFamily: sFont.mono, fontSize: '0.6rem', padding: '1px 6px', borderRadius: '2px',
-                            background: l.status === 'setup' ? 'oklch(0.25 0.08 145)' : l.status === 'active' ? 'oklch(0.25 0.08 25)' : 'oklch(0.25 0.04 260)',
+                            background: l.status === 'setup' ? 'oklch(0.25 0.08 145)' : l.status === 'active' ? 'oklch(0.45 0.08 25)' : 'oklch(0.45 0.04 260)',
                             color: l.status === 'setup' ? sColor.green : l.status === 'active' ? sColor.red : sColor.textDim,
                           }}>
                             {l.status?.toUpperCase()}
@@ -699,7 +699,7 @@ export default function DragRacing() {
                       </span>
                       <span style={{
                         fontFamily: sFont.mono, fontSize: '0.6rem', padding: '2px 8px', borderRadius: '2px',
-                        background: bracketQuery.data.season.status === 'playoffs' ? 'oklch(0.25 0.08 25)' : 'oklch(0.20 0.04 260)',
+                        background: bracketQuery.data.season.status === 'playoffs' ? 'oklch(0.45 0.08 25)' : 'oklch(0.40 0.04 260)',
                         color: bracketQuery.data.season.status === 'playoffs' ? sColor.red : sColor.textDim,
                       }}>
                         {bracketQuery.data.season.status?.toUpperCase()}
@@ -715,7 +715,7 @@ export default function DragRacing() {
                         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
                           {/* Seed 1 */}
                           <div className="ppei-card p-3" style={{
-                            background: match.winnerId === match.seed1?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.12 0.005 260)',
+                            background: match.winnerId === match.seed1?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.32 0.005 260)',
                             border: `1px solid ${match.winnerId === match.seed1?.profileId ? sColor.green : sColor.border}`,
                             borderRadius: '2px',
                           }}>
@@ -739,7 +739,7 @@ export default function DragRacing() {
                           <span style={{ fontFamily: sFont.heading, fontSize: '1rem', color: sColor.red }}>VS</span>
                           {/* Seed 2 */}
                           <div className="ppei-card p-3" style={{
-                            background: match.winnerId === match.seed2?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.12 0.005 260)',
+                            background: match.winnerId === match.seed2?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.32 0.005 260)',
                             border: `1px solid ${match.winnerId === match.seed2?.profileId ? sColor.green : sColor.border}`,
                             borderRadius: '2px',
                           }}>
@@ -880,8 +880,8 @@ export default function DragRacing() {
                           display: 'inline-flex', alignItems: 'center', gap: '6px',
                           padding: '6px 12px', borderRadius: '2px',
                           background: badge.type === 'league_champion'
-                            ? 'linear-gradient(135deg, oklch(0.20 0.08 80), oklch(0.15 0.04 80))'
-                            : 'linear-gradient(135deg, oklch(0.20 0.06 25), oklch(0.14 0.03 25))',
+                            ? 'linear-gradient(135deg, oklch(0.40 0.08 80), oklch(0.35 0.04 80))'
+                            : 'linear-gradient(135deg, oklch(0.40 0.06 25), oklch(0.34 0.03 25))',
                           border: `1px solid ${badge.type === 'league_champion' ? sColor.gold : sColor.red}`,
                         }}>
                           {badge.type === 'league_champion'
@@ -923,7 +923,7 @@ export default function DragRacing() {
         {/* Pricing Banner */}
         <div className="mt-12 mb-6">
           <Card className="ppei-card p-6" style={{
-            background: 'linear-gradient(135deg, oklch(0.12 0.02 25) 0%, oklch(0.10 0.005 260) 50%, oklch(0.12 0.02 55) 100%)',
+            background: 'linear-gradient(135deg, oklch(0.12 0.02 25) 0%, oklch(0.30 0.005 260) 50%, oklch(0.32 0.02 55) 100%)',
             border: `1px solid ${sColor.border}`,
           }}>
             <div className="text-center mb-6">

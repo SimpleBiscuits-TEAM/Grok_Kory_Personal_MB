@@ -10,9 +10,9 @@ import { Upload, Cpu, FileDown, Loader2, CheckCircle, AlertCircle, Zap, Database
 const sFont = { heading: '"Bebas Neue", "Impact", sans-serif', body: '"Rajdhani", sans-serif', mono: '"Share Tech Mono", monospace' };
 const sColor = {
   red: 'oklch(0.52 0.22 25)', blue: 'oklch(0.55 0.20 260)', green: 'oklch(0.55 0.20 145)',
-  yellow: 'oklch(0.70 0.18 85)', bgDark: 'oklch(0.10 0.005 260)', bgCard: 'oklch(0.13 0.006 260)',
-  bgInput: 'oklch(0.11 0.005 260)', border: 'oklch(0.20 0.010 260)', borderLight: 'oklch(0.25 0.010 260)',
-  textDim: 'oklch(0.55 0.010 260)', textMuted: 'oklch(0.40 0.010 260)',
+  yellow: 'oklch(0.70 0.18 85)', bgDark: 'oklch(0.30 0.005 260)', bgCard: 'oklch(0.33 0.006 260)',
+  bgInput: 'oklch(0.31 0.005 260)', border: 'oklch(0.20 0.010 260)', borderLight: 'oklch(0.25 0.010 260)',
+  textDim: 'oklch(0.68 0.010 260)', textMuted: 'oklch(0.55 0.010 260)',
 };
 
 type PipelineStep = 'idle' | 'uploading' | 'detecting' | 'discovering' | 'generating' | 'validating' | 'complete' | 'error';

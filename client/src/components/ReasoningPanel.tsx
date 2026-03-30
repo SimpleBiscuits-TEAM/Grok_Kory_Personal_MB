@@ -56,7 +56,7 @@ const typeBorderColors: Record<string, string> = {
   fault: 'oklch(0.52 0.22 25)',
   warning: 'oklch(0.75 0.18 60)',
   improvement: 'oklch(0.70 0.18 200)',
-  info: 'oklch(0.45 0.010 260)',
+  info: 'oklch(0.60 0.010 260)',
 };
 
 const confidenceBadge: Record<string, { bg: string; text: string; label: string }> = {
@@ -139,8 +139,8 @@ function FindingCard({ finding }: { finding: ReasoningFinding }) {
           </div>
         </div>
         {expanded
-          ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.008 260)', flexShrink: 0 }} />
-          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.45 0.008 260)', flexShrink: 0 }} />
+          ? <ChevronDown style={{ width: '14px', height: '14px', color: 'oklch(0.60 0.008 260)', flexShrink: 0 }} />
+          : <ChevronRight style={{ width: '14px', height: '14px', color: 'oklch(0.60 0.008 260)', flexShrink: 0 }} />
         }
       </button>
 
@@ -169,13 +169,13 @@ function FindingCard({ finding }: { finding: ReasoningFinding }) {
               <p style={{
                 fontFamily: '"Share Tech Mono", monospace',
                 fontSize: '0.65rem',
-                color: 'oklch(0.50 0.010 260)',
+                color: 'oklch(0.63 0.010 260)',
                 letterSpacing: '0.08em',
                 margin: '0 0 6px 0',
               }}>EVIDENCE CHAIN</p>
               {finding.evidence.map((e, i) => (
                 <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '3px' }}>
-                  <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.45 0.010 260)', flexShrink: 0 }}>▸</span>
+                  <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.60 0.010 260)', flexShrink: 0 }}>▸</span>
                   <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.5 }}>{e}</span>
                 </div>
               ))}
@@ -253,7 +253,7 @@ function FindingCard({ finding }: { finding: ReasoningFinding }) {
               <p style={{
                 fontFamily: '"Share Tech Mono", monospace',
                 fontSize: '0.65rem',
-                color: 'oklch(0.55 0.10 280)',
+                color: 'oklch(0.68 0.10 280)',
                 margin: 0,
                 lineHeight: 1.5,
               }}>{finding.betaNote}</p>
@@ -316,8 +316,8 @@ function BetaImprovementCard({ improvement }: { improvement: BetaImprovement }) 
           </div>
         </div>
         {expanded
-          ? <ChevronDown style={{ width: '13px', height: '13px', color: 'oklch(0.40 0.008 260)', flexShrink: 0 }} />
-          : <ChevronRight style={{ width: '13px', height: '13px', color: 'oklch(0.40 0.008 260)', flexShrink: 0 }} />
+          ? <ChevronDown style={{ width: '13px', height: '13px', color: 'oklch(0.58 0.008 260)', flexShrink: 0 }} />
+          : <ChevronRight style={{ width: '13px', height: '13px', color: 'oklch(0.58 0.008 260)', flexShrink: 0 }} />
         }
       </button>
 
@@ -379,7 +379,7 @@ export function ReasoningPanel({ report }: ReasoningPanelProps) {
           <p style={{
             fontFamily: '"Share Tech Mono", monospace',
             fontSize: '0.65rem',
-            color: 'oklch(0.45 0.010 260)',
+            color: 'oklch(0.60 0.010 260)',
             margin: 0,
           }}>{report.engineVersion} — Context-Aware Analysis</p>
         </div>
@@ -516,8 +516,8 @@ export function ReasoningPanel({ report }: ReasoningPanelProps) {
               color: 'oklch(0.60 0.15 280)',
             }}>BETA IMPROVEMENT SUGGESTIONS ({report.betaImprovements.length})</span>
             {showBeta
-              ? <ChevronDown style={{ width: '13px', height: '13px', color: 'oklch(0.45 0.010 260)', marginLeft: 'auto' }} />
-              : <ChevronRight style={{ width: '13px', height: '13px', color: 'oklch(0.45 0.010 260)', marginLeft: 'auto' }} />
+              ? <ChevronDown style={{ width: '13px', height: '13px', color: 'oklch(0.60 0.010 260)', marginLeft: 'auto' }} />
+              : <ChevronRight style={{ width: '13px', height: '13px', color: 'oklch(0.60 0.010 260)', marginLeft: 'auto' }} />
             }
           </button>
 
@@ -526,7 +526,7 @@ export function ReasoningPanel({ report }: ReasoningPanelProps) {
               <p style={{
                 fontFamily: '"Share Tech Mono", monospace',
                 fontSize: '0.65rem',
-                color: 'oklch(0.45 0.010 260)',
+                color: 'oklch(0.60 0.010 260)',
                 margin: '0 0 4px 0',
                 lineHeight: 1.5,
               }}>
@@ -555,7 +555,7 @@ function ContextBadge({ label, value, color }: { label: string; value: string; c
       borderRadius: '2px',
       padding: '2px 8px',
     }}>
-      <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.60rem', color: 'oklch(0.40 0.008 260)', letterSpacing: '0.08em' }}>{label}:</span>
+      <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.60rem', color: 'oklch(0.58 0.008 260)', letterSpacing: '0.08em' }}>{label}:</span>
       <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.65rem', color, letterSpacing: '0.04em' }}>{value}</span>
     </div>
   );
@@ -575,7 +575,7 @@ function SectionHeader({ icon, label, count, color }: { icon: React.ReactNode; l
         fontFamily: '"Share Tech Mono", monospace',
         fontSize: '0.65rem',
         background: 'oklch(0.15 0.005 260)',
-        color: 'oklch(0.50 0.010 260)',
+        color: 'oklch(0.63 0.010 260)',
         padding: '1px 6px',
         borderRadius: '2px',
       }}>{count}</span>

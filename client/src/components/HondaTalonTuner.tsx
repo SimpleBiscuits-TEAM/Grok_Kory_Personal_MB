@@ -20,12 +20,12 @@ import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
 const sColor = {
   bg: '#0a0a0a',
-  card: 'oklch(0.13 0.006 260)',
+  card: 'oklch(0.33 0.006 260)',
   border: 'oklch(0.22 0.008 260)',
   red: 'oklch(0.52 0.22 25)',
   redBright: 'oklch(0.60 0.24 25)',
   text: 'white',
-  textDim: 'oklch(0.55 0.010 260)',
+  textDim: 'oklch(0.68 0.010 260)',
   textMid: 'oklch(0.70 0.010 260)',
   green: 'oklch(0.65 0.20 145)',
   yellow: 'oklch(0.80 0.18 90)',
@@ -336,7 +336,7 @@ function FuelMapCard({
                             cursor: 'pointer',
                             minWidth: '40px',
                             fontSize: '0.68rem',
-                            border: isEditing ? `2px solid ${sColor.redBright}` : '1px solid oklch(0.20 0.006 260)',
+                            border: isEditing ? `2px solid ${sColor.redBright}` : '1px solid oklch(0.40 0.006 260)',
                           }}
                         >
                           {isEditing ? (
@@ -479,9 +479,9 @@ function WP8DatalogViewer({ wp8Data }: { wp8Data: WP8ParseResult }) {
             key={ch.index}
             onClick={() => toggleChannel(ch.index)}
             style={{
-              background: selectedChannels.includes(ch.index) ? 'oklch(0.20 0.04 25)' : 'oklch(0.12 0.004 260)',
+              background: selectedChannels.includes(ch.index) ? 'oklch(0.20 0.04 25)' : 'oklch(0.32 0.004 260)',
               color: selectedChannels.includes(ch.index) ? sColor.redBright : sColor.textDim,
-              border: `1px solid ${selectedChannels.includes(ch.index) ? sColor.red : 'oklch(0.20 0.006 260)'}`,
+              border: `1px solid ${selectedChannels.includes(ch.index) ? sColor.red : 'oklch(0.40 0.006 260)'}`,
               borderRadius: '2px', padding: '2px 8px', cursor: 'pointer',
               fontFamily: sFont.mono, fontSize: '0.65rem',
             }}

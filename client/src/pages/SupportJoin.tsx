@@ -38,9 +38,9 @@ const sFont = {
 };
 const sColor = {
   bg: 'oklch(0.10 0.005 260)',
-  bgDark: 'oklch(0.08 0.004 260)',
-  bgCard: 'oklch(0.13 0.006 260)',
-  bgInput: 'oklch(0.10 0.005 260)',
+  bgDark: 'oklch(0.28 0.004 260)',
+  bgCard: 'oklch(0.33 0.006 260)',
+  bgInput: 'oklch(0.30 0.005 260)',
   border: 'oklch(0.22 0.008 260)',
   borderLight: 'oklch(0.18 0.006 260)',
   red: 'oklch(0.52 0.22 25)',
@@ -48,8 +48,8 @@ const sColor = {
   blue: 'oklch(0.70 0.18 200)',
   yellow: 'oklch(0.75 0.18 60)',
   text: 'oklch(0.95 0.005 260)',
-  textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)',
 };
 
 // ─── Types ──────────────────────────────────────────────────────────────────

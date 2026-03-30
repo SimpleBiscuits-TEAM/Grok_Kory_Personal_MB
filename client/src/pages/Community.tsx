@@ -156,7 +156,7 @@ export default function Community() {
 
       {/* Community Header */}
       <div style={{
-        background: 'linear-gradient(135deg, oklch(0.12 0.01 200) 0%, oklch(0.08 0.004 260) 100%)',
+        background: 'linear-gradient(135deg, oklch(0.12 0.01 200) 0%, oklch(0.28 0.004 260) 100%)',
         borderBottom: `1px solid ${sColor.border}`,
         padding: '1.5rem 0',
       }}>

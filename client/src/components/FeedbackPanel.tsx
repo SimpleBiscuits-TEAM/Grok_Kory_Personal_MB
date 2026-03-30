@@ -179,7 +179,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
             style={{
               background: 'transparent',
               border: 'none',
-              color: 'oklch(0.55 0.010 260)',
+              color: 'oklch(0.68 0.010 260)',
               cursor: 'pointer',
               padding: '4px',
               display: 'flex',
@@ -187,7 +187,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               transition: 'color 0.15s',
             }}
             onMouseEnter={e => (e.currentTarget.style.color = 'white')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.55 0.010 260)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
           >
             <X style={{ width: '18px', height: '18px' }} />
           </button>
@@ -211,7 +211,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 background: 'transparent',
                 border: 'none',
                 borderBottom: tab === t.id ? '2px solid oklch(0.52 0.22 25)' : '2px solid transparent',
-                color: tab === t.id ? 'white' : 'oklch(0.55 0.010 260)',
+                color: tab === t.id ? 'white' : 'oklch(0.68 0.010 260)',
                 fontFamily: '"Bebas Neue", "Impact", sans-serif',
                 fontSize: '0.95rem',
                 letterSpacing: '0.08em',
@@ -285,7 +285,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
           {/* Feedback Form */}
           {status !== 'success' && tab === 'feedback' && (
             <form onSubmit={handleFeedbackSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.68 0.010 260)', margin: 0 }}>
                 Help us improve. All feedback is reviewed directly by the team.
               </p>
 
@@ -326,10 +326,10 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                       style={{
                         width: '36px',
                         height: '36px',
-                        background: fbRating !== null && n <= fbRating ? 'oklch(0.75 0.18 40)' : 'oklch(0.16 0.008 260)',
-                        border: `1px solid ${fbRating !== null && n <= fbRating ? 'oklch(0.75 0.18 40)' : 'oklch(0.28 0.008 260)'}`,
+                        background: fbRating !== null && n <= fbRating ? 'oklch(0.75 0.18 40)' : 'oklch(0.36 0.008 260)',
+                        border: `1px solid ${fbRating !== null && n <= fbRating ? 'oklch(0.75 0.18 40)' : 'oklch(0.48 0.008 260)'}`,
                         borderRadius: '3px',
-                        color: fbRating !== null && n <= fbRating ? 'oklch(0.10 0.005 260)' : 'oklch(0.55 0.010 260)',
+                        color: fbRating !== null && n <= fbRating ? 'oklch(0.30 0.005 260)' : 'oklch(0.68 0.010 260)',
                         fontFamily: '"Bebas Neue", sans-serif',
                         fontSize: '1rem',
                         cursor: 'pointer',
@@ -389,7 +389,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
           {/* Error Report Form */}
           {status !== 'success' && tab === 'error' && (
             <form onSubmit={handleErrorSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.68 0.010 260)', margin: 0 }}>
                 Found a bug or incorrect result? Report it here and we'll investigate.
               </p>
 
@@ -448,7 +448,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                     position: 'absolute', right: '10px', top: '50%',
                     transform: 'translateY(-50%)',
                     width: '14px', height: '14px',
-                    color: 'oklch(0.55 0.010 260)',
+                    color: 'oklch(0.68 0.010 260)',
                     pointerEvents: 'none',
                   }} />
                 </div>
@@ -487,7 +487,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   padding: '0.6rem 0.75rem',
                   fontFamily: '"Share Tech Mono", monospace',
                   fontSize: '0.75rem',
-                  color: 'oklch(0.50 0.010 260)',
+                  color: 'oklch(0.63 0.010 260)',
                 }}>
                   Context auto-attached: {context}
                 </div>
@@ -497,7 +497,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                 type="submit"
                 disabled={status === 'sending' || !errType || !errDescription.trim()}
                 style={{
-                  background: status === 'sending' || !errType || !errDescription.trim() ? 'oklch(0.30 0.010 260)' : 'oklch(0.52 0.22 25)',
+                  background: status === 'sending' || !errType || !errDescription.trim() ? 'oklch(0.50 0.010 260)' : 'oklch(0.52 0.22 25)',
                   color: 'white',
                   fontFamily: '"Bebas Neue", "Impact", sans-serif',
                   fontSize: '1rem',

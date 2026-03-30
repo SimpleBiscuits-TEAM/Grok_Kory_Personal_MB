@@ -29,13 +29,13 @@ const sFont = {
 
 const sColor = {
   bg: 'oklch(0.10 0.005 260)',
-  bgCard: 'oklch(0.13 0.006 260)',
-  bgHover: 'oklch(0.16 0.008 260)',
+  bgCard: 'oklch(0.33 0.006 260)',
+  bgHover: 'oklch(0.36 0.008 260)',
   border: 'oklch(0.22 0.008 260)',
   red: 'oklch(0.52 0.22 25)',
   text: 'oklch(0.95 0.005 260)',
-  textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)',
   green: 'oklch(0.65 0.20 145)',
   blue: 'oklch(0.70 0.18 200)',
   yellow: 'oklch(0.75 0.18 60)',

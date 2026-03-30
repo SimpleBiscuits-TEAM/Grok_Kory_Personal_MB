@@ -330,7 +330,7 @@ export function StatsSummary({ data }: ChartProps) {
             fontFamily: '"Bebas Neue", "Impact", sans-serif',
             fontSize: '0.72rem',
             letterSpacing: '0.1em',
-            color: 'oklch(0.50 0.010 260)',
+            color: 'oklch(0.63 0.010 260)',
             margin: 0,
             marginBottom: '6px'
           }}>{card.label}</p>
@@ -347,7 +347,7 @@ export function StatsSummary({ data }: ChartProps) {
           <p style={{
             fontFamily: '"Share Tech Mono", monospace',
             fontSize: '0.7rem',
-            color: 'oklch(0.45 0.008 260)',
+            color: 'oklch(0.60 0.008 260)',
             margin: 0,
             marginTop: '4px'
           }}>{card.sub}</p>

@@ -45,8 +45,8 @@ const sColor = {
   border: 'oklch(0.22 0.008 260)', borderLight: 'oklch(0.18 0.006 260)',
   red: 'oklch(0.52 0.22 25)', green: 'oklch(0.65 0.20 145)', blue: 'oklch(0.70 0.18 200)',
   yellow: 'oklch(0.75 0.18 60)', orange: 'oklch(0.65 0.20 55)',
-  text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)', purple: 'oklch(0.60 0.20 300)',
+  text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)', purple: 'oklch(0.60 0.20 300)',
 };
 
 // ─── Gauge Component ───────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ function CustomPresetDialog({
                   style={{
                     padding: '4px 8px', borderRadius: '3px',
                     fontFamily: sFont.mono, fontSize: '0.65rem',
-                    background: pidSource === src ? (src === 'mode22' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
+                    background: pidSource === src ? (src === 'mode22' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.40 0.01 260)') : 'transparent',
                     border: `1px solid ${pidSource === src ? (src === 'mode22' ? sColor.orange : sColor.red) : sColor.border}`,
                     color: pidSource === src ? sColor.text : sColor.textDim,
                     cursor: 'pointer',
@@ -511,7 +511,7 @@ function PIDSelector({
             style={{
               flex: 1, padding: '4px 6px', borderRadius: '3px',
               fontFamily: sFont.mono, fontSize: '0.6rem', letterSpacing: '0.05em',
-              background: pidSource === src ? (src === 'extended' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.20 0.01 260)') : 'transparent',
+              background: pidSource === src ? (src === 'extended' ? 'oklch(0.20 0.02 55 / 0.5)' : 'oklch(0.40 0.01 260)') : 'transparent',
               border: `1px solid ${pidSource === src ? (src === 'extended' ? sColor.orange : sColor.red) : sColor.borderLight}`,
               color: pidSource === src ? sColor.text : sColor.textMuted,
               cursor: 'pointer',
@@ -1710,8 +1710,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                           {dtc.severity && (
                             <span style={{
                               fontFamily: sFont.mono, fontSize: '0.55rem', padding: '1px 6px',
-                              background: dtc.severity === 'critical' ? 'oklch(0.18 0.05 25)' : dtc.severity === 'warning' ? 'oklch(0.18 0.04 55)' : 'oklch(0.15 0.01 260)',
-                              border: `1px solid ${dtc.severity === 'critical' ? 'oklch(0.35 0.10 25)' : dtc.severity === 'warning' ? 'oklch(0.35 0.08 55)' : sColor.border}`,
+                              background: dtc.severity === 'critical' ? 'oklch(0.18 0.05 25)' : dtc.severity === 'warning' ? 'oklch(0.38 0.04 55)' : 'oklch(0.35 0.01 260)',
+                              border: `1px solid ${dtc.severity === 'critical' ? 'oklch(0.35 0.10 25)' : dtc.severity === 'warning' ? 'oklch(0.55 0.08 55)' : sColor.border}`,
                               borderRadius: '2px', color: dtc.severity === 'critical' ? sColor.red : dtc.severity === 'warning' ? sColor.yellow : sColor.textDim,
                               textTransform: 'uppercase',
                             }}>
@@ -1901,7 +1901,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       padding: '2px 6px', borderRadius: '2px',
                       background: (r.pid.service ?? 0x01) === 0x22 ? 'oklch(0.15 0.02 55 / 0.4)' : 'oklch(0.15 0.01 145 / 0.4)',
                       color: (r.pid.service ?? 0x01) === 0x22 ? sColor.orange : sColor.green,
-                      border: `1px solid ${(r.pid.service ?? 0x01) === 0x22 ? 'oklch(0.30 0.10 55)' : 'oklch(0.30 0.10 145)'}`,
+                      border: `1px solid ${(r.pid.service ?? 0x01) === 0x22 ? 'oklch(0.30 0.10 55)' : 'oklch(0.50 0.10 145)'}`,
                     }}>
                       {r.pid.shortName}
                       {r.sampleValue !== undefined && (
@@ -2154,7 +2154,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                   style={{
                     flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
                     borderRadius: '3px 0 0 3px', cursor: 'pointer',
-                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.08 0.005 260)',
+                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
                     fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
                     color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
                   }}
@@ -2167,7 +2167,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                   style={{
                     flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
                     borderRadius: '0 3px 3px 0', cursor: 'pointer',
-                    background: adapterType === 'pcan' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.08 0.005 260)',
+                    background: adapterType === 'pcan' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.28 0.005 260)',
                     fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
                     color: adapterType === 'pcan' ? sColor.orange : sColor.textDim,
                   }}
@@ -2229,7 +2229,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                   <div style={{ maxWidth: '520px', margin: '16px auto 0' }}>
                     <div style={{
                       padding: '12px 16px', borderRadius: '3px', textAlign: 'left',
-                      background: bridgeAvailable === true ? 'oklch(0.12 0.03 145 / 0.3)' : bridgeAvailable === false ? 'oklch(0.12 0.04 25 / 0.3)' : 'oklch(0.10 0.005 260)',
+                      background: bridgeAvailable === true ? 'oklch(0.12 0.03 145 / 0.3)' : bridgeAvailable === false ? 'oklch(0.12 0.04 25 / 0.3)' : 'oklch(0.30 0.005 260)',
                       border: `1px solid ${bridgeAvailable === true ? 'oklch(0.30 0.10 145)' : bridgeAvailable === false ? 'oklch(0.30 0.12 25)' : sColor.border}`,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

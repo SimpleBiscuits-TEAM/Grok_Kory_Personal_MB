@@ -40,7 +40,7 @@ export default function BarGauge({
         onDrop={onDrop}
         style={{
           width: '100%', height: '64px',
-          border: `1px dashed ${isDragOver ? 'oklch(0.65 0.18 220)' : 'oklch(0.25 0.008 260)'}`,
+          border: `1px dashed ${isDragOver ? 'oklch(0.65 0.18 220)' : 'oklch(0.45 0.008 260)'}`,
           borderRadius: '4px',
           background: isDragOver ? 'oklch(0.12 0.02 220 / 0.3)' : 'oklch(0.08 0.004 260)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -49,7 +49,7 @@ export default function BarGauge({
       >
         <span style={{
           fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem',
-          color: 'oklch(0.35 0.008 260)', letterSpacing: '0.1em',
+          color: 'oklch(0.55 0.008 260)', letterSpacing: '0.1em',
         }}>
           {isDragOver ? 'DROP PID' : '+ ADD PID'}
         </span>
@@ -81,7 +81,7 @@ export default function BarGauge({
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
         <span style={{
           fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.7rem',
-          color: 'oklch(0.55 0.010 260)', letterSpacing: '0.1em',
+          color: 'oklch(0.68 0.010 260)', letterSpacing: '0.1em',
         }}>
           {pid.shortName}
         </span>
@@ -94,7 +94,7 @@ export default function BarGauge({
           </span>
           <span style={{
             fontFamily: '"Rajdhani", sans-serif', fontSize: '0.65rem',
-            color: 'oklch(0.45 0.008 260)',
+            color: 'oklch(0.60 0.008 260)',
           }}>
             {pid.unit}
           </span>
@@ -124,10 +124,10 @@ export default function BarGauge({
 
       {/* Min/Max labels */}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
-        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.5rem', color: 'oklch(0.35 0.006 260)' }}>
+        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.5rem', color: 'oklch(0.55 0.006 260)' }}>
           {min}
         </span>
-        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.5rem', color: 'oklch(0.35 0.006 260)' }}>
+        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.5rem', color: 'oklch(0.55 0.006 260)' }}>
           {max}
         </span>
       </div>

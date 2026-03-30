@@ -33,6 +33,16 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ limit: "100mb", extended: true }));
+
+  // Canonical domain redirect: ppei.ai → www.ppei.ai
+  app.use((req, res, next) => {
+    const host = req.hostname || req.headers.host?.split(':')[0] || '';
+    if (host === 'ppei.ai') {
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      return res.redirect(301, `${proto}://www.ppei.ai${req.originalUrl}`);
+    }
+    next();
+  });
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // tRPC API

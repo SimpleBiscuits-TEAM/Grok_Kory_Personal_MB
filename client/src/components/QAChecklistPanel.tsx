@@ -22,14 +22,14 @@ const sFont = {
 
 const sColor = {
   bg: 'oklch(0.10 0.005 260)',
-  bgCard: 'oklch(0.13 0.006 260)',
-  bgHover: 'oklch(0.16 0.008 260)',
+  bgCard: 'oklch(0.33 0.006 260)',
+  bgHover: 'oklch(0.36 0.008 260)',
   border: 'oklch(0.22 0.008 260)',
   borderLight: 'oklch(0.18 0.006 260)',
   red: 'oklch(0.52 0.22 25)',
   text: 'oklch(0.95 0.005 260)',
-  textDim: 'oklch(0.55 0.010 260)',
-  textMuted: 'oklch(0.45 0.008 260)',
+  textDim: 'oklch(0.68 0.010 260)',
+  textMuted: 'oklch(0.58 0.008 260)',
   green: 'oklch(0.65 0.20 145)',
   blue: 'oklch(0.70 0.18 200)',
   yellow: 'oklch(0.75 0.18 60)',
@@ -537,7 +537,7 @@ function AddItemDialog({ checklistId, onClose }: { checklistId: string; onClose:
                   onClick={() => setPriority(p)}
                   style={{
                     padding: '4px 12px', fontFamily: sFont.mono, fontSize: '0.72rem',
-                    background: priority === p ? `${priorityConfig[p].color}25` : 'oklch(0.11 0.005 260)',
+                    background: priority === p ? `${priorityConfig[p].color}25` : 'oklch(0.31 0.005 260)',
                     border: `1px solid ${priority === p ? priorityConfig[p].color : sColor.border}`,
                     borderRadius: '3px', cursor: 'pointer', color: priorityConfig[p].color,
                   }}
@@ -709,7 +709,7 @@ function ChecklistDetail({ checklistId, onBack }: { checklistId: string; onBack:
       <div>
         {filteredItems.length === 0 && (
           <div style={{ textAlign: 'center', padding: '2rem', background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
-            <ClipboardList style={{ width: 32, height: 32, color: 'oklch(0.25 0.008 260)', margin: '0 auto 8px' }} />
+            <ClipboardList style={{ width: 32, height: 32, color: 'oklch(0.45 0.008 260)', margin: '0 auto 8px' }} />
             <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted }}>No test items match the current filter</p>
           </div>
         )}
@@ -767,8 +767,8 @@ export default function QAChecklistPanel() {
 
       {!isLoading && (!checklists || checklists.length === 0) && (
         <div style={{ textAlign: 'center', padding: '3rem', background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
-          <ClipboardList style={{ width: 48, height: 48, color: 'oklch(0.25 0.008 260)', margin: '0 auto 16px' }} />
-          <p style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em', color: 'oklch(0.50 0.010 260)', marginBottom: '8px' }}>NO CHECKLISTS YET</p>
+          <ClipboardList style={{ width: 48, height: 48, color: 'oklch(0.45 0.008 260)', margin: '0 auto 16px' }} />
+          <p style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em', color: 'oklch(0.63 0.010 260)', marginBottom: '8px' }}>NO CHECKLISTS YET</p>
           <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textMuted, marginBottom: '16px' }}>
             Create a QA checklist to start tracking test results for the PPEI team.
           </p>

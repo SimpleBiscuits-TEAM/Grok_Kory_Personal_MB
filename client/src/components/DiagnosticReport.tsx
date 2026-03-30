@@ -42,7 +42,7 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
           <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
             {report.summary}
           </p>
-          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.45 0.008 260)', margin: 0, marginTop: '6px' }}>
+          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.60 0.008 260)', margin: 0, marginTop: '6px' }}>
             Generated: {report.timestamp.toLocaleString()}
           </p>
         </div>
@@ -217,7 +217,7 @@ function IssueCard({ issue }: IssueCardProps) {
             fontFamily: '"Bebas Neue", "Impact", sans-serif',
             fontSize: '0.75rem',
             letterSpacing: '0.08em',
-            color: 'oklch(0.50 0.010 260)',
+            color: 'oklch(0.63 0.010 260)',
             margin: 0,
             marginBottom: '4px'
           }}>RECOMMENDATION:</p>
