@@ -172,16 +172,19 @@ export default defineConfig({
     minify: 'terser',            // Use terser for aggressive minification
     terserOptions: {
       compress: {
-        drop_console: true,
-        drop_debugger: true,
-        passes: 2,
+        drop_console: true,      // Strip all console.* calls from production
+        drop_debugger: true,     // Strip debugger statements
+        passes: 2,               // Multiple compression passes
         pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.table'],
       },
       mangle: {
-        toplevel: true,
+        toplevel: true,          // Mangle top-level variable names
+        properties: {
+          regex: /^_/,           // Mangle properties starting with underscore
+        },
       },
       format: {
-        comments: false,
+        comments: false,         // Strip all comments
       },
     } as any,
     rollupOptions: {
