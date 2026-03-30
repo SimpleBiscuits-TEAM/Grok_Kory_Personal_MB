@@ -40,7 +40,11 @@ export const accessManagementRouter = router({
   }),
 
   // ── Public: Request access to Advanced ───────────────────────────────────
-  requestAccess: protectedProcedure.mutation(async ({ ctx }) => {
+  requestAccess: protectedProcedure
+    .input(z.object({
+      reason: z.string().min(10, 'Please provide at least a brief reason').max(2000).optional(),
+    }).optional())
+    .mutation(async ({ ctx, input }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
 
@@ -62,16 +66,20 @@ export const accessManagementRouter = router({
       return { status: 'already_pending' as const };
     }
 
-    // Set to pending
+    // Set to pending with reason
     await db.update(users)
-      .set({ advancedAccess: 'pending' })
+      .set({
+        advancedAccess: 'pending',
+        accessRequestReason: input?.reason || null,
+      })
       .where(eq(users.id, ctx.user.id));
 
     // Notify owner about new access request
     try {
+      const reasonText = input?.reason ? `\n\nReason: ${input.reason}` : '';
       await notifyOwner({
         title: `Access Request: ${ctx.user.name || ctx.user.email}`,
-        content: `${ctx.user.name || 'Unknown'} (${ctx.user.email || 'no email'}) has requested access to V-OP. Review in the User Management panel.`,
+        content: `${ctx.user.name || 'Unknown'} (${ctx.user.email || 'no email'}) has requested access to V-OP Pro.${reasonText}\n\nReview in the User Management panel.`,
       });
     } catch {
       console.warn('[Access] Owner notification failed, but request was saved');
@@ -130,6 +138,7 @@ export const accessManagementRouter = router({
         accessLevel: users.accessLevel,
         accessApprovedBy: users.accessApprovedBy,
         accessApprovedAt: users.accessApprovedAt,
+        accessRequestReason: users.accessRequestReason,
         createdAt: users.createdAt,
         lastSignedIn: users.lastSignedIn,
       })

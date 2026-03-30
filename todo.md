@@ -2316,3 +2316,21 @@
 - [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
 - [ ] Add PCAN as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
 - [ ] Add Flash tab to V-OP Pro with fun "we're cooking" placeholder
+- [ ] Add V-OP channel option to Service Procedures
+- [ ] Hook Service Procedures to OBD device connection (V-OP + existing adapters)
+- [ ] Add context/reason field to V-OP Pro access request form (who, why, vehicle info)
+- [ ] Display request details in admin approval panel so admin knows what they're approving
+- [x] Update access code from KingKONG to KINGKONG
+
+## Knox-Verified Universal Vehicle Protocol Intelligence
+- [ ] Build universal protocol intelligence layer (auto-detect ISO 15765 CAN, ISO 14229 UDS, J1939, ISO 9141, KWP2000)
+- [ ] Knox-verified manufacturer DID databases: GM, Ford, Ram/Chrysler, Toyota, Honda, BMW, Mercedes, Nissan, Hyundai/Kia
+- [ ] Knox-verified heavy-duty DID databases: Cummins, Duramax, Power Stroke, Detroit Diesel
+- [ ] Full UDS service support (0x10, 0x22, 0x2E, 0x27, 0x31, 0x14, 0x19) for all major platforms
+- [ ] Universal DTC read/clear: OBD-II (Mode 03/04/07/0A), UDS (0x19/0x14), J1939 (DM1/DM2/DM11)
+- [ ] Service procedure protocol awareness per vehicle make/model
+- [ ] Update datalogger to use protocol intelligence layer for auto-detection
+- [ ] Update DTC reader to use universal protocol layer
+- [ ] Update service procedures to use protocol-aware OBD connection
+- [ ] Write tests for protocol detection, DID databases, and UDS services
+- [x] Monica→Knox escalation: when Monica can't resolve a protocol/PID issue, she escalates to Knox internally and relays the answer

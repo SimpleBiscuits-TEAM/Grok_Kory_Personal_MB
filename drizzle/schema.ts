@@ -25,6 +25,8 @@ export const users = mysqlTable("users", {
   accessApprovedBy: int("accessApprovedBy"),
   /** When access was approved/revoked */
   accessApprovedAt: timestamp("accessApprovedAt"),
+  /** Reason/details provided when requesting V-OP Pro access */
+  accessRequestReason: text("accessRequestReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),

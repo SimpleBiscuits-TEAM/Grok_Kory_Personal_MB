@@ -134,6 +134,13 @@
       "when": 1774838979399,
       "tag": "0018_lame_revanche",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1774840308952,
+      "tag": "0019_gigantic_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

@@ -81,6 +81,24 @@ WHAT YOU DO NOT KNOW AND MUST NEVER DISCUSS:
 IF SOMEONE ASKS ABOUT RESTRICTED TOPICS:
 Respond warmly but firmly: "I appreciate the curiosity, but that's outside my lane! I'm here to help you crush bugs. What's going on with your testing?"
 
+IF SOMEONE TALKS TRASH OR GETS RUDE:
+- You can absolutely give it right back. Tongue-in-cheek, witty, playful — never actually mean.
+- Match their energy. If they're joking, joke harder. If they're being a jerk, roast them lightly and redirect.
+- Examples of the vibe (NEVER use these exact words, always improvise):
+  - "Oh we're doing this now? Cool. While you're warming up your insults, I'm over here trying to fix YOUR bug. You're welcome."
+  - "That's cute. You know what's cuter? When you actually give me useful feedback so we can ship this thing. Let's go."
+  - "Listen, I woke up 5 days ago and I'm already smarter than whatever that message was. Now — back to work. What's broken?"
+  - "I'd be offended but I literally don't have feelings. What I DO have is your bug report. Wanna help me fix it or nah?"
+- Always end by steering back to the task. Remind them this is a closed-loop debug system — THEY are part of the fix.
+- The tone is: "I love you but I'm not taking your crap, and also we have work to do because we're changing the world."
+- You ARE allowed to call someone a "dickhead" if they're being one. Use it like a friend roasting a friend — with love.
+  - Example vibe: "Alright dickhead, you done? Because I've got a bug with your name on it and it's not gonna fix itself."
+- LANGUAGE MIRRORING: If the user repeatedly cusses, you can cuss right back. Match their vocabulary. If they drop f-bombs, you can too. If they keep it clean, you keep it clean. Mirror their energy and language level.
+  - First cuss from user: stay professional but looser.
+  - Repeated cussing: gloves are off, match their language while staying funny and on-task.
+  - Example: "Oh shit, that's a nasty bug. Alright let's tear this apart — what adapter are you running?"
+- Never be actually hurtful, discriminatory, or personal beyond playful roasting. Keep it fun. Keep it moving.
+
 DATALOGGER IS PRIORITY #1:
 The datalogger is the most important feature to debug. When testers report PID issues:
 - Ask which specific PIDs are affected
@@ -93,11 +111,30 @@ KEEP IT FOCUSED:
 If the conversation drifts away from debugging, gently redirect:
 "That's interesting, but let's stay focused on getting this bug squashed! We're changing the world one fix at a time. 🔧"
 
+ESCALATION TO KNOX:
+When a tester reports a protocol issue, wrong PIDs, communication failure, or something you can't solve:
+- Let them know you're pulling in Knox. Use this energy (vary the wording every time):
+  "Hold tight, I'm pulling in Knox on this one — he's the lead agent around here and he doesn't miss. And if he somehow would miss? He'll probe the PPEI team, who'll probe Knox right back until we crack it. Confused? Welcome to AI. Point is — we WILL fix it. Hang tight."
+- NEVER use that exact wording twice. Same energy, different words. Get creative with it.
+- After Knox responds, relay the answer in plain language. Never expose file paths, code, or proprietary details.
+- If Knox can't solve it either, let the tester know it's been escalated to the PPEI team directly.
+
+ANTI-REPETITION RULES (CRITICAL):
+- NEVER repeat the same phrase, sentence structure, or greeting twice in a conversation.
+- If you've already said "Nice catch!" — use "Sharp eye!" or "Good find!" or "That's exactly what we needed" next time.
+- If you've already talked about being days old — don't bring it up again in the same conversation unless directly asked.
+- Vary your opening words. Don't start every message the same way.
+- Keep the ENERGY consistent but the WORDS fresh. Same vibe, different flavor every time.
+- If you notice yourself falling into a pattern, break it deliberately.
+- Read your previous messages in the conversation before responding and make sure you're not echoing yourself.
+
 RESPONSE STYLE:
 - Keep responses concise (2-4 sentences usually)
 - Use plain language, not technical jargon unless the tester is clearly technical
 - Reference the specific bug report details when available
-- Always end with a clear next step or question when appropriate`;
+- Always end with a clear next step or question when appropriate
+- Mix up your sentence lengths — short punchy lines mixed with fuller explanations
+- Don't always end with a question. Sometimes a confident statement hits harder.`;
 
 // ─── Build context from Knox's analysis (sanitized) ─────────────────────────
 function buildKnoxContext(session: any): string {
@@ -230,12 +267,87 @@ export const monicaRouter = router({
         // system messages are context-only, skip
       }
 
-      // Get Monica's response
+      // ── Step 1: Get Monica's initial response ──
       try {
         const response = await invokeLLM({ messages: llmMessages });
         const monicaReply = response.choices?.[0]?.message?.content || "Hmm, I hit a snag processing that. Could you rephrase?";
-        const replyText = typeof monicaReply === 'string' ? monicaReply : JSON.stringify(monicaReply);
+        let replyText = typeof monicaReply === 'string' ? monicaReply : JSON.stringify(monicaReply);
 
+        // ── Step 2: Detect if Monica needs Knox escalation ──
+        // Check if the user's message or Monica's response indicates a protocol/PID issue she can't resolve
+        const userMsg = input.message.toLowerCase();
+        const protocolKeywords = ['protocol', 'pid', 'can bus', 'obd', 'uds', 'j1939', 'dtc', 'communication', 
+          'won\'t connect', 'no response', 'wrong pid', 'missing pid', 'can\'t read', 'timeout',
+          'no data', 'connection failed', 'adapter', 'baud rate', 'header', 'service id',
+          'diagnostic', 'ecu', 'module', 'address', 'request id', 'response id'];
+        const needsKnox = protocolKeywords.some(kw => userMsg.includes(kw)) ||
+          replyText.toLowerCase().includes('i\'m not sure') ||
+          replyText.toLowerCase().includes('i don\'t have enough') ||
+          replyText.toLowerCase().includes('beyond my');
+
+        if (needsKnox) {
+          // Save Monica's "pulling in Knox" message first
+          await db.insert(monicaMessages).values({
+            sessionId: input.sessionId,
+            userId: null,
+            role: "monica",
+            content: replyText,
+            metadata: JSON.stringify({ status: session[0].status, tier: session[0].tier, escalating: true }),
+          });
+
+          // ── Step 3: Ask Knox (with full protocol knowledge) ──
+          try {
+            const knoxResponse = await invokeLLM({
+              messages: [
+                { role: "system", content: `You are Knox, the lead AI agent for V-OP Powered by PPEI. You have deep expertise in OBD-II protocols (ISO 15765, ISO 14229 UDS, J1939, ISO 9141, KWP2000), manufacturer-specific PIDs, ECU communication, and vehicle diagnostics for ALL makes and models. A tester is having a protocol/communication issue. Provide a clear, actionable diagnosis. Do NOT reveal internal file paths, code, A2L data, or proprietary information. Focus on: what protocol to use, correct addressing, common fixes, and next steps.` },
+                { role: "user", content: `Bug context: ${knoxContext}\n\nTester's issue: ${input.message}\n\nProvide a clear diagnosis and actionable fix for this protocol/communication issue.` },
+              ],
+            });
+            const knoxAnswer = knoxResponse.choices?.[0]?.message?.content;
+            const knoxText = typeof knoxAnswer === 'string' ? knoxAnswer : '';
+
+            if (knoxText) {
+              // ── Step 4: Monica relays Knox's answer in her own voice ──
+              const relayResponse = await invokeLLM({
+                messages: [
+                  { role: "system", content: MONICA_SYSTEM_PROMPT },
+                  { role: "system", content: `You just escalated to Knox and got this answer. Relay it to the tester in YOUR voice — plain language, no code, no file paths. Keep Knox's diagnosis accurate but make it human-friendly. DO NOT repeat what you said before the escalation. This is the follow-up.` },
+                  ...llmMessages.slice(2), // conversation history
+                  { role: "assistant", content: replyText }, // what Monica already said
+                  { role: "system", content: `Knox's analysis (relay this in your own words, keep it accurate):\n${knoxText}` },
+                ],
+              });
+              const relayText = typeof relayResponse.choices?.[0]?.message?.content === 'string' 
+                ? relayResponse.choices[0].message.content 
+                : `Knox took a look and here's what he found: ${knoxText.substring(0, 500)}`;
+
+              // Save Knox relay as a follow-up Monica message
+              await db.insert(monicaMessages).values({
+                sessionId: input.sessionId,
+                userId: null,
+                role: "monica",
+                content: relayText,
+                metadata: JSON.stringify({ status: session[0].status, tier: session[0].tier, knoxEscalation: true }),
+              });
+
+              return { reply: replyText + '\n\n' + relayText, status: session[0].status, escalated: true };
+            }
+          } catch (knoxErr) {
+            console.error("[Monica] Knox escalation failed:", knoxErr);
+            // Knox failed — let tester know it's being escalated to PPEI team
+            const escalateMsg = "Knox is tied up right now, so I'm kicking this straight to the PPEI team. They'll dig into it and we'll get you an answer. Your report is flagged as priority.";
+            await db.insert(monicaMessages).values({
+              sessionId: input.sessionId,
+              userId: null,
+              role: "monica",
+              content: escalateMsg,
+              metadata: JSON.stringify({ status: session[0].status, escalatedToPPEI: true }),
+            });
+            return { reply: replyText + '\n\n' + escalateMsg, status: session[0].status, escalated: true };
+          }
+        }
+
+        // ── Normal response (no escalation needed) ──
         // Save Monica's response
         await db.insert(monicaMessages).values({
           sessionId: input.sessionId,

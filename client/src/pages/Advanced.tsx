@@ -71,7 +71,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-const ACCESS_CODE = 'KingKONG';
+const ACCESS_CODE = 'KINGKONG';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ const sColor = {
 function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [code, setCode] = useState('');
+  const [requestReason, setRequestReason] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
@@ -195,12 +196,23 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
             </>
           ) : (
             <>
-              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                V-OP Pro requires approval from PPEI. Request access below or contact us directly.
+              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1rem' }}>
+                V-OP Pro requires approval from PPEI. Tell us a bit about yourself and what you're working on.
               </p>
+              <textarea
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                placeholder="Your name, shop/company, vehicle(s) you work on, and why you'd like V-OP Pro access..."
+                rows={4}
+                style={{
+                  width: '100%', background: 'oklch(0.15 0.006 260)', border: `1px solid ${sColor.border}`,
+                  borderRadius: '3px', padding: '10px 12px', color: 'white', fontFamily: sFont.body,
+                  fontSize: '0.85rem', resize: 'vertical', marginBottom: '1rem', outline: 'none',
+                }}
+              />
               <button
-                onClick={() => requestAccess.mutate()}
-                disabled={requestAccess.isPending}
+                onClick={() => requestAccess.mutate({ reason: requestReason || undefined })}
+                disabled={requestAccess.isPending || requestReason.trim().length < 10}
                 style={{
                   background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1rem',
                   letterSpacing: '0.1em', padding: '12px 32px', borderRadius: '3px', border: 'none',
@@ -1430,6 +1442,76 @@ function EditorGate() {
   );
 }
 
+// ─── Flash Placeholder ───────────────────────────────────────────────────
+
+function FlashPlaceholder() {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      height: 'calc(100vh - 250px)', textAlign: 'center', padding: '40px',
+    }}>
+      {/* Animated flame icon */}
+      <div style={{
+        width: 100, height: 100, borderRadius: '50%',
+        background: 'radial-gradient(circle, oklch(0.80 0.18 85 / 0.15), transparent 70%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: '24px', animation: 'pulse 2s ease-in-out infinite',
+      }}>
+        <Zap style={{ width: 52, height: 52, color: 'oklch(0.80 0.18 85)' }} />
+      </div>
+
+      <div style={{
+        fontFamily: "'Bebas Neue', sans-serif", fontSize: '2rem',
+        letterSpacing: '0.15em', color: 'oklch(0.80 0.18 85)',
+        marginBottom: '12px',
+      }}>
+        FLASH
+      </div>
+
+      <div style={{
+        fontFamily: "'Rajdhani', sans-serif", fontSize: '1.1rem',
+        color: 'oklch(0.70 0.010 260)', lineHeight: 1.6, maxWidth: '500px',
+        marginBottom: '20px',
+      }}>
+        Come back next week — we're cookin' something special.
+      </div>
+
+      {/* Channel badges */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+        <div style={{
+          padding: '8px 16px', borderRadius: '4px',
+          border: '1px solid oklch(0.52 0.22 25 / 0.5)',
+          background: 'oklch(0.52 0.22 25 / 0.08)',
+          fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem',
+          color: 'oklch(0.52 0.22 25)', letterSpacing: '0.08em',
+        }}>
+          <Zap style={{ width: 12, height: 12, display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+          V-OP PROTOCOL
+        </div>
+        <div style={{
+          padding: '8px 16px', borderRadius: '4px',
+          border: '1px solid oklch(0.65 0.15 55 / 0.5)',
+          background: 'oklch(0.65 0.15 55 / 0.08)',
+          fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem',
+          color: 'oklch(0.65 0.15 55)', letterSpacing: '0.08em',
+        }}>
+          <Cpu style={{ width: 12, height: 12, display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+          PCAN-USB
+        </div>
+      </div>
+
+      <div style={{
+        fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem',
+        color: 'oklch(0.40 0.010 260)', padding: '12px 20px',
+        border: '1px solid oklch(0.20 0.008 260)', borderRadius: '4px',
+        background: 'oklch(0.10 0.005 260)',
+      }}>
+        ECU read/write via V-OP and PCAN-USB channels. OBDLink is for datalogging only.
+      </div>
+    </div>
+  );
+}
+
 // ─── IntelliSpy + Reverse Engineering Wrapper ──────────────────────────────
 
 function IntelliSpyWithReverseEng({ isAdmin }: { isAdmin: boolean }) {
@@ -1508,7 +1590,7 @@ function EditorWithSubTabs({ wp8Data, onBack }: { wp8Data: WP8ParseResult | null
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'qa' | 'offsets' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'flash' | 'qa' | 'offsets' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1516,6 +1598,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.80 0.18 85)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1706,6 +1789,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpyWithReverseEng isAdmin={isAdmin} /></div>}
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
+        {activeTab === 'flash' && <div className="ppei-anim-fade-up"><FlashPlaceholder /></div>}
         {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
       </main>
 
