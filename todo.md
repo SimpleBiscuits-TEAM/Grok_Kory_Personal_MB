@@ -2402,3 +2402,12 @@
 ## OAuth Callback Error (2026-03-30)
 - [x] Fix OAuth callback failed error on www.ppei.ai login (added retry with backoff for transient TiDB errors, graceful redirect on failure)
 - [x] Fix feedback panel mobile layout - bottom sheet on mobile, centered modal on desktop, safe-area padding
+
+## Log Details Rename + PID Selector (2026-03-30)
+- [x] Rename "Dyno Results" to "Log Details" across 8 files (Home, Advanced, DynoCharts, pdfExport, ShareCard, DebugReport, healthReportPdf)
+- [x] Expand PID_OVERLAYS from 13 to 27 channels covering all ProcessedMetrics numeric arrays
+- [x] Group PIDs by category (Engine, Boost, Fuel, Temps, Pressures, Trans) with category toggle-all
+- [x] Allow manual enable/disable of individual PIDs for chart visibility
+- [x] Only show PIDs that have actual data (>1% non-zero/non-NaN) in the loaded log
+- [x] Support negative values (injection timing) in axis domains and data bucketing
+- [x] Show count of available channels and active selections

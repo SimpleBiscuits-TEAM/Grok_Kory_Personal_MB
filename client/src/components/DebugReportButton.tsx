@@ -42,7 +42,7 @@ const FEATURE_AREAS = [
   { value: 'canam_vin', label: 'Can-Am VIN' },
   { value: 'service_procedures', label: 'Service Procedures' },
   { value: 'health_report', label: 'Health Report' },
-  { value: 'dyno_charts', label: 'Dyno Charts' },
+  { value: 'dyno_charts', label: 'Log Details Charts' },
   { value: 'diagnostic_report', label: 'Diagnostic Report' },
   { value: 'drag_timeslip', label: 'Drag Timeslip' },
   { value: 'voice_commands', label: 'Voice Commands' },

@@ -375,26 +375,52 @@ const FaultChartWrapper = forwardRef<HTMLDivElement, {
 FaultChartWrapper.displayName = 'FaultChartWrapper';
 
 // ─── PID OVERLAY DEFINITIONS ─────────────────────────────────────────────────
-const PID_OVERLAYS: Array<{
+// Complete registry of all ProcessedMetrics numeric channels.
+// Grouped by category for the selector UI.
+interface PidOverlayDef {
   key: keyof ProcessedMetrics;
   label: string;
   unit: string;
   color: string;
+  category: string;
   domain?: [number, number];
-}> = [
-  { key: 'boost',              label: 'Boost',          unit: 'PSIG',    color: '#a78bfa' },
-  { key: 'boostDesired',       label: 'Boost Desired',  unit: 'PSIG',    color: '#7c3aed' },
-  { key: 'maf',                label: 'MAF',            unit: 'lb/min',  color: '#34d399' },
-  { key: 'railPressureActual', label: 'Rail Pressure',  unit: 'psi',     color: '#f59e0b' },
-  { key: 'turboVanePosition',  label: 'Vane Pos',       unit: '%',       color: '#fb923c', domain: [0, 100] },
-  { key: 'exhaustGasTemp',     label: 'EGT',            unit: '°F',      color: '#ef4444' },
-  { key: 'vehicleSpeed',       label: 'Speed',          unit: 'mph',     color: '#38bdf8' },
-  { key: 'coolantTemp',        label: 'Coolant',        unit: '°F',      color: '#22d3ee' },
-  { key: 'oilTemp',            label: 'Oil Temp',       unit: '°F',      color: '#f97316' },
-  { key: 'oilPressure',        label: 'Oil Press',      unit: 'psi',     color: '#84cc16' },
-  { key: 'transFluidTemp',     label: 'Trans Temp',     unit: '°F',      color: '#e879f9' },
-  { key: 'converterSlip',      label: 'Conv Slip',      unit: 'RPM',     color: '#fb7185' },
-  { key: 'pcvDutyCycle',       label: 'PCV Duty',       unit: 'mA',      color: '#fbbf24' },
+}
+
+const PID_OVERLAYS: PidOverlayDef[] = [
+  // ── Engine / Performance ──
+  { key: 'rpm',                label: 'RPM',              unit: 'rpm',       color: '#e2e8f0', category: 'Engine' },
+  { key: 'hpTorque',           label: 'HP (Torque)',      unit: 'HP',        color: '#ff4d00', category: 'Engine' },
+  { key: 'hpMaf',              label: 'HP (MAF)',         unit: 'HP',        color: '#ff8c42', category: 'Engine' },
+  { key: 'maf',                label: 'MAF',              unit: 'lb/min',    color: '#34d399', category: 'Engine' },
+  { key: 'throttlePosition',   label: 'Throttle Pos',    unit: '%',         color: '#c084fc', category: 'Engine', domain: [0, 100] },
+  { key: 'vehicleSpeed',       label: 'Speed',            unit: 'mph',       color: '#38bdf8', category: 'Engine' },
+  // ── Boost / Turbo ──
+  { key: 'boost',              label: 'Boost',            unit: 'PSIG',      color: '#a78bfa', category: 'Boost' },
+  { key: 'boostDesired',       label: 'Boost Desired',    unit: 'PSIG',      color: '#7c3aed', category: 'Boost' },
+  { key: 'turboVanePosition',  label: 'Vane Pos',         unit: '%',         color: '#fb923c', category: 'Boost', domain: [0, 100] },
+  { key: 'turboVaneDesired',   label: 'Vane Desired',     unit: '%',         color: '#d97706', category: 'Boost', domain: [0, 100] },
+  { key: 'mapAbsolute',        label: 'MAP Absolute',     unit: 'psi',       color: '#818cf8', category: 'Boost' },
+  { key: 'barometricPressure', label: 'Baro Pressure',    unit: 'psi',       color: '#94a3b8', category: 'Boost' },
+  // ── Fuel System ──
+  { key: 'railPressureActual', label: 'Rail Pressure',    unit: 'psi',       color: '#f59e0b', category: 'Fuel' },
+  { key: 'railPressureDesired',label: 'Rail Desired',     unit: 'psi',       color: '#eab308', category: 'Fuel' },
+  { key: 'pcvDutyCycle',       label: 'PCV Duty',         unit: 'mA',        color: '#fbbf24', category: 'Fuel' },
+  { key: 'injectorPulseWidth', label: 'Inj Pulse Width',  unit: 'ms',        color: '#fcd34d', category: 'Fuel' },
+  { key: 'injectionTiming',    label: 'Inj Timing',       unit: '°BTDC',     color: '#fde68a', category: 'Fuel' },
+  { key: 'fuelQuantity',       label: 'Fuel Qty',         unit: 'mm³',       color: '#f0abfc', category: 'Fuel' },
+  // ── Temperatures ──
+  { key: 'exhaustGasTemp',     label: 'EGT',              unit: '°F',        color: '#ef4444', category: 'Temps' },
+  { key: 'coolantTemp',        label: 'Coolant',          unit: '°F',        color: '#22d3ee', category: 'Temps' },
+  { key: 'oilTemp',            label: 'Oil Temp',         unit: '°F',        color: '#f97316', category: 'Temps' },
+  { key: 'transFluidTemp',     label: 'Trans Temp',       unit: '°F',        color: '#e879f9', category: 'Temps' },
+  { key: 'intakeAirTemp',      label: 'IAT',              unit: '°F',        color: '#67e8f9', category: 'Temps' },
+  // ── Pressures / Lubrication ──
+  { key: 'oilPressure',        label: 'Oil Press',        unit: 'psi',       color: '#84cc16', category: 'Pressures' },
+  { key: 'converterPressure',  label: 'Conv Pressure',    unit: 'psi',       color: '#a3e635', category: 'Pressures' },
+  // ── Transmission ──
+  { key: 'converterSlip',      label: 'Conv Slip',        unit: 'RPM',       color: '#fb7185', category: 'Trans' },
+  { key: 'converterDutyCycle', label: 'Conv Duty',        unit: '%',         color: '#f472b6', category: 'Trans' },
+  { key: 'currentGear',        label: 'Gear',             unit: '',          color: '#a78bfa', category: 'Trans' },
 ];
 
 // ─── MAIN DYNOJET-STYLE HP/TORQUE CHART ──────────────────────────────────────
@@ -422,13 +448,17 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
   const availablePids = useMemo(() => {
     return PID_OVERLAYS.filter(p => {
       const arr = data[p.key] as number[] | undefined;
-      return Array.isArray(arr) && arr.some(v => v > 0);
+      if (!Array.isArray(arr) || arr.length === 0) return false;
+      // Channel has data if it has any non-zero, non-NaN values
+      // (some PIDs like injection timing can be negative)
+      const nonEmpty = arr.filter(v => !isNaN(v) && v !== 0);
+      return nonEmpty.length >= arr.length * 0.01; // at least 1% non-zero
     });
   }, [data]);
 
   const activePidDefs = useMemo(
-    () => PID_OVERLAYS.filter(p => selectedPids.has(p.key as string)),
-    [selectedPids]
+    () => availablePids.filter(p => selectedPids.has(p.key as string)),
+    [selectedPids, availablePids]
   );
 
   const togglePid = (key: string) => {
@@ -473,7 +503,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       const bucketMap: Record<number, { sum: number; count: number }> = {};
       data.rpm.forEach((rpm, i) => {
         const pidVal = pidArr[i];
-        if (pidVal > 0 && rpm > 600) {
+        if (!isNaN(pidVal) && pidVal !== 0 && rpm > 600) {
           const bucket = Math.round(rpm / bucketSize) * bucketSize;
           if (!bucketMap[bucket]) bucketMap[bucket] = { sum: 0, count: 0 };
           bucketMap[bucket].sum += pidVal;
@@ -512,7 +542,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       for (const pidDef of activePidDefs) {
         const pidArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
         const v = pidArr[i];
-        row[`pid_${pidDef.key as string}`] = (v != null && v > 0) ? v : null;
+        row[`pid_${pidDef.key as string}`] = (v != null && !isNaN(v) && v !== 0) ? v : null;
       }
       rows.push(row);
     }
@@ -547,12 +577,12 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
         domains[pidDef.key as string] = pidDef.domain;
       } else {
         const rawArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
-        const vals = Array.isArray(rawArr) ? rawArr.filter(v => v > 0) : [];
+        const vals = Array.isArray(rawArr) ? rawArr.filter(v => !isNaN(v) && v !== 0) : [];
         if (vals.length) {
           const mn = Math.min(...vals);
           const mx = Math.max(...vals);
-          const pad = (mx - mn) * 0.12 || mx * 0.12 || 1;
-          domains[pidDef.key as string] = [Math.max(0, mn - pad), mx + pad * 1.5];
+          const pad = (mx - mn) * 0.12 || Math.abs(mx) * 0.12 || 1;
+          domains[pidDef.key as string] = [mn >= 0 ? Math.max(0, mn - pad) : mn - pad, mx + pad * 1.5];
         } else {
           domains[pidDef.key as string] = [0, 100];
         }
@@ -570,7 +600,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
         border: '1px solid #1e2330', borderRadius: '12px', padding: '40px 20px',
         textAlign: 'center', color: '#444', fontFamily: 'monospace', fontSize: 13,
       }}>
-        <div style={{ color: '#ff4d00', fontSize: 16, fontWeight: 'bold', letterSpacing: 2, marginBottom: 8 }}>DYNO RESULTS</div>
+        <div style={{ color: '#ff4d00', fontSize: 16, fontWeight: 'bold', letterSpacing: 2, marginBottom: 8 }}>LOG DETAILS</div>
         <div>Insufficient RPM/torque data to render dyno graph.</div>
         <div style={{ fontSize: 11, marginTop: 6, color: '#333' }}>Log must contain RPM and torque percentage channels.</div>
       </div>
@@ -593,10 +623,10 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div style={{ color: '#ff4d00', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
-            DYNO RESULTS
+            LOG DETAILS
           </div>
           <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
-            Duramax L5P 6.6L Diesel — Estimated from OBD-II Torque Data
+            PID Data Explorer — Toggle channels to visualize
           </div>
           <div style={{
             color: '#665533', fontSize: 10, fontFamily: 'monospace', marginTop: 4,
@@ -643,7 +673,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
         </div>
       </div>
 
-      {/* PID Overlay Dropdown */}
+      {/* PID Channel Selector */}
       {availablePids.length > 0 && (
         <div style={{ marginBottom: 12, position: 'relative' }}>
           {/* Trigger button */}
@@ -667,7 +697,10 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
           >
             <span>
               <span style={{ color: '#444', marginRight: 6 }}>▶</span>
-              OVERLAY PIDs
+              PID CHANNELS
+              <span style={{ color: '#444', marginLeft: 8, fontSize: 10 }}>
+                {availablePids.length} available
+              </span>
               {selectedPids.size > 0 && (
                 <span style={{
                   marginLeft: 10, background: '#ff4d0033', color: '#ff4d00',
@@ -707,7 +740,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
             </div>
           )}
 
-          {/* Dropdown panel */}
+          {/* Dropdown panel — category grouped */}
           {dropdownOpen && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
@@ -717,13 +750,16 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
               borderRadius: 8,
               boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
               padding: '10px 12px',
+              maxHeight: 420,
+              overflowY: 'auto',
             }}>
+              {/* Header bar */}
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                marginBottom: 8,
+                marginBottom: 8, position: 'sticky', top: 0, background: '#0d0f14', zIndex: 2, paddingBottom: 4,
               }}>
                 <span style={{ color: '#444', fontSize: 9, fontFamily: 'monospace', letterSpacing: 1 }}>
-                  SELECT PIDs TO OVERLAY — multiple allowed
+                  SELECT PIDs TO DISPLAY — {availablePids.length} channels detected
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={() => setSelectedPids(new Set(availablePids.map(p => p.key as string)))} style={{
@@ -740,39 +776,92 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                   }}>close ▲</button>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 4 }}>
-                {availablePids.map(pid => {
-                  const checked = selectedPids.has(pid.key as string);
+
+              {/* Category-grouped PID list */}
+              {(() => {
+                const categories = Array.from(new Set(availablePids.map(p => p.category)));
+                return categories.map(cat => {
+                  const catPids = availablePids.filter(p => p.category === cat);
+                  if (catPids.length === 0) return null;
+                  const allChecked = catPids.every(p => selectedPids.has(p.key as string));
+                  const someChecked = catPids.some(p => selectedPids.has(p.key as string));
                   return (
-                    <label
-                      key={pid.key as string}
-                      onClick={(e) => { e.preventDefault(); togglePid(pid.key as string); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 10px', borderRadius: 6,
-                        border: `1px solid ${checked ? pid.color + '55' : '#1e2330'}`,
-                        background: checked ? `${pid.color}12` : 'transparent',
-                        cursor: 'pointer',
-                        transition: 'all 0.12s',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        readOnly
-                        style={{ accentColor: pid.color, width: 13, height: 13, cursor: 'pointer', pointerEvents: 'none' }}
-                      />
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: pid.color, flexShrink: 0 }} />
-                      <span style={{ fontFamily: 'monospace', fontSize: 10, color: checked ? pid.color : '#666' }}>
-                        {pid.label}
-                      </span>
-                      <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#333', marginLeft: 'auto' }}>
-                        {pid.unit}
-                      </span>
-                    </label>
+                    <div key={cat} style={{ marginBottom: 8 }}>
+                      {/* Category header with toggle-all */}
+                      <div
+                        onClick={() => {
+                          setSelectedPids(prev => {
+                            const next = new Set(prev);
+                            if (allChecked) {
+                              catPids.forEach(p => next.delete(p.key as string));
+                            } else {
+                              catPids.forEach(p => next.add(p.key as string));
+                            }
+                            return next;
+                          });
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '4px 6px', cursor: 'pointer',
+                          borderBottom: '1px solid #1a1d28', marginBottom: 4,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={allChecked}
+                          ref={el => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                          readOnly
+                          style={{ accentColor: '#ff4d00', width: 12, height: 12, cursor: 'pointer', pointerEvents: 'none' }}
+                        />
+                        <span style={{
+                          color: someChecked ? '#ff4d00' : '#555',
+                          fontSize: 9, fontFamily: 'monospace', fontWeight: 'bold',
+                          letterSpacing: 1.5, textTransform: 'uppercase',
+                        }}>
+                          {cat}
+                        </span>
+                        <span style={{ color: '#333', fontSize: 9, fontFamily: 'monospace' }}>
+                          ({catPids.length})
+                        </span>
+                      </div>
+                      {/* PIDs in this category */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 3, paddingLeft: 4 }}>
+                        {catPids.map(pid => {
+                          const checked = selectedPids.has(pid.key as string);
+                          return (
+                            <label
+                              key={pid.key as string}
+                              onClick={(e) => { e.preventDefault(); togglePid(pid.key as string); }}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: 7,
+                                padding: '5px 8px', borderRadius: 5,
+                                border: `1px solid ${checked ? pid.color + '55' : '#1a1d28'}`,
+                                background: checked ? `${pid.color}12` : 'transparent',
+                                cursor: 'pointer',
+                                transition: 'all 0.12s',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                readOnly
+                                style={{ accentColor: pid.color, width: 12, height: 12, cursor: 'pointer', pointerEvents: 'none' }}
+                              />
+                              <span style={{ width: 7, height: 7, borderRadius: '50%', background: pid.color, flexShrink: 0 }} />
+                              <span style={{ fontFamily: 'monospace', fontSize: 10, color: checked ? pid.color : '#666', flex: 1 }}>
+                                {pid.label}
+                              </span>
+                              <span style={{ fontFamily: 'monospace', fontSize: 9, color: '#333' }}>
+                                {pid.unit}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
-                })}
-              </div>
+                });
+              })()}
             </div>
           )}
         </div>

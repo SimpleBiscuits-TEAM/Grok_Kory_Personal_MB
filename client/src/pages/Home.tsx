@@ -880,9 +880,9 @@ export default function Home() {
               </div>
             )}
 
-            {/* Dyno Results */}
+            {/* Log Details */}
             <div className="ppei-section-reveal ppei-delay-300">
-              <SectionHeader icon={<BarChart3 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DYNO RESULTS" />
+              <SectionHeader icon={<BarChart3 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="LOG DETAILS" />
               <div ref={dynoContainerRef}>
                 <DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} />
               </div>

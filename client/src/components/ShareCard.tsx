@@ -67,7 +67,7 @@ const CARD_THEMES: Record<ShareCardType, { accent: string; gradient: string; bad
 };
 
 const TYPE_LABELS: Record<ShareCardType, string> = {
-  dyno: 'DYNO RESULTS',
+  dyno: 'LOG DETAILS',
   diagnostic: 'DIAGNOSTIC REPORT',
   timeslip: 'TIME SLIP',
   callout: 'REGIONAL CALLOUT',
@@ -429,7 +429,7 @@ export function QuickShareButton({ data, className }: { data: ShareCardData; cla
 export function buildDynoShareData(hp: number, tq: number, vehicleDesc?: string, userName?: string, vehiclePhotoUrl?: string): ShareCardData {
   return {
     type: 'dyno',
-    title: 'DYNO RESULTS',
+    title: 'LOG DETAILS',
     subtitle: vehicleDesc || 'Duramax Performance',
     primaryStat: `${hp} HP`,
     primaryLabel: 'Peak Horsepower',

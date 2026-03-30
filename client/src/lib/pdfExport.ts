@@ -257,7 +257,7 @@ export async function generatePerformanceReport(
   // ===== DYNO CHART =====
 doc.addPage();
   y = margin + 5;
-  addText('DYNO RESULTS — HP & TORQUE', 13, 'bold', [30, 58, 138]);
+  addText('LOG DETAILS — HP & TORQUE', 13, 'bold', [30, 58, 138]);
   await addImg(refs.dynoRef.current, '', true);
 
   // ── AIRFLOW OUTLOOK TABLE ──────────────────────────────────────────────────
