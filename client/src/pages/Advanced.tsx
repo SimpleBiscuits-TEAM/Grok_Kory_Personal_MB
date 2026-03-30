@@ -1461,6 +1461,7 @@ const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'reverseeng' as TabId, label: 'REVERSE ENG', icon: <Cpu style={{ width: 16, height: 16, color: 'oklch(0.65 0.22 25)' }} /> },
   { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
@@ -1469,10 +1470,17 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
-  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
-    { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  ] : [];
-  const allTabs = isAdmin ? [...tabs, ...adminTabs, ...superAdminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
+  const allTabs = isAdmin ? [...tabs, ...adminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
+
+  // Badge counts for admin tabs
+  const accessStats = trpc.access.stats.useQuery(undefined, { enabled: isAdmin, refetchInterval: 30000 });
+  const supportStats = trpc.supportAdmin.getDashboardStats.useQuery(undefined, { enabled: isAdmin, refetchInterval: 30000 });
+  const pendingCount = accessStats.data?.pendingRequests ?? 0;
+  const unreadCount = (supportStats.data?.unreadConversations ?? 0) + (supportStats.data?.totalFeedback ?? 0);
+  const tabBadges: Record<string, number> = {
+    users: pendingCount,
+    support: unreadCount,
+  };
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
@@ -1592,6 +1600,21 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                 cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
               }}>
                 {tab.icon} {tab.label}
+                {tabBadges[tab.id] > 0 && (
+                  <span style={{
+                    background: sColor.red,
+                    color: 'white',
+                    fontSize: '0.55rem',
+                    fontFamily: sFont.mono,
+                    padding: '1px 5px',
+                    borderRadius: '8px',
+                    lineHeight: 1.2,
+                    minWidth: '16px',
+                    textAlign: 'center',
+                  }}>
+                    {tabBadges[tab.id]}
+                  </span>
+                )}
               </button>
             </Fragment>
           ))}
@@ -1678,7 +1701,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'reverseeng' && isAdmin && <div className="ppei-anim-fade-up"><ReverseEngineeringPanel /></div>}
         {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
-        {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
+        {activeTab === 'support' && isAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 

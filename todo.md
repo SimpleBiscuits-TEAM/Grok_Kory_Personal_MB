@@ -2243,3 +2243,19 @@
 - [x] Store site access in localStorage so users don't re-enter every visit
 - [x] Show login button + access code input on the gate screen
 - [x] Contact PPEI info shown on gate (info@ppei.com)
+
+## Access Restructure & Admin Notifications (2026-03-29)
+- [x] SiteGate: logged-in users must have admin approval to see site content (not just auth)
+- [x] SiteGate: access code (KingKONG) still bypasses approval requirement
+- [x] SiteGate: admins/super_admins always pass through
+- [x] Send owner notification when user submits feedback (already in feedback router)
+- [x] Send owner notification when user requests access (added to requestAccess procedure)
+- [ ] Send owner notification when new chat message received (deferred - needs chat system)
+- [x] Hide FEEDBACK/REPORT button from non-admin users (Home.tsx admin-only check)
+- [x] Hide Support tab from non-admin users in V-OP Pro (admin guard on supportAdmin router)
+- [x] Add access request management to Support panel (USER MGMT tab has approve/deny)
+- [x] Move Support tab from super_admin-only to admin tabs (visible to all admins)
+- [x] Show notification badge counts on USER MGMT and SUPPORT tabs for admins (pending + unread)
+- [x] Make all current admins super_admins in DB (Erik, Carmen, Kory all super_admin)
+- [ ] Merge Support tab into User Management tab (kept as separate tabs for now - cleaner UX)
+- [x] Add visible logout button for logged-in users (LOG OUT button in Home.tsx header)

@@ -15,6 +15,7 @@ import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure, adminProcedure, superAdminProcedure } from '../_core/trpc';
 import { getDb } from '../db';
 import { users } from '../../drizzle/schema';
+import { notifyOwner } from '../_core/notification';
 
 export const accessManagementRouter = router({
   // ── Public: Check own access status ──────────────────────────────────────
@@ -65,6 +66,16 @@ export const accessManagementRouter = router({
     await db.update(users)
       .set({ advancedAccess: 'pending' })
       .where(eq(users.id, ctx.user.id));
+
+    // Notify owner about new access request
+    try {
+      await notifyOwner({
+        title: `Access Request: ${ctx.user.name || ctx.user.email}`,
+        content: `${ctx.user.name || 'Unknown'} (${ctx.user.email || 'no email'}) has requested access to V-OP. Review in the User Management panel.`,
+      });
+    } catch {
+      console.warn('[Access] Owner notification failed, but request was saved');
+    }
 
     return { status: 'requested' as const };
   }),

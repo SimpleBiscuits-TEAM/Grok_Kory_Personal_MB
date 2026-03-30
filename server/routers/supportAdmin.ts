@@ -12,16 +12,19 @@ import { feedback, adminConversations, adminMessages, users } from '../../drizzl
 import { supportSessions, supportMetrics } from '../../drizzle/schema_projects';
 import { eq, desc, and, like, sql, count } from 'drizzle-orm';
 
-// Super admin guard
-const superAdminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user?.role !== 'super_admin') {
+// Admin guard (super_admin + admin)
+const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user?.role !== 'super_admin' && ctx.user?.role !== 'admin') {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'Only the owner can access the Support Admin Panel',
+      message: 'Admin access required for the Support Panel',
     });
   }
   return next({ ctx });
 });
+
+// Keep alias for backward compat
+const superAdminProcedure = adminProcedure;
 
 export const supportAdminRouter = router({
   // ── Dashboard Stats ──────────────────────────────────────────────────────

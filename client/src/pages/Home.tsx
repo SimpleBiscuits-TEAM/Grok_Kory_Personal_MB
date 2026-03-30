@@ -11,7 +11,7 @@ import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
@@ -40,7 +40,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 export default function Home() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const { showPanel: showWhatsNew, setShowPanel: setShowWhatsNew } = useWhatsNew();
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
@@ -322,6 +322,35 @@ export default function Home() {
                 {APP_VERSION}
               </span>
               {isAuthenticated && <NotificationBell />}
+              {isAuthenticated && (
+                <button
+                  onClick={async () => {
+                    await logout();
+                    localStorage.removeItem('ppei_site_access');
+                    window.location.href = '/';
+                  }}
+                  className="ppei-btn-hover"
+                  title="Log out"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: 'transparent',
+                    border: '1px solid oklch(0.22 0.006 260)',
+                    color: 'oklch(0.50 0.010 260)',
+                    padding: '4px 8px',
+                    borderRadius: '2px',
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.65rem',
+                    letterSpacing: '0.06em',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <LogOut size={12} />
+                  LOG OUT
+                </button>
+              )}
               <Link href="/advanced" style={{ textDecoration: 'none' }}>
                 <div className="ppei-btn-hover" style={{
                   display: 'flex',
@@ -1075,13 +1104,17 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* Feedback / Error Report floating button and panel */}
-      <FeedbackTrigger onClick={() => setFeedbackOpen(true)} />
-      <FeedbackPanel
-        isOpen={feedbackOpen}
-        onClose={() => setFeedbackOpen(false)}
-        context={fileName ?? undefined}
-      />
+      {/* Feedback / Error Report floating button and panel — admin only */}
+      {user?.role === 'admin' || user?.role === 'super_admin' ? (
+        <>
+          <FeedbackTrigger onClick={() => setFeedbackOpen(true)} />
+          <FeedbackPanel
+            isOpen={feedbackOpen}
+            onClose={() => setFeedbackOpen(false)}
+            context={fileName ?? undefined}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
