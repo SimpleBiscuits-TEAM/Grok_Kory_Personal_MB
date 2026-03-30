@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, waitlist, InsertWaitlist } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -111,6 +111,21 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────────────
+export async function insertWaitlistEmail(data: InsertWaitlist): Promise<boolean> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot insert waitlist email: database not available");
+    return false;
+  }
+  try {
+    await db.insert(waitlist).values(data);
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to insert waitlist email:", error);
+    return false;
+  }
+}
+
 export async function insertFeedback(data: InsertFeedback): Promise<boolean> {
   const db = await getDb();
   if (!db) {

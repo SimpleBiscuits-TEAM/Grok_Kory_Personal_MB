@@ -18,7 +18,7 @@ import {
   FileText, Activity, AlertCircle, Clock, ShieldX, Users,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings, Inbox, Fuel
+  Radio, Wrench, Key, Settings, Inbox, Fuel, ShieldCheck
 } from 'lucide-react';
 import { getLoginUrl } from '@/const';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
@@ -1474,6 +1474,37 @@ function FlashPlaceholder() {
         marginBottom: '20px',
       }}>
         Come back next week — we're cookin' something special.
+      </div>
+
+      {/* PPEI-Exclusive Disclaimer */}
+      <div style={{
+        maxWidth: '600px', marginBottom: '24px', padding: '20px 24px',
+        background: 'oklch(0.52 0.22 25 / 0.06)',
+        border: `1px solid oklch(0.52 0.22 25 / 0.25)`,
+        borderLeft: `4px solid oklch(0.52 0.22 25)`,
+        borderRadius: '4px', textAlign: 'left',
+      }}>
+        <div style={{
+          fontFamily: "'Bebas Neue', sans-serif", fontSize: '1rem',
+          letterSpacing: '0.1em', color: 'oklch(0.52 0.22 25)',
+          marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <ShieldCheck style={{ width: 16, height: 16 }} />
+          PPEI EXCLUSIVE
+        </div>
+        <div style={{
+          fontFamily: "'Rajdhani', sans-serif", fontSize: '0.88rem',
+          color: 'oklch(0.65 0.010 260)', lineHeight: 1.7,
+        }}>
+          V-OP is a bespoke product built for and by PPEI. This tool <strong style={{ color: 'white' }}>does not flash third-party tunes</strong>. Only aftermarket calibrations approved and built by PPEI will be flashed by this device. Users may view and modify some of their own data, however OEM flashes and PPEI calibrations are the only files written to the ECU.
+        </div>
+        <div style={{
+          fontFamily: "'Rajdhani', sans-serif", fontSize: '0.82rem',
+          color: 'oklch(0.50 0.010 260)', lineHeight: 1.6, marginTop: '10px',
+          paddingTop: '10px', borderTop: '1px solid oklch(0.52 0.22 25 / 0.15)',
+        }}>
+          Datalogging, diagnostics, and analysis tools are available to all users.
+        </div>
       </div>
 
       {/* Channel badges */}

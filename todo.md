@@ -2343,3 +2343,12 @@
 - [x] Fix og:description and twitter:description - still showing old Duramax text (platform injects from project description, not Settings title)
 - [x] SiteGate: transparent blurry background showing V-OP Pro behind the gate
 - [x] SiteGate: "get in line" messaging with email prompt, "see you soon" vibe
+- [ ] SiteGate: Replace SIGN IN with email collection field (no Manus OAuth on gate)
+- [ ] SiteGate: Email submission notifies owner, stored in waitlist table
+- [ ] SiteGate: Access still requires KINGKONG code only
+- [x] SiteGate: Remove Manus OAuth sign-in from gate entirely
+- [x] SiteGate: Add waitlist tRPC endpoint (public, no auth) with owner notification
+- [x] SiteGate: Sign-in stays in app header nav only (after gate)
+- [x] Post-gate: Immediate full-screen sign-in prompt if not authenticated (can't skip)
+- [x] Flash section: Add PPEI-exclusive flashing disclaimer (no third-party tunes, PPEI-only calibrations)
+- [x] Home/About: Add note that datalogging/diagnostics are public, flashing is PPEI-exclusive

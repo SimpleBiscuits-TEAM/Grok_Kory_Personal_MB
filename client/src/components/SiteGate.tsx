@@ -1,22 +1,24 @@
 /**
- * SiteGate — Site-wide access control.
- * Three paths to enter:
- * 1. Logged in + admin/super_admin role → always pass through
- * 2. Logged in + advancedAccess === 'approved' → pass through
- * 3. Access code "KingKONG" entered → pass through (stored in localStorage)
+ * SiteGate — Two-layer access control.
  * 
- * Blocked:
- * - Logged in but not approved → shows pending/request screen
- * - Not logged in and no code → shows login + code gate
+ * Layer 1 (Gate): Blurred V-OP Pro background.
+ *   - Email waitlist ("get in line") — saved to DB, owner notified
+ *   - Access code "KingKONG" — stored in localStorage
+ *   - NO Manus OAuth here
  * 
- * Background: Blurred fake V-OP Pro interface teasing what's behind the gate
+ * Layer 2 (Post-gate sign-in): Full-screen sign-in prompt.
+ *   - If user passed the gate but is NOT authenticated → forced sign-in screen
+ *   - Uses the same blurred background aesthetic
+ *   - Links to Manus OAuth (but user is already inside the app context)
+ * 
+ * Bypass: Logged-in admin/super_admin always passes both layers.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { getLoginUrl } from '@/const';
-import { Lock, LogIn, KeyRound, AlertCircle, Loader2, Clock, ShieldX, Send, BarChart3, Gauge, Brain, FileCode2, Radio, Zap, Database, Users, ArrowLeft } from 'lucide-react';
+import { LogIn, KeyRound, AlertCircle, Loader2, Mail, CheckCircle, BarChart3, Gauge, Brain, FileCode2, Radio, Zap, Database, Users } from 'lucide-react';
 
 const SITE_ACCESS_KEY = 'vop_site_access';
 const ACCESS_CODE = 'KingKONG';
@@ -43,7 +45,26 @@ const sColor = {
   textMuted: 'oklch(0.45 0.008 260)',
 };
 
-/** Fake V-OP Pro background that shows behind the blurred overlay */
+// ── Shared card style ──
+const cardStyle: React.CSSProperties = {
+  width: 'min(460px, 95vw)',
+  background: 'oklch(0.09 0.005 260 / 0.92)',
+  border: '1px solid oklch(0.25 0.008 260)',
+  borderTop: `3px solid ${sColor.red}`,
+  borderRadius: '6px',
+  backdropFilter: 'blur(20px)',
+  WebkitBackdropFilter: 'blur(20px)',
+  boxShadow: '0 25px 60px oklch(0 0 0 / 0.6)',
+  overflow: 'hidden',
+};
+
+const cardHeaderStyle: React.CSSProperties = {
+  padding: '2rem 2rem 1.5rem',
+  textAlign: 'center',
+  borderBottom: '1px solid oklch(0.18 0.008 260)',
+};
+
+// ── Fake V-OP Pro background ──
 function FakeProBackground() {
   const fakeTabs = [
     { label: 'ANALYZER', icon: <BarChart3 style={{ width: 14, height: 14 }} />, active: true },
@@ -55,15 +76,9 @@ function FakeProBackground() {
   ];
 
   return (
-    <div style={{
-      position: 'absolute', inset: 0, overflow: 'hidden',
-      background: sColor.bg, color: sColor.text,
-    }}>
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: sColor.bg, color: sColor.text }}>
       {/* Fake header */}
-      <div style={{
-        background: sColor.bgDark,
-        borderBottom: `1px solid oklch(0.20 0.008 260)`,
-      }}>
+      <div style={{ background: sColor.bgDark, borderBottom: `1px solid oklch(0.20 0.008 260)` }}>
         <div style={{ height: '3px', background: `linear-gradient(90deg, ${sColor.red}, oklch(0.65 0.22 30), ${sColor.red})` }} />
         <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -72,18 +87,14 @@ function FakeProBackground() {
               <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>V-OP PRO</h1>
               <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI · AI DIAGNOSTICS</p>
             </div>
-            <span style={{
-              fontFamily: sFont.mono, fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)',
-              padding: '2px 8px', border: '1px solid oklch(0.22 0.006 260)', borderRadius: '2px',
-              background: 'oklch(0.12 0.004 260)',
-            }}>v0.03</span>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: 'oklch(0.45 0.010 260)', padding: '2px 8px', border: '1px solid oklch(0.22 0.006 260)', borderRadius: '2px', background: 'oklch(0.12 0.004 260)' }}>v0.03</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: `${sColor.green}1f`, border: `1px solid ${sColor.green}4d`, borderRadius: '2px' }}>
               <Database style={{ width: 12, height: 12, color: sColor.green }} />
               <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.green }}>261 DOCS</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: '1px solid oklch(0.25 0.008 260)', borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em' }}>
               <Users style={{ width: 14, height: 14 }} /> USER MGMT
             </div>
           </div>
@@ -106,13 +117,10 @@ function FakeProBackground() {
           ))}
         </div>
 
-        {/* Fake analyzer content */}
+        {/* Fake stat cards */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
           {['RPM', 'BOOST PSI', 'RAIL PRESSURE', 'EGT °F'].map(label => (
-            <div key={label} style={{
-              background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px',
-              padding: '16px', textAlign: 'center',
-            }}>
+            <div key={label} style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px', padding: '16px', textAlign: 'center' }}>
               <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginBottom: '4px' }}>{label}</div>
               <div style={{ fontFamily: sFont.heading, fontSize: '1.8rem', color: 'white' }}>
                 {label === 'RPM' ? '3,247' : label === 'BOOST PSI' ? '38.2' : label === 'RAIL PRESSURE' ? '26,450' : '1,187'}
@@ -121,15 +129,9 @@ function FakeProBackground() {
           ))}
         </div>
 
-        {/* Fake chart area */}
-        <div style={{
-          background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px',
-          padding: '24px', height: '300px', position: 'relative', overflow: 'hidden',
-        }}>
-          <div style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white', marginBottom: '16px', letterSpacing: '0.06em' }}>
-            DYNO ESTIMATED HP/TQ
-          </div>
-          {/* Fake chart lines */}
+        {/* Fake chart */}
+        <div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '3px', padding: '24px', height: '300px', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white', marginBottom: '16px', letterSpacing: '0.06em' }}>DYNO ESTIMATED HP/TQ</div>
           <svg width="100%" height="220" viewBox="0 0 800 220" preserveAspectRatio="none" style={{ opacity: 0.6 }}>
             <path d="M0,200 C100,190 200,160 300,120 C400,80 500,40 600,30 C700,25 800,35 800,40" fill="none" stroke={sColor.red} strokeWidth="2.5" />
             <path d="M0,180 C100,170 200,140 300,110 C400,90 500,70 600,60 C700,55 800,50 800,55" fill="none" stroke={sColor.blue} strokeWidth="2.5" />
@@ -142,7 +144,7 @@ function FakeProBackground() {
           </div>
         </div>
 
-        {/* Fake diagnostic cards */}
+        {/* Fake diagnostics */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '20px' }}>
           <div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.green}`, borderRadius: '3px', padding: '16px' }}>
             <div style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: 'white', marginBottom: '4px' }}>FUEL SYSTEM</div>
@@ -158,33 +160,78 @@ function FakeProBackground() {
   );
 }
 
-/** The blurred overlay + gate card */
+/** Full-screen overlay with blurred Pro background */
 function GateOverlay({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999 }}>
-      {/* Fake Pro background */}
       <FakeProBackground />
-
-      {/* Blur overlay */}
       <div style={{
         position: 'absolute', inset: 0,
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         background: 'oklch(0.05 0.005 260 / 0.55)',
       }} />
-
-      {/* Gate content centered on top */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '1rem',
-      }}>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
         {children}
       </div>
     </div>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAYER 2: Post-gate sign-in prompt (shown after access code, if not logged in)
+// ═══════════════════════════════════════════════════════════════════════════════
+function SignInPrompt() {
+  return (
+    <GateOverlay>
+      <div style={cardStyle}>
+        {/* Header */}
+        <div style={cardHeaderStyle}>
+          <img src={PPEI_LOGO_URL} alt="PPEI" style={{ width: '56px', height: '56px', margin: '0 auto 1rem', display: 'block' }} />
+          <h1 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', margin: '0 0 0.25rem' }}>V-OP</h1>
+          <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', letterSpacing: '0.1em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI</p>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '1.5rem 2rem 2rem', textAlign: 'center' }}>
+          <p style={{ fontFamily: sFont.heading, fontSize: '1.4rem', color: 'white', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+            CREATE YOUR ACCOUNT
+          </p>
+          <p style={{ fontFamily: sFont.body, fontSize: '0.88rem', color: 'oklch(0.55 0.010 260)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+            Sign in to access your dashboard, save your work, and manage your data.
+          </p>
+
+          {/* Sign in button */}
+          <a
+            href={getLoginUrl()}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              width: '100%', padding: '14px 24px', background: sColor.red, color: 'white',
+              fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.1em',
+              borderRadius: '3px', border: 'none', cursor: 'pointer', textDecoration: 'none',
+              transition: 'background 0.15s', boxSizing: 'border-box',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'oklch(0.45 0.22 25)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'oklch(0.52 0.22 25)')}
+          >
+            <LogIn style={{ width: 18, height: 18 }} />
+            SIGN IN
+          </a>
+
+          <p style={{
+            fontFamily: sFont.body, fontSize: '0.78rem', color: 'oklch(0.40 0.010 260)',
+            textAlign: 'center', marginTop: '1.25rem', marginBottom: 0,
+          }}>
+            Your account connects you to your personal V-OP workspace.
+          </p>
+        </div>
+      </div>
+    </GateOverlay>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LAYER 1: The Gate (email waitlist + access code)
+// ═══════════════════════════════════════════════════════════════════════════════
 export function SiteGate({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [hasCodeAccess, setHasCodeAccess] = useState(() => {
@@ -198,17 +245,19 @@ export function SiteGate({ children }: { children: React.ReactNode }) {
   const [codeError, setCodeError] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
 
-  // Query access status for logged-in users
-  const accessQuery = trpc.access.myAccess.useQuery(undefined, {
-    enabled: isAuthenticated,
-    retry: false,
-  });
-  const requestAccess = trpc.access.requestAccess.useMutation({
-    onSuccess: () => accessQuery.refetch(),
+  // Email waitlist state
+  const [email, setEmail] = useState('');
+  const [emailName, setEmailName] = useState('');
+  const [emailSubmitted, setEmailSubmitted] = useState(false);
+  const [emailError, setEmailError] = useState('');
+
+  const waitlistSubmit = trpc.waitlist.submit.useMutation({
+    onSuccess: () => setEmailSubmitted(true),
+    onError: (err) => setEmailError(err.message || 'Something went wrong'),
   });
 
-  // Loading state
-  if (authLoading || (isAuthenticated && accessQuery.isLoading)) {
+  // ── Loading ──
+  if (authLoading) {
     return (
       <GateOverlay>
         <Loader2 style={{ width: 32, height: 32, color: sColor.red, animation: 'spin 1s linear infinite' }} />
@@ -216,132 +265,30 @@ export function SiteGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // ── Access code bypass → always let through ──
-  if (hasCodeAccess) {
+  // ── Logged-in admin/super_admin → skip everything ──
+  if (isAuthenticated && (user?.role === 'admin' || user?.role === 'super_admin')) {
     return <>{children}</>;
   }
 
-  // ── Logged in checks ──
-  if (isAuthenticated && accessQuery.data) {
-    const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-    
-    // Admins always pass
-    if (isAdmin) {
-      return <>{children}</>;
+  // ── Has access code → check if authenticated ──
+  if (hasCodeAccess) {
+    // Past the gate, but not signed in → force sign-in
+    if (!isAuthenticated) {
+      return <SignInPrompt />;
     }
-
-    // Approved users pass
-    if (accessQuery.data.canAccessAdvanced) {
-      return <>{children}</>;
-    }
-
-    // Logged in but NOT approved → show request/pending/revoked screen
-    const isPending = accessQuery.data.advancedAccess === 'pending';
-    const isRevoked = accessQuery.data.advancedAccess === 'revoked';
-
-    return (
-      <GateOverlay>
-        <div style={{
-          width: 'min(460px, 95vw)',
-          background: 'oklch(0.09 0.005 260 / 0.92)',
-          border: '1px solid oklch(0.25 0.008 260)',
-          borderTop: `3px solid ${sColor.red}`,
-          borderRadius: '6px',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          boxShadow: '0 25px 60px oklch(0 0 0 / 0.6)',
-          overflow: 'hidden',
-        }}>
-          {/* Header */}
-          <div style={{
-            padding: '2rem 2rem 1.5rem',
-            textAlign: 'center',
-            borderBottom: '1px solid oklch(0.18 0.008 260)',
-          }}>
-            <img src={PPEI_LOGO_URL} alt="PPEI" style={{ width: '56px', height: '56px', margin: '0 auto 1rem', display: 'block' }} />
-            <h1 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', margin: '0 0 0.25rem' }}>V-OP</h1>
-            <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', letterSpacing: '0.1em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI</p>
-          </div>
-
-          {/* Status */}
-          <div style={{ padding: '1.5rem 2rem 2rem', textAlign: 'center' }}>
-            <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: 'oklch(0.55 0.010 260)', marginBottom: '1rem' }}>
-              Signed in as <strong style={{ color: 'white' }}>{user?.name || user?.email}</strong>
-            </p>
-
-            {isPending ? (
-              <>
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  padding: '8px 16px', background: 'oklch(0.75 0.18 60 / 0.12)', border: '1px solid oklch(0.75 0.18 60 / 0.3)',
-                  borderRadius: '4px', marginBottom: '1.25rem',
-                }}>
-                  <Clock style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} />
-                  <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.75 0.18 60)' }}>YOU'RE IN LINE</span>
-                </div>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: 'oklch(0.70 0.010 260)', lineHeight: 1.6 }}>
-                  We see you. Hang tight — the PPEI team is reviewing your request.
-                </p>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: 'oklch(0.45 0.010 260)', lineHeight: 1.5, marginTop: '0.5rem' }}>
-                  See you soon.
-                </p>
-              </>
-            ) : isRevoked ? (
-              <>
-                <div style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  padding: '8px 16px', background: 'oklch(0.52 0.22 25 / 0.12)', border: '1px solid oklch(0.52 0.22 25 / 0.3)',
-                  borderRadius: '4px', marginBottom: '1.25rem',
-                }}>
-                  <ShieldX style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} />
-                  <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.52 0.22 25)' }}>ACCESS REVOKED</span>
-                </div>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: 'oklch(0.50 0.010 260)', lineHeight: 1.6 }}>
-                  Your access has been revoked. Contact PPEI for more information.
-                </p>
-              </>
-            ) : (
-              <>
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.4rem', color: 'white', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
-                  GET IN LINE
-                </p>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: 'oklch(0.55 0.010 260)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-                  V-OP is invite-only right now. Drop your request and we'll let you know.
-                </p>
-                <button
-                  onClick={() => requestAccess.mutate()}
-                  disabled={requestAccess.isPending}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '8px',
-                    background: sColor.red, color: 'white', fontFamily: sFont.heading,
-                    fontSize: '1rem', letterSpacing: '0.1em', padding: '12px 32px',
-                    borderRadius: '3px', border: 'none', cursor: 'pointer',
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  {requestAccess.isPending ? <Loader2 style={{ width: 16, height: 16 }} className="animate-spin" /> : <Send style={{ width: 16, height: 16 }} />}
-                  REQUEST ACCESS
-                </button>
-                <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: 'oklch(0.45 0.010 260)', marginTop: '1rem' }}>
-                  See you soon.
-                </p>
-              </>
-            )}
-
-            <p style={{
-              fontFamily: sFont.body, fontSize: '0.75rem', color: 'oklch(0.40 0.010 260)',
-              textAlign: 'center', marginTop: '1.5rem', marginBottom: 0,
-            }}>
-              Questions? Hit us at{' '}
-              <a href="mailto:info@ppei.com" style={{ color: sColor.red, textDecoration: 'none' }}>info@ppei.com</a>
-            </p>
-          </div>
-        </div>
-      </GateOverlay>
-    );
+    // Signed in → full access
+    return <>{children}</>;
   }
 
-  // ── Not logged in → show login + code gate ──
+  // ── Logged in (came back, has session) but no code → let them through too ──
+  if (isAuthenticated) {
+    // They already have an account, just let them in
+    // (and store the code access so they don't see the gate again)
+    try { localStorage.setItem(SITE_ACCESS_KEY, 'granted'); } catch { /* ignore */ }
+    return <>{children}</>;
+  }
+
+  // ── Not logged in, no code → show the gate ──
   const handleCodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (codeInput === ACCESS_CODE) {
@@ -354,60 +301,106 @@ export function SiteGate({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const handleEmailSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailError('');
+    if (!email || !email.includes('@')) {
+      setEmailError('Enter a valid email');
+      return;
+    }
+    waitlistSubmit.mutate({ email, name: emailName || undefined });
+  };
+
   return (
     <GateOverlay>
-      <div style={{
-        width: 'min(460px, 95vw)',
-        background: 'oklch(0.09 0.005 260 / 0.92)',
-        border: '1px solid oklch(0.25 0.008 260)',
-        borderTop: `3px solid ${sColor.red}`,
-        borderRadius: '6px',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        boxShadow: '0 25px 60px oklch(0 0 0 / 0.6)',
-        overflow: 'hidden',
-      }}>
+      <div style={cardStyle}>
         {/* Header */}
-        <div style={{
-          padding: '2rem 2rem 1.5rem',
-          textAlign: 'center',
-          borderBottom: '1px solid oklch(0.18 0.008 260)',
-        }}>
+        <div style={cardHeaderStyle}>
           <img src={PPEI_LOGO_URL} alt="PPEI" style={{ width: '56px', height: '56px', margin: '0 auto 1rem', display: 'block' }} />
           <h1 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', margin: '0 0 0.25rem' }}>V-OP</h1>
           <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.010 260)', letterSpacing: '0.1em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI</p>
         </div>
 
         {/* Body */}
-        <div style={{ padding: '1.5rem 2rem 2rem', textAlign: 'center' }}>
-          <p style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: 'white', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
-            GET IN LINE
-          </p>
-          <p style={{ fontFamily: sFont.body, fontSize: '0.88rem', color: 'oklch(0.55 0.010 260)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-            Sign in with your email to request access. We'll be in touch.
-          </p>
+        <div style={{ padding: '1.5rem 2rem 2rem' }}>
+          {/* Email waitlist section */}
+          <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
+            <p style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: 'white', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>
+              GET IN LINE
+            </p>
+            <p style={{ fontFamily: sFont.body, fontSize: '0.88rem', color: 'oklch(0.55 0.010 260)', lineHeight: 1.6, marginBottom: '1rem' }}>
+              Drop your email. We'll let you know when you're in.
+            </p>
+          </div>
 
-          {/* Login button */}
-          <a
-            href={getLoginUrl()}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-              width: '100%', padding: '12px 24px', background: sColor.red, color: 'white',
-              fontFamily: sFont.heading, fontSize: '1.05rem', letterSpacing: '0.1em',
-              borderRadius: '3px', border: 'none', cursor: 'pointer', textDecoration: 'none',
-              transition: 'background 0.15s', boxSizing: 'border-box',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'oklch(0.45 0.22 25)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'oklch(0.52 0.22 25)')}
-          >
-            <LogIn style={{ width: 16, height: 16 }} />
-            SIGN IN
-          </a>
+          {!emailSubmitted ? (
+            <form onSubmit={handleEmailSubmit} style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={emailName}
+                  onChange={e => setEmailName(e.target.value)}
+                  placeholder="Name (optional)"
+                  style={{
+                    width: '100%', padding: '10px 12px', fontFamily: sFont.body, fontSize: '0.85rem',
+                    background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.28 0.008 260)',
+                    borderRadius: '3px', color: 'white', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => { setEmail(e.target.value); setEmailError(''); }}
+                  placeholder="Email address"
+                  required
+                  style={{
+                    width: '100%', padding: '10px 12px', fontFamily: sFont.body, fontSize: '0.85rem',
+                    background: 'oklch(0.10 0.005 260)',
+                    border: `1px solid ${emailError ? sColor.red : 'oklch(0.28 0.008 260)'}`,
+                    borderRadius: '3px', color: 'white', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={waitlistSubmit.isPending}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                    width: '100%', padding: '12px 24px', background: sColor.red, color: 'white',
+                    fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.1em',
+                    borderRadius: '3px', border: 'none', cursor: 'pointer',
+                    transition: 'background 0.15s', opacity: waitlistSubmit.isPending ? 0.7 : 1,
+                  }}
+                >
+                  {waitlistSubmit.isPending
+                    ? <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />
+                    : <Mail style={{ width: 16, height: 16 }} />
+                  }
+                  {waitlistSubmit.isPending ? 'SUBMITTING...' : 'GET IN LINE'}
+                </button>
+              </div>
+              {emailError && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '8px', fontFamily: sFont.body, fontSize: '0.8rem', color: 'oklch(0.65 0.18 25)' }}>
+                  <AlertCircle style={{ width: 12, height: 12 }} />
+                  {emailError}
+                </div>
+              )}
+            </form>
+          ) : (
+            <div style={{
+              textAlign: 'center', padding: '16px', marginBottom: '1.25rem',
+              background: 'oklch(0.65 0.20 145 / 0.08)', border: '1px solid oklch(0.65 0.20 145 / 0.25)',
+              borderRadius: '4px',
+            }}>
+              <CheckCircle style={{ width: 24, height: 24, color: sColor.green, margin: '0 auto 8px', display: 'block' }} />
+              <p style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.green, letterSpacing: '0.06em', margin: '0 0 4px' }}>YOU'RE IN LINE</p>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: 'oklch(0.55 0.010 260)', margin: 0 }}>We'll be in touch at <strong style={{ color: 'white' }}>{email}</strong></p>
+            </div>
+          )}
 
           {/* Divider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '1.25rem 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '0 0 1.25rem' }}>
             <div style={{ flex: 1, height: '1px', background: 'oklch(0.22 0.008 260)' }} />
-            <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: 'oklch(0.40 0.010 260)', letterSpacing: '0.1em' }}>OR</span>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: 'oklch(0.40 0.010 260)', letterSpacing: '0.1em' }}>HAVE A CODE?</span>
             <div style={{ flex: 1, height: '1px', background: 'oklch(0.22 0.008 260)' }} />
           </div>
 

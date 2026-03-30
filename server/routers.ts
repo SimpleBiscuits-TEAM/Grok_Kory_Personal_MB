@@ -21,7 +21,7 @@ import { datalogCacheRouter } from "./routers/datalogCache";
 import { accessManagementRouter } from "./routers/accessManagement";
 import { monicaRouter } from "./routers/monica";
 import { notifyOwner } from "./_core/notification";
-import { insertFeedback } from "./db";
+import { insertFeedback, insertWaitlistEmail } from "./db";
 import { z } from "zod";
 import { storagePut } from "./storage";
 import { protectedProcedure } from "./_core/trpc";
@@ -91,6 +91,37 @@ export const appRouter = router({
 
   // AI Monica — Customer-facing debug assistant
   monica: monicaRouter,
+
+  // Email Waitlist (public, no auth required)
+  waitlist: router({
+    submit: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          name: z.string().max(255).optional(),
+          message: z.string().max(1000).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const saved = await insertWaitlistEmail({
+          email: input.email,
+          name: input.name || null,
+          message: input.message || null,
+        });
+
+        // Notify owner
+        try {
+          await notifyOwner({
+            title: `New V-OP Waitlist: ${input.email}`,
+            content: `Email: ${input.email}\nName: ${input.name || 'Not provided'}\nMessage: ${input.message || 'None'}`,
+          });
+        } catch {
+          console.warn("[Waitlist] Owner notification failed, but email was saved");
+        }
+
+        return { success: saved };
+      }),
+  }),
 
   // Feedback / Error Reports
   feedback: router({

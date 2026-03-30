@@ -250,3 +250,21 @@ export const monicaMessages = mysqlTable("monica_messages", {
 
 export type MonicaMessage = typeof monicaMessages.$inferSelect;
 export type InsertMonicaMessage = typeof monicaMessages.$inferInsert;
+
+// ── Email Waitlist ──────────────────────────────────────────────────────────
+
+/**
+ * Email waitlist — collects emails from visitors who want access to V-OP.
+ * Submitted from the SiteGate before they have an account.
+ * Owner gets notified on each submission.
+ */
+export const waitlist = mysqlTable("waitlist", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  message: text("message"), // optional note from the visitor
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Waitlist = typeof waitlist.$inferSelect;
+export type InsertWaitlist = typeof waitlist.$inferInsert;
