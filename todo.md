@@ -2221,3 +2221,18 @@
 - [ ] Rename normal mode to "V-OP Lite" in UI (Home.tsx header/branding) - deferred, keeping V-OP for now
 - [x] Rename advanced mode to "V-OP Pro" in UI (Advanced.tsx header, access gate, navigation)
 - [x] Update ADVANCED button in header to say "V-OP PRO" (Home.tsx header, feature cards, CTA buttons)
+
+## Patent Document Revision (2026-03-29)
+- [x] Remove all competitor/third-party tool names (EFILive, HP Tuners, WinOLS, INCA, FORScan, Vehicle Spy, etc.)
+- [x] Genericize engine/truck platform names (Duramax, Cummins, Powerstroke → "ECU platform", "diesel engine controller", etc.)
+- [x] Add self-improving AI trajectory language (Inventive Aspect 6: beyond human expert within ~6 months, Claim 6 + Claim 20)
+- [x] Remove Prior Art Considerations section (replaced with filing strategy notes)
+- [x] Delivered as PDF (VOP_Patent_Clean.pdf, 29 pages)
+
+## Voice Feedback (2026-03-29)
+- [x] Add speech-to-text (talk to text) to the feedback panel (useVoiceInput hook + VOICE buttons on both textareas)
+- [x] Created reusable useVoiceInput hook using Web Speech API (SpeechRecognition)
+- [x] Added VOICE button to Feedback message textarea with interim text display
+- [x] Added VOICE button to Error Description textarea with interim text display
+- [x] Shows pulsing red dot + LISTENING indicator while recording
+- [x] Gracefully hides VOICE button on unsupported browsers

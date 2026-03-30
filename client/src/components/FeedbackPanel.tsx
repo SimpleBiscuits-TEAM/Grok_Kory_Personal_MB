@@ -8,8 +8,9 @@
  * Tab 2: Error / Bug Report
  */
 
-import React, { useState } from 'react';
-import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown, Mic, MicOff } from 'lucide-react';
+import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { trpc } from '@/lib/trpc';
 
 type Tab = 'feedback' | 'error';
@@ -41,6 +42,20 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
 
   const submitMutation = trpc.feedback.submit.useMutation();
 
+  // Voice input for feedback message
+  const fbVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => {
+      setFbMessage(prev => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + text);
+    }, []),
+  });
+
+  // Voice input for error description
+  const errVoice = useVoiceInput({
+    onTranscript: useCallback((text: string) => {
+      setErrDescription(prev => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + text);
+    }, []),
+  });
+
   const resetAll = () => {
     setStatus('idle');
     setFbName(''); setFbEmail(''); setFbRating(null); setFbMessage('');
@@ -48,6 +63,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
   };
 
   const handleClose = () => {
+    fbVoice.stopListening();
+    errVoice.stopListening();
     resetAll();
     onClose();
   };
@@ -346,16 +363,58 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               </div>
 
               <div>
-                <label style={labelStyle}>Feedback <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>Feedback <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
+                  {fbVoice.isSupported && (
+                    <button
+                      type="button"
+                      onClick={fbVoice.toggleListening}
+                      title={fbVoice.isListening ? 'Stop recording' : 'Talk to text'}
+                      style={{
+                        background: fbVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
+                        border: `1px solid ${fbVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+                        borderRadius: '3px',
+                        color: 'white',
+                        cursor: 'pointer',
+                        padding: '3px 8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontFamily: '"Share Tech Mono", monospace',
+                        fontSize: '0.65rem',
+                        letterSpacing: '0.06em',
+                        transition: 'all 0.15s',
+                        animation: fbVoice.isListening ? 'pulse 1.5s infinite' : 'none',
+                      }}
+                    >
+                      {fbVoice.isListening ? <MicOff style={{ width: '12px', height: '12px' }} /> : <Mic style={{ width: '12px', height: '12px' }} />}
+                      {fbVoice.isListening ? 'STOP' : 'VOICE'}
+                    </button>
+                  )}
+                </div>
                 <textarea
                   required
-                  value={fbMessage}
-                  onChange={e => setFbMessage(e.target.value)}
-                  placeholder="What's working well? What could be better? Any features you'd like to see?"
+                  value={fbMessage + (fbVoice.interimText ? (fbMessage && !fbMessage.endsWith(' ') ? ' ' : '') + fbVoice.interimText : '')}
+                  onChange={e => { fbVoice.stopListening(); setFbMessage(e.target.value); }}
+                  placeholder="What's working well? What could be better? Any features you'd like to see? Tap VOICE to speak."
                   rows={4}
                   style={{ ...inputStyle, resize: 'vertical', minHeight: '90px' }}
                   className="ppei-input-focus"
                 />
+                {fbVoice.isListening && (
+                  <div style={{
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.7rem',
+                    color: 'oklch(0.52 0.22 25)',
+                    marginTop: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}>
+                    <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'oklch(0.52 0.22 25)', animation: 'pulse 1s infinite' }} />
+                    LISTENING...
+                  </div>
+                )}
               </div>
 
               <button
@@ -455,16 +514,58 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               </div>
 
               <div>
-                <label style={labelStyle}>Description <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>Description <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
+                  {errVoice.isSupported && (
+                    <button
+                      type="button"
+                      onClick={errVoice.toggleListening}
+                      title={errVoice.isListening ? 'Stop recording' : 'Talk to text'}
+                      style={{
+                        background: errVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
+                        border: `1px solid ${errVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
+                        borderRadius: '3px',
+                        color: 'white',
+                        cursor: 'pointer',
+                        padding: '3px 8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontFamily: '"Share Tech Mono", monospace',
+                        fontSize: '0.65rem',
+                        letterSpacing: '0.06em',
+                        transition: 'all 0.15s',
+                        animation: errVoice.isListening ? 'pulse 1.5s infinite' : 'none',
+                      }}
+                    >
+                      {errVoice.isListening ? <MicOff style={{ width: '12px', height: '12px' }} /> : <Mic style={{ width: '12px', height: '12px' }} />}
+                      {errVoice.isListening ? 'STOP' : 'VOICE'}
+                    </button>
+                  )}
+                </div>
                 <textarea
                   required
-                  value={errDescription}
-                  onChange={e => setErrDescription(e.target.value)}
-                  placeholder="Describe what went wrong. Include any error messages you saw."
+                  value={errDescription + (errVoice.interimText ? (errDescription && !errDescription.endsWith(' ') ? ' ' : '') + errVoice.interimText : '')}
+                  onChange={e => { errVoice.stopListening(); setErrDescription(e.target.value); }}
+                  placeholder="Describe what went wrong. Include any error messages you saw. Tap VOICE to speak."
                   rows={3}
                   style={{ ...inputStyle, resize: 'vertical', minHeight: '80px' }}
                   className="ppei-input-focus"
                 />
+                {errVoice.isListening && (
+                  <div style={{
+                    fontFamily: '"Share Tech Mono", monospace',
+                    fontSize: '0.7rem',
+                    color: 'oklch(0.52 0.22 25)',
+                    marginTop: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}>
+                    <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'oklch(0.52 0.22 25)', animation: 'pulse 1s infinite' }} />
+                    LISTENING...
+                  </div>
+                )}
               </div>
 
               <div>
