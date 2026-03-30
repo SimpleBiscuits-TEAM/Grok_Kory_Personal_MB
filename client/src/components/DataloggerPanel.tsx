@@ -1364,12 +1364,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>ADAPTER:</span>
             <select
               value={adapterType}
-              onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan')}
+              onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan' | 'vop')}
               disabled={connectionState !== 'disconnected' && connectionState !== 'error'}
               style={{
                 fontFamily: sFont.mono, fontSize: '0.7rem', padding: '2px 6px',
                 background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`,
-                borderRadius: '2px', color: adapterType === 'pcan' ? sColor.orange : sColor.text,
+                borderRadius: '2px', color: adapterType === 'pcan' ? sColor.orange : adapterType === 'vop' ? sColor.red : sColor.text,
               }}
             >
               <option value="elm327">ELM327 (WebSerial)</option>
@@ -2137,7 +2137,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
             </div>
           )}
 
-          {/* Idle state */}
+          {/* Ready state */}
           {connectionState === 'disconnected' && !isLogging && liveReadings.size === 0 && (
             <div style={{
               background: sColor.bgCard, border: `1px solid ${sColor.border}`,
@@ -2181,7 +2181,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                   style={{
                     flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'vop' ? sColor.red : sColor.border}`,
                     borderRadius: '0 3px 3px 0', cursor: 'pointer',
-                    background: adapterType === 'vop' ? 'oklch(0.52 0.22 25 / 0.15)' : 'oklch(0.08 0.005 260)',
+                    background: adapterType === 'vop' ? 'oklch(0.12 0.04 25 / 0.4)' : 'oklch(0.08 0.005 260)',
                     fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
                     color: adapterType === 'vop' ? sColor.red : sColor.textDim,
                   }}
@@ -2364,6 +2364,43 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       <div>No bridge software required</div>
                       <div>Full PID support including GM Mode 22 extended</div>
                       <div>Integrated with Flash and Service Procedures</div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* V-OP Mode Instructions */}
+              {adapterType === 'vop' && (
+                <>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto' }}>
+                    <strong style={{ color: sColor.red }}>V-OP</strong> is a proprietary PPEI protocol for advanced vehicle optimization. Full protocol support is being finalized and will be available soon.
+                  </div>
+
+                  <div style={{ maxWidth: '520px', margin: '20px auto 0' }}>
+                    <div style={{
+                      padding: '24px 20px', borderRadius: '6px', textAlign: 'center',
+                      background: 'oklch(0.12 0.04 25 / 0.2)',
+                      border: `1px solid oklch(0.30 0.12 25)`,
+                    }}>
+                      <div style={{ fontSize: '2rem', marginBottom: '12px' }}>{String.fromCodePoint(0x26A1)}</div>
+                      <div style={{ fontFamily: sFont.heading, fontSize: '1rem', color: sColor.red, letterSpacing: '0.1em', marginBottom: '8px' }}>
+                        V-OP PROTOCOL
+                      </div>
+                      <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, lineHeight: 1.6 }}>
+                        Protocol implementation arriving this week. Stay tuned.
+                      </div>
+                      <div style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
+                        {['Deep ECU Integration', 'Custom Parameter Access', 'Real-time Calibration Sync', 'Full Read/Write Support'].map(feature => (
+                          <span key={feature} style={{
+                            fontFamily: sFont.mono, fontSize: '0.6rem',
+                            background: 'rgba(200,50,50,0.15)', border: '1px solid rgba(200,50,50,0.3)',
+                            borderRadius: '3px', padding: '3px 8px', color: sColor.red,
+                            textTransform: 'uppercase', letterSpacing: '0.05em',
+                          }}>
+                            {feature}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </>

@@ -7,7 +7,7 @@
 
 import { VehicleInfo } from './obdConnection';
 
-export type SupportedProtocol = 'obd2' | 'j1939' | 'kline';
+export type SupportedProtocol = 'obd2' | 'j1939' | 'kline' | 'vop';
 
 export interface ProtocolCapability {
   protocol: SupportedProtocol;
@@ -96,6 +96,22 @@ export function detectSupportedProtocols(vehicleInfo?: VehicleInfo): ProtocolCap
     ],
   });
 
+  // V-OP (proprietary protocol — coming soon)
+  capabilities.push({
+    protocol: 'vop',
+    supported: true,
+    confidence: 50,
+    reason: 'V-OP is a proprietary PPEI protocol for advanced vehicle optimization. Protocol implementation coming soon.',
+    features: [
+      'Proprietary PPEI Protocol',
+      'Advanced Vehicle Optimization',
+      'Deep ECU Integration',
+      'Custom Parameter Access',
+      'Real-time Calibration Sync',
+      'Protocol details arriving next week',
+    ],
+  });
+
   // Sort by confidence
   return capabilities.sort((a, b) => b.confidence - a.confidence);
 }
@@ -157,6 +173,8 @@ export function getProtocolBaudRate(protocol: SupportedProtocol): number {
       return 250000;
     case 'kline':
       return 10400;
+    case 'vop':
+      return 500000; // V-OP proprietary — TBD
     case 'obd2':
     default:
       return 10400;
@@ -174,6 +192,8 @@ export function supportsLiveTuning(protocol: SupportedProtocol): boolean {
       return false; // J1939 is read-only for most parameters
     case 'kline':
       return true; // Mode 0x2E/0x3D support
+    case 'vop':
+      return true; // V-OP supports full read/write
     default:
       return false;
   }
@@ -214,6 +234,14 @@ export function getProtocolFeatures(protocol: SupportedProtocol): string[] {
       'Live Tuning (Mode 0x2E/0x3D)',
       'Legacy Vehicle Support',
     ],
+    vop: [
+      'Proprietary PPEI Protocol',
+      'Advanced Vehicle Optimization',
+      'Deep ECU Integration',
+      'Custom Parameter Access',
+      'Real-time Calibration Sync',
+      'Full Read/Write Support',
+    ],
   };
 
   return capabilities[protocol] || [];
@@ -228,6 +256,8 @@ export function getRecommendedAdapter(protocol: SupportedProtocol): string {
       return 'CAN adapter with 250kbps support (e.g., OBDLink EX with CAN mode)';
     case 'kline':
       return 'K-Line adapter (e.g., OBDLink EX, FTDI-based adapter)';
+    case 'vop':
+      return 'V-OP compatible adapter (protocol details coming soon)';
     case 'obd2':
     default:
       return 'OBD-II adapter (e.g., OBDLink EX, ELM327-compatible)';
@@ -278,6 +308,13 @@ export const PROTOCOL_COMPATIBILITY: ProtocolCompatibility[] = [
     commonMakes: ['BMW', 'Audi', 'Mercedes', 'Volkswagen', 'Bosch', 'Siemens'],
     notes: 'Legacy protocol for pre-2010 European vehicles',
   },
+  {
+    protocol: 'vop',
+    minYear: 1996,
+    regions: ['North America', 'Europe', 'Asia'],
+    commonMakes: ['All'],
+    notes: 'Proprietary PPEI V-OP protocol for advanced vehicle optimization (coming soon)',
+  },
 ];
 
 /**
@@ -306,7 +343,7 @@ export function isProtocolLikelyForVehicle(
  * Get all compatible protocols for a vehicle
  */
 export function getCompatibleProtocols(year?: number, make?: string): SupportedProtocol[] {
-  return (['obd2', 'j1939', 'kline'] as const).filter((protocol) =>
+  return (['obd2', 'j1939', 'kline', 'vop'] as const).filter((protocol) =>
     isProtocolLikelyForVehicle(protocol, year, make)
   );
 }

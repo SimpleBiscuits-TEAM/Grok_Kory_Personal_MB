@@ -13,7 +13,7 @@
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface ProtocolFault {
-  protocol: 'obd2' | 'j1939' | 'kline';
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
   code: string; // DTC (OBD-II), SPN/FMI (J1939), or hex code (K-Line)
   description: string;
   severity: 'info' | 'warning' | 'critical';

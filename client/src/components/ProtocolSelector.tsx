@@ -57,6 +57,8 @@ export function ProtocolSelector({
         return '🚛';
       case 'kline':
         return '🔧';
+      case 'vop':
+        return '⚡';
       case 'obd2':
       default:
         return '🔌';
@@ -69,6 +71,8 @@ export function ProtocolSelector({
         return 'Heavy-duty trucks and commercial vehicles (250kbps CAN)';
       case 'kline':
         return 'Legacy vehicles and European cars (10.4kbaud single-wire)';
+      case 'vop':
+        return 'Proprietary PPEI V-OP protocol for advanced vehicle optimization (coming soon)';
       case 'obd2':
       default:
         return 'Universal standard for all post-1996 vehicles (10.4kbaud)';
@@ -118,7 +122,7 @@ export function ProtocolSelector({
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <div className="font-semibold capitalize">
-                          {protocol.protocol === 'obd2' ? 'OBD-II' : protocol.protocol.toUpperCase()}
+                          {protocol.protocol === 'obd2' ? 'OBD-II' : protocol.protocol === 'vop' ? 'V-OP' : protocol.protocol.toUpperCase()}
                         </div>
                         {isRecommended && (
                           <Badge variant="default" className="text-xs">
@@ -219,6 +223,7 @@ export function ProtocolSelector({
             <li>J1939 provides more detailed engine/transmission data on heavy-duty trucks</li>
             <li>K-Line is for older European vehicles (pre-2010)</li>
             <li>Some adapters support multiple protocols - check your adapter specs</li>
+            <li>V-OP is a proprietary PPEI protocol — full support arriving soon</li>
           </ul>
         </div>
       </Card>
@@ -230,7 +235,7 @@ export function ProtocolSelector({
           onClick={() => onProtocolSelected?.(selectedProtocol)}
           className="flex-1"
         >
-          Connect with {selectedProtocol === 'obd2' ? 'OBD-II' : selectedProtocol.toUpperCase()}
+          Connect with {selectedProtocol === 'obd2' ? 'OBD-II' : selectedProtocol === 'vop' ? 'V-OP' : selectedProtocol.toUpperCase()}
         </Button>
       </div>
     </div>

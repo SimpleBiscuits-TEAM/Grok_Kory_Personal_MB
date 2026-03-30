@@ -55,7 +55,7 @@ function makeReading(
 }
 
 function makeDataset(
-  protocol: 'obd2' | 'j1939' | 'kline',
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop',
   readings: NormalizedReading[]
 ): ProtocolDataset {
   const timestamps = readings.map(r => r.timestamp);

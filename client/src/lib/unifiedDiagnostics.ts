@@ -21,7 +21,7 @@ import {
 export interface UnifiedDiagnosticIssue {
   id: string;
   type: 'info' | 'warning' | 'critical';
-  protocol: 'obd2' | 'j1939' | 'kline' | 'cross-protocol';
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop' | 'cross-protocol';
   category: string;
   parameter: string;
   shortName: string;
@@ -47,7 +47,7 @@ export interface UnifiedHealthScore {
 
 export interface UnifiedDiagnosticReport {
   timestamp: number;
-  protocol: 'obd2' | 'j1939' | 'kline' | 'multi';
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop' | 'multi';
   totalReadings: number;
   issues: UnifiedDiagnosticIssue[];
   health: UnifiedHealthScore;
@@ -576,7 +576,7 @@ export function runUnifiedDiagnostics(readings: NormalizedReading[]): UnifiedDia
 
   // Determine protocol(s)
   const protocols = new Set(readings.map(r => r.protocol));
-  const protocol = protocols.size > 1 ? 'multi' : (Array.from(protocols)[0] as 'obd2' | 'j1939' | 'kline');
+  const protocol = protocols.size > 1 ? 'multi' : (Array.from(protocols)[0] as 'obd2' | 'j1939' | 'kline' | 'vop');
 
   // Detect operating state
   const state = detectOperatingState(readings);
