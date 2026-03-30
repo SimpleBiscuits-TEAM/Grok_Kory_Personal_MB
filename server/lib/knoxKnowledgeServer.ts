@@ -685,12 +685,100 @@ Ship Option C immediately (fastest to market), develop Option B as premium produ
 - Extremely small package — coin-sized dongle possible
 `;
 
+const VOP_UNLOCK_BOX = `
+## VOP Unlock Box — Hardware Security Bypass Module (CONFIDENTIAL — Server-Only)
+
+### Purpose
+The VOP Unlock Box is a separate hardware module that connects between the vehicle's OBD-II port and the VOP 3.0 board. It provides hardware-level security bypass for ECUs with hardened lock functions that cannot be defeated through software-only seed/key computation. Primary targets are 2017-2023 GM Duramax L5P trucks and other vehicles with advanced anti-tamper protections.
+
+### Physical Specifications
+The unlock box uses an OBD-II male-to-female pass-through enclosure manufactured by Shenzhen Benz's Electronics (diagnostic-cable.com / china-obd2cable.com).
+
+| Component | Specification |
+|-----------|--------------|
+| Front Shell | ABS Black, ~72mm x 46mm |
+| Back Shell | ABS Black, screw-secured to front |
+| OBD/M Connector | 16-pin OBD-II male plug, phosphor copper (C5191), nickel plating |
+| OBD/F Connector | 16-pin OBD-II female socket, PBT Black, brass (H62), nickel plating |
+| Fastener | M2.3 self-tapping screw |
+| Certification | RoHS compliant |
+
+### Electrical Test Requirements
+1. 100% conduction verified — no short circuit and no open circuit
+2. DC Voltage withstand: 500V
+3. Insulation Resistance: 20MΩ minimum
+4. Conduction Resistance: 1Ω maximum
+
+### Hardware Stack — Locked ECU Flash Workflow
+For vehicles with hardened ECU security (e.g., 2017-2023 Duramax L5P), the full hardware stack is:
+
+Step 1: Vehicle OBD-II Port
+Step 2: VOP Unlock Box (OBD male plugs into vehicle)
+Step 3: VOP 3.0 Board (plugs into Unlock Box OBD female pass-through)
+Step 4: Phone connects to VOP 3.0 via WiFi/BLE
+
+The unlock box sits inline between the vehicle and VOP 3.0. It intercepts and manipulates the CAN bus signals as needed for the security bypass, then passes all other traffic through transparently to VOP 3.0 for normal flash/read/diagnostic operations.
+
+### Target Vehicles — Locked ECU Platforms
+These ECU platforms have hardened security that requires the unlock box:
+
+#### GM Duramax L5P (2017-2023)
+- ECU: E41 (Bosch MG1CS111)
+- Security: GM Global B architecture with CMAC-based authentication
+- Challenge: 31-byte seed, 12-byte key with module-specific CMAC secrets
+- The E41 has additional hardware security measures beyond standard UDS seed/key
+- Requires hardware-level intervention for programming session access
+- Affects: Chevrolet Silverado 2500HD/3500HD, GMC Sierra 2500HD/3500HD (2017-2023)
+
+#### GM Gas Trucks (2019+)
+- ECU: E42/E86 (various Bosch MG1 variants)
+- Security: GM Global B with enhanced anti-tamper
+- Some variants have fuse-based lockout that requires hardware bypass
+
+#### Other Potential Targets
+- Ford 6.7L Power Stroke (2020+) with updated Bosch MG1 security
+- RAM Cummins 6.7L (2019+) with Cummins CM2450 enhanced security
+- Any future ECU platform that adds hardware-level anti-tamper beyond software seed/key
+
+### Pass-Through Architecture
+The unlock box is designed as a transparent pass-through. When the unlock function is not needed, the box simply connects all 16 OBD-II pins straight through with no modification. This means:
+- Other diagnostic tools can still be plugged into the OBD-F port on the unlock box
+- VOP 3.0 can operate normally for non-locked ECUs without removing the unlock box
+- The unlock function is only activated when VOP 3.0 sends a specific command sequence
+- The box does not interfere with normal vehicle operation when installed permanently
+
+### Integration with VOP 3.0 Firmware
+The VOP 3.0 flash script language supports the unlock box through these commands:
+- IS_UNLOCK: Check if the current flash procedure requires the unlock box
+- FLASH_PATCH: Apply unlock-specific patches during the flash sequence
+- The flash procedure script detects whether the unlock box is present and adjusts the security access sequence accordingly
+- If a locked ECU is detected and no unlock box is present, VOP 3.0 alerts the user through the app and Knox provides guidance
+
+### Customer Experience
+1. Customer plugs Unlock Box into vehicle OBD-II port
+2. Customer plugs VOP 3.0 board into Unlock Box pass-through
+3. Opens VOP app on phone — Knox detects locked ECU platform
+4. Knox says: "L5P Duramax detected. Unlock box connected. Ready to flash."
+5. Customer selects tune and hits FLASH
+6. Unlock box handles security bypass transparently
+7. VOP 3.0 executes the flash procedure
+8. Flash progress visible on phone (and car screen if streaming)
+9. Knox confirms: "Flash complete. ECU unlocked and tuned."
+
+### Competitive Advantage
+No other tuning platform offers an integrated hardware unlock solution at this price point. Competitors require:
+- HP Tuners: Requires bench flash (ECU removal) for locked L5P — $500+ bench harness + labor
+- EFI Live: AutoCal 3 with unlock license — $800+ per device
+- GDP Tuning: EZ Lynk with unlock — $600+ per device
+- VOP: Unlock Box (<$20) + VOP 3.0 (<$20) = under $40 total, through the OBD-II port, no bench flash required
+`;
+
 /**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX;
 }
 
 /**
