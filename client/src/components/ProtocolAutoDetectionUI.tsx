@@ -17,8 +17,8 @@ import {
 interface ProtocolAutoDetectionUIProps {
   detectionResults: DetectionResults | null;
   isDetecting: boolean;
-  selectedProtocol: 'obd2' | 'j1939' | 'kline' | 'vop' | null;
-  onProtocolSelect: (protocol: 'obd2' | 'j1939' | 'kline' | 'vop') => void;
+  selectedProtocol: 'obd2' | 'j1939' | 'kline' | null;
+  onProtocolSelect: (protocol: 'obd2' | 'j1939' | 'kline') => void;
   onRetryDetection?: () => void;
 }
 
@@ -342,7 +342,7 @@ export function ProtocolAutoDetectionUI({
 export function useProtocolDetection(connection: any) {
   const [detectionResults, setDetectionResults] = useState<DetectionResults | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [selectedProtocol, setSelectedProtocol] = useState<'obd2' | 'j1939' | 'kline' | 'vop' | null>(null);
+  const [selectedProtocol, setSelectedProtocol] = useState<'obd2' | 'j1939' | 'kline' | null>(null);
 
   const runDetection = async () => {
     if (!connection) return;

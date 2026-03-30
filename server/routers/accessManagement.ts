@@ -15,7 +15,6 @@ import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure, adminProcedure, superAdminProcedure } from '../_core/trpc';
 import { getDb } from '../db';
 import { users } from '../../drizzle/schema';
-import { notifyOwner } from '../_core/notification';
 
 export const accessManagementRouter = router({
   // ── Public: Check own access status ──────────────────────────────────────
@@ -40,11 +39,7 @@ export const accessManagementRouter = router({
   }),
 
   // ── Public: Request access to Advanced ───────────────────────────────────
-  requestAccess: protectedProcedure
-    .input(z.object({
-      reason: z.string().min(10, 'Please provide at least a brief reason').max(2000).optional(),
-    }).optional())
-    .mutation(async ({ ctx, input }) => {
+  requestAccess: protectedProcedure.mutation(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
 
@@ -66,24 +61,10 @@ export const accessManagementRouter = router({
       return { status: 'already_pending' as const };
     }
 
-    // Set to pending with reason
+    // Set to pending
     await db.update(users)
-      .set({
-        advancedAccess: 'pending',
-        accessRequestReason: input?.reason || null,
-      })
+      .set({ advancedAccess: 'pending' })
       .where(eq(users.id, ctx.user.id));
-
-    // Notify owner about new access request
-    try {
-      const reasonText = input?.reason ? `\n\nReason: ${input.reason}` : '';
-      await notifyOwner({
-        title: `Access Request: ${ctx.user.name || ctx.user.email}`,
-        content: `${ctx.user.name || 'Unknown'} (${ctx.user.email || 'no email'}) has requested access to V-OP Pro.${reasonText}\n\nReview in the User Management panel.`,
-      });
-    } catch {
-      console.warn('[Access] Owner notification failed, but request was saved');
-    }
 
     return { status: 'requested' as const };
   }),
@@ -138,7 +119,6 @@ export const accessManagementRouter = router({
         accessLevel: users.accessLevel,
         accessApprovedBy: users.accessApprovedBy,
         accessApprovedAt: users.accessApprovedAt,
-        accessRequestReason: users.accessRequestReason,
         createdAt: users.createdAt,
         lastSignedIn: users.lastSignedIn,
       })

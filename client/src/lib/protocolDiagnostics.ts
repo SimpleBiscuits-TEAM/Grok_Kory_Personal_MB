@@ -422,7 +422,7 @@ export function generateKLineDiagnosticReport(
 // ─── Cross-Protocol Diagnostics ──────────────────────────────────────────────
 
 export interface CrossProtocolDiagnosticSummary {
-  protocol: 'j1939' | 'kline' | 'obd2' | 'vop';
+  protocol: 'j1939' | 'kline' | 'obd2';
   vehicleType: string;
   overallHealth: number;              // 0-100
   criticalIssues: number;
@@ -435,7 +435,7 @@ export interface CrossProtocolDiagnosticSummary {
  * Get diagnostic summary for a protocol
  */
 export function getDiagnosticSummary(
-  protocol: 'j1939' | 'kline' | 'vop',
+  protocol: 'j1939' | 'kline',
   report: J1939DiagnosticReport | KLineDiagnosticReport,
   vehicleType: string
 ): CrossProtocolDiagnosticSummary {

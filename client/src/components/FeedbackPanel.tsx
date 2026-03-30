@@ -8,9 +8,8 @@
  * Tab 2: Error / Bug Report
  */
 
-import React, { useState, useCallback, useRef } from 'react';
-import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown, Mic, MicOff, Video, Paperclip, Trash2, Loader2 } from 'lucide-react';
-import { useVoiceInput } from '@/hooks/useVoiceInput';
+import React, { useState } from 'react';
+import { MessageSquare, AlertTriangle, X, Send, CheckCircle, ChevronDown } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 
 type Tab = 'feedback' | 'error';
@@ -40,83 +39,15 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
   const [errDescription, setErrDescription] = useState('');
   const [errSteps, setErrSteps] = useState('');
 
-  // File attachments (video, screen recordings, images)
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-  const ACCEPTED_TYPES = 'video/*,image/*,audio/*,.webm,.mp4,.mov,.avi,.png,.jpg,.jpeg,.gif,.mp3,.wav';
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    const valid = files.filter(f => {
-      if (f.size > MAX_FILE_SIZE) {
-        alert(`File "${f.name}" is too large (max 50MB)`);
-        return false;
-      }
-      return true;
-    });
-    setAttachments(prev => [...prev, ...valid].slice(0, 5)); // max 5 files
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const uploadAttachments = async (): Promise<string[]> => {
-    if (attachments.length === 0) return [];
-    setUploading(true);
-    try {
-      const urls: string[] = [];
-      for (const file of attachments) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch('/api/trpc/feedback.uploadFile', {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.result?.data?.url) urls.push(data.result.data.url);
-        }
-      }
-      return urls;
-    } catch {
-      return [];
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const submitMutation = trpc.feedback.submit.useMutation();
-
-  // Voice input for feedback message
-  const fbVoice = useVoiceInput({
-    onTranscript: useCallback((text: string) => {
-      setFbMessage(prev => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + text);
-    }, []),
-  });
-
-  // Voice input for error description
-  const errVoice = useVoiceInput({
-    onTranscript: useCallback((text: string) => {
-      setErrDescription(prev => prev + (prev && !prev.endsWith(' ') ? ' ' : '') + text);
-    }, []),
-  });
 
   const resetAll = () => {
     setStatus('idle');
     setFbName(''); setFbEmail(''); setFbRating(null); setFbMessage('');
     setErrName(''); setErrEmail(''); setErrType(''); setErrDescription(''); setErrSteps('');
-    setAttachments([]);
   };
 
   const handleClose = () => {
-    fbVoice.stopListening();
-    errVoice.stopListening();
     resetAll();
     onClose();
   };
@@ -125,7 +56,6 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     e.preventDefault();
     setStatus('sending');
     try {
-      const uploadedUrls = await uploadAttachments();
       const result = await submitMutation.mutateAsync({
         type: 'feedback',
         name: fbName || undefined,
@@ -133,7 +63,6 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         rating: fbRating ?? undefined,
         message: fbMessage,
         context: context || undefined,
-        attachments: uploadedUrls.length > 0 ? uploadedUrls : undefined,
       });
       setStatus(result.success ? 'success' : 'error');
     } catch {
@@ -145,7 +74,6 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
     e.preventDefault();
     setStatus('sending');
     try {
-      const uploadedUrls = await uploadAttachments();
       const result = await submitMutation.mutateAsync({
         type: 'error',
         name: errName || undefined,
@@ -154,7 +82,6 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         errorType: errType || undefined,
         stepsToReproduce: errSteps || undefined,
         context: context || undefined,
-        attachments: uploadedUrls.length > 0 ? uploadedUrls : undefined,
       });
       setStatus(result.success ? 'success' : 'error');
     } catch {
@@ -206,11 +133,11 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         className="ppei-anim-scale-in"
         style={{
           position: 'fixed',
-          top: '5%',
+          top: '50%',
           left: '50%',
-          transform: 'translateX(-50%)',
+          transform: 'translate(-50%, -50%)',
           width: 'min(520px, 95vw)',
-          maxHeight: '90vh',
+          maxHeight: '85vh',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
           background: 'oklch(0.11 0.005 260)',
@@ -419,153 +346,23 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               </div>
 
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <label style={{ ...labelStyle, marginBottom: 0 }}>Feedback <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
-                  {fbVoice.isSupported && (
-                    <button
-                      type="button"
-                      onClick={fbVoice.toggleListening}
-                      title={fbVoice.isListening ? 'Stop recording' : 'Talk to text'}
-                      style={{
-                        background: fbVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
-                        border: `1px solid ${fbVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
-                        borderRadius: '3px',
-                        color: 'white',
-                        cursor: 'pointer',
-                        padding: '3px 8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontFamily: '"Share Tech Mono", monospace',
-                        fontSize: '0.65rem',
-                        letterSpacing: '0.06em',
-                        transition: 'all 0.15s',
-                        animation: fbVoice.isListening ? 'pulse 1.5s infinite' : 'none',
-                      }}
-                    >
-                      {fbVoice.isListening ? <MicOff style={{ width: '12px', height: '12px' }} /> : <Mic style={{ width: '12px', height: '12px' }} />}
-                      {fbVoice.isListening ? 'STOP' : 'VOICE'}
-                    </button>
-                  )}
-                </div>
+                <label style={labelStyle}>Feedback <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
                 <textarea
                   required
-                  value={fbMessage + (fbVoice.interimText ? (fbMessage && !fbMessage.endsWith(' ') ? ' ' : '') + fbVoice.interimText : '')}
-                  onChange={e => { fbVoice.stopListening(); setFbMessage(e.target.value); }}
-                  placeholder="What's working well? What could be better? Any features you'd like to see? Tap VOICE to speak."
+                  value={fbMessage}
+                  onChange={e => setFbMessage(e.target.value)}
+                  placeholder="What's working well? What could be better? Any features you'd like to see?"
                   rows={4}
                   style={{ ...inputStyle, resize: 'vertical', minHeight: '90px' }}
                   className="ppei-input-focus"
                 />
-                {fbVoice.isListening && (
-                  <div style={{
-                    fontFamily: '"Share Tech Mono", monospace',
-                    fontSize: '0.7rem',
-                    color: 'oklch(0.52 0.22 25)',
-                    marginTop: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}>
-                    <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'oklch(0.52 0.22 25)', animation: 'pulse 1s infinite' }} />
-                    LISTENING...
-                  </div>
-                )}
-              </div>
-
-              {/* Attachments */}
-              <div>
-                <label style={labelStyle}>Attachments (optional)</label>
-                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem', color: 'oklch(0.45 0.010 260)', margin: '0 0 6px' }}>
-                  Upload screen recordings, videos, or screenshots to help describe the issue (max 50MB each, up to 5 files)
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={ACCEPTED_TYPES}
-                  multiple
-                  onChange={handleFileSelect}
-                  style={{ display: 'none' }}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      background: 'oklch(0.16 0.008 260)',
-                      border: '1px solid oklch(0.28 0.008 260)',
-                      borderRadius: '3px',
-                      color: 'oklch(0.65 0.010 260)',
-                      cursor: 'pointer',
-                      padding: '6px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontFamily: '"Share Tech Mono", monospace',
-                      fontSize: '0.7rem',
-                      letterSpacing: '0.04em',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <Paperclip style={{ width: '12px', height: '12px' }} />
-                    ATTACH FILES
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{
-                      background: 'oklch(0.16 0.008 260)',
-                      border: '1px solid oklch(0.28 0.008 260)',
-                      borderRadius: '3px',
-                      color: 'oklch(0.65 0.010 260)',
-                      cursor: 'pointer',
-                      padding: '6px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontFamily: '"Share Tech Mono", monospace',
-                      fontSize: '0.7rem',
-                      letterSpacing: '0.04em',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    <Video style={{ width: '12px', height: '12px' }} />
-                    SCREEN RECORDING
-                  </button>
-                </div>
-                {attachments.length > 0 && (
-                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {attachments.map((file, i) => (
-                      <div key={i} style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: 'oklch(0.13 0.006 260)',
-                        border: '1px solid oklch(0.22 0.008 260)',
-                        borderRadius: '3px',
-                        padding: '4px 8px',
-                      }}>
-                        <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.60 0.010 260)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '300px' }}>
-                          {file.type.startsWith('video') ? '\uD83C\uDFA5' : file.type.startsWith('image') ? '\uD83D\uDDBC\uFE0F' : '\uD83C\uDFA4'} {file.name} ({(file.size / 1024 / 1024).toFixed(1)}MB)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removeAttachment(i)}
-                          style={{ background: 'transparent', border: 'none', color: 'oklch(0.52 0.22 25)', cursor: 'pointer', padding: '2px', display: 'flex' }}
-                        >
-                          <Trash2 style={{ width: '12px', height: '12px' }} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               <button
                 type="submit"
-                disabled={status === 'sending' || uploading || !fbMessage.trim()}
+                disabled={status === 'sending' || !fbMessage.trim()}
                 style={{
-                  background: status === 'sending' || uploading || !fbMessage.trim() ? 'oklch(0.30 0.010 260)' : 'oklch(0.52 0.22 25)',
+                  background: status === 'sending' || !fbMessage.trim() ? 'oklch(0.30 0.010 260)' : 'oklch(0.52 0.22 25)',
                   color: 'white',
                   fontFamily: '"Bebas Neue", "Impact", sans-serif',
                   fontSize: '1rem',
@@ -573,7 +370,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   padding: '10px 24px',
                   borderRadius: '3px',
                   border: 'none',
-                  cursor: status === 'sending' || uploading || !fbMessage.trim() ? 'not-allowed' : 'pointer',
+                  cursor: status === 'sending' || !fbMessage.trim() ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -583,8 +380,8 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
                   width: '100%',
                 }}
               >
-                {uploading ? <Loader2 style={{ width: '14px', height: '14px', animation: 'spin 1s linear infinite' }} /> : <Send style={{ width: '14px', height: '14px' }} />}
-                {uploading ? 'UPLOADING...' : status === 'sending' ? 'SENDING...' : 'SEND FEEDBACK'}
+                <Send style={{ width: '14px', height: '14px' }} />
+                {status === 'sending' ? 'SENDING...' : 'SEND FEEDBACK'}
               </button>
             </form>
           )}
@@ -658,58 +455,16 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
               </div>
 
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <label style={{ ...labelStyle, marginBottom: 0 }}>Description <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
-                  {errVoice.isSupported && (
-                    <button
-                      type="button"
-                      onClick={errVoice.toggleListening}
-                      title={errVoice.isListening ? 'Stop recording' : 'Talk to text'}
-                      style={{
-                        background: errVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
-                        border: `1px solid ${errVoice.isListening ? 'oklch(0.52 0.22 25)' : 'oklch(0.28 0.008 260)'}`,
-                        borderRadius: '3px',
-                        color: 'white',
-                        cursor: 'pointer',
-                        padding: '3px 8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        fontFamily: '"Share Tech Mono", monospace',
-                        fontSize: '0.65rem',
-                        letterSpacing: '0.06em',
-                        transition: 'all 0.15s',
-                        animation: errVoice.isListening ? 'pulse 1.5s infinite' : 'none',
-                      }}
-                    >
-                      {errVoice.isListening ? <MicOff style={{ width: '12px', height: '12px' }} /> : <Mic style={{ width: '12px', height: '12px' }} />}
-                      {errVoice.isListening ? 'STOP' : 'VOICE'}
-                    </button>
-                  )}
-                </div>
+                <label style={labelStyle}>Description <span style={{ color: 'oklch(0.52 0.22 25)' }}>*</span></label>
                 <textarea
                   required
-                  value={errDescription + (errVoice.interimText ? (errDescription && !errDescription.endsWith(' ') ? ' ' : '') + errVoice.interimText : '')}
-                  onChange={e => { errVoice.stopListening(); setErrDescription(e.target.value); }}
-                  placeholder="Describe what went wrong. Include any error messages you saw. Tap VOICE to speak."
+                  value={errDescription}
+                  onChange={e => setErrDescription(e.target.value)}
+                  placeholder="Describe what went wrong. Include any error messages you saw."
                   rows={3}
                   style={{ ...inputStyle, resize: 'vertical', minHeight: '80px' }}
                   className="ppei-input-focus"
                 />
-                {errVoice.isListening && (
-                  <div style={{
-                    fontFamily: '"Share Tech Mono", monospace',
-                    fontSize: '0.7rem',
-                    color: 'oklch(0.52 0.22 25)',
-                    marginTop: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}>
-                    <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: 'oklch(0.52 0.22 25)', animation: 'pulse 1s infinite' }} />
-                    LISTENING...
-                  </div>
-                )}
               </div>
 
               <div>

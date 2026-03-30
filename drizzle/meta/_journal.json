@@ -120,34 +120,6 @@
       "when": 1774828285852,
       "tag": "0016_flawless_hemingway",
       "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "5",
-      "when": 1774838504273,
-      "tag": "0017_parallel_master_chief",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "5",
-      "when": 1774838979399,
-      "tag": "0018_lame_revanche",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "5",
-      "when": 1774840308952,
-      "tag": "0019_gigantic_doctor_spectrum",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "5",
-      "when": 1774845674591,
-      "tag": "0020_same_toro",
-      "breakpoints": true
     }
   ]
 }

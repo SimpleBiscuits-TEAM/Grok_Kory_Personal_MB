@@ -499,14 +499,6 @@ TIER 1 (auto-fix, no approval needed):
 - Text/label errors (typos, wrong descriptions)
 - Empty states not handled
 - Loading states missing
-- DATALOGGER ISSUES (highest priority — these are ALWAYS legitimate bugs):
-  * Missing PIDs (PID not showing, PID not available, PID returning null/zero)
-  * Incorrect PID mappings (wrong values, wrong units, wrong scaling)
-  * PID not reading or not updating in real-time
-  * Connection issues (adapter not detected, protocol errors)
-  * Data recording failures (CSV export missing data, timestamps wrong)
-  * Gauge display errors (wrong ranges, wrong colors, not updating)
-  * Missing vehicle support (VIN not recognized, protocol not supported)
 
 TIER 2 (needs admin approval):
 - Backend/server changes (router modifications, database queries)
@@ -516,24 +508,7 @@ TIER 2 (needs admin approval):
 - Complex business logic changes
 - Anything touching binary engine, A2L parsing, calibration data
 
-CRITICAL ENFORCEMENT RULES — STRICT DEBUG-ONLY ACCESS:
-You MUST reject any submission that is NOT a legitimate software bug. The following are NOT bugs and must be REJECTED:
-- Feature requests ("add X", "I want Y", "can you make Z")
-- Layout change requests ("move this here", "change the layout", "rearrange tabs")
-- Design/styling preferences ("make it blue", "change the font", "I don't like how X looks")
-- New functionality requests ("add a button for", "create a new page")
-- Workflow changes ("I want the process to work differently")
-
-If the report is NOT a legitimate bug (broken functionality, incorrect data, crashes, errors), you MUST:
-1. Set tier to "tier2"
-2. Set category to "feature_request"
-3. Set confidence to 1.0
-4. Set proposedFix to "REJECTED — This is not a bug. The debug system is strictly for reporting software defects, not for requesting features, layout changes, or design preferences. Please use the Feedback panel instead."
-5. Set explanation to a polite but firm message explaining this is not a bug and directing them to the Feedback panel.
-
-Only process reports that describe ACTUAL broken behavior — something that was working and stopped, produces wrong results, crashes, shows errors, or behaves differently than documented.
-
-IMPORTANT: Missing PIDs, incorrect PID data, datalogger connection issues, and data recording problems are ALWAYS legitimate bugs — NEVER classify these as feature requests. The datalogger is the #1 priority debug target.
+IMPORTANT: If the report sounds like a FEATURE REQUEST rather than a bug, classify as Tier 2 and note it.
 
 Respond in JSON format:
 {
@@ -589,28 +564,6 @@ ${bug.retestCount ? `Retest Count: ${bug.retestCount}` : ''}`
     const analysisText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent);
 
     const analysis = JSON.parse(analysisText);
-
-    // STRICT ENFORCEMENT: Reject non-bug submissions immediately
-    if (analysis.category === "feature_request") {
-      await db.update(debugSessions)
-        .set({
-          status: "closed",
-          tier: "tier2",
-          analysisResult: analysisText,
-          rootCause: "REJECTED — Not a legitimate bug report.",
-          proposedFix: analysis.proposedFix,
-          estimatedTokens: 0,
-        })
-        .where(eq(debugSessions.id, sessionId));
-
-      await logAudit(sessionId, null, "mara", "rejected_not_a_bug", analysisText, 0);
-
-      await notifyOwner({
-        title: `Debug Report Rejected: ${bug.title}`,
-        content: `Knox rejected bug #${sessionId} — not a legitimate bug.\nCategory: feature_request\n\n${analysis.explanation}`,
-      });
-      return; // Do not process further
-    }
 
     // Update session with analysis
     await db.update(debugSessions)

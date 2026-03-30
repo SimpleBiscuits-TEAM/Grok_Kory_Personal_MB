@@ -270,9 +270,7 @@ export default function ServiceProcedures() {
     log: [],
   });
 
-  const [adapterType, setAdapterType] = useState<'elm327' | 'pcan' | 'vop'>('elm327');
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [connected] = useState(false);
 
   const selectedProcedure = PROCEDURES.find(p => p.id === state.procedureId);
 
@@ -284,22 +282,6 @@ export default function ServiceProcedures() {
       log: [...prev.log, `[${new Date().toLocaleTimeString()}] ${msg}`],
     }));
   }, []);
-
-  const handleServiceConnect = useCallback(async () => {
-    if (adapterType === 'vop') return; // Coming soon
-    setConnecting(true);
-    addLog(`Connecting via ${adapterType === 'pcan' ? 'PCAN-USB bridge' : 'ELM327 WebSerial'}...`);
-    // Simulate connection handshake
-    await new Promise(r => setTimeout(r, 1500));
-    setConnected(true);
-    setConnecting(false);
-    addLog(`Connected via ${adapterType === 'pcan' ? 'PCAN-USB' : 'ELM327'}. UDS session active.`);
-  }, [adapterType, addLog]);
-
-  const handleServiceDisconnect = useCallback(() => {
-    setConnected(false);
-    addLog('Disconnected from vehicle.');
-  }, [addLog]);
 
   const selectProcedure = useCallback((id: string) => {
     setState({
@@ -396,32 +378,14 @@ export default function ServiceProcedures() {
           UDS-BASED MAINTENANCE &amp; DIAGNOSTICS
         </span>
         <div className="flex-1" />
-        {/* Adapter selector */}
-        <select
-          value={adapterType}
-          onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan' | 'vop')}
-          disabled={connected || connecting}
-          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs font-['Share_Tech_Mono',monospace] text-zinc-300"
-        >
-          <option value="elm327">ELM327 / OBDLink</option>
-          <option value="pcan">PCAN-USB</option>
-          <option value="vop">V-OP (Coming Soon)</option>
-        </select>
-
         {connected ? (
-          <Button variant="outline" size="sm" onClick={handleServiceDisconnect}
-            className="border-green-500 text-green-400 text-xs font-['Share_Tech_Mono',monospace] h-7 gap-1">
-            <Wifi className="w-3 h-3" /> CONNECTED
-          </Button>
+          <Badge variant="outline" className="border-green-500 text-green-400 text-xs font-['Share_Tech_Mono',monospace]">
+            <Wifi className="w-3 h-3 mr-1" /> CONNECTED
+          </Badge>
         ) : (
-          <Button variant="outline" size="sm" onClick={handleServiceConnect}
-            disabled={connecting || adapterType === 'vop'}
-            className={`text-xs font-['Share_Tech_Mono',monospace] h-7 gap-1 ${
-              adapterType === 'vop' ? 'border-zinc-700 text-zinc-600 cursor-not-allowed' : 'border-red-700 text-red-400 hover:bg-red-900/20'
-            }`}>
-            {connecting ? <Loader2 className="w-3 h-3 animate-spin" /> : <WifiOff className="w-3 h-3" />}
-            {connecting ? 'CONNECTING...' : adapterType === 'vop' ? 'COMING SOON' : 'CONNECT'}
-          </Button>
+          <Badge variant="outline" className="border-zinc-600 text-zinc-500 text-xs font-['Share_Tech_Mono',monospace]">
+            <WifiOff className="w-3 h-3 mr-1" /> OFFLINE
+          </Badge>
         )}
       </div>
 

@@ -7,7 +7,7 @@
 
 import { OBDConnection, PIDDefinition, STANDARD_PIDS } from './obdConnection';
 
-export type DetectedProtocol = 'obd2' | 'j1939' | 'kline' | 'vop';
+export type DetectedProtocol = 'obd2' | 'j1939' | 'kline';
 
 export interface ProtocolDetectionResult {
   protocol: DetectedProtocol;
@@ -132,31 +132,6 @@ export async function detectKLine(
   }
 }
 
-// ─── V-OP Detection ───────────────────────────────────────────────
-
-/**
- * Detect V-OP protocol support (placeholder — protocol arriving soon)
- */
-export async function detectVOP(
-  timeout: number = 5000
-): Promise<ProtocolDetectionResult> {
-  const startTime = performance.now();
-
-  try {
-    // Future: Implement actual V-OP proprietary protocol detection
-    // Protocol details arriving next week
-    throw new Error('V-OP protocol not yet implemented — coming soon');
-  } catch (error) {
-    return {
-      protocol: 'vop',
-      confidence: 0,
-      responseTime: performance.now() - startTime,
-      supportedFeatures: [],
-      error: `V-OP detection: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    };
-  }
-}
-
 // ─── Auto-Detection Orchestrator ──────────────────────────────────────────
 
 export interface DetectionResults {
@@ -175,7 +150,7 @@ export async function autoDetectProtocols(
 ): Promise<DetectionResults> {
   const {
     timeout = 5000,
-    prioritize = ['obd2', 'j1939', 'kline', 'vop'],
+    prioritize = ['obd2', 'j1939', 'kline'],
     requireVehicleInfo = false,
   } = options;
 
@@ -195,11 +170,6 @@ export async function autoDetectProtocols(
       }
     } else if (protocol === 'kline') {
       const result = await detectKLine(timeout);
-      if (result.confidence > 0) {
-        results.push(result);
-      }
-    } else if (protocol === 'vop') {
-      const result = await detectVOP(timeout);
       if (result.confidence > 0) {
         results.push(result);
       }
@@ -279,9 +249,6 @@ export function recommendProtocol(
     case 'kline':
       reason = 'K-Line detected. Best for legacy European and Asian vehicles.';
       break;
-    case 'vop':
-      reason = 'V-OP detected. Proprietary PPEI protocol for advanced vehicle optimization.';
-      break;
   }
 
   return {
@@ -332,12 +299,6 @@ export function getProtocolStyle(protocol: DetectedProtocol): {
         color: 'oklch(0.65 0.20 55)', // Orange
         icon: '🔧',
         label: 'K-Line',
-      };
-    case 'vop':
-      return {
-        color: 'oklch(0.52 0.22 25)', // Red (PPEI brand)
-        icon: '⚡',
-        label: 'V-OP',
       };
   }
 }

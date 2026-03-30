@@ -25,8 +25,6 @@ export const users = mysqlTable("users", {
   accessApprovedBy: int("accessApprovedBy"),
   /** When access was approved/revoked */
   accessApprovedAt: timestamp("accessApprovedAt"),
-  /** Reason/details provided when requesting V-OP Pro access */
-  accessRequestReason: text("accessRequestReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -46,7 +44,6 @@ export const feedback = mysqlTable("feedback", {
   errorType: varchar("errorType", { length: 255 }),
   stepsToReproduce: text("stepsToReproduce"),
   context: text("context"),
-  attachments: text("attachments"), // JSON array of { url, filename, mimeType, size }
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -229,42 +226,3 @@ export const datalogCache = mysqlTable("datalog_cache", {
 
 export type DatalogCache = typeof datalogCache.$inferSelect;
 export type InsertDatalogCache = typeof datalogCache.$inferInsert;
-
-
-// ── AI Monica — Customer-Facing Debug Assistant ─────────────────────────────
-
-/**
- * Monica chat messages — conversation history between testers and AI Monica.
- * Monica is sandboxed: she can read Knox's analysis but has NO access to
- * proprietary data (A2L files, functional docs, calibration internals).
- */
-export const monicaMessages = mysqlTable("monica_messages", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: int("sessionId").notNull(), // FK to debugSessions.id
-  userId: int("userId"), // FK to users.id (null = Monica)
-  role: mysqlEnum("role", ["user", "monica", "system"]).notNull(),
-  content: text("content").notNull(),
-  metadata: text("metadata"), // JSON: any extra context (e.g., Knox status pulled)
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export type MonicaMessage = typeof monicaMessages.$inferSelect;
-export type InsertMonicaMessage = typeof monicaMessages.$inferInsert;
-
-// ── Email Waitlist ──────────────────────────────────────────────────────────
-
-/**
- * Email waitlist — collects emails from visitors who want access to V-OP.
- * Submitted from the SiteGate before they have an account.
- * Owner gets notified on each submission.
- */
-export const waitlist = mysqlTable("waitlist", {
-  id: int("id").autoincrement().primaryKey(),
-  email: varchar("email", { length: 320 }).notNull(),
-  name: varchar("name", { length: 255 }),
-  message: text("message"), // optional note from the visitor
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export type Waitlist = typeof waitlist.$inferSelect;
-export type InsertWaitlist = typeof waitlist.$inferInsert;

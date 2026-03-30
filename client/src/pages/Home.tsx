@@ -11,7 +11,7 @@ import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut, Wrench, ChevronDown, ChevronUp, Key } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
@@ -35,16 +35,12 @@ import CompareView from '@/components/CompareView';
 import { APP_VERSION } from '@/lib/version';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
-import VehicleCoding from '@/components/VehicleCoding';
-import CanAmVinChanger from '@/components/CanAmVinChanger';
-import DataloggerPanel from '@/components/DataloggerPanel';
-import ServiceProcedures from '@/components/ServiceProcedures';
 import { useAuth } from '@/_core/hooks/useAuth';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 export default function Home() {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const { showPanel: showWhatsNew, setShowPanel: setShowWhatsNew } = useWhatsNew();
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
@@ -60,12 +56,6 @@ export default function Home() {
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
-  const [showBasicEditor, setShowBasicEditor] = useState(false);
-  const [showCanAmVin, setShowCanAmVin] = useState(false);
-  const [showDatalogger, setShowDatalogger] = useState(false);
-  const [showAnalyzer, setShowAnalyzer] = useState(false);
-  const [showProcedures, setShowProcedures] = useState(false);
-  const [basicEditorView, setBasicEditorView] = useState<'coding' | 'canam'>('coding');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -332,35 +322,6 @@ export default function Home() {
                 {APP_VERSION}
               </span>
               {isAuthenticated && <NotificationBell />}
-              {isAuthenticated && (
-                <button
-                  onClick={async () => {
-                    await logout();
-                    localStorage.removeItem('ppei_site_access');
-                    window.location.href = '/';
-                  }}
-                  className="ppei-btn-hover"
-                  title="Log out"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    background: 'transparent',
-                    border: '1px solid oklch(0.22 0.006 260)',
-                    color: 'oklch(0.50 0.010 260)',
-                    padding: '4px 8px',
-                    borderRadius: '2px',
-                    fontFamily: '"Share Tech Mono", monospace',
-                    fontSize: '0.65rem',
-                    letterSpacing: '0.06em',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <LogOut size={12} />
-                  LOG OUT
-                </button>
-              )}
               <Link href="/advanced" style={{ textDecoration: 'none' }}>
                 <div className="ppei-btn-hover" style={{
                   display: 'flex',
@@ -377,7 +338,7 @@ export default function Home() {
                   cursor: 'pointer',
                   transition: 'all 0.15s',
                 }}>
-                  V-OP PRO
+                  ADVANCED
                 </div>
               </Link>
 
@@ -561,240 +522,83 @@ export default function Home() {
               </div>
             </div>
 
-            {/* About */}
-            <div className="mt-6 ppei-anim-fade-up ppei-delay-400">
-              <div style={{
+            {/* Feature cards */}
+            <div className="mt-6 grid md:grid-cols-2 gap-4 ppei-anim-fade-up ppei-delay-400">
+              <div className="ppei-card-hover" style={{
                 background: 'oklch(0.13 0.006 260)',
                 border: '1px solid oklch(0.22 0.008 260)',
-                borderLeft: '4px solid oklch(0.52 0.22 25)',
+                borderTop: '3px solid oklch(0.52 0.22 25)',
                 borderRadius: '3px',
-                padding: '1.25rem',
+                padding: '1.25rem'
               }}>
                 <h3 style={{
                   fontFamily: '"Bebas Neue", "Impact", sans-serif',
                   fontSize: '1.1rem',
                   letterSpacing: '0.08em',
                   color: 'white',
-                  marginBottom: '0.5rem',
+                  marginBottom: '0.75rem',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px'
                 }}>
-                  <Zap style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />
-                  ABOUT V-OP
+                  <BarChart3 style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />
+                  WHAT'S ANALYZED
                 </h3>
-                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.7, margin: 0 }}>
-                  V-OP is PPEI's AI-powered vehicle optimization platform. Upload datalogs for instant diagnostics, connect live for real-time datalogging, edit calibrations, run service procedures, and let our reasoning engine identify what others miss. Built by tuners, for tuners.
-                </p>
+                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> VIN Decoder
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span>
+                    <span>AI Diagnostics <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.75 0.18 40)', background: 'oklch(0.75 0.18 40 / 0.12)', border: '1px solid oklch(0.75 0.18 40 / 0.3)', borderRadius: '2px', padding: '1px 5px', marginLeft: '4px' }}>BETA</span></span>
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> DTC Lookup
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 'bold' }}>▸</span> Full PDF Report Export
+                  </li>
+                </ul>
+              </div>
+
+              <div className="ppei-card-hover" style={{
+                background: 'oklch(0.13 0.006 260)',
+                border: '1px solid oklch(0.22 0.008 260)',
+                borderTop: '3px solid oklch(0.65 0.20 145)',
+                borderRadius: '3px',
+                padding: '1.25rem'
+              }}>
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1.1rem',
+                  letterSpacing: '0.08em',
+                  color: 'white',
+                  marginBottom: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
+                  ADVANCED MODE
+                </h3>
+                <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Calibration Editor
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Live Gauge Dashboard
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Voice Commands
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'oklch(0.65 0.20 145)', fontWeight: 'bold' }}>▸</span> Tune Compare & Patch
+                  </li>
+                </ul>
               </div>
             </div>
 
-            {/* Basic Editor (Non-ECU) — with sub-tabs for Vehicle Coding & Can-Am VIN */}
-            <div className="mt-6 ppei-anim-fade-up ppei-delay-500">
-              <button
-                onClick={() => setShowBasicEditor(!showBasicEditor)}
-                style={{
-                  width: '100%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '1rem 1.25rem',
-                  background: 'oklch(0.13 0.006 260)',
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderLeft: '4px solid oklch(0.70 0.18 200)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Wrench style={{ width: 18, height: 18, color: 'oklch(0.70 0.18 200)' }} />
-                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>BASIC EDITOR</span>
-                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>Vehicle Coding & Can-Am VIN</span>
-                </div>
-                {showBasicEditor ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
-              </button>
-              {showBasicEditor && (
-                <div style={{
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderTop: 'none',
-                  borderRadius: '0 0 3px 3px',
-                  background: 'oklch(0.10 0.004 260)',
-                  overflow: 'hidden',
-                }}>
-                  {/* Sub-tab bar */}
-                  <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid oklch(0.20 0.008 260)' }}>
-                    <button
-                      onClick={() => setBasicEditorView('coding')}
-                      style={{
-                        flex: 1, padding: '10px 16px',
-                        fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.85rem', letterSpacing: '0.06em',
-                        color: basicEditorView === 'coding' ? 'white' : 'oklch(0.50 0.010 260)',
-                        background: basicEditorView === 'coding' ? 'oklch(0.16 0.008 260)' : 'transparent',
-                        borderTop: 'none', borderLeft: 'none', borderRight: 'none',
-                        borderBottom: basicEditorView === 'coding' ? '2px solid oklch(0.70 0.18 200)' : '2px solid transparent',
-                        cursor: 'pointer', transition: 'all 0.15s',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      }}
-                    >
-                      <Wrench style={{ width: 14, height: 14 }} /> VEHICLE CODING
-                    </button>
-                    <button
-                      onClick={() => setBasicEditorView('canam')}
-                      style={{
-                        flex: 1, padding: '10px 16px',
-                        fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.85rem', letterSpacing: '0.06em',
-                        color: basicEditorView === 'canam' ? 'white' : 'oklch(0.50 0.010 260)',
-                        background: basicEditorView === 'canam' ? 'oklch(0.16 0.008 260)' : 'transparent',
-                        borderTop: 'none', borderLeft: 'none', borderRight: 'none',
-                        borderBottom: basicEditorView === 'canam' ? '2px solid oklch(0.75 0.18 60)' : '2px solid transparent',
-                        cursor: 'pointer', transition: 'all 0.15s',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                      }}
-                    >
-                      <Key style={{ width: 14, height: 14, color: 'oklch(0.75 0.18 60)' }} /> CAN-AM VIN
-                    </button>
-                  </div>
-                  <div style={{ height: 'calc(100vh - 260px)', overflow: 'auto' }}>
-                    {basicEditorView === 'coding' && <VehicleCoding />}
-                    {basicEditorView === 'canam' && <CanAmVinChanger />}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Data Re-Imagined (Analyzer) */}
-            <div className="mt-6 ppei-anim-fade-up ppei-delay-500">
-              <button
-                onClick={() => setShowAnalyzer(!showAnalyzer)}
-                style={{
-                  width: '100%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '1rem 1.25rem',
-                  background: 'oklch(0.13 0.006 260)',
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderLeft: '4px solid oklch(0.52 0.22 25)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <BarChart3 style={{ width: 18, height: 18, color: 'oklch(0.52 0.22 25)' }} />
-                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>DATA RE-IMAGINED</span>
-                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>AI-Powered Datalog Analysis</span>
-                </div>
-                {showAnalyzer ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
-              </button>
-              {showAnalyzer && (
-                <div style={{
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderTop: 'none',
-                  borderRadius: '0 0 3px 3px',
-                  background: 'oklch(0.10 0.004 260)',
-                  padding: '1.5rem',
-                }}>
-                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', marginBottom: '1rem' }}>
-                    Upload a datalog above to unlock the full analysis dashboard — AI diagnostics, dyno charts, health reports, and PDF export.
-                  </p>
-                  <button
-                    onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                    style={{
-                      background: 'oklch(0.52 0.22 25)',
-                      color: 'white',
-                      fontFamily: '"Bebas Neue", sans-serif',
-                      fontSize: '0.95rem',
-                      letterSpacing: '0.08em',
-                      padding: '8px 24px',
-                      borderRadius: '3px',
-                      border: 'none',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <Upload style={{ width: 14, height: 14 }} /> UPLOAD DATALOG
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Datalogger */}
-            <div className="mt-6 ppei-anim-fade-up ppei-delay-500">
-              <button
-                onClick={() => setShowDatalogger(!showDatalogger)}
-                style={{
-                  width: '100%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '1rem 1.25rem',
-                  background: 'oklch(0.13 0.006 260)',
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderLeft: '4px solid oklch(0.65 0.20 145)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Gauge style={{ width: 18, height: 18, color: 'oklch(0.65 0.20 145)' }} />
-                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>DATALOGGER</span>
-                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>Live OBD-II Connection</span>
-                </div>
-                {showDatalogger ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
-              </button>
-              {showDatalogger && (
-                <div style={{
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderTop: 'none',
-                  borderRadius: '0 0 3px 3px',
-                  background: 'oklch(0.10 0.004 260)',
-                  height: 'calc(100vh - 200px)',
-                  overflow: 'auto',
-                }}>
-                  <DataloggerPanel />
-                </div>
-              )}
-            </div>
-
-            {/* Service Procedures */}
-            <div className="mt-6 ppei-anim-fade-up ppei-delay-600">
-              <button
-                onClick={() => setShowProcedures(!showProcedures)}
-                style={{
-                  width: '100%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '1rem 1.25rem',
-                  background: 'oklch(0.13 0.006 260)',
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderLeft: '4px solid oklch(0.75 0.18 40)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  color: 'white',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Activity style={{ width: 18, height: 18, color: 'oklch(0.75 0.18 40)' }} />
-                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>SERVICE PROCEDURES</span>
-                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>DPF Regen, TPMS, Injector Coding & More</span>
-                </div>
-                {showProcedures ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
-              </button>
-              {showProcedures && (
-                <div style={{
-                  border: '1px solid oklch(0.22 0.008 260)',
-                  borderTop: 'none',
-                  borderRadius: '0 0 3px 3px',
-                  background: 'oklch(0.10 0.004 260)',
-                  height: 'calc(100vh - 200px)',
-                  overflow: 'auto',
-                }}>
-                  <ServiceProcedures />
-                </div>
-              )}
-            </div>
-
-
-
-            {/* Welcome back for signed-in users */}
+            {/* Quick Actions for signed-in users */}
             {isAuthenticated && (
               <div className="mt-6 ppei-anim-fade-up ppei-delay-600">
                 <div style={{
@@ -804,23 +608,69 @@ export default function Home() {
                   borderRadius: '3px',
                   padding: '1rem 1.25rem',
                 }}>
-                  <p style={{
-                    fontFamily: '"Bebas Neue", sans-serif',
-                    fontSize: '1rem',
-                    letterSpacing: '0.06em',
-                    color: 'white',
-                    margin: 0
-                  }}>
-                    WELCOME BACK{user?.name ? `, ${user.name.toUpperCase()}` : ''}
-                  </p>
-                  <p style={{
-                    fontFamily: '"Rajdhani", sans-serif',
-                    fontSize: '0.85rem',
-                    color: 'oklch(0.55 0.010 260)',
-                    margin: 0
-                  }}>
-                    Upload a datalog above or expand any tool below to get started
-                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <p style={{
+                        fontFamily: '"Bebas Neue", sans-serif',
+                        fontSize: '1rem',
+                        letterSpacing: '0.06em',
+                        color: 'white',
+                        margin: 0
+                      }}>
+                        WELCOME BACK{user?.name ? `, ${user.name.toUpperCase()}` : ''}
+                      </p>
+                      <p style={{
+                        fontFamily: '"Rajdhani", sans-serif',
+                        fontSize: '0.85rem',
+                        color: 'oklch(0.55 0.010 260)',
+                        margin: 0
+                      }}>
+                        Upload a datalog above or jump to Advanced Mode for calibration tools
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Link href="/advanced">
+                        <button className="ppei-btn-hover" style={{
+                          background: 'oklch(0.16 0.008 260)',
+                          color: 'oklch(0.80 0.010 260)',
+                          fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem',
+                          letterSpacing: '0.08em',
+                          padding: '6px 16px',
+                          borderRadius: '3px',
+                          border: '1px solid oklch(0.28 0.008 260)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <Cpu style={{ width: '14px', height: '14px' }} />
+                          ADVANCED MODE
+                        </button>
+                      </Link>
+                      <Link href="/advanced">
+                        <button className="ppei-btn-hover" style={{
+                          background: 'oklch(0.16 0.008 260)',
+                          color: 'oklch(0.80 0.010 260)',
+                          fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem',
+                          letterSpacing: '0.08em',
+                          padding: '6px 16px',
+                          borderRadius: '3px',
+                          border: '1px solid oklch(0.28 0.008 260)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <Search style={{ width: '14px', height: '14px' }} />
+                          DTC LOOKUP
+                        </button>
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1225,17 +1075,13 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* Feedback / Error Report floating button and panel — admin only */}
-      {user?.role === 'admin' || user?.role === 'super_admin' ? (
-        <>
-          <FeedbackTrigger onClick={() => setFeedbackOpen(true)} />
-          <FeedbackPanel
-            isOpen={feedbackOpen}
-            onClose={() => setFeedbackOpen(false)}
-            context={fileName ?? undefined}
-          />
-        </>
-      ) : null}
+      {/* Feedback / Error Report floating button and panel */}
+      <FeedbackTrigger onClick={() => setFeedbackOpen(true)} />
+      <FeedbackPanel
+        isOpen={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        context={fileName ?? undefined}
+      />
     </div>
   );
 }

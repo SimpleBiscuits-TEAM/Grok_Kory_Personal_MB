@@ -2203,168 +2203,26 @@
 - [ ] Add advancedAccess field to users table (enum: none/pending/approved/revoked, default none)
 - [ ] Add accessLevel field to users table (int 0-3, default 0, for future Level 1/2/3 tiers)
 - [ ] Add accessApprovedBy and accessApprovedAt fields to users table
-- [x] Auto-detect super_admin from OWNER_OPEN_ID on login (Kory)
-- [x] Auto-promote Erik (ppei.com), Erik Fontenot (yahoo.com), Carmen to admin on login
-- [x] Build tRPC procedures: listUsers, approveAdvancedAccess, revokeAdvancedAccess, setUserRole, requestAccess
-- [x] Build Admin Panel user management UI (list users, approve/revoke, assign roles)
-- [ ] Remove PPEIROCKS code gate from Advanced.tsx (kept as temp fallback, removing Friday)
-- [ ] Remove KINGKONG editor gate (make role-based) - deferred
-- [x] Replace code gate with role-based access check
-- [x] Build "Request Access" screen for unapproved users at /advanced
-- [x] Build "Access Pending" screen for users who requested but not yet approved
-- [x] Update admin tab visibility: super_admin sees all, admin sees admin tabs, users see only their level
-- [x] Write tests for access control procedures (14 tests)
-- [x] Prepare accessLevel column for future Level 1/2/3 feature gating
+- [ ] Auto-detect super_admin from OWNER_OPEN_ID on login (Kory)
+- [ ] Auto-promote Erik (ppei.com), Erik Fontenot (yahoo.com), Carmen to admin on login
+- [ ] Build tRPC procedures: listUsers, approveAdvancedAccess, revokeAdvancedAccess, setUserRole, requestAccess
+- [ ] Build Admin Panel user management UI (list users, approve/revoke, assign roles)
+- [ ] Remove PPEIROCKS code gate from Advanced.tsx
+- [ ] Remove KINGKONG editor gate (make role-based)
+- [ ] Replace code gate with role-based access check (super_admin/admin always in, approved users in, others see request screen)
+- [ ] Build "Request Access" screen for unapproved users at /advanced
+- [ ] Build "Access Pending" screen for users who requested but not yet approved
+- [ ] Update admin tab visibility: super_admin sees all, admin sees admin tabs, users see only their level
+- [ ] Write tests for access control procedures
+- [ ] Prepare accessLevel column for future Level 1/2/3 feature gating
 - [ ] Logan to be promoted manually by Kory from admin panel once he logs in
-- [x] Show deprecation notice on access gate: passcode removed by Friday, log in to keep access
-- [x] Unapproved/not-logged-in users see "Contact PPEI" message
-- [ ] Rename normal mode to "V-OP Lite" in UI (Home.tsx header/branding) - deferred, keeping V-OP for now
-- [x] Rename advanced mode to "V-OP Pro" in UI (Advanced.tsx header, access gate, navigation)
-- [x] Update ADVANCED button in header to say "V-OP PRO" (Home.tsx header, feature cards, CTA buttons)
-
-## Patent Document Revision (2026-03-29)
-- [x] Remove all competitor/third-party tool names (EFILive, HP Tuners, WinOLS, INCA, FORScan, Vehicle Spy, etc.)
-- [x] Genericize engine/truck platform names (Duramax, Cummins, Powerstroke → "ECU platform", "diesel engine controller", etc.)
-- [x] Add self-improving AI trajectory language (Inventive Aspect 6: beyond human expert within ~6 months, Claim 6 + Claim 20)
-- [x] Remove Prior Art Considerations section (replaced with filing strategy notes)
-- [x] Delivered as PDF (VOP_Patent_Clean.pdf, 29 pages)
-
-## Voice Feedback (2026-03-29)
-- [x] Add speech-to-text (talk to text) to the feedback panel (useVoiceInput hook + VOICE buttons on both textareas)
-- [x] Created reusable useVoiceInput hook using Web Speech API (SpeechRecognition)
-- [x] Added VOICE button to Feedback message textarea with interim text display
-- [x] Added VOICE button to Error Description textarea with interim text display
-- [x] Shows pulsing red dot + LISTENING indicator while recording
-- [x] Gracefully hides VOICE button on unsupported browsers
-
-## Site-Wide Access Gate (2026-03-29)
-- [x] Add site-wide access gate requiring login OR access code "KingKONG" to view any page (SiteGate component wraps App)
-- [x] Change V-OP Pro access code from PPEIROCKS to KingKONG (case-sensitive match)
-- [x] Store site access in localStorage so users don't re-enter every visit
-- [x] Show login button + access code input on the gate screen
-- [x] Contact PPEI info shown on gate (info@ppei.com)
-
-## Access Restructure & Admin Notifications (2026-03-29)
-- [x] SiteGate: logged-in users must have admin approval to see site content (not just auth)
-- [x] SiteGate: access code (KingKONG) still bypasses approval requirement
-- [x] SiteGate: admins/super_admins always pass through
-- [x] Send owner notification when user submits feedback (already in feedback router)
-- [x] Send owner notification when user requests access (added to requestAccess procedure)
-- [ ] Send owner notification when new chat message received (deferred - needs chat system)
-- [x] Hide FEEDBACK/REPORT button from non-admin users (Home.tsx admin-only check)
-- [x] Hide Support tab from non-admin users in V-OP Pro (admin guard on supportAdmin router)
-- [x] Add access request management to Support panel (USER MGMT tab has approve/deny)
-- [x] Move Support tab from super_admin-only to admin tabs (visible to all admins)
-- [x] Show notification badge counts on USER MGMT and SUPPORT tabs for admins (pending + unread)
-- [x] Make all current admins super_admins in DB (Erik, Carmen, Kory all super_admin)
-- [ ] Merge Support tab into User Management tab (kept as separate tabs for now - cleaner UX)
-- [x] Add visible logout button for logged-in users (LOG OUT button in Home.tsx header)
-
-## V-OP Pro Tab Restructure (2026-03-29)
-- [x] Remove PIDs tab from V-OP Pro
-- [x] Remove Search tab from V-OP Pro
-- [x] Remove Vehicles tab from V-OP Pro
-- [x] Remove Mode 6 tab from V-OP Pro
-- [x] Remove UDS tab from V-OP Pro
-- [x] Remove Services tab from V-OP Pro
-- [x] Move Coding to V-OP Lite (Home.tsx) as collapsible "BASIC EDITOR (NON-ECU)" section with VehicleCoding component
-- [x] Move USER MGMT out of tabs to header area for admins (with pending request badge count)
-- [x] Remove lock button from V-OP Pro header
-- [x] Move Honda Talon tab to sit right after Editor tab in V-OP Pro
-- [x] Change "V-OP LITE" button in Pro header to "← BACK" (clearer navigation, less confusing)
-- [x] Rename Binary tab to "Segment Swapper" and move it inside Editor tab (sub-section)
-- [x] Remove A2L Files tab (already handled inside Editor)
-- [x] Move Can-Am VIN to V-OP Lite (Home.tsx) under Basic Editor section
-- [x] Move Reverse Engineering under IntelliSpy tab (sub-section)
-- [x] Move Notifications tab under User Management panel (sub-tab)
-- [x] Move Support tab under User Management panel (sub-tab)
-- [x] Verify Honda Talon tab is visible and working in V-OP Pro
-- [x] Move Honda Talon inside Editor tab as a sub-tab (alongside Calibration Editor & Segment Swapper)
-- [x] Move Procedures tab to V-OP Lite (Home.tsx) as collapsible section
-- [x] Remove V-OP Pro details/info from V-OP Lite section
-- [x] Move Can-Am VIN inside Basic Editor tab (not separate collapsible)
-- [x] Remove all 'manus' references from client-side code visible in inspect element (class names, comments, data attributes, etc.)
-- [x] Move Honda Talon inside Editor tab as a sub-tab (alongside Calibration Editor & Segment Swapper)
-- [x] Move Procedures tab to V-OP Lite (Home.tsx) as collapsible section
-- [x] Remove V-OP Pro details/info from V-OP Lite section
-- [x] Move Can-Am VIN inside Basic Editor tab (not separate collapsible)
-- [x] Add Datalogger to V-OP Lite (Home.tsx) as collapsible section (keep in Pro too)
-- [x] Remove "What's Analyzed" section from V-OP Lite
-- [x] Remove "V-OP Pro details" section from V-OP Lite
-- [x] Add clean "About" section to V-OP Lite
-- [x] Make Analyzer its own collapsible section in Lite named "Data Re-Imagined"
-- [ ] Create patent document PDF for V-OP Powered by PPEI
-- [x] Fix CSS shorthand conflict: border vs borderBottom in Basic Editor sub-tab buttons (Home.tsx)
-- [x] Reposition Feedback panel higher on screen (not buried at bottom)
-- [x] Add video/screen recording upload support to Feedback panel
-- [x] Add speech-to-text (mic button) input to Feedback panel (already existed)
-- [x] Enforce strict debug-only rule on Knox: reject feature requests, layout changes — only process legitimate bugs
-- [x] Add attachments column to feedback DB schema
-- [x] Add file upload endpoint for feedback attachments (video/screen recording)
-- [x] Update FeedbackPanel to accept video/screen recording uploads
-- [x] Build Monica: customer-facing debug AI agent (sandboxed, no proprietary access)
-- [x] Monica backend: tRPC procedures for debug chat, status updates, follow-up questions
-- [x] Monica frontend: chat UI in debug panel for testers to communicate
-- [x] Monica keeps testers informed on bug status, PPEI approval needs, etc.
-- [x] Update Knox to treat missing PIDs, datalogger issues, PID mapping errors as legitimate bugs (not feature requests)
-- [x] Datalogger is priority #1 debug target — ensure Knox handles datalogger bugs properly
-- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
-- [ ] Add Flash tab to V-OP Pro with fun "we're cooking" placeholder
-- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
-- [ ] Add PCAN as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
-- [ ] Add Flash tab to V-OP Pro with V-OP and PCAN channels only (no OBDLink) — fun "we're cooking" placeholder
-- [ ] Add V-OP as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
-- [ ] Add PCAN as an OBD channel option in Datalogger (protocol coming soon, placeholder state)
-- [ ] Add Flash tab to V-OP Pro with fun "we're cooking" placeholder
-- [ ] Add V-OP channel option to Service Procedures
-- [ ] Hook Service Procedures to OBD device connection (V-OP + existing adapters)
-- [ ] Add context/reason field to V-OP Pro access request form (who, why, vehicle info)
-- [ ] Display request details in admin approval panel so admin knows what they're approving
-- [x] Update access code from KingKONG to KINGKONG
-
-## Knox-Verified Universal Vehicle Protocol Intelligence
-- [ ] Build universal protocol intelligence layer (auto-detect ISO 15765 CAN, ISO 14229 UDS, J1939, ISO 9141, KWP2000)
-- [ ] Knox-verified manufacturer DID databases: GM, Ford, Ram/Chrysler, Toyota, Honda, BMW, Mercedes, Nissan, Hyundai/Kia
-- [ ] Knox-verified heavy-duty DID databases: Cummins, Duramax, Power Stroke, Detroit Diesel
-- [ ] Full UDS service support (0x10, 0x22, 0x2E, 0x27, 0x31, 0x14, 0x19) for all major platforms
-- [ ] Universal DTC read/clear: OBD-II (Mode 03/04/07/0A), UDS (0x19/0x14), J1939 (DM1/DM2/DM11)
-- [ ] Service procedure protocol awareness per vehicle make/model
-- [ ] Update datalogger to use protocol intelligence layer for auto-detection
-- [ ] Update DTC reader to use universal protocol layer
-- [ ] Update service procedures to use protocol-aware OBD connection
-- [ ] Write tests for protocol detection, DID databases, and UDS services
-- [x] Monica→Knox escalation: when Monica can't resolve a protocol/PID issue, she escalates to Knox internally and relays the answer
-
-## Weekly Backup System
-- [x] Build database export script (server/backup-export.mjs) — dumps all 10 tables as SQL INSERT statements
-- [x] Create RECOVERY.md with full step-by-step restore instructions and one-paste Manus rebuild prompt
-- [x] Set up weekly scheduled task for automated backup (every Sunday 3AM CT)
-- [x] First backup exported successfully (6 users, 10 tables, 9.3 KB)
-- [x] Fix og:description and twitter:description - still showing old Duramax text (platform injects from project description, not Settings title)
-- [x] SiteGate: transparent blurry background showing V-OP Pro behind the gate
-- [x] SiteGate: "get in line" messaging with email prompt, "see you soon" vibe
-- [ ] SiteGate: Replace SIGN IN with email collection field (no Manus OAuth on gate)
-- [ ] SiteGate: Email submission notifies owner, stored in waitlist table
-- [ ] SiteGate: Access still requires KINGKONG code only
-- [x] SiteGate: Remove Manus OAuth sign-in from gate entirely
-- [x] SiteGate: Add waitlist tRPC endpoint (public, no auth) with owner notification
-- [x] SiteGate: Sign-in stays in app header nav only (after gate)
-- [x] Post-gate: Immediate full-screen sign-in prompt if not authenticated (can't skip)
-- [x] Flash section: Add PPEI-exclusive flashing disclaimer (no third-party tunes, PPEI-only calibrations)
-- [x] Home/About: Add note that datalogging/diagnostics are public, flashing is PPEI-exclusive
-- [ ] Fleet: Database schema (fleet_organizations, fleet_vehicles, fleet_drivers, fleet_trips, fleet_alerts, fleet_fuel_logs, fleet_driver_scores, fleet_ai_insights)
-- [ ] Fleet: Backend tRPC API for fleet CRUD, vehicle management, driver management
-- [ ] Fleet: Dashboard UI — fleet overview, vehicle list, driver list, alerts panel
-- [ ] Fleet: Fuel economy analysis — compare trucks, track MPG trends, identify waste
-- [ ] Fleet: Driver behavior scoring — speeding, idling, braking, acceleration patterns
-- [ ] Fleet: Alert system — management notifications for driving habits, vehicle health
-- [ ] Fleet: AI insights — reasoning engine for fleet-wide patterns, ML model training pipeline
-- [ ] Fleet: VOP OBD memory sync — WiFi/BT/USB data transfer from device to server
-- [ ] Fleet: Trip history with route replay and fuel consumption per trip
-- [ ] Fleet: Vehicle health monitoring — aggregate diagnostic data across fleet
-- [ ] Fleet: Remote vehicle session — mechanic logs into vehicle remotely for live diagnostics
-- [ ] Fleet: Bidirectional controls — remote commands (forced regen, injector balance, DTC clear, etc.)
-- [ ] Fleet: Fleet roles — Owner, Manager, Mechanic, Driver with proper permissions
-- [ ] Fleet: Aftermarket sensor integration — TPMS, EGT probes, trans temp, boost gauges, etc.
-- [ ] Fleet: Unified sensor dashboard — all aftermarket + OEM sensors in one view
-- [ ] Fleet: Monica video teaser — generated at the end with full fleet knowledge
+- [ ] Show deprecation notice on access gate: passcode removed by Friday, log in to keep access
+- [ ] Unapproved/not-logged-in users see "Contact PPEI" message
+- [ ] Rename normal mode to "V-OP Lite" in UI (Home.tsx header/branding)
+- [ ] Rename advanced mode to "V-OP Pro" in UI (Advanced.tsx header, access gate, navigation)
+- [ ] Update ADVANCED button in header to say "V-OP PRO" or "PRO"
+- [ ] Legal research: Crypto/Bitcoin wagering for drag races (smart contracts, escrow)
+- [ ] Legal research: Skill-based competition model (entry fee tournaments)
+- [ ] Legal research: Sweepstakes model for drag racing
+- [ ] Legal research: Fantasy sports precedent applied to drag racing
+- [ ] V-OP Drag: 1% rake + $200/month subscription model (ultra-competitive pricing)

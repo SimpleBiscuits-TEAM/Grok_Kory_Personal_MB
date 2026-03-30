@@ -1,9 +1,0 @@
-{
-  "query": "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('0017_parallel_master_chief', UNIX_TIMESTAMP() * 1000);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('0017_parallel_master_chief', UNIX_TIMESTAMP() * 1000);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 67
-}

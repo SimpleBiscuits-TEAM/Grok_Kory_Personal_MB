@@ -112,13 +112,12 @@ export const OBDII_PRESETS: PIDPreset[] = [
 /**
  * Get presets for detected protocol
  */
-export function getPresetsForProtocol(protocol: 'obd2' | 'j1939' | 'kline' | 'vop'): PIDPreset[] {
+export function getPresetsForProtocol(protocol: 'obd2' | 'j1939' | 'kline'): PIDPreset[] {
   switch (protocol) {
     case 'j1939':
       return J1939_PRESETS;
     case 'kline':
       return KLINE_PRESETS;
-    case 'vop':
     case 'obd2':
     default:
       return OBDII_PRESETS;
@@ -129,7 +128,7 @@ export function getPresetsForProtocol(protocol: 'obd2' | 'j1939' | 'kline' | 'vo
  * Get recommended preset for protocol and vehicle type
  */
 export function getRecommendedPreset(
-  protocol: 'obd2' | 'j1939' | 'kline' | 'vop',
+  protocol: 'obd2' | 'j1939' | 'kline',
   vehicleType?: string
 ): PIDPreset | null {
   const presets = getPresetsForProtocol(protocol);
@@ -157,7 +156,7 @@ export function getRecommendedPreset(
 /**
  * Get preset by name
  */
-export function getPresetByName(name: string, protocol: 'obd2' | 'j1939' | 'kline' | 'vop'): PIDPreset | null {
+export function getPresetByName(name: string, protocol: 'obd2' | 'j1939' | 'kline'): PIDPreset | null {
   const presets = getPresetsForProtocol(protocol);
   return presets.find(p => p.name === name) || null;
 }
@@ -165,7 +164,7 @@ export function getPresetByName(name: string, protocol: 'obd2' | 'j1939' | 'klin
 // ─── Preset Metadata ──────────────────────────────────────────────────────
 
 export interface PresetMetadata {
-  protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
+  protocol: 'obd2' | 'j1939' | 'kline';
   sampleRate: number; // ms
   complexity: 'basic' | 'intermediate' | 'advanced';
   vehicleTypes: string[];
@@ -175,7 +174,7 @@ export interface PresetMetadata {
 /**
  * Get metadata for a preset
  */
-export function getPresetMetadata(preset: PIDPreset, protocol: 'obd2' | 'j1939' | 'kline' | 'vop' = 'obd2'): PresetMetadata {
+export function getPresetMetadata(preset: PIDPreset, protocol: 'obd2' | 'j1939' | 'kline' = 'obd2'): PresetMetadata {
 
   let sampleRate = 100;
   let complexity: 'basic' | 'intermediate' | 'advanced' = 'basic';

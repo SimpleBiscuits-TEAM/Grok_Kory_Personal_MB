@@ -15,7 +15,7 @@ import { NormalizedReading } from './protocolDataNormalizer';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface ProtocolDataset {
-  protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
+  protocol: 'obd2' | 'j1939' | 'kline';
   label: string;
   readings: NormalizedReading[];
   startTime: number;
@@ -30,7 +30,7 @@ export interface ParameterMatch {
   category: string;
   unit: string;
   datasets: {
-    protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
+    protocol: 'obd2' | 'j1939' | 'kline';
     values: number[];
     timestamps: number[];
     mean: number;
@@ -46,7 +46,7 @@ export interface ParameterMatch {
 }
 
 export interface ProtocolQualityScore {
-  protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
+  protocol: 'obd2' | 'j1939' | 'kline';
   overallScore: number; // 0-100
   metrics: {
     sampleRate: number; // avg samples/sec
@@ -348,7 +348,7 @@ export function compareProtocols(datasets: ProtocolDataset[]): ComparisonReport 
         : 1;
 
       return {
-        protocol: proto as 'obd2' | 'j1939' | 'kline' | 'vop',
+        protocol: proto as 'obd2' | 'j1939' | 'kline',
         values,
         timestamps,
         mean: mean(values),
