@@ -2334,3 +2334,9 @@
 - [ ] Update service procedures to use protocol-aware OBD connection
 - [ ] Write tests for protocol detection, DID databases, and UDS services
 - [x] Monica→Knox escalation: when Monica can't resolve a protocol/PID issue, she escalates to Knox internally and relays the answer
+
+## Weekly Backup System
+- [x] Build database export script (server/backup-export.mjs) — dumps all 10 tables as SQL INSERT statements
+- [x] Create RECOVERY.md with full step-by-step restore instructions and one-paste Manus rebuild prompt
+- [x] Set up weekly scheduled task for automated backup (every Sunday 3AM CT)
+- [x] First backup exported successfully (6 users, 10 tables, 9.3 KB)
