@@ -2294,3 +2294,4 @@
 - [x] Add clean "About" section to V-OP Lite
 - [x] Make Analyzer its own collapsible section in Lite named "Data Re-Imagined"
 - [ ] Create patent document PDF for V-OP Powered by PPEI
+- [x] Fix CSS shorthand conflict: border vs borderBottom in Basic Editor sub-tab buttons (Home.tsx)

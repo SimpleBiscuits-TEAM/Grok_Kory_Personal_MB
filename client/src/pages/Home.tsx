@@ -629,8 +629,9 @@ export default function Home() {
                         fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.85rem', letterSpacing: '0.06em',
                         color: basicEditorView === 'coding' ? 'white' : 'oklch(0.50 0.010 260)',
                         background: basicEditorView === 'coding' ? 'oklch(0.16 0.008 260)' : 'transparent',
+                        borderTop: 'none', borderLeft: 'none', borderRight: 'none',
                         borderBottom: basicEditorView === 'coding' ? '2px solid oklch(0.70 0.18 200)' : '2px solid transparent',
-                        border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                        cursor: 'pointer', transition: 'all 0.15s',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                       }}
                     >
@@ -643,8 +644,9 @@ export default function Home() {
                         fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.85rem', letterSpacing: '0.06em',
                         color: basicEditorView === 'canam' ? 'white' : 'oklch(0.50 0.010 260)',
                         background: basicEditorView === 'canam' ? 'oklch(0.16 0.008 260)' : 'transparent',
+                        borderTop: 'none', borderLeft: 'none', borderRight: 'none',
                         borderBottom: basicEditorView === 'canam' ? '2px solid oklch(0.75 0.18 60)' : '2px solid transparent',
-                        border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+                        cursor: 'pointer', transition: 'all 0.15s',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
                       }}
                     >
