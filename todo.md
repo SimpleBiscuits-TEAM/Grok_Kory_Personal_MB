@@ -2253,7 +2253,7 @@
 - [ ] Unified DRAG RACING tab covering all vehicle types (diesel, powersports, golf cart, ag)
 - [ ] Golf cart analyzer — battery health, motor efficiency, cell balance, controller diagnostics
 - [ ] Golf cart drag racing — speed, acceleration, voltage sag, motor current
-- [ ] Consolidate all admin/dev tabs into one DEV TOOLS tab — admin sees same tabs as regular user + DEV TOOLS
+- [x] Consolidate all admin/dev tabs into one DEV TOOLS tab — admin sees same tabs as regular user + DEV TOOLS
 
 ## V-OP Drag Racing — Regional Callouts & User-Created Leagues (2026-03-30)
 - [x] Add regional callouts schema (dragCallouts table — location-based challenges)
@@ -2263,10 +2263,10 @@
 - [x] User-created leagues: anyone can create a series with custom rules, classes, entry fees
 - [x] League commissioner role — creator manages brackets, scoring, championships
 - [x] Multi-round championship point scoring and season standings
-- [ ] Playoff brackets for league championships
+- [x] Playoff brackets for league championships
 - [x] Facebook sharing integration — timeslips, callouts, standings as shareable cards
 - [ ] Challenge links — share direct URL, opponent clicks to accept (future)
-- [ ] "Fastest in [Location]" badges on profiles
+- [x] "Fastest in [Location]" badges on profiles
 
 ## V-OP Drag Racing — Bitcoin Wagering (2026-03-30)
 - [ ] Bitcoin payment integration for subscriptions ($20/mo base, $200/mo with wagering)
@@ -2285,7 +2285,7 @@
 - [x] Build Fleet page UI — Goose AI chat, 8-tab dashboard (Goose, Dashboard, Vehicles, Drivers, Alerts, Reports, Diagnostics, Settings)
 - [x] Build Drag Racing page UI — time slips, AI race reports, callouts, leagues, leaderboards, BTC wagering
 - [x] Build Community page UI — real-time forum, categories, channels, threads, modern messaging feel
-- [ ] Build DEV TOOLS consolidated admin tab (all internal tools as sub-tabs)
+- [x] Build DEV TOOLS consolidated admin tab (all internal tools as sub-tabs)
 - [x] Wire all new pages into App.tsx navigation
 - [x] Write tests for Fleet, Drag, and Community routers
 - [x] Push database schema migrations
@@ -2302,8 +2302,8 @@
 - [x] Integrate share into Drag Racing — regional callout share ("Fastest L5P in Louisiana")
 - [x] Integrate share into Drag Racing — league standings share
 - [x] Integrate share into Drag Racing — leaderboard position share
-- [ ] Integrate share into Fleet — fleet stats summary share (next iteration)
-- [ ] Integrate share into Community — thread/post share (next iteration)
+- [x] Integrate share into Fleet — fleet stats summary share
+- [x] Integrate share into Community — thread/post share
 - [ ] Open Graph meta tags with dynamic preview images per share type (future)
 - [x] "Powered by V-OP / PPEI" branding on all share cards
 - [x] Vehicle photo upload — users upload truck pics as their vehicle profile photo

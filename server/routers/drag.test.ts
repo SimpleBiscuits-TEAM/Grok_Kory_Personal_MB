@@ -161,3 +161,86 @@ describe("drag.getSubscription", () => {
     expect(result === null || typeof result === "object").toBe(true);
   });
 });
+
+describe("drag.getRegionalChampions", () => {
+  it("returns an array of regional champions", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getRegionalChampions({
+      raceType: "quarter",
+      limit: 50,
+    });
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("accepts eighth mile race type", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getRegionalChampions({
+      raceType: "eighth",
+      limit: 10,
+    });
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+  });
+});
+
+describe("drag.getProfileBadges", () => {
+  it("returns an array of badges for a profile", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getProfileBadges({
+      profileId: 1,
+    });
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("returns empty array for non-existent profile", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getProfileBadges({
+      profileId: 99999,
+    });
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(0);
+  });
+});
+
+describe("drag.getPlayoffBracket", () => {
+  it("returns season and bracket data", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getPlayoffBracket({
+      seasonId: 1,
+    });
+
+    expect(result).toBeDefined();
+    expect(result).toHaveProperty("season");
+    expect(result).toHaveProperty("bracket");
+    expect(Array.isArray(result.bracket)).toBe(true);
+  });
+
+  it("returns null season for non-existent season", async () => {
+    const ctx = createPublicContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.drag.getPlayoffBracket({
+      seasonId: 99999,
+    });
+
+    expect(result.season).toBeNull();
+    expect(result.bracket).toEqual([]);
+  });
+});

@@ -15,9 +15,10 @@ import { Input } from '@/components/ui/input';
 import {
   Loader2, MessageSquare, Hash, Users, Heart, ArrowLeft,
   Plus, ChevronRight, Shield, Send, Flame, Wrench, Flag,
-  Truck, Zap, BookOpen
+  Truck, Zap, BookOpen, Share2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ShareCard, QuickShareButton, buildCommunityShareData } from '@/components/ShareCard';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -425,6 +426,16 @@ export default function Community() {
                         <Heart className="h-3 w-3" style={{ color: sColor.red }} />
                         <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>{p.likeCount ?? 0}</span>
                       </button>
+                      {idx === 0 && (
+                        <QuickShareButton
+                          data={buildCommunityShareData(
+                            selectedThreadTitle,
+                            categories.find(c => c.id === selectedCategoryId)?.name || 'General',
+                            user?.name || undefined
+                          )}
+                          className="ppei-btn-hover"
+                        />
+                      )}
                     </div>
                   </Card>
                 ))}

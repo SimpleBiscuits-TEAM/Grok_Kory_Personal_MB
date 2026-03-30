@@ -397,4 +397,194 @@ export const dragRouter = router({
         .orderBy(desc(dragTournaments.createdAt))
         .limit(input.limit);
     }),
+
+  // ── Regional Champions ("Fastest in [Location]") ──────────────────────
+  getRegionalChampions: publicProcedure
+    .input(z.object({
+      raceType: z.enum(["eighth", "quarter"]).default("quarter"),
+      limit: z.number().default(50),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      // Find the fastest public run per trackLocation, join with profile
+      const etCol = input.raceType === "eighth" ? dragRuns.eighthEt : dragRuns.quarterEt;
+      const mphCol = input.raceType === "eighth" ? dragRuns.eighthMph : dragRuns.quarterMph;
+      const rows = await db
+        .select({
+          trackLocation: dragRuns.trackLocation,
+          bestEt: sql<string>`MIN(CAST(${etCol} AS DECIMAL(8,4)))`.as("bestEt"),
+          bestMph: sql<string>`MAX(CAST(${mphCol} AS DECIMAL(8,4)))`.as("bestMph"),
+          profileId: dragRuns.profileId,
+          displayName: dragProfiles.displayName,
+          vehicleDesc: dragProfiles.vehicleDesc,
+          vehicleClass: dragProfiles.vehicleClass,
+        })
+        .from(dragRuns)
+        .innerJoin(dragProfiles, eq(dragRuns.profileId, dragProfiles.id))
+        .where(
+          and(
+            eq(dragRuns.isPublic, true),
+            sql`${dragRuns.trackLocation} IS NOT NULL AND ${dragRuns.trackLocation} != ''`,
+            sql`${etCol} IS NOT NULL AND ${etCol} != ''`,
+          )
+        )
+        .groupBy(dragRuns.trackLocation, dragRuns.profileId, dragProfiles.displayName, dragProfiles.vehicleDesc, dragProfiles.vehicleClass)
+        .orderBy(sql`bestEt ASC`)
+        .limit(input.limit);
+
+      // Deduplicate: keep only the fastest per location
+      const seen = new Set<string>();
+      const champions: typeof rows = [];
+      for (const row of rows) {
+        const loc = (row.trackLocation || "").toLowerCase().trim();
+        if (!seen.has(loc)) {
+          seen.add(loc);
+          champions.push(row);
+        }
+      }
+      return champions;
+    }),
+
+  // ── Playoff Bracket ───────────────────────────────────────────────────
+  getPlayoffBracket: publicProcedure
+    .input(z.object({ seasonId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { season: null, bracket: [] };
+
+      // Get season info
+      const seasonRows = await db.select().from(dragLeagueSeasons)
+        .where(eq(dragLeagueSeasons.id, input.seasonId));
+      const season = seasonRows[0] || null;
+
+      // Get standings for this season, ordered by rank
+      const standings = await db
+        .select({
+          id: dragLeagueStandings.id,
+          profileId: dragLeagueStandings.profileId,
+          rank: dragLeagueStandings.rank,
+          points: dragLeagueStandings.points,
+          wins: dragLeagueStandings.wins,
+          losses: dragLeagueStandings.losses,
+          bestEt: dragLeagueStandings.bestEt,
+          bestMph: dragLeagueStandings.bestMph,
+          displayName: dragProfiles.displayName,
+          vehicleDesc: dragProfiles.vehicleDesc,
+          vehicleClass: dragProfiles.vehicleClass,
+        })
+        .from(dragLeagueStandings)
+        .innerJoin(dragProfiles, eq(dragLeagueStandings.profileId, dragProfiles.id))
+        .where(eq(dragLeagueStandings.seasonId, input.seasonId))
+        .orderBy(asc(dragLeagueStandings.rank));
+
+      // Build bracket from top-N standings (power of 2)
+      const bracketSize = standings.length >= 16 ? 16 : standings.length >= 8 ? 8 : standings.length >= 4 ? 4 : 2;
+      const seeded = standings.slice(0, bracketSize);
+
+      // Generate matchups: 1v(N), 2v(N-1), etc.
+      const bracket: Array<{ round: number; matchIndex: number; seed1: typeof seeded[0] | null; seed2: typeof seeded[0] | null; winnerId?: number | null }> = [];
+      for (let i = 0; i < Math.floor(seeded.length / 2); i++) {
+        bracket.push({
+          round: 1,
+          matchIndex: i,
+          seed1: seeded[i] || null,
+          seed2: seeded[seeded.length - 1 - i] || null,
+          winnerId: null,
+        });
+      }
+
+      return { season, bracket };
+    }),
+
+  // ── Get badges for a specific profile ─────────────────────────────────
+  getProfileBadges: publicProcedure
+    .input(z.object({ profileId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const badges: Array<{ type: string; label: string; location?: string; value?: string }> = [];
+
+      // Check if this profile holds any regional fastest ET records
+      // For each location where this profile has a public run, check if they have the best ET
+      const profileRuns = await db.select({
+        trackLocation: dragRuns.trackLocation,
+        quarterEt: dragRuns.quarterEt,
+        eighthEt: dragRuns.eighthEt,
+      }).from(dragRuns)
+        .where(and(
+          eq(dragRuns.profileId, input.profileId),
+          eq(dragRuns.isPublic, true),
+          sql`${dragRuns.trackLocation} IS NOT NULL AND ${dragRuns.trackLocation} != ''`,
+        ));
+
+      // Get unique locations
+      const locations = Array.from(new Set(profileRuns.map(r => r.trackLocation).filter(Boolean)));
+
+      for (const loc of locations) {
+        // Check quarter mile
+        const fastestQtr = await db.select({
+          profileId: dragRuns.profileId,
+          bestEt: sql<string>`MIN(CAST(${dragRuns.quarterEt} AS DECIMAL(8,4)))`.as("bestEt"),
+        }).from(dragRuns)
+          .where(and(
+            eq(dragRuns.isPublic, true),
+            eq(dragRuns.trackLocation, loc!),
+            sql`${dragRuns.quarterEt} IS NOT NULL AND ${dragRuns.quarterEt} != ''`,
+          ))
+          .groupBy(dragRuns.profileId)
+          .orderBy(sql`bestEt ASC`)
+          .limit(1);
+
+        if (fastestQtr[0] && fastestQtr[0].profileId === input.profileId) {
+          badges.push({
+            type: 'regional_champion',
+            label: `FASTEST IN ${loc!.toUpperCase()}`,
+            location: loc!,
+            value: `${Number(fastestQtr[0].bestEt).toFixed(3)}s 1/4`,
+          });
+        }
+
+        // Check eighth mile
+        const fastest8th = await db.select({
+          profileId: dragRuns.profileId,
+          bestEt: sql<string>`MIN(CAST(${dragRuns.eighthEt} AS DECIMAL(8,4)))`.as("bestEt"),
+        }).from(dragRuns)
+          .where(and(
+            eq(dragRuns.isPublic, true),
+            eq(dragRuns.trackLocation, loc!),
+            sql`${dragRuns.eighthEt} IS NOT NULL AND ${dragRuns.eighthEt} != ''`,
+          ))
+          .groupBy(dragRuns.profileId)
+          .orderBy(sql`bestEt ASC`)
+          .limit(1);
+
+        if (fastest8th[0] && fastest8th[0].profileId === input.profileId) {
+          badges.push({
+            type: 'regional_champion_eighth',
+            label: `FASTEST 1/8 IN ${loc!.toUpperCase()}`,
+            location: loc!,
+            value: `${Number(fastest8th[0].bestEt).toFixed(3)}s 1/8`,
+          });
+        }
+      }
+
+      // Check league championships
+      const championships = await db.select({
+        seasonName: dragLeagueSeasons.name,
+        leagueId: dragLeagueSeasons.leagueId,
+      }).from(dragLeagueSeasons)
+        .where(eq(dragLeagueSeasons.championId, input.profileId));
+
+      for (const champ of championships) {
+        badges.push({
+          type: 'league_champion',
+          label: `LEAGUE CHAMPION`,
+          value: champ.seasonName || `Season`,
+        });
+      }
+
+      return badges;
+    }),
 });

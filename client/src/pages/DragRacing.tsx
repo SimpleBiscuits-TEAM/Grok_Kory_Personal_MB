@@ -15,8 +15,9 @@ import { Input } from '@/components/ui/input';
 import {
   Loader2, Flag, Trophy, MapPin, Users, Timer, Crown,
   Plus, Share2, Bitcoin, Shield, Star, Target,
-  Medal, Swords
+  Medal, Swords, Award, Zap
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { ShareCard, buildTimeslipShareData, buildCalloutShareData, buildLeagueShareData, QuickShareButton } from '@/components/ShareCard';
 
@@ -62,6 +63,14 @@ export default function DragRacing() {
     undefined,
     { enabled: isAuthenticated && (activeTab === 'profile' || activeTab === 'timeslips') }
   );
+  const regionalChampionsQuery = trpc.drag.getRegionalChampions.useQuery(
+    { raceType: 'quarter', limit: 50 },
+    { enabled: activeTab === 'leaderboard' }
+  );
+  const profileBadgesQuery = trpc.drag.getProfileBadges.useQuery(
+    { profileId: myProfileQuery.data?.id ?? 0 },
+    { enabled: !!myProfileQuery.data?.id && activeTab === 'profile' }
+  );
 
   // Create callout state
   const [showCreateCallout, setShowCreateCallout] = useState(false);
@@ -73,6 +82,13 @@ export default function DragRacing() {
     vehicleClass: 'open',
     description: '',
   });
+
+  // Bracket state
+  const [selectedSeasonId, setSelectedSeasonId] = useState<number | null>(null);
+  const bracketQuery = trpc.drag.getPlayoffBracket.useQuery(
+    { seasonId: selectedSeasonId! },
+    { enabled: !!selectedSeasonId }
+  );
 
   // Create league state
   const [showCreateLeague, setShowCreateLeague] = useState(false);
@@ -271,6 +287,52 @@ export default function DragRacing() {
                   Be the first to claim the throne. Upload a timeslip and own the leaderboard.
                 </p>
               </Card>
+            )}
+
+            {/* Regional Champions */}
+            {regionalChampionsQuery.data && regionalChampionsQuery.data.length > 0 && (
+              <div className="mt-8">
+                <div className="ppei-section-header mb-4">
+                  <MapPin className="h-5 w-5" style={{ color: sColor.amber }} />
+                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white', margin: 0 }}>FASTEST IN YOUR AREA</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {regionalChampionsQuery.data.map((champ, idx) => (
+                    <Card key={idx} className="ppei-card ppei-card-hover p-4" style={{
+                      background: sColor.cardBg,
+                      border: `1px solid ${sColor.border}`,
+                      borderLeft: `4px solid ${sColor.amber}`,
+                    }}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <Zap className="h-3.5 w-3.5" style={{ color: sColor.amber }} />
+                            <span style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.amber, letterSpacing: '0.06em' }}>
+                              FASTEST IN {(champ.trackLocation || 'UNKNOWN').toUpperCase()}
+                            </span>
+                          </div>
+                          <span style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white' }}>
+                            {champ.displayName || `Profile #${champ.profileId}`}
+                          </span>
+                          {champ.vehicleDesc && (
+                            <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, display: 'block', marginTop: '2px' }}>
+                              {champ.vehicleDesc}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span style={{ fontFamily: sFont.heading, fontSize: '1.4rem', color: sColor.red }}>
+                            {champ.bestEt ? `${Number(champ.bestEt).toFixed(3)}s` : '—'}
+                          </span>
+                          <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, display: 'block' }}>
+                            {champ.bestMph ? `${Number(champ.bestMph).toFixed(1)} MPH` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -588,6 +650,109 @@ export default function DragRacing() {
                 </p>
               </Card>
             )}
+
+            {/* Playoff Bracket Viewer */}
+            <div className="mt-8">
+              <div className="ppei-section-header mb-4">
+                <Trophy className="h-5 w-5" style={{ color: sColor.gold }} />
+                <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white', margin: 0 }}>PLAYOFF BRACKET</h3>
+              </div>
+              {!selectedSeasonId ? (
+                <Card className="ppei-card p-6 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
+                  <Trophy className="h-10 w-10 mx-auto mb-3" style={{ color: sColor.textDim }} />
+                  <p style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white' }}>SELECT A LEAGUE SEASON</p>
+                  <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, marginTop: '0.5rem' }}>
+                    When a league enters playoff status, the bracket will appear here.
+                    Seeding is based on regular-season standings.
+                  </p>
+                  <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, marginTop: '1rem' }}>
+                    Feature coming soon — brackets auto-generate when a season enters playoffs.
+                  </p>
+                </Card>
+              ) : bracketQuery.isLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" style={{ color: sColor.red }} />
+                </div>
+              ) : bracketQuery.data?.bracket && bracketQuery.data.bracket.length > 0 ? (
+                <div>
+                  {bracketQuery.data.season && (
+                    <div className="mb-4 flex items-center gap-3">
+                      <span style={{ fontFamily: sFont.heading, fontSize: '1rem', color: sColor.amber }}>
+                        {bracketQuery.data.season.name || `Season ${bracketQuery.data.season.seasonNumber}`}
+                      </span>
+                      <span style={{
+                        fontFamily: sFont.mono, fontSize: '0.6rem', padding: '2px 8px', borderRadius: '2px',
+                        background: bracketQuery.data.season.status === 'playoffs' ? 'oklch(0.25 0.08 25)' : 'oklch(0.20 0.04 260)',
+                        color: bracketQuery.data.season.status === 'playoffs' ? sColor.red : sColor.textDim,
+                      }}>
+                        {bracketQuery.data.season.status?.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  <div className="grid gap-3">
+                    {bracketQuery.data.bracket.map((match, idx) => (
+                      <Card key={idx} className="ppei-card p-4" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, marginBottom: '8px' }}>
+                          ROUND {match.round} — MATCH {match.matchIndex + 1}
+                        </div>
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                          {/* Seed 1 */}
+                          <div className="ppei-card p-3" style={{
+                            background: match.winnerId === match.seed1?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.12 0.005 260)',
+                            border: `1px solid ${match.winnerId === match.seed1?.profileId ? sColor.green : sColor.border}`,
+                            borderRadius: '2px',
+                          }}>
+                            <div className="flex items-center gap-2">
+                              <span style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: sColor.amber }}>
+                                #{match.seed1?.rank ?? '?'}
+                              </span>
+                              <div>
+                                <span style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: 'white' }}>
+                                  {match.seed1?.displayName || 'TBD'}
+                                </span>
+                                {match.seed1?.bestEt && (
+                                  <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, display: 'block' }}>
+                                    {Number(match.seed1.bestEt).toFixed(3)}s
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          {/* VS */}
+                          <span style={{ fontFamily: sFont.heading, fontSize: '1rem', color: sColor.red }}>VS</span>
+                          {/* Seed 2 */}
+                          <div className="ppei-card p-3" style={{
+                            background: match.winnerId === match.seed2?.profileId ? 'oklch(0.18 0.04 145)' : 'oklch(0.12 0.005 260)',
+                            border: `1px solid ${match.winnerId === match.seed2?.profileId ? sColor.green : sColor.border}`,
+                            borderRadius: '2px',
+                          }}>
+                            <div className="flex items-center gap-2 justify-end">
+                              <div className="text-right">
+                                <span style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: 'white' }}>
+                                  {match.seed2?.displayName || 'TBD'}
+                                </span>
+                                {match.seed2?.bestEt && (
+                                  <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, display: 'block' }}>
+                                    {Number(match.seed2.bestEt).toFixed(3)}s
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: sColor.amber }}>
+                                #{match.seed2?.rank ?? '?'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <Card className="ppei-card p-6 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
+                  <p style={{ fontFamily: sFont.body, color: sColor.textDim }}>No bracket data available for this season.</p>
+                </Card>
+              )}
+            </div>
           </div>
         )}
 
@@ -684,6 +849,44 @@ export default function DragRacing() {
                     </div>
                   ))}
                 </div>
+
+                {/* Regional Champion Badges */}
+                {profileBadgesQuery.data && profileBadgesQuery.data.length > 0 && (
+                  <div className="mt-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Award className="h-4 w-4" style={{ color: sColor.gold }} />
+                      <span style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: sColor.gold, letterSpacing: '0.06em' }}>BADGES & TITLES</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {profileBadgesQuery.data.map((badge, i) => (
+                        <div key={i} className="ppei-anim-scale-in" style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '6px',
+                          padding: '6px 12px', borderRadius: '2px',
+                          background: badge.type === 'league_champion'
+                            ? 'linear-gradient(135deg, oklch(0.20 0.08 80), oklch(0.15 0.04 80))'
+                            : 'linear-gradient(135deg, oklch(0.20 0.06 25), oklch(0.14 0.03 25))',
+                          border: `1px solid ${badge.type === 'league_champion' ? sColor.gold : sColor.red}`,
+                        }}>
+                          {badge.type === 'league_champion'
+                            ? <Crown className="h-3.5 w-3.5" style={{ color: sColor.gold }} />
+                            : <Zap className="h-3.5 w-3.5" style={{ color: sColor.red }} />
+                          }
+                          <span style={{
+                            fontFamily: sFont.heading, fontSize: '0.7rem', letterSpacing: '0.08em',
+                            color: badge.type === 'league_champion' ? sColor.gold : sColor.red,
+                          }}>
+                            {badge.label}
+                          </span>
+                          {badge.value && (
+                            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }}>
+                              {badge.value}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </Card>
             ) : (
               <Card className="ppei-card p-8 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>

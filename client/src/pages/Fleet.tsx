@@ -11,9 +11,10 @@ import PpeiHeader from '@/components/PpeiHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader2, Truck, Users, AlertTriangle, Activity, Plus, MessageSquare, Send, Bot, Fuel, Wrench, Shield, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Loader2, Truck, Users, AlertTriangle, Activity, Plus, MessageSquare, Send, Bot, Fuel, Wrench, Shield, ChevronRight, ArrowLeft, Share2 } from 'lucide-react';
 import { Streamdown } from 'streamdown';
 import { toast } from 'sonner';
+import { ShareCard, QuickShareButton, buildFleetShareData } from '@/components/ShareCard';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -287,6 +288,23 @@ export default function Fleet() {
                 </div>
               ))}
             </div>
+            {/* Share Fleet Stats */}
+            <div className="flex justify-end mb-4">
+              <ShareCard
+                data={buildFleetShareData(
+                  dashQuery.data?.vehicles ?? 0,
+                  0, // avg MPG — populated when fuel logs exist
+                  0, // total miles — populated when trips exist
+                  orgsQuery.data?.find(o => o.id === selectedOrgId)?.name,
+                )}
+                trigger={
+                  <Button variant="outline" size="sm" style={{ fontFamily: sFont.heading, fontSize: '0.72rem', letterSpacing: '0.06em', color: sColor.textDim, borderColor: sColor.border }}>
+                    <Share2 className="h-3.5 w-3.5 mr-1.5" /> SHARE FLEET STATS
+                  </Button>
+                }
+              />
+            </div>
+
             <Card className="ppei-card p-6" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
               <div className="flex items-center gap-3 mb-4">
                 <Bot className="h-5 w-5" style={{ color: sColor.green }} />
