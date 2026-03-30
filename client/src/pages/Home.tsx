@@ -93,7 +93,7 @@ export default function Home() {
         if (wp8Result.vehicleType === 'HONDA_TALON') {
           // Store WP8 data in sessionStorage for the Advanced page to pick up
           // Float32Array doesn't serialize to JSON properly, so convert to regular arrays
-          const serializableRows = wp8Result.rows.slice(0, 5000).map(r => ({
+          const serializableRows = wp8Result.rows.slice(0, 2000).map(r => ({
             timestamp: r.timestamp,
             values: Array.from(r.values),
           }));

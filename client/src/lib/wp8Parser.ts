@@ -1,13 +1,24 @@
 /**
- * WP8 (Dynojet Power Vision Datalog) Parser
+ * WP8 (Dynojet WinPEP / Dynoware RT Datalog) Parser
  *
- * File format:
+ * Supports two file format versions:
+ *
+ * V1 (Legacy binary):
  *   Magic: FECE FACE (4 bytes)
  *   Header: offset(4) + flags(4) + padding(4) + part_number(null-terminated)
  *   Channel definitions: blocks starting with 00 10, each containing channel name and metadata
  *   Data rows: marker 03 10 + size(2) + padding(2) + payload(4-byte counter + N x float32 LE)
  *
- * Honda Talon detection: DCT channels + part number containing "0801EB"
+ * V2 (Protobuf-encoded, Dynoware RT):
+ *   Magic: FECE FACE (4 bytes)
+ *   Version byte: 0x01 (1 byte)
+ *   Protobuf channel blocks (field=1, length-delimited), each containing:
+ *     field=1: metadata sub-message (varint fields)
+ *     field=2: channel name (string)
+ *     field=4: data points (repeated sub-messages with float32 value + varint timestamp)
+ *   Data is COLUMNAR — each channel carries its own time-series data points
+ *
+ * Honda Talon detection: DCT channels + part number containing "0801EB" or "0801EA"
  */
 
 export interface WP8Channel {
@@ -32,33 +43,223 @@ export interface WP8ParseResult {
 }
 
 const WP8_MAGIC = 0xFECEFACE;
-const CHANNEL_MARKER = 0x0010;  // big-endian
-const NAME_SUB_MARKER = 0x0110; // big-endian
-const ROW_MARKER_BYTE0 = 0x03;
-const ROW_MARKER_BYTE1 = 0x10;
 
 /** Honda Talon detection: DCT channels + specific part number prefixes */
 const HONDA_TALON_PART_PREFIXES = ['0801EB', '0801EA'];
 const HONDA_TALON_DCT_KEYWORDS = ['DCT', 'Dual Clutch'];
 
-/**
- * Parse a WP8 binary file into structured data
- */
-export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
-  const data = new Uint8Array(buffer);
-  const view = new DataView(buffer);
+// ─── Protobuf helpers ───────────────────────────────────────────────
 
-  // Validate magic
-  const magic = view.getUint32(0, false); // big-endian FECE FACE
-  if (magic !== WP8_MAGIC) {
-    throw new Error(`Invalid WP8 file: expected magic FECEFACE, got ${magic.toString(16).toUpperCase()}`);
+function readVarint(data: Uint8Array, pos: number): [number, number] {
+  let result = 0;
+  let shift = 0;
+  while (pos < data.length) {
+    const b = data[pos];
+    result |= (b & 0x7f) << shift;
+    pos++;
+    if (!(b & 0x80)) break;
+    shift += 7;
+    if (shift > 35) break; // safety: max 5 bytes for 32-bit varint
+  }
+  // Handle unsigned 32-bit overflow
+  return [result >>> 0, pos];
+}
+
+// ─── V2 Protobuf parser ─────────────────────────────────────────────
+
+interface V2ChannelData {
+  name: string;
+  points: Array<{ ts: number; val: number }>;
+}
+
+function parseV2(data: Uint8Array, view: DataView): WP8ParseResult {
+  const channels: WP8Channel[] = [];
+  const channelData: V2ChannelData[] = [];
+
+  // Start after magic (4 bytes) + version byte (1 byte)
+  let pos = 5;
+
+  while (pos < data.length - 2) {
+    const [tag, pos2] = readVarint(data, pos);
+    const fieldNum = tag >>> 3;
+    const wireType = tag & 0x07;
+
+    // We only expect field=1, wire_type=2 (length-delimited) at the top level
+    if (wireType !== 2) break;
+
+    const [length, pos3] = readVarint(data, pos2);
+    const blockEnd = pos3 + length;
+    if (blockEnd > data.length) break;
+
+    // Parse inside the channel block
+    let innerPos = pos3;
+    let channelName = '';
+    const points: Array<{ ts: number; val: number }> = [];
+
+    while (innerPos < blockEnd - 1) {
+      const [innerTag, innerPos2] = readVarint(data, innerPos);
+      const innerField = innerTag >>> 3;
+      const innerWire = innerTag & 0x07;
+
+      if (innerWire === 2) {
+        // Length-delimited
+        const [innerLen, innerPos3] = readVarint(data, innerPos2);
+        const contentEnd = innerPos3 + innerLen;
+        if (contentEnd > blockEnd) break;
+
+        if (innerField === 2) {
+          // Channel name (string)
+          const bytes = data.slice(innerPos3, contentEnd);
+          channelName = '';
+          for (let i = 0; i < bytes.length; i++) {
+            channelName += String.fromCharCode(bytes[i]);
+          }
+        } else if (innerField === 4) {
+          // Data point sub-message: field=1 float32, field=2 varint timestamp
+          let dpPos = innerPos3;
+          let dpVal = 0;
+          let dpTs = 0;
+          let hasVal = false;
+          let hasTs = false;
+
+          while (dpPos < contentEnd) {
+            const [dpTag, dpPos2] = readVarint(data, dpPos);
+            const dpField = dpTag >>> 3;
+            const dpWire = dpTag & 0x07;
+
+            if (dpWire === 5 && dpField === 1) {
+              // float32 (fixed 32-bit)
+              if (dpPos2 + 4 <= contentEnd) {
+                dpVal = view.getFloat32(dpPos2, true);
+                hasVal = true;
+              }
+              dpPos = dpPos2 + 4;
+            } else if (dpWire === 0) {
+              // varint (timestamp)
+              const [v, nextPos] = readVarint(data, dpPos2);
+              if (dpField === 2) {
+                dpTs = v;
+                hasTs = true;
+              }
+              dpPos = nextPos;
+            } else {
+              // Skip unknown
+              dpPos = dpPos2 + 1;
+              break;
+            }
+          }
+
+          if (hasVal && hasTs) {
+            points.push({ ts: dpTs, val: dpVal });
+          }
+        } else {
+          // Skip other length-delimited fields (e.g., metadata sub-message field=1)
+        }
+
+        innerPos = contentEnd;
+      } else if (innerWire === 0) {
+        // Varint — skip
+        const [, nextPos] = readVarint(data, innerPos2);
+        innerPos = nextPos;
+      } else if (innerWire === 5) {
+        // Fixed 32-bit — skip
+        innerPos = innerPos2 + 4;
+      } else if (innerWire === 1) {
+        // Fixed 64-bit — skip
+        innerPos = innerPos2 + 8;
+      } else {
+        innerPos = innerPos2 + 1;
+        break;
+      }
+    }
+
+    if (channelName.length > 0) {
+      channels.push({
+        index: channels.length,
+        name: channelName.trim(),
+        blockOffset: pos,
+      });
+      channelData.push({ name: channelName.trim(), points });
+    }
+
+    pos = blockEnd;
   }
 
+  // Convert columnar data to row-oriented format
+  // Collect all unique timestamps across all channels, then build rows
+  const tsSet = new Set<number>();
+  for (const ch of channelData) {
+    for (const pt of ch.points) {
+      tsSet.add(pt.ts);
+    }
+  }
+  const allTimestamps = Array.from(tsSet).sort((a, b) => a - b);
+
+  // Build lookup maps: for each channel, map timestamp → value
+  const channelMaps: Map<number, number>[] = channelData.map(ch => {
+    const m = new Map<number, number>();
+    for (const pt of ch.points) {
+      m.set(pt.ts, pt.val);
+    }
+    return m;
+  });
+
+  // Build rows
+  const numChannels = channels.length;
+  const rows: WP8DataRow[] = [];
+  for (const ts of allTimestamps) {
+    const values = new Float32Array(numChannels);
+    for (let i = 0; i < numChannels; i++) {
+      const val = channelMaps[i].get(ts);
+      if (val !== undefined) {
+        values[i] = val;
+      } else {
+        // Interpolate: use last known value (forward-fill)
+        values[i] = NaN;
+      }
+    }
+    rows.push({ timestamp: ts, values });
+  }
+
+  // Forward-fill NaN values so each row has complete data
+  for (let col = 0; col < numChannels; col++) {
+    let lastVal = 0;
+    for (let row = 0; row < rows.length; row++) {
+      if (Number.isNaN(rows[row].values[col])) {
+        rows[row].values[col] = lastVal;
+      } else {
+        lastVal = rows[row].values[col];
+      }
+    }
+  }
+
+  // V2 files don't have a traditional part number — extract from channel context
+  const partNumber = '';
+
+  const vehicleType = detectVehicleType(partNumber, channels);
+
+  return {
+    magic: WP8_MAGIC,
+    partNumber,
+    channels,
+    rows,
+    totalRows: rows.length,
+    vehicleType,
+    rawSize: data.length,
+  };
+}
+
+// ─── V1 Legacy binary parser ────────────────────────────────────────
+
+const V1_CHANNEL_MARKER_B0 = 0x00;
+const V1_CHANNEL_MARKER_B1 = 0x10;
+const V1_ROW_MARKER_B0 = 0x03;
+const V1_ROW_MARKER_B1 = 0x10;
+
+function parseV1(data: Uint8Array, view: DataView): WP8ParseResult {
   // Extract part number (null-terminated string)
-  // Scan from offset 0x0C, skip non-printable bytes to find start of ASCII part number
   let partNumber = '';
   let pos = 0x0C;
-  // Skip leading zeros/non-printable bytes
   while (pos < Math.min(data.length, 0x20) && (data[pos] < 0x20 || data[pos] > 0x7E)) {
     pos++;
   }
@@ -73,21 +274,17 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
   let channelStartPos = pos;
 
   while (channelStartPos < data.length - 6) {
-    // Stop if we hit a data row marker (03 10) - we've passed the channel section
-    if (data[channelStartPos] === ROW_MARKER_BYTE0 && data[channelStartPos + 1] === ROW_MARKER_BYTE1) {
+    if (data[channelStartPos] === V1_ROW_MARKER_B0 && data[channelStartPos + 1] === V1_ROW_MARKER_B1) {
       break;
     }
-    // Look for channel block marker: 00 10
-    if (data[channelStartPos] === 0x00 && data[channelStartPos + 1] === 0x10) {
+    if (data[channelStartPos] === V1_CHANNEL_MARKER_B0 && data[channelStartPos + 1] === V1_CHANNEL_MARKER_B1) {
       const blockSize = data[channelStartPos + 2];
       const blockDataStart = channelStartPos + 3;
 
-      // Look for name sub-marker 01 10 within the block
       let namePos = blockDataStart;
-      let foundName = false;
       while (namePos < blockDataStart + blockSize - 6) {
         if (data[namePos] === 0x01 && data[namePos + 1] === 0x10) {
-          const strLen = view.getUint32(namePos + 2, true); // LE
+          const strLen = view.getUint32(namePos + 2, true);
           if (strLen > 0 && strLen < 100) {
             let name = '';
             for (let i = 0; i < strLen; i++) {
@@ -101,7 +298,6 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
                 name: name.trim(),
                 blockOffset: channelStartPos,
               });
-              foundName = true;
             }
           }
           break;
@@ -109,11 +305,8 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
         namePos++;
       }
 
-      // Advance past this block
       channelStartPos = blockDataStart + blockSize;
-      // Skip padding zeros until next block or data section
       while (channelStartPos < data.length && data[channelStartPos] === 0x00) {
-        // Check if next byte could be start of a new channel block (0x10)
         if (channelStartPos + 1 < data.length && data[channelStartPos + 1] === 0x10) {
           break;
         }
@@ -124,10 +317,10 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
     channelStartPos++;
   }
 
-  // Find data section - look for first row marker (03 10)
+  // Find data section
   let dataStart = channelStartPos;
   while (dataStart < data.length - 4) {
-    if (data[dataStart] === ROW_MARKER_BYTE0 && data[dataStart + 1] === ROW_MARKER_BYTE1) {
+    if (data[dataStart] === V1_ROW_MARKER_B0 && data[dataStart + 1] === V1_ROW_MARKER_B1) {
       break;
     }
     dataStart++;
@@ -139,39 +332,33 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
   const numChannels = channels.length;
 
   while (rowPos < data.length - 6) {
-    if (data[rowPos] !== ROW_MARKER_BYTE0 || data[rowPos + 1] !== ROW_MARKER_BYTE1) {
+    if (data[rowPos] !== V1_ROW_MARKER_B0 || data[rowPos + 1] !== V1_ROW_MARKER_B1) {
       rowPos++;
       continue;
     }
 
-    const rowSize = view.getUint16(rowPos + 2, true); // LE
-    const payloadStart = rowPos + 6; // marker(2) + size(2) + padding(2)
+    const rowSize = view.getUint16(rowPos + 2, true);
+    const payloadStart = rowPos + 6;
 
     if (payloadStart + rowSize > data.length) break;
 
-    // First 4 bytes of payload are timestamp/counter
     const timestamp = view.getUint16(payloadStart, true);
-
-    // Remaining bytes are float32 values
     const floatStart = payloadStart + 4;
     const numFloats = Math.min(numChannels, Math.floor((rowSize - 4) / 4));
     const values = new Float32Array(numFloats);
 
     for (let i = 0; i < numFloats; i++) {
-      values[i] = view.getFloat32(floatStart + i * 4, true); // LE
+      values[i] = view.getFloat32(floatStart + i * 4, true);
     }
 
     rows.push({ timestamp, values });
-
-    // Advance to next row
     rowPos = payloadStart + rowSize;
   }
 
-  // Detect vehicle type
   const vehicleType = detectVehicleType(partNumber, channels);
 
   return {
-    magic,
+    magic: WP8_MAGIC,
     partNumber,
     channels,
     rows,
@@ -181,6 +368,45 @@ export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
   };
 }
 
+// ─── Format detection ───────────────────────────────────────────────
+
+/**
+ * Detect whether a WP8 file uses V1 (legacy binary) or V2 (protobuf) format.
+ *
+ * V2 files have a version byte (0x01) at offset 4, followed by protobuf field
+ * tag 0x0a (field=1, wire_type=2) at offset 5.
+ *
+ * V1 files have raw binary header bytes at offset 4 that don't match this pattern.
+ */
+function isV2Format(data: Uint8Array): boolean {
+  if (data.length < 7) return false;
+  // V2: magic(4) + version=0x01(1) + protobuf field tag 0x0a(1)
+  return data[4] === 0x01 && data[5] === 0x0a;
+}
+
+// ─── Public API ─────────────────────────────────────────────────────
+
+/**
+ * Parse a WP8 binary file into structured data.
+ * Automatically detects V1 (legacy) vs V2 (protobuf) format.
+ */
+export function parseWP8(buffer: ArrayBuffer): WP8ParseResult {
+  const data = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+
+  // Validate magic
+  const magic = view.getUint32(0, false);
+  if (magic !== WP8_MAGIC) {
+    throw new Error(`Invalid WP8 file: expected magic FECEFACE, got ${magic.toString(16).toUpperCase()}`);
+  }
+
+  if (isV2Format(data)) {
+    return parseV2(data, view);
+  } else {
+    return parseV1(data, view);
+  }
+}
+
 /**
  * Detect vehicle type from part number and channel names
  */
@@ -188,22 +414,19 @@ function detectVehicleType(
   partNumber: string,
   channels: WP8Channel[]
 ): 'HONDA_TALON' | 'UNKNOWN' {
-  // Check part number
   const isHondaPart = HONDA_TALON_PART_PREFIXES.some(prefix =>
     partNumber.toUpperCase().includes(prefix)
   );
 
-  // Check for DCT channels (Honda Talon uses Dual Clutch Transmission)
   const hasDCT = channels.some(ch =>
     HONDA_TALON_DCT_KEYWORDS.some(kw =>
       ch.name.toUpperCase().includes(kw.toUpperCase())
     )
   );
 
-  // Honda Talon: must have DCT channels AND matching part number
-  // Or just DCT channels with Alpha N (Honda fueling strategy)
   const hasAlphaN = channels.some(ch => ch.name === 'Alpha N');
 
+  // Honda Talon: DCT channels + (matching part number OR Alpha N)
   if ((isHondaPart && hasDCT) || (hasDCT && hasAlphaN)) {
     return 'HONDA_TALON';
   }
@@ -231,7 +454,6 @@ export function wp8ToCSV(result: WP8ParseResult): string {
     const vals: string[] = [];
     for (let i = 0; i < result.channels.length; i++) {
       const v = i < row.values.length ? row.values[i] : 0;
-      // Round to 4 decimal places to keep CSV clean
       vals.push(Number.isFinite(v) ? v.toFixed(4) : '0');
     }
     lines.push(vals.join(','));

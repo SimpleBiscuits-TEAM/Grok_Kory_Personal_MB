@@ -2316,3 +2316,8 @@
 - [x] Apply watermark to Health Report PDF
 - [x] Apply watermark to Diagnostic Report PDF
 - [x] Apply watermark to Drag Timeslip PDF export
+
+## WP8 File Parsing Bug
+- [x] Debug WP8 file upload error — "format incorrect" when uploading UTV96_YawPowerCoils_Rev_0_4_Run_6.wp8
+- [x] Fix WP8 parser to handle V2 protobuf-encoded format (Dynoware RT) — added full V2 parser alongside existing V1 parser
+- [x] Test with the provided WP8 file — 171 channels, 3343 timestamps, Honda Talon detected correctly
