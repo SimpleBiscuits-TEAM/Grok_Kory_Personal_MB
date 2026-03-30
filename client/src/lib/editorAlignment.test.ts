@@ -395,3 +395,173 @@ describe('Alignment engine edge cases', () => {
     expect(typeof result.offset).toBe('number');
   });
 });
+
+// ── DEADBEEF Header Parsing Tests ───────────────────────────────────────────
+
+import {
+  parseDEADBEEFFlashAddresses,
+  generateDEADBEEFCandidateBases,
+} from './editorEngine';
+
+describe('parseDEADBEEFFlashAddresses', () => {
+  it('returns empty array for non-DEADBEEF files', () => {
+    const buf = new Uint8Array(0x300);
+    buf[0] = 0x00; buf[1] = 0x00; buf[2] = 0x00; buf[3] = 0x00;
+    expect(parseDEADBEEFFlashAddresses(buf)).toEqual([]);
+  });
+
+  it('returns empty array for files smaller than 0x200 bytes', () => {
+    const buf = new Uint8Array(0x100);
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+    expect(parseDEADBEEFFlashAddresses(buf)).toEqual([]);
+  });
+
+  it('detects flash addresses in DEADBEEF header', () => {
+    const buf = new Uint8Array(0x300);
+    // DEADBEEF magic
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+
+    // Write flash addresses at 0x104 and 0x108 (big-endian)
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(0x104, 0x08FD8100, false); // big-endian
+    dv.setUint32(0x108, 0x09000000, false);
+    dv.setUint32(0x10C, 0x08FF56F0, false);
+
+    const result = parseDEADBEEFFlashAddresses(buf);
+    expect(result.length).toBeGreaterThanOrEqual(3);
+    expect(result).toContain(0x08FD8100);
+    expect(result).toContain(0x09000000);
+    expect(result).toContain(0x08FF56F0);
+    // Should be sorted
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i]).toBeGreaterThanOrEqual(result[i - 1]);
+    }
+  });
+
+  it('ignores values outside 0x08000000-0x09FFFFFF range', () => {
+    const buf = new Uint8Array(0x300);
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(0x104, 0x08FD8100, false);
+    dv.setUint32(0x108, 0x09000000, false);
+    dv.setUint32(0x10C, 0x12345678, false); // outside range
+    dv.setUint32(0x110, 0xFFFFFFFF, false); // outside range
+
+    const result = parseDEADBEEFFlashAddresses(buf);
+    expect(result).not.toContain(0x12345678);
+    expect(result).not.toContain(0xFFFFFFFF);
+  });
+
+  it('also scans secondary header region (0x200-0x240)', () => {
+    const buf = new Uint8Array(0x300);
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(0x104, 0x08FD8100, false);
+    dv.setUint32(0x108, 0x09000000, false);
+    // Secondary region
+    dv.setUint32(0x208, 0x08FD82FC, false);
+
+    const result = parseDEADBEEFFlashAddresses(buf);
+    expect(result).toContain(0x08FD82FC);
+  });
+});
+
+describe('generateDEADBEEFCandidateBases', () => {
+  it('returns empty array for empty input', () => {
+    expect(generateDEADBEEFCandidateBases([])).toEqual([]);
+  });
+
+  it('generates candidates around minimum flash address', () => {
+    const flashAddrs = [0x08FD8100, 0x08FF56F0, 0x09000000];
+    const candidates = generateDEADBEEFCandidateBases(flashAddrs);
+
+    // Should have many candidates
+    expect(candidates.length).toBeGreaterThan(100);
+
+    // Should be sorted
+    for (let i = 1; i < candidates.length; i++) {
+      expect(candidates[i]).toBeGreaterThanOrEqual(candidates[i - 1]);
+    }
+
+    // The correct base 0x08FD5F50 should be in the candidates
+    // (minAddr=0x08FD8100, headerSize=0x21B0 → 0x08FD8100-0x21B0=0x08FD5F50)
+    expect(candidates).toContain(0x08FD8100 - 0x21B0);
+  });
+
+  it('includes raw flash addresses and 64KB-aligned variants', () => {
+    const flashAddrs = [0x08FD8100, 0x09000000];
+    const candidates = generateDEADBEEFCandidateBases(flashAddrs);
+
+    // Raw addresses should be included
+    expect(candidates).toContain(0x08FD8100);
+    expect(candidates).toContain(0x09000000);
+
+    // 64KB-aligned variants
+    expect(candidates).toContain(0x08FD0000);
+    expect(candidates).toContain(0x09000000);
+  });
+
+  it('has no duplicates', () => {
+    const flashAddrs = [0x08FD8100, 0x08FF56F0, 0x09000000];
+    const candidates = generateDEADBEEFCandidateBases(flashAddrs);
+    const unique = new Set(candidates);
+    expect(candidates.length).toBe(unique.size);
+  });
+});
+
+describe('alignOffsets with DEADBEEF binary', () => {
+  it('uses deadbeef_header method when DEADBEEF magic is present', () => {
+    // Create a binary with DEADBEEF header and valid data at known offsets
+    const size = 0x200000; // 2MB
+    const buf = new Uint8Array(size);
+    // Fill with 0xFF (out-of-range for most maps) to ensure only our planted values match
+    buf.fill(0xFF);
+
+    // DEADBEEF magic
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+
+    // Flash addresses in header
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(0x104, 0x08FD8100, false);
+    dv.setUint32(0x108, 0x09000000, false);
+    dv.setUint32(0x10C, 0x08FF56F0, false);
+
+    // Base address: 0x08FD7100 (= 0x08FD8100 - 0x1000)
+    // This means A2L address X maps to file offset X - 0x08FD7100
+    const testBase = 0x08FD8100 - 0x1000;
+
+    // Plant multiple valid UWORD (2-byte big-endian) values at known file offsets.
+    // Default resolveDataType returns UWORD (2 bytes, unsigned, big-endian).
+    // Each map expects a value in [0, 255], so plant small 16-bit values.
+    const mapOffsets = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x8000, 0x9000, 0xA000];
+    const maps: CalibrationMap[] = mapOffsets.map((fileOff, i) => {
+      // Plant a valid UWORD value at this file offset (big-endian: high byte first)
+      const val = 50 + i * 20; // values: 50, 70, 90, 110, 130, 150, 170, 190, 210, 230
+      buf[fileOff] = 0;     // high byte = 0
+      buf[fileOff + 1] = val; // low byte = value
+      return {
+        name: `TestVal${i}`,
+        description: `Test value ${i}`,
+        type: 'VALUE' as const,
+        address: testBase + fileOff, // A2L virtual address
+        recordLayout: 'RL_VALUE',
+        compuMethod: 'CM_IDENT',
+        lowerLimit: 0,
+        upperLimit: 255,
+        annotations: [],
+        axes: [],
+      };
+    });
+
+    const def = makeEcuDef({ maps, ecuFamily: 'MG1CA920' });
+    const result = alignOffsets(def, buf, 0);
+
+    // The alignment engine should find a method (deadbeef_header or known_offset)
+    expect(result.confidence).toBeGreaterThan(0);
+    expect(result.method).not.toBe('none');
+    // The offset should be negative of the base
+    expect(result.offset).toBe(-testBase);
+  });
+});

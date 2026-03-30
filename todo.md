@@ -2326,3 +2326,13 @@
 - [x] Fix WP8 V2 file not redirecting to Honda Talon Tuner page after successful parse — talon was only a devSubTab, added top-level activeTab === 'talon' rendering
 - [x] Verify sessionStorage data handoff works for V2 format
 - [x] Test end-to-end: upload V2 WP8 → detect Honda Talon → redirect to Advanced?tab=talon — Honda Talon tab now dynamically appears in tab bar when WP8 data is loaded
+
+## MG1 Binary Map Offset Fix (2026-03-30)
+- [x] Investigate MG1 binary map offset misalignment (editor shows 0x9464588, WinOLS shows 0x48E638 for AirPah_pIntkNomFcoCorr)
+- [x] Root cause: DEADBEEF container header has flash addresses (0x08FD8100+) but alignment engine only tried 0x08FD8000 (off by 0x20B0 = 8,368 bytes)
+- [x] Fix: Added parseDEADBEEFFlashAddresses() to extract flash addresses from container header (0x100-0x1D0, 0x200-0x240 regions)
+- [x] Fix: Added generateDEADBEEFCandidateBases() to generate candidate bases from header-derived addresses (header size sweep 0x1000-0x4000)
+- [x] Fix: Injected DEADBEEF strategy into both alignOffsets (Strategy 1.75) and autoHealAlignment (Strategy 2.5)
+- [x] Verified: correct base 0x08FD5F50 found in candidates, row 0 values match WinOLS exactly: [0.0, 4.9, 14.1, 29.3, 44.1, 58.2, 72.7, 90.0]
+- [x] Added 11 new tests for DEADBEEF parsing, candidate generation, and alignment (30 total in editorAlignment.test.ts)
+- [x] All 954 tests passing, TypeScript compiles cleanly

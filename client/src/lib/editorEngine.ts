@@ -1508,11 +1508,83 @@ export function extractBinaryData(
   } catch { /* binary file, not text */ }
 
   // Raw binary (.bin, .bdc, or unknown)
+  // Note: DEADBEEF MG1 container base address detection is handled by the
+  // alignment engine via parseDEADBEEFFlashAddresses() + generateDEADBEEFCandidateBases()
   return {
     data: new Uint8Array(buffer),
     baseAddress: 0,
     format: upper.endsWith('.BDC') ? 'bdc' : 'raw',
   };
+}
+
+/**
+ * Parse DEADBEEF container header to extract flash address hints.
+ * MG1/MG1CA920 binary dumps start with 0xDEADBEEF and contain a segment
+ * table at offset 0x100-0x1D0 with 32-bit big-endian flash addresses.
+ *
+ * Returns sorted array of flash addresses found in the header.
+ * Returns empty array if the file is not a DEADBEEF container.
+ */
+export function parseDEADBEEFFlashAddresses(data: Uint8Array): number[] {
+  if (data.length < 0x200) return [];
+
+  // Check for DEADBEEF magic at offset 0
+  if (data[0] !== 0xDE || data[1] !== 0xAD || data[2] !== 0xBE || data[3] !== 0xEF) {
+    return [];
+  }
+
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const flashAddresses = new Set<number>();
+
+  // Scan primary header region (0x100-0x1D0)
+  for (let offset = 0x100; offset < Math.min(0x1D0, data.length - 3); offset += 4) {
+    const val = dv.getUint32(offset, false); // big-endian
+    if (val >= 0x08000000 && val <= 0x09FFFFFF) {
+      flashAddresses.add(val);
+    }
+  }
+
+  // Scan secondary header region (0x200-0x240)
+  for (let offset = 0x200; offset < Math.min(0x240, data.length - 3); offset += 4) {
+    const val = dv.getUint32(offset, false);
+    if (val >= 0x08000000 && val <= 0x09FFFFFF) {
+      flashAddresses.add(val);
+    }
+  }
+
+  return Array.from(flashAddresses).sort((a, b) => a - b);
+}
+
+/**
+ * For DEADBEEF MG1 containers, compute candidate base addresses from header flash addresses.
+ * The minimum flash address in the header corresponds to a file offset that is
+ * typically the header size + padding (around 0x1000-0x3000 bytes).
+ * We generate candidates by subtracting various plausible header sizes.
+ */
+export function generateDEADBEEFCandidateBases(flashAddresses: number[]): number[] {
+  if (flashAddresses.length === 0) return [];
+
+  const minAddr = flashAddresses[0];
+  const candidates: number[] = [];
+
+  // The header+padding size varies per ECU version.
+  // Known values: ~0x21B0 for MG1CA920 Duramax L5P
+  // Generate candidates for header sizes from 0x1000 to 0x4000 in 0x10 steps
+  // This covers the range where the minimum flash address could map to.
+  for (let headerSize = 0x1000; headerSize <= 0x4000; headerSize += 0x10) {
+    candidates.push(minAddr - headerSize);
+  }
+
+  // Also add the raw flash addresses themselves as potential bases
+  // (in case the file is a segment extract starting at one of these addresses)
+  for (const addr of flashAddresses) {
+    candidates.push(addr);
+    // And nearby 64KB-aligned variants
+    candidates.push(addr & 0xFFFF0000);
+  }
+
+  // Deduplicate and sort
+  return Array.from(new Set(candidates)).sort((a, b) => a - b);
 }
 
 // ─── COMPU_METHOD Value Conversion ───────────────────────────────────────────
@@ -1743,6 +1815,100 @@ export function alignOffsets(
         method: 'zero_offset',
         anchors: zeroAnchors,
       };
+    }
+  }
+
+  // Strategy 1.75: DEADBEEF container header-derived bases
+  // For MG1 binaries with DEADBEEF headers, parse flash addresses from the header
+  // and generate fine-grained candidate bases. This finds the exact base even when
+  // the hardcoded list doesn't include the specific ECU version's base.
+  {
+    const deadbeefAddrs = parseDEADBEEFFlashAddresses(binaryData);
+    if (deadbeefAddrs.length >= 2) {
+      const candidates = generateDEADBEEFCandidateBases(deadbeefAddrs);
+      // Also include all map types (not just VALUE) for better coverage
+      const allTestMaps = ecuDef.maps.filter(m => m.address > 0).slice(0, 80);
+      const bigEndian = ecuDef.moduleInfo.byteOrder === 'MSB_FIRST';
+
+      let bestScore = 0;
+      let bestBase = 0;
+      let bestAnchors: AlignmentResult['anchors'] = [];
+
+      for (const candidateBase of candidates) {
+        let matches = 0;
+        let total = 0;
+        const anchors: AlignmentResult['anchors'] = [];
+
+        for (const map of allTestMaps) {
+          const binOffset = map.address - candidateBase;
+          if (binOffset < 0 || binOffset >= binaryData.length - 4) continue;
+          total++;
+
+          const dt = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
+          const raw = readValue(binaryData, binOffset, dt, bigEndian);
+          const cm = ecuDef.compuMethods.get(map.compuMethod);
+          const phys = rawToPhysical(raw, cm);
+
+          if (phys >= map.lowerLimit && phys <= map.upperLimit) {
+            matches++;
+            if (anchors.length < 5) {
+              anchors.push({ a2lAddr: map.address, binOffset, name: map.name });
+            }
+          }
+        }
+
+        if (total > 0) {
+          const score = matches / total;
+          if (score > bestScore) {
+            bestScore = score;
+            bestBase = candidateBase;
+            bestAnchors = anchors;
+          }
+        }
+      }
+
+      // If we found a good match from DEADBEEF candidates, use it
+      if (bestScore > 0.3) {
+        // Ultra-fine refinement: search +/- 0x100 around the best candidate in 0x2 steps
+        const fineStart = Math.max(0, bestBase - 0x100);
+        const fineEnd = bestBase + 0x100;
+        for (let tryBase = fineStart; tryBase <= fineEnd; tryBase += 0x2) {
+          let matches = 0;
+          let total = 0;
+          const anchors: AlignmentResult['anchors'] = [];
+
+          for (const map of allTestMaps) {
+            const binOffset = map.address - tryBase;
+            if (binOffset < 0 || binOffset >= binaryData.length - 4) continue;
+            total++;
+
+            const dt = resolveDataType(map.recordLayout, ecuDef.recordLayouts);
+            const raw = readValue(binaryData, binOffset, dt, bigEndian);
+            const cm = ecuDef.compuMethods.get(map.compuMethod);
+            const phys = rawToPhysical(raw, cm);
+
+            if (phys >= map.lowerLimit && phys <= map.upperLimit) {
+              matches++;
+              if (anchors.length < 5) {
+                anchors.push({ a2lAddr: map.address, binOffset, name: map.name });
+              }
+            }
+          }
+
+          if (total > 0 && matches / total > bestScore) {
+            bestScore = matches / total;
+            bestBase = tryBase;
+            bestAnchors = anchors;
+          }
+        }
+
+        return {
+          offset: -bestBase,
+          confidence: bestScore,
+          method: 'deadbeef_header',
+          anchors: bestAnchors,
+        };
+      }
     }
   }
 
@@ -2610,6 +2776,52 @@ export function autoHealAlignment(
       bestResult = result;
     } else {
       ecuDef.moduleInfo.byteOrder = origOrder; // revert
+    }
+  }
+
+  // ── Strategy 2.5: DEADBEEF container header-derived bases ──
+  {
+    const deadbeefAddrs = parseDEADBEEFFlashAddresses(binaryData);
+    if (deadbeefAddrs.length >= 2) {
+      strategiesAttempted.push('deadbeef_header');
+      log.push(`[Knox] Strategy 2.5: DEADBEEF header detected — ${deadbeefAddrs.length} flash addresses found.`);
+      log.push(`  Flash addresses: ${deadbeefAddrs.map(a => '0x' + a.toString(16).toUpperCase()).join(', ')}`);
+
+      const candidates = generateDEADBEEFCandidateBases(deadbeefAddrs);
+      log.push(`  Generated ${candidates.length} candidate base addresses.`);
+
+      let localBestScore = 0;
+      let localBestBase = 0;
+
+      // Coarse pass over all candidates
+      for (const candidateBase of candidates) {
+        const { score } = testOffset(-candidateBase);
+        if (score > localBestScore) {
+          localBestScore = score;
+          localBestBase = candidateBase;
+        }
+      }
+
+      // Fine pass: +/- 0x100 in steps of 0x2
+      if (localBestScore > 0.1) {
+        for (let tryBase = localBestBase - 0x100; tryBase <= localBestBase + 0x100; tryBase += 0x2) {
+          if (tryBase < 0) continue;
+          const { score } = testOffset(-tryBase);
+          if (score > localBestScore) {
+            localBestScore = score;
+            localBestBase = tryBase;
+          }
+        }
+      }
+
+      if (localBestScore > bestHealth) {
+        const result = tryAndValidate(-localBestBase, `auto_heal_deadbeef_0x${localBestBase.toString(16).toUpperCase()}`);
+        log.push(`  → DEADBEEF base 0x${localBestBase.toString(16).toUpperCase()}: ${(result.diag.healthScore * 100).toFixed(0)}% healthy`);
+        if (result.diag.healthScore > bestHealth) {
+          bestHealth = result.diag.healthScore;
+          bestResult = result;
+        }
+      }
     }
   }
 
