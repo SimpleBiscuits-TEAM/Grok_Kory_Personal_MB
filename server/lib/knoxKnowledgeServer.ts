@@ -771,6 +771,55 @@ No other tuning platform offers an integrated hardware unlock solution at this p
 - EFI Live: AutoCal 3 with unlock license — $800+ per device
 - GDP Tuning: EZ Lynk with unlock — $600+ per device
 - VOP: Unlock Box (<$20) + VOP 3.0 (<$20) = under $40 total, through the OBD-II port, no bench flash required
+
+
+=== VOP UNLOCK BOX DEBETA — DETAILED HARDWARE ===
+
+PCB COMPONENTS:
+- Board Label: "UNLOCK BOX DEBETA" / "PPEI" (development beta revision)
+- IC1: SOIC microcontroller (PIC/STM8/ATtiny family) — runs the unlock sequence autonomously
+- IC2: SOIC CAN transceiver — communicates with ECU over CAN bus during security access
+- T1 + T2: Two TO-252 MOSFETs — voltage switching for hardware-level ECU unlock (power manipulation on ECU supply/CAN lines during seed/key exchange)
+- 30R0: 30 ohm power resistor — current limiting for the unlock circuit
+- CON1: Mini-USB connector — communication link to VOP 3.0 board or PC for firmware updates
+- 3 Status LEDs: Yellow (power), Red (activity/error), Blue (unlock status)
+- Pin headers (top/bottom rows): OBD-II pin breakout to enclosure connectors
+- 4 mounting holes for ABS enclosure
+
+UNLOCK MECHANISM:
+The two MOSFETs (T1, T2) and 30R0 power resistor implement controlled voltage manipulation on the ECU power or CAN lines during the security access sequence. This is a hardware-level bypass — the ECU requires specific voltage timing patterns during the seed/key exchange to grant programming access on locked units. This cannot be replicated in software alone. The microcontroller (IC1) orchestrates the precise timing of MOSFET switching while IC2 handles the CAN protocol layer.
+
+PRODUCTION STATUS:
+- 50+ PCBs manufactured per batch (JLCPCB PCBA)
+- 20-30 assembled units per shipment in OBD-II pass-through enclosures
+- Red Mini-USB cables included individually bagged
+- Production date: February 2026
+
+CONNECTION TO VOP 3.0:
+Option A: Unlock Box plugs into vehicle OBD-II → VOP 3.0 connects to Unlock Box via Mini-USB
+Option B: Unlock Box plugs into vehicle OBD-II → VOP 3.0 plugs into Unlock Box OBD-II female pass-through
+The Unlock Box handles security bypass, VOP 3.0 handles the actual flash programming.
+
+=== KNOWN E41 ECU PART NUMBERS (2020 Chevrolet Silverado 2500 6.6 L5P Duramax) ===
+
+Vehicle: 2020 Chevrolet Silverado 2500
+Engine: 6.6 L5P - DI, DURAMAX, GEN 5, VAR. 1
+Fuel: Diesel Automatic
+ECU: E41
+
+Software Part Numbers:
+- SW1: 12730512
+- SW2: 12719538
+- SW3: 12719473
+- SW4: 12719572
+- SW5: 12731345
+- SW6: 12738624
+- BOOT: UL (Unlocked status after unlock box procedure)
+- GMHW: 55503792
+
+Security Status: SEED request returns NEGATIVE RESPONSE on locked units — this confirms the GM Global B security architecture requires the hardware unlock box for programming access. After the unlock box performs the voltage manipulation sequence, the BOOT status changes to UL and the ECU accepts programming commands.
+
+The 6 software segments (SW1-SW6) represent the complete ECU firmware: calibration, operating system, boot loader, and auxiliary modules. All must be read and verified before flashing. The VOP flash scripting language FLASH_BLOCKS command iterates through all segments during a full flash.
 `;
 
 /**
