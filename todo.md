@@ -2379,3 +2379,15 @@
 - [x] Added 0x08FD7F00 to known offsets for MG1CA920, MG1C, and autoHeal boschBases
 - [x] Added test: small DEADBEEF header (0x200 bytes) alignment finds correct base
 - [x] All 31 alignment tests pass, TypeScript compiles cleanly
+
+## MG1 DEADBEEF Container Decompiler/Disassembler (2026-03-30)
+- [ ] Analyze WinOLS project to extract ground truth segment layout and map-to-file-offset mappings
+- [ ] Reverse-engineer DEADBEEF container format (segment tables, flash address mapping, data regions)
+- [ ] Build proper DEADBEEF segment parser that reconstructs flat flash image from container
+- [ ] Integrate decompiler into editor binary loading pipeline (extractBinaryData)
+- [ ] Verify editor maps match WinOLS display for the Can-Am MDG1 binary
+- [ ] Write tests for DEADBEEF decompiler
+
+## Rate Limiter Bug (2026-03-30)
+- [x] Fix rate limiter causing "Rate exceeded" white screen after OAuth login
+- [x] Fix CSV parser rejecting E86B_ticket164909_railpsi_2.csv (missing RPM/MAF columns error)

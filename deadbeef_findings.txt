@@ -1,0 +1,43 @@
+DEADBEEF Container Analysis - DEFINITIVE FINDINGS
+===================================================
+
+Binary: 1E1102029SE7VLM3_StockRead_exported.bin (6,193,152 bytes)
+A2L: 1E1101953.a2l (20,981 CHARACTERISTICs, all in 0x9440xxxx-0x9482xxxx range)
+
+KEY DISCOVERY: THE FILE HAS TWO SEGMENTS WITH A 1.8MB GAP
+==========================================================
+
+File layout:
+  0x000000 - 0x0003FF: DEADBEEF header (1024 bytes)
+  0x000400 - 0x2AFBBF: Segment 1 data (code/calibration, ~2.7MB)
+  0x2AFBC0 - 0x467FFF: GAP filled with 0xFF (1,803,328 bytes = 1.72MB)
+  0x468000 - 0x4B7FFF: Segment 2 data (calibration, ~320KB)
+  0x4B8000 - 0x5E7FFF: Trailing 0xFF padding (1,245,184 bytes = 1.19MB)
+
+A2L address range: 0x0944028C - 0x09482382
+
+Base address analysis:
+  - Best single base (NaN-only metric): 0x08FD7000 (99.9% reasonable)
+  - But 0x08FD7000 gives WRONG values for AirPah_ratMAirEngInNom!
+  - Base 0x08FE0018 gives CORRECT AirPah value (0.92) but only 96.2% reasonable
+
+THE PROBLEM: With ANY single base:
+  - 1,218 maps (flash 0x944028C-0x9447048) fall in the 0xFF gap
+  - These maps read all-FF data = NaN for floats
+  - The "99.9% reasonable" bases just happen to read non-NaN garbage
+
+SEGMENT TABLE NEEDED:
+  The 1,218 maps in 0x944028C-0x9447048 are in the GAP region.
+  The 19,763 maps in 0x944704C-0x9482382 are in Segment 2 (post-gap).
+  
+  The DEADBEEF container must define a segment mapping that:
+  1. Maps flash 0x944028C-0x9447048 to file data BEFORE the gap
+  2. Maps flash 0x944704C-0x9482382 to file data AFTER the gap
+  
+  This means the flash address space is CONTIGUOUS (0x9440xxxx-0x9482xxxx)
+  but the file data is SPLIT across the gap.
+
+NEXT STEP: Build a segment parser that:
+  1. Reads the DEADBEEF header segment table
+  2. Reconstructs a virtual flat flash image
+  3. Uses a single base address against the reconstructed image

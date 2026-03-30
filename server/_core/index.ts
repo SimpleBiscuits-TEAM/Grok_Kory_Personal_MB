@@ -4,7 +4,8 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import rateLimit, { type Options } from "express-rate-limit";
+import { ipKeyGenerator } from "express-rate-limit";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -94,22 +95,29 @@ async function startServer() {
   });
 
   // ── Global API Rate Limiting ───────────────────────────────────────────
-  // 200 requests per minute per IP across all API endpoints.
+  // 300 requests per minute per IP across all API endpoints.
   // Individual routers may have stricter per-user limits via secureFileAccess.
+  // OAuth callback is excluded to prevent login failures.
   const apiLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    max: 200,
+    max: 300,
     standardHeaders: true, // Return rate limit info in RateLimit-* headers
     legacyHeaders: false,
     message: { error: "Too many requests. Please slow down." },
-    // Skip rate limiting in development
-    skip: () => process.env.NODE_ENV === "development",
-    // Use X-Forwarded-For behind reverse proxy
+    // Skip rate limiting in development, and always skip for OAuth callback
+    skip: (req) => {
+      if (process.env.NODE_ENV === "development") return true;
+      // Never rate-limit the OAuth callback — it's a one-shot redirect
+      if (req.path.startsWith("/oauth/callback")) return true;
+      return false;
+    },
+    // Use ipKeyGenerator helper for proper IPv6 subnet handling
     keyGenerator: (req) => {
-      return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
         req.ip ||
         req.socket.remoteAddress ||
         "unknown";
+      return ipKeyGenerator(ip);
     },
   });
   app.use("/api/", apiLimiter);
@@ -125,10 +133,11 @@ async function startServer() {
     message: { error: "AI request rate limit exceeded. Please wait a moment." },
     skip: () => process.env.NODE_ENV === "development",
     keyGenerator: (req) => {
-      return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
         req.ip ||
         req.socket.remoteAddress ||
         "unknown";
+      return ipKeyGenerator(ip);
     },
   });
   // Apply stricter limits to known LLM-heavy tRPC procedures

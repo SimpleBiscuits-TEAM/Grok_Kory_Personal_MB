@@ -1050,8 +1050,17 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
   // ── Core engine PIDs ──────────────────────────────────────────────────────
   // Each lookup includes both ECM.* (LML/L5P) and PCM.* (LB7/LLY) variants
+  // Some EFILive logs (e.g. diagnostic state dumps) may not include ECM.RPM or ECM.MAF.
+  // We fall back to related PIDs and treat missing channels as optional.
   const timeIdx          = getColumnIndex(['Time']);
-  const rpmIdx           = getColumnIndex(['ECM.RPM', 'PCM.RPM']);
+  const rpmIdx           = (() => {
+    const primary = getColumnIndex(['ECM.RPM', 'PCM.RPM']);
+    if (primary !== -1) return primary;
+    // Fallback: ECM.IDLERPM (desired idle speed) or ECM.TOS (trans output speed)
+    // These aren't true engine RPM but allow partial analysis
+    return getColumnIndex(['ECM.IDLERPM', 'ECM.TOS']);
+  })();
+  const rpmIsFallback    = getColumnIndex(['ECM.RPM', 'PCM.RPM']) === -1 && rpmIdx !== -1;
   const mafIdx           = getColumnIndex(['ECM.MAF', 'PCM.MAF']);
   // MAP / Boost: LML uses ECM.MAP; LB7 uses PCM.BOOST_M (kPa absolute)
   const mapIdx           = getColumnIndex(['ECM.MAP', 'PCM.BOOST_M', 'PCM.MAP']);
@@ -1143,14 +1152,11 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate', 'PCM.FUEL_MAIN_M']);
 
   // ── Validate required columns ────────────────────────────────────────
-  // For LML EFILive logs, torque may not be present (e.g. transmission-only logs)
-  // so we only require RPM and MAF as hard requirements.
-  if (rpmIdx === -1 || mafIdx === -1) {
-    throw new Error(
-      'Missing required EFILive columns: RPM and/or MAF (ECM.RPM/PCM.RPM, ECM.MAF/PCM.MAF). ' +
-      'Ensure your EFILive scan tool logged these PIDs.'
-    );
-  }
+  // Many EFILive logs are diagnostic state dumps that don't include ECM.RPM or ECM.MAF.
+  // We now parse whatever data is available instead of rejecting the file.
+  // At minimum we need a Time column or Frame column to sequence the data.
+  const hasRpm = rpmIdx !== -1;
+  const hasMaf = mafIdx !== -1;
 
   const rpm: number[] = [];
   const maf: number[] = [];
@@ -1211,17 +1217,17 @@ function parseEFILiveCSV(content: string): DuramaxData {
       return isNaN(n) ? NaN : n;
     };
 
-    const rpmVal = parseVal(rpmIdx);
-    if (isNaN(rpmVal)) continue; // skip rows with no RPM data
+    const rpmVal = hasRpm ? parseVal(rpmIdx) : NaN;
+    if (hasRpm && isNaN(rpmVal)) continue; // skip rows with no RPM data (only if RPM column exists)
     // Skip data glitch rows: RPM=0 with impossible sensor values (key-cycle noise)
     // These occur when the ECM is powering down and sensors report garbage values.
     // Only skip after the first few rows to allow initial idle data through.
-    if (rpmVal === 0 && i > dataStartRow + 5) continue;
+    if (hasRpm && rpmVal === 0 && i > dataStartRow + 5) continue;
 
-    rpm.push(rpmVal);
+    rpm.push(hasRpm ? rpmVal : 0);
     // ECM.MAF / PCM.MAF is in g/s — convert to lb/min (imperial) for consistency with HP Tuners
     // 1 g/s = 0.132277 lb/min
-    const mafGps = parseVal(mafIdx);
+    const mafGps = hasMaf ? parseVal(mafIdx) : NaN;
     maf.push(isNaN(mafGps) ? 0 : mafGps * 0.132277);
 
     // MAP for LML is in kPa absolute; convert to PSIG gauge for consistency with HP Tuners
@@ -1363,8 +1369,15 @@ function parseEFILiveCSV(content: string): DuramaxData {
   }
 
   if (rpm.length === 0) {
+    // If we have no rows at all, the file may be truly empty or all rows were filtered
     throw new Error('No valid data rows found in EFILive CSV. Check that the file is a valid EFILive datalog export.');
   }
+
+  // Track missing PIDs for UI display
+  const pidsMissing: string[] = [];
+  if (!hasRpm && !rpmIsFallback) pidsMissing.push('RPM (ECM.RPM)');
+  if (rpmIsFallback) pidsMissing.push('RPM (using fallback: ' + pidHeaders[rpmIdx] + ')');
+  if (!hasMaf) pidsMissing.push('MAF (ECM.MAF)');
 
   const duration = offset[offset.length - 1] - offset[0];
 
@@ -1405,7 +1418,7 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // A log where MAP is not in the scan list will have mapIdx === -1 OR all-zero boost.
     boostActualAvailable: mapIdx !== -1 && boost.some(v => v > 0),
     pidSubstitutions: [],
-    pidsMissing: [],
+    pidsMissing,
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
