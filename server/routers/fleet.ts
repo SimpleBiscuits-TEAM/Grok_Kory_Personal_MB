@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, type Message, type Role } from "../_core/llm";
 import { getDb } from "../db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import {
@@ -57,9 +57,9 @@ export const fleetRouter = router({
     }))
     .mutation(async ({ input }) => {
       const systemPrompt = buildGoosePrompt();
-      const messages = [
-        { role: "system" as const, content: systemPrompt },
-        ...input.messages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+      const messages: Message[] = [
+        { role: "system", content: systemPrompt },
+        ...input.messages.map(m => ({ role: m.role as Role, content: m.content })),
       ];
       const response = await invokeLLM({ messages });
       return {

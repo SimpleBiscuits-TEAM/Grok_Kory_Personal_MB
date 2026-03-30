@@ -1544,8 +1544,10 @@ export function parseDEADBEEFFlashAddresses(data: Uint8Array): number[] {
     }
   }
 
-  // Scan secondary header region (0x200-0x240)
-  for (let offset = 0x200; offset < Math.min(0x240, data.length - 3); offset += 4) {
+  // Scan secondary header region (0x200-0x400)
+  // Some DEADBEEF containers have extended header data with flash addresses
+  // beyond 0x240 (e.g., Can-Am MDG1 has addresses at 0x248, 0x284, etc.)
+  for (let offset = 0x200; offset < Math.min(0x400, data.length - 3); offset += 4) {
     const val = dv.getUint32(offset, false);
     if (val >= 0x08000000 && val <= 0x09FFFFFF) {
       flashAddresses.add(val);
@@ -1558,8 +1560,11 @@ export function parseDEADBEEFFlashAddresses(data: Uint8Array): number[] {
 /**
  * For DEADBEEF MG1 containers, compute candidate base addresses from header flash addresses.
  * The minimum flash address in the header corresponds to a file offset that is
- * typically the header size + padding (around 0x1000-0x3000 bytes).
- * We generate candidates by subtracting various plausible header sizes.
+ * the header size + padding. Header sizes vary widely across ECU versions:
+ *   - ~0x200 for Can-Am MDG1/MG1CA920 (Maverick R, etc.)
+ *   - ~0x21B0 for Duramax L5P MG1CA920
+ *   - ~0x1000-0x4000 for other MG1 variants
+ * We generate candidates by subtracting plausible header sizes from 0x80 to 0x6000.
  */
 export function generateDEADBEEFCandidateBases(flashAddresses: number[]): number[] {
   if (flashAddresses.length === 0) return [];
@@ -1568,10 +1573,13 @@ export function generateDEADBEEFCandidateBases(flashAddresses: number[]): number
   const candidates: number[] = [];
 
   // The header+padding size varies per ECU version.
-  // Known values: ~0x21B0 for MG1CA920 Duramax L5P
-  // Generate candidates for header sizes from 0x1000 to 0x4000 in 0x10 steps
-  // This covers the range where the minimum flash address could map to.
-  for (let headerSize = 0x1000; headerSize <= 0x4000; headerSize += 0x10) {
+  // Known values:
+  //   ~0x200 for Can-Am MDG1/MG1CA920 (small DEADBEEF header)
+  //   ~0x21B0 for Duramax L5P MG1CA920
+  //   ~0x1000-0x4000 for other MG1 variants
+  // Generate candidates for header sizes from 0x80 to 0x6000 in 0x10 steps
+  // This covers all known DEADBEEF header sizes including very small ones.
+  for (let headerSize = 0x80; headerSize <= 0x6000; headerSize += 0x10) {
     candidates.push(minAddr - headerSize);
   }
 
@@ -1952,11 +1960,14 @@ export function alignOffsets(
   const knownOffsets: number[] = [];
 
   if (family === 'MG1CA920') {
-    // Bosch MG1CA920 (Duramax L5P, LM2, etc.)
-    // A2L addresses in 0x09xxxxxxx range, binary base confirmed at 0x08FD8000
-    // Also try nearby 64KB-aligned variants in case of minor version differences
+    // Bosch MG1CA920 (Duramax L5P, LM2, Can-Am Maverick R, etc.)
+    // A2L addresses in 0x09xxxxxxx range
+    // Confirmed bases:
+    //   0x08FD8000 for 1E1101953 / MG1CA920 Duramax L5P BIN files
+    //   0x08FD7F00 for 1E1102029 / MG1CA920 Can-Am MDG1 (small DEADBEEF header)
     knownOffsets.push(
-      0x08FD8000,  // confirmed base for 1E1101953 / MG1CA920 BIN files
+      0x08FD8000,  // confirmed base for 1E1101953 / MG1CA920 Duramax L5P
+      0x08FD7F00,  // confirmed base for 1E1102029 / MG1CA920 Can-Am MDG1
       0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
       0x08F00000, 0x09000000, 0x09400000, 0x09440000,
       0x08000000, 0x08800000, 0x08C00000,
@@ -1980,10 +1991,11 @@ export function alignOffsets(
     );
   } else if (family === 'MG1C' || family.includes('BOSCH')) {
     // Bosch MG1C: A2L addresses typically 0x94xxxxx or 0x60Cxxxxx, binary starts at 0x00
-    // MG1CA920: 0x08FD8000 base address (Can-Am)
+    // MG1CA920: 0x08FD8000 / 0x08FD7F00 base addresses
     // Polaris MG1C400A1T2: 0x08FC0000 base address
     knownOffsets.push(
-      0x08FD8000,  // MG1CA920 confirmed base (Can-Am)
+      0x08FD8000,  // MG1CA920 confirmed base (Duramax L5P)
+      0x08FD7F00,  // MG1CA920 confirmed base (Can-Am MDG1)
       0x08FC0000,  // Polaris MG1C400A1T2 confirmed base
       0x94400000, 0x94000000, 0x80000000, 0x80010000, 0x80020000,
       0x80040000, 0x80100000, 0x60C00000, 0x0060C000, 0xA0000000, 0x00000000
@@ -2922,9 +2934,9 @@ export function autoHealAlignment(
   strategiesAttempted.push('bosch_tricore_scan');
   log.push('[Knox] Strategy 3: Scanning Bosch/Tricore/Infineon base addresses...');
   const boschBases = [
-    // MG1CA920 (Duramax L5P, LM2) — confirmed base addresses
+    // MG1CA920 (Duramax L5P, LM2, Can-Am MDG1) — confirmed base addresses
     // Polaris MG1C400A1T2 — confirmed base address
-    0x08FD8000, 0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
+    0x08FD8000, 0x08FD7F00, 0x08FE0000, 0x08FC0000, 0x08FA0000, 0x08F80000,
     0x08F00000, 0x09000000, 0x08000000, 0x08800000, 0x08C00000,
     // Bosch MED17 / Tricore TC1xxx
     0x80000000, 0x80010000, 0x80020000, 0x80040000, 0x80060000, 0x80080000,

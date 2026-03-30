@@ -2369,3 +2369,13 @@
 - [x] Verified: correct base wins at all sample sizes (50, 80, 100, 500 maps)
 - [x] Also fixed Strategy 2 to track best across ALL candidates instead of returning first >0.5
 - [x] All 954 tests pass, TypeScript compiles cleanly
+
+## MG1 DEADBEEF Small Header Alignment Fix (2026-03-30)
+- [x] Root cause: generateDEADBEEFCandidateBases() searched header sizes 0x1000-0x4000, but Can-Am MDG1 binary has ~0x200 header
+- [x] Correct base 0x08FD7F00 (header size 0x200) was never generated as a candidate
+- [x] DEADBEEF strategy (1.75) picked wrong base with confidence > 0.3, preventing brute force from running
+- [x] Fix: extended header size range from 0x80-0x6000 (was 0x1000-0x4000)
+- [x] Fix: extended DEADBEEF flash address scan from 0x200-0x400 (was 0x200-0x240)
+- [x] Added 0x08FD7F00 to known offsets for MG1CA920, MG1C, and autoHeal boschBases
+- [x] Added test: small DEADBEEF header (0x200 bytes) alignment finds correct base
+- [x] All 31 alignment tests pass, TypeScript compiles cleanly

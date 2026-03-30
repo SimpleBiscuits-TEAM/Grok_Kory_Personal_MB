@@ -41,6 +41,68 @@ const STORAGE_KEY_LAST_CHECK = 'whatsNew_lastCheck';
  * Default notifications about new features
  */
 export const DEFAULT_NOTIFICATIONS: WhatsNewNotification[] = [
+  // ── v0.03 Updates (March 2026) ──
+  {
+    id: 'v003_calibration_editor',
+    type: 'feature',
+    title: 'Calibration Editor — MG1 Alignment Fix',
+    description: 'Binary map offsets now align correctly for all MG1 ECU files',
+    details:
+      'The alignment engine now uses NaN/Inf penalty scoring across all strategies, ensuring correct base address detection for DEADBEEF container binaries. Maps display exactly as they should.',
+    icon: '🔧',
+    color: 'oklch(0.52 0.22 25)', // PPEI Red
+    priority: 'high',
+    createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+  {
+    id: 'v003_drag_racing',
+    type: 'feature',
+    title: 'Drag Racing — Regional Badges & Playoffs',
+    description: 'Fastest in Location badges and playoff bracket system',
+    details:
+      'Earn regional champion badges based on your track times. League seasons now support playoff brackets with seeded matchups from standings.',
+    icon: '🏁',
+    color: 'oklch(0.70 0.18 200)', // Blue
+    priority: 'high',
+    createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+  {
+    id: 'v003_share_integration',
+    type: 'feature',
+    title: 'Share Cards — Fleet & Community',
+    description: 'Share fleet stats and community threads with custom cards',
+    details:
+      'Generate shareable cards from Fleet dashboard stats and Community threads. Includes QR codes, branding, and one-click copy.',
+    icon: '📤',
+    color: 'oklch(0.65 0.20 145)', // Green
+    priority: 'medium',
+    createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+  {
+    id: 'v003_text_contrast',
+    type: 'improvement',
+    title: 'UI Readability Improvements',
+    description: '246 text contrast fixes across 36 files for better readability',
+    details:
+      'All dim text elements have been brightened for better contrast against dark backgrounds. Subtitles, helper text, version badges, and data labels are now clearly visible.',
+    icon: '👁️',
+    color: 'oklch(0.75 0.18 60)', // Yellow
+    priority: 'low',
+    createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+  {
+    id: 'v003_auth_upgrade',
+    type: 'improvement',
+    title: 'Authentication & Access Control',
+    description: 'Restored logout, removed legacy passcode from Advanced',
+    details:
+      'User avatar dropdown with sign-out in the header. Advanced section now requires authentication (legacy passcode removed). Sign-in button for guests.',
+    icon: '🔐',
+    color: 'oklch(0.60 0.20 300)', // Purple
+    priority: 'medium',
+    createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
+  },
+  // ── v0.02 Updates ──
   {
     id: 'j1939_support_v1',
     type: 'protocol',
@@ -49,9 +111,9 @@ export const DEFAULT_NOTIFICATIONS: WhatsNewNotification[] = [
     details:
       'Log and analyze J1939 parameters from Cummins, Duramax, and Volvo engines. Includes 6 essential PGNs with real-time monitoring.',
     icon: '🚛',
-    color: 'oklch(0.60 0.20 300)', // Purple
+    color: 'oklch(0.60 0.20 300)',
     priority: 'high',
-    createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000, // 7 days ago
+    createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
   },
   {
     id: 'kline_support_v1',
@@ -61,7 +123,7 @@ export const DEFAULT_NOTIFICATIONS: WhatsNewNotification[] = [
     details:
       'Connect to older European and Asian vehicles via K-Line (ISO 9141-2). Supports 30+ OBD-II parameters with 5-baud initialization.',
     icon: '🔧',
-    color: 'oklch(0.65 0.20 55)', // Orange
+    color: 'oklch(0.65 0.20 55)',
     priority: 'high',
     createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
   },
@@ -71,45 +133,9 @@ export const DEFAULT_NOTIFICATIONS: WhatsNewNotification[] = [
     title: 'Protocol Auto-Detection',
     description: 'Automatically detects supported protocols',
     details:
-      'When you connect, the analyzer now scans for OBD-II, J1939, and K-Line support. Displays confidence scores and recommended protocol.',
+      'When you connect, the analyzer scans for OBD-II, J1939, and K-Line support. Displays confidence scores and recommended protocol.',
     icon: '🔍',
-    color: 'oklch(0.70 0.18 200)', // Blue
-    priority: 'high',
-    createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: 'protocol_presets_v1',
-    type: 'preset',
-    title: 'Protocol-Specific Presets',
-    description: 'Optimized parameter groups for each protocol',
-    details:
-      'New preset groups: Heavy Duty Truck Monitoring, Legacy Vehicle Diagnostics, Engine Focus, Transmission Focus, and more.',
-    icon: '⚙️',
-    color: 'oklch(0.65 0.20 145)', // Green
-    priority: 'medium',
-    createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: 'csv_export_v1',
-    type: 'feature',
-    title: 'Protocol-Aware CSV Export',
-    description: 'Export datalogs with protocol-specific formatting',
-    details:
-      'Export J1939, K-Line, and OBD-II datalogs with proper metadata, VIN, timestamps, and parameter names.',
-    icon: '📊',
-    color: 'oklch(0.75 0.18 60)', // Yellow
-    priority: 'medium',
-    createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-  },
-  {
-    id: 'gauge_dashboard_v1',
-    type: 'feature',
-    title: 'Real-Time Gauge Dashboard',
-    description: 'Glassmorphic gauges for live parameter monitoring',
-    details:
-      'View protocol parameters in real-time with auto-ranging gauges, color-coded by protocol, and smart parameter sorting.',
-    icon: '📈',
-    color: 'oklch(0.60 0.20 300)', // Purple
+    color: 'oklch(0.70 0.18 200)',
     priority: 'medium',
     createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
   },

@@ -45,16 +45,18 @@ export default function Pitch() {
 
   const chatMutation = trpc.pitch.chat.useMutation({
     onSuccess: (data) => {
-      setMessages(prev => [...prev, {
-        role: "assistant" as const,
-        content: data.reply,
-      }]);
+      const reply: Message = {
+        role: "assistant",
+        content: String(data.reply ?? ""),
+      };
+      setMessages(prev => [...prev, reply]);
     },
     onError: (error) => {
-      setMessages(prev => [...prev, {
-        role: "assistant" as const,
+      const errMsg: Message = {
+        role: "assistant",
         content: `Connection issue — give me a sec. Error: ${error.message}`,
-      }]);
+      };
+      setMessages(prev => [...prev, errMsg]);
     },
   });
 

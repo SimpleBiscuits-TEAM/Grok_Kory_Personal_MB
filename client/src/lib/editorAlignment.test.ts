@@ -453,18 +453,25 @@ describe('parseDEADBEEFFlashAddresses', () => {
     expect(result).not.toContain(0xFFFFFFFF);
   });
 
-  it('also scans secondary header region (0x200-0x240)', () => {
-    const buf = new Uint8Array(0x300);
+  it('also scans secondary header region (0x200-0x400)', () => {
+    const buf = new Uint8Array(0x500);
     buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
 
     const dv = new DataView(buf.buffer);
     dv.setUint32(0x104, 0x08FD8100, false);
     dv.setUint32(0x108, 0x09000000, false);
-    // Secondary region
+    // Secondary region — early part
     dv.setUint32(0x208, 0x08FD82FC, false);
+    // Secondary region — extended part (Can-Am MDG1 has addresses at 0x248, 0x284, etc.)
+    dv.setUint32(0x248, 0x08FD8734, false);
+    dv.setUint32(0x284, 0x08FD876C, false);
+    dv.setUint32(0x3FC, 0x08FD8E00, false); // near end of extended range
 
     const result = parseDEADBEEFFlashAddresses(buf);
     expect(result).toContain(0x08FD82FC);
+    expect(result).toContain(0x08FD8734);
+    expect(result).toContain(0x08FD876C);
+    expect(result).toContain(0x08FD8E00);
   });
 });
 
@@ -488,6 +495,10 @@ describe('generateDEADBEEFCandidateBases', () => {
     // The correct base 0x08FD5F50 should be in the candidates
     // (minAddr=0x08FD8100, headerSize=0x21B0 → 0x08FD8100-0x21B0=0x08FD5F50)
     expect(candidates).toContain(0x08FD8100 - 0x21B0);
+
+    // Small header sizes must also be covered (Can-Am MDG1 has ~0x200 header)
+    // (minAddr=0x08FD8100, headerSize=0x200 → 0x08FD8100-0x200=0x08FD7F00)
+    expect(candidates).toContain(0x08FD8100 - 0x200);
   });
 
   it('includes raw flash addresses and 64KB-aligned variants', () => {
@@ -512,7 +523,7 @@ describe('generateDEADBEEFCandidateBases', () => {
 });
 
 describe('alignOffsets with DEADBEEF binary', () => {
-  it('uses deadbeef_header method when DEADBEEF magic is present', () => {
+  it('uses deadbeef_header method when DEADBEEF magic is present (standard header)', () => {
     // Create a binary with DEADBEEF header and valid data at known offsets
     const size = 0x200000; // 2MB
     const buf = new Uint8Array(size);
@@ -562,6 +573,60 @@ describe('alignOffsets with DEADBEEF binary', () => {
     expect(result.confidence).toBeGreaterThan(0);
     expect(result.method).not.toBe('none');
     // The offset should be negative of the base
+    expect(result.offset).toBe(-testBase);
+  });
+
+  it('finds correct base with small DEADBEEF header (0x200 bytes, Can-Am MDG1 scenario)', () => {
+    // Simulates the Can-Am MDG1/MG1CA920 binary where the DEADBEEF header is only ~0x200 bytes.
+    // The correct base is 0x08FD8100 - 0x200 = 0x08FD7F00.
+    // Previously this was missed because the search started at header size 0x1000.
+    const size = 0x500000; // 5MB
+    const buf = new Uint8Array(size);
+    buf.fill(0xFF);
+
+    // DEADBEEF magic
+    buf[0] = 0xDE; buf[1] = 0xAD; buf[2] = 0xBE; buf[3] = 0xEF;
+
+    // Flash addresses in header (mimics Can-Am MDG1 header)
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(0x104, 0x08FD8100, false);
+    dv.setUint32(0x108, 0x09000000, false);
+    dv.setUint32(0x10C, 0x08FF56F0, false);
+    // Extended header addresses (0x200-0x400 region)
+    dv.setUint32(0x208, 0x08FD82FC, false);
+    dv.setUint32(0x248, 0x08FD8734, false);
+
+    // Base address: 0x08FD7F00 (= 0x08FD8100 - 0x200)
+    // This is the small-header scenario that was previously broken.
+    const testBase = 0x08FD8100 - 0x200; // 0x08FD7F00
+
+    // Plant valid UWORD values at file offsets starting at 0x200
+    // (data starts right after the small header)
+    const mapOffsets = [0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x8000, 0x9000, 0xA000];
+    const maps: CalibrationMap[] = mapOffsets.map((fileOff, i) => {
+      const val = 50 + i * 20;
+      buf[fileOff] = 0;
+      buf[fileOff + 1] = val;
+      return {
+        name: `TestVal${i}`,
+        description: `Test value ${i}`,
+        type: 'VALUE' as const,
+        address: testBase + fileOff,
+        recordLayout: 'RL_VALUE',
+        compuMethod: 'CM_IDENT',
+        lowerLimit: 0,
+        upperLimit: 255,
+        annotations: [],
+        axes: [],
+      };
+    });
+
+    const def = makeEcuDef({ maps, ecuFamily: 'MG1CA920' });
+    const result = alignOffsets(def, buf, 0);
+
+    expect(result.confidence).toBeGreaterThan(0);
+    expect(result.method).not.toBe('none');
+    // The offset should be negative of the small-header base
     expect(result.offset).toBe(-testBase);
   });
 });
