@@ -2336,3 +2336,13 @@
 - [x] Verified: correct base 0x08FD5F50 found in candidates, row 0 values match WinOLS exactly: [0.0, 4.9, 14.1, 29.3, 44.1, 58.2, 72.7, 90.0]
 - [x] Added 11 new tests for DEADBEEF parsing, candidate generation, and alignment (30 total in editorAlignment.test.ts)
 - [x] All 954 tests passing, TypeScript compiles cleanly
+
+## Fleet/Drag Summary Banners + Auth/Access Fixes (2026-03-30)
+- [x] Add summary banner to Fleet tab explaining module purpose and goals
+- [x] Add summary banner to Drag Racing tab explaining module purpose and goals
+- [x] Restore logout button/functionality (user avatar dropdown with SIGN OUT in PpeiHeader)
+- [ ] Re-enforce Advanced section access control (currently public, should require special access)
+
+## Version Bump + Text Contrast Fix (2026-03-30)
+- [x] Update version to v0.03
+- [x] Improve text contrast for dim text (subtitle, version badge, helper text too dark to read)

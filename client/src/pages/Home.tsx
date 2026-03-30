@@ -275,7 +275,7 @@ export default function Home() {
               <p style={{
                 fontFamily: '"Rajdhani", sans-serif',
                 fontSize: '1.05rem',
-                color: 'oklch(0.72 0.010 260)',
+                color: 'oklch(0.82 0.008 260)',
                 letterSpacing: '0.03em'
               }}>
                 Upload your datalog to generate a full diagnostic analysis, dyno chart, and PDF report
@@ -383,10 +383,10 @@ export default function Home() {
                   }}>
                     {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
                   </h3>
-                  <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.65 0.010 260)', fontSize: '0.9rem' }}>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', color: 'oklch(0.75 0.010 260)', fontSize: '0.9rem' }}>
                     Drag &amp; drop your datalog file here, or click to browse
                   </p>
-                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.50 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
+                  <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.62 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
                     CSV &amp; WP8 (DYNOJET) SUPPORTED
                   </p>
 

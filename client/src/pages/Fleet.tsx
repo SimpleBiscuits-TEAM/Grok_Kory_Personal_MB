@@ -268,6 +268,23 @@ export default function Fleet() {
         {/* Dashboard */}
         {activeTab === 'dashboard' && (
           <div className="ppei-anim-fade-up">
+            {/* Module Summary Banner */}
+            <div style={{
+              background: 'oklch(0.12 0.008 260)',
+              border: `1px solid ${sColor.border}`,
+              borderLeft: `4px solid ${sColor.red}`,
+              borderRadius: '3px',
+              padding: '20px 24px',
+              marginBottom: '24px',
+            }}>
+              <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em', color: 'white', margin: '0 0 8px 0' }}>
+                FLEET MANAGEMENT
+              </h3>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.92rem', color: sColor.textDim, lineHeight: 1.7, margin: 0 }}>
+                Monitor and manage your entire fleet from one place. Track vehicle health, driver performance, fuel consumption, and maintenance schedules in real time. Our goal is to give fleet owners and managers the tools to reduce downtime, lower operating costs, and keep every vehicle running at peak performance — whether you're managing diesel trucks, agriculture equipment, powersports, or specialty vehicles.
+              </p>
+            </div>
+
             <div className="ppei-section-header mb-6">
               <Activity className="h-6 w-6" style={{ color: sColor.red }} />
               <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: 'white', margin: 0 }}>FLEET OVERVIEW</h2>

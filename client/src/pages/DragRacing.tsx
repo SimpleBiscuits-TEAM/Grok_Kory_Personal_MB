@@ -220,6 +220,23 @@ export default function DragRacing() {
       </div>
 
       <main className="container mx-auto px-4 py-6">
+        {/* Module Summary Banner */}
+        <div style={{
+          background: 'oklch(0.12 0.008 260)',
+          border: `1px solid ${sColor.border}`,
+          borderLeft: `4px solid ${sColor.red}`,
+          borderRadius: '3px',
+          padding: '20px 24px',
+          marginBottom: '24px',
+        }}>
+          <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em', color: 'white', margin: '0 0 8px 0' }}>
+            ABOUT V-OP DRAG RACING
+          </h3>
+          <p style={{ fontFamily: sFont.body, fontSize: '0.92rem', color: sColor.textDim, lineHeight: 1.7, margin: 0 }}>
+            V-OP Drag Racing turns your datalog into a virtual drag strip. Upload a pull and we'll calculate your 1/8 and 1/4 mile times, generate a timeslip, and rank you against other trucks in your area. Our goal is to build a competitive community where you can post callouts, create leagues, and earn regional champion badges — all backed by real data, not just talk. Whether you're chasing a personal best or calling out the fastest truck in your zip code, this is where it happens.
+          </p>
+        </div>
+
         {/* ── LEADERBOARD ── */}
         {activeTab === 'leaderboard' && (
           <div className="ppei-anim-fade-up">
