@@ -1373,7 +1373,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 16, height: 16 }} /> },
   { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 16, height: 16 }} /> },
-  { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
+  { id: 'binary', label: 'EDITOR', icon: <Cpu style={{ width: 16, height: 16 }} /> },
   { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
   { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 16, height: 16 }} /> },
   { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 16, height: 16 }} /> },
@@ -1520,7 +1520,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               {[
                 { id: 'search', label: 'SEARCH', icon: <Search style={{ width: 13, height: 13 }} /> },
                 { id: 'vehicles', label: 'VEHICLES', icon: <Car style={{ width: 13, height: 13 }} /> },
-                { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 13, height: 13 }} /> },
+                { id: 'binary', label: 'EDITOR', icon: <Cpu style={{ width: 13, height: 13 }} /> },
                 { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 13, height: 13 }} /> },
                 { id: 'pids', label: 'PIDS', icon: <Hash style={{ width: 13, height: 13 }} /> },
                 { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 13, height: 13 }} /> },

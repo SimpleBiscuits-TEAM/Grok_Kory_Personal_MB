@@ -3072,7 +3072,7 @@ export function autoHealAlignment(
       populateMapValues(map, ecuDef, binaryData, bestResult.align.offset);
     }
 
-    log.push(`[Knox] ✓ Fixed! Used ${bestResult.align.method} — health improved from ${(originalDiag.healthScore * 100).toFixed(0)}% to ${(bestResult.diag.healthScore * 100).toFixed(0)}%`);
+    log.push(`[Knox] [OK] Fixed! Used ${bestResult.align.method} — health improved from ${(originalDiag.healthScore * 100).toFixed(0)}% to ${(bestResult.diag.healthScore * 100).toFixed(0)}%`);
     log.push(`[Knox] Final offset: 0x${Math.abs(bestResult.align.offset).toString(16).toUpperCase()} (${bestResult.align.offset < 0 ? 'negative' : 'positive'}), confidence: ${(bestResult.align.confidence * 100).toFixed(0)}%`);
 
     return {
@@ -3099,7 +3099,7 @@ export function autoHealAlignment(
     }
   }
 
-  log.push(`[Knox] ✗ Could not find a better alignment. Best health: ${(bestHealth * 100).toFixed(0)}%. The A2L may not match this binary.`);
+  log.push(`[Knox] [FAIL] Could not find a better alignment. Best health: ${(bestHealth * 100).toFixed(0)}%. The A2L may not match this binary.`);
   log.push('[Knox] Suggestions: Try uploading a different A2L file, or check if the binary is the correct flash region.');
 
   return {

@@ -502,6 +502,17 @@ export function executeSegmentSwap(
   const warnings: string[] = [];
   const swappedSegments: SwapResult['swappedSegments'] = [];
 
+  // Hard stop: OS must match for segment swap to proceed
+  if (!pair.osMatch) {
+    return {
+      success: false,
+      swappedSegments: [],
+      warnings: [],
+      error: `OS mismatch — segment swap blocked. Target OS: ${pair.target.osPN}, Source OS: ${pair.source.osPN}. ` +
+        `Both binaries must share the same main operating system part number for segment swap to be safe.`,
+    };
+  }
+
   // Validate all swaps first
   for (const idx of segmentIndices) {
     const plan = validateSwap(pair, idx);

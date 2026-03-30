@@ -358,6 +358,31 @@ describe('Binary Segment Swap Engine', () => {
       expect(String.fromCharCode(...modified.slice(0x1010, 0x1018))).toBe('12688302');
     });
 
+    it('should block swap when OS part numbers do not match', () => {
+      const targetData = buildTestBinary(
+        [{ pnOffset: 0x1010, pn: '12688302', dataSize: 0x2000 }],
+        0x20, '12709843'
+      );
+      const sourceData = buildTestBinary(
+        [{ pnOffset: 0x1010, pn: '12688303', dataSize: 0x2000 }],
+        0x20, '12709844' // Different OS
+      );
+
+      const pair = setupBinaryPair(
+        targetData, 'target.bin',
+        mockAnalysis([{ index: 1, pn: '12688302', fn: 'System', binOffset: 0x1000 }]),
+        sourceData, 'source.bin',
+        mockAnalysis([{ index: 1, pn: '12688303', fn: 'System', binOffset: 0x1000 }])
+      );
+
+      expect(pair.osMatch).toBe(false);
+      const result = executeSegmentSwap(pair, [1]);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('OS mismatch');
+      expect(result.error).toContain('segment swap blocked');
+      expect(result.modifiedData).toBeUndefined();
+    });
+
     it('should copy calibration data, not just the PN', () => {
       const targetData = buildTestBinary(
         [{ pnOffset: 0x1010, pn: '12688302', dataSize: 0x100 }],

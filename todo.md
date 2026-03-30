@@ -2411,3 +2411,20 @@
 - [x] Only show PIDs that have actual data (>1% non-zero/non-NaN) in the loaded log
 - [x] Support negative values (injection timing) in axis domains and data bucketing
 - [x] Show count of available channels and active selections
+
+## Segment Swapper Part Number Fix (2026-03-30)
+- [ ] Fix segment swapper not showing part numbers besides OS for E86B binaries
+- [x] Rename "Binary" tab to "Editor" tab in the Advanced section navigation
+
+## PDF Health Report Text Bug (2026-03-30)
+- [x] Fix garbled emoji characters (\u2713/\u2717/\u26a0) in all PDF-rendering files: healthReport, advancedHealthPdf, pdfExport, compareEngine, ecuChecksums, editorEngine, knoxLearningEngine
+
+## User Feedback Fixes (2026-03-30 batch)
+- [x] Fix VGT analysis logic: open VGT = less boost = potentially HIGHER EGTs (current logic is backwards)
+- [x] Fix EGT sensor false positive - stop flagging EGT sensor as broken when it's not
+- [x] Dyno HP fallback: when torque PID unavailable, calculate HP from vehicle weight + acceleration
+- [x] Airflow outlook: add toggle switch between table and line graph view (defaults to graph)
+- [x] Performance recommendations: added to reasoning engine (IPW, rail pressure, boost efficiency, EGT, IAT, converter matching)
+- [ ] Fix E86B segment swapper part number scanning (double-AFAF headers have PN at +0x10)
+- [x] MG1 DEADBEEF multi-segment binary alignment (already comprehensive, verified working)
+- [x] Segment swapper: block swap if main OS part number doesn't match between files (hard block at UI + library level)

@@ -844,8 +844,10 @@ export default function BinaryUploadPanel() {
                   {/* Segment comparison table */}
                   {binaryPair && binaryPair.matchedSegments.length > 0 && (
                     <div style={{ marginBottom: '16px' }}>
-                      <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, letterSpacing: '0.06em', marginBottom: '8px' }}>
-                        SELECT SEGMENTS TO SWAP (click to toggle)
+                      <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: binaryPair.osMatch ? sColor.textMuted : sColor.red, letterSpacing: '0.06em', marginBottom: '8px' }}>
+                        {binaryPair.osMatch
+                          ? 'SELECT SEGMENTS TO SWAP (click to toggle)'
+                          : 'SEGMENT SWAP DISABLED — OS MISMATCH'}
                       </div>
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: sFont.mono, fontSize: '0.75rem' }}>
@@ -864,21 +866,21 @@ export default function BinaryUploadPanel() {
                               return (
                                 <tr
                                   key={tgt.index}
-                                  onClick={() => !isOsSeg && toggleSegment(tgt.index)}
+                                  onClick={() => !isOsSeg && binaryPair.osMatch && toggleSegment(tgt.index)}
                                   style={{
                                     borderBottom: `1px solid ${sColor.borderLight}`,
                                     background: isSelected ? `${sColor.red}15` : 'transparent',
-                                    cursor: isOsSeg ? 'not-allowed' : 'pointer',
-                                    opacity: isOsSeg ? 0.4 : 1,
+                                    cursor: (isOsSeg || !binaryPair.osMatch) ? 'not-allowed' : 'pointer',
+                                    opacity: (isOsSeg || !binaryPair.osMatch) ? 0.4 : 1,
                                   }}
                                 >
                                   <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                                     <input
                                       type="checkbox"
                                       checked={isSelected}
-                                      disabled={isOsSeg}
+                                      disabled={isOsSeg || !binaryPair.osMatch}
                                       onChange={() => {}}
-                                      style={{ accentColor: sColor.red, cursor: isOsSeg ? 'not-allowed' : 'pointer' }}
+                                      style={{ accentColor: sColor.red, cursor: (isOsSeg || !binaryPair.osMatch) ? 'not-allowed' : 'pointer' }}
                                     />
                                   </td>
                                   <td style={{ padding: '6px 8px', color: sColor.textDim }}>{String(tgt.index).padStart(2, '0')}</td>
@@ -907,7 +909,7 @@ export default function BinaryUploadPanel() {
                   )}
 
                   {/* Execute swap button */}
-                  {selectedSegments.size > 0 && (
+                  {selectedSegments.size > 0 && binaryPair?.osMatch && (
                     <button
                       onClick={executeSwap}
                       style={{

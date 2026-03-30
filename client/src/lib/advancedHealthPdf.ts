@@ -507,7 +507,7 @@ function getTimingAnalysis(
 
     if (lowTimingHighPwCount > 5 && worstPw > 0) {
       const expectedMin = worstRpm >= 3500 ? 29 : worstRpm >= 3000 ? 27 : worstRpm >= 2500 ? 25 : 22;
-      commentary += ` ⚠ Low timing at high pulse width: ${worstTiming.toFixed(1)}° at ${worstPw.toFixed(2)}ms PW and ${Math.round(worstRpm)} RPM. A pulse that high does better at ${expectedMin}°+ of timing at this RPM. We don't want to spray that much fuel if it's not going to be used for power — you're either making power or wasting it as heat. Low timing at high PW means the fuel charge isn't burning efficiently: energy goes out the exhaust instead of pushing the piston down. That's higher EGTs, reduced efficiency, and wasted fuel. The tune should be advancing timing to match the fuel delivery.`;
+      commentary += ` [WARNING] Low timing at high pulse width: ${worstTiming.toFixed(1)}° at ${worstPw.toFixed(2)}ms PW and ${Math.round(worstRpm)} RPM. A pulse that high does better at ${expectedMin}°+ of timing at this RPM. We don't want to spray that much fuel if it's not going to be used for power — you're either making power or wasting it as heat. Low timing at high PW means the fuel charge isn't burning efficiently: energy goes out the exhaust instead of pushing the piston down. That's higher EGTs, reduced efficiency, and wasted fuel. The tune should be advancing timing to match the fuel delivery.`;
     }
   }
 

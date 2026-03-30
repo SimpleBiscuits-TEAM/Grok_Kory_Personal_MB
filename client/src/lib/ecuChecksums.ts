@@ -361,8 +361,8 @@ export function getChecksumStatus(binary: Uint8Array): string {
   const totalCount = validation.results.length;
 
   if (validation.valid) {
-    return `✓ All ${totalCount} checksums valid (${validation.family})`;
+    return `[OK] All ${totalCount} checksums valid (${validation.family})`;
   } else {
-    return `✗ ${totalCount - validCount}/${totalCount} checksums invalid (${validation.family})`;
+    return `[FAIL] ${totalCount - validCount}/${totalCount} checksums invalid (${validation.family})`;
   }
 }

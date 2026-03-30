@@ -87,6 +87,7 @@ export interface ProcessedMetrics {
   mapAbsolute: number[];      // Raw MAP psi absolute (for reference)
   hpTorque: number[];
   hpMaf: number[];
+  hpAccel: number[];  // HP estimated from vehicle weight + acceleration (fallback when torque unavailable)
   vehicleSpeed: number[];
   timeMinutes: number[];
   railPressureActual: number[];
@@ -124,6 +125,7 @@ export interface ProcessedMetrics {
     mafMean: number;
     hpTorqueMax: number;
     hpMafMax: number;
+    hpAccelMax: number;
     boostMax: number;
     egtMax: number;
     egtAvailable: boolean;
@@ -1909,6 +1911,61 @@ function calculateHPFromMAF(maf: number[]): number[] {
 }
 
 /**
+ * Calculate horsepower from vehicle weight + acceleration (fallback method).
+ * Uses F = m * a, then P = F * v, converted to HP.
+ *
+ * This is the fallback when torque PID is not available in the datalog.
+ * Requires vehicle speed (mph) and time (seconds) to compute acceleration.
+ *
+ * Default vehicle weight: 7500 lbs (typical Duramax truck curb weight + driver).
+ * This can be overridden by vehicle metadata if available.
+ *
+ * HP = (weight_lbs * accel_g * speed_mph) / 375
+ * where accel_g = delta_speed_mph / (delta_time_sec * 21.937)
+ *       375 = conversion factor for lb * mph to HP
+ */
+function calculateHPFromAcceleration(
+  vehicleSpeed: number[],
+  timeMinutes: number[],
+  vehicleWeightLbs: number = 7500
+): number[] {
+  if (vehicleSpeed.length < 3) return vehicleSpeed.map(() => 0);
+
+  const hp: number[] = new Array(vehicleSpeed.length).fill(0);
+
+  // Use a 5-sample moving window for smoothing (reduces noise from speed sensor)
+  const WINDOW = 5;
+  for (let i = WINDOW; i < vehicleSpeed.length; i++) {
+    const dt = (timeMinutes[i] - timeMinutes[i - WINDOW]) * 60; // seconds
+    if (dt <= 0.01) continue; // avoid division by zero
+
+    const dv = vehicleSpeed[i] - vehicleSpeed[i - WINDOW]; // mph
+    const accelMph2 = dv / dt; // mph/s
+    const accelFtS2 = accelMph2 * 1.467; // convert mph/s to ft/s^2
+    const speedFtS = vehicleSpeed[i] * 1.467; // mph to ft/s
+
+    // Force = mass * acceleration (mass = weight / 32.174 ft/s^2)
+    const massSlug = vehicleWeightLbs / 32.174;
+    const force = massSlug * accelFtS2; // lbs-force
+
+    // Power = Force * velocity (ft-lbs/s), convert to HP (1 HP = 550 ft-lbs/s)
+    const powerHP = (force * speedFtS) / 550;
+
+    // Add rolling resistance estimate (~1.5% of vehicle weight at speed)
+    const rollingResistanceHP = (vehicleWeightLbs * 0.015 * speedFtS) / 550;
+
+    // Add aerodynamic drag estimate (Cd=0.45, A=35sqft for a truck)
+    const speedMs = vehicleSpeed[i] * 0.44704;
+    const aeroDragN = 0.5 * 1.225 * 0.45 * 3.252 * speedMs * speedMs; // Newtons
+    const aeroDragHP = (aeroDragN * speedMs) / 745.7;
+
+    hp[i] = Math.max(0, powerHP + rollingResistanceHP + aeroDragHP);
+  }
+
+  return hp;
+}
+
+/**
  * Compute the atmospheric (idle) baseline for boost pressure calibration.
  *
  * Priority order:
@@ -1969,8 +2026,14 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
   );
   
   const hpMaf = calculateHPFromMAF(rawData.maf);
-  
+
   const timeMinutes = rawData.offset.map(o => o / 60);
+
+  // Acceleration-based HP fallback (works when torque PID is unavailable)
+  // Uses vehicle speed + time to estimate HP from F=ma physics.
+  // Default weight: 7500 lbs for a typical Duramax truck.
+  const vehicleWeightLbs = 7500; // TODO: allow user to set this
+  const hpAccel = calculateHPFromAcceleration(rawData.vehicleSpeed, timeMinutes, vehicleWeightLbs);
 
   // ── Universal boost absolute-vs-gauge calibration pass ──────────────────
   // Runs on EVERY format. Detects whether boostDesired contains atmospheric
@@ -2053,6 +2116,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     mafMean: rawData.maf.reduce((a, b) => a + b, 0) / rawData.maf.length,
     hpTorqueMax: Math.max(...hpTorque),
     hpMafMax: Math.max(...hpMaf),
+    hpAccelMax: Math.max(...hpAccel),
     boostMax: Math.max(...boost),
     egtMax,
     egtAvailable,
@@ -2067,6 +2131,7 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     mapAbsolute: rawData.mapAbsolute,
     hpTorque,
     hpMaf,
+    hpAccel,
     vehicleSpeed: rawData.vehicleSpeed,
     timeMinutes,
     railPressureActual: rawData.railPressureActual,
@@ -2118,6 +2183,7 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     mapAbsolute: downsample(data.mapAbsolute),
     hpTorque: downsample(data.hpTorque),
     hpMaf: downsample(data.hpMaf),
+    hpAccel: downsample(data.hpAccel),
     vehicleSpeed: downsample(data.vehicleSpeed),
     timeMinutes: downsample(data.timeMinutes),
     railPressureActual: downsample(data.railPressureActual),

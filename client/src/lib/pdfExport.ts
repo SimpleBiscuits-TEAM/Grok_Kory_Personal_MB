@@ -216,7 +216,7 @@ export async function generatePerformanceReport(
       const col: [number, number, number] = isGood ? [22, 163, 74] : isWarn ? [202, 138, 4] : [220, 38, 38];
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold'); doc.setTextColor(...col);
-      doc.text(`${isGood ? '✓' : isWarn ? '⚠' : '✗'} ${sec.name} — ${sec.score}/100`, margin, y);
+      doc.text(`${isGood ? '[OK]' : isWarn ? '[!]' : '[X]'} ${sec.name} -- ${sec.score}/100`, margin, y);
       y += 4.5;
       sec.findings.slice(0, 2).forEach((f: string) => {
         doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80);

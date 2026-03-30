@@ -391,6 +391,7 @@ const PID_OVERLAYS: PidOverlayDef[] = [
   { key: 'rpm',                label: 'RPM',              unit: 'rpm',       color: '#e2e8f0', category: 'Engine' },
   { key: 'hpTorque',           label: 'HP (Torque)',      unit: 'HP',        color: '#ff4d00', category: 'Engine' },
   { key: 'hpMaf',              label: 'HP (MAF)',         unit: 'HP',        color: '#ff8c42', category: 'Engine' },
+  { key: 'hpAccel',            label: 'HP (Accel)',       unit: 'HP',        color: '#ff6b6b', category: 'Engine' },
   { key: 'maf',                label: 'MAF',              unit: 'lb/min',    color: '#34d399', category: 'Engine' },
   { key: 'throttlePosition',   label: 'Throttle Pos',    unit: '%',         color: '#c084fc', category: 'Engine', domain: [0, 100] },
   { key: 'vehicleSpeed',       label: 'Speed',            unit: 'mph',       color: '#38bdf8', category: 'Engine' },
@@ -469,18 +470,35 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
     });
   };
 
+  // Determine if torque-based HP is available. If not, fall back to acceleration-based HP.
+  const hasTorqueHP = useMemo(() => {
+    return data.hpTorque.some(v => v > 10);
+  }, [data.hpTorque]);
+
+  const hasAccelHP = useMemo(() => {
+    return data.hpAccel.some(v => v > 10);
+  }, [data.hpAccel]);
+
+  // Choose the best HP source: torque > accel > MAF
+  const hpSource = hasTorqueHP ? 'torque' : hasAccelHP ? 'accel' : 'maf';
+
   const dynoData = useMemo(() => {
     // Build base dyno points binned by RPM
     let base: Array<Record<string, number | null>> = [];
     const bucketSize = 100;
+
+    // Select HP array based on best available source
+    const hpArr = hpSource === 'torque' ? data.hpTorque
+                : hpSource === 'accel' ? data.hpAccel
+                : data.hpMaf;
 
     if (!binnedData || binnedData.length === 0) {
       const step = Math.ceil(data.rpm.length / 80);
       base = data.rpm
         .map((rpm, i) => ({
           rpm: Math.round(rpm),
-          hp: Math.round(data.hpTorque[i] || 0),
-          torque: rpm > 100 ? Math.round((data.hpTorque[i] || 0) * 5252 / rpm) : 0,
+          hp: Math.round(hpArr[i] || 0),
+          torque: rpm > 100 ? Math.round((hpArr[i] || 0) * 5252 / rpm) : 0,
         }))
         .filter((_, i) => i % step === 0)
         .filter(d => (d.rpm as number) > 600 && (d.hp as number) > 10 && (d.torque as number) > 0 && (d.torque as number) < 2500)
@@ -532,7 +550,10 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
     const rows: Array<Record<string, number | null>> = [];
     for (let i = 0; i < n; i += step) {
       const rpm = data.rpm[i] || 0;
-      const hpVal = data.hpTorque[i] || 0;
+      const hpArr2 = hpSource === 'torque' ? data.hpTorque
+                   : hpSource === 'accel' ? data.hpAccel
+                   : data.hpMaf;
+      const hpVal = hpArr2[i] || 0;
       const row: Record<string, number | null> = {
         time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
         rpm,
@@ -636,6 +657,17 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
             These numbers are calculated from the datalog and are heavily dependent on tuning configuration.
             They can be inaccurate vs. an actual chassis dyno. Use as a trend indicator, not bragging rights.
           </div>
+          {hpSource !== 'torque' && (
+            <div style={{
+              color: '#ff8c42', fontSize: 10, fontFamily: 'monospace', marginTop: 4,
+              padding: '4px 8px', background: 'rgba(255,140,66,0.08)', borderRadius: 4,
+              borderLeft: '2px solid #ff8c42', lineHeight: 1.4, maxWidth: 500,
+            }}>
+              {hpSource === 'accel'
+                ? 'HP Source: Vehicle Weight + Acceleration (torque PID unavailable). Assumes 7500 lb vehicle weight. Includes rolling resistance and aero drag estimates.'
+                : 'HP Source: MAF-based estimate (torque and speed PIDs unavailable). Less accurate than torque or acceleration methods.'}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
           {/* Fullscreen toggle */}
@@ -1557,6 +1589,7 @@ interface AirflowOutlookProps {
 }
 
 export const AirflowOutlookTable = forwardRef<HTMLDivElement, AirflowOutlookProps>(({ data }, ref) => {
+  const [viewMode, setViewMode] = useState<'table' | 'graph'>('graph');
   const hasBoost = data.boost.some(v => v > 0);
   const hasVane = data.turboVanePosition.some(v => v > 0);
   const hasMaf = data.maf.some(v => v > 0);
@@ -1658,12 +1691,34 @@ export const AirflowOutlookTable = forwardRef<HTMLDivElement, AirflowOutlookProp
       boxShadow: '0 4px 32px rgba(0,0,0,0.6)',
     }}>
       {/* Header */}
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ color: '#a78bfa', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
-          AIRFLOW OUTLOOK
+      <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <div style={{ color: '#a78bfa', fontWeight: 'bold', fontSize: 16, fontFamily: 'monospace', letterSpacing: 2 }}>
+            AIRFLOW OUTLOOK
+          </div>
+          <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
+            Boost, VGT Vane Position &amp; MAF {viewMode === 'table' ? 'binned by RPM' : 'over time'}
+          </div>
         </div>
-        <div style={{ color: '#555', fontSize: 11, fontFamily: 'monospace', marginTop: 2 }}>
-          Boost, VGT Vane Position &amp; MAF binned by RPM — averages per 250 RPM bucket
+        {/* Toggle switch */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: 'monospace', fontSize: 10, color: viewMode === 'graph' ? '#a78bfa' : '#555' }}>GRAPH</span>
+          <button
+            onClick={() => setViewMode(v => v === 'table' ? 'graph' : 'table')}
+            style={{
+              width: 40, height: 20, borderRadius: 10, border: '1px solid #333',
+              background: viewMode === 'table' ? '#333' : '#7c3aed',
+              position: 'relative', cursor: 'pointer', padding: 0,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16, borderRadius: '50%', background: '#fff',
+              position: 'absolute', top: 1,
+              left: viewMode === 'graph' ? 2 : 21,
+              transition: 'left 0.2s',
+            }} />
+          </button>
+          <span style={{ fontFamily: 'monospace', fontSize: 10, color: viewMode === 'table' ? '#a78bfa' : '#555' }}>TABLE</span>
         </div>
       </div>
 
@@ -1671,6 +1726,9 @@ export const AirflowOutlookTable = forwardRef<HTMLDivElement, AirflowOutlookProp
         <div style={{ color: '#444', fontFamily: 'monospace', fontSize: 12, padding: '40px 0', textAlign: 'center' }}>
           Boost, vane position, or MAF data not logged in this file.
         </div>
+      ) : viewMode === 'graph' ? (
+        <AirflowLineGraph data={data} hasBoost={hasBoost} hasVane={hasVane} hasMaf={hasMaf}
+          hasDesiredBoost={hasDesiredBoost} hasDesiredVane={hasDesiredVane} />
       ) : (
         <>
           {/* Summary cards */}
@@ -1780,6 +1838,75 @@ export const AirflowOutlookTable = forwardRef<HTMLDivElement, AirflowOutlookProp
   );
 });
 AirflowOutlookTable.displayName = 'AirflowOutlookTable';
+
+// ─── AIRFLOW LINE GRAPH (sub-component for graph view) ─────────────────────
+function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, hasDesiredVane }: {
+  data: ProcessedMetrics;
+  hasBoost: boolean;
+  hasVane: boolean;
+  hasMaf: boolean;
+  hasDesiredBoost: boolean;
+  hasDesiredVane: boolean;
+}) {
+  const graphData = useMemo(() => {
+    const n = data.rpm.length;
+    const step = Math.max(1, Math.ceil(n / 400));
+    const rows: Array<Record<string, number | null>> = [];
+    for (let i = 0; i < n; i += step) {
+      const row: Record<string, number | null> = {
+        time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
+        rpm: data.rpm[i] || 0,
+      };
+      if (hasBoost) row.boost = data.boost[i] || 0;
+      if (hasDesiredBoost) row.boostDesired = data.boostDesired[i] || 0;
+      if (hasVane) row.vanePos = data.turboVanePosition[i] || 0;
+      if (hasDesiredVane) row.vaneDesired = data.turboVaneDesired[i] || 0;
+      if (hasMaf) row.maf = data.maf[i] || 0;
+      rows.push(row);
+    }
+    return rows;
+  }, [data, hasBoost, hasVane, hasMaf, hasDesiredBoost, hasDesiredVane]);
+
+  return (
+    <div style={{ width: '100%', height: 280 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={graphData} margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
+          <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10, fill: '#666' }}
+            label={{ value: 'Time (min)', position: 'insideBottom', offset: -2, style: { fill: '#555', fontSize: 10 } }} />
+          <YAxis yAxisId="boost" stroke="#a78bfa" tick={{ fontSize: 10, fill: '#a78bfa' }}
+            label={{ value: 'PSIG', angle: -90, position: 'insideLeft', style: { fill: '#a78bfa', fontSize: 10 } }} />
+          {hasVane && (
+            <YAxis yAxisId="vane" orientation="right" stroke="#fb923c" tick={{ fontSize: 10, fill: '#fb923c' }}
+              domain={[0, 100]}
+              label={{ value: '%', angle: 90, position: 'insideRight', style: { fill: '#fb923c', fontSize: 10 } }} />
+          )}
+          {hasMaf && (
+            <YAxis yAxisId="maf" orientation="right" stroke="#38bdf8" tick={{ fontSize: 10, fill: '#38bdf8' }}
+              label={{ value: 'lb/min', angle: 90, position: 'insideRight', offset: hasVane ? 40 : 0, style: { fill: '#38bdf8', fontSize: 10 } }} />
+          )}
+          <Tooltip
+            contentStyle={{ background: '#0d0f14', border: '1px solid #333', borderRadius: 8, fontSize: 11, fontFamily: 'monospace' }}
+            labelStyle={{ color: '#888' }}
+            formatter={(value: number, name: string) => {
+              const labels: Record<string, string> = {
+                boost: 'Boost Actual', boostDesired: 'Boost Desired',
+                vanePos: 'Vane Actual', vaneDesired: 'Vane Desired',
+                maf: 'MAF',
+              };
+              return [typeof value === 'number' ? value.toFixed(1) : value, labels[name] || name];
+            }}
+          />
+          {hasBoost && <Line yAxisId="boost" type="monotone" dataKey="boost" stroke="#a78bfa" dot={false} strokeWidth={1.5} name="boost" isAnimationActive={false} />}
+          {hasDesiredBoost && <Line yAxisId="boost" type="monotone" dataKey="boostDesired" stroke="#7c3aed" dot={false} strokeWidth={1} strokeDasharray="4 2" name="boostDesired" isAnimationActive={false} />}
+          {hasVane && <Line yAxisId="vane" type="monotone" dataKey="vanePos" stroke="#fb923c" dot={false} strokeWidth={1.5} name="vanePos" isAnimationActive={false} />}
+          {hasDesiredVane && <Line yAxisId="vane" type="monotone" dataKey="vaneDesired" stroke="#d97706" dot={false} strokeWidth={1} strokeDasharray="4 2" name="vaneDesired" isAnimationActive={false} />}
+          {hasMaf && <Line yAxisId={hasVane ? 'maf' : 'boost'} type="monotone" dataKey="maf" stroke="#38bdf8" dot={false} strokeWidth={1.5} name="maf" isAnimationActive={false} />}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 // Backward-compatible alias so existing imports still work
 export const BoostEfficiencyChart = AirflowOutlookTable;

@@ -158,27 +158,27 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   // ── EGT Analysis ──────────────────────────────────────────────────────────
   // Use EGT data if available (non-zero values)
   const egtVals = validValues(data.exhaustGasTemp);
-  let egtStatus = '✓ Normal — EGT within safe range';
+  let egtStatus = '[OK] Normal -- EGT within safe range';
 
   if (egtVals.length > 0) {
     const maxEgt = Math.max(...egtVals);
     const avgEgt = egtVals.reduce((a, b) => a + b, 0) / egtVals.length;
 
-    // Rule: >1800°F = sensor fault
-    const sensorFaultCount = egtVals.filter(e => e > 1800).length;
+    // Rule: >2100°F = sensor fault (raised from 1800 -- aftermarket sensors can read higher)
+    const sensorFaultCount = egtVals.filter(e => e > 2100).length;
     // Rule: >1650°F for >5 seconds (at 25Hz = 125 samples)
     const highEgtCount = egtVals.filter(e => e > 1650).length;
 
     if (sensorFaultCount > 0) {
-      egtStatus = '✗ FAULT — EGT sensor disconnected or out of service (readings >1800°F)';
+      egtStatus = '[FAULT] EGT sensor disconnected or out of service (readings >2100F)';
       score -= 20;
-      findings.push('EGT sensor fault detected — readings above 1800°F indicate sensor is disconnected or failed');
+      findings.push('EGT sensor fault detected — readings above 2100°F indicate sensor is disconnected or failed');
     } else if (highEgtCount >= 125) {
-      egtStatus = '⚠ WARNING — EGT exceeded 1650°F for more than 5 seconds';
+      egtStatus = '[WARNING] EGT exceeded 1650F for more than 5 seconds';
       score -= 15;
       findings.push(`EGT exceeded 1650°F for ${(highEgtCount / 25).toFixed(1)}s — contact tuner for review`);
     } else if (highEgtCount > 0) {
-      egtStatus = `⚠ CAUTION — Brief EGT spike to ${maxEgt.toFixed(0)}°F (${highEgtCount} samples above 1650°F)`;
+      egtStatus = `[CAUTION] Brief EGT spike to ${maxEgt.toFixed(0)}F (${highEgtCount} samples above 1650F)`;
       score -= 5;
       findings.push(`EGT briefly exceeded 1650°F (${highEgtCount} samples) — monitor under sustained load`);
     } else {
@@ -191,7 +191,7 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
 
   // ── MAF at Idle ───────────────────────────────────────────────────────────
   // L5P idle: 2–6 lb/min is normal
-  let mafStatus = '✓ Normal — MAF idle flow within spec';
+  let mafStatus = '[OK] Normal -- MAF idle flow within spec';
   const idleIndices = data.rpm.map((r, i) => (r > 500 && r < 900 ? i : -1)).filter(i => i !== -1);
 
   if (idleIndices.length > 50) {
@@ -202,11 +202,11 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
       const lowIdleCount = idleMafVals.filter(m => m < 2).length;
 
       if (highIdleCount > 30) {
-        mafStatus = `⚠ WARNING — High MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, limit: 6 lb/min)`;
+        mafStatus = `[WARNING] High MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, limit: 6 lb/min)`;
         score -= 10;
         findings.push(`MAF flow above 6 lb/min at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min) — check MAF sensor and contact tuner`);
       } else if (lowIdleCount > 30) {
-        mafStatus = `⚠ WARNING — Low MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, minimum: 2 lb/min)`;
+        mafStatus = `[WARNING] Low MAF at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min, minimum: 2 lb/min)`;
         score -= 10;
         findings.push(`MAF flow below 2 lb/min at idle (avg: ${avgIdleMaf.toFixed(1)} lb/min) — check MAF sensor and contact tuner`);
       } else {
@@ -218,7 +218,7 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
   // ── Turbocharger / Boost ──────────────────────────────────────────────────
   const boostVals = validValues(data.boost);
   const maxMaf = safeMax(data.maf);
-  let turboStatus = '✓ Normal — Turbocharger responding correctly';
+  let turboStatus = '[OK] Normal -- Turbocharger responding correctly';
   // boostActualAvailable: false means MAP was not in the datalog — all boost values are zero/invalid
   const boostAvail = data.boostActualAvailable !== false;
 
@@ -233,7 +233,7 @@ function evaluateEngineHealth(data: ProcessedMetrics): EngineHealthSection {
     ).length;
 
     if (highMafLowBoostCount > 50) {
-      turboStatus = '⚠ WARNING — Possible boost leak (high MAF, low boost pressure)';
+      turboStatus = '[WARNING] Possible boost leak (high MAF, low boost pressure)';
       score -= 15;
       findings.push(`High MAF with low boost pressure detected (below ${boostLeakFloor.toFixed(0)} psi while MAF > 55 lb/min) — perform boost leak test and inspect intake`);
     } else {
@@ -317,10 +317,10 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
   const avgDesired = safeAvg(railDesired);
   const avgDiff = Math.abs(avgActual - avgDesired);
 
-  let pressureStatus = '✓ Normal — Rail pressure regulation within spec';
+  let pressureStatus = '[OK] Normal -- Rail pressure regulation within spec';
 
   if (lowRailCount >= 150) {
-    pressureStatus = '✗ FAIL — Low rail pressure detected';
+    pressureStatus = '[FAIL] Low rail pressure detected';
     score -= 25;
     const pcvVals = validValues(data.pcvDutyCycle);
     const avgPcv = pcvVals.length ? pcvVals.reduce((a, b) => a + b, 0) / pcvVals.length : 0;
@@ -330,7 +330,7 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
       findings.push('Low rail pressure — PCV above 500mA, a tuning adjustment may resolve this. Contact tuner.');
     }
   } else if (highRailFlagged) {
-    pressureStatus = '⚠ WARNING — High rail pressure deviation detected';
+    pressureStatus = '[WARNING] High rail pressure deviation detected';
     score -= 15;
     findings.push(`High rail pressure deviation sustained for ${(highRailMaxConsecutive / 10).toFixed(1)}s (threshold: 3500 psi, excl. decel/transients) — regulator adjustment may be needed.`);
   } else {
@@ -354,7 +354,7 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
   const dutyCycle = data.converterDutyCycle || [];
   const transTemp = validValues(data.transFluidTemp);
 
-  let slipStatus = '✓ Normal — Torque converter slip within spec';
+  let slipStatus = '[OK] Normal -- Torque converter slip within spec';
 
   if (validValues(slip).length > 0) {
     // Only evaluate slip during LOCKED states (duty cycle > 90%)
@@ -458,14 +458,14 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
     // Consecutive: 15+ samples sustained (lowered from 25 for better sensitivity)
     // Cumulative: 40+ total samples of elevated slip after settle (catches intermittent issues)
     if (maxCriticalConsecutive >= 15 || totalCriticalSamples >= 40) {
-      slipStatus = '✗ FAIL — Excessive converter slip after lockup (clutch degradation suspected)';
+      slipStatus = '[FAIL] Excessive converter slip after lockup (clutch degradation suspected)';
       score -= 30;
       const detail = maxCriticalConsecutive >= 15
         ? `${maxCriticalConsecutive} consecutive samples >60 RPM`
         : `${totalCriticalSamples} total samples >60 RPM (intermittent)`;
       findings.push(`Converter slip after TCC settled: ${detail}. Internal wear suspected.`);
     } else if (maxWarnConsecutive >= 15 || totalWarnSamples >= 40) {
-      slipStatus = `⚠ WARNING — Elevated converter slip after lockup (max: ${maxLockedSlip.toFixed(0)} RPM)`;
+      slipStatus = `[WARNING] Elevated converter slip after lockup (max: ${maxLockedSlip.toFixed(0)} RPM)`;
       score -= 10;
       const detail = maxWarnConsecutive >= 15
         ? `${maxWarnConsecutive} consecutive samples >40 RPM`
@@ -483,12 +483,12 @@ function evaluateTransmission(data: ProcessedMetrics): TransmissionSection {
       const maxLagMs = (maxApplyLag / 25 * 1000); // Convert samples to ms at 25Hz
       const maxLagSec = maxLagMs / 1000;
       if (applyLagEvents >= 3) {
-        slipStatus = slipStatus.includes('✗') ? slipStatus : '✗ FAIL — Excessive TCC apply lag (slow lockup)';
+        slipStatus = slipStatus.includes('[FAIL]') ? slipStatus : '[FAIL] Excessive TCC apply lag (slow lockup)';
         score -= 20;
         findings.push(`TCC apply lag: ${applyLagEvents} events where lockup took >${(LAG_THRESHOLD_SAMPLES / 25).toFixed(1)}s. Max lag: ${maxLagSec.toFixed(1)}s. Possible worn clutch plates or low apply pressure.`);
       } else if (applyLagEvents >= 1 || maxLagSec > 5.0) {
-        if (!slipStatus.includes('✗') && !slipStatus.includes('⚠')) {
-          slipStatus = `⚠ WARNING — TCC apply lag detected (max: ${maxLagSec.toFixed(1)}s to lockup)`;
+        if (!slipStatus.includes('[FAIL]') && !slipStatus.includes('[WARNING]')) {
+          slipStatus = `[WARNING] TCC apply lag detected (max: ${maxLagSec.toFixed(1)}s to lockup)`;
         }
         score -= 8;
         findings.push(`TCC apply lag: max ${maxLagSec.toFixed(1)}s to achieve lockup (${applyLagEvents} slow events). Normal is <2s. Monitor for worsening.`);
@@ -532,7 +532,7 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
   // ── Oil Pressure ──────────────────────────────────────────────────────────
   // L5P spec: 25–80 PSI operating. Low idle warning <20 PSI. Critical <15 PSI.
   const oilPressVals = validValues(data.oilPressure);
-  let oilStatus = '✓ Normal — Oil pressure within spec';
+  let oilStatus = '[OK] Normal -- Oil pressure within spec';
 
   if (oilPressVals.length > 0) {
     const minOilPress = Math.min(...oilPressVals);
@@ -542,11 +542,11 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
     const warningLowCount = oilPressVals.filter(p => p < 20).length;
 
     if (criticalLowCount > 10) {
-      oilStatus = `✗ CRITICAL — Oil pressure dangerously low (min: ${minOilPress.toFixed(0)} PSI)`;
+      oilStatus = `[CRITICAL] Oil pressure dangerously low (min: ${minOilPress.toFixed(0)} PSI)`;
       score -= 30;
       findings.push(`Critical low oil pressure detected (${minOilPress.toFixed(0)} PSI) — stop engine immediately and check oil level and pump`);
     } else if (warningLowCount > 10) {
-      oilStatus = `⚠ WARNING — Oil pressure low (min: ${minOilPress.toFixed(0)} PSI, limit: 20 PSI)`;
+      oilStatus = `[WARNING] Oil pressure low (min: ${minOilPress.toFixed(0)} PSI, limit: 20 PSI)`;
       score -= 15;
       findings.push(`Low oil pressure detected (min: ${minOilPress.toFixed(0)} PSI) — check oil level, filter, and pump condition`);
     } else {
@@ -560,7 +560,7 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
   // ── Engine Coolant Temp ───────────────────────────────────────────────────
   // L5P spec: thermostat opens at 180°F, normal 180–210°F, warning >220°F, critical >230°F
   const coolantVals = validValues(data.coolantTemp);
-  let coolantStatus = '✓ Normal — Coolant temperature within spec';
+  let coolantStatus = '[OK] Normal -- Coolant temperature within spec';
 
   if (coolantVals.length > 0) {
     const maxCoolant = Math.max(...coolantVals);
@@ -569,11 +569,11 @@ function evaluateThermalManagement(data: ProcessedMetrics): ThermalSection {
     const warningCount = coolantVals.filter(c => c > 220).length;
 
     if (criticalCount > 10) {
-      coolantStatus = `✗ CRITICAL — Engine overheating (max: ${maxCoolant.toFixed(0)}°F, limit: 230°F)`;
+      coolantStatus = `[CRITICAL] Engine overheating (max: ${maxCoolant.toFixed(0)}F, limit: 230F)`;
       score -= 25;
       findings.push(`Engine overheating — coolant reached ${maxCoolant.toFixed(0)}°F. Inspect cooling system, thermostat, and water pump.`);
     } else if (warningCount > 10) {
-      coolantStatus = `⚠ WARNING — Elevated coolant temp (max: ${maxCoolant.toFixed(0)}°F, warning: 220°F)`;
+      coolantStatus = `[WARNING] Elevated coolant temp (max: ${maxCoolant.toFixed(0)}F, warning: 220F)`;
       score -= 10;
       findings.push(`Coolant temperature elevated (max: ${maxCoolant.toFixed(0)}°F) — monitor cooling system under load`);
     } else {
@@ -622,7 +622,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   // the pump's (CP3/CP4/HP4 depending on platform) physical capacity. Only flag when actual is well below
   // the pump's demonstrated peak AND the deviation exceeds both absolute and
   // percentage thresholds.
-  let p0087Status = '✓ PASS';
+  let p0087Status = '[PASS]';
   const railActual = data.railPressureActual;
   const railDesired = data.railPressureDesired;
   const hasRailData = validValues(railActual).length > 10 && validValues(railDesired).length > 10;
@@ -641,14 +641,14 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
       return offset > 5000 && pctOffset > 0.20 && !isSaturated;
     }).length;
     if (lowRailCount >= 150) {
-      p0087Status = '✗ DETECTED — Low Rail Pressure Deviation';
+      p0087Status = '[DETECTED] Low Rail Pressure Deviation';
       detectedCodes.push('LOW_RAIL_PRESSURE');
     }
   } else {
     p0087Status = '— Rail pressure not logged';
   } // ── High Rail Pressure Deviation ──────────────────────────────────────────
   // Actual is 3.5k+ higher than desired, EXCLUDING decel/transients, sustained 120+ consecutive samples
-  let highRailStatus = '✓ PASS';
+  let highRailStatus = '[PASS]';
   if (hasRailData) {
     let hrConsec = 0, hrMaxConsec = 0;
     for (let i = 0; i < railActual.length; i++) {
@@ -668,7 +668,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
       }
     }
     if (hrMaxConsec >= 120) {
-      highRailStatus = '✗ DETECTED — High Rail Pressure Deviation';
+      highRailStatus = '[DETECTED] High Rail Pressure Deviation';
       detectedCodes.push('HIGH_RAIL_PRESSURE');
     }
   } else {
@@ -679,7 +679,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   // Turbo saturation-aware: on tuned trucks, desired boost is set above the
   // turbo's physical limit. Only flag when actual is well below the turbo's
   // demonstrated peak AND high MAF confirms airflow demand.
-  let p0299Status = '✓ PASS';
+  let p0299Status = '[PASS]';
   const boostActual = validValues(data.boost);
   const boostAvailForP0299 = data.boostActualAvailable !== false;
   if (!boostAvailForP0299) {
@@ -694,7 +694,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
       m > 55 && data.boost[i] > 0 && data.boost[i] < boostLeakFloor
     ).length;
     if (highMafLowBoost >= 100) {
-      p0299Status = '✗ DETECTED — Low Boost (possible boost leak)';
+      p0299Status = '[DETECTED] Low Boost (possible boost leak)';
       detectedCodes.push('LOW_BOOST');
     }
   } else {
@@ -702,17 +702,17 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   }
 
   // ── EGT Warning ─────────────────────────────────────────────────────────────────
-  // >1475°F for >5 seconds, or stuck >1800°F
-  let egtStatus = '✓ PASS';
+  // >1475°F for >5 seconds, or stuck >2100°F
+  let egtStatus = '[PASS]';
   const egtVals = validValues(data.exhaustGasTemp);
   if (egtVals.length > 0) {
-    const sensorFaultCount = egtVals.filter(e => e > 1800).length;
+    const sensorFaultCount = egtVals.filter(e => e > 2100).length;
     const highEgtCount = egtVals.filter(e => e > 1475).length;
     if (sensorFaultCount > 0) {
-      egtStatus = '✗ DETECTED — EGT Sensor Fault (>1800°F, likely disconnected)';
+      egtStatus = '[DETECTED] EGT Sensor Fault (>2100F, likely disconnected)';
       detectedCodes.push('EGT_SENSOR_FAULT');
     } else if (highEgtCount >= 125) {
-      egtStatus = '⚠ WARNING — EGT exceeded 1475°F for >5 seconds';
+      egtStatus = '[WARNING] EGT exceeded 1475F for >5 seconds';
       detectedCodes.push('EGT_HIGH');
     }
   } else {
@@ -720,7 +720,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   }
 
   // ── MAF Out of Range at Idle ───────────────────────────────────────────
-  let p0101Status = '✓ PASS';
+  let p0101Status = '[PASS]';
   const idleIndices = data.rpm.map((r, i) => (r > 500 && r < 900 ? i : -1)).filter(i => i !== -1);
   if (idleIndices.length > 50) {
     const idleMafVals = idleIndices.map(i => data.maf[i]).filter(m => m > 0);
@@ -728,10 +728,10 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
       const highIdleCount = idleMafVals.filter(m => m > 6).length;
       const lowIdleCount = idleMafVals.filter(m => m < 2).length;
       if (highIdleCount > 30) {
-        p0101Status = '✗ DETECTED — MAF High at Idle (>6 lb/min)';
+        p0101Status = '[DETECTED] MAF High at Idle (>6 lb/min)';
         detectedCodes.push('HIGH_IDLE_MAF');
       } else if (lowIdleCount > 30) {
-        p0101Status = '✗ DETECTED — MAF Low at Idle (<2 lb/min)';
+        p0101Status = '[DETECTED] MAF Low at Idle (<2 lb/min)';
         detectedCodes.push('LOW_IDLE_MAF');
       }
     }
@@ -744,7 +744,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   // samples) and then rises back above threshold. During the initial apply sequence
   // (ControlledOn with high slip converging to zero), high slip is NORMAL.
   // Also detect TCC apply lag — excessive time from TCC commanded to lockup achieved.
-  let converterSlipStatus = '✓ PASS';
+  let converterSlipStatus = '[PASS]';
   const slipVals = data.converterSlip.map(s => Math.abs(s));
   const dcVals = data.converterDutyCycle || [];
   if (validValues(slipVals).length > 0) {
@@ -810,21 +810,21 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     }
     // Consecutive (15+) OR cumulative (40+) thresholds
     if (maxCritConsec >= 15 || totalCritSamples >= 40) {
-      converterSlipStatus = '✗ DETECTED — Excessive Converter Slip After Lockup';
+      converterSlipStatus = '[DETECTED] Excessive Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_CRITICAL');
     } else if (maxWarnConsec >= 15 || totalWarnSamples >= 40) {
-      converterSlipStatus = '⚠ WARNING — Elevated Converter Slip After Lockup';
+      converterSlipStatus = '[WARNING] Elevated Converter Slip After Lockup';
       detectedCodes.push('TCC_SLIP_WARNING');
     }
     // TCC apply lag detection
     if (applyLagEvents >= 3) {
       if (!converterSlipStatus.includes('DETECTED')) {
-        converterSlipStatus = '✗ DETECTED — Excessive TCC Apply Lag (Slow Lockup)';
+        converterSlipStatus = '[DETECTED] Excessive TCC Apply Lag (Slow Lockup)';
       }
       detectedCodes.push('TCC_APPLY_LAG');
     } else if (applyLagEvents >= 1 || (maxApplyLag / 25) > 5.0) {
       if (!converterSlipStatus.includes('DETECTED') && !converterSlipStatus.includes('WARNING')) {
-        converterSlipStatus = '⚠ WARNING — TCC Apply Lag Detected';
+        converterSlipStatus = '[WARNING] TCC Apply Lag Detected';
       }
       detectedCodes.push('TCC_APPLY_LAG_WARN');
     }
@@ -860,16 +860,16 @@ function generateRecommendations(
 
   // ── TCC / Converter Slip specific recommendations ──
   if (diagnostics.detectedCodes.includes('TCC_SLIP_CRITICAL')) {
-    recommendations.push('⚠ CRITICAL: Torque converter clutch is slipping excessively after lockup — this indicates internal wear or clutch degradation. Have the torque converter inspected immediately by a transmission specialist. Continued driving may cause further damage.');
+    recommendations.push('[CRITICAL] Torque converter clutch is slipping excessively after lockup — this indicates internal wear or clutch degradation. Have the torque converter inspected immediately by a transmission specialist. Continued driving may cause further damage.');
   } else if (diagnostics.detectedCodes.includes('TCC_SLIP_WARNING')) {
-    recommendations.push('⚠ WARNING: Elevated torque converter slip detected after lockup. This may indicate early TCC wear or low transmission fluid. Check trans fluid level and condition, and monitor for worsening slip.');
+    recommendations.push('[WARNING] Elevated torque converter slip detected after lockup. This may indicate early TCC wear or low transmission fluid. Check trans fluid level and condition, and monitor for worsening slip.');
   }
 
   // ── TCC Apply Lag specific recommendations ──
   if (diagnostics.detectedCodes.includes('TCC_APPLY_LAG')) {
-    recommendations.push('⚠ CRITICAL: Excessive TCC apply lag detected — the torque converter is taking too long to achieve lockup after being commanded. This indicates worn clutch plates, low apply pressure, or degraded transmission fluid. Have the transmission inspected by a specialist.');
+    recommendations.push('[CRITICAL] Excessive TCC apply lag detected — the torque converter is taking too long to achieve lockup after being commanded. This indicates worn clutch plates, low apply pressure, or degraded transmission fluid. Have the transmission inspected by a specialist.');
   } else if (diagnostics.detectedCodes.includes('TCC_APPLY_LAG_WARN')) {
-    recommendations.push('⚠ WARNING: TCC apply lag detected — the torque converter is slower than normal to achieve lockup. Check transmission fluid level and condition. Monitor for worsening lag on future datalogs.');
+    recommendations.push('[WARNING] TCC apply lag detected — the torque converter is slower than normal to achieve lockup. Check transmission fluid level and condition. Monitor for worsening lag on future datalogs.');
   }
 
   // ── Fuel pressure specific recommendations ──

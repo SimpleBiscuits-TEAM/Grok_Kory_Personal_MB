@@ -526,10 +526,10 @@ export function compareDatasets(
   const bRegen = detectRegenMode(bData);
 
   if (aRegen.regenDetected) {
-    warnings.push(`⚠ Log A ("${aLabel}") contains ${aRegen.regenSampleCount} regen-mode samples (${aRegen.regenPercent.toFixed(1)}%). These are excluded from comparison. Power output is reduced 80+ HP during regen.`);
+    warnings.push(`[WARNING] Log A ("${aLabel}") contains ${aRegen.regenSampleCount} regen-mode samples (${aRegen.regenPercent.toFixed(1)}%). These are excluded from comparison. Power output is reduced 80+ HP during regen.`);
   }
   if (bRegen.regenDetected) {
-    warnings.push(`⚠ Log B ("${bLabel}") contains ${bRegen.regenSampleCount} regen-mode samples (${bRegen.regenPercent.toFixed(1)}%). These are excluded from comparison. Power output is reduced 80+ HP during regen.`);
+    warnings.push(`[WARNING] Log B ("${bLabel}") contains ${bRegen.regenSampleCount} regen-mode samples (${bRegen.regenPercent.toFixed(1)}%). These are excluded from comparison. Power output is reduced 80+ HP during regen.`);
   }
 
   // 2. Get normal-mode indices

@@ -101,6 +101,9 @@ export function runReasoningEngine(
   // ── Step 5c: Boost leak detection ────────────────────────────────────────
   findings.push(...analyzeBoostLeak(data, ctx));
 
+  // ── Step 5d: Performance recommendations ─────────────────────────────────
+  findings.push(...generatePerformanceRecommendations(data, ctx));
+
   // ── Step 6: Beta improvement suggestions ─────────────────────────────────
   betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics));
 
@@ -629,6 +632,54 @@ function analyzeBoostSystem(
     }
   }
 
+  // VGT-EGT correlation analysis
+  // VGT position semantics: Higher % = more CLOSED = more boost.
+  // Lower % = more OPEN = less boost = potentially HIGHER EGTs.
+  // When VGT opens up (low %), exhaust energy bypasses the turbine wheel,
+  // meaning less energy is extracted from exhaust gas. This can lead to:
+  //   1. Higher EGTs downstream because the exhaust retains more heat
+  //   2. Less boost because less exhaust energy drives the compressor
+  // This is OPPOSITE to what you might intuitively think -- opening VGT
+  // does NOT cool the exhaust, it actually means hotter exhaust exits.
+  const egtVals = data.exhaustGasTemp.filter(v => v > 0);
+  if (vane.length > 20 && egtVals.length > 20) {
+    // Find periods where VGT is relatively open (< 40%) under load
+    const minLen = Math.min(data.turboVanePosition.length, data.exhaustGasTemp.length, data.rpm.length);
+    let openVgtHighEgt = 0;
+    let closedVgtNormalEgt = 0;
+    for (let i = 0; i < minLen; i++) {
+      const vanePos = data.turboVanePosition[i];
+      const egt = data.exhaustGasTemp[i];
+      const rpmVal = data.rpm[i];
+      if (rpmVal < 1500 || egt <= 0 || vanePos <= 0) continue;
+      if (vanePos < 40 && egt > 1200) openVgtHighEgt++;
+      if (vanePos > 60 && egt < 1200) closedVgtNormalEgt++;
+    }
+
+    if (openVgtHighEgt > 30) {
+      findings.push({
+        id: 'vgt-egt-correlation',
+        category: 'thermal',
+        confidence: 'medium',
+        type: 'info',
+        title: 'VGT Position Correlates with Elevated EGTs',
+        reasoning:
+          `When the VGT vanes are more open (< 40% closed), less exhaust energy is ` +
+          `extracted by the turbine, which means the exhaust gas retains more heat. ` +
+          `This log shows ${openVgtHighEgt} samples where VGT was open and EGT exceeded 1200F. ` +
+          `This is expected behavior -- an open VGT produces less boost but allows hotter ` +
+          `exhaust to pass through. If EGTs are a concern, a more closed VGT position ` +
+          `(higher boost target) can actually help cool exhaust by extracting more energy.`,
+        evidence: [
+          `Open VGT + high EGT samples: ${openVgtHighEgt}`,
+          `Closed VGT + normal EGT samples: ${closedVgtNormalEgt}`,
+          `Max boost: ${maxBoost.toFixed(1)} psi`,
+        ],
+        suggestion: 'This is normal VGT behavior. If sustained high EGTs are a concern, discuss boost targets with your tuner.',
+      });
+    }
+  }
+
   return findings;
 }
 
@@ -1025,6 +1076,208 @@ function getToolDisplayName(fileFormat: string): string {
     case 'hptuners': return 'datalog tool';
     default: return 'datalog tool';
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Performance Recommendations
+// Analyzes the datalog to provide actionable performance improvement suggestions
+// based on observed engine behavior, tuning parameters, and operating conditions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function generatePerformanceRecommendations(
+  data: ProcessedMetrics,
+  ctx: OperatingContext
+): ReasoningFinding[] {
+  const findings: ReasoningFinding[] = [];
+
+  // ── Injector pulse width analysis ──
+  const ipwNonZero = data.injectorPulseWidth.filter(v => v > 0);
+  const maxIpw = ipwNonZero.length > 0 ? Math.max(...ipwNonZero) : 0;
+  const avgIpw = ipwNonZero.length > 0 ? ipwNonZero.reduce((a, b) => a + b, 0) / ipwNonZero.length : 0;
+
+  // Solenoid injectors: > 2500 uS is race-level
+  // Piezo injectors: > 1.5 ms is race-level
+  const isPiezo = ctx.platform === 'LML' || ctx.platform === 'L5P';
+  const raceThreshold = isPiezo ? 1.5 : 2.5;
+  const highThreshold = isPiezo ? 1.2 : 2.0;
+
+  if (maxIpw > raceThreshold) {
+    findings.push({
+      id: 'perf-high-ipw',
+      category: 'fuel_system',
+      confidence: 'high',
+      type: 'info',
+      title: 'Race-Level Injector Pulse Width Detected',
+      reasoning:
+        `Peak injector pulse width of ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'} indicates ` +
+        `race-level fueling. At this level, EGTs will be elevated and injector life may be reduced. ` +
+        `For sustained high-performance use, consider upgrading to larger injectors that can deliver ` +
+        `the same fuel volume at a shorter pulse width, reducing thermal stress on the injector tips.`,
+      evidence: [
+        `Peak injector pulse width: ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
+        `Average pulse width: ${avgIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
+        `Platform: ${ctx.platform} (${isPiezo ? 'piezo' : 'solenoid'} injectors)`,
+      ],
+      suggestion: isPiezo
+        ? 'For builds over 600 HP, consider aftermarket piezo injectors with higher flow rates to reduce pulse width and EGTs.'
+        : 'For builds over 500 HP, consider larger solenoid injectors (e.g., SAC nozzles) to reduce pulse width below 2000 µs.',
+    });
+  } else if (maxIpw > highThreshold) {
+    findings.push({
+      id: 'perf-moderate-ipw',
+      category: 'fuel_system',
+      confidence: 'medium',
+      type: 'info',
+      title: 'High Injector Pulse Width — Monitor EGTs',
+      reasoning:
+        `Peak injector pulse width of ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'} is in the ` +
+        `high-performance range. This is typical for moderate tunes but approaching the limit where ` +
+        `injector efficiency drops and EGTs rise. Monitor exhaust gas temperatures closely.`,
+      evidence: [
+        `Peak injector pulse width: ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
+        `Average pulse width: ${avgIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
+      ],
+      suggestion: 'Keep EGTs below 1300°F sustained. If EGTs are consistently high, discuss injector sizing with your tuner.',
+    });
+  }
+
+  // ── Rail pressure headroom analysis ──
+  const rpActual = data.railPressureActual.filter(v => v > 0);
+  const rpDesired = data.railPressureDesired.filter(v => v > 0);
+  const maxRpActual = rpActual.length > 0 ? Math.max(...rpActual) : 0;
+  const maxRpDesired = rpDesired.length > 0 ? Math.max(...rpDesired) : 0;
+
+  // Detect if rail pressure is at the CP3 pump's physical limit
+  // Stock CP3 typically maxes out around 26,000-27,000 psi
+  const cp3Limit = 26500;
+  if (maxRpActual > cp3Limit && maxRpDesired > maxRpActual + 500) {
+    findings.push({
+      id: 'perf-cp3-limit',
+      category: 'fuel_system',
+      confidence: 'medium',
+      type: 'improvement',
+      title: 'CP3 Pump Approaching Maximum Output',
+      reasoning:
+        `Peak rail pressure of ${maxRpActual.toFixed(0)} psi with desired at ${maxRpDesired.toFixed(0)} psi ` +
+        `suggests the CP3 injection pump is near its physical output limit. The pump cannot deliver ` +
+        `the fuel volume the tune is requesting at this pressure. This limits peak power and can ` +
+        `cause rail pressure droop under sustained load.`,
+      evidence: [
+        `Peak actual rail pressure: ${maxRpActual.toFixed(0)} psi`,
+        `Peak desired rail pressure: ${maxRpDesired.toFixed(0)} psi`,
+        `Deficit: ${(maxRpDesired - maxRpActual).toFixed(0)} psi`,
+      ],
+      suggestion: 'Consider a CP3 upgrade (stroker pump or twin CP3 kit) to support higher fuel demands. A lift pump upgrade may also help if not already installed.',
+    });
+  }
+
+  // ── Boost-to-power efficiency ──
+  const maxBoost = data.stats.boostMax;
+  const maxHp = Math.max(data.stats.hpTorqueMax, data.stats.hpMafMax, data.stats.hpAccelMax);
+  if (maxBoost > 0 && maxHp > 100) {
+    const hpPerPsi = maxHp / maxBoost;
+    // Typical efficiency: 10-15 HP/psi for stock turbo, 15-25 for aftermarket
+    if (hpPerPsi < 8 && maxBoost > 25) {
+      findings.push({
+        id: 'perf-low-boost-efficiency',
+        category: 'boost',
+        confidence: 'medium',
+        type: 'improvement',
+        title: 'Low Boost-to-Power Efficiency',
+        reasoning:
+          `At ${maxBoost.toFixed(1)} psi peak boost, the estimated ${maxHp.toFixed(0)} HP yields ` +
+          `only ${hpPerPsi.toFixed(1)} HP per psi of boost. This is below typical efficiency for ` +
+          `a performance-tuned Duramax. Possible causes include turbo inefficiency at this flow rate, ` +
+          `excessive backpressure, or intercooler heat soak reducing charge density.`,
+        evidence: [
+          `Peak boost: ${maxBoost.toFixed(1)} psi`,
+          `Estimated peak HP: ${maxHp.toFixed(0)}`,
+          `Efficiency: ${hpPerPsi.toFixed(1)} HP/psi`,
+        ],
+        suggestion: 'Check intercooler efficiency (intake air temps). If turbo is stock and boost is high, an aftermarket turbo may deliver more power at the same boost level.',
+      });
+    }
+  }
+
+  // ── EGT management recommendations ──
+  const egtNonZero = data.exhaustGasTemp.filter(v => v > 0);
+  const maxEgt = egtNonZero.length > 0 ? Math.max(...egtNonZero) : 0;
+  const avgEgt = egtNonZero.length > 10
+    ? egtNonZero.reduce((a, b) => a + b, 0) / egtNonZero.length
+    : 0;
+
+  if (maxEgt > 1400 && avgEgt > 900) {
+    findings.push({
+      id: 'perf-high-egt',
+      category: 'thermal',
+      confidence: 'high',
+      type: 'warning',
+      title: 'Elevated Exhaust Gas Temperatures',
+      reasoning:
+        `Peak EGT of ${maxEgt.toFixed(0)}°F with an average of ${avgEgt.toFixed(0)}°F indicates ` +
+        `significant thermal loading. Sustained EGTs above 1300°F accelerate turbo wear, can crack ` +
+        `exhaust manifolds, and reduce injector life. ` +
+        (maxEgt > 1500
+          ? `At ${maxEgt.toFixed(0)}°F, piston/head damage becomes a risk on extended pulls.`
+          : `Current levels are manageable for short bursts but should not be sustained.`),
+      evidence: [
+        `Peak EGT: ${maxEgt.toFixed(0)}°F`,
+        `Average EGT: ${avgEgt.toFixed(0)}°F`,
+        `Max RPM: ${ctx.maxRpmObserved.toFixed(0)}`,
+      ],
+      suggestion: maxEgt > 1500
+        ? 'Reduce fueling or increase airflow (larger turbo, better intercooler). Consider water-methanol injection for sustained high-load use.'
+        : 'Monitor EGTs during towing or sustained pulls. Ensure intercooler is not heat-soaked.',
+    });
+  }
+
+  // ── Intake air temperature analysis ──
+  const iatNonZero = data.intakeAirTemp.filter(v => v > 0);
+  const maxIat = iatNonZero.length > 0 ? Math.max(...iatNonZero) : 0;
+  if (maxIat > 160 && maxBoost > 15) {
+    findings.push({
+      id: 'perf-high-iat',
+      category: 'thermal',
+      confidence: 'medium',
+      type: 'improvement',
+      title: 'High Intake Air Temperature Under Boost',
+      reasoning:
+        `Intake air temperature reached ${maxIat.toFixed(0)}°F while boost was above 15 psi. ` +
+        `Hot intake air reduces charge density, lowering power output and increasing detonation risk. ` +
+        `Every 10°F reduction in IAT can yield approximately 1% more power.`,
+      evidence: [
+        `Peak IAT: ${maxIat.toFixed(0)}°F`,
+        `Peak boost: ${maxBoost.toFixed(1)} psi`,
+      ],
+      suggestion: 'Upgrade intercooler to a larger core or add water-methanol injection. Ensure intercooler piping is not kinked or restricted.',
+    });
+  }
+
+  // ── Torque converter matching ──
+  const slipNonZero = data.converterSlip.filter(v => Math.abs(v) > 5);
+  const maxSlip = slipNonZero.length > 0 ? Math.max(...slipNonZero.map(Math.abs)) : 0;
+  if (maxSlip > 300 && maxHp > 400) {
+    findings.push({
+      id: 'perf-converter-slip',
+      category: 'transmission',
+      confidence: 'medium',
+      type: 'improvement',
+      title: 'Torque Converter Slip at High Power',
+      reasoning:
+        `Peak converter slip of ${maxSlip.toFixed(0)} RPM at an estimated ${maxHp.toFixed(0)} HP ` +
+        `indicates the torque converter may not be matched to the power level. Excessive slip ` +
+        `generates heat in the transmission fluid and wastes power. For high-performance builds, ` +
+        `the converter stall speed should match the turbo's spool point for optimal launch and ` +
+        `minimal slip once locked.`,
+      evidence: [
+        `Peak converter slip: ${maxSlip.toFixed(0)} RPM`,
+        `Estimated peak HP: ${maxHp.toFixed(0)}`,
+      ],
+      suggestion: 'Consider a performance torque converter with a stall speed matched to your turbo setup. For drag racing, a higher stall (2800-3200 RPM) helps launch; for towing, a lower stall (1800-2200 RPM) reduces heat.',
+    });
+  }
+
+  return findings;
 }
 
 function generateBetaImprovements(

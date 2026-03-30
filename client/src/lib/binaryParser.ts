@@ -161,11 +161,14 @@ function findBytes(data: Uint8Array, b1: number, b2: number): number[] {
 
 const SEGMENT_FUNCTIONS: Record<number, string> = {
   1: 'Main Operating System',
-  2: 'System',
+  2: 'System / Calibration',
   3: 'Fuel System',
-  4: 'Speedometer',
+  4: 'Speedometer / Transmission',
   5: 'Engine Diagnostic',
   6: 'Engine Operation',
+  7: 'Emission Diagnostic',
+  8: 'Transmission Calibration',
+  9: 'Extended Calibration',
 };
 
 // ── Platform Detection from Filename ─────────────────────────────────────
@@ -335,9 +338,9 @@ function extractPpeiMetadata(data: Uint8Array): PpeiMetadata | null {
 
 function parseSegmentHeaders(data: Uint8Array): FlashSegment[] {
   const segments: FlashSegment[] = [];
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
 
-  // Known segment header offsets for EFILive editable bins
-  // These come from the segment_map.txt files
+  // ── Strategy 1: Known fixed-offset segment headers (E46/E90 layout) ──
   const segmentCandidates = [
     // E46 layout
     { binOff: 0x040000, chipOff: 0x00840000 },
@@ -352,7 +355,7 @@ function parseSegmentHeaders(data: Uint8Array): FlashSegment[] {
     { binOff: 0x60B000, chipOff: 0x00E0B000 },
     { binOff: 0x60D000, chipOff: 0x00E0D000 },
     { binOff: 0x623130, chipOff: 0x00E23130 },
-    // E90 layout (same as first set but different segment sizes)
+    // E90 layout
     { binOff: 0x300000, chipOff: 0x00B00000 },
   ];
 
@@ -360,7 +363,6 @@ function parseSegmentHeaders(data: Uint8Array): FlashSegment[] {
     const off = candidate.binOff;
     if (off + 0x20 >= data.length) continue;
 
-    // Check if there's an 8-digit part number at +0x10
     let isDigits = true;
     for (let j = 0; j < 8; j++) {
       const b = data[off + 0x10 + j];
@@ -371,13 +373,10 @@ function parseSegmentHeaders(data: Uint8Array): FlashSegment[] {
     const partNumber = readAsciiString(data, off + 0x10, 8);
     if (!partNumber || partNumber.length !== 8) continue;
 
-    // Read segment index from header byte at +0x04
     const segIdx = data[off + 0x04] || 0;
-    // Read the segment index from +0x03 if +0x04 doesn't look right
     const segIdxAlt = data[off + 0x03] || 0;
     const index = (segIdx >= 1 && segIdx <= 8) ? segIdx : (segIdxAlt >= 1 && segIdxAlt <= 8) ? segIdxAlt : segments.length + 1;
 
-    // Try to read CVN from +0x20 area
     const cvnBytes = data.slice(off + 0x20, off + 0x24);
     const cvn = Array.from(cvnBytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
 
@@ -389,29 +388,116 @@ function parseSegmentHeaders(data: Uint8Array): FlashSegment[] {
       binOffsetHex: toHex(off),
       chipAddress: candidate.chipOff,
       chipAddressHex: '0x' + candidate.chipOff.toString(16).toUpperCase().padStart(8, '0'),
-      length: 0, // Will be estimated
+      length: 0,
       lengthHex: '0x000000',
       cvn: cvn !== '00000000' && cvn !== 'FFFFFFFF' ? cvn : undefined,
     });
   }
 
+  // ── Strategy 2: Dynamic marker scanning for E86B/E86A and similar layouts ──
+  // Scans for 0055AAFF and AFAFAFAF segment markers with embedded part numbers
+  // Header format (0055AAFF): marker(8) + hash(4) + 'A'(1) + PN(8) + FFFF(2) + 01(1) + chipAddr(4LE) + size(4LE)
+  // Header format (AFAFAFAF): marker(4) + hash(4) + flags(4) + 'A'(1) + PN(8) + FFFF(2) + 01(1) + chipAddr(4LE) + size(4LE)
+  if (segments.length === 0 && data.length >= 0x10000) {
+    const seenOffsets = new Set<number>();
+
+    for (let i = 0; i < data.length - 32; i++) {
+      let pnOffset = -1;
+      let headerOffset = i;
+
+      // Check for 0055AAFF 0055AAFF marker (8 bytes)
+      if (data[i] === 0x00 && data[i + 1] === 0x55 && data[i + 2] === 0xAA && data[i + 3] === 0xFF &&
+          data[i + 4] === 0x00 && data[i + 5] === 0x55 && data[i + 6] === 0xAA && data[i + 7] === 0xFF) {
+        // Part number at offset +12 (after marker(8) + hash(4))
+        pnOffset = i + 12;
+      }
+      // Check for AFAFAFAF marker (4 bytes) — but not in a run of 0xAF fill
+      else if (data[i] === 0xAF && data[i + 1] === 0xAF && data[i + 2] === 0xAF && data[i + 3] === 0xAF &&
+               (i === 0 || data[i - 1] !== 0xAF)) {
+        // Part number at offset +12 (after marker(4) + hash(4) + flags(4))
+        pnOffset = i + 12;
+      }
+
+      if (pnOffset < 0 || pnOffset + 21 >= data.length) continue;
+
+      // Validate: byte at pnOffset should be 'A' (0x41) followed by 8 ASCII digits
+      if (data[pnOffset] !== 0x41) continue;
+      let allDigits = true;
+      for (let j = 1; j <= 8; j++) {
+        const b = data[pnOffset + j];
+        if (b < 0x30 || b > 0x39) { allDigits = false; break; }
+      }
+      if (!allDigits) continue;
+
+      // Validate: FFFF marker after part number
+      if (data[pnOffset + 9] !== 0xFF || data[pnOffset + 10] !== 0xFF) continue;
+      // Validate: 0x01 byte after FFFF
+      if (data[pnOffset + 11] !== 0x01) continue;
+
+      // Avoid duplicate detections at same header
+      if (seenOffsets.has(headerOffset)) continue;
+      seenOffsets.add(headerOffset);
+
+      const partNumber = readAsciiString(data, pnOffset + 1, 8);
+      if (!partNumber) continue;
+
+      // Parse chip address and segment size (little-endian)
+      const chipAddr = dv.getUint32(pnOffset + 12, true);
+      const segSize = dv.getUint32(pnOffset + 16, true);
+
+      // Extract segment index from the hash field
+      // For 0055AAFF: hash is at +8, the low byte often encodes a sequential counter
+      // For AFAFAFAF: flags at +8 may contain the index
+      const hashVal = dv.getUint32(headerOffset + 8, true);
+      // Use the high byte of the hash as a rough segment index hint
+      const rawIdx = (hashVal >> 16) & 0xFF;
+      const index = (rawIdx >= 1 && rawIdx <= 12) ? rawIdx : segments.length + 1;
+
+      segments.push({
+        index,
+        partNumber,
+        function: SEGMENT_FUNCTIONS[index] || `Segment ${index}`,
+        binOffset: headerOffset,
+        binOffsetHex: toHex(headerOffset),
+        chipAddress: chipAddr,
+        chipAddressHex: '0x' + chipAddr.toString(16).toUpperCase().padStart(8, '0'),
+        length: segSize,
+        lengthHex: '0x' + segSize.toString(16).toUpperCase().padStart(6, '0'),
+        cvn: undefined,
+      });
+
+      // Skip past this header to avoid re-detecting overlapping patterns
+      i = pnOffset + 20;
+    }
+  }
+
   // Sort by bin offset
   segments.sort((a, b) => a.binOffset - b.binOffset);
 
-  // Estimate lengths based on gaps between segments
-  for (let i = 0; i < segments.length; i++) {
-    if (i + 1 < segments.length) {
-      segments[i].length = segments[i + 1].binOffset - segments[i].binOffset;
-    } else {
-      // Last segment — estimate from signature area or file end
-      const sigAreaStart = 0x800000;
-      if (segments[i].binOffset < sigAreaStart && sigAreaStart < data.length) {
-        segments[i].length = sigAreaStart - segments[i].binOffset;
-      } else {
-        segments[i].length = data.length - segments[i].binOffset;
-      }
+  // Re-index segments sequentially if dynamic scan found them
+  // (the hash-based index extraction is unreliable, sequential is better)
+  if (segments.length > 0) {
+    for (let i = 0; i < segments.length; i++) {
+      segments[i].index = i + 1;
+      segments[i].function = SEGMENT_FUNCTIONS[i + 1] || `Segment ${i + 1}`;
     }
-    segments[i].lengthHex = '0x' + segments[i].length.toString(16).toUpperCase().padStart(6, '0');
+  }
+
+  // Estimate lengths for segments that don't have them (Strategy 1 segments)
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i].length === 0) {
+      if (i + 1 < segments.length) {
+        segments[i].length = segments[i + 1].binOffset - segments[i].binOffset;
+      } else {
+        const sigAreaStart = 0x800000;
+        if (segments[i].binOffset < sigAreaStart && sigAreaStart < data.length) {
+          segments[i].length = sigAreaStart - segments[i].binOffset;
+        } else {
+          segments[i].length = data.length - segments[i].binOffset;
+        }
+      }
+      segments[i].lengthHex = '0x' + segments[i].length.toString(16).toUpperCase().padStart(6, '0');
+    }
   }
 
   return segments;

@@ -264,7 +264,7 @@ export class KnoxLearningEngine {
     }
 
     if (param.warnings && param.warnings.length > 0) {
-      guidance += `\n**⚠️ Warnings:**\n`;
+      guidance += `\n**Warnings:**\n`;
       for (const warning of param.warnings) {
         guidance += `- ${warning}\n`;
       }

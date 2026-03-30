@@ -696,12 +696,19 @@ function checkLowBoostPressure(
         const mafFlow = maf[i] || 0;
         const currentRpm = rpm[i] || 0;
 
+        // VGT position semantics:
+        // Higher % = more CLOSED (vanes restricting exhaust flow = more boost)
+        // Lower % = more OPEN (vanes allowing exhaust to bypass = less boost)
+        // So vanePos > 58.5% means VGT is CLOSED trying to build boost.
+        // If VGT is closed AND boost is low, the boost is leaking somewhere.
+        // If VGT is OPEN (< 40%) and boost is low, that's expected behavior
+        // (ECM is commanding less boost, not a fault).
         if (mafFlow > 71.5 && actual[i] < 20 && vanePos > 58.5) {
           issues.push({
             code: 'LOW-BOOST-LEAK',
             severity: 'critical',
             title: 'Low Boost Pressure - Likely Boost Leak',
-            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at steady-state (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}% and MAF flow is ${mafFlow.toFixed(1)} lb/min. Turbo peak in this log: ${peakActualBoost.toFixed(1)} psi.`,
+            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at steady-state (transients excluded). VGT is commanding ${vanePos.toFixed(1)}% closed to build boost, but actual boost is only ${actual[i].toFixed(1)} psi with ${mafFlow.toFixed(1)} lb/min airflow. Turbo peak in this log: ${peakActualBoost.toFixed(1)} psi.`,
             recommendation:
               'A boost leak is very likely. Perform a boost leakdown test and inspect intake system for leaks, cracks, or loose connections. Check intercooler, piping, and clamps.',
           });
@@ -710,10 +717,18 @@ function checkLowBoostPressure(
             code: 'LOW-BOOST-TURBO',
             severity: 'warning',
             title: 'Low Boost Pressure - Turbo Issue',
-            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at ${currentRpm.toFixed(0)} RPM (transients excluded). Turbo vane position is ${vanePos.toFixed(1)}%. Turbo peak: ${peakActualBoost.toFixed(1)} psi.`,
+            description: `Boost is ${offset.toFixed(1)} psi (${(pctOffset * 100).toFixed(0)}%) lower than desired for ${minDuration}+ seconds at ${currentRpm.toFixed(0)} RPM (transients excluded). VGT is commanding ${vanePos.toFixed(1)}% closed but boost is not responding. Turbo peak: ${peakActualBoost.toFixed(1)} psi.`,
             recommendation:
               'Perform a boost leakdown test and check the intake system for leaks. Inspect turbo for damage or excessive play.',
           });
+        } else if (vanePos < 40 && actual[i] < 15) {
+          // VGT is OPEN (low %) = less boost is expected.
+          // Opening VGT = less exhaust restriction = less boost = potentially HIGHER EGTs
+          // because exhaust energy is not being used to drive the turbine.
+          // This is normal operation when ECM doesn't need boost, skip fault.
+          // No issue to report -- this is commanded behavior.
+          consecutiveViolations = 0;
+          continue;
         } else {
           issues.push({
             code: 'LOW-BOOST-GENERAL',
@@ -744,7 +759,7 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   if (!egt.length) return issues;
 
   const HIGH_THRESHOLD = 1750;
-  const CRITICAL_THRESHOLD = 1900;
+  const CRITICAL_THRESHOLD = 2100;  // Raised from 1900 -- aftermarket sensors can read higher
   const MIN_DURATION_SEC = 5;
   const SAMPLE_RATE = 10;
   const MIN_SAMPLES = MIN_DURATION_SEC * SAMPLE_RATE;
@@ -763,22 +778,35 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
     sensorFaulty = true;
   }
 
+  // Stuck sensor detection with context awareness:
+  // EGT sensors have high thermal mass and respond slowly. During short runs
+  // (drag strips, quick pulls), EGT may legitimately stay flat at low values.
+  // Only flag as stuck if: (1) stuck for 150+ samples (raised from 65), AND
+  // (2) the stuck value is above 400F (below 400F = engine hasn't warmed EGT yet,
+  //     sensor is just reading ambient/low exhaust temp -- not a fault).
   let maxStuck = 0;
   let currentStuck = 0;
+  let stuckValue = 0;
   for (let i = 1; i < egt.length; i++) {
     if (Math.abs(egt[i] - egt[i - 1]) < 1) {
       currentStuck++;
-      maxStuck = Math.max(maxStuck, currentStuck);
+      if (currentStuck > maxStuck) {
+        maxStuck = currentStuck;
+        stuckValue = egt[i];
+      }
     } else {
       currentStuck = 0;
     }
   }
-  if (maxStuck > 65) {
+  // Only flag stuck if the sensor is stuck at a meaningful temperature (>400F)
+  // AND for a very long time (150+ samples = 15+ seconds at 10Hz).
+  // Short runs with slowly-changing EGT are normal, not a sensor fault.
+  if (maxStuck > 150 && stuckValue > 400) {
     issues.push({
       code: 'EGT-SENSOR-STUCK',
       severity: 'warning',
       title: 'EGT Sensor Stuck/Frozen',
-      description: `EGT sensor reading was frozen (< 1F change) for ${maxStuck} consecutive samples. A stuck sensor cannot protect the DPF from overtemperature events.`,
+      description: `EGT sensor reading was frozen at ${stuckValue.toFixed(0)}F (< 1F change) for ${maxStuck} consecutive samples (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). A stuck sensor cannot protect the DPF from overtemperature events.`,
       recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
     });
     sensorFaulty = true;
@@ -793,7 +821,7 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
       code: 'EGT-SENSOR-ERRATIC',
       severity: 'warning',
       title: 'EGT Sensor Erratic',
-      description: `EGT sensor shows ${erraticCount} rapid jumps of >200F between samples. This indicates a failing sensor or wiring fault.`,
+      description: `EGT sensor shows ${erraticCount} rapid jumps of >260F between samples. This indicates a failing sensor or wiring fault.`,
       recommendation: 'Inspect EGT sensor connector and wiring for heat damage. Replace EGT sensor if erratic readings persist.',
     });
     sensorFaulty = true;
