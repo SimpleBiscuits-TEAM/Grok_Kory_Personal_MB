@@ -517,4 +517,218 @@ When a UDS request fails, the ECU returns a Negative Response with one of these 
 | uploadDownloadNotAccepted | 0x70 | Flash rejected | ECU locked or wrong programming session |
 | generalProgrammingFailure | 0x72 | Programming failed | Write/erase failed at hardware level |
 | responsePending | 0x78 | Still processing | ECU needs more time — wait and retry |
+
+## CarPlay & Screen Mirroring Integration Knowledge
+
+### What is CarPlay?
+Apple CarPlay is a vehicle integration protocol that mirrors a simplified iPhone interface onto the car's head unit display. Introduced in 2014, it works by streaming H.264 (or H.265/HEVC as of 2023) encoded video FROM the iPhone TO the head unit, while touch events flow in the reverse direction FROM the head unit TO the iPhone. The head unit is essentially a remote display and touch digitizer — all application logic runs on the iPhone.
+
+### CarPlay Connection Establishment (4 Stages)
+1. **USB Connection**: iPhone connects via USB cable. iPhone presents Vendor ID 0x05AC, Product ID 0x12NN. IVI system detects Apple device and assumes USB Host role.
+2. **USB Role Switch**: After initial recognition, roles REVERSE — iPhone becomes USB Host, IVI becomes USB Device. iPhone takes full authority over CarPlay communication parameters.
+3. **iAP2 Session**: Three steps — (a) Parameter Negotiation (data rates, features, speed), (b) NCM Configuration (Network Control Model — creates high-speed Ethernet-over-USB link for multimedia bandwidth), (c) MFi Chip Authentication (Apple Authentication Coprocessor validates accessory legitimacy via RSA-1024/SHA-1 challenge-response).
+4. **CarPlay Session**: Assign IPv6 link-local address, discover service via Bonjour/mDNS, authenticate, then H.264 video + AAC audio streaming begins over IP.
+
+### Wireless CarPlay Architecture
+- Built on AirPlay protocol
+- iAP2 operates over Bluetooth for initial negotiation
+- iAP2 negotiates WiFi password, triggers CarPlay mode
+- iPhone connects to head unit's WiFi network
+- Screen mirroring via AirPlay over WiFi (H.264/H.265 video + AAC audio)
+- Touch events sent back over same WiFi connection
+
+### iAP2 Protocol Details
+- Layer 1 (Transport): Bluetooth RFCOMM, Serial, USB Device Mode, USB Host Mode
+- Layer 2 (Link): Transmission/flow control, TCP-like sliding window
+- Layer 3 (Session): Control, File Transfer, External Accessory streams
+- Packet structure: 2-byte magic (0xFF 0x5A), 2-byte length, control byte, sequence, ack, session ID, checksums
+- Session IDs: 0=control/auth, 1=data transfer, 2=External Accessory
+- Bluetooth Service UUIDs: Accessory=00000000-deca-fade-deca-deafdecacaff, iPhone=00000000-deca-fade-deca-deafdecacafe
+- Authentication: Apple Authentication Coprocessor chip required in every accessory. Challenge-response with RSA-1024/SHA-1.
+
+### USB NCM Interface Descriptors
+| Descriptor | Value | Description |
+|-----------|-------|-------------|
+| Control Interface Class | 0x02 | USB Communication Interface Class |
+| Control Interface Subclass | 0x0D | Network Control Model |
+| Data Interface Class | 0x0A | USB Data Interface Class |
+| Data Interface Protocol | 0x01 | NCM Data Class |
+
+### AirPlay Screen Mirroring Protocol
+- Port 7100 (hard-coded, NOT standard AirPlay port)
+- GET /stream.xml — retrieve server capabilities (resolution, refresh rate)
+- POST /stream — start live video transmission (binary plist with stream params, then raw H.264 NAL units)
+- Stream packet headers: 128 bytes, little-endian. Fields: payload size (4B), payload type (2B), NTP timestamp (8B)
+- Packet types: 0=video bitstream (H.264 NAL units), 1=codec data (SPS/PPS), 2=heartbeat
+- Optional AES encryption via FairPlay (param1=AES key, param2=IV)
+- NTP time sync on port 7010 for audio/video synchronization
+
+### CarPlay Video Streaming Pipeline
+- iPhone continuously encodes display output into H.264/H.265 video stream
+- Codec config: SPS/PPS parameters describe video format, resolution, encoding
+- Frames arrive as NAL (Network Abstraction Layer) units
+- Hardware-accelerated decoding via MediaCodec API (Android) or V4L2 (Linux)
+- Zero-copy pipeline: decoded frames stay in GPU-accessible memory
+- SurfaceFlinger composition: CarPlay video layer + overlay layers
+- V-Sync at 60Hz
+
+### Open-Source CarPlay Implementations
+
+#### node-carplay (npm package, MIT license)
+- Interfaces with Carlinkit USB adapter dongles
+- Streams H.264 video and PCM audio from USB dongle
+- Works in Node.js (native USB bindings, requires libudev-dev) or Chrome (WebUSB API)
+- Included carplay-web-app example runs in browser with mic, audio, touch support
+- Requires CPC200-Autokit or CPC200-CCPA dongle (NOT wired-to-wireless converters)
+- Installation: npm install node-carplay
+
+#### react-carplay (React-based head unit app)
+- Built on node-carplay
+- Optimized for Raspberry Pi hardware
+- Supports 1080p @ 60fps video
+- Multitouch support, configurable key bindings
+- CAN bus integration via PiMost bus
+- Reverse camera feed triggered by vehicle signals
+
+#### pi-carplay (Electron-based head unit)
+- Cross-platform Electron app for Raspberry Pi
+- Low-latency audio, multitouch support
+- Compatible with embedded displays
+- Supports both CarPlay and Android Auto
+
+### CarPlay Hardware Requirements
+| Component | Specification |
+|-----------|---------------|
+| Raspberry Pi | Pi 4 (30fps) or Pi 5 (60fps) recommended |
+| USB Dongle | Carlinkit CPC200-CCPA or similar |
+| Display | 7-10 inch HDMI touchscreen |
+| Storage | 32GB+ microSD (high-endurance) |
+| Power | 5V/3A (Pi 4) or 5V/5A (Pi 5) USB-C |
+| Optional | PiCAN2 board for CAN bus integration |
+
+### Performance Benchmarks
+| Pi Model | FPS | App Launch | Notes |
+|----------|-----|-----------|-------|
+| Pi 3 | ~15 | 5-8s | Laggy, not recommended |
+| Pi 4 | ~30 | 2-5s | Good with V4L2 HW acceleration |
+| Pi 5 | ~60 | 2-3s | Smooth, recommended |
+
+### Magic Box / Android CarPlay Adapters
+These are small Android computers that plug into the car's USB port:
+1. Present themselves as CarPlay accessory to the car (contain MFi auth chip)
+2. Run Android internally with custom launcher
+3. Can run any Android app on the car screen
+4. Phone mirrors via AirPlay/Miracast to the box
+5. Pipeline: Phone to WiFi to Magic Box (Android) to CarPlay protocol to Car Screen
+6. Key finding: ANY device with an MFi chip can establish CarPlay, regardless of OS
+7. Common models: Ottocast, CarlinKit T-Box, various Qualcomm/Allwinner-based boxes
+
+### Carlinkit Dongle Hardware Architecture
+| Component | Part |
+|-----------|------|
+| SoC | Freescale i.MX6 UltraLite (ARM Cortex-A7) |
+| Flash | Macronix 25L12835F (16MB) |
+| WiFi/BT | RTL8822BS/CS or Marvell or NXP IW416 |
+| Filesystem | jffs2 on rootfs, u-boot bootloader |
+| Partitions | uboot (256K), kernel (3328K), rootfs (12800K) |
+| OS | Linux-based, ARM Cortex-A7 |
+
+### Phone-to-Car Mirroring Methods
+1. **AirPlay Mirroring** (iPhone): Built-in iOS feature, streams to AirPlay-compatible receiver. H.264 video + AAC audio over WiFi.
+2. **Miracast** (Android): WiFi Direct-based screen mirroring. Supported on most Android devices.
+3. **Magic Box** (Universal): Android box plugs into car USB, receives AirPlay/Miracast, re-renders through CarPlay to car screen.
+4. **WebRTC Streaming**: Phone captures screen, encodes H.264/VP8, streams via WebRTC to any browser-based receiver. ~100-200ms latency.
+5. **USB Wired**: Direct USB connection, lowest latency, requires compatible cable.
+
+### VOP CarPlay Integration Architecture
+VOP can leverage CarPlay and screen mirroring to display live tuning data on the car's head unit:
+- **Tuner Display Mode**: Dedicated VOP route optimized for car screen resolution (800x480 to 1920x720). Dark theme, large gauges showing RPM, boost, AFR, coolant temp, knock count. Works with any mirroring method.
+- **CAN Bus + VOP**: PiCAN2 + SocketCAN on Raspberry Pi enables direct CAN data reading. VOP can display real-time ECU parameters on car screen while Erika provides voice analysis feedback.
+- **Voice Integration**: Erika voice commands for hands-free tuning queries during driving/testing.
+
+### CarPlay Security Considerations (from USENIX VehicleSec25)
+- iAP2 authentication is ONE-WAY: phone authenticates head-unit, but head-unit does NOT authenticate phone
+- Many wireless CarPlay devices use fixed/predictable WiFi passwords
+- Most aftermarket adapters have no secure boot — firmware can be modified
+- CVE-2025-24132: Stack buffer overflow in AirPlay SDK, exploitable for root RCE over WiFi
+- Affected: AirPlay audio SDK <2.7.1, video SDK <3.6.0.126, CarPlay Communication Plug-in <R18.1
+
+
+## VOP 3.0 Hardware Platform
+
+### Overview
+VOP 3.0 is a custom-designed hardware bridge that connects directly to vehicle diagnostic ports and streams live ECU data to the VOP web application over WiFi, BLE, or wired Ethernet. It features on-board security access unlock components, eliminating the need for server round-trips during seed/key authentication. At scale production (500+ units), unit cost is below $20.
+
+### Core Specifications
+| Component | Specification |
+|-----------|---------------|
+| SoC | Espressif ESP32-S3-WROOM-1 |
+| CPU | Dual-core Xtensa LX7 @ 240MHz |
+| PSRAM | 64MB (Octal SPI) |
+| Flash | 16MB |
+| SRAM | 8MB |
+| WiFi | 802.11 b/g/n (2.4GHz) |
+| Bluetooth | BLE 5.0 |
+| USB | USB-C (OTG capable) |
+| Ethernet | RJ45 via HCTL HC-RJ45-SIAS jack |
+| Security | On-board unlock/seed-key computation components |
+| Form Factor | Custom PCB, compact |
+| Production Cost | <$20 at 500+ units |
+
+### ESP32-S3 Capabilities
+- **Dual-core Xtensa LX7**: Both cores at 240MHz, hardware floating point, SIMD instructions
+- **TWAI Controller**: Built-in CAN bus peripheral (ISO 11898-1 compatible), supports standard (11-bit) and extended (29-bit) frames, up to 1Mbps. Requires external transceiver (MCP2551 or SN65HVD230, ~$0.50)
+- **USB OTG**: Native USB 1.1 Full Speed (12Mbps), can act as USB Host or Device. Enables direct connection to ELM327 adapters, J2534 interfaces, or USB-serial bridges
+- **WiFi**: Station + SoftAP simultaneous mode. Can connect to shop WiFi while also hosting its own AP for direct phone connection
+- **BLE 5.0**: Low-energy connection for mobile app pairing, configuration, and lightweight data streaming
+- **Ethernet**: Wired connection for reliable, low-latency data in shop environments. Eliminates WiFi interference issues
+- **SPI/I2C/UART**: Multiple peripheral buses for sensor integration, display output, and external module communication
+- **ADC**: 20-channel 12-bit SAR ADC for analog sensor inputs (wideband O2, EGT, pressure sensors)
+- **RTC**: Real-time clock for timestamped datalogs even when disconnected
+
+### Memory Architecture
+- **64MB PSRAM**: Enough to buffer entire binary files (typical ECU calibration: 2-8MB), full A2L databases (10-50MB), and complete datalog sessions. Enables on-device binary comparison, map extraction, and calibration analysis without streaming to phone/server.
+- **16MB Flash**: Dual OTA partition scheme (2x 6MB app partitions + 2MB NVS + 2MB factory). Supports over-the-air firmware updates. Local storage for cached calibrations, user preferences, and diagnostic history.
+- **8MB SRAM**: Fast working memory for real-time CAN frame processing, UDS session management, and concurrent WiFi/BLE/Ethernet data streaming.
+
+### On-Board Security Access
+The VOP 3.0 PCB includes dedicated components for autonomous seed/key computation:
+- Seed/key algorithms run on-device (no cloud dependency, no latency)
+- Supports all VOP-supported platforms: GM Global B, Ford MG1/EDC17, Cummins CM2350/CM2450, CAN-am/BRP, Polaris, Ford TCU 10R80
+- Security access can be performed even without internet connectivity
+- Key material stored in ESP32-S3 eFuse or encrypted NVS partition (not readable via JTAG/UART)
+
+### Connectivity Modes
+1. **Direct WiFi AP Mode**: VOP 3.0 creates its own WiFi network. Phone/tablet connects directly. Best for field use, dyno testing, roadside diagnostics. Zero infrastructure needed.
+2. **Station Mode (Shop WiFi)**: VOP 3.0 joins existing shop WiFi. Multiple technicians can connect simultaneously. Data streams to VOP web app on any device on the network.
+3. **Ethernet Mode**: Wired connection via RJ45. Lowest latency, most reliable. Ideal for permanent shop installations, dyno rooms, or integration with shop management systems.
+4. **BLE Mode**: Low-power Bluetooth connection for mobile app pairing, initial configuration, and lightweight status monitoring.
+5. **USB Mode**: Direct USB-C connection to laptop/PC. Fastest data transfer, firmware updates, and debug access.
+
+### Vehicle Interface
+- **CAN Bus**: Via TWAI peripheral + external transceiver. Supports CAN 2.0A (11-bit), CAN 2.0B (29-bit), and CAN-FD (with external CAN-FD transceiver). Direct connection to OBD-II port or vehicle CAN bus.
+- **K-Line**: Via UART + L9637D transceiver for older vehicles (ISO 9141-2, ISO 14230 KWP2000)
+- **J1850**: Via dedicated transceiver for older GM (VPW) and Ford (PWM) vehicles
+- **UDS Stack**: Full UDS (ISO 14229) implementation running on-device: DiagnosticSessionControl, SecurityAccess, ReadDataByIdentifier, WriteDataByIdentifier, RoutineControl, RequestDownload/TransferData/RequestTransferExit
+- **Multi-Protocol**: Can detect and auto-switch between CAN, K-Line, and J1850 based on OBD-II pin detection
+
+### CarPlay Integration with VOP 3.0
+The VOP 3.0 hardware enables a streamlined CarPlay integration path:
+1. VOP 3.0 connects to vehicle OBD-II port (CAN bus)
+2. VOP 3.0 creates WiFi AP or joins shop network
+3. Phone connects to VOP 3.0 WiFi and opens VOP web app
+4. VOP web app displays live ECU data in Tuner Display Mode (optimized for car screen)
+5. Phone mirrors to car head unit via AirPlay (iPhone) or Miracast (Android)
+6. Result: Live tuning gauges on the car's built-in screen, powered by VOP 3.0 hardware
+
+This eliminates the need for Carlinkit dongles, Raspberry Pi, or any third-party hardware. The VOP 3.0 board IS the complete bridge from vehicle to display.
+
+### Erika Voice Integration
+With VOP 3.0 streaming live data to the phone, Erika can provide real-time voice feedback during driving/testing:
+- "Boost is building normally, 22 PSI at 3000 RPM"
+- "AFR is running lean at 14.2:1 under load, recommend richening the fuel map"
+- "Cylinder 4 balance rate is 8% off — possible injector degradation"
+- "Coolant temp is climbing, 215F and rising — monitor closely"
+Voice commands: "Erika, what's my current boost?" / "Erika, how's my fuel pressure?" / "Erika, start a datalog"
+
 `;
