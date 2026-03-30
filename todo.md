@@ -2391,3 +2391,14 @@
 ## Rate Limiter Bug (2026-03-30)
 - [x] Fix rate limiter causing "Rate exceeded" white screen after OAuth login
 - [x] Fix CSV parser rejecting E86B_ticket164909_railpsi_2.csv (missing RPM/MAF columns error)
+
+## EZ Lynk CSV Format Support (2026-03-30)
+- [x] Analyze EZ Lynk CSV format structure (2015 LML E86A + A50 TCM log)
+- [x] Add EZ Lynk format detection to parseCSV
+- [x] Add EZ Lynk parser with full column mapping (21 PIDs)
+- [x] Handle sparse GPS-only rows, kPSI→PSI rail pressure conversion
+- [ ] Verify EZ Lynk log parses and displays correctly in browser
+
+## OAuth Callback Error (2026-03-30)
+- [x] Fix OAuth callback failed error on www.ppei.ai login (added retry with backoff for transient TiDB errors, graceful redirect on failure)
+- [x] Fix feedback panel mobile layout - bottom sheet on mobile, centered modal on desktop, safe-area padding

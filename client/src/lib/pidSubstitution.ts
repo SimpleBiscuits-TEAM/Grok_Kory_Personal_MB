@@ -94,7 +94,7 @@ export function resolvePids(
   rows: number[][],
   rpm: number[],
   offsets: number[],
-  format: 'hptuners' | 'efilive' | 'bankspower'
+  format: 'hptuners' | 'efilive' | 'bankspower' | 'ezlynk'
 ): PidResolutionResult {
   const find = makeColumnFinder(headers);
   const col = (idx: number) => extractColumn(rows, idx);

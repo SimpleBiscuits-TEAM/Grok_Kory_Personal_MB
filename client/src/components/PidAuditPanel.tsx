@@ -195,7 +195,7 @@ export default function PidAuditPanel({ substitutions, missing, fileFormat, boos
                         ))}
                       </div>
                       <p className="text-xs text-zinc-400 font-mono mt-2">
-                        Add these parameters to your {fileFormat === 'bankspower' ? 'Banks Power iDash' : fileFormat === 'efilive' ? 'EFILive' : 'datalog tool'} configuration for more complete analysis.
+                        Add these parameters to your {fileFormat === 'bankspower' ? 'Banks Power iDash' : fileFormat === 'efilive' ? 'EFILive' : fileFormat === 'ezlynk' ? 'EZ Lynk' : 'datalog tool'} configuration for more complete analysis.
                       </p>
                     </div>
                   </div>

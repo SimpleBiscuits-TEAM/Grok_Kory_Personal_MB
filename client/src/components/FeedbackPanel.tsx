@@ -128,26 +128,45 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         }}
       />
 
-      {/* Panel */}
+      {/* Panel — bottom-sheet on mobile, centered modal on desktop */}
       <div
-        className="ppei-anim-scale-in"
+        className="ppei-anim-scale-in ppei-feedback-panel"
         style={{
           position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: 'min(520px, 95vw)',
-          maxHeight: '85vh',
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
+          zIndex: 999,
           background: 'oklch(0.11 0.005 260)',
           border: '1px solid oklch(0.25 0.008 260)',
           borderTop: '3px solid oklch(0.52 0.22 25)',
-          borderRadius: '4px',
-          zIndex: 999,
           boxShadow: '0 20px 60px oklch(0 0 0 / 0.7)',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
         }}
       >
+        <style>{`
+          .ppei-feedback-panel {
+            /* Mobile: bottom sheet */
+            bottom: 0;
+            left: 0;
+            right: 0;
+            max-height: 90vh;
+            max-height: 90dvh;
+            border-radius: 12px 12px 0 0 !important;
+            width: 100% !important;
+          }
+          @media (min-width: 640px) {
+            .ppei-feedback-panel {
+              /* Desktop: centered modal */
+              bottom: auto !important;
+              left: 50% !important;
+              right: auto !important;
+              top: 50%;
+              transform: translate(-50%, -50%);
+              width: min(520px, 95vw) !important;
+              max-height: 85vh !important;
+              border-radius: 4px !important;
+            }
+          }
+        `}</style>
         {/* Header */}
         <div style={{
           display: 'flex',
@@ -229,7 +248,7 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         </div>
 
         {/* Body */}
-        <div style={{ padding: '1.25rem', paddingBottom: '2rem' }}>
+        <div style={{ padding: '1.25rem', paddingBottom: 'max(2rem, env(safe-area-inset-bottom, 0px))' }}>
 
           {/* Success state */}
           {status === 'success' && (
@@ -526,12 +545,13 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
   );
 }
 
-/** Floating trigger button — fixed bottom-right */
+/** Floating trigger button — fixed bottom-right, compact on mobile */
 export function FeedbackTrigger({ onClick }: { onClick: () => void }) {
   const [hovered, setHovered] = useState(false);
 
   return (
     <div
+      className="ppei-feedback-trigger-wrap"
       style={{
         position: 'fixed',
         bottom: '1.5rem',
@@ -543,6 +563,24 @@ export function FeedbackTrigger({ onClick }: { onClick: () => void }) {
         gap: '8px',
       }}
     >
+      <style>{`
+        .ppei-feedback-trigger-label {
+          display: none;
+        }
+        .ppei-feedback-trigger-wrap {
+          bottom: 1rem !important;
+          right: 1rem !important;
+        }
+        @media (min-width: 640px) {
+          .ppei-feedback-trigger-label {
+            display: inline;
+          }
+          .ppei-feedback-trigger-wrap {
+            bottom: 1.5rem !important;
+            right: 1.5rem !important;
+          }
+        }
+      `}</style>
       <button
         onClick={onClick}
         onMouseEnter={() => setHovered(true)}
@@ -569,7 +607,7 @@ export function FeedbackTrigger({ onClick }: { onClick: () => void }) {
         }}
       >
         <MessageSquare style={{ width: '15px', height: '15px' }} />
-        FEEDBACK / REPORT
+        <span className="ppei-feedback-trigger-label">FEEDBACK / REPORT</span>
       </button>
     </div>
   );

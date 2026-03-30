@@ -75,7 +75,7 @@ export interface DuramaxData {
   pidsMissing: string[];       // channels that had no valid substitute
   timestamp: string;
   duration: number;
-  fileFormat: 'hptuners' | 'efilive' | 'bankspower';
+  fileFormat: 'hptuners' | 'efilive' | 'bankspower' | 'ezlynk';
   boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
   vehicleMeta?: VehicleMeta; // VIN-based vehicle identification from CSV metadata
 }
@@ -130,7 +130,7 @@ export interface ProcessedMetrics {
     egtFlatlined: boolean;
     duration: number;
   };
-  fileFormat: 'hptuners' | 'efilive' | 'bankspower';
+  fileFormat: 'hptuners' | 'efilive' | 'bankspower' | 'ezlynk';
   vehicleMeta?: VehicleMeta; // VIN-based vehicle identification
 }
 
@@ -225,12 +225,21 @@ export function parseCSV(content: string): DuramaxData {
     line.includes('ECM.RPM') || line.includes('ECM.MAF') ||
     line.includes('PCM.RPM') || line.includes('PCM.MAF')
   );
+
+  // EZ Lynk format: single header row with human-readable names + units in parentheses
+  // Detected by "Engine RPM (RPM)" or "Boost Pressure (PSI)" or "Injection Pressure(A)" in header
+  const isEZLynk = cleanLines.length > 0 && (
+    cleanLines[0].includes('Engine RPM (RPM)') ||
+    (cleanLines[0].includes('Boost Pressure (PSI)') && cleanLines[0].includes('Injection Pressure'))
+  );
   
   let result: DuramaxData;
   if (isDatalogger) {
     result = parseDataloggerCSV(cleanContent);
   } else if (isBanksPower) {
     result = parseBanksPowerCSV(cleanContent);
+  } else if (isEZLynk) {
+    result = parseEZLynkCSV(cleanContent);
   } else if (isEFILive) {
     result = parseEFILiveCSV(cleanContent);
   } else {
@@ -1653,6 +1662,227 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     timestamp: new Date().toLocaleString(),
     duration,
     fileFormat: 'bankspower',
+  };
+}
+
+/**
+ * Parse EZ Lynk CSV format
+ * Single header row with human-readable column names + units in parentheses.
+ * Data rows are comma-separated, sparse (many rows only have Time + GPS).
+ * Units: RPM in RPM, Boost in PSI (gauge), Rail Pressure in kPSI, Temps in °F,
+ *        MAF in g/s, Speed in MPH, Timing in °BTDC, Fuel Qty in mm³.
+ */
+function parseEZLynkCSV(content: string): DuramaxData {
+  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length < 2) throw new Error('EZ Lynk CSV has no data rows');
+
+  const headers = lines[0].split(',').map(h => h.trim());
+
+  // Column finder: case-insensitive partial match
+  const findCol = (patterns: string[]): number => {
+    for (const pat of patterns) {
+      const lp = pat.toLowerCase();
+      const idx = headers.findIndex(h => h.toLowerCase().includes(lp));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  // Map EZ Lynk columns to our data model
+  const timeIdx = findCol(['Time']);
+  const rpmIdx = findCol(['Engine RPM']);
+  const mafIdx = findCol(['Mass Air Flow']);
+  const boostIdx = findCol(['Boost Pressure']);
+  const throttleIdx = findCol(['Throttle Position']);
+  const timingIdx = findCol(['Main Injection Timing', 'Injection Timing']);
+  const coolantIdx = findCol(['Eng. Coolant Temp', 'Engine Coolant Temp', 'Coolant Temp']);
+  const transIdx = findCol(['Transmission Temp']);
+  const loadIdx = findCol(['Engine Load']);
+  const railActualIdx = findCol(['Injection Pressure(A)', 'Fuel Pressure(A)', 'Rail Pressure(A)']);
+  const railDesiredIdx = findCol(['Injection Pressure(D)', 'Fuel Pressure(D)', 'Rail Pressure(D)']);
+  const speedIdx = findCol(['Vehicle Speed']);
+  const gpsSpeedIdx = findCol(['GPS Speed']);
+  const dpfSootIdx = findCol(['DPF Soot']);
+  const turbineRpmIdx = findCol(['Trans. Turbine RPM', 'Turbine RPM']);
+  const slipIdx = findCol(['Torque Converter Slip', 'TQ Conv. Slip', 'Converter Slip']);
+  const fuelQtyIdx = findCol(['Injection Quantity(D)', 'Fuel Quantity']);
+  const pcvActualIdx = findCol(['Fuel Pres. Reg. Cur.(A)', 'FPR Current(A)']);
+  const pcvDesiredIdx = findCol(['Fuel Pres. Reg. Cur.(D)', 'FPR Current(D)']);
+  const gearIdx = findCol(['Gear']);
+  const tccStatusIdx = findCol(['TQ Conv. Status', 'TCC Status', 'Torque Converter Status']);
+
+  if (rpmIdx === -1 && mafIdx === -1 && boostIdx === -1) {
+    throw new Error('EZ Lynk CSV: Cannot find Engine RPM, MAF, or Boost columns. Ensure this is a valid EZ Lynk datalog.');
+  }
+
+  // Parse data rows — skip rows where key engine PIDs are all empty (GPS-only rows)
+  const rpm: number[] = [];
+  const maf: number[] = [];
+  const boost: number[] = [];
+  const mapAbsolute: number[] = [];
+  const torquePercent: number[] = [];
+  const maxTorque: number[] = [];
+  const vehicleSpeed: number[] = [];
+  const fuelRate: number[] = [];
+  const offset: number[] = [];
+  const railPressureActual: number[] = [];
+  const railPressureDesired: number[] = [];
+  const pcvDutyCycle: number[] = [];
+  const boostDesired: number[] = [];
+  const turboVanePosition: number[] = [];
+  const turboVaneDesired: number[] = [];
+  const exhaustGasTemp: number[] = [];
+  const converterSlip: number[] = [];
+  const converterDutyCycle: number[] = [];
+  const converterPressure: number[] = [];
+  const currentGear: number[] = [];
+  const oilPressure: number[] = [];
+  const coolantTemp: number[] = [];
+  const oilTemp: number[] = [];
+  const transFluidTemp: number[] = [];
+  const barometricPressure: number[] = [];
+  const throttlePosition: number[] = [];
+  const injectorPulseWidth: number[] = [];
+  const injectionTiming: number[] = [];
+  const intakeAirTemp: number[] = [];
+  const fuelQuantity: number[] = [];
+
+  const pidsMissing: string[] = [];
+  if (rpmIdx === -1) pidsMissing.push('Engine RPM');
+  if (mafIdx === -1) pidsMissing.push('Mass Air Flow');
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    const val = (idx: number): number => {
+      if (idx === -1 || idx >= cols.length) return NaN;
+      const v = cols[idx].trim();
+      if (v === '') return NaN;
+      return parseFloat(v);
+    };
+
+    // Skip GPS-only rows: if RPM, boost, and rail pressure are all empty, skip
+    const rpmVal = val(rpmIdx);
+    const boostVal = val(boostIdx);
+    const railVal = val(railActualIdx);
+    if (isNaN(rpmVal) && isNaN(boostVal) && isNaN(railVal)) continue;
+
+    const timeVal = val(timeIdx);
+
+    rpm.push(isNaN(rpmVal) ? 0 : rpmVal);
+    maf.push(isNaN(val(mafIdx)) ? 0 : val(mafIdx));
+    // EZ Lynk boost is already gauge PSI
+    boost.push(isNaN(boostVal) ? 0 : Math.max(0, boostVal));
+    mapAbsolute.push(isNaN(boostVal) ? 0 : boostVal + 14.696); // approximate absolute from gauge
+    torquePercent.push(isNaN(val(loadIdx)) ? 0 : val(loadIdx));
+    maxTorque.push(879.174); // Default LML max torque
+    
+    // Speed: prefer vehicle speed, fall back to GPS speed
+    const spd = val(speedIdx);
+    const gpsSpd = val(gpsSpeedIdx);
+    vehicleSpeed.push(!isNaN(spd) ? spd : (!isNaN(gpsSpd) ? gpsSpd : 0));
+    
+    fuelRate.push(0); // Not available in EZ Lynk
+    offset.push(!isNaN(timeVal) ? timeVal : (rpm.length - 1) * 0.1);
+    
+    // Rail pressure: EZ Lynk uses kPSI, convert to PSI (* 1000)
+    const rpActual = val(railActualIdx);
+    const rpDesired = val(railDesiredIdx);
+    railPressureActual.push(!isNaN(rpActual) ? rpActual * 1000 : 0);
+    railPressureDesired.push(!isNaN(rpDesired) ? rpDesired * 1000 : 0);
+    
+    // PCV: use actual current (mA) — similar to EFILive PCV duty
+    const pcvA = val(pcvActualIdx);
+    pcvDutyCycle.push(!isNaN(pcvA) ? pcvA : 0);
+    
+    boostDesired.push(0); // Not typically in EZ Lynk logs
+    turboVanePosition.push(0);
+    turboVaneDesired.push(0);
+    exhaustGasTemp.push(0); // Not in this log
+    
+    const slip = val(slipIdx);
+    converterSlip.push(!isNaN(slip) ? slip : 0);
+    
+    // TCC status to duty cycle
+    if (tccStatusIdx !== -1 && tccStatusIdx < cols.length) {
+      const tccVal = val(tccStatusIdx);
+      // EZ Lynk TCC status is numeric: 0=off, 67=controlled, 98=locked
+      if (!isNaN(tccVal)) {
+        converterDutyCycle.push(tccVal > 90 ? 100 : tccVal > 50 ? 75 : tccVal > 0 ? 25 : 0);
+      } else {
+        converterDutyCycle.push(0);
+      }
+    } else {
+      converterDutyCycle.push(0);
+    }
+    converterPressure.push(0);
+    
+    const gear = val(gearIdx);
+    currentGear.push(!isNaN(gear) ? gear : 0);
+    
+    oilPressure.push(0);
+    const ct = val(coolantIdx);
+    coolantTemp.push(!isNaN(ct) ? ct : 0);
+    oilTemp.push(0);
+    const tt = val(transIdx);
+    transFluidTemp.push(!isNaN(tt) ? tt : 0);
+    barometricPressure.push(14.696); // Not available, assume sea level
+    
+    const tp = val(throttleIdx);
+    throttlePosition.push(!isNaN(tp) ? tp : 0);
+    injectorPulseWidth.push(0); // Not in EZ Lynk
+    const timing = val(timingIdx);
+    injectionTiming.push(!isNaN(timing) ? timing : 0);
+    intakeAirTemp.push(0); // Not in this log
+    
+    const fq = val(fuelQtyIdx);
+    fuelQuantity.push(!isNaN(fq) ? fq : 0);
+  }
+
+  if (rpm.length === 0) {
+    throw new Error('EZ Lynk CSV: No valid data rows found. The file may contain only GPS data.');
+  }
+
+  const duration = offset.length > 1 ? offset[offset.length - 1] - offset[0] : 0;
+
+  return {
+    rpm,
+    maf,
+    boost,
+    mapAbsolute,
+    throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
+    torquePercent,
+    maxTorque,
+    vehicleSpeed,
+    fuelRate,
+    offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    turboVaneDesired,
+    exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
+    currentGear,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
+    barometricPressure,
+    fuelQuantity,
+    boostSource: boostIdx !== -1 ? 'direct' : 'none',
+    boostActualAvailable: boost.some(v => v > 0),
+    pidSubstitutions: [],
+    pidsMissing,
+    boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
+    timestamp: new Date().toLocaleString(),
+    duration,
+    fileFormat: 'ezlynk',
   };
 }
 
