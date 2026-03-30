@@ -33,6 +33,7 @@ import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import CompareView from '@/components/CompareView';
 import { APP_VERSION } from '@/lib/version';
+import { ShareCard, buildDynoShareData, buildDiagnosticShareData, buildHealthShareData } from '@/components/ShareCard';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -678,6 +679,26 @@ export default function Home() {
                 >
                   NEW FILE
                 </button>
+                {/* Share to Facebook */}
+                {data && (
+                  <ShareCard
+                    data={
+                      healthReport
+                        ? buildHealthShareData(
+                            healthReport.overallScore,
+                            healthReport.overallStatus,
+                            healthReport.vehicleInfo ? `${healthReport.vehicleInfo.year} ${healthReport.vehicleInfo.make} ${healthReport.vehicleInfo.model}` : undefined,
+                            user?.name || undefined
+                          )
+                        : buildDynoShareData(
+                            Math.round(data.stats.hpTorqueMax),
+                            Math.round(data.stats.hpTorqueMax * 0.85),
+                            fileName || undefined,
+                            user?.name || undefined
+                          )
+                    }
+                  />
+                )}
               </div>
             </div>
 

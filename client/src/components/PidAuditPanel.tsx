@@ -1,5 +1,5 @@
 /**
- * PidAuditPanel — PPEI AI Beta
+ * PidAuditPanel — V-OP Beta
  *
  * Displays the PID substitution audit trail AND the boost pressure
  * calibration result so users can see exactly what was adjusted and why.

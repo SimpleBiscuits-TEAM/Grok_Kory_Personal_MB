@@ -8,16 +8,16 @@
  */
 
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
-import { KNOX_KNOWLEDGE_BASE } from "@shared/knoxKnowledge";
+import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
 
 export const editorRouter = router({
   /**
    * Knox AI Chat — calibration engineering assistant
    */
-  knoxChat: publicProcedure
+  knoxChat: protectedProcedure
     .input(
       z.object({
         message: z.string().min(1).max(10000),
@@ -116,7 +116,7 @@ You have access to the ECU context below. Use it to give specific, actionable an
 ${input.context ? input.context.slice(0, 30000) : 'No ECU definition currently loaded.'}
 
 ## Technical Reference Database
-${KNOX_KNOWLEDGE_BASE.slice(0, 20000)}`;
+${getFullKnoxKnowledge().slice(0, 20000)}`;
 
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
         { role: "system", content: systemPrompt },
@@ -150,7 +150,7 @@ ${KNOX_KNOWLEDGE_BASE.slice(0, 20000)}`;
   /**
    * Store an A2L definition file to S3 for future binary matching
    */
-  storeA2L: publicProcedure
+  storeA2L: protectedProcedure
     .input(
       z.object({
         fileName: z.string(),
@@ -183,14 +183,15 @@ ${KNOX_KNOWLEDGE_BASE.slice(0, 20000)}`;
         "application/json"
       );
 
-      return { success: true, url, ecuFamily: input.ecuFamily };
+      // Do NOT return raw storage URL to client
+      return { success: true, ecuFamily: input.ecuFamily };
     }),
 
   /**
    * Magic Mode — AI-powered map name simplification
    * Takes a batch of engineering map names and returns friendly names + smart categories
    */
-  simplifyMaps: publicProcedure
+  simplifyMaps: protectedProcedure
     .input(
       z.object({
         maps: z.array(
@@ -295,7 +296,7 @@ Examples of good translations:
   /**
    * Fetch a stored A2L file by ECU family for auto-matching
    */
-  fetchA2L: publicProcedure
+  fetchA2L: protectedProcedure
     .input(
       z.object({
         ecuFamily: z.string(),

@@ -8,6 +8,34 @@ import App from "./App";
 import { getLoginUrl } from "./const";
 import "./index.css";
 
+// ── Knox Shield (production-only anti-tamper) ──────────────────────────────
+import { activateShield, protectNetworkRequests } from "@/lib/knoxShield";
+
+// Activate client-side protections in production only.
+// This does NOT interfere with any app logic, tRPC calls, or closed-loop behavior.
+// It only adds passive detection layers (DevTools, timing, DOM integrity).
+activateShield({
+  productionOnly: true,
+  detectDevTools: true,
+  protectConsole: true,
+  disableContextMenu: true,
+  disableInspectShortcuts: true,
+  timingDetection: true,
+  onTamperDetected: (type, details) => {
+    // Silent logging — does NOT block the user or break any functionality
+    // In a future version, this could report to the server for audit
+    if (import.meta.env.DEV) {
+      console.warn(`[Knox Shield] Tamper detected: ${type}`, details);
+    }
+  },
+});
+
+// Add request fingerprinting to all fetch calls (production only)
+if (import.meta.env.PROD) {
+  protectNetworkRequests();
+}
+// ── End Knox Shield ────────────────────────────────────────────────────────
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {

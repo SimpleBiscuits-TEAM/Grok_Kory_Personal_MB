@@ -1,5 +1,5 @@
 /**
- * PPEI AI Beta — Drag Racing Analyzer
+ * V-OP Beta — Drag Racing Analyzer
  *
  * Detects drag runs from datalog, calculates timeslip metrics, identifies
  * performance-limiting faults, and generates tuner recommendations.

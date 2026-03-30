@@ -1,5 +1,5 @@
 /**
- * DragTimeslip — PPEI AI Beta
+ * DragTimeslip — V-OP Beta
  *
  * Displays drag racing analysis results in a timeslip-style card
  * matching the aesthetic of a real drag strip timing slip.

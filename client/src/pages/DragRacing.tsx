@@ -18,6 +18,7 @@ import {
   Medal, Swords
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ShareCard, buildTimeslipShareData, buildCalloutShareData, buildLeagueShareData, QuickShareButton } from '@/components/ShareCard';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -247,13 +248,17 @@ export default function DragRacing() {
                           {entry.season || 'All-Time'}
                         </span>
                       </div>
-                      <button
-                        onClick={() => shareToFacebook(`Check out this leaderboard time: ${entry.bestValue} on V-OP Drag Racing!`)}
-                        className="ppei-btn-hover"
-                        style={{ padding: '6px', borderRadius: '2px', background: 'oklch(0.16 0.006 260)', border: `1px solid ${sColor.border}` }}
-                      >
-                        <Share2 className="h-3.5 w-3.5" style={{ color: sColor.blue }} />
-                      </button>
+                      <ShareCard
+                        data={buildTimeslipShareData(
+                          entry.bestValue ? Number(entry.bestValue).toFixed(3) : '—',
+                          '—',
+                          '—',
+                          entry.vehicleClass || undefined,
+                          undefined,
+                          entry.season || undefined
+                        )}
+                        compact
+                      />
                     </div>
                   </Card>
                 ))}
@@ -400,10 +405,15 @@ export default function DragRacing() {
                         )}
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => shareToFacebook(`I'm calling out all racers: "${c.title}" — ${c.locationValue}. Think you can beat me? V-OP Drag Racing`)}
-                          className="ppei-btn-hover" style={{ padding: '6px 10px', borderRadius: '2px', background: 'oklch(0.16 0.006 260)', border: `1px solid ${sColor.border}` }}>
-                          <Share2 className="h-3.5 w-3.5" style={{ color: sColor.blue }} />
-                        </button>
+                        <ShareCard
+                          data={buildCalloutShareData(
+                            c.title,
+                            c.locationValue || 'Unknown',
+                            undefined,
+                            undefined
+                          )}
+                          compact
+                        />
                       </div>
                     </div>
                   </Card>
@@ -554,10 +564,16 @@ export default function DragRacing() {
                             JOIN
                           </Button>
                         )}
-                        <button onClick={() => shareToFacebook(`Join "${l.name}" on V-OP Drag Racing! ${l.locationValue ? l.locationValue + ' — ' : ''}${l.memberCount ?? 0} racers and counting.`)}
-                          className="ppei-btn-hover" style={{ padding: '6px 10px', borderRadius: '2px', background: 'oklch(0.16 0.006 260)', border: `1px solid ${sColor.border}` }}>
-                          <Share2 className="h-3.5 w-3.5" style={{ color: sColor.blue }} />
-                        </button>
+                        <ShareCard
+                          data={buildLeagueShareData(
+                            l.name,
+                            0, // rank
+                            0, // points
+                            undefined,
+                            undefined
+                          )}
+                          compact
+                        />
                       </div>
                     </div>
                   </Card>

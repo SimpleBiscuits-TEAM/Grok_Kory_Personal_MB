@@ -112,7 +112,7 @@ export function runReasoningEngine(
     operatingContext: ctx,
     betaImprovements,
     summary,
-    engineVersion: 'PPEI AI Beta v1.0',
+    engineVersion: 'V-OP Beta v1.0',
   };
 }
 
@@ -335,7 +335,7 @@ function analyzeTccBehavior(
     evidence,
     suggestion,
     betaNote:
-      'PPEI AI Beta: Slip pattern analysis uses ±25 RPM noise-floor filtering (logging tool signal noise), ' +
+      'V-OP Beta: Slip pattern analysis uses ±25 RPM noise-floor filtering (logging tool signal noise), ' +
       'gear-shift exclusion (±15 samples around gear changes), lock-transition grace period (±20 samples), ' +
       'converging-slip exclusion (slip decreasing >30% over 20 samples = normal torque multiplication), ' +
       'and 15-consecutive-sample confirmation. Load-correlation logic compares slip events against ' +
@@ -469,7 +469,7 @@ function analyzeRailPressure(
           'Verify high-pressure pump output pressure (HP4 on L5P, CP4 on LML, CP3 on older platforms). Consider fuel system inspection if deviation worsens under load.'
         : undefined,
       betaNote:
-        'PPEI AI Beta: Rail pressure deviation is only evaluated at operating temperature (ECT >160°F). ' +
+        'V-OP Beta: Rail pressure deviation is only evaluated at operating temperature (ECT >160°F). ' +
         'PCV current fluctuation is cross-correlated with deviation to distinguish regulator hunting ' +
         'from normal load-induced variation.',
     });
@@ -823,7 +823,7 @@ function analyzeConverterStallVsTurboSpool(
         'MAF limiting (reducing fuel on the bottom end) can reduce smoke but may increase lag since ' +
         'there is less heat energy to drive the turbo.',
       betaNote:
-        'PPEI AI Beta: Converter stall analysis examines WOT launch events (throttle >85%, ' +
+        'V-OP Beta: Converter stall analysis examines WOT launch events (throttle >85%, ' +
         'gear 1-2, VSS <15 mph) and measures the delay from WOT to first meaningful boost ' +
         'production, as well as the RPM at which the turbo begins spooling. ' +
         'This finding is presented as a possibility, not a definitive diagnosis — multiple ' +
@@ -1000,7 +1000,7 @@ function analyzeBoostLeak(
         'address the boost leak first — restoring full boost pressure may partially compensate ' +
         'for a lower stall speed by allowing the turbo to build pressure more quickly.',
       betaNote:
-        'PPEI AI Beta: Boost leak detection compares peak MAF (airflow) against peak boost ' +
+        'V-OP Beta: Boost leak detection compares peak MAF (airflow) against peak boost ' +
         'pressure under WOT conditions. A secondary check looks for boost plateauing between ' +
         'mid and high RPM despite increasing airflow. The compound effect with converter stall ' +
         'mismatch is noted when both conditions are detected in the same log.',

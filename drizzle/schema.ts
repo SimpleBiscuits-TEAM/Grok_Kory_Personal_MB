@@ -259,6 +259,7 @@ export const dragProfiles = mysqlTable("drag_profiles", {
   subscriptionStatus: mysqlEnum("subscriptionStatus", ["none", "active", "expired", "cancelled"]).default("none").notNull(),
   subscriptionExpiresAt: timestamp("subscriptionExpiresAt"),
   avatarUrl: text("avatarUrl"),
+  vehiclePhotoUrl: text("vehiclePhotoUrl"), // truck photo for share cards
   bio: text("bio"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

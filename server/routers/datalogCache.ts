@@ -15,9 +15,9 @@ function randomSuffix(): string {
 export const datalogCacheRouter = router({
   /**
    * Cache a datalog upload to S3 and record metadata.
-   * Public — works for anonymous users too.
+   * SECURED — requires authentication to prevent anonymous abuse.
    */
-  cacheDatalog: publicProcedure
+  cacheDatalog: protectedProcedure
     .input(
       z.object({
         fileName: z.string(),
@@ -65,7 +65,7 @@ export const datalogCacheRouter = router({
       return {
         id: inserted.insertId,
         s3Key,
-        s3Url: url,
+        // s3Url intentionally omitted — use getDownloadUrl to get a short-lived presigned URL
         expiresAt: expiresAt.toISOString(),
       };
     }),
@@ -135,7 +135,7 @@ export const datalogCacheRouter = router({
         });
       }
 
-      // Get a fresh presigned URL
+      // Get a fresh presigned URL — NEVER fall back to stored URL
       try {
         const { url } = await storageGet(entry.s3Key);
         return {
@@ -144,13 +144,12 @@ export const datalogCacheRouter = router({
           fileSize: entry.fileSize,
           isExpired: new Date() > entry.expiresAt,
         };
-      } catch {
-        return {
-          fileName: entry.fileName,
-          url: entry.s3Url, // fallback to stored URL
-          fileSize: entry.fileSize,
-          isExpired: true,
-        };
+      } catch (err: any) {
+        console.error(`[DatalogCache] Failed to generate presigned URL for ${entry.s3Key}:`, err.message);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Unable to generate download URL. The cached file may have expired.',
+        });
       }
     }),
 });

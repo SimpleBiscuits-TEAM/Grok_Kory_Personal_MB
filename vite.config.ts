@@ -167,6 +167,31 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // ── Security Hardening ──────────────────────────────────────────────
+    sourcemap: false,            // NEVER ship source maps to production
+    minify: 'terser',            // Use terser for aggressive minification
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+        passes: 2,
+        pure_funcs: ['console.log', 'console.debug', 'console.info', 'console.warn', 'console.table'],
+      },
+      mangle: {
+        toplevel: true,
+      },
+      format: {
+        comments: false,
+      },
+    } as any,
+    rollupOptions: {
+      output: {
+        // Randomize chunk names to make static analysis harder
+        chunkFileNames: 'assets/[hash].js',
+        entryFileNames: 'assets/[hash].js',
+        assetFileNames: 'assets/[hash].[ext]',
+      },
+    },
   },
   server: {
     host: true,
