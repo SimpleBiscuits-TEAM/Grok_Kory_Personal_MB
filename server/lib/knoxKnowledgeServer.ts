@@ -822,12 +822,123 @@ Security Status: SEED request returns NEGATIVE RESPONSE on locked units — this
 The 6 software segments (SW1-SW6) represent the complete ECU firmware: calibration, operating system, boot loader, and auxiliary modules. All must be read and verified before flashing. The VOP flash scripting language FLASH_BLOCKS command iterates through all segments during a full flash.
 `;
 
+const VOP3_FLASH_ENCRYPTION = `
+## VOP 3.0 Flash Script Encryption System (CONFIDENTIAL — Server-Only)
+
+### Architecture Overview
+Flash scripts and calibration data stored on the external Winbond 25Q256FVE6 32MB SPI NOR flash are encrypted at rest using AES-256-GCM authenticated encryption. Decryption occurs exclusively into the 64MB PSRAM during execution, and plaintext is securely zeroed immediately after use. This prevents extraction of proprietary flash procedures even if an attacker physically desolders the Winbond chip.
+
+### Encryption Algorithm
+- Cipher: AES-256-GCM (Galois/Counter Mode)
+- Key size: 256 bits
+- IV/Nonce: 12 bytes, randomly generated per blob (NIST SP 800-38D compliant)
+- Authentication tag: 16 bytes (detects any tampering)
+- Additional Authenticated Data (AAD): header fields (magic, version, flags, script_id, sizes) are bound to ciphertext — prevents header swapping attacks
+- Hardware accelerated: ESP32-S3 mbedtls uses the on-chip AES engine (~40MB/s throughput)
+
+### Key Management
+The key hierarchy uses three layers:
+1. Master Key: 256-bit key burned into eFuse BLOCK_KEY4 during manufacturing. Read-protected and write-protected — software cannot extract it. Same key across all VOP 3.0 boards.
+2. Device ID: SHA-256 hash of the raw eFuse BLOCK0 data (MAC address + wafer info). Unique per chip, immutable.
+3. Per-Device Key: Derived via HKDF-SHA256(IKM=master_key, salt=device_id, info="VOP3-FlashCrypt-v1"). This means each board has a unique encryption key — dumping flash from Board A is useless on Board B.
+
+The master key is read from eFuse into a stack variable, used for HKDF derivation, then immediately zeroed. Only the derived per-device key persists in RAM (IRAM, not flash-backed) for the session lifetime.
+
+### Encrypted Blob Format (48-byte header)
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 4 | magic | 0x03524356 ("VCR\x03") |
+| 4 | 2 | version | Format version (currently 0x0001) |
+| 6 | 2 | flags | Content type and properties |
+| 8 | 4 | script_id | Unique script identifier |
+| 12 | 4 | orig_size | Original plaintext size |
+| 16 | 4 | cipher_size | Ciphertext size (same as orig for GCM) |
+| 20 | 12 | iv | Random AES-GCM nonce |
+| 32 | 16 | tag | GCM authentication tag |
+| 48 | var | ciphertext | Encrypted payload |
+
+### Flag Definitions
+- 0x0001 SCRIPT: Flash script (.vopscript)
+- 0x0002 CALDATA: Calibration/tune data (.voptune)
+- 0x0004 FIRMWARE: Firmware update payload
+- 0x0008 COMPRESSED: LZ4 compressed before encryption
+- 0x0010 DEVICE_LOCK: Bound to specific board (cannot transfer)
+
+### Winbond 25Q256FVE6 Flash Layout (32MB)
+| Offset | Size | Partition |
+|--------|------|-----------|
+| 0x0000000 | 1MB | Script Index Table |
+| 0x0100000 | 15MB | Encrypted Flash Scripts |
+| 0x1000000 | 8MB | Encrypted Calibration Data |
+| 0x1800000 | 4MB | Firmware Update Staging |
+| 0x1C00000 | 3MB | Datalog Storage |
+| 0x1F00000 | 1MB | Reserved / Wear-leveling metadata |
+
+Each script occupies a 256KB slot. Maximum 60 scripts in the scripts partition. Maximum plaintext size per script: 2MB.
+
+### Execution Flow
+1. Boot: vop_crypt_init() reads master key from eFuse, reads device ID, derives per-device key via HKDF, wipes master key from stack.
+2. Flash command received from phone: vop_crypt_decrypt_script() reads encrypted blob from Winbond, validates header, performs AES-256-GCM authenticated decryption into PSRAM.
+3. If GCM tag fails: tamper event logged to NVS (survives reboot), tamper counter incremented, decryption aborted. Script is NOT executed.
+4. If GCM tag passes: plaintext script parsed and executed (CAN commands sent to ECU).
+5. After execution: vop_crypt_free_plaintext() zeroes the PSRAM buffer using mbedtls_platform_zeroize() (prevents compiler from optimizing away the wipe).
+6. Shutdown: vop_crypt_deinit() zeroes the derived key from memory.
+
+### Two Encryption Modes
+1. DEVICE-BOUND: Encrypted with per-device key (master + device ID). Only that specific board can decrypt. Used for scripts stored on the board.
+2. UNIVERSAL: Encrypted with master key only (fixed salt). Any provisioned board can decrypt. Used for OTA distribution — board re-encrypts with device key on receipt.
+
+### Manufacturing Provisioning
+During manufacturing, each VOP 3.0 board is provisioned once:
+1. Master key burned into eFuse BLOCK_KEY4 via vop_provision_burn_master_key()
+2. Read protection set — software can never read the key back
+3. Write protection set — key cannot be overwritten
+4. These operations are IRREVERSIBLE (eFuse is one-time programmable)
+5. After reboot, the board derives its unique key and is ready for encrypted scripts
+
+### Host-Side Tooling
+A Python tool (vop_encrypt_script.py) encrypts scripts before deployment:
+- genkey: Generate 256-bit master key
+- encrypt: Encrypt script (device-bound or universal)
+- decrypt: Decrypt for testing/verification
+- inspect: View blob header without decrypting
+- batch: Encrypt entire directory of scripts
+Uses the 'cryptography' Python package with identical HKDF and AES-GCM parameters as the firmware.
+
+### Tamper Detection and Forensics
+- GCM authentication tag detects ANY modification to ciphertext or header
+- Tamper events logged to NVS: count, flash offset, error type, uptime timestamp
+- Tamper data survives reboots — can be retrieved for security auditing
+- Future: tamper count could be burned into eFuse (permanent, unforgeable)
+
+### Security Properties
+- Confidentiality: AES-256 — computationally infeasible to break
+- Integrity: GCM tag — single bit flip detected
+- Authenticity: AAD binds header to ciphertext — no header swapping
+- Device binding: HKDF with device ID — flash dump useless on different board
+- Key protection: eFuse read-protect — no software extraction
+- Forward secrecy: random IV per blob — identical scripts produce different ciphertext
+- Memory safety: plaintext zeroed after use — no PSRAM residue
+
+### Threat Model
+| Threat | Mitigation |
+|--------|------------|
+| Desolder Winbond chip, read with programmer | AES-256-GCM — ciphertext is meaningless without key |
+| Copy flash dump to another board | Per-device key — different board, different key |
+| JTAG memory dump during execution | JTAG disabled via eFuse in production |
+| Modify encrypted blob (inject malicious CAN commands) | GCM tag detects tampering, script rejected |
+| Brute-force the encryption key | 2^256 keyspace — heat death of universe first |
+| Read master key from eFuse via software | Read-protected — hardware returns zeros |
+| Glitch attack on eFuse read protection | Requires expensive lab equipment, not scalable |
+| Man-in-the-middle during OTA | TLS transport + GCM integrity on blob |
+`;
+
 /**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + VOP3_FLASH_ENCRYPTION;
 }
 
 /**
