@@ -2340,3 +2340,4 @@
 - [x] Create RECOVERY.md with full step-by-step restore instructions and one-paste Manus rebuild prompt
 - [x] Set up weekly scheduled task for automated backup (every Sunday 3AM CT)
 - [x] First backup exported successfully (6 users, 10 tables, 9.3 KB)
+- [x] Fix og:description and twitter:description - still showing old Duramax text (platform injects from project description, not Settings title)
