@@ -18,7 +18,7 @@ import { PIDReading } from './obdConnection';
 export interface NormalizedReading {
   // Protocol-agnostic identifiers
   id: string; // Unique identifier (e.g., "obd2_0x0c", "j1939_61444_0", "kline_0x0c")
-  protocol: 'obd2' | 'j1939' | 'kline';
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop';
   timestamp: number;
   value: number;
   unit: string;
@@ -326,7 +326,7 @@ export function groupByProtocol(readings: NormalizedReading[]): Map<string, Norm
  */
 export function filterByProtocol(
   readings: NormalizedReading[],
-  protocol: 'obd2' | 'j1939' | 'kline'
+  protocol: 'obd2' | 'j1939' | 'kline' | 'vop'
 ): NormalizedReading[] {
   return readings.filter(r => r.protocol === protocol);
 }

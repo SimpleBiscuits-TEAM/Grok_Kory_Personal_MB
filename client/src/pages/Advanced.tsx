@@ -1508,7 +1508,7 @@ function EditorWithSubTabs({ wp8Data, onBack }: { wp8Data: WP8ParseResult | null
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'qa' | 'offsets' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'flash' | 'qa' | 'offsets' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1516,6 +1516,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1707,6 +1708,66 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
+
+        {activeTab === 'flash' && (
+          <div className="ppei-anim-fade-up">
+            <div style={{
+              background: sColor.bgCard,
+              border: `1px solid ${sColor.border}`,
+              borderRadius: '3px',
+              padding: '80px 20px',
+              textAlign: 'center',
+              minHeight: '400px',
+              display: 'flex',
+              flexDirection: 'column' as const,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <div style={{ fontSize: '3.5rem', marginBottom: '24px' }}>{String.fromCodePoint(0x1F468, 0x200D, 0x1F373)}</div>
+              <div style={{
+                fontFamily: sFont.heading,
+                fontSize: '1.8rem',
+                letterSpacing: '0.12em',
+                color: 'oklch(0.75 0.18 60)',
+                marginBottom: '12px',
+              }}>
+                FLASH
+              </div>
+              <div style={{
+                fontFamily: sFont.body,
+                fontSize: '1.1rem',
+                color: sColor.textDim,
+                lineHeight: 1.7,
+                maxWidth: '460px',
+              }}>
+                Come back next week {String.fromCodePoint(0x1F609)}{' '}&mdash;{' '}we're cookin'.
+              </div>
+              <div style={{
+                marginTop: '32px',
+                display: 'flex',
+                gap: '8px',
+                flexWrap: 'wrap' as const,
+                justifyContent: 'center',
+              }}>
+                {['ECU Flashing', 'Calibration Upload', 'Binary Diff', 'Recovery Mode'].map(feature => (
+                  <span key={feature} style={{
+                    fontFamily: sFont.mono,
+                    fontSize: '0.6rem',
+                    background: 'rgba(200,180,50,0.12)',
+                    border: '1px solid rgba(200,180,50,0.25)',
+                    borderRadius: '3px',
+                    padding: '4px 10px',
+                    color: 'oklch(0.75 0.18 60)',
+                    textTransform: 'uppercase' as const,
+                    letterSpacing: '0.06em',
+                  }}>
+                    {feature}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Voice Command Button */}

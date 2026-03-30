@@ -287,7 +287,7 @@ function getPIDNameOBD(pid: number): string {
 export type ProtocolReading = J1939ParameterReading | KLineParameterReading | PIDReading;
 
 export interface UnifiedCSVExportOptions {
-  protocol: 'j1939' | 'kline' | 'obd2';
+  protocol: 'j1939' | 'kline' | 'obd2' | 'vop';
   vehicleInfo?: VehicleInfo;
   vin?: string;
   startTime?: number;
@@ -306,6 +306,7 @@ export function exportProtocolToCSV(
       return exportJ1939ToCSV(readings as J1939ParameterReading[], options);
     case 'kline':
       return exportKLineToCSV(readings as KLineParameterReading[], options);
+    case 'vop':
     case 'obd2':
     default:
       return exportOBDToCSV(readings as PIDReading[], options);
@@ -347,9 +348,9 @@ export function downloadCSV(content: string, filename: string): void {
 /**
  * Generate filename with timestamp
  */
-export function generateCSVFilename(protocol: 'j1939' | 'kline' | 'obd2', vin?: string): string {
+export function generateCSVFilename(protocol: 'j1939' | 'kline' | 'obd2' | 'vop', vin?: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-  const protocolName = protocol === 'obd2' ? 'obd2' : protocol.toUpperCase();
+  const protocolName = protocol === 'obd2' ? 'obd2' : protocol === 'vop' ? 'vop' : protocol.toUpperCase();
   const vinPart = vin ? `-${vin.slice(-8)}` : '';
   return `datalog-${protocolName}${vinPart}-${timestamp}.csv`;
 }

@@ -14,7 +14,7 @@ export type ProtocolReading = J1939ParameterReading | KLineParameterReading | PI
 
 export interface ProtocolGaugeDashboardProps {
   readings: ProtocolReading[];
-  protocol: 'j1939' | 'kline' | 'obd2';
+  protocol: 'j1939' | 'kline' | 'obd2' | 'vop';
   maxGauges?: number;
 }
 
@@ -49,7 +49,7 @@ interface GaugeProps {
   min: number;
   max: number;
   unit: string;
-  protocol: 'j1939' | 'kline' | 'obd2';
+  protocol: 'j1939' | 'kline' | 'obd2' | 'vop';
 }
 
 function ProtocolGauge({ reading, min, max, unit, protocol }: GaugeProps) {
@@ -104,19 +104,23 @@ function ProtocolGauge({ reading, min, max, unit, protocol }: GaugeProps) {
                 ? sColor.purple
                 : protocol === 'kline'
                   ? sColor.orange
-                  : sColor.blue,
+                  : protocol === 'vop'
+                    ? sColor.red
+                    : sColor.blue,
             background:
               protocol === 'j1939'
                 ? 'rgba(153,102,255,0.2)'
                 : protocol === 'kline'
                   ? 'rgba(255,127,0,0.2)'
-                  : 'rgba(112,178,255,0.2)',
+                  : protocol === 'vop'
+                    ? 'rgba(200,50,50,0.2)'
+                    : 'rgba(112,178,255,0.2)',
             padding: '2px 6px',
             borderRadius: '3px',
             fontWeight: 700,
           }}
         >
-          {protocol === 'j1939' ? 'J1939' : protocol === 'kline' ? 'K-LINE' : 'OBD2'}
+          {protocol === 'j1939' ? 'J1939' : protocol === 'kline' ? 'K-LINE' : protocol === 'vop' ? 'V-OP' : 'OBD2'}
         </span>
         <span
           style={{
