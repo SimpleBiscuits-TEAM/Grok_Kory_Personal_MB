@@ -2341,3 +2341,5 @@
 - [x] Set up weekly scheduled task for automated backup (every Sunday 3AM CT)
 - [x] First backup exported successfully (6 users, 10 tables, 9.3 KB)
 - [x] Fix og:description and twitter:description - still showing old Duramax text (platform injects from project description, not Settings title)
+- [x] SiteGate: transparent blurry background showing V-OP Pro behind the gate
+- [x] SiteGate: "get in line" messaging with email prompt, "see you soon" vibe
