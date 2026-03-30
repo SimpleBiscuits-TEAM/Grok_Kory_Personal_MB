@@ -1837,6 +1837,8 @@ export function alignOffsets(
       for (const candidateBase of candidates) {
         let matches = 0;
         let total = 0;
+        let nanCount = 0;
+        let denormCount = 0;
         const anchors: AlignmentResult['anchors'] = [];
 
         for (const map of allTestMaps) {
@@ -1849,6 +1851,18 @@ export function alignOffsets(
           const cm = ecuDef.compuMethods.get(map.compuMethod);
           const phys = rawToPhysical(raw, cm);
 
+          // NaN/Inf detection: calibration data should NEVER produce NaN/Inf
+          if (Number.isNaN(phys) || !Number.isFinite(phys)) {
+            nanCount++;
+            continue; // Don't count as a match
+          }
+
+          // Denormalized float detection: very small non-zero values suggest
+          // reading from code/pointer regions rather than calibration data
+          if (phys !== 0 && Math.abs(phys) < 1e-30) {
+            denormCount++;
+          }
+
           if (phys >= map.lowerLimit && phys <= map.upperLimit) {
             matches++;
             if (anchors.length < 5) {
@@ -1858,7 +1872,11 @@ export function alignOffsets(
         }
 
         if (total > 0) {
-          const score = matches / total;
+          // Score: ratio of clean matches, heavily penalized by NaN/Inf presence
+          const nanPenalty = nanCount / total; // 0 = no NaN, 1 = all NaN
+          const denormPenalty = (denormCount / total) * 0.3; // lighter penalty
+          const rawScore = matches / total;
+          const score = Math.max(0, rawScore - nanPenalty - denormPenalty);
           if (score > bestScore) {
             bestScore = score;
             bestBase = candidateBase;
@@ -1877,6 +1895,9 @@ export function alignOffsets(
           let total = 0;
           const anchors: AlignmentResult['anchors'] = [];
 
+          let nanCount = 0;
+          let denormCount = 0;
+
           for (const map of allTestMaps) {
             const binOffset = map.address - tryBase;
             if (binOffset < 0 || binOffset >= binaryData.length - 4) continue;
@@ -1887,6 +1908,14 @@ export function alignOffsets(
             const cm = ecuDef.compuMethods.get(map.compuMethod);
             const phys = rawToPhysical(raw, cm);
 
+            if (Number.isNaN(phys) || !Number.isFinite(phys)) {
+              nanCount++;
+              continue;
+            }
+            if (phys !== 0 && Math.abs(phys) < 1e-30) {
+              denormCount++;
+            }
+
             if (phys >= map.lowerLimit && phys <= map.upperLimit) {
               matches++;
               if (anchors.length < 5) {
@@ -1895,10 +1924,16 @@ export function alignOffsets(
             }
           }
 
-          if (total > 0 && matches / total > bestScore) {
-            bestScore = matches / total;
-            bestBase = tryBase;
-            bestAnchors = anchors;
+          if (total > 0) {
+            const nanPenalty = nanCount / total;
+            const denormPenalty = (denormCount / total) * 0.3;
+            const rawScore = matches / total;
+            const score = Math.max(0, rawScore - nanPenalty - denormPenalty);
+            if (score > bestScore) {
+              bestScore = score;
+              bestBase = tryBase;
+              bestAnchors = anchors;
+            }
           }
         }
 
@@ -1972,9 +2007,16 @@ export function alignOffsets(
   const valueMaps = ecuDef.maps.filter(m => m.type === 'VALUE' && m.address > 0);
   const sampleMaps = valueMaps.slice(0, 50);
 
+  // Track best across all known offsets (don't return on first >0.5 — find the BEST)
+  let knownBestScore = 0;
+  let knownBestOffset = 0;
+  let knownBestAnchors: AlignmentResult['anchors'] = [];
+
   for (const baseOffset of knownOffsets) {
     let matches = 0;
     let total = 0;
+    let nanCount = 0;
+    let denormCount = 0;
     const anchors: AlignmentResult['anchors'] = [];
 
     for (const map of sampleMaps) {
@@ -1989,6 +2031,15 @@ export function alignOffsets(
       const cm = ecuDef.compuMethods.get(map.compuMethod);
       const phys = rawToPhysical(raw, cm);
 
+      // NaN/Inf detection: calibration data should NEVER produce NaN/Inf
+      if (Number.isNaN(phys) || !Number.isFinite(phys)) {
+        nanCount++;
+        continue;
+      }
+      if (phys !== 0 && Math.abs(phys) < 1e-30) {
+        denormCount++;
+      }
+
       if (phys >= map.lowerLimit && phys <= map.upperLimit) {
         matches++;
         if (anchors.length < 5) {
@@ -1997,14 +2048,26 @@ export function alignOffsets(
       }
     }
 
-    if (total > 0 && matches / total > 0.5) {
-      return {
-        offset: -baseOffset,
-        confidence: matches / total,
-        method: 'known_offset',
-        anchors,
-      };
+    if (total > 0) {
+      const nanPenalty = nanCount / total;
+      const denormPenalty = (denormCount / total) * 0.3;
+      const rawScore = matches / total;
+      const score = Math.max(0, rawScore - nanPenalty - denormPenalty);
+      if (score > knownBestScore) {
+        knownBestScore = score;
+        knownBestOffset = baseOffset;
+        knownBestAnchors = anchors;
+      }
     }
+  }
+
+  if (knownBestScore > 0.5) {
+    return {
+      offset: -knownBestOffset,
+      confidence: knownBestScore,
+      method: 'known_offset',
+      anchors: knownBestAnchors,
+    };
   }
 
   // Strategy 3: Adaptive brute-force search
@@ -2031,6 +2094,8 @@ export function alignOffsets(
   const testBase = (tryBase: number) => {
     let matches = 0;
     let total = 0;
+    let nanCount = 0;
+    let denormCount = 0;
     const anchors: AlignmentResult['anchors'] = [];
 
     for (const map of bruteTestMaps) {
@@ -2044,6 +2109,14 @@ export function alignOffsets(
       const cm = ecuDef.compuMethods.get(map.compuMethod);
       const phys = rawToPhysical(raw, cm);
 
+      if (Number.isNaN(phys) || !Number.isFinite(phys)) {
+        nanCount++;
+        continue;
+      }
+      if (phys !== 0 && Math.abs(phys) < 1e-30) {
+        denormCount++;
+      }
+
       if (phys >= map.lowerLimit && phys <= map.upperLimit) {
         matches++;
         if (anchors.length < 5) {
@@ -2053,7 +2126,10 @@ export function alignOffsets(
     }
 
     if (total > 0) {
-      const score = matches / total;
+      const nanPenalty = nanCount / total;
+      const denormPenalty = (denormCount / total) * 0.3;
+      const rawScore = matches / total;
+      const score = Math.max(0, rawScore - nanPenalty - denormPenalty);
       if (score > bestScore) {
         bestScore = score;
         bestOffset = tryBase;
@@ -2704,6 +2780,8 @@ export function autoHealAlignment(
   const testOffset = (offset: number): { score: number; anchors: AlignmentResult['anchors'] } => {
     let matches = 0;
     let total = 0;
+    let nanCount = 0;
+    let denormCount = 0;
     const anchors: AlignmentResult['anchors'] = [];
 
     for (const map of testMaps) {
@@ -2716,6 +2794,16 @@ export function autoHealAlignment(
       const cm = ecuDef.compuMethods.get(map.compuMethod);
       const phys = rawToPhysical(raw, cm);
 
+      // NaN/Inf detection: calibration data should NEVER produce NaN/Inf
+      if (Number.isNaN(phys) || !Number.isFinite(phys)) {
+        nanCount++;
+        continue;
+      }
+      // Denormalized float detection
+      if (phys !== 0 && Math.abs(phys) < 1e-30) {
+        denormCount++;
+      }
+
       if (phys >= map.lowerLimit && phys <= map.upperLimit) {
         matches++;
         if (anchors.length < 5) {
@@ -2724,7 +2812,12 @@ export function autoHealAlignment(
       }
     }
 
-    return { score: total > 0 ? matches / total : 0, anchors };
+    if (total === 0) return { score: 0, anchors };
+    const nanPenalty = nanCount / total;
+    const denormPenalty = (denormCount / total) * 0.3;
+    const rawScore = matches / total;
+    const score = Math.max(0, rawScore - nanPenalty - denormPenalty);
+    return { score, anchors };
   };
 
   // Helper: apply an offset, populate values, and validate

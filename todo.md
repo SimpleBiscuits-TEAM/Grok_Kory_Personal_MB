@@ -2351,3 +2351,21 @@
 - [x] Remove legacy PPEIROCKS passcode from Advanced — make it auth-only (sign in + admin approval)
 - [x] Add bare domain redirect from ppei.ai to www.ppei.ai in server
 - [x] Sweep all pages for dim text contrast (oklch lightness < 0.60) and brighten — 246 fixes across 36 files
+
+## Batch 7 — Outstanding Suggestions + Admin Function Tab (2026-03-30)
+- [ ] What's New changelog modal on login with dismiss option
+- [ ] Fix fleet TS errors — add fleetSensors, fleetAiInsights, fleetAccessTokens to schema
+- [ ] Wire playoff bracket to league seasons — View Bracket button on league cards
+- [ ] Challenge links for drag racing callouts — shareable accept URLs
+- [ ] Open Graph meta tags — dynamic OG preview images per share type
+- [ ] MG1 disassembly/definition generation pipeline — auto-build def files from binary analysis
+- [ ] Admin Function Tab — master index of all installed features/tools for quick access
+
+## MG1 Map Definition Deep Fix (2026-03-30)
+- [x] Investigate why editor shows AirPah_ratMAirEngInNom (ratio ~0.92) while WinOLS shows AirPah_pIntkNomFcoCorr (hPa ~4.9-90.0) at same address 0x48E638
+- [x] Root cause: alignment scoring used only range checks (unbounded -3.4E+38 to 3.4E+38), so wrong base scored equally
+- [x] Fix: added NaN/Inf/denormal penalty scoring to ALL alignment strategies (1.75 DEADBEEF, 2 known offsets, 3 brute force, autoHeal testOffset)
+- [x] Verified: correct base 0x08FD5F50 scores 0.974 vs wrong base 0.000 (100% NaN) at 80-map sample size
+- [x] Verified: correct base wins at all sample sizes (50, 80, 100, 500 maps)
+- [x] Also fixed Strategy 2 to track best across ALL candidates instead of returning first >0.5
+- [x] All 954 tests pass, TypeScript compiles cleanly
