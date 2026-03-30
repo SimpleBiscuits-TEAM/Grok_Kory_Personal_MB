@@ -2270,3 +2270,4 @@
 - [x] Move Coding to V-OP Lite (Home.tsx) as collapsible "BASIC EDITOR (NON-ECU)" section with VehicleCoding component
 - [x] Move USER MGMT out of tabs to header area for admins (with pending request badge count)
 - [x] Remove lock button from V-OP Pro header
+- [x] Move Honda Talon tab to sit right after Editor tab in V-OP Pro

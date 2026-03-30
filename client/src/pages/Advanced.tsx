@@ -1439,12 +1439,12 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
   { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
   { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
-  { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
