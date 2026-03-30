@@ -2272,3 +2272,10 @@
 - [x] Remove lock button from V-OP Pro header
 - [x] Move Honda Talon tab to sit right after Editor tab in V-OP Pro
 - [x] Change "V-OP LITE" button in Pro header to "← BACK" (clearer navigation, less confusing)
+- [x] Rename Binary tab to "Segment Swapper" and move it inside Editor tab (sub-section)
+- [x] Remove A2L Files tab (already handled inside Editor)
+- [x] Move Can-Am VIN to V-OP Lite (Home.tsx) under Basic Editor section
+- [x] Move Reverse Engineering under IntelliSpy tab (sub-section)
+- [x] Move Notifications tab under User Management panel (sub-tab)
+- [x] Move Support tab under User Management panel (sub-tab)
+- [x] Verify Honda Talon tab is visible and working in V-OP Pro

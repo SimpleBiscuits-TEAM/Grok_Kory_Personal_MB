@@ -11,7 +11,7 @@ import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut, Wrench, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, LogOut, Wrench, ChevronDown, ChevronUp, Key } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
@@ -36,6 +36,7 @@ import { APP_VERSION } from '@/lib/version';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import VehicleCoding from '@/components/VehicleCoding';
+import CanAmVinChanger from '@/components/CanAmVinChanger';
 import { useAuth } from '@/_core/hooks/useAuth';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
@@ -58,6 +59,7 @@ export default function Home() {
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
   const [showBasicEditor, setShowBasicEditor] = useState(false);
+  const [showCanAmVin, setShowCanAmVin] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -662,6 +664,43 @@ export default function Home() {
                   overflow: 'auto',
                 }}>
                   <VehicleCoding />
+                </div>
+              )}
+            </div>
+
+            {/* Can-Am VIN Changer */}
+            <div className="mt-6 ppei-anim-fade-up ppei-delay-600">
+              <button
+                onClick={() => setShowCanAmVin(!showCanAmVin)}
+                style={{
+                  width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '1rem 1.25rem',
+                  background: 'oklch(0.13 0.006 260)',
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderLeft: '4px solid oklch(0.75 0.18 60)',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  color: 'white',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Key style={{ width: 18, height: 18, color: 'oklch(0.75 0.18 60)' }} />
+                  <span style={{ fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '1.1rem', letterSpacing: '0.08em' }}>CAN-AM VIN</span>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.50 0.010 260)' }}>VIN Change & Key Relearn</span>
+                </div>
+                {showCanAmVin ? <ChevronUp style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} /> : <ChevronDown style={{ width: 18, height: 18, color: 'oklch(0.50 0.010 260)' }} />}
+              </button>
+              {showCanAmVin && (
+                <div style={{
+                  border: '1px solid oklch(0.22 0.008 260)',
+                  borderTop: 'none',
+                  borderRadius: '0 0 3px 3px',
+                  background: 'oklch(0.10 0.004 260)',
+                  height: 'calc(100vh - 200px)',
+                  overflow: 'auto',
+                }}>
+                  <CanAmVinChanger />
                 </div>
               )}
             </div>

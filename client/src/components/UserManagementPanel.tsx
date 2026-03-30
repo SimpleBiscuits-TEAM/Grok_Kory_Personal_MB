@@ -14,8 +14,11 @@ import { useState, useMemo } from 'react';
 import {
   Users, Shield, ShieldCheck, ShieldX, UserCheck, UserX, Search,
   ChevronDown, ChevronUp, Clock, AlertCircle, Crown, Star,
-  Check, X, Filter,
+  Check, X, Filter, Inbox, MessageSquare, Settings, Bell,
 } from 'lucide-react';
+import AdminNotificationPanel from '@/components/AdminNotificationPanel';
+import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
+import SupportAdminPanel from '@/components/SupportAdminPanel';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { Button } from '@/components/ui/button';
@@ -342,9 +345,12 @@ function UserRow({ user, isSuperAdmin, onRefresh }: {
 
 // ── Main Panel ──────────────────────────────────────────────────────────────
 
+type MgmtTab = 'users' | 'support' | 'notifications' | 'notifprefs';
+
 export default function UserManagementPanel() {
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const [mgmtTab, setMgmtTab] = useState<MgmtTab>('users');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
 
@@ -363,27 +369,83 @@ export default function UserManagementPanel() {
     { id: 'none', label: 'NO ACCESS' },
   ];
 
+  // Support stats for badge
+  const supportStats = trpc.supportAdmin.getDashboardStats.useQuery(undefined, { refetchInterval: 30000 });
+  const supportBadge = (supportStats.data?.unreadConversations ?? 0) + (supportStats.data?.totalFeedback ?? 0);
+
+  const mgmtTabs: { id: MgmtTab; label: string; icon: React.ReactNode; badge?: number }[] = [
+    { id: 'users', label: 'USERS', icon: <Users style={{ width: 14, height: 14 }} />, badge: stats?.pendingRequests },
+    { id: 'support', label: 'SUPPORT', icon: <Inbox style={{ width: 14, height: 14 }} />, badge: supportBadge },
+    { id: 'notifications', label: 'NOTIFICATIONS', icon: <Bell style={{ width: 14, height: 14 }} /> },
+    { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 14, height: 14 }} /> },
+  ];
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
       <div style={{
         padding: '16px 20px', borderBottom: `1px solid ${sColor.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
-        <div>
-          <h2 style={{
-            fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.text,
-            letterSpacing: '0.1em', margin: 0, display: 'flex', alignItems: 'center', gap: '8px',
-          }}>
-            <Users style={{ width: 18, height: 18, color: sColor.red }} />
-            USER MANAGEMENT
-          </h2>
-          <p style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, margin: '4px 0 0' }}>
-            {stats?.totalUsers ?? '—'} USERS · {stats?.pendingRequests ?? 0} PENDING · {stats?.approvedUsers ?? 0} WITH ACCESS
-          </p>
+        <h2 style={{
+          fontFamily: sFont.heading, fontSize: '1.1rem', color: sColor.text,
+          letterSpacing: '0.1em', margin: 0, display: 'flex', alignItems: 'center', gap: '8px',
+        }}>
+          <Users style={{ width: 18, height: 18, color: sColor.red }} />
+          USER MANAGEMENT
+        </h2>
+        <p style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, margin: '4px 0 0' }}>
+          {stats?.totalUsers ?? '—'} USERS · {stats?.pendingRequests ?? 0} PENDING · {stats?.approvedUsers ?? 0} WITH ACCESS
+        </p>
+
+        {/* Sub-tab navigation */}
+        <div style={{ display: 'flex', gap: '2px', marginTop: '12px', borderBottom: `1px solid ${sColor.border}` }}>
+          {mgmtTabs.map(t => (
+            <button key={t.id} onClick={() => setMgmtTab(t.id)} style={{
+              display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px',
+              fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+              color: mgmtTab === t.id ? 'white' : 'oklch(0.50 0.010 260)',
+              background: mgmtTab === t.id ? 'oklch(0.16 0.008 260)' : 'transparent',
+              border: 'none', borderBottom: mgmtTab === t.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+              cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
+              position: 'relative',
+            }}>
+              {t.icon} {t.label}
+              {(t.badge ?? 0) > 0 && (
+                <span style={{
+                  background: sColor.red, color: 'white',
+                  fontSize: '0.5rem', fontFamily: sFont.mono,
+                  padding: '1px 4px', borderRadius: '8px',
+                  lineHeight: 1.2, minWidth: '14px', textAlign: 'center',
+                }}>{t.badge}</span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* Support tab content */}
+      {mgmtTab === 'support' && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <SupportAdminPanel />
+        </div>
+      )}
+
+      {/* Notifications tab content */}
+      {mgmtTab === 'notifications' && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <AdminNotificationPanel onClose={() => setMgmtTab('users')} />
+        </div>
+      )}
+
+      {/* Notif Prefs tab content */}
+      {mgmtTab === 'notifprefs' && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <NotificationPrefsPanel />
+        </div>
+      )}
+
+      {/* Users tab content */}
+      {mgmtTab === 'users' && <>
       {/* Search + Filters */}
       <div style={{ padding: '12px 20px', borderBottom: `1px solid ${sColor.border}` }}>
         {/* Search */}
@@ -460,6 +522,7 @@ export default function UserManagementPanel() {
           ))
         )}
       </div>
+      </>}
     </div>
   );
 }

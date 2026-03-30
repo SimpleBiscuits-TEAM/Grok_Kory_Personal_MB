@@ -1430,9 +1430,85 @@ function EditorGate() {
   );
 }
 
+// ─── IntelliSpy + Reverse Engineering Wrapper ──────────────────────────────
+
+function IntelliSpyWithReverseEng({ isAdmin }: { isAdmin: boolean }) {
+  const [view, setView] = useState<'intellispy' | 'reverseeng'>('intellispy');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Sub-tab bar */}
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '8px', borderBottom: `1px solid oklch(0.20 0.008 260)` }}>
+        <button onClick={() => setView('intellispy')} style={{
+          display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+          fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+          color: view === 'intellispy' ? 'white' : 'oklch(0.50 0.010 260)',
+          background: view === 'intellispy' ? 'oklch(0.16 0.008 260)' : 'transparent',
+          border: 'none', borderBottom: view === 'intellispy' ? `2px solid ${sColor.red}` : '2px solid transparent',
+          cursor: 'pointer', transition: 'all 0.15s',
+        }}>
+          <Radio style={{ width: 14, height: 14, color: 'oklch(0.65 0.20 145)' }} /> CAN SNIFFER
+        </button>
+        {isAdmin && (
+          <button onClick={() => setView('reverseeng')} style={{
+            display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+            fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+            color: view === 'reverseeng' ? 'white' : 'oklch(0.50 0.010 260)',
+            background: view === 'reverseeng' ? 'oklch(0.16 0.008 260)' : 'transparent',
+            border: 'none', borderBottom: view === 'reverseeng' ? `2px solid ${sColor.red}` : '2px solid transparent',
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}>
+            <Cpu style={{ width: 14, height: 14, color: 'oklch(0.65 0.22 25)' }} /> REVERSE ENG
+          </button>
+        )}
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {view === 'intellispy' && <IntelliSpy />}
+        {view === 'reverseeng' && isAdmin && <ReverseEngineeringPanel />}
+      </div>
+    </div>
+  );
+}
+
+// ─── Editor + Segment Swapper Wrapper ───────────────────────────────────────
+
+function EditorWithSegmentSwapper() {
+  const [view, setView] = useState<'editor' | 'segment'>('editor');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Sub-tab bar */}
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '8px', borderBottom: `1px solid oklch(0.20 0.008 260)` }}>
+        <button onClick={() => setView('editor')} style={{
+          display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+          fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+          color: view === 'editor' ? 'white' : 'oklch(0.50 0.010 260)',
+          background: view === 'editor' ? 'oklch(0.16 0.008 260)' : 'transparent',
+          border: 'none', borderBottom: view === 'editor' ? `2px solid ${sColor.red}` : '2px solid transparent',
+          cursor: 'pointer', transition: 'all 0.15s',
+        }}>
+          <FileCode2 style={{ width: 14, height: 14, color: 'oklch(0.52 0.22 25)' }} /> CALIBRATION EDITOR
+        </button>
+        <button onClick={() => setView('segment')} style={{
+          display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+          fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+          color: view === 'segment' ? 'white' : 'oklch(0.50 0.010 260)',
+          background: view === 'segment' ? 'oklch(0.16 0.008 260)' : 'transparent',
+          border: 'none', borderBottom: view === 'segment' ? `2px solid ${sColor.red}` : '2px solid transparent',
+          cursor: 'pointer', transition: 'all 0.15s',
+        }}>
+          <Cpu style={{ width: 14, height: 14 }} /> SEGMENT SWAPPER
+        </button>
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {view === 'editor' && <EditorGate />}
+        {view === 'segment' && <BinaryUploadPanel />}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'a2l' | 'intellispy' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'procedures' | 'talon' | 'qa' | 'offsets' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1440,20 +1516,13 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
-  { id: 'binary', label: 'BINARY', icon: <Cpu style={{ width: 16, height: 16 }} /> },
-  { id: 'a2l', label: 'A2L FILES', icon: <FileCode2 style={{ width: 16, height: 16 }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  { id: 'reverseeng' as TabId, label: 'REVERSE ENG', icon: <Cpu style={{ width: 16, height: 16, color: 'oklch(0.65 0.22 25)' }} /> },
-  { id: 'notifprefs', label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
-  { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
@@ -1462,7 +1531,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
-  const allTabs = isAdmin ? [...tabs, ...adminTabs] : [...tabs, { id: 'notifprefs' as TabId, label: 'NOTIF PREFS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> }];
+  const allTabs = isAdmin ? [...tabs, ...adminTabs] : tabs;
 
   // Badge counts for admin tabs
   const accessStats = trpc.access.stats.useQuery(undefined, { enabled: isAdmin, refetchInterval: 30000 });
@@ -1470,8 +1539,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const pendingCount = accessStats.data?.pendingRequests ?? 0;
   const unreadCount = (supportStats.data?.unreadConversations ?? 0) + (supportStats.data?.totalFeedback ?? 0);
   const tabBadges: Record<string, number> = {
-    users: pendingCount,
-    support: unreadCount,
+    users: pendingCount + unreadCount,
   };
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
@@ -1635,22 +1703,14 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
-        {activeTab === 'a2l' && <div className="ppei-anim-fade-up"><A2LPanel a2lData={a2lData} setA2lData={setA2lData} /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
-        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
-        {activeTab === 'binary' && <div className="ppei-anim-fade-up"><BinaryUploadPanel /></div>}
-        {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
-
-        {activeTab === 'canam' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><CanAmVinChanger /></div>}
+        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorWithSegmentSwapper /></div>
+        {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpyWithReverseEng isAdmin={isAdmin} /></div>}
         {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
-        {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
-        {activeTab === 'reverseeng' && isAdmin && <div className="ppei-anim-fade-up"><ReverseEngineeringPanel /></div>}
         {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
-        {activeTab === 'support' && isAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
-        {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
 
       {/* Voice Command Button */}
