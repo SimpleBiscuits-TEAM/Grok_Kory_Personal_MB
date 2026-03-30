@@ -2279,3 +2279,18 @@
 - [x] Move Notifications tab under User Management panel (sub-tab)
 - [x] Move Support tab under User Management panel (sub-tab)
 - [x] Verify Honda Talon tab is visible and working in V-OP Pro
+- [x] Move Honda Talon inside Editor tab as a sub-tab (alongside Calibration Editor & Segment Swapper)
+- [x] Move Procedures tab to V-OP Lite (Home.tsx) as collapsible section
+- [x] Remove V-OP Pro details/info from V-OP Lite section
+- [x] Move Can-Am VIN inside Basic Editor tab (not separate collapsible)
+- [x] Remove all 'manus' references from client-side code visible in inspect element (class names, comments, data attributes, etc.)
+- [x] Move Honda Talon inside Editor tab as a sub-tab (alongside Calibration Editor & Segment Swapper)
+- [x] Move Procedures tab to V-OP Lite (Home.tsx) as collapsible section
+- [x] Remove V-OP Pro details/info from V-OP Lite section
+- [x] Move Can-Am VIN inside Basic Editor tab (not separate collapsible)
+- [x] Add Datalogger to V-OP Lite (Home.tsx) as collapsible section (keep in Pro too)
+- [x] Remove "What's Analyzed" section from V-OP Lite
+- [x] Remove "V-OP Pro details" section from V-OP Lite
+- [x] Add clean "About" section to V-OP Lite
+- [x] Make Analyzer its own collapsible section in Lite named "Data Re-Imagined"
+- [ ] Create patent document PDF for V-OP Powered by PPEI

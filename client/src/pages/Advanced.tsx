@@ -1471,36 +1471,36 @@ function IntelliSpyWithReverseEng({ isAdmin }: { isAdmin: boolean }) {
 
 // ─── Editor + Segment Swapper Wrapper ───────────────────────────────────────
 
-function EditorWithSegmentSwapper() {
-  const [view, setView] = useState<'editor' | 'segment'>('editor');
+function EditorWithSubTabs({ wp8Data, onBack }: { wp8Data: WP8ParseResult | null; onBack: () => void }) {
+  const [view, setView] = useState<'editor' | 'segment' | 'talon'>('editor');
+
+  const subTabStyle = (active: boolean) => ({
+    display: 'flex' as const, alignItems: 'center' as const, gap: '6px', padding: '8px 14px',
+    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+    color: active ? 'white' : 'oklch(0.50 0.010 260)',
+    background: active ? 'oklch(0.16 0.008 260)' : 'transparent',
+    border: 'none' as const, borderBottom: active ? `2px solid ${sColor.red}` : '2px solid transparent',
+    cursor: 'pointer' as const, transition: 'all 0.15s',
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Sub-tab bar */}
       <div style={{ display: 'flex', gap: '2px', marginBottom: '8px', borderBottom: `1px solid oklch(0.20 0.008 260)` }}>
-        <button onClick={() => setView('editor')} style={{
-          display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
-          fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
-          color: view === 'editor' ? 'white' : 'oklch(0.50 0.010 260)',
-          background: view === 'editor' ? 'oklch(0.16 0.008 260)' : 'transparent',
-          border: 'none', borderBottom: view === 'editor' ? `2px solid ${sColor.red}` : '2px solid transparent',
-          cursor: 'pointer', transition: 'all 0.15s',
-        }}>
+        <button onClick={() => setView('editor')} style={subTabStyle(view === 'editor')}>
           <FileCode2 style={{ width: 14, height: 14, color: 'oklch(0.52 0.22 25)' }} /> CALIBRATION EDITOR
         </button>
-        <button onClick={() => setView('segment')} style={{
-          display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
-          fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
-          color: view === 'segment' ? 'white' : 'oklch(0.50 0.010 260)',
-          background: view === 'segment' ? 'oklch(0.16 0.008 260)' : 'transparent',
-          border: 'none', borderBottom: view === 'segment' ? `2px solid ${sColor.red}` : '2px solid transparent',
-          cursor: 'pointer', transition: 'all 0.15s',
-        }}>
+        <button onClick={() => setView('segment')} style={subTabStyle(view === 'segment')}>
           <Cpu style={{ width: 14, height: 14 }} /> SEGMENT SWAPPER
+        </button>
+        <button onClick={() => setView('talon')} style={subTabStyle(view === 'talon')}>
+          <Fuel style={{ width: 14, height: 14, color: 'oklch(0.70 0.20 40)' }} /> HONDA TALON
         </button>
       </div>
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {view === 'editor' && <EditorGate />}
         {view === 'segment' && <BinaryUploadPanel />}
+        {view === 'talon' && <HondaTalonTuner wp8Data={wp8Data} onBack={onBack} />}
       </div>
     </div>
   );
@@ -1508,16 +1508,14 @@ function EditorWithSegmentSwapper() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'procedures' | 'talon' | 'qa' | 'offsets' | 'users';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'ai' | 'intellispy' | 'qa' | 'offsets' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1553,7 +1551,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
     if (tabParam === 'talon') {
-      setActiveTab('talon');
+      setActiveTab('editor');
       const raw = sessionStorage.getItem('pendingWP8');
       if (raw) {
         try {
@@ -1704,10 +1702,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
-        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorWithSegmentSwapper /></div>
+        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorWithSubTabs wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpyWithReverseEng isAdmin={isAdmin} /></div>}
-        {activeTab === 'procedures' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><ServiceProcedures /></div>}
-        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'qa' && isAdmin && <div className="ppei-anim-fade-up"><QAChecklistPanel /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
