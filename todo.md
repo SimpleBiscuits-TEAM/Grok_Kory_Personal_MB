@@ -2271,3 +2271,4 @@
 - [x] Move USER MGMT out of tabs to header area for admins (with pending request badge count)
 - [x] Remove lock button from V-OP Pro header
 - [x] Move Honda Talon tab to sit right after Editor tab in V-OP Pro
+- [x] Change "V-OP LITE" button in Pro header to "← BACK" (clearer navigation, less confusing)

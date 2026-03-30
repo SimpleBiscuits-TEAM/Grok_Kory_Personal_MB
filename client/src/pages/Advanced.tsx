@@ -1584,7 +1584,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               )}
               <Link href="/" style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
-                  <ArrowLeft style={{ width: 14, height: 14 }} /> V-OP LITE
+                  <ArrowLeft style={{ width: 14, height: 14 }} /> BACK
                 </div>
               </Link>
             </div>
