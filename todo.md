@@ -2269,3 +2269,4 @@
 - [x] Remove Services tab from V-OP Pro
 - [x] Move Coding to V-OP Lite (Home.tsx) as collapsible "BASIC EDITOR (NON-ECU)" section with VehicleCoding component
 - [x] Move USER MGMT out of tabs to header area for admins (with pending request badge count)
+- [x] Remove lock button from V-OP Pro header
