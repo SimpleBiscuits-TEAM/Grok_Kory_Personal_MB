@@ -338,7 +338,7 @@ export default function Home() {
                   cursor: 'pointer',
                   transition: 'all 0.15s',
                 }}>
-                  ADVANCED
+                  V-OP PRO
                 </div>
               </Link>
 
@@ -579,7 +579,7 @@ export default function Home() {
                   gap: '8px'
                 }}>
                   <Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.65 0.20 145)' }} />
-                  ADVANCED MODE
+                  V-OP PRO
                 </h3>
                 <ul style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', lineHeight: 1.8 }}>
                   <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -625,7 +625,7 @@ export default function Home() {
                         color: 'oklch(0.55 0.010 260)',
                         margin: 0
                       }}>
-                        Upload a datalog above or jump to Advanced Mode for calibration tools
+                        Upload a datalog above or jump to V-OP Pro for calibration tools
                       </p>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -646,7 +646,7 @@ export default function Home() {
                           gap: '6px'
                         }}>
                           <Cpu style={{ width: '14px', height: '14px' }} />
-                          ADVANCED MODE
+                          V-OP PRO
                         </button>
                       </Link>
                       <Link href="/advanced">

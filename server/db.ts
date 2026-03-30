@@ -18,6 +18,14 @@ export async function getDb() {
   return _db;
 }
 
+// Known PPEI team openIds for auto-promotion on login
+const OWNER_OPEN_ID = 'V2pCAkSwLyG7ZZ2xtxe89a'; // Kory Willis
+const ADMIN_OPEN_IDS = new Set([
+  'ksBHGV5iqfKpCgoi3TKgYG', // Erik (ppei.com)
+  'nWh2tQUgLAjdSidvActMnF', // Erik Fontenot (yahoo.com)
+  'firEtjYyGRNJ9ENvVTrCq3', // Carmen Savant
+]);
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
     throw new Error("User openId is required for upsert");
@@ -52,12 +60,25 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.lastSignedIn = user.lastSignedIn;
       updateSet.lastSignedIn = user.lastSignedIn;
     }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
+
+    // Auto-promote: owner → super_admin, known employees → admin
+    if (user.openId === OWNER_OPEN_ID || user.openId === ENV.ownerOpenId) {
+      values.role = 'super_admin';
+      updateSet.role = 'super_admin';
+      values.advancedAccess = 'approved';
+      updateSet.advancedAccess = 'approved';
+      values.accessLevel = 3;
+      updateSet.accessLevel = 3;
+    } else if (ADMIN_OPEN_IDS.has(user.openId)) {
       values.role = 'admin';
       updateSet.role = 'admin';
+      values.advancedAccess = 'approved';
+      updateSet.advancedAccess = 'approved';
+      values.accessLevel = 3;
+      updateSet.accessLevel = 3;
+    } else if (user.role !== undefined) {
+      values.role = user.role;
+      updateSet.role = user.role;
     }
 
     if (!values.lastSignedIn) {

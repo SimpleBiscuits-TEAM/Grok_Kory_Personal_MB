@@ -18,6 +18,7 @@ import { binaryAnalysisRouter } from "./routers/binaryAnalysis";
 import { adminMessagingRouter } from "./routers/adminMessaging";
 import { supportAdminRouter } from "./routers/supportAdmin";
 import { datalogCacheRouter } from "./routers/datalogCache";
+import { accessManagementRouter } from "./routers/accessManagement";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -81,6 +82,9 @@ export const appRouter = router({
 
   // Datalog caching for dev/debug (8hr TTL)
   datalogCache: datalogCacheRouter,
+
+  // Access Management (user approval, role management)
+  access: accessManagementRouter,
 
   // Feedback / Error Reports
   feedback: router({

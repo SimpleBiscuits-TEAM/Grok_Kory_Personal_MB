@@ -15,11 +15,12 @@ import { Link } from 'wouter';
 import {
   Search, Lock, ArrowLeft, Database, BookOpen,
   Hash, Terminal, ChevronDown, ChevronRight, X, Zap,
-  FileText, Activity, AlertCircle,
+  FileText, Activity, AlertCircle, Clock, ShieldX, Users,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
   Radio, Wrench, Key, Settings, Inbox, Fuel
 } from 'lucide-react';
+import { getLoginUrl } from '@/const';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
   OBD_PIDS, OBD_SERVICES, GM_MODE6_MONITORS, UDS_SERVICE_MAPPING,
@@ -63,6 +64,7 @@ import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
+import UserManagementPanel from '@/components/UserManagementPanel';
 import HondaTalonTuner from '@/components/HondaTalonTuner';
 import { WP8ParseResult } from '@/lib/wp8Parser';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -83,17 +85,48 @@ const sColor = {
   textMuted: 'oklch(0.45 0.008 260)',
 };
 
-// ─── Access Code Gate ────────────────────────────────────────────────────────
+// ─── V-OP Pro Access Gate ────────────────────────────────────────────────────
 
+/**
+ * AccessGate — Three paths to V-OP Pro:
+ * 1. Logged in with approved access / admin / super_admin → auto-unlock
+ * 2. Logged in but not approved → "Contact PPEI" / request access screen
+ * 3. Not logged in → login button + temporary PPEIROCKS code (deprecated Friday)
+ */
 function AccessGate({ onUnlock }: { onUnlock: () => void }) {
+  const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
+  const [showCodeInput, setShowCodeInput] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  const accessQuery = trpc.access.myAccess.useQuery(undefined, {
+    enabled: isAuthenticated,
+    retry: false,
+  });
+  const requestAccess = trpc.access.requestAccess.useMutation({
+    onSuccess: () => accessQuery.refetch(),
+  });
 
-  const handleSubmit = () => {
+  useEffect(() => { if (showCodeInput) inputRef.current?.focus(); }, [showCodeInput]);
+
+  // Auto-unlock if user has access
+  useEffect(() => {
+    if (accessQuery.data?.canAccessAdvanced) {
+      localStorage.setItem(STORAGE_KEY, 'true');
+      onUnlock();
+    }
+  }, [accessQuery.data, onUnlock]);
+
+  // Also auto-unlock if legacy code was stored
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEY) === 'true') {
+      onUnlock();
+    }
+  }, [onUnlock]);
+
+  const handleCodeSubmit = () => {
     if (code.toUpperCase() === ACCESS_CODE) {
       localStorage.setItem(STORAGE_KEY, 'true');
       onUnlock();
@@ -105,49 +138,202 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
+        <Loader2 style={{ width: 32, height: 32, color: sColor.red }} className="animate-spin" />
+      </div>
+    );
+  }
+
+  // ── Logged in but NOT approved ──
+  if (isAuthenticated && accessQuery.data && !accessQuery.data.canAccessAdvanced) {
+    const isPending = user && accessQuery.data.advancedAccess === 'pending';
+    const isRevoked = user && accessQuery.data.advancedAccess === 'revoked';
+
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
+        <div className="ppei-anim-scale-in" style={{
+          background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
+          borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
+          textAlign: 'center',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
+            <img src={PPEI_LOGO_URL} alt="PPEI" style={{ height: '56px', objectFit: 'contain' }} />
+          </div>
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', marginBottom: '0.5rem' }}>
+            V-OP PRO
+          </h2>
+
+          {isPending ? (
+            <>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                padding: '8px 16px', background: 'oklch(0.75 0.18 60 / 0.12)', border: '1px solid oklch(0.75 0.18 60 / 0.3)',
+                borderRadius: '4px', marginBottom: '1.5rem',
+              }}>
+                <Clock style={{ width: 16, height: 16, color: sColor.yellow }} />
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.yellow }}>ACCESS REQUEST PENDING</span>
+              </div>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                Your request is being reviewed by the PPEI team. You'll get access once approved.
+              </p>
+            </>
+          ) : isRevoked ? (
+            <>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
+                padding: '8px 16px', background: 'oklch(0.52 0.22 25 / 0.12)', border: '1px solid oklch(0.52 0.22 25 / 0.3)',
+                borderRadius: '4px', marginBottom: '1.5rem',
+              }}>
+                <ShieldX style={{ width: 16, height: 16, color: sColor.red }} />
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.red }}>ACCESS REVOKED</span>
+              </div>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                Your V-OP Pro access has been revoked. Contact PPEI for more information.
+              </p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                V-OP Pro requires approval from PPEI. Request access below or contact us directly.
+              </p>
+              <button
+                onClick={() => requestAccess.mutate()}
+                disabled={requestAccess.isPending}
+                style={{
+                  background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1rem',
+                  letterSpacing: '0.1em', padding: '12px 32px', borderRadius: '3px', border: 'none',
+                  cursor: 'pointer', marginBottom: '1rem', display: 'inline-flex', alignItems: 'center', gap: '8px',
+                }}
+              >
+                {requestAccess.isPending ? <Loader2 style={{ width: 16, height: 16 }} className="animate-spin" /> : null}
+                REQUEST ACCESS
+              </button>
+            </>
+          )}
+
+          <div style={{ borderTop: `1px solid ${sColor.border}`, paddingTop: '1.5rem', marginTop: '0.5rem' }}>
+            <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMuted, marginBottom: '8px' }}>
+              CONTACT PPEI
+            </p>
+            <a href="https://ppei.com" target="_blank" rel="noopener noreferrer" style={{
+              fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.blue, textDecoration: 'none',
+            }}>
+              ppei.com
+            </a>
+          </div>
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <Link href="/" style={{ textDecoration: 'none' }}>
+              <span style={{
+                fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                color: sColor.textMuted, cursor: 'pointer',
+              }}>
+                ← BACK TO V-OP LITE
+              </span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Not logged in → Login button + temporary PPEIROCKS code ──
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
       <div className={`ppei-anim-scale-in ${shake ? 'ppei-shake' : ''}`} style={{
         background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
-        borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '440px', width: '100%', margin: '0 1rem',
+        borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
+        textAlign: 'center',
       }}>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
-          <div style={{ background: `${sColor.red}1f`, border: `1px solid ${sColor.red}4d`, borderRadius: '50%', padding: '1rem' }}>
-            <Lock style={{ width: '32px', height: '32px', color: sColor.red }} />
-          </div>
+          <img src={PPEI_LOGO_URL} alt="PPEI" style={{ height: '56px', objectFit: 'contain' }} />
         </div>
-        <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', textAlign: 'center', marginBottom: '0.5rem' }}>
-          ADVANCED MODE
+        <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', marginBottom: '0.5rem' }}>
+          V-OP PRO
         </h2>
-        <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, textAlign: 'center', marginBottom: '2rem' }}>
-          Enter access code to unlock beta features
+        <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, marginBottom: '2rem', lineHeight: 1.6 }}>
+          Sign in to access V-OP Pro features. Access requires approval from PPEI.
         </p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            ref={inputRef}
-            type="password"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-            placeholder="Access Code"
-            style={{
-              flex: 1, padding: '12px 16px', fontFamily: sFont.mono, fontSize: '1rem',
-              background: sColor.bgInput, border: `2px solid ${error ? sColor.red : sColor.border}`,
-              borderRadius: '3px', color: 'white', outline: 'none', letterSpacing: '0.15em', textAlign: 'center',
-            }}
-          />
-          <button onClick={handleSubmit} style={{
-            background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1rem',
-            letterSpacing: '0.1em', padding: '12px 24px', borderRadius: '3px', border: 'none', cursor: 'pointer',
+
+        {/* Primary: Login button */}
+        <a href={getLoginUrl()} style={{
+          display: 'inline-flex', alignItems: 'center', gap: '8px',
+          background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1.1rem',
+          letterSpacing: '0.1em', padding: '14px 40px', borderRadius: '3px', border: 'none',
+          cursor: 'pointer', textDecoration: 'none', marginBottom: '1.5rem',
+        }}>
+          <Lock style={{ width: 18, height: 18 }} /> SIGN IN
+        </a>
+
+        {/* Deprecation notice + legacy code input */}
+        <div style={{
+          borderTop: `1px solid ${sColor.border}`, paddingTop: '1.5rem', marginTop: '0.5rem',
+        }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            padding: '6px 12px', background: 'oklch(0.75 0.18 60 / 0.10)', border: '1px solid oklch(0.75 0.18 60 / 0.25)',
+            borderRadius: '3px', marginBottom: '12px',
           }}>
-            UNLOCK
-          </button>
+            <AlertCircle style={{ width: 12, height: 12, color: sColor.yellow }} />
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.yellow }}>
+              PASSCODE ACCESS ENDS FRIDAY — SIGN IN TO KEEP ACCESS
+            </span>
+          </div>
+
+          {!showCodeInput ? (
+            <button
+              onClick={() => setShowCodeInput(true)}
+              style={{
+                background: 'transparent', border: `1px solid ${sColor.border}`,
+                borderRadius: '3px', padding: '8px 20px', cursor: 'pointer',
+                color: sColor.textMuted, fontFamily: sFont.mono, fontSize: '0.7rem',
+                letterSpacing: '0.06em', display: 'block', margin: '0 auto',
+              }}
+            >
+              HAVE A PASSCODE?
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', maxWidth: '320px', margin: '0 auto' }}>
+              <input
+                ref={inputRef}
+                type="password"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCodeSubmit()}
+                placeholder="Access Code"
+                style={{
+                  flex: 1, padding: '10px 14px', fontFamily: sFont.mono, fontSize: '0.85rem',
+                  background: sColor.bgInput, border: `2px solid ${error ? sColor.red : sColor.border}`,
+                  borderRadius: '3px', color: 'white', outline: 'none', letterSpacing: '0.15em', textAlign: 'center',
+                }}
+              />
+              <button onClick={handleCodeSubmit} style={{
+                background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '0.85rem',
+                letterSpacing: '0.08em', padding: '10px 18px', borderRadius: '3px', border: 'none', cursor: 'pointer',
+              }}>
+                UNLOCK
+              </button>
+            </div>
+          )}
+          {error && (
+            <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.red, textAlign: 'center', marginTop: '8px' }}>
+              Invalid access code
+            </p>
+          )}
         </div>
-        {error && (
-          <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.red, textAlign: 'center', marginTop: '12px' }}>
-            Invalid access code
-          </p>
-        )}
+
+        <div style={{ marginTop: '1.5rem' }}>
+          <Link href="/" style={{ textDecoration: 'none' }}>
+            <span style={{
+              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+              color: sColor.textMuted, cursor: 'pointer',
+            }}>
+              ← BACK TO V-OP LITE
+            </span>
+          </Link>
+        </div>
       </div>
     </div>
   );
@@ -1246,7 +1432,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users';
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
@@ -1269,6 +1455,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'users', label: 'USER MGMT', icon: <Users style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
@@ -1344,7 +1531,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <Link href="/"><img src={PPEI_LOGO_URL} alt="V-OP by PPEI" className="ppei-logo" style={{ height: '48px', width: 'auto', objectFit: 'contain', cursor: 'pointer' }} /></Link>
               <div style={{ borderLeft: `3px solid ${sColor.red}`, paddingLeft: '12px' }}>
-                <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>V-OP ADVANCED</h1>
+                <h1 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1.1, margin: 0 }}>V-OP PRO</h1>
                 <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, letterSpacing: '0.04em', margin: 0 }}>VEHICLE OPTIMIZER BY PPEI · AI DIAGNOSTICS</p>
               </div>
               <span style={{
@@ -1379,7 +1566,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
               <Link href="/" style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'oklch(0.18 0.006 260)', border: `1px solid oklch(0.25 0.008 260)`, borderRadius: '2px', color: 'oklch(0.70 0.010 260)', fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em', cursor: 'pointer' }}>
-                  <ArrowLeft style={{ width: 14, height: 14 }} /> ANALYZER
+                  <ArrowLeft style={{ width: 14, height: 14 }} /> V-OP LITE
                 </div>
               </Link>
             </div>
@@ -1490,6 +1677,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'notifications' && isAdmin && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'offsets' && isAdmin && <div className="ppei-anim-fade-up"><OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} /></div>}
         {activeTab === 'reverseeng' && isAdmin && <div className="ppei-anim-fade-up"><ReverseEngineeringPanel /></div>}
+        {activeTab === 'users' && isAdmin && <div className="ppei-anim-fade-up"><UserManagementPanel /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'notifprefs' && <div className="ppei-anim-fade-up"><NotificationPrefsPanel /></div>}
       </main>
@@ -1502,7 +1690,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         <div style={{ height: '2px', background: `linear-gradient(90deg, ${sColor.red} 0%, oklch(0.65 0.20 40) 40%, ${sColor.yellow} 60%, ${sColor.green} 80%, ${sColor.blue} 100%)`, marginBottom: '1rem' }} />
         <div className="container mx-auto px-4 text-center">
           <p style={{ fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.12em', color: 'oklch(0.35 0.008 260)' }}>
-            PPEI CUSTOM TUNING · ADVANCED DIAGNOSTICS · BETA · PPEI.COM
+            PPEI CUSTOM TUNING · V-OP PRO · PPEI.COM
           </p>
         </div>
       </footer>

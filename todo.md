@@ -2182,3 +2182,42 @@
 - [x] Investigate test notifications being sent to user without explanation (vitest notifications.test.ts was writing to production DB)
 - [x] Fix test to clean up after itself (afterAll cleanup + expiring notification + admin-only audience)
 - [x] Purged 43 test notification records and delivery records from production database
+
+## Role-Based Access Control Restructure (2026-03-29)
+- [x] Add advancedAccess field to users table (enum: none/pending/approved/revoked, default none)
+- [x] Add accessLevel field to users table (int 0-3, default 0, for future Level 1/2/3 tiers)
+- [x] Add accessApprovedBy and accessApprovedAt fields to users table
+- [x] Auto-detect super_admin from OWNER_OPEN_ID on login (set role to super_admin)
+- [x] Build tRPC procedures: listUsers, approveAdvancedAccess, revokeAdvancedAccess, setUserRole, requestAccess
+- [x] Build Admin Panel user management UI (list users, approve/revoke, assign roles)
+- [ ] Remove PPEIROCKS code gate from Advanced.tsx (kept as temporary fallback, deprecating Friday)
+- [ ] Remove KINGKONG editor gate (make role-based) — deferred
+- [x] Replace code gate with role-based access check (super_admin/admin always in, approved users in, others see pending/request screen)
+- [x] Build "Request Access" screen for unapproved users at /advanced
+- [x] Build "Access Pending" screen for users who requested but not yet approved
+- [x] Update admin tab visibility: super_admin sees all, admin sees admin tabs, users see only their level
+- [x] Write tests for access control procedures (14 tests: auth, role checks, list, stats, approve/revoke guards)
+- [x] Prepare accessLevel column for future Level 1/2/3 feature gating
+
+## Role-Based Access Control Restructure (2026-03-29)
+- [ ] Add advancedAccess field to users table (enum: none/pending/approved/revoked, default none)
+- [ ] Add accessLevel field to users table (int 0-3, default 0, for future Level 1/2/3 tiers)
+- [ ] Add accessApprovedBy and accessApprovedAt fields to users table
+- [x] Auto-detect super_admin from OWNER_OPEN_ID on login (Kory)
+- [x] Auto-promote Erik (ppei.com), Erik Fontenot (yahoo.com), Carmen to admin on login
+- [x] Build tRPC procedures: listUsers, approveAdvancedAccess, revokeAdvancedAccess, setUserRole, requestAccess
+- [x] Build Admin Panel user management UI (list users, approve/revoke, assign roles)
+- [ ] Remove PPEIROCKS code gate from Advanced.tsx (kept as temp fallback, removing Friday)
+- [ ] Remove KINGKONG editor gate (make role-based) - deferred
+- [x] Replace code gate with role-based access check
+- [x] Build "Request Access" screen for unapproved users at /advanced
+- [x] Build "Access Pending" screen for users who requested but not yet approved
+- [x] Update admin tab visibility: super_admin sees all, admin sees admin tabs, users see only their level
+- [x] Write tests for access control procedures (14 tests)
+- [x] Prepare accessLevel column for future Level 1/2/3 feature gating
+- [ ] Logan to be promoted manually by Kory from admin panel once he logs in
+- [x] Show deprecation notice on access gate: passcode removed by Friday, log in to keep access
+- [x] Unapproved/not-logged-in users see "Contact PPEI" message
+- [ ] Rename normal mode to "V-OP Lite" in UI (Home.tsx header/branding) - deferred, keeping V-OP for now
+- [x] Rename advanced mode to "V-OP Pro" in UI (Advanced.tsx header, access gate, navigation)
+- [x] Update ADVANCED button in header to say "V-OP PRO" (Home.tsx header, feature cards, CTA buttons)

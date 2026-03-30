@@ -17,6 +17,14 @@ export const users = mysqlTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin", "super_admin"]).default("user").notNull(),
+  /** Advanced access status: none (default), pending (requested), approved, revoked */
+  advancedAccess: mysqlEnum("advancedAccess", ["none", "pending", "approved", "revoked"]).default("none").notNull(),
+  /** Access level for future tiered feature gating (0=none, 1-3=tiers) */
+  accessLevel: int("accessLevel").default(0).notNull(),
+  /** User ID of admin who approved/revoked access */
+  accessApprovedBy: int("accessApprovedBy"),
+  /** When access was approved/revoked */
+  accessApprovedAt: timestamp("accessApprovedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
