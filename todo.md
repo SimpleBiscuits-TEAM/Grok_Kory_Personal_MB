@@ -2352,3 +2352,19 @@
 - [x] Post-gate: Immediate full-screen sign-in prompt if not authenticated (can't skip)
 - [x] Flash section: Add PPEI-exclusive flashing disclaimer (no third-party tunes, PPEI-only calibrations)
 - [x] Home/About: Add note that datalogging/diagnostics are public, flashing is PPEI-exclusive
+- [ ] Fleet: Database schema (fleet_organizations, fleet_vehicles, fleet_drivers, fleet_trips, fleet_alerts, fleet_fuel_logs, fleet_driver_scores, fleet_ai_insights)
+- [ ] Fleet: Backend tRPC API for fleet CRUD, vehicle management, driver management
+- [ ] Fleet: Dashboard UI — fleet overview, vehicle list, driver list, alerts panel
+- [ ] Fleet: Fuel economy analysis — compare trucks, track MPG trends, identify waste
+- [ ] Fleet: Driver behavior scoring — speeding, idling, braking, acceleration patterns
+- [ ] Fleet: Alert system — management notifications for driving habits, vehicle health
+- [ ] Fleet: AI insights — reasoning engine for fleet-wide patterns, ML model training pipeline
+- [ ] Fleet: VOP OBD memory sync — WiFi/BT/USB data transfer from device to server
+- [ ] Fleet: Trip history with route replay and fuel consumption per trip
+- [ ] Fleet: Vehicle health monitoring — aggregate diagnostic data across fleet
+- [ ] Fleet: Remote vehicle session — mechanic logs into vehicle remotely for live diagnostics
+- [ ] Fleet: Bidirectional controls — remote commands (forced regen, injector balance, DTC clear, etc.)
+- [ ] Fleet: Fleet roles — Owner, Manager, Mechanic, Driver with proper permissions
+- [ ] Fleet: Aftermarket sensor integration — TPMS, EGT probes, trans temp, boost gauges, etc.
+- [ ] Fleet: Unified sensor dashboard — all aftermarket + OEM sensors in one view
+- [ ] Fleet: Monica video teaser — generated at the end with full fleet knowledge
