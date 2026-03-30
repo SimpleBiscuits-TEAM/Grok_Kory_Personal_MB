@@ -4,6 +4,7 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { SiteGate } from "./components/SiteGate";
 import Home from "./pages/Home";
 import Advanced from "./pages/Advanced";
 import SupportJoin from "./pages/SupportJoin";
@@ -34,8 +35,10 @@ function App() {
       >
         <TooltipProvider>
           <Toaster />
-          <Router />
-          <DebugReportButton />
+          <SiteGate>
+            <Router />
+            <DebugReportButton />
+          </SiteGate>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

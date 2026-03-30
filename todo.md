@@ -2236,3 +2236,10 @@
 - [x] Added VOICE button to Error Description textarea with interim text display
 - [x] Shows pulsing red dot + LISTENING indicator while recording
 - [x] Gracefully hides VOICE button on unsupported browsers
+
+## Site-Wide Access Gate (2026-03-29)
+- [x] Add site-wide access gate requiring login OR access code "KingKONG" to view any page (SiteGate component wraps App)
+- [x] Change V-OP Pro access code from PPEIROCKS to KingKONG (case-sensitive match)
+- [x] Store site access in localStorage so users don't re-enter every visit
+- [x] Show login button + access code input on the gate screen
+- [x] Contact PPEI info shown on gate (info@ppei.com)

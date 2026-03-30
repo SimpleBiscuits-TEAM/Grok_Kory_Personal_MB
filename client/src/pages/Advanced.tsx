@@ -6,7 +6,7 @@
  *   - Multi-vehicle knowledge base (L5P, LML, LBZ, LLY, LB7, LS/LT)
  *   - Full-text search across SAE J1979, J1979-2, GM Mode 6, OBD-II PIDs
  *   - Complete datalog analyzer (merged from normal mode)
- *   - Access gated behind code "PPEIROCKS"
+ *   - Access gated behind code "KingKONG"
  */
 
 import React, { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
@@ -71,7 +71,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-const ACCESS_CODE = 'PPEIROCKS';
+const ACCESS_CODE = 'KingKONG';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ const sColor = {
  * AccessGate — Three paths to V-OP Pro:
  * 1. Logged in with approved access / admin / super_admin → auto-unlock
  * 2. Logged in but not approved → "Contact PPEI" / request access screen
- * 3. Not logged in → login button + temporary PPEIROCKS code (deprecated Friday)
+ * 3. Not logged in → login button + access code
  */
 function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
@@ -127,7 +127,7 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   }, [onUnlock]);
 
   const handleCodeSubmit = () => {
-    if (code.toUpperCase() === ACCESS_CODE) {
+    if (code === ACCESS_CODE) {
       localStorage.setItem(STORAGE_KEY, 'true');
       onUnlock();
     } else {
