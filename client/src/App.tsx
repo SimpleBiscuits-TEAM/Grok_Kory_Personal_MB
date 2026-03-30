@@ -15,6 +15,7 @@ const DragRacing = lazy(() => import("./pages/DragRacing"));
 const Community = lazy(() => import("./pages/Community"));
 const SupportJoin = lazy(() => import("./pages/SupportJoin"));
 const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
+const Pitch = lazy(() => import("./pages/Pitch"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -65,6 +66,7 @@ function Router() {
         <Route path={"/fleet"} component={Fleet} />
         <Route path={"/drag"} component={DragRacing} />
         <Route path={"/community"} component={Community} />
+        <Route path={"/pitch"} component={Pitch} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />

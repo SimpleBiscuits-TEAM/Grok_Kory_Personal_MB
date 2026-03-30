@@ -22,6 +22,7 @@ import { accessManagementRouter } from "./routers/accessManagement";
 import { fleetRouter } from "./routers/fleet";
 import { dragRouter } from "./routers/drag";
 import { communityRouter } from "./routers/community";
+import { pitchRouter } from "./routers/pitch";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -97,6 +98,9 @@ export const appRouter = router({
 
   // V-OP Community Forum
   community: communityRouter,
+
+  // V-OP AI Business Chat (Theo "Pitch")
+  pitch: pitchRouter,
 
   // Feedback / Error Reports
   feedback: router({
