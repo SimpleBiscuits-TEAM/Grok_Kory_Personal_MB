@@ -12,6 +12,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
+import { getKnoxFileContextForLLM } from "../db";
 import { getKnoxFiles, getKnoxFileById, getKnoxPlatformSummary, getKnoxCollectionSummary } from "../db";
 
 export const editorRouter = router({
@@ -119,8 +120,19 @@ ${input.context ? input.context.slice(0, 30000) : 'No ECU definition currently l
 ## Technical Reference Database
 ${getFullKnoxKnowledge().slice(0, 20000)}`;
 
+      // Inject Knox file library context
+      let knoxFileCtx = '';
+      try {
+        knoxFileCtx = await getKnoxFileContextForLLM();
+      } catch (e) {
+        console.warn('[Knox] Failed to load file library context:', e);
+      }
+      const fullSystemPrompt = knoxFileCtx
+        ? systemPrompt + '\n\n' + knoxFileCtx.slice(0, 8000)
+        : systemPrompt;
+
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: fullSystemPrompt },
       ];
 
       // Add conversation history

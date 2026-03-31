@@ -2597,3 +2597,19 @@
 - [x] Analyze FPGS0.a2l, HAFFA.a2l, FHVJ1.a2l
 - [x] Knox file library tRPC procedures (list, detail, platforms, collections)
 - [x] Knox file library vitest tests (11 tests passing)
+
+## Knox File Browser + Erika Context + Bulk Upload
+- [x] Build Knox File Browser panel component (search, filter by platform/collection/type, detail view)
+- [x] Integrate Knox File Browser as "Knox Library" tab in CalibrationEditor
+- [x] Wire Knox files into Erika's context for cross-platform calibration knowledge
+- [x] Build bulk file upload with drag-and-drop UI (placeholder — full server-side processing via chat)
+- [x] Write vitest tests for Knox browser (12 tests passing)
+
+## Can-Am MG1 Decompile & Definition File Build
+- [ ] Decompile/disassemble 1E1101953.a2l — map all 46K+ calibration parameters, categories, control logic
+- [ ] Decompile/disassemble 1E1101953SA2VLMJ.hex — map memory layout, segment structure, flash addresses
+- [ ] Document ECU logic flow (air path, fuel, boost, torque, emissions, diagnostics)
+- [ ] Build definition file from decompiled understanding
+- [ ] Test definition file in editor — verify maps match WinOLS reference exactly
+- [ ] Iterate fixes until all maps align with WinOLS ground truth
+- [ ] Test with second Can-Am MG1 BIN (StockRead_1G0100914SB3VUM8_UL_exported.bin)

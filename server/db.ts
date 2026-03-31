@@ -197,6 +197,50 @@ export async function getKnoxCollectionSummary() {
   return result;
 }
 
+/**
+ * Build a compact Knox file library summary for LLM context injection.
+ * Returns platform → file list with key metadata (filename, calibratables, ECU ID).
+ */
+export async function getKnoxFileContextForLLM(): Promise<string> {
+  const db = await getDb();
+  if (!db) return 'Knox file library: not available (database offline).';
+  const files = await db.select({
+    filename: knoxFiles.filename,
+    fileType: knoxFiles.fileType,
+    platform: knoxFiles.platform,
+    ecuId: knoxFiles.ecuId,
+    totalCalibratables: knoxFiles.totalCalibratables,
+    totalMeasurements: knoxFiles.totalMeasurements,
+    sourceCollection: knoxFiles.sourceCollection,
+  }).from(knoxFiles).orderBy(knoxFiles.platform);
+
+  if (files.length === 0) return 'Knox file library: empty (no files stored yet).';
+
+  // Group by platform
+  const byPlatform: Record<string, typeof files> = {};
+  for (const f of files) {
+    const key = f.platform || 'Unknown';
+    if (!byPlatform[key]) byPlatform[key] = [];
+    byPlatform[key].push(f);
+  }
+
+  let ctx = `## Knox ECU File Library (${files.length} files across ${Object.keys(byPlatform).length} platforms)\n\n`;
+  for (const [platform, pFiles] of Object.entries(byPlatform)) {
+    ctx += `### ${platform} (${pFiles.length} files)\n`;
+    for (const f of pFiles) {
+      const parts = [f.filename];
+      if (f.fileType) parts.push(`[${f.fileType}]`);
+      if (f.ecuId) parts.push(`ECU: ${f.ecuId}`);
+      if (f.totalCalibratables) parts.push(`${f.totalCalibratables} cals`);
+      if (f.totalMeasurements) parts.push(`${f.totalMeasurements} meas`);
+      if (f.sourceCollection) parts.push(`(${f.sourceCollection})`);
+      ctx += `- ${parts.join(' | ')}\n`;
+    }
+    ctx += '\n';
+  }
+  return ctx;
+}
+
 export async function insertFeedback(data: InsertFeedback): Promise<boolean> {
   const db = await getDb();
   if (!db) {
