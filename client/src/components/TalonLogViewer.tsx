@@ -25,7 +25,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { Download, X, ChevronDown, ChevronRight, Search, Maximize2, Minimize2 } from 'lucide-react';
+import { Download, X, ChevronDown, ChevronRight, Search, Maximize2, Minimize2, Zap } from 'lucide-react';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
 
 // ─── Theme: HPTuners VCM Scanner dark blue ──────────────────────────────────
@@ -114,6 +114,7 @@ function getUnit(name: string): string {
   if (n.includes('voltage') || n.includes('sensor voltage')) return 'V';
   if (n.includes('module voltage')) return 'V';
   if (n.includes('air fuel ratio') || n.includes('afr')) return 'λ';
+  if (n === 'lambda 1' || n === 'lambda 2') return 'λ';
   if (n.includes('alpha')) return '';
   if (n.includes('throttle') || n.includes('duty cycle') || n.includes('trim')) return '%';
   if (n.includes('pulse') || n.includes('width')) return 'ms';
@@ -852,13 +853,20 @@ export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult })
                     : undefined;
                   const isInActiveSection = assignment?.sectionIdx === activeSection;
 
-                  // Get value at cursor
+                  // Get value at cursor (convert AFR→Lambda for AFR channels)
                   let val = '—';
+                  let displayName = ch.name;
                   if (cursorIdx !== null && cursorIdx < wp8Data.rows.length) {
-                    const v = ch.index < wp8Data.rows[cursorIdx].values.length
+                    let v = ch.index < wp8Data.rows[cursorIdx].values.length
                       ? wp8Data.rows[cursorIdx].values[ch.index]
                       : 0;
-                    val = formatValue(v, ch.name);
+                    // Convert AFR to Lambda (÷14.7)
+                    const isAFR = ch.name.toLowerCase().includes('air fuel ratio');
+                    if (isAFR && Number.isFinite(v) && v > 0) {
+                      v = v / 14.7;
+                      displayName = ch.name.replace(/Air Fuel Ratio/i, 'Lambda');
+                    }
+                    val = formatValue(v, isAFR ? 'lambda' : ch.name);
                   }
 
                   return (
@@ -898,7 +906,7 @@ export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult })
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                       }}>
-                        {ch.name}
+                        {displayName}
                       </span>
                       <span style={{
                         width: 70,
@@ -915,6 +923,40 @@ export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult })
                 })}
               </div>
 
+              {/* Alpha-N Mode Indicator */}
+              {(() => {
+                if (cursorIdx === null || cursorIdx >= wp8Data.rows.length) return null;
+                const alphaNIdx = keyChannels.alphaN;
+                if (alphaNIdx < 0) return null;
+                const alphaNVal = alphaNIdx < wp8Data.rows[cursorIdx].values.length
+                  ? wp8Data.rows[cursorIdx].values[alphaNIdx] : 0;
+                const isAlphaN = alphaNVal === 1;
+                return (
+                  <div style={{
+                    padding: '4px 8px',
+                    borderTop: `1px solid ${T.border}`,
+                    background: isAlphaN ? 'rgba(234, 179, 8, 0.10)' : 'rgba(6, 182, 212, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}>
+                    <Zap size={12} style={{ color: isAlphaN ? T.yellow : T.cyan }} />
+                    <span style={{
+                      fontSize: '0.68rem',
+                      fontWeight: 'bold',
+                      color: isAlphaN ? T.yellow : T.cyan,
+                      fontFamily: FONT.heading,
+                      letterSpacing: '0.06em',
+                    }}>
+                      {isAlphaN ? 'ALPHA-N TABLES ACTIVE' : 'SPEED DENSITY TABLES ACTIVE'}
+                    </span>
+                    <span style={{ fontSize: '0.6rem', color: T.textDim }}>
+                      Alpha-N = {alphaNVal.toFixed(2)} | IPW from {isAlphaN ? 'Alpha-N Cyl 1 & 2' : 'Speed Density Cyl 1 & 2'}
+                    </span>
+                  </div>
+                );
+              })()}
+
               {/* Bottom info */}
               <div style={{
                 padding: '4px 8px',
@@ -923,9 +965,9 @@ export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult })
                 color: T.textDim,
               }}>
                 {cursorIdx !== null ? (
-                  <span>Time: {getTimeStr(cursorIdx)} | Sample: {cursorIdx}</span>
+                  <span>Time: {getTimeStr(cursorIdx)} | Sample: {cursorIdx} | AFR shown as Lambda (÷14.7)</span>
                 ) : (
-                  <span>Hover chart to see values</span>
+                  <span>Hover chart to see values | AFR auto-converted to Lambda</span>
                 )}
               </div>
             </>

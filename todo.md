@@ -2663,3 +2663,10 @@
 - [x] Support all 4 cylinder fuel maps via screenshot upload
 - [x] Clipboard paste (Ctrl+V) support for fuel table screenshots — no file save needed
 - [x] Paste zone UI with visual feedback when pasting from snipping tool
+
+## Honda Talon Tuner — Target Lambda, Fact-Check, AFR→Lambda, Alpha-N Indicator (2026-03-31)
+- [x] Shared Target Lambda between Cyl 1 & Cyl 2 (editing one updates both), Alpha-N and Speed Density keep separate
+- [x] Screenshot fact-checking — verify OCR title matches the card (Alpha-N vs Speed Density + cylinder number)
+- [ ] AFR→Lambda conversion in log viewer (AFR1 / 14.7, AFR2 / 14.7)
+- [ ] Alpha-N channel indicator — when Alpha-N = 1, show Alpha-N tables active; else Speed Density active
+- [ ] Encode Honda Talon datalog review logic into Knox knowledge base (Alpha-N mode detection, AFR→Lambda, fuel table cross-reference rules)

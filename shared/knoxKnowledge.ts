@@ -731,4 +731,83 @@ With VOP 3.0 streaming live data to the phone, Knox can provide real-time voice 
 - "Coolant temp is climbing, 215F and rising — monitor closely"
 Voice commands: "Knox, what's my current boost?" / "Knox, how's my fuel pressure?" / "Knox, start a datalog"
 
+## Honda Talon ECU & Datalog Review Logic
+
+### Platform Overview
+The Honda Talon 1000R/X uses a Keihin ECU (part prefixes 0801EB / 0801EA) with a 999cc parallel-twin engine.
+Tuning is done via the Dynojet Power Vision (PV3) which produces .wp8 datalog files and .djt calibration files.
+The C3 Tuning Software (or HP Tuners VCM Scanner for Honda Powersports) is used to edit fuel tables.
+
+### Fuel Table Structure
+The Honda Talon has TWO fueling modes, each with per-cylinder tables (4 tables total):
+1. **Alpha-N Mode** — Throttle-based fueling (TPS vs RPM lookup)
+   - Desired Injector Pw, Alpha-N, Cyl 1
+   - Desired Injector Pw, Alpha-N, Cyl 2
+2. **Speed Density Mode** — MAP-based fueling (MAP vs RPM lookup)
+   - Desired Injector Pw, Speed Density, Cyl 1
+   - Desired Injector Pw, Speed Density, Cyl 2
+
+All tables output Injector Pulsewidth in milliseconds (ms).
+Column axis: TPS (Throttle Degrees) for Alpha-N, MAP (kPa) for Speed Density.
+Row axis: RPM (rpmx1000).
+
+### Active Table Detection (CRITICAL RULE)
+The WP8 datalog contains an "Alpha N" channel (also called "Alpha-N"):
+- **When Alpha-N = 1** → The ECU is using the **Alpha-N tables** for desired pulsewidth
+- **When Alpha-N ≠ 1 (typically 0)** → The ECU is using the **Speed Density tables** for desired pulsewidth
+
+This is the ONLY way to know which fuel table set is active at any given moment in the datalog.
+When reviewing logs, ALWAYS check the Alpha-N channel value before correlating to fuel tables.
+
+### AFR to Lambda Conversion
+The WP8 datalog reports Air Fuel Ratio 1 (AFR1) and Air Fuel Ratio 2 (AFR2) in standard AFR units.
+To convert to Lambda: **Lambda = AFR / 14.7** (stoichiometric ratio for gasoline).
+- Lambda = 1.0 → Stoichiometric (14.7:1 AFR)
+- Lambda < 1.0 → Rich (e.g., 0.85 = 12.5:1 AFR)
+- Lambda > 1.0 → Lean (e.g., 1.05 = 15.4:1 AFR)
+
+When reviewing Honda Talon datalogs, ALWAYS convert AFR to Lambda for analysis.
+Target Lambda for WOT (wide open throttle) is typically 0.82–0.88 (rich for safety).
+Target Lambda for cruise/part throttle is typically 0.95–1.02.
+
+### Target Lambda Row
+Each fuel table has a "Target Lambda" row above the RPM axis.
+Cylinder 1 and Cylinder 2 share the same Target Lambda values within each mode:
+- Alpha-N Cyl 1 Target Lambda = Alpha-N Cyl 2 Target Lambda (synced)
+- Speed Density Cyl 1 Target Lambda = Speed Density Cyl 2 Target Lambda (synced)
+But Alpha-N and Speed Density Target Lambda are INDEPENDENT (different values allowed).
+
+### Datalog Review Workflow
+When Knox reviews a Honda Talon WP8 datalog:
+1. Check the Alpha-N channel to determine which fuel table mode is active at each timestamp
+2. Convert AFR1 and AFR2 to Lambda (÷14.7)
+3. Compare actual Lambda to the Target Lambda for the active fuel table
+4. Identify deviations: if actual Lambda differs from target by >0.03, flag for review
+5. Cross-reference with RPM and TPS/MAP to identify which fuel table cell was active
+6. Look for patterns: consistent lean spots suggest the fuel table needs more pulsewidth in that cell
+7. Check Short Term Fuel Trim (STFT) — large positive values = ECU adding fuel (table too lean), large negative = ECU removing fuel (table too rich)
+8. Monitor Injector Duty Cycle — above 85% is a concern, above 95% is injector maxed out
+9. Check Coolant Temperature and Intake Air Temperature for heat soak issues
+10. Review DCT (Dual Clutch Transmission) data: clutch pressures, slip speeds, commanded gear
+
+### Key WP8 Channels for Honda Talon
+| Channel | Unit | Notes |
+|---------|------|-------|
+| Engine Speed | RPM | Primary axis for fuel table lookup |
+| Throttle Position | % | Column axis for Alpha-N tables |
+| Manifold Absolute Pressure | kPa | Column axis for Speed Density tables |
+| Air Fuel Ratio 1 | AFR | Convert to Lambda (÷14.7) — Cylinder 1 |
+| Air Fuel Ratio 2 | AFR | Convert to Lambda (÷14.7) — Cylinder 2 |
+| Alpha N | 0/1 | 1 = Alpha-N active, 0 = Speed Density active |
+| Injector Pulsewidth Final | ms | Actual commanded pulsewidth |
+| Injector Pulsewidth Desired | ms | Base desired pulsewidth from table |
+| Short Term Fuel Trim | % | ECU correction (positive = adding fuel) |
+| Injector Duty Cycle | % | Monitor for injector saturation |
+| Ignition Timing Final | ° | Spark advance |
+| Coolant Temperature | °F | Monitor for heat soak |
+| Intake Air Temperature | °F | Affects air density calculations |
+| Vehicle Speed | mph | Useful for gear ratio analysis |
+| Commanded Gear | gear | DCT gear position |
+| Module Voltage | V | Battery/charging system health |
+
 `;

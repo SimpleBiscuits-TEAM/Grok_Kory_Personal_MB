@@ -132,6 +132,25 @@ function getHeatColor(value: number, min: number, max: number): string {
   }
 }
 
+// ─── Fact-check: detect table type from OCR-extracted title ────────────────
+function detectTableType(tableName: string): { mode: 'alphaN' | 'speedDensity' | null; cylinder: 1 | 2 | null } {
+  const lower = tableName.toLowerCase();
+  const mode = lower.includes('alpha') ? 'alphaN' as const
+    : (lower.includes('speed') && lower.includes('density')) ? 'speedDensity' as const
+    : null;
+  const cyl = lower.includes('cyl 1') || lower.includes('cylinder 1') ? 1 as const
+    : lower.includes('cyl 2') || lower.includes('cylinder 2') ? 2 as const
+    : null;
+  return { mode, cylinder: cyl };
+}
+
+function getExpectedTableType(key: string): { mode: 'alphaN' | 'speedDensity'; cylinder: 1 | 2 } {
+  if (key === 'alphaN_cyl1') return { mode: 'alphaN', cylinder: 1 };
+  if (key === 'alphaN_cyl2') return { mode: 'alphaN', cylinder: 2 };
+  if (key === 'speedDensity_cyl1') return { mode: 'speedDensity', cylinder: 1 };
+  return { mode: 'speedDensity', cylinder: 2 };
+}
+
 // ─── Fuel Map Card Component ────────────────────────────────────────────────
 function FuelMapCard({
   config,
@@ -160,6 +179,7 @@ function FuelMapCard({
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [pasteZoneFocused, setPasteZoneFocused] = useState(false);
   const [pastedPreview, setPastedPreview] = useState<string | null>(null);
+  const [factCheckWarning, setFactCheckWarning] = useState<string | null>(null);
 
   const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
@@ -179,6 +199,7 @@ function FuelMapCard({
   const processImageForOCR = useCallback(async (blob: Blob, mimeType: string) => {
     setOcrLoading(true);
     setOcrError(null);
+    setFactCheckWarning(null);
     setPastedPreview(null);
     try {
       // Show preview
@@ -201,6 +222,20 @@ function FuelMapCard({
       });
 
       if (result.success) {
+        // === FACT-CHECK: Verify screenshot matches this card ===
+        const detected = detectTableType(result.tableName || '');
+        const expected = getExpectedTableType(config.key);
+        let warning: string | null = null;
+
+        if (detected.mode && detected.mode !== expected.mode) {
+          warning = `Screenshot appears to be ${detected.mode === 'alphaN' ? 'Alpha-N' : 'Speed Density'} but this card is ${expected.mode === 'alphaN' ? 'Alpha-N' : 'Speed Density'}. Loaded anyway \u2014 verify this is correct.`;
+        }
+        if (detected.cylinder && detected.cylinder !== expected.cylinder) {
+          const cylWarn = `Screenshot appears to be Cylinder ${detected.cylinder} but this card is Cylinder ${expected.cylinder}.`;
+          warning = warning ? `${warning} ${cylWarn}` : `${cylWarn} Loaded anyway \u2014 verify this is correct.`;
+        }
+        setFactCheckWarning(warning);
+
         const fuelMap: FuelMap = {
           name: result.tableName || config.label,
           description: config.desc,
@@ -553,6 +588,28 @@ function FuelMapCard({
             </div>
           </div>
 
+          {/* Fact-check warning */}
+          {factCheckWarning && (
+            <div style={{
+              background: 'oklch(0.18 0.10 90)',
+              border: `1px solid ${sColor.yellow}`,
+              borderRadius: '2px',
+              padding: '8px 12px',
+              marginBottom: '8px',
+              display: 'flex', alignItems: 'flex-start', gap: '8px',
+            }}>
+              <AlertCircle style={{ width: 16, height: 16, color: sColor.yellow, flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <span style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.yellow, letterSpacing: '0.04em' }}>
+                  TABLE MISMATCH WARNING
+                </span>
+                <p style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.yellow, margin: '2px 0 0' }}>
+                  {factCheckWarning}
+                </p>
+              </div>
+            </div>
+          )}
+
           {ocrLoading && (
             <div style={{
               background: 'oklch(0.15 0.06 200)',
@@ -759,13 +816,39 @@ export default function HondaTalonTuner({
     });
   }, []);
 
+  // Shared Target Lambda: Cyl 1 & 2 share within same mode (Alpha-N or Speed Density)
+  // Editing Alpha-N Cyl 1 Target Lambda also updates Alpha-N Cyl 2, and vice versa.
+  // Speed Density Cyl 1 & 2 share separately.
   const handleTargetLambdaEdit = useCallback((key: keyof FuelMapState, col: number, value: number) => {
     setFuelMaps(prev => {
-      const map = prev[key];
-      if (!map) return prev;
-      const newLambda = [...map.targetLambda];
-      newLambda[col] = value;
-      return { ...prev, [key]: { ...map, targetLambda: newLambda } };
+      const next = { ...prev };
+
+      // Determine the sibling key (same mode, other cylinder)
+      let siblingKey: keyof FuelMapState | null = null;
+      if (key === 'alphaN_cyl1') siblingKey = 'alphaN_cyl2';
+      else if (key === 'alphaN_cyl2') siblingKey = 'alphaN_cyl1';
+      else if (key === 'speedDensity_cyl1') siblingKey = 'speedDensity_cyl2';
+      else if (key === 'speedDensity_cyl2') siblingKey = 'speedDensity_cyl1';
+
+      // Update the primary map
+      const map = next[key];
+      if (map) {
+        const newLambda = [...map.targetLambda];
+        newLambda[col] = value;
+        next[key] = { ...map, targetLambda: newLambda };
+      }
+
+      // Sync to sibling (same mode, other cylinder)
+      if (siblingKey) {
+        const sibling = next[siblingKey];
+        if (sibling && col < sibling.targetLambda.length) {
+          const sibLambda = [...sibling.targetLambda];
+          sibLambda[col] = value;
+          next[siblingKey] = { ...sibling, targetLambda: sibLambda };
+        }
+      }
+
+      return next;
     });
   }, []);
 
