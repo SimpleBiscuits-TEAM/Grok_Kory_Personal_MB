@@ -44,6 +44,7 @@ import TuneCompare from '@/components/editor/TuneCompare';
 import { TuneManager } from '@/components/editor/TuneManager';
 import CalculatorsPanel from '@/components/editor/CalculatorsPanel';
 import KnoxFileBrowser from '@/components/editor/KnoxFileBrowser';
+import LimitAnalysisPanel from '@/components/editor/LimitAnalysisPanel';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
@@ -444,6 +445,73 @@ export default function CalibrationEditor() {
       setLoadingMessage('');
     }
   }, [toast, storeA2LMutation]);
+
+  // ── Knox "Load into Editor" handler ──
+  const handleKnoxLoadDefinition = useCallback(async (content: string, fileName: string) => {
+    setIsLoading(true);
+    setLoadingMessage(`Parsing ${fileName} from Knox Library...`);
+
+    try {
+      let def: EcuDefinition;
+      if (fileName.toLowerCase().endsWith('.csv')) {
+        def = parseCumminsCSV(content, fileName);
+      } else {
+        def = parseA2LForEditor(content, fileName);
+      }
+
+      // Store raw A2L text for session persistence
+      setA2lRawContent(content);
+      setA2lRawFileName(fileName);
+
+      setEcuDef(def);
+      setSelectedMapIndex(null);
+      setModifiedMaps(new Set());
+
+      toast.success('Knox Definition Loaded', {
+        description: `${def.ecuFamily}: ${def.stats.totalMaps} maps, ${def.stats.totalMeasurements} measurements (${def.parseTime.toFixed(0)}ms)`
+      });
+
+      // If binary is already loaded, try alignment
+      const currentBinaryData = binaryDataRef.current;
+      const currentBaseAddress = binaryBaseAddressRef.current;
+      if (currentBinaryData) {
+        setLoadingMessage('Aligning offsets...');
+        const align = alignOffsets(def, currentBinaryData, currentBaseAddress);
+        setAlignment(align);
+
+        if (align.confidence > 0.15) {
+          setLoadingMessage('Populating map values...');
+          for (const map of def.maps) {
+            populateMapValues(map, def, currentBinaryData, align.offset);
+          }
+
+          // Knox self-healing
+          setLoadingMessage('Knox is checking alignment quality...');
+          const heal = autoHealAlignment(def, currentBinaryData, currentBaseAddress, align);
+          setHealResult(heal);
+          if (heal.success && heal.finalAlignment !== align) {
+            setAlignment(heal.finalAlignment);
+            toast.success('Knox Auto-Fixed Alignment', {
+              description: `Improved from ${(heal.originalDiagnostic.healthScore * 100).toFixed(0)}% to ${(heal.finalDiagnostic.healthScore * 100).toFixed(0)}% healthy`
+            });
+          } else if (align.confidence > 0.5) {
+            toast.success('Offset Alignment', { description: `Aligned with ${(align.confidence * 100).toFixed(0)}% confidence (${align.method})` });
+          } else {
+            toast.warning('Low Confidence Alignment', { description: `Aligned at ${(align.confidence * 100).toFixed(0)}% confidence` });
+          }
+          setEcuDef({ ...def }); // trigger re-render
+        }
+      }
+
+      // Switch to maps tab after loading
+      setActiveTab('maps');
+    } catch (err: any) {
+      toast.error('Parse Error', { description: err.message || 'Failed to parse Knox definition file' });
+    } finally {
+      setIsLoading(false);
+      setLoadingMessage('');
+    }
+  }, [toast]);
 
   // ── Auto-fetch A2L helper ──
   const autoFetchAndAlign = useCallback(async (
@@ -1081,6 +1149,7 @@ export default function CalibrationEditor() {
                   <TabsTrigger value="tunes" className="text-[11px]">Tunes</TabsTrigger>
                   <TabsTrigger value="calc" className="text-[11px]">Calc</TabsTrigger>
                   <TabsTrigger value="knox" className="text-[11px]">Knox</TabsTrigger>
+                  <TabsTrigger value="limits" className="text-[11px]">Limits</TabsTrigger>
                   <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
 
@@ -1310,7 +1379,17 @@ export default function CalibrationEditor() {
                 </TabsContent>
 
                 <TabsContent value="knox" className="flex-1 overflow-hidden mt-0 min-h-0">
-                  <KnoxFileBrowser />
+                  <KnoxFileBrowser onLoadDefinition={handleKnoxLoadDefinition} />
+                </TabsContent>
+
+                <TabsContent value="limits" className="flex-1 overflow-hidden mt-0 min-h-0">
+                  <LimitAnalysisPanel
+                    ecuDef={ecuDef}
+                    onJumpToMap={(idx) => {
+                      setSelectedMapIndex(idx);
+                      setActiveTab('maps');
+                    }}
+                  />
                 </TabsContent>
 
                 <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3 min-h-0">

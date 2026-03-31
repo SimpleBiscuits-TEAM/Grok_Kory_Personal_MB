@@ -2614,3 +2614,13 @@
 - [x] Iterate fixes — all maps verified, zero offset errors
 - [x] Test with second Can-Am MG1 BIN — DIFFERENT major version (1G010 vs 1E110), 44.6% byte diff, requires own A2L
 - [x] Create engine load & boost control logic flowchart with table/parameter names
+
+## Knox Editor Integration + Bulk Upload + MG1 Auto-Detection
+- [x] Knox "Load into Editor" button — click any A2L in Knox Library to auto-load as active definition
+- [x] Server-side endpoint to fetch A2L content from S3 (fetchKnoxA2LContent procedure)
+- [x] Bulk file upload via Knox Library tab — drag-and-drop A2L/H32/VST with auto-analysis
+- [x] Server-side file analysis endpoint (uploadKnoxFile procedure — parse A2L metadata, detect ECU family, store in knox_files)
+- [x] MG1 definition auto-detection — Knox DB fallback in fetchA2L when static registry has no match
+- [x] Integrate MG1CA920 into ECU family detection pipeline (knoxAutoMatch procedure)
+- [x] Write vitest tests for all features (21 tests passing in knox-integration.test.ts)
+- [x] Airflow/boost/torque limit analysis overlay — 7 categories (airflow, boost, torque, fuel, ignition, throttle, thermal) with headroom analysis

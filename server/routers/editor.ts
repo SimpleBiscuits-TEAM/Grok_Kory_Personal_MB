@@ -8,12 +8,14 @@
  */
 
 import { z } from "zod";
+import { sql, desc } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
-import { getKnoxFileContextForLLM } from "../db";
+import { getKnoxFileContextForLLM, getDb } from "../db";
 import { getKnoxFiles, getKnoxFileById, getKnoxPlatformSummary, getKnoxCollectionSummary } from "../db";
+import { knoxFiles } from "../../drizzle/schema";
 
 export const editorRouter = router({
   /**
@@ -340,6 +342,48 @@ Examples of good translations:
       }
 
       if (!entry) {
+        // Fallback: search Knox DB for a matching A2L file
+        try {
+          const db = await getDb();
+          if (db) {
+            const family = input.ecuFamily.toUpperCase();
+            const matches = await db
+              .select()
+              .from(knoxFiles)
+              .where(sql`
+                ${knoxFiles.fileType} = 'a2l'
+                AND (
+                  ${knoxFiles.platform} LIKE ${'%' + family + '%'}
+                  OR ${knoxFiles.ecuId} LIKE ${'%' + family + '%'}
+                  OR ${knoxFiles.projectId} LIKE ${'%' + family + '%'}
+                  OR ${knoxFiles.filename} LIKE ${'%' + family + '%'}
+                )
+              `)
+              .orderBy(desc(knoxFiles.totalCalibratables))
+              .limit(1);
+
+            if (matches.length > 0) {
+              const knoxMatch = matches[0];
+              console.log(`[A2L] Knox DB fallback found: ${knoxMatch.filename} (${knoxMatch.totalCalibratables} cals)`);
+              // Fetch the content from S3
+              const response = await fetch(knoxMatch.s3Url);
+              if (response.ok) {
+                const content = await response.text();
+                return {
+                  found: true as const,
+                  ecuFamily: input.ecuFamily,
+                  fileName: knoxMatch.filename,
+                  type: 'a2l' as const,
+                  content,
+                  source: 'knox_db',
+                };
+              }
+            }
+          }
+        } catch (knoxErr: any) {
+          console.warn('[A2L] Knox DB fallback failed:', knoxErr.message);
+        }
+
         return {
           found: false as const,
           ecuFamily: input.ecuFamily,
@@ -475,5 +519,222 @@ Examples of good translations:
   knoxCollections: protectedProcedure
     .query(async () => {
       return getKnoxCollectionSummary();
+    }),
+
+  /**
+   * Fetch A2L content from Knox DB for loading into editor.
+   * Downloads the file from S3 and returns the raw text content.
+   */
+  fetchKnoxA2LContent: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const file = await getKnoxFileById(input.id);
+      if (!file) {
+        return { found: false as const, message: 'File not found in Knox database' };
+      }
+      if (file.fileType !== 'a2l' && file.fileType !== 'source') {
+        return { found: false as const, message: `Cannot load ${file.fileType} files as definitions. Only A2L files are supported.` };
+      }
+      try {
+        // Get presigned URL from S3
+        const { url } = await storageGet(file.s3Key);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for large A2L files
+        let response: Response;
+        try {
+          response = await fetch(url, { signal: controller.signal });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+        if (!response.ok) {
+          return { found: false as const, message: `Failed to download file: HTTP ${response.status}` };
+        }
+        const content = await response.text();
+        console.log(`[Knox] Loaded A2L ${file.filename} (${content.length} bytes) for editor`);
+        return {
+          found: true as const,
+          fileName: file.filename,
+          content,
+          platform: file.platform,
+          ecuId: file.ecuId,
+          totalCalibratables: file.totalCalibratables,
+        };
+      } catch (err: any) {
+        console.error(`[Knox] Failed to fetch A2L content for ${file.filename}:`, err);
+        return { found: false as const, message: `Download failed: ${err.message}` };
+      }
+    }),
+
+  /**
+   * Upload a file to Knox library.
+   * Accepts base64-encoded file data, stores to S3, and inserts metadata into DB.
+   */
+  uploadKnoxFile: protectedProcedure
+    .input(z.object({
+      filename: z.string(),
+      contentBase64: z.string(),
+      sourceCollection: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('Database not available');
+
+      // Decode base64
+      const buffer = Buffer.from(input.contentBase64, 'base64');
+      const sizeBytes = buffer.length;
+      const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+
+      // Determine file type
+      const ext = input.filename.split('.').pop()?.toLowerCase() || '';
+      let fileType = 'a2l';
+      if (ext === 'h32' || ext === 'bin') fileType = 'binary';
+      else if (ext === 'vst') {
+        // Check if text or binary VST
+        const sample = buffer.slice(0, 200).toString('utf-8');
+        fileType = /[\x00-\x08\x0e-\x1f]/.test(sample) ? 'vst_binary' : 'vst_text';
+      }
+      else if (ext === 'c' || ext === 'h') fileType = 'source';
+      else if (ext === 'ati') fileType = 'ati';
+      else if (ext === 'vbf') fileType = 'vbf';
+      else if (ext === 'err') fileType = 'error_log';
+
+      // Quick A2L metadata extraction
+      let platform = 'Unknown';
+      let ecuId: string | null = null;
+      let projectId: string | null = null;
+      let projectName: string | null = null;
+      let version: string | null = null;
+      let cpuType: string | null = null;
+      let epk: string | null = null;
+      let totalCalibratables = 0;
+      let totalMeasurements = 0;
+      let totalFunctions = 0;
+      const analysisJson: any = {};
+
+      if (fileType === 'a2l' || fileType === 'source') {
+        const text = buffer.toString('utf-8');
+        // Extract MODULE name
+        const moduleMatch = text.match(/\/begin\s+MODULE\s+(\S+)/i);
+        if (moduleMatch) projectId = moduleMatch[1];
+        // Extract PROJECT name
+        const projMatch = text.match(/\/begin\s+PROJECT\s+(\S+)\s+"([^"]*)"/i);
+        if (projMatch) { projectName = projMatch[2] || projMatch[1]; }
+        // Count parameters
+        const charMatches = text.match(/\/begin\s+CHARACTERISTIC/gi);
+        totalCalibratables = charMatches?.length || 0;
+        const measMatches = text.match(/\/begin\s+MEASUREMENT/gi);
+        totalMeasurements = measMatches?.length || 0;
+        const funcMatches = text.match(/\/begin\s+FUNCTION/gi);
+        totalFunctions = funcMatches?.length || 0;
+        // CPU type
+        const cpuMatch = text.match(/CPU_TYPE\s+"([^"]+)"/i);
+        if (cpuMatch) cpuType = cpuMatch[1];
+        // ECU ID
+        const ecuMatch = text.match(/ECU\s+"([^"]+)"/i);
+        if (ecuMatch) ecuId = ecuMatch[1];
+        // EPK
+        const epkMatch = text.match(/EPK\s+"([^"]+)"/i);
+        if (epkMatch) epk = epkMatch[1];
+        // Version
+        const verMatch = text.match(/ASAP2_VERSION\s+(\d+\s+\d+)/i);
+        if (verMatch) version = `ASAP2 ${verMatch[1]}`;
+        // Platform detection
+        if (text.includes('MG1CA920') || text.includes('MDG1C')) platform = 'Bosch MG1CA920 (Can-Am/BRP)';
+        else if (text.includes('MG1CS019')) platform = 'Bosch MG1CS019';
+        else if (text.includes('MED17')) platform = 'Bosch MED17';
+        else if (text.includes('TC1797') || text.includes('TriCore')) platform = 'Infineon TriCore / GM';
+        else if (text.includes('Copperhead') || text.includes('FPDL') || text.includes('FPDM')) platform = 'Ford PCM / Copperhead';
+        else if (text.includes('Coyote') || text.includes('FPGS') || text.includes('FPGH')) platform = 'Ford PCM / Coyote 5.0L';
+        else if (text.includes('EcoBoost') || text.includes('CNBP') || text.includes('SGBN')) platform = 'Ford PCM / EcoBoost';
+        else if (projectId) platform = `ECU: ${projectId}`;
+
+        analysisJson.parameters = {
+          CHARACTERISTIC: totalCalibratables,
+          MEASUREMENT: totalMeasurements,
+          FUNCTION: totalFunctions,
+        };
+      }
+
+      // Upload to S3
+      const randomSuffix = Math.random().toString(36).substring(2, 8);
+      const s3Key = `knox-library/${input.filename.replace(/[^a-zA-Z0-9._-]/g, '_')}-${randomSuffix}.${ext}`;
+      const { url: s3Url } = await storagePut(s3Key, buffer, 'application/octet-stream');
+
+      // Insert into DB
+      await db.insert(knoxFiles).values({
+        filename: input.filename,
+        fileType,
+        sizeMb,
+        sizeBytes,
+        s3Key,
+        s3Url,
+        platform,
+        ecuId,
+        projectId,
+        projectName,
+        version,
+        epk,
+        cpuType,
+        totalCalibratables,
+        totalMeasurements,
+        totalFunctions,
+        analysisJson,
+        sourceCollection: input.sourceCollection || 'User Upload',
+      });
+
+      console.log(`[Knox] Uploaded ${input.filename} → ${s3Key} (${sizeMb} MB, ${totalCalibratables} cals)`);
+      return {
+        success: true,
+        filename: input.filename,
+        fileType,
+        platform,
+        totalCalibratables,
+        totalMeasurements,
+      };
+    }),
+
+  /**
+   * Search Knox DB for a matching A2L by ECU family/platform.
+   * Used by the auto-detection pipeline as a fallback when the static registry doesn't have a match.
+   */
+  knoxAutoMatch: protectedProcedure
+    .input(z.object({ ecuFamily: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { found: false as const, message: 'Database not available' };
+
+      const family = input.ecuFamily.toUpperCase();
+
+      // Search by platform, ecuId, projectId, or filename containing the family name
+      const candidates = await db.select()
+        .from(knoxFiles)
+        .where(
+          sql`(
+            ${knoxFiles.fileType} = 'a2l'
+            AND (
+              ${knoxFiles.platform} LIKE ${'%' + family + '%'}
+              OR ${knoxFiles.ecuId} LIKE ${'%' + family + '%'}
+              OR ${knoxFiles.projectId} LIKE ${'%' + family + '%'}
+              OR ${knoxFiles.filename} LIKE ${'%' + family + '%'}
+            )
+          )`
+        )
+        .orderBy(desc(knoxFiles.totalCalibratables))
+        .limit(5);
+
+      if (candidates.length === 0) {
+        return { found: false as const, message: `No Knox A2L files match ECU family: ${family}` };
+      }
+
+      // Pick the best candidate (most calibratables)
+      const best = candidates[0];
+      return {
+        found: true as const,
+        fileId: best.id,
+        filename: best.filename,
+        platform: best.platform,
+        totalCalibratables: best.totalCalibratables,
+        s3Key: best.s3Key,
+      };
     }),
 });

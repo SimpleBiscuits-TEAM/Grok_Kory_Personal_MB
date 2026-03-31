@@ -6,18 +6,18 @@
  *  - Search by filename
  *  - Filter by platform, collection, file type
  *  - Detail view with full ECU metadata + analysis JSON
+ *  - "Load into Editor" button for A2L files
  *  - Download link to S3-stored files
- *  - Bulk file upload with drag-and-drop
+ *  - Bulk file upload with drag-and-drop + auto-analysis
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import {
   Search, Filter, Database, FileText, HardDrive, Cpu, ChevronLeft,
   Upload, X, FolderOpen, ArrowDown, ExternalLink, Loader2, Package,
-  FileCode, Binary, AlertCircle, CheckCircle
+  FileCode, Binary, AlertCircle, CheckCircle, Play, FileUp
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -33,34 +33,14 @@ const FILE_TYPE_CONFIG: Record<string, { icon: typeof FileText; color: string; l
   error_log: { icon: AlertCircle, color: 'text-red-400', label: 'Error Log' },
 };
 
-interface KnoxFile {
-  id: number;
-  filename: string;
-  fileType: string;
-  sizeMb: string;
-  platform: string;
-  ecuId: string | null;
-  projectId: string | null;
-  projectName: string | null;
-  version: string | null;
-  cpuType: string | null;
-  totalCalibratables: number | null;
-  totalMeasurements: number | null;
-  totalFunctions: number | null;
-  sourceCollection: string | null;
-  s3Url: string;
-  createdAt: Date;
+const ALLOWED_EXTENSIONS = ['a2l', 'h32', 'bin', 'vst', 'c', 'h', 'ati', 'vbf', 'err', 'hex'];
+
+interface KnoxFileBrowserProps {
+  /** Called when user clicks "Load into Editor" on an A2L file. Passes the raw A2L text content + filename. */
+  onLoadDefinition?: (content: string, fileName: string) => void;
 }
 
-interface KnoxFileDetail extends KnoxFile {
-  sizeBytes: number;
-  epk: string | null;
-  s3Key: string;
-  analysisJson: any;
-  updatedAt: Date;
-}
-
-export default function KnoxFileBrowser() {
+export default function KnoxFileBrowser({ onLoadDefinition }: KnoxFileBrowserProps) {
   // State
   const [search, setSearch] = useState('');
   const [platformFilter, setPlatformFilter] = useState('');
@@ -70,6 +50,10 @@ export default function KnoxFileBrowser() {
   const [page, setPage] = useState(0);
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; current: string }>({ done: 0, total: 0, current: '' });
+  const [loadingA2L, setLoadingA2L] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const PAGE_SIZE = 30;
 
   // Queries
@@ -89,6 +73,9 @@ export default function KnoxFileBrowser() {
     { id: selectedFileId! },
     { enabled: !!selectedFileId }
   );
+
+  // Mutations
+  const uploadMutation = trpc.editor.uploadKnoxFile.useMutation();
 
   const files = filesData?.files || [];
   const total = filesData?.total || 0;
@@ -111,6 +98,110 @@ export default function KnoxFileBrowser() {
     setSelectedFileId(null);
   }, []);
 
+  // Load A2L into editor
+  const handleLoadIntoEditor = useCallback(async (fileId: number) => {
+    if (!onLoadDefinition) {
+      toast.error('Editor connection not available');
+      return;
+    }
+    setLoadingA2L(true);
+    try {
+      const result = await fetch(`/api/trpc/editor.fetchKnoxA2LContent?input=${encodeURIComponent(JSON.stringify({ id: fileId }))}`, {
+        credentials: 'include',
+      });
+      const json = await result.json();
+      const data = json?.result?.data;
+      if (data?.found) {
+        onLoadDefinition(data.content, data.fileName);
+        toast.success('Definition Loaded', {
+          description: `${data.fileName} — ${data.totalCalibratables?.toLocaleString() || '?'} calibratables`
+        });
+      } else {
+        toast.error('Failed to Load', { description: data?.message || 'Unknown error' });
+      }
+    } catch (err: any) {
+      toast.error('Load Failed', { description: err.message });
+    } finally {
+      setLoadingA2L(false);
+    }
+  }, [onLoadDefinition]);
+
+  // Bulk file upload
+  const processFiles = useCallback(async (fileList: File[]) => {
+    const validFiles = fileList.filter(f => {
+      const ext = f.name.split('.').pop()?.toLowerCase() || '';
+      return ALLOWED_EXTENSIONS.includes(ext);
+    });
+
+    if (validFiles.length === 0) {
+      toast.error('No valid files', { description: `Supported: ${ALLOWED_EXTENSIONS.join(', ')}` });
+      return;
+    }
+
+    if (validFiles.length < fileList.length) {
+      toast.info(`Skipping ${fileList.length - validFiles.length} unsupported file(s)`);
+    }
+
+    setUploading(true);
+    setUploadProgress({ done: 0, total: validFiles.length, current: validFiles[0].name });
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      setUploadProgress({ done: i, total: validFiles.length, current: file.name });
+
+      try {
+        // Read file as base64
+        const buffer = await file.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        await uploadMutation.mutateAsync({
+          filename: file.name,
+          contentBase64: base64,
+          sourceCollection: 'User Upload',
+        });
+        successCount++;
+      } catch (err: any) {
+        console.error(`Upload failed for ${file.name}:`, err);
+        failCount++;
+      }
+    }
+
+    setUploading(false);
+    setUploadProgress({ done: 0, total: 0, current: '' });
+
+    if (successCount > 0) {
+      toast.success(`Uploaded ${successCount} file(s)`, {
+        description: failCount > 0 ? `${failCount} failed` : 'All files analyzed and stored in Knox'
+      });
+      refetchFiles();
+    } else {
+      toast.error('All uploads failed');
+    }
+  }, [uploadMutation, refetchFiles]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      processFiles(droppedFiles);
+    }
+  }, [processFiles]);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length > 0) {
+      processFiles(selectedFiles);
+    }
+    // Reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [processFiles]);
+
   // Stats
   const totalA2L = useMemo(() => {
     if (!platforms) return 0;
@@ -122,6 +213,7 @@ export default function KnoxFileBrowser() {
     const ftConfig = FILE_TYPE_CONFIG[fileDetail.fileType] || FILE_TYPE_CONFIG.a2l;
     const Icon = ftConfig.icon;
     const analysis = fileDetail.analysisJson as any;
+    const isA2L = fileDetail.fileType === 'a2l' || fileDetail.fileType === 'source';
 
     return (
       <div className="flex flex-col h-full overflow-auto p-3 gap-3">
@@ -219,16 +311,40 @@ export default function KnoxFileBrowser() {
           </div>
         )}
 
-        {/* Download */}
-        <a
-          href={fileDetail.s3Url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 px-3 py-2 bg-red-600/20 border border-red-600/30 rounded text-[11px] font-bold text-red-400 hover:bg-red-600/30 transition-colors"
-        >
-          <ArrowDown className="w-3.5 h-3.5" />
-          DOWNLOAD FILE
-        </a>
+        {/* Action buttons */}
+        <div className="flex flex-col gap-2">
+          {/* Load into Editor — only for A2L files */}
+          {isA2L && onLoadDefinition && (
+            <button
+              onClick={() => handleLoadIntoEditor(fileDetail.id)}
+              disabled={loadingA2L}
+              className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-600/20 border border-emerald-600/40 rounded text-[11px] font-bold text-emerald-400 hover:bg-emerald-600/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loadingA2L ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  LOADING INTO EDITOR...
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5" />
+                  LOAD INTO EDITOR
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Download */}
+          <a
+            href={fileDetail.s3Url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 px-3 py-2 bg-red-600/20 border border-red-600/30 rounded text-[11px] font-bold text-red-400 hover:bg-red-600/30 transition-colors"
+          >
+            <ArrowDown className="w-3.5 h-3.5" />
+            DOWNLOAD FILE
+          </a>
+        </div>
       </div>
     );
   }
@@ -275,18 +391,44 @@ export default function KnoxFileBrowser() {
             }`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              const droppedFiles = Array.from(e.dataTransfer.files);
-              if (droppedFiles.length > 0) {
-                toast.info(`${droppedFiles.length} file(s) queued — bulk upload coming soon. For now, share files in chat.`);
-              }
-            }}
+            onDrop={handleDrop}
           >
-            <Upload className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
-            <p className="text-[10px] text-zinc-400">Drag & drop A2L, H32, VST, or BIN files here</p>
-            <p className="text-[9px] text-zinc-600 mt-1">Files will be analyzed and added to Knox automatically</p>
+            {uploading ? (
+              <div className="space-y-2">
+                <Loader2 className="w-5 h-5 animate-spin text-red-500 mx-auto" />
+                <p className="text-[10px] text-zinc-400">
+                  Uploading {uploadProgress.done + 1} of {uploadProgress.total}...
+                </p>
+                <p className="text-[9px] text-zinc-500 font-mono truncate">{uploadProgress.current}</p>
+                <div className="w-full bg-zinc-800 rounded-full h-1.5">
+                  <div
+                    className="bg-red-500 h-1.5 rounded-full transition-all"
+                    style={{ width: `${((uploadProgress.done + 0.5) / uploadProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <Upload className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
+                <p className="text-[10px] text-zinc-400">Drag & drop A2L, H32, VST, or BIN files here</p>
+                <p className="text-[9px] text-zinc-600 mt-1">Files will be analyzed and added to Knox automatically</p>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-2 px-3 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-[10px] text-zinc-400 transition-colors"
+                >
+                  <FileUp className="w-3 h-3 inline mr-1" />
+                  Browse Files
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".a2l,.h32,.bin,.vst,.c,.h,.ati,.vbf,.err,.hex"
+                  onChange={handleFileInputChange}
+                  className="hidden"
+                />
+              </>
+            )}
           </div>
         )}
 
