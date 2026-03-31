@@ -36,6 +36,8 @@ interface NavItem {
   path: string;
   /** If true, only show when authenticated */
   auth?: boolean;
+  /** If true, only show for admin/super_admin users */
+  admin?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -45,8 +47,7 @@ const navItems: NavItem[] = [
   { label: 'DRAG', path: '/drag' },
   { label: 'COMMUNITY', path: '/community' },
   { label: 'PITCH', path: '/pitch' },
-  { label: 'TASKS', path: '/tasks', auth: true },
-  { label: 'CALIBRATIONS', path: '/calibrations' },
+  { label: 'TASKS', path: '/tasks', auth: true, admin: true },
 ];
 
 export default function PpeiHeader() {
@@ -68,7 +69,12 @@ export default function PpeiHeader() {
     }
   }, [showUserMenu]);
 
-  const visibleItems = navItems.filter(item => !item.auth || isAuthenticated);
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const visibleItems = navItems.filter(item => {
+    if (item.admin && !isAdmin) return false;
+    if (item.auth && !isAuthenticated) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     setShowUserMenu(false);

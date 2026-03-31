@@ -147,8 +147,9 @@ function TasksAccessGate() {
     );
   }
 
-  // Signed in but not @ppei email — show manual email verification
-  if (!isPpeiEmail(user.email)) {
+  // Signed in but not admin — show restricted message
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  if (!isAdmin) {
     return (
       <div style={{ minHeight: '100vh', background: sColor.bg }}>
         <PpeiHeader />
@@ -174,7 +175,7 @@ function TasksAccessGate() {
               letterSpacing: '0.08em',
               color: 'white',
               margin: '0 0 0.5rem 0',
-            }}>ACCESS RESTRICTED</h2>
+            }}>ADMIN ACCESS ONLY</h2>
             <p style={{
               fontFamily: sFont.body,
               fontSize: '0.9rem',
@@ -182,8 +183,8 @@ function TasksAccessGate() {
               margin: '0 0 0.75rem 0',
               lineHeight: 1.6,
             }}>
-              The QA Task Tracker is restricted to PPEI team members.
-              Enter your @ppei email address to verify access.
+              The QA Task Tracker is restricted to administrators.
+              Contact a PPEI admin if you need access.
             </p>
             <p style={{
               fontFamily: sFont.mono,
@@ -193,73 +194,13 @@ function TasksAccessGate() {
             }}>
               Signed in as: {user.email || user.name || 'Unknown'}
             </p>
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <input
-                type="email"
-                placeholder="yourname@ppei.com"
-                value={emailInput}
-                onChange={(e) => { setEmailInput(e.target.value); setError(''); }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (isPpeiEmail(emailInput)) {
-                      localStorage.setItem(STORAGE_KEY, emailInput.toLowerCase().trim());
-                      window.location.reload();
-                    } else {
-                      setError('Must be a valid @ppei email address');
-                    }
-                  }
-                }}
-                style={{
-                  flex: 1,
-                  maxWidth: '260px',
-                  padding: '8px 14px',
-                  background: 'oklch(0.14 0.006 260)',
-                  border: `1px solid ${error ? sColor.red : sColor.border}`,
-                  color: 'white',
-                  fontFamily: sFont.mono,
-                  fontSize: '0.8rem',
-                  outline: 'none',
-                }}
-              />
-              <button
-                onClick={() => {
-                  if (isPpeiEmail(emailInput)) {
-                    localStorage.setItem(STORAGE_KEY, emailInput.toLowerCase().trim());
-                    window.location.reload();
-                  } else {
-                    setError('Must be a valid @ppei email address');
-                  }
-                }}
-                style={{
-                  padding: '8px 20px',
-                  background: sColor.red,
-                  color: 'white',
-                  border: 'none',
-                  fontFamily: sFont.heading,
-                  fontSize: '0.85rem',
-                  letterSpacing: '0.06em',
-                  cursor: 'pointer',
-                }}
-              >
-                VERIFY
-              </button>
-            </div>
-            {error && (
-              <p style={{
-                fontFamily: sFont.mono,
-                fontSize: '0.7rem',
-                color: sColor.red,
-                margin: '0.75rem 0 0 0',
-              }}>{error}</p>
-            )}
           </div>
         </div>
       </div>
     );
   }
 
-  // Should not reach here — if @ppei email, we proceed
+  // Should not reach here — admin check passed above
   return null;
 }
 
@@ -269,12 +210,11 @@ export default function Tasks() {
   const store = useTaskStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Check if unlocked via localStorage or if user has @ppei email
-  const storedEmail = localStorage.getItem(STORAGE_KEY);
-  const hasAccess = isPpeiEmail(user?.email) || isPpeiEmail(storedEmail);
+  // Admin-only access: only admin/super_admin roles can view Tasks
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
 
   // Show gate if no access
-  if (loading || !isAuthenticated || !hasAccess) {
+  if (loading || !isAuthenticated || !isAdmin) {
     return <TasksAccessGate />;
   }
 

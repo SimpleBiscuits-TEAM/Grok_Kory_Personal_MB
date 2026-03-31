@@ -2714,3 +2714,8 @@
 - [x] Cummins Fueling States: Wire decoder into DynoCharts tooltip for Fuel Ctrl Mode overlay
 - [x] Cummins Fueling States: Add Engine Torque State decoding to DynoCharts tooltip
 - [x] Cummins Fueling States: 31 vitest tests passing
+- [x] Move Calibrations page from top-level nav to Advanced tab (navigates to /calibrations when clicked)
+- [x] Tasks page: Restrict /tasks route to admin-only access (role-based guard, hidden from non-admin nav)
+- [ ] CM2200 Config: Locate and parse CM2200 ECU config file for Knox
+- [ ] CM2200 Config: Add CM2200 ECU definition to cumminsParameterDatabase.ts
+- [ ] CM2200 Config: Add CM2200_SPECS to ecuReference.ts

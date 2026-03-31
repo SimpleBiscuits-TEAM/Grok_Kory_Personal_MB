@@ -1356,7 +1356,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'calibrations';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1367,6 +1367,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'calibrations', label: 'CALIBRATIONS', icon: <Database style={{ width: 16, height: 16, color: 'oklch(0.70 0.15 280)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1493,7 +1494,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               {isAdmin && idx === tabs.length && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
-              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } setActiveTab(tab.id); }} style={{
+              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } if (tab.id === 'calibrations') { navigate('/calibrations'); return; } setActiveTab(tab.id); }} style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
                 color: activeTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
