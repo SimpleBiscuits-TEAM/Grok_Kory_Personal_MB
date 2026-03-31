@@ -2750,3 +2750,10 @@
 - [x] VOP Bridge Installer: Create download page in web app for easy customer access
 - [x] VOP Bridge Installer: Include PPEI/VOP branding (logo, colors, license agreement)
 - [x] Honda Talon Tuner: Fix OCR image-to-table import showing zeros instead of correct data values
+- [x] IntelliSpy: Fix live CAN traffic — added Check Bridge button using PCANConnection.isBridgeAvailable()
+- [x] IntelliSpy: Add "Check Bridge" connection panel matching DataloggerPanel pattern
+- [x] Shared Bridge: Verified bridge supports multi-client — Datalogger and IntelliSpy work simultaneously
+- [x] Fix Banks iDash parser detection for 2024+ L5P logs (4-row header format with TIME/hex PIDs/short names/units)
+- [x] Fix analyzer to parse 2024+ L5P Banks iDash log format (Latin-1 encoding, EGT sentinel filtering)
+- [x] Add 2024-2026 L5P Banks iDash Full PID layout as selectable preset in Datalogger
+- [x] Export all Manus knowledge items to docs/knowledge-base.md as permanent unlimited repo-hosted knowledge base

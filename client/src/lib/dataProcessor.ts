@@ -298,11 +298,18 @@ export function parseCSV(content: string): DuramaxData {
     cleanLines[0].includes('Elapsed (s)')
   );
 
-  // Check for Banks Power format (has "Horsepower ECU", "Torque ECU", "DYNO" columns)
+  // Check for Banks Power / iDash format
+  // Pattern 1: Legacy Banks dyno logs with "Horsepower ECU", "DYNO", "Transmission Slip"
+  // Pattern 2: Banks iDash 4-row header — row 0 starts with "TIME,Engine RPM" and row 1 has hex PIDs ("0x")
   const isBanksPower = cleanLines.some(line => 
     line.includes('Horsepower ECU') || 
     line.includes('DYNO - WHP') || 
     line.includes('Transmission Slip')
+  ) || (
+    cleanLines.length >= 4 &&
+    cleanLines[0].startsWith('TIME,') &&
+    cleanLines[0].includes('Engine RPM') &&
+    cleanLines[1].includes('0x')
   );
   
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
@@ -1855,14 +1862,20 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   };
   
   // Banks Power column mappings
+  // Handles both legacy Banks dyno format and 2024+ iDash 4-row header format
   const timeIdx = getColumnIndex(['TIME']);
   const rpmIdx = getColumnIndex(['Engine RPM']);
   const mafIdx = getColumnIndex(['Mass Air Flow']);
   // Use 'Boost Pressure' (gauge, PSIG) if available; fall back to MAP absolute
   const boostGaugeIdx = getColumnIndex(['Boost Pressure']);
-  const mapIdx = getColumnIndex(['Manifold Absolute Pressure']);
-  const torqueIdx = getColumnIndex(['Torque ECU']);
+  // MAP: iDash uses 'Manifold Pressure A' or 'Manifold Absolute Pressure A'
+  const mapIdx = getColumnIndex(['Manifold Pressure A', 'Manifold Absolute Pressure A', 'Manifold Absolute Pressure']);
+  // Torque: iDash 2024 uses 'Torque % Actual' (percentage) instead of 'Torque ECU' (ft-lb)
+  const torqueIdx = getColumnIndex(['Torque ECU', 'Torque % Actual']);
+  const torqueCmdIdx = getColumnIndex(['Torque % Commanded']);
   const hpIdx = getColumnIndex(['Horsepower ECU']);
+  // Engine Reference Torque: iDash provides this in ft-lb for converting % to actual
+  const refTorqueIdx = getColumnIndex(['Engine Reference Torque']);
   const speedIdx = getColumnIndex(['Vehicle Speed']);
   const fuelRateIdx = getColumnIndex(['Fuel Flow Rate', 'Cylinder Fuel Rate']);
   const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
@@ -1872,7 +1885,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const mapCommandedIdx = getColumnIndex(['MAP Commanded']);
   const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
   const turboVaneIdx = getColumnIndex(['Turbo Vane Position']);
-  const turboVaneDesiredIdx = getColumnIndex(['Turbo Vane Position Desired', 'Desired Turbo Vane Position', 'Turbo Vane Desired']);
+  const turboVaneDesiredIdx = getColumnIndex(['Turbo Vane Position Desired', 'Desired Turbo Vane Position', 'Turbo Vane Desired', 'Turbo Vane Command']);
   // EGT: scan ALL EGT-matching columns and pick the one with the highest peak reading
   // Banks Power may log multiple EGT sensors (DOC inlet, turbo inlet, DPF outlet, etc.)
   const egtIdx = (() => {
@@ -1903,10 +1916,25 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const coolantTempIdx = getColumnIndex(['Engine Coolant Temp', 'Coolant Temp']);
   const oilTempIdx = getColumnIndex(['Engine Oil Temp', 'Oil Temp']);
   const transFluidTempIdx = getColumnIndex(['Transmission Fluid Temp', 'Trans Fluid Temp']);
-  const throttleIdx = getColumnIndex(['Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
+  // Throttle: iDash 2024 uses 'Throttle Position' (actual) and 'Accelerator Pedal D'/'Accelerator Pedal E'
+  const throttleIdx = getColumnIndex(['Accelerator Pedal D', 'Accelerator Pedal E', 'Accelerator Pedal Position', 'Throttle Position', 'Pedal Position', 'APP', 'Accel Pedal']);
   const injPulseWidthIdx = getColumnIndex(['Injector Pulse Width', 'Inj Pulse Width', 'Fuel Pulse Width']);
-  const injTimingIdx = getColumnIndex(['Injection Timing', 'Timing Advance', 'SOI', 'Start of Injection']);
-  const iatIdx = getColumnIndex(['Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
+  // iDash 2024 uses 'Injection Timing Advance'
+  const injTimingIdx = getColumnIndex(['Injection Timing Advance', 'Injection Timing', 'Timing Advance', 'SOI', 'Start of Injection']);
+  // iDash 2024 uses 'IAT Bank 1 Sensor 1/2/3' and 'CAC Temp Bank 1 Sensor 1/2'
+  const iatIdx = getColumnIndex(['IAT Bank 1 Sensor 1', 'IAT Bank 1', 'Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
+  // iDash 2024 additional channels
+  const calcLoadIdx = getColumnIndex(['Calculated Engine Load', 'Absolute Engine Load']);
+  const battVoltIdx = getColumnIndex(['ECU Battery Voltage', 'B-Bus Battery Voltage']);
+  const egrCmdIdx = getColumnIndex(['EGR Duty Cycle Commanded']);
+  const egrActIdx = getColumnIndex(['EGR Duty Cycle Actual']);
+  const cylFuelRateIdx = getColumnIndex(['Cylinder Fuel Rate']);
+  const defLevelIdx = getColumnIndex(['DEF Fluid Level', 'DEF Tank Level']);
+  const dpfDeltaPressIdx = getColumnIndex(['DPF Delta Press']);
+  const dpfRegenStatusIdx = getColumnIndex(['Dpf Regen Status']);
+  const liftPumpIdx = getColumnIndex(['Lift Pump Fuel Pressure']);
+  const fuelTankIdx = getColumnIndex(['Fuel Tank Level']);
+  const exhaustFlowIdx = getColumnIndex(['Engine Exhaust Flow Rate']);
   
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns in Banks Power format: Engine RPM or Mass Air Flow');
@@ -1977,15 +2005,28 @@ function parseBanksPowerCSV(content: string): DuramaxData {
       boost.push(0);
     }
     
-    // Banks Power provides actual torque and HP, not percentages
-    // Convert torque to percentage if we have max torque reference
-    if (torqueIdx !== -1 && hpIdx !== -1) {
-      // Use torque directly, assume 879 lb-ft reference
-      torquePercent.push((values[torqueIdx] / 879.174) * 100);
-      maxTorque.push(879.174);
+    // Banks Power torque handling:
+    // Legacy format: 'Torque ECU' is ft-lb, 'Horsepower ECU' is HP → convert to %
+    // iDash 2024: 'Torque % Actual' is already %, 'Engine Reference Torque' is ft-lb
+    const refTorqueVal = refTorqueIdx !== -1 ? values[refTorqueIdx] : 0;
+    if (torqueIdx !== -1) {
+      const torqueVal = values[torqueIdx];
+      if (refTorqueVal > 0) {
+        // iDash format: torque is already %, reference torque gives us the ft-lb base
+        torquePercent.push(torqueVal);
+        maxTorque.push(refTorqueVal);
+      } else if (hpIdx !== -1) {
+        // Legacy format: torque is ft-lb, assume 879 lb-ft reference
+        torquePercent.push((torqueVal / 879.174) * 100);
+        maxTorque.push(879.174);
+      } else {
+        // Torque value exists but no reference — treat as percentage
+        torquePercent.push(torqueVal);
+        maxTorque.push(879.174);
+      }
     } else {
       torquePercent.push(0);
-      maxTorque.push(879.174);
+      maxTorque.push(refTorqueVal > 0 ? refTorqueVal : 879.174);
     }
     
     vehicleSpeed.push(speedIdx !== -1 ? values[speedIdx] : 0);
@@ -1999,20 +2040,27 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     boostDesired.push(mapCmdVal > 0 ? Math.max(0, mapCmdVal - ambientVal) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
-    exhaustGasTemp.push(egtIdx !== -1 ? values[egtIdx] : 0);
+    // Filter EGT/CAT sentinel values: -1740.6, -531.7 = sensor not connected on iDash
+    const rawEgt = egtIdx !== -1 ? values[egtIdx] : 0;
+    exhaustGasTemp.push(rawEgt < -100 ? 0 : rawEgt);
     converterSlip.push(converterSlipIdx !== -1 ? values[converterSlipIdx] : 0);
     converterDutyCycle.push(converterDutyIdx !== -1 ? values[converterDutyIdx] : 0);
     converterPressure.push(converterPressureIdx !== -1 ? values[converterPressureIdx] : 0);
     currentGear.push(currentGearIdx !== -1 ? values[currentGearIdx] : 0);
     oilPressure.push(oilPressureIdx !== -1 ? values[oilPressureIdx] : 0);
-    coolantTemp.push(coolantTempIdx !== -1 ? values[coolantTempIdx] : 0);
-    oilTemp.push(oilTempIdx !== -1 ? values[oilTempIdx] : 0);
+    // Filter temp sentinel values (< -100°F = sensor not connected)
+    const rawCoolant = coolantTempIdx !== -1 ? values[coolantTempIdx] : 0;
+    coolantTemp.push(rawCoolant < -100 ? 0 : rawCoolant);
+    const rawOilT = oilTempIdx !== -1 ? values[oilTempIdx] : 0;
+    oilTemp.push(rawOilT < -100 ? 0 : rawOilT);
     transFluidTemp.push(transFluidTempIdx !== -1 ? values[transFluidTempIdx] : 0);
     barometricPressure.push(ambientVal);
     throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
     injectorPulseWidth.push(injPulseWidthIdx !== -1 ? values[injPulseWidthIdx] : 0);
     injectionTiming.push(injTimingIdx !== -1 ? values[injTimingIdx] : 0);
-    intakeAirTemp.push(iatIdx !== -1 ? values[iatIdx] : 0);
+    // Filter IAT sentinel values
+    const rawIat = iatIdx !== -1 ? values[iatIdx] : 0;
+    intakeAirTemp.push(rawIat < -100 ? 0 : rawIat);
   }
   
   if (rpm.length === 0) {

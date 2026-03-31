@@ -114,7 +114,15 @@ export default function Home() {
         throw new Error('WP8 file detected but not a Honda Talon datalog. Only Honda Talon .wp8 files are currently supported.');
       }
 
-      const content = await file.text();
+      // Use TextDecoder to handle both UTF-8 and Latin-1 encoded files
+      // Banks iDash logs use Latin-1 degree symbols (°F) that fail with UTF-8
+      const buf = await file.arrayBuffer();
+      let content: string;
+      try {
+        content = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+      } catch {
+        content = new TextDecoder('latin1').decode(buf);
+      }
       const rawData = parseCSV(content);
       const processed = processData(rawData);
       const downsampled = downsampleData(processed, 2000);

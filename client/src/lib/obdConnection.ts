@@ -645,6 +645,47 @@ export const PID_PRESETS: PIDPreset[] = [
     ],
   },
   {
+    name: '2024-2026 L5P Banks iDash Full',
+    description: 'Complete Banks iDash layout: FRP, Boost, VGT, EGT, EGR, DPF, DEF, NOx, Oil, Trans, IAT — E42 ECM',
+    pids: [
+      0x0C,     // Engine RPM (Mode 01)
+      0x0D,     // Vehicle Speed (Mode 01)
+      0x05,     // Engine Coolant Temp (Mode 01)
+      0x10,     // Mass Air Flow (Mode 01)
+      0x04,     // Calculated Engine Load (Mode 01)
+      0x33,     // Barometric Pressure (Mode 01)
+      0x42,     // ECU Battery Voltage (Mode 01)
+      0x0565,   // Fuel Rail Pressure Actual
+      0x0564,   // FRP Commanded
+      0x054A,   // FRP Deviation
+      0x056C,   // Injection Timing
+      0x056D,   // Injection Quantity
+      0x0572,   // Commanded Boost
+      0x0573,   // Actual Boost
+      0x0574,   // VGT Commanded
+      0x0575,   // VGT Actual
+      0x0576,   // Turbo Speed
+      0x0580,   // EGT Pre-Turbo
+      0x0581,   // EGT Post-Turbo
+      0x057A,   // Charge Air Cooler Outlet Temp
+      0x0590,   // EGR Mass Flow
+      0x05B0,   // Engine Oil Temp
+      0x05B1,   // Engine Oil Pressure
+      0x05A0,   // Transmission Fluid Temp
+      0x05A1,   // TCC Slip
+      0x05A2,   // TCC Commanded Pressure
+      0x05A3,   // Trans Output Speed
+      0x1A10,   // DPF Soot Load
+      0x1A11,   // DPF Differential Pressure
+      0x1A14,   // DPF Regen Status
+      0x1A20,   // DEF Tank Level
+      0x1A21,   // DEF Tank Temperature
+      0x1A22,   // DEF Dosing Rate
+      0x1A23,   // SCR Inlet NOx
+      0x1A24,   // SCR Outlet NOx
+    ],
+  },
+  {
     name: 'Duramax Fuel System (Extended)',
     description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, PCV Duty, Injector Balance Rates',
     pids: [

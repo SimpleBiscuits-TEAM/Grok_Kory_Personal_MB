@@ -36,6 +36,7 @@ import { lookupModule, ALL_KNOWN_MODULES, type KnownModule } from '@/lib/moduleS
 import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
+import { PCANConnection } from '@/lib/pcanConnection';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -446,6 +447,11 @@ export default function IntelliSpy() {
   const [bridgeUrl, setBridgeUrl] = useState('wss://localhost:8766');
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Bridge check state (matches DataloggerPanel pattern)
+  const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
+  const [checkingBridge, setCheckingBridge] = useState(false);
+  const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
+
   // Protocol state
   const [activeProtocol, setActiveProtocol] = useState<SupportedProtocol>('obd2');
   const [showProtocolMenu, setShowProtocolMenu] = useState(false);
@@ -507,6 +513,26 @@ export default function IntelliSpy() {
     }
   }, []);
 
+  // ─── Bridge Check ─────────────────────────────────────────────────────
+
+  const handleCheckBridge = useCallback(async () => {
+    setCheckingBridge(true);
+    try {
+      const result = await PCANConnection.isBridgeAvailable();
+      setBridgeAvailable(result.available);
+      if (result.available) {
+        setDetectedBridgeUrl(result.url);
+      } else {
+        setDetectedBridgeUrl(null);
+      }
+    } catch {
+      setBridgeAvailable(false);
+      setDetectedBridgeUrl(null);
+    } finally {
+      setCheckingBridge(false);
+    }
+  }, []);
+
   // ─── WebSocket Connection ──────────────────────────────────────────────
 
   const connect = useCallback(async () => {
@@ -514,7 +540,10 @@ export default function IntelliSpy() {
 
     setStatus('connecting');
 
-    const urlsToTry = ['wss://localhost:8766', 'ws://localhost:8765'];
+    // Use detected URL first, then fall back to defaults
+    const urlsToTry = detectedBridgeUrl
+      ? [detectedBridgeUrl, ...(['wss://localhost:8766', 'ws://localhost:8765'].filter(u => u !== detectedBridgeUrl))]
+      : ['wss://localhost:8766', 'ws://localhost:8765'];
     let connected = false;
 
     for (const url of urlsToTry) {
@@ -585,7 +614,7 @@ export default function IntelliSpy() {
     if (!connected) {
       setStatus('error');
     }
-  }, [activeProtocol]);
+  }, [activeProtocol, detectedBridgeUrl]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -1028,16 +1057,34 @@ export default function IntelliSpy() {
           </div>
         )}
       </div>
-
-      {/* ─── Toolbar ─────────────────────────────────────────────────── */}
+      {/* ─── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800/50">
+        {/* Bridge Check */}
+        <Button size="sm" variant="outline" onClick={handleCheckBridge} disabled={checkingBridge || status === 'monitoring'}
+          className={`font-['Share_Tech_Mono',monospace] text-xs ${
+            bridgeAvailable === true ? 'border-green-700 text-green-400' :
+            bridgeAvailable === false ? 'border-red-700 text-red-400' :
+            'border-zinc-700 text-zinc-400'
+          } hover:bg-zinc-800/50`}>
+          {checkingBridge ? (
+            <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> Checking...</>
+          ) : bridgeAvailable === true ? (
+            <><CheckCircle className="w-3.5 h-3.5 mr-1" /> Bridge OK</>
+          ) : bridgeAvailable === false ? (
+            <><XCircle className="w-3.5 h-3.5 mr-1" /> No Bridge</>
+          ) : (
+            <><Search className="w-3.5 h-3.5 mr-1" /> Check Bridge</>
+          )}
+        </Button>
+
+        <div className="w-px h-5 bg-zinc-800" />
+
         {/* Connection controls */}
         {status === 'disconnected' || status === 'error' ? (
           <Button size="sm" variant="outline" onClick={connect}
             className="border-green-700 text-green-400 hover:bg-green-900/30 font-['Share_Tech_Mono',monospace] text-xs">
             <Wifi className="w-3.5 h-3.5 mr-1" /> Connect Bridge
-          </Button>
-        ) : status === 'connected' ? (
+          </Button>    ) : status === 'connected' ? (
           <>
             <Button size="sm" variant="outline" onClick={() => startMonitor()}
               className="border-red-700 text-red-400 hover:bg-red-900/30 font-['Share_Tech_Mono',monospace] text-xs">
@@ -1255,7 +1302,14 @@ export default function IntelliSpy() {
                       <>
                         <WifiOff className="w-8 h-8 mb-3 text-zinc-700" />
                         <span className="text-sm">Connect to the PCAN bridge to start sniffing.</span>
-                        <span className="text-xs mt-1 text-zinc-700">Run: python pcan_bridge.py</span>
+                        <span className="text-xs mt-1 text-zinc-700">
+                          Click "Check Bridge" to verify your VOP Bridge is running.
+                        </span>
+                        {bridgeAvailable === false && (
+                          <span className="text-xs mt-2 text-red-400/70">
+                            Bridge not detected. Make sure the VOP Bridge installer is running.
+                          </span>
+                        )}
                       </>
                     )}
                   </div>
@@ -1548,7 +1602,7 @@ export default function IntelliSpy() {
 
       {/* ─── Status Bar ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-4 px-4 py-1 border-t border-zinc-800/50 bg-zinc-950/50 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-600">
-        <span>BRIDGE: {bridgeUrl}</span>
+        <span>BRIDGE: {bridgeUrl} {bridgeAvailable === true ? '✔' : bridgeAvailable === false ? '✘' : ''}</span>
         <span>STATUS: {status.toUpperCase()}</span>
         <span className={PROTOCOL_OPTIONS.find(p => p.value === activeProtocol)?.color.split(' ')[0] || 'text-zinc-400'}>
           PROTO: {activeProtocol.toUpperCase()}
