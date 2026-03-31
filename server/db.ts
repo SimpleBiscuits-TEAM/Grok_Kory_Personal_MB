@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback, knoxFiles } from "../drizzle/schema";
-import { like, desc, sql, count } from "drizzle-orm";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes } from "../drizzle/schema";
+import { like, desc, sql, count, eq, and } from "drizzle-orm";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -253,5 +252,31 @@ export async function insertFeedback(data: InsertFeedback): Promise<boolean> {
   } catch (error) {
     console.error("[Database] Failed to insert feedback:", error);
     return false;
+  }
+}
+
+/**
+ * Verify an access code for unauthenticated entry.
+ * Returns the code record if valid, null otherwise.
+ */
+export async function verifyAccessCode(code: string): Promise<{ id: number; label: string | null } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [row] = await db
+      .select({ id: accessCodes.id, label: accessCodes.label, isActive: accessCodes.isActive, maxUses: accessCodes.maxUses, currentUses: accessCodes.currentUses, expiresAt: accessCodes.expiresAt })
+      .from(accessCodes)
+      .where(eq(accessCodes.code, code.trim().toUpperCase()))
+      .limit(1);
+    if (!row) return null;
+    if (!row.isActive) return null;
+    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    if (row.maxUses !== null && row.currentUses >= row.maxUses) return null;
+    // Increment usage counter
+    await db.update(accessCodes).set({ currentUses: sql`${accessCodes.currentUses} + 1` }).where(eq(accessCodes.id, row.id));
+    return { id: row.id, label: row.label };
+  } catch (error) {
+    console.error("[Database] Failed to verify access code:", error);
+    return null;
   }
 }

@@ -129,6 +129,15 @@ function getChannelColor(sectionIdx: number, channelSlot: number): string {
   return TRACE_COLORS[(sectionIdx * 4 + channelSlot) % TRACE_COLORS.length];
 }
 
+// ─── AFR→Lambda conversion for chart traces ────────────────────────────────
+function isAFRChannel(ch: WP8Channel): boolean {
+  return ch.name.toLowerCase().includes('air fuel ratio');
+}
+function convertAFRValue(v: number, ch: WP8Channel): number {
+  if (isAFRChannel(ch) && Number.isFinite(v) && v > 0) return v / 14.7;
+  return v;
+}
+
 // ─── Canvas Chart Section ───────────────────────────────────────────────────
 interface ChartSectionProps {
   sectionIdx: number;
@@ -179,13 +188,15 @@ function ChartSection({
     return () => ro.disconnect();
   }, [height]);
 
-  // Compute min/max for each channel in visible range
+  // Compute min/max for each channel in visible range (AFR channels converted to Lambda)
   const channelRanges = useMemo(() => {
     const ranges: { min: number; max: number }[] = [];
     for (const ci of channelIndices) {
       let mn = Infinity, mx = -Infinity;
+      const ch = channels[ci];
       for (let i = startIdx; i <= endIdx && i < rows.length; i++) {
-        const v = ci < rows[i].values.length ? rows[i].values[ci] : 0;
+        const raw = ci < rows[i].values.length ? rows[i].values[ci] : 0;
+        const v = ch ? convertAFRValue(raw, ch) : raw;
         if (Number.isFinite(v)) {
           if (v < mn) mn = v;
           if (v > mx) mx = v;
@@ -198,7 +209,7 @@ function ChartSection({
       ranges.push({ min: mn - pad, max: mx + pad });
     }
     return ranges;
-  }, [channelIndices, rows, startIdx, endIdx]);
+  }, [channelIndices, channels, rows, startIdx, endIdx]);
 
   // Draw
   useEffect(() => {
@@ -253,25 +264,24 @@ function ChartSection({
       ctx.stroke();
     }
 
-    // Draw traces
+    // Draw traces (AFR channels auto-converted to Lambda)
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
       const { min, max } = channelRanges[slot];
       const range = max - min;
       const color = getChannelColor(sectionIdx, slot);
-
+      const ch = channels[ci];
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-
       let started = false;
       for (let i = 0; i < visibleCount; i++) {
         const rowIdx = startIdx + i;
         if (rowIdx >= rows.length) break;
-        const v = ci < rows[rowIdx].values.length ? rows[rowIdx].values[ci] : 0;
+        const raw = ci < rows[rowIdx].values.length ? rows[rowIdx].values[ci] : 0;
+        const v = ch ? convertAFRValue(raw, ch) : raw;
         const x = marginLeft + (i / (visibleCount - 1)) * plotW;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
-
         if (!started) {
           ctx.moveTo(x, y);
           started = true;
@@ -282,31 +292,30 @@ function ChartSection({
       ctx.stroke();
     });
 
-    // Y-axis labels (left side for first 2 channels, right side for last 2)
+       // Y-axis labels (left side for first 2 channels, right side for last 2)
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
       const { min, max } = channelRanges[slot];
       const color = getChannelColor(sectionIdx, slot);
       const ch = channels[ci];
-      const unit = getUnit(ch?.name || '');
+      const afrConv = ch && isAFRChannel(ch);
+      const fmtName = afrConv ? 'lambda' : (ch?.name || '');
+      const unit = afrConv ? 'λ' : getUnit(ch?.name || '');
       const isRight = slot >= 2;
-
       ctx.fillStyle = color;
       ctx.font = `bold 10px ${FONT.mono}`;
       ctx.textAlign = isRight ? 'left' : 'right';
-
       const xBase = isRight ? W - marginRight + 4 : marginLeft - 4;
       const yOffset = slot % 2 === 0 ? 0 : (plotH / 2);
-
       // Max value at top
       ctx.fillText(
-        formatValue(max, ch?.name || '') + (unit ? ' ' + unit : ''),
+        formatValue(max, fmtName) + (unit ? ' ' + unit : ''),
         xBase,
         marginTop + 10 + yOffset
       );
       // Min value at bottom
       ctx.fillText(
-        formatValue(min, ch?.name || ''),
+        formatValue(min, fmtName),
         xBase,
         marginTop + plotH / 2 - 2 + yOffset
       );
@@ -324,26 +333,26 @@ function ChartSection({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Value dots on crosshair
+      // Value dots on crosshair (AFR→Lambda converted)
       channelIndices.forEach((ci, slot) => {
         if (slot >= channelRanges.length) return;
         const { min, max } = channelRanges[slot];
         const range = max - min;
-        const v = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
+        const ch = channels[ci];
+        const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
+        const v = ch ? convertAFRValue(raw, ch) : raw;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         const color = getChannelColor(sectionIdx, slot);
-
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(x, y, 4, 0, Math.PI * 2);
         ctx.fill();
-
         // Value label near dot
         ctx.fillStyle = color;
         ctx.font = `bold 11px ${FONT.mono}`;
         ctx.textAlign = 'left';
-        const ch = channels[ci];
-        ctx.fillText(formatValue(v, ch?.name || ''), x + 8, y + 4);
+        const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
+        ctx.fillText(formatValue(v, displayName), x + 8, y + 4);
       });
     }
 

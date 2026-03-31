@@ -28,7 +28,7 @@ import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { notifyOwner } from "./_core/notification";
-import { insertFeedback } from "./db";
+import { insertFeedback, verifyAccessCode } from "./db";
 import { z } from "zod";
 
 export const appRouter = router({
@@ -41,6 +41,26 @@ export const appRouter = router({
       return {
         success: true,
       } as const;
+    }),
+    verifyAccessCode: publicProcedure
+      .input(z.object({ code: z.string().min(1).max(64) }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await verifyAccessCode(input.code);
+        if (!result) {
+          return { success: false, message: "Invalid or expired access code" } as const;
+        }
+        // Set a session cookie to mark the user as having access-code entry
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie("vop_access", "granted", {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+        return { success: true, label: result.label } as const;
+      }),
+    checkAccess: publicProcedure.query(({ ctx }) => {
+      const hasOAuth = Boolean(ctx.user);
+      const hasAccessCode = ctx.req.cookies?.vop_access === "granted";
+      return { authenticated: hasOAuth || hasAccessCode, method: hasOAuth ? "oauth" : hasAccessCode ? "access_code" : "none" } as const;
     }),
   }),
 

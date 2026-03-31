@@ -2667,17 +2667,17 @@
 ## Honda Talon Tuner — Target Lambda, Fact-Check, AFR→Lambda, Alpha-N Indicator (2026-03-31)
 - [x] Shared Target Lambda between Cyl 1 & Cyl 2 (editing one updates both), Alpha-N and Speed Density keep separate
 - [x] Screenshot fact-checking — verify OCR title matches the card (Alpha-N vs Speed Density + cylinder number)
-- [ ] AFR→Lambda conversion in log viewer (AFR1 / 14.7, AFR2 / 14.7)
-- [ ] Alpha-N channel indicator — when Alpha-N = 1, show Alpha-N tables active; else Speed Density active
-- [ ] Encode Honda Talon datalog review logic into Knox knowledge base (Alpha-N mode detection, AFR→Lambda, fuel table cross-reference rules)
-- [ ] Log-to-Map Cell Overlay: highlight active fuel table cells during datalog, color by Lambda deviation
-- [ ] Log-to-Map: determine active mode (Alpha-N vs Speed Density) from Alpha-N channel
-- [ ] Log-to-Map: map RPM + TPS/MAP to nearest fuel table cell
-- [ ] Log-to-Map: color cells green (on target), yellow (slight deviation), red (significant lean/rich)
-- [ ] Log-to-Map: sync overlay with TalonLogViewer cursor position
-- [ ] Fuel Table Diff/Compare: paste two screenshots side-by-side
-- [ ] Fuel Table Diff/Compare: color-coded difference map showing changed cells
-- [ ] Fuel Table Diff/Compare: show delta values (new - old) in each cell
+- [x] AFR→Lambda conversion in log viewer (AFR1 / 14.7, AFR2 / 14.7)
+- [x] Alpha-N channel indicator — when Alpha-N = 1, show Alpha-N tables active; else Speed Density active
+- [x] Encode Honda Talon datalog review logic into Knox knowledge base (Alpha-N mode detection, AFR→Lambda, fuel table cross-reference rules)
+- [x] Log-to-Map Cell Overlay: highlight active fuel table cells during datalog, color by Lambda deviation
+- [x] Log-to-Map: determine active mode (Alpha-N vs Speed Density) from Alpha-N channel
+- [x] Log-to-Map: map RPM + TPS/MAP to nearest fuel table cell
+- [x] Log-to-Map: color cells green (on target), yellow (slight deviation), red (significant lean/rich)
+- [x] Log-to-Map: sync overlay with TalonLogViewer cursor position
+- [x] Fuel Table Diff/Compare: paste two screenshots side-by-side
+- [x] Fuel Table Diff/Compare: color-coded difference map showing changed cells
+- [x] Fuel Table Diff/Compare: show delta values (new - old) in each cell
 - [ ] Integrate vop-task-tracker into V-OP as TASKS nav button
 - [x] Copy task tracker components (StatsBar, FilterBar, TaskTable, SprintTimeline, ModuleSidebar, taskData, useTaskStore)
 - [x] Add @ppei email access gate for TASKS page (similar to Advanced tab gate)
@@ -2774,3 +2774,10 @@
 - [x] Knox Diagnostic Agent: Server-side tRPC router with LLM-powered diagnosis (diagnosticAgent.ts)
 - [x] Knox Diagnostic Agent: Test condition guidance (tell customer what driving conditions are needed)
 - [x] IntelliSpy: Fix CAN traffic — removed destructive set_protocol on connect, auto-starts bus monitoring
+- [x] Auth Gate: Block all unauthenticated access — require sign-in or access code before any content is visible
+- [x] Auth Gate: Create access code entry page as alternative to OAuth sign-in
+- [x] Honda Talon: Replace basic WP8DatalogViewer with pro log viewer
+- [x] Honda Talon: Log-to-Map sync overlay with TalonLogViewer cursor position
+- [x] Honda Talon: Encode datalog review logic into Knox knowledge base (Alpha-N, AFR→Lambda, fuel table rules)
+- [x] Honda Talon: Clean up duplicate todo items and verify image-to-table OCR fix
+- [x] Honda Talon: AFR→Lambda conversion applied to chart traces, Y-axis labels, and crosshair tooltips (not just sidebar)

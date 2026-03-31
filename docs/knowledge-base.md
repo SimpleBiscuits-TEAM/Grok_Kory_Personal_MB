@@ -221,9 +221,12 @@
 ## 9. Honda Talon Tuner
 
 ### Honda Talon Log File & Fuel Map Handling
-- Automatically detect that a log file is from a Honda Talon
-- If detected, create a page in the advanced section for uploading and editing four separate fuel maps
-- Incorporate specific rules for reviewing datalogs and adjusting fuel tables for Honda Talon vehicles
+- Automatically detect Honda Talon from WP8 binary (0801EB/0801EA + DCT/Alpha-N channels)
+- Route to Honda Talon Tuner page with four fuel maps, pro log viewer, and compare tools
+- AFR→Lambda conversion in chart traces, channel list, and crosshair tooltips
+- Alpha-N mode indicator shows active table set based on cursor position
+- Log-to-Map overlay highlights active fuel table cell, colors by Lambda deviation
+- 10-step datalog review workflow encoded in Knox knowledge base (shared/knoxKnowledge.ts)
 
 ### OCR Image-to-Table
 - Cell display precision: use `toFixed(3)` for fuel map values (not toFixed(1))

@@ -33,6 +33,26 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+// ── Access Codes ─────────────────────────────────────────────────────────
+/**
+ * Access codes allow entry to the application without OAuth sign-in.
+ * Admins create codes with optional expiry and usage limits.
+ */
+export const accessCodes = mysqlTable("access_codes", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 64 }).notNull().unique(),
+  label: varchar("label", { length: 255 }), // e.g. "Beta Tester", "SEMA 2026"
+  createdBy: int("createdBy"), // FK to users.id (admin)
+  isActive: boolean("isActive").default(true).notNull(),
+  maxUses: int("maxUses"), // null = unlimited
+  currentUses: int("currentUses").default(0).notNull(),
+  expiresAt: timestamp("expiresAt"), // null = never expires
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AccessCode = typeof accessCodes.$inferSelect;
+export type InsertAccessCode = typeof accessCodes.$inferInsert;
+
 // ── Feedback / Error Reports ──────────────────────────────────────────────
 export const feedback = mysqlTable("feedback", {
   id: int("id").autoincrement().primaryKey(),
