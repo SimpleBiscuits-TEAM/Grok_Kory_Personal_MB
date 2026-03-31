@@ -42,6 +42,7 @@ import KnoxChat from '@/components/editor/KnoxChat';
 import HexEditor from '@/components/editor/HexEditor';
 import TuneCompare from '@/components/editor/TuneCompare';
 import { TuneManager } from '@/components/editor/TuneManager';
+import CalculatorsPanel from '@/components/editor/CalculatorsPanel';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
@@ -1077,6 +1078,7 @@ export default function CalibrationEditor() {
                   <TabsTrigger value="ecu" className="text-[11px]">ECU</TabsTrigger>
                   <TabsTrigger value="info" className="text-[11px]">Info</TabsTrigger>
                   <TabsTrigger value="tunes" className="text-[11px]">Tunes</TabsTrigger>
+                  <TabsTrigger value="calc" className="text-[11px]">Calc</TabsTrigger>
                   <TabsTrigger value="jokes" className="text-[11px]">😂</TabsTrigger>
                 </TabsList>
 
@@ -1299,6 +1301,10 @@ export default function CalibrationEditor() {
                       });
                     }}
                   />
+                </TabsContent>
+
+                <TabsContent value="calc" className="flex-1 overflow-hidden mt-0 min-h-0">
+                  <CalculatorsPanel />
                 </TabsContent>
 
                 <TabsContent value="jokes" className="flex-1 overflow-auto mt-0 p-3 min-h-0">

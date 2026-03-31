@@ -2517,9 +2517,9 @@
 - [ ] As database grows with more binaries/A2Ls/calibrations, Knox search becomes the primary file access method
 
 ## Transmission TCM Unlock Research
-- [ ] Diff T87A patched OLS vs stock BIN to identify exact unlock bytes (seed-key bypass, flash write protection)
-- [ ] Diff T93 unlocked OLS vs stock BIN to identify T93 unlock mechanism
-- [ ] Map security architecture from T87A/T93 A2Ls (security access params, write protection regions)
+- [x] Diff T87A patched OLS vs stock BIN to identify exact unlock bytes (security flag 0x1386, tables 0xA88C-0xC027, 6 seed-key bypasses)
+- [x] Diff T93 unlocked OLS vs stock BIN -- same pattern as T87A (calibration-level lock, not bootloader)
+- [x] Map security architecture: lock is in calibration data, one-time bench patch enables OBD flash
 - [ ] Build automatic TCM unlock patcher in editor (apply unlock to any T87A/T93 binary)
 - [ ] If bench unlock fails on different unit, adapt based on Knox security knowledge
 - [ ] Document C10 vs C11 address offset differences (133 params differ, C11 shifted +0x1000 in upper range)
@@ -2533,3 +2533,39 @@
 - [ ] TCC lockup strategy editing (pressure, slip targets, apply/release timing)
 - [ ] Line pressure editing (main pressure, converter charge, lube)
 - [ ] Adaptive learn reset capability
+
+## HPT to BIN Converter (Editor)
+- [ ] Reverse engineer VCM Extractor tool to understand .hpt file format
+- [ ] Build .hpt file parser in the editor (client-side)
+- [ ] Add .hpt upload support alongside existing .bin upload in editor
+- [ ] Add .bin export option when user exports from editor
+
+## EFI to BIN Converter (Editor)
+- [ ] Reverse engineer EfiReader tool to understand .efi file format
+- [ ] Build .efi file parser in the editor (client-side)
+- [ ] Add .efi upload support in editor
+
+## EFD Reader (Editor)
+- [ ] Analyze EFD_Reader C# source for EFD decryption/parsing logic (uses EVP_CIPHER for crypto)
+- [ ] Port EFD parsing to TypeScript for editor integration
+- [ ] Enable EFD file viewing in editor with parameter tree
+
+## PPEI Calculators Tab (Editor)
+- [x] Build interactive "Calculators" tab in editor
+- [x] MAP Sensor Data calculator (pressure/voltage conversion)
+- [x] PPEI Automotive Calculations (master calc sheet)
+- [x] T56 Gear Calculator (manual trans ratios)
+- [x] Timing Calculator V4 (injection timing — shift point scaling)
+- [x] Tire/Gear/Trans Calculator (speed/RPM/gear ratio)
+- [x] TOS & Vehicle Speed Calculator - 6R100 (Ford 6-speed)
+- [x] TOS & Vehicle Speed Calculator - 48RE (Dodge)
+- [x] TOS & Vehicle Speed Calculator - 68RFE (Cummins 6-speed)
+- [x] TOS & Vehicle Speed Calculator - Aisin (6-speed)
+- [x] TOS & Vehicle Speed Calculator - Allison (6-speed)
+- [x] Transmission Calc (general)
+- [x] 10R80 RPM & TCC Converter (Ford 10-speed reverse RPM calc)
+- [x] 68RFE Lockup Schedule (Cummins lockup timing)
+- [x] Engine Conversion Tool (unit conversions)
+- [x] Equivalence Ratio Calculator (AFR/lambda)
+- [x] GM A6 Shift Calculator v1.1 (Allison 6-speed shift points)
+- [x] Tire Size & Shift Point Calculator
