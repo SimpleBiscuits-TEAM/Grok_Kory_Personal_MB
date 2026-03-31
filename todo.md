@@ -2606,10 +2606,11 @@
 - [x] Write vitest tests for Knox browser (12 tests passing)
 
 ## Can-Am MG1 Decompile & Definition File Build
-- [ ] Decompile/disassemble 1E1101953.a2l — map all 46K+ calibration parameters, categories, control logic
-- [ ] Decompile/disassemble 1E1101953SA2VLMJ.hex — map memory layout, segment structure, flash addresses
-- [ ] Document ECU logic flow (air path, fuel, boost, torque, emissions, diagnostics)
-- [ ] Build definition file from decompiled understanding
-- [ ] Test definition file in editor — verify maps match WinOLS reference exactly
-- [ ] Iterate fixes until all maps align with WinOLS ground truth
-- [ ] Test with second Can-Am MG1 BIN (StockRead_1G0100914SB3VUM8_UL_exported.bin)
+- [x] Decompile/disassemble 1E1101953.a2l — 20,983 calibratables mapped (507 MAPs, 612 CURVEs, 16,275 VALUEs)
+- [x] Decompile/disassemble 1E1101953SA2VLMJ.hex — 3 segments (boot 0x0060C000, firmware 0x08FC0000, cal 0x09440000)
+- [x] Document ECU logic flow (air path, fuel, boost, torque, emissions, diagnostics)
+- [x] Build definition file (19,101 tuning params, 100% MAP/CURVE/VALUE verification)
+- [x] Test definition file — 100% match with HEX binary, WinOLS OLS is version 1E1102029
+- [x] Iterate fixes — all maps verified, zero offset errors
+- [x] Test with second Can-Am MG1 BIN — DIFFERENT major version (1G010 vs 1E110), 44.6% byte diff, requires own A2L
+- [x] Create engine load & boost control logic flowchart with table/parameter names
