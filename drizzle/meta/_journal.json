@@ -141,6 +141,13 @@
       "when": 1774920141221,
       "tag": "0019_steep_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1774935789276,
+      "tag": "0020_known_sasquatch",
+      "breakpoints": true
     }
   ]
 }

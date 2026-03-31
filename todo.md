@@ -2624,3 +2624,40 @@
 - [x] Integrate MG1CA920 into ECU family detection pipeline (knoxAutoMatch procedure)
 - [x] Write vitest tests for all features (21 tests passing in knox-integration.test.ts)
 - [x] Airflow/boost/torque limit analysis overlay — 7 categories (airflow, boost, torque, fuel, ignition, throttle, thermal) with headroom analysis
+
+## CASTING MODE — Live Streaming & Virtual Dyno Events
+- [ ] Database schema for casting (cast_sessions, cast_events, cast_viewers, cast_reactions, cast_chat, stream_keys)
+- [ ] Admin Casting panel — Go Live toggle, camera/mic/screen capture, stream preview
+- [ ] Stream key management — store RTMP keys for YouTube, Facebook, Twitch, TikTok, custom endpoints
+- [ ] Multi-platform RTMP multicast — push to all platforms simultaneously
+- [ ] Cast Dyno Mode — virtual stadium layout with viewer video seats (COVID NBA style)
+- [ ] Viewer video bubbles in stadium seating — camera-on viewers get a visible seat
+- [ ] Crowd reactions system — fire, horn, applause, etc. with stadium lighting effects
+- [ ] Live dyno overlay HUD — HP/torque gauge, boost, RPM, EGT as transparent overlay on camera feed
+- [ ] Real-time dyno data streaming via WebSocket
+- [ ] AI ChatBot host (Knox-powered) — welcomes viewers, calls out numbers, moderates chat, color commentary
+- [ ] Aggregated chat — merge in-app + YouTube + FB + Twitch chat into one scrolling ticker
+- [ ] Event system — schedule upcoming dyno events, countdown timer, event lobby
+- [ ] Event notifications — push to users when event is about to start
+- [ ] Viewer features — front row seat request, vote on next truck, clip sharing
+- [ ] Commentary mode — admin mic overlay on dyno feed
+- [ ] Post-event — auto-save VOD, highlight reel, shareable dyno results card
+- [ ] Write vitest tests for casting system
+
+## Honda Talon Pro Log Viewer (HPTuners/Dynojet Hybrid)
+- [x] Honda Talon HPTuners/Dynojet hybrid log viewer — 4 stacked chart sections with up to 4 channels each
+- [x] Left-side channel panel with live values at cursor position (HPTuners style)
+- [ ] Dark mode theme matching VCM Scanner aesthetic
+- [x] Synced crosshair cursor across all 4 chart sections
+- [ ] Per-section channel assignment (select channels into sections)
+- [ ] Color-coded channel traces with left/right Y-axis labels
+- [ ] Zoom/pan support synced across all sections
+- [ ] Replace existing basic WP8DatalogViewer with new pro log viewer
+
+## Screenshot-to-Fuel-Table OCR Upload
+- [x] Add screenshot upload button to Honda Talon fuel table section
+- [x] Use LLM vision to OCR fuel table screenshots from C3 Tuning Software
+- [x] Extract cell values, TPS axis, RPM axis from screenshot
+- [x] Populate editable fuel table from OCR results
+- [x] Add Target Lambda row above RPM axis in fuel table editor
+- [x] Support all 4 cylinder fuel maps via screenshot upload

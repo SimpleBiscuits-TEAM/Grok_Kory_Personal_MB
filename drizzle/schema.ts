@@ -1044,3 +1044,155 @@ export const knoxFiles = mysqlTable("knox_files", {
 });
 export type KnoxFile = typeof knoxFiles.$inferSelect;
 export type InsertKnoxFile = typeof knoxFiles.$inferInsert;
+
+
+// ── CASTING MODE — Live Streaming & Virtual Dyno Events ─────────────────────
+
+/** Stream platform keys (YouTube, Twitch, Facebook, TikTok, custom RTMP) */
+export const streamKeys = mysqlTable("stream_keys", {
+  id: int("id").autoincrement().primaryKey(),
+  platform: varchar("platform", { length: 64 }).notNull(), // youtube, twitch, facebook, tiktok, custom
+  label: varchar("label", { length: 128 }).notNull(), // display name
+  rtmpUrl: text("rtmpUrl").notNull(), // RTMP ingest URL
+  streamKey: text("streamKey").notNull(), // stream key (encrypted at rest)
+  enabled: boolean("enabled").default(true).notNull(),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type StreamKey = typeof streamKeys.$inferSelect;
+
+/** Cast sessions — each "Go Live" creates a session */
+export const castSessions = mysqlTable("cast_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 256 }).notNull(),
+  description: text("description"),
+  mode: mysqlEnum("mode", ["standard", "dyno", "event"]).default("standard").notNull(),
+  status: mysqlEnum("status", ["scheduled", "lobby", "live", "ended"]).default("scheduled").notNull(),
+  /** Admin who started the cast */
+  hostId: int("hostId").notNull(),
+  /** Event ID if this session is part of a scheduled event */
+  eventId: int("eventId"),
+  /** WebRTC/media config */
+  mediaConfig: json("mediaConfig"), // { camera, mic, screenShare, resolution, bitrate }
+  /** Platforms being cast to */
+  activePlatforms: json("activePlatforms"), // array of streamKey IDs
+  /** Dyno mode overlay config */
+  dynoConfig: json("dynoConfig"), // { showHp, showTorque, showBoost, showRpm, showEgt, overlayPosition }
+  /** Peak stats captured during session */
+  peakStats: json("peakStats"), // { maxHp, maxTorque, maxBoost, maxRpm, maxEgt, quarterMile }
+  /** VOD recording URL after session ends */
+  vodUrl: text("vodUrl"),
+  /** Viewer count tracking */
+  peakViewers: int("peakViewers").default(0),
+  totalUniqueViewers: int("totalUniqueViewers").default(0),
+  startedAt: timestamp("startedAt"),
+  endedAt: timestamp("endedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CastSession = typeof castSessions.$inferSelect;
+
+/** Scheduled dyno events */
+export const castEvents = mysqlTable("cast_events", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 256 }).notNull(),
+  description: text("description"),
+  /** Event banner/thumbnail URL */
+  bannerUrl: text("bannerUrl"),
+  /** Vehicle info for the event */
+  vehicleInfo: json("vehicleInfo"), // { year, make, model, engine, mods, owner }
+  scheduledAt: timestamp("scheduledAt").notNull(),
+  /** Duration estimate in minutes */
+  estimatedDuration: int("estimatedDuration").default(60),
+  status: mysqlEnum("status", ["upcoming", "live", "completed", "cancelled"]).default("upcoming").notNull(),
+  /** Associated cast session ID (set when event goes live) */
+  sessionId: int("sessionId"),
+  /** RSVP count */
+  rsvpCount: int("rsvpCount").default(0),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CastEvent = typeof castEvents.$inferSelect;
+
+/** Viewers in a cast session (stadium seats) */
+export const castViewers = mysqlTable("cast_viewers", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  userId: int("userId").notNull(),
+  /** Seat position in the virtual stadium */
+  seatSection: mysqlEnum("seatSection", ["front_row", "lower_bowl", "upper_deck", "skybox"]).default("upper_deck").notNull(),
+  seatIndex: int("seatIndex").default(0).notNull(),
+  /** Whether viewer has camera on (visible in stadium) */
+  cameraOn: boolean("cameraOn").default(false).notNull(),
+  /** WebRTC peer connection ID */
+  peerId: varchar("peerId", { length: 128 }),
+  joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+  leftAt: timestamp("leftAt"),
+});
+export type CastViewer = typeof castViewers.$inferSelect;
+
+/** Chat messages during a cast */
+export const castChat = mysqlTable("cast_chat", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  userId: int("userId"),
+  /** External platform source (null = in-app) */
+  platform: varchar("platform", { length: 64 }), // null, youtube, twitch, facebook
+  username: varchar("username", { length: 128 }).notNull(),
+  message: text("message").notNull(),
+  /** Message type */
+  type: mysqlEnum("type", ["chat", "system", "ai_host", "highlight", "question"]).default("chat").notNull(),
+  /** Pinned messages stay at top */
+  pinned: boolean("pinned").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CastChatMessage = typeof castChat.$inferSelect;
+
+/** Crowd reactions during a cast */
+export const castReactions = mysqlTable("cast_reactions", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  userId: int("userId"),
+  /** Reaction type */
+  reaction: varchar("reaction", { length: 32 }).notNull(), // fire, horn, applause, boost, checkered_flag, wrench, turbo
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CastReaction = typeof castReactions.$inferSelect;
+
+/** Event RSVPs */
+export const castRsvps = mysqlTable("cast_rsvps", {
+  id: int("id").autoincrement().primaryKey(),
+  eventId: int("eventId").notNull(),
+  userId: int("userId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CastRsvp = typeof castRsvps.$inferSelect;
+
+/** Front row seat requests */
+export const castSeatRequests = mysqlTable("cast_seat_requests", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  userId: int("userId").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "denied"]).default("pending").notNull(),
+  requestedSection: mysqlEnum("requestedSection", ["front_row", "lower_bowl"]).default("front_row").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CastSeatRequest = typeof castSeatRequests.$inferSelect;
+
+/** Dyno data snapshots streamed during a live session */
+export const castDynoSnapshots = mysqlTable("cast_dyno_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull(),
+  /** Real-time dyno values */
+  rpm: decimal("rpm", { precision: 10, scale: 2 }),
+  hp: decimal("hp", { precision: 10, scale: 2 }),
+  torque: decimal("torque", { precision: 10, scale: 2 }),
+  boost: decimal("boost", { precision: 10, scale: 2 }),
+  egt: decimal("egt", { precision: 10, scale: 2 }),
+  speed: decimal("speed", { precision: 10, scale: 2 }),
+  /** Timestamp of this data point */
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+});
+export type CastDynoSnapshot = typeof castDynoSnapshots.$inferSelect;

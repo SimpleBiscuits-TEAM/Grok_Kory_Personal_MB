@@ -23,6 +23,7 @@ import { fleetRouter } from "./routers/fleet";
 import { dragRouter } from "./routers/drag";
 import { communityRouter } from "./routers/community";
 import { pitchRouter } from "./routers/pitch";
+import { talonOcrRouter } from "./routers/talonOcr";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -101,6 +102,9 @@ export const appRouter = router({
 
   // V-OP AI Business Chat (Theo "Pitch")
   pitch: pitchRouter,
+
+  // Honda Talon Screenshot-to-Fuel-Table OCR
+  talonOcr: talonOcrRouter,
 
   // Feedback / Error Reports
   feedback: router({

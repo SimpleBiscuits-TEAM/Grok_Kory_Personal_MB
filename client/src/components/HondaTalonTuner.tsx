@@ -6,6 +6,8 @@
  *   - Four fuel map upload cards (Alpha-N Cyl 1 & 2, Speed Density Cyl 1 & 2)
  *   - Heat-map grid editor for each fuel map
  *   - CSV paste/upload support for fuel tables from C3 Tuning Software
+ *   - Screenshot OCR upload — snap a picture of C3 table, AI extracts all values
+ *   - Target Lambda row above RPM axis for future log-based fuel tuning
  *
  * Design: Matches PPEI motorsport dark theme
  */
@@ -13,9 +15,11 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
-  Fuel, Gauge, Thermometer, Activity
+  Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon
 } from 'lucide-react';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
+import TalonLogViewer from '@/components/TalonLogViewer';
+import { trpc } from '@/lib/trpc';
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
 const sColor = {
@@ -30,6 +34,7 @@ const sColor = {
   green: 'oklch(0.65 0.20 145)',
   yellow: 'oklch(0.80 0.18 90)',
   blue: 'oklch(0.65 0.18 250)',
+  cyan: 'oklch(0.72 0.14 200)',
 };
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -44,6 +49,7 @@ interface FuelMap {
   rowAxis: number[];  // RPM axis
   colAxis: number[];  // TPS or MAP axis
   data: number[][];   // 2D fuel values
+  targetLambda: number[];  // Target Lambda row (one per column)
   rowLabel: string;
   colLabel: string;
   unit: string;
@@ -99,6 +105,7 @@ function parseFuelTableCSV(text: string): FuelMap | null {
     rowAxis,
     colAxis,
     data,
+    targetLambda: colAxis.map(() => 0.85), // Default target lambda
     rowLabel: 'RPM',
     colLabel,
     unit: '%',
@@ -132,18 +139,26 @@ function FuelMapCard({
   onLoad,
   onClear,
   onCellEdit,
+  onTargetLambdaEdit,
 }: {
   config: typeof FUEL_MAP_CONFIGS[number];
   map: FuelMap | null;
   onLoad: (map: FuelMap) => void;
   onClear: () => void;
   onCellEdit: (row: number, col: number, value: number) => void;
+  onTargetLambdaEdit: (col: number, value: number) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const screenshotRef = useRef<HTMLInputElement>(null);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const [editingLambda, setEditingLambda] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+
+  const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
   const handleFile = useCallback((file: File) => {
     file.text().then(text => {
@@ -157,6 +172,46 @@ function FuelMapCard({
       }
     });
   }, [config, onLoad]);
+
+  const handleScreenshotUpload = useCallback(async (file: File) => {
+    setOcrLoading(true);
+    setOcrError(null);
+    try {
+      // Convert file to base64
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+
+      const result = await extractMutation.mutateAsync({
+        imageBase64: base64,
+        mimeType: file.type || 'image/png',
+        tableName: config.label,
+      });
+
+      if (result.success) {
+        const fuelMap: FuelMap = {
+          name: result.tableName || config.label,
+          description: config.desc,
+          rowAxis: result.rowAxis,
+          colAxis: result.colAxis,
+          data: result.data,
+          targetLambda: result.colAxis.map(() => 0.85), // Default target lambda
+          rowLabel: result.rowAxisLabel?.includes('RPM') ? 'RPM' : config.rowLabel,
+          colLabel: result.colAxisLabel || config.colLabel,
+          unit: result.unit || 'ms',
+        };
+        onLoad(fuelMap);
+      }
+    } catch (err: any) {
+      setOcrError(err?.message || 'Failed to extract fuel table from screenshot');
+    } finally {
+      setOcrLoading(false);
+    }
+  }, [config, onLoad, extractMutation]);
 
   const handlePaste = useCallback(() => {
     const parsed = parseFuelTableCSV(pasteText);
@@ -174,16 +229,32 @@ function FuelMapCard({
   const startEdit = (row: number, col: number) => {
     if (!map) return;
     setEditingCell({ row, col });
-    setEditValue(map.data[row][col].toFixed(2));
+    setEditingLambda(null);
+    setEditValue(map.data[row][col].toFixed(3));
+  };
+
+  const startLambdaEdit = (col: number) => {
+    if (!map) return;
+    setEditingLambda(col);
+    setEditingCell(null);
+    setEditValue(map.targetLambda[col].toFixed(3));
   };
 
   const commitEdit = () => {
-    if (!editingCell || !map) return;
-    const val = parseFloat(editValue);
-    if (!isNaN(val)) {
-      onCellEdit(editingCell.row, editingCell.col, val);
+    if (editingCell && map) {
+      const val = parseFloat(editValue);
+      if (!isNaN(val)) {
+        onCellEdit(editingCell.row, editingCell.col, val);
+      }
+      setEditingCell(null);
     }
-    setEditingCell(null);
+    if (editingLambda !== null && map) {
+      const val = parseFloat(editValue);
+      if (!isNaN(val)) {
+        onTargetLambdaEdit(editingLambda, val);
+      }
+      setEditingLambda(null);
+    }
   };
 
   // Find min/max for heat map
@@ -231,7 +302,7 @@ function FuelMapCard({
       {/* Upload controls */}
       {!map && (
         <div className="flex flex-col gap-2">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
             <button
               onClick={() => fileRef.current?.click()}
@@ -255,7 +326,65 @@ function FuelMapCard({
             >
               PASTE TABLE
             </button>
+
+            {/* Screenshot OCR Upload Button */}
+            <input
+              ref={screenshotRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleScreenshotUpload(f); }}
+              className="hidden"
+            />
+            <button
+              onClick={() => screenshotRef.current?.click()}
+              disabled={ocrLoading}
+              style={{
+                background: ocrLoading ? 'oklch(0.25 0.010 260)' : sColor.cyan,
+                color: ocrLoading ? sColor.textDim : '#0a0a0a',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
+                padding: '6px 16px', border: 'none',
+                borderRadius: '2px', cursor: ocrLoading ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px',
+              }}
+            >
+              {ocrLoading ? (
+                <><Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />EXTRACTING...</>
+              ) : (
+                <><Camera style={{ width: 14, height: 14 }} />SCREENSHOT UPLOAD</>
+              )}
+            </button>
           </div>
+
+          {/* OCR Loading/Error state */}
+          {ocrLoading && (
+            <div style={{
+              background: 'oklch(0.15 0.06 200)',
+              border: `1px solid ${sColor.cyan}`,
+              borderRadius: '2px',
+              padding: '10px 14px',
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              <Loader2 style={{ width: 16, height: 16, color: sColor.cyan, animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.cyan }}>
+                AI is reading your fuel table screenshot... This may take 10-20 seconds.
+              </span>
+            </div>
+          )}
+          {ocrError && (
+            <div style={{
+              background: 'oklch(0.15 0.06 25)',
+              border: `1px solid ${sColor.red}`,
+              borderRadius: '2px',
+              padding: '10px 14px',
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              <AlertCircle style={{ width: 16, height: 16, color: sColor.red }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.redBright }}>
+                {ocrError}
+              </span>
+            </div>
+          )}
+
           {showPaste && (
             <div className="flex flex-col gap-2">
               <textarea
@@ -284,42 +413,151 @@ function FuelMapCard({
               </button>
             </div>
           )}
+
+          {/* Screenshot hint */}
+          <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '4px' }}>
+            <Camera style={{ width: 12, height: 12, display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
+            <strong style={{ color: sColor.cyan }}>Screenshot Upload:</strong> Take a screenshot of your C3 Tuning Software fuel table and upload it. AI will extract all values, axes, and populate the editor automatically.
+          </p>
         </div>
       )}
 
-      {/* Heat map grid */}
+      {/* Heat map grid with Target Lambda row */}
       {map && (
         <div>
           <div className="flex items-center justify-between mb-2">
             <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>
               {map.rowAxis.length}×{map.colAxis.length} | Min: {min.toFixed(2)} | Max: {max.toFixed(2)} | Avg: {(map.data.flat().reduce((a, b) => a + b, 0) / map.data.flat().length).toFixed(2)}
             </div>
-            <button onClick={onClear} style={{
-              background: 'transparent', color: sColor.textDim, border: 'none',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
-              fontFamily: sFont.mono, fontSize: '0.7rem',
-            }}>
-              <Trash2 style={{ width: 12, height: 12 }} />CLEAR
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Re-upload screenshot button when map is loaded */}
+              <button
+                onClick={() => {
+                  const inp = document.createElement('input');
+                  inp.type = 'file';
+                  inp.accept = 'image/png,image/jpeg,image/jpg,image/webp';
+                  inp.onchange = (e) => {
+                    const f = (e.target as HTMLInputElement).files?.[0];
+                    if (f) handleScreenshotUpload(f);
+                  };
+                  inp.click();
+                }}
+                disabled={ocrLoading}
+                style={{
+                  background: 'transparent', color: sColor.cyan, border: 'none',
+                  cursor: ocrLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                }}
+              >
+                <Camera style={{ width: 12, height: 12 }} />{ocrLoading ? 'EXTRACTING...' : 'RE-SCAN'}
+              </button>
+              <button onClick={onClear} style={{
+                background: 'transparent', color: sColor.textDim, border: 'none',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                fontFamily: sFont.mono, fontSize: '0.7rem',
+              }}>
+                <Trash2 style={{ width: 12, height: 12 }} />CLEAR
+              </button>
+            </div>
           </div>
-          <div style={{ overflowX: 'auto', maxHeight: '400px', overflowY: 'auto' }}>
+
+          {ocrLoading && (
+            <div style={{
+              background: 'oklch(0.15 0.06 200)',
+              border: `1px solid ${sColor.cyan}`,
+              borderRadius: '2px',
+              padding: '8px 12px',
+              marginBottom: '8px',
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              <Loader2 style={{ width: 14, height: 14, color: sColor.cyan, animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.cyan }}>
+                Re-scanning screenshot...
+              </span>
+            </div>
+          )}
+
+          <div style={{ overflowX: 'auto', maxHeight: '500px', overflowY: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
               <thead>
+                {/* Column axis header */}
                 <tr>
-                  <th style={{ padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.75rem', position: 'sticky', top: 0, left: 0, background: sColor.card, zIndex: 2 }}>
+                  <th style={{
+                    padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                    fontSize: '0.75rem', position: 'sticky', top: 0, left: 0,
+                    background: sColor.card, zIndex: 3,
+                  }}>
                     {map.rowLabel}\{map.colLabel}
                   </th>
                   {map.colAxis.map((v, i) => (
-                    <th key={i} style={{ padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.72rem', position: 'sticky', top: 0, background: sColor.card, zIndex: 1, textAlign: 'center' }}>
+                    <th key={i} style={{
+                      padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                      fontSize: '0.72rem', position: 'sticky', top: 0,
+                      background: sColor.card, zIndex: 2, textAlign: 'center',
+                    }}>
                       {v}
                     </th>
                   ))}
+                </tr>
+
+                {/* ═══ TARGET LAMBDA ROW ═══ */}
+                <tr style={{ borderBottom: `2px solid ${sColor.cyan}` }}>
+                  <td style={{
+                    padding: '3px 6px', color: sColor.cyan, fontFamily: sFont.heading,
+                    fontSize: '0.72rem', position: 'sticky', left: 0,
+                    background: 'oklch(0.14 0.04 200)', zIndex: 2,
+                    whiteSpace: 'nowrap', letterSpacing: '0.04em',
+                  }}>
+                    TARGET λ
+                  </td>
+                  {map.targetLambda.map((val, ci) => {
+                    const isEditing = editingLambda === ci;
+                    return (
+                      <td
+                        key={ci}
+                        onDoubleClick={() => startLambdaEdit(ci)}
+                        style={{
+                          padding: '2px 4px',
+                          textAlign: 'center',
+                          background: 'oklch(0.14 0.04 200)',
+                          color: sColor.cyan,
+                          cursor: 'pointer',
+                          minWidth: '40px',
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          border: isEditing ? `2px solid ${sColor.cyan}` : '1px solid oklch(0.20 0.03 200)',
+                        }}
+                      >
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onBlur={commitEdit}
+                            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingLambda(null); }}
+                            style={{
+                              width: '40px', background: 'transparent', color: sColor.cyan,
+                              border: 'none', textAlign: 'center', fontFamily: sFont.mono,
+                              fontSize: '0.68rem', outline: 'none', fontWeight: 600,
+                            }}
+                          />
+                        ) : (
+                          val.toFixed(3)
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {map.data.map((row, ri) => (
                   <tr key={ri}>
-                    <td style={{ padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.72rem', position: 'sticky', left: 0, background: sColor.card, zIndex: 1 }}>
+                    <td style={{
+                      padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                      fontSize: '0.72rem', position: 'sticky', left: 0,
+                      background: sColor.card, zIndex: 1,
+                    }}>
                       {map.rowAxis[ri]}
                     </td>
                     {row.map((val, ci) => {
@@ -367,7 +605,7 @@ function FuelMapCard({
           <div className="flex items-center gap-2 mt-2" style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
             <div style={{ width: 60, height: 8, background: 'linear-gradient(to right, oklch(0.35 0.12 145), oklch(0.50 0.18 90), oklch(0.35 0.22 25))', borderRadius: 2 }} />
             <span>{min.toFixed(1)}</span>
-            <span style={{ flex: 1, textAlign: 'center' }}>Dbl-click to edit</span>
+            <span style={{ flex: 1, textAlign: 'center' }}>Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = future log-based tuning reference</span>
             <span>{max.toFixed(1)}</span>
           </div>
         </div>
@@ -376,183 +614,9 @@ function FuelMapCard({
   );
 }
 
-// ─── WP8 Datalog Viewer ─────────────────────────────────────────────────────
+// ─── WP8 Datalog Viewer — now uses the HPTuners/Dynojet hybrid TalonLogViewer ─
 function WP8DatalogViewer({ wp8Data }: { wp8Data: WP8ParseResult }) {
-  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
-  const [selectedChannels, setSelectedChannels] = useState<number[]>([]);
-  const [visibleRows, setVisibleRows] = useState(200);
-  const keyChannels = useMemo(() => getHondaTalonKeyChannels(wp8Data), [wp8Data]);
-
-  // Default selected channels
-  useEffect(() => {
-    const defaults = [
-      keyChannels.engineSpeed,
-      keyChannels.throttlePosition,
-      keyChannels.afr1,
-      keyChannels.afr2,
-      keyChannels.map,
-    ].filter(i => i >= 0);
-    setSelectedChannels(defaults);
-  }, [keyChannels]);
-
-  const toggleChannel = (idx: number) => {
-    setSelectedChannels(prev =>
-      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
-    );
-  };
-
-  const handleExportCSV = useCallback(() => {
-    const csv = wp8ToCSV(wp8Data);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `honda_talon_datalog_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [wp8Data]);
-
-  return (
-    <div style={{
-      background: sColor.card,
-      border: `1px solid ${sColor.border}`,
-      borderTop: `3px solid ${sColor.red}`,
-      borderRadius: '3px',
-      padding: '16px',
-    }}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white' }}>
-            WP8 DATALOG — HONDA TALON
-          </h3>
-          <p style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.textDim }}>
-            Part: {wp8Data.partNumber} | {wp8Data.channels.length} channels | {wp8Data.totalRows} samples | {(wp8Data.rawSize / 1024).toFixed(1)} KB
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewMode('table')}
-            style={{
-              background: viewMode === 'table' ? 'oklch(0.18 0.008 260)' : 'transparent',
-              color: viewMode === 'table' ? 'white' : sColor.textDim,
-              border: `1px solid ${viewMode === 'table' ? sColor.red : sColor.border}`,
-              borderRadius: '2px', padding: '4px 10px', cursor: 'pointer',
-              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
-              display: 'flex', alignItems: 'center', gap: '4px',
-            }}
-          >
-            <Table2 style={{ width: 14, height: 14 }} />TABLE
-          </button>
-          <button
-            onClick={() => setViewMode('chart')}
-            style={{
-              background: viewMode === 'chart' ? 'oklch(0.18 0.008 260)' : 'transparent',
-              color: viewMode === 'chart' ? 'white' : sColor.textDim,
-              border: `1px solid ${viewMode === 'chart' ? sColor.red : sColor.border}`,
-              borderRadius: '2px', padding: '4px 10px', cursor: 'pointer',
-              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
-              display: 'flex', alignItems: 'center', gap: '4px',
-            }}
-          >
-            <LineChart style={{ width: 14, height: 14 }} />CHART
-          </button>
-          <button
-            onClick={handleExportCSV}
-            style={{
-              background: 'oklch(0.18 0.008 260)', color: sColor.textMid,
-              border: `1px solid ${sColor.border}`, borderRadius: '2px',
-              padding: '4px 10px', cursor: 'pointer',
-              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
-              display: 'flex', alignItems: 'center', gap: '4px',
-            }}
-          >
-            <Download style={{ width: 14, height: 14 }} />EXPORT CSV
-          </button>
-        </div>
-      </div>
-
-      {/* Channel selector */}
-      <div className="mb-3" style={{ maxHeight: '120px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-        {wp8Data.channels.map(ch => (
-          <button
-            key={ch.index}
-            onClick={() => toggleChannel(ch.index)}
-            style={{
-              background: selectedChannels.includes(ch.index) ? 'oklch(0.20 0.04 25)' : 'oklch(0.32 0.004 260)',
-              color: selectedChannels.includes(ch.index) ? sColor.redBright : sColor.textDim,
-              border: `1px solid ${selectedChannels.includes(ch.index) ? sColor.red : 'oklch(0.40 0.006 260)'}`,
-              borderRadius: '2px', padding: '2px 8px', cursor: 'pointer',
-              fontFamily: sFont.mono, fontSize: '0.65rem',
-            }}
-          >
-            {ch.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Table view */}
-      {viewMode === 'table' && (
-        <div style={{ overflowX: 'auto', maxHeight: '500px', overflowY: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontFamily: sFont.mono, fontSize: '0.7rem', width: '100%' }}>
-            <thead>
-              <tr>
-                <th style={{ padding: '4px 8px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.75rem', position: 'sticky', top: 0, background: sColor.card, zIndex: 1, textAlign: 'left' }}>
-                  #
-                </th>
-                {selectedChannels.map(idx => (
-                  <th key={idx} style={{ padding: '4px 8px', color: sColor.red, fontFamily: sFont.heading, fontSize: '0.72rem', position: 'sticky', top: 0, background: sColor.card, zIndex: 1, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {wp8Data.channels[idx]?.name || `CH${idx}`}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {wp8Data.rows.slice(0, visibleRows).map((row, ri) => (
-                <tr key={ri} style={{ borderBottom: '1px solid oklch(0.16 0.006 260)' }}>
-                  <td style={{ padding: '3px 8px', color: sColor.textDim }}>{ri}</td>
-                  {selectedChannels.map(idx => (
-                    <td key={idx} style={{ padding: '3px 8px', color: 'white', textAlign: 'right' }}>
-                      {idx < row.values.length ? row.values[idx].toFixed(2) : '—'}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {visibleRows < wp8Data.totalRows && (
-            <button
-              onClick={() => setVisibleRows(v => Math.min(v + 500, wp8Data.totalRows))}
-              style={{
-                width: '100%', padding: '8px', background: 'oklch(0.15 0.006 260)',
-                color: sColor.textMid, border: `1px solid ${sColor.border}`,
-                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
-                cursor: 'pointer', marginTop: '4px',
-              }}
-            >
-              LOAD MORE ({visibleRows}/{wp8Data.totalRows})
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Chart view */}
-      {viewMode === 'chart' && (
-        <div style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: sColor.textDim, fontFamily: sFont.body }}>
-          <div className="text-center">
-            <LineChart style={{ width: 48, height: 48, margin: '0 auto 12px', opacity: 0.4 }} />
-            <p>Chart view — select channels above to visualize</p>
-            <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>
-              {selectedChannels.length} channel{selectedChannels.length !== 1 ? 's' : ''} selected | {wp8Data.totalRows} data points
-            </p>
-            <p style={{ fontSize: '0.75rem', marginTop: '8px', color: sColor.red }}>
-              Export to CSV and use the main Analyzer for full chart support
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <TalonLogViewer wp8Data={wp8Data} />;
 }
 
 // ─── Main Honda Talon Tuner Component ───────────────────────────────────────
@@ -601,6 +665,16 @@ export default function HondaTalonTuner({
       const newData = map.data.map(r => [...r]);
       newData[row][col] = value;
       return { ...prev, [key]: { ...map, data: newData } };
+    });
+  }, []);
+
+  const handleTargetLambdaEdit = useCallback((key: keyof FuelMapState, col: number, value: number) => {
+    setFuelMaps(prev => {
+      const map = prev[key];
+      if (!map) return prev;
+      const newLambda = [...map.targetLambda];
+      newLambda[col] = value;
+      return { ...prev, [key]: { ...map, targetLambda: newLambda } };
     });
   }, []);
 
@@ -682,6 +756,7 @@ export default function HondaTalonTuner({
               onLoad={(map) => handleFuelMapLoad(config.key, map)}
               onClear={() => handleFuelMapClear(config.key)}
               onCellEdit={(row, col, val) => handleCellEdit(config.key, row, col, val)}
+              onTargetLambdaEdit={(col, val) => handleTargetLambdaEdit(config.key, col, val)}
             />
           ))}
         </div>
