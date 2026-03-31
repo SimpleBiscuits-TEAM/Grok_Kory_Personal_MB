@@ -2263,49 +2263,109 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
                       )}
                       {bridgeAvailable === false && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '6px' }}>
-                          Bridge not found. Make sure <strong style={{ color: sColor.text }}>pcan_bridge.py</strong> is running.
+                          Bridge not found. <strong style={{ color: sColor.text }}>Download the VOP Bridge installer below</strong> to get started.
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Setup Instructions */}
-                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.8, maxWidth: '520px', margin: '12px auto 0', textAlign: 'left' }}>
-                    <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.08em', marginBottom: '8px' }}>SETUP INSTRUCTIONS</div>
-                    <div style={{ padding: '10px 12px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
-                      <div style={{ color: sColor.textMuted, marginBottom: '4px' }}># 1. Install dependencies (one-time)</div>
-                      <div style={{ color: sColor.green }}>pip install python-can websockets</div>
-                      <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in PCAN-USB, then run the bridge</div>
-                      <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
-                      <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
+                  {/* VOP Bridge Installer — One-Click Setup */}
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '16px', lineHeight: 1.6, maxWidth: '560px', margin: '16px auto 0', textAlign: 'left' }}>
+                    {/* Download CTA */}
+                    <div style={{
+                      padding: '16px 20px',
+                      background: 'linear-gradient(135deg, oklch(0.14 0.04 25 / 0.4), oklch(0.10 0.005 260))',
+                      border: `2px solid oklch(0.35 0.15 25)`,
+                      borderRadius: '4px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{
+                          width: 40, height: 40, borderRadius: '4px',
+                          background: 'oklch(0.52 0.22 25)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '1.2rem', fontWeight: 700, color: 'white',
+                          fontFamily: sFont.heading, letterSpacing: '0.05em',
+                        }}>VOP</div>
+                        <div>
+                          <div style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white', letterSpacing: '0.08em' }}>VOP BRIDGE INSTALLER</div>
+                          <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>v2.0 — Windows 10/11 (64-bit)</div>
+                        </div>
+                      </div>
+                      <div style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.text, marginBottom: '12px', lineHeight: 1.6 }}>
+                        One-click installer that sets up everything automatically — Python, PCAN drivers, and the bridge service. No command prompt needed.
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <a
+                          href="/api/download/vop-bridge-installer"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '6px',
+                            padding: '8px 20px', background: 'oklch(0.52 0.22 25)',
+                            border: 'none', borderRadius: '3px', color: 'white',
+                            fontFamily: sFont.heading, fontSize: '0.9rem', letterSpacing: '0.1em',
+                            textDecoration: 'none', cursor: 'pointer',
+                          }}
+                        >
+                          ⬇ DOWNLOAD INSTALLER
+                        </a>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim }}>~45 MB · VOP_Bridge_Setup_v2.0.exe</span>
+                      </div>
                     </div>
-                    <div style={{ marginTop: '8px', color: sColor.textDim }}>
-                      The bridge script is included in the <strong style={{ color: sColor.text }}>tools/</strong> folder. It connects to your PCAN-USB via python-can and serves both a secure (wss://localhost:8766) and insecure (ws://localhost:8765) WebSocket. The browser tries the secure connection first (required when this page is served over HTTPS). <strong style={{ color: sColor.red }}>First time?</strong> Accept the self-signed certificate by visiting <strong style={{ color: sColor.text }}>https://localhost:8766</strong> in Chrome and clicking Advanced → Proceed.
-                    </div>
-                  </div>
 
-                  {/* Supported PCAN Adapters */}
-                  <div style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textMuted, marginTop: '12px', lineHeight: 1.6, maxWidth: '520px', margin: '12px auto 0' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', textAlign: 'left' }}>
+                    {/* Quick Steps */}
+                    <div style={{ marginTop: '14px', padding: '12px 16px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
+                      <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.08em', marginBottom: '10px' }}>SETUP — 3 EASY STEPS</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr', gap: '6px 10px', alignItems: 'start' }}>
+                        <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>1</div>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
+                          <strong>Download & run</strong> the VOP Bridge installer above
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>Installs Python, PCAN drivers, and bridge — all automatic</div>
+                        </div>
+                        <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>2</div>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
+                          <strong>Plug in</strong> your PCAN-USB adapter and double-click the VOP Bridge shortcut
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>Bridge starts automatically if you enabled auto-start during install</div>
+                        </div>
+                        <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
+                          <strong>Click CHECK</strong> above, then <strong>CONNECT</strong> — you're live!
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time? Accept the certificate at <strong style={{ color: sColor.text }}>https://localhost:8766</strong></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Supported Adapters + Advanced */}
+                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 55 / 0.2)', border: '1px solid oklch(0.25 0.08 55)', borderRadius: '3px' }}>
-                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.orange, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED VIA BRIDGE</div>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.orange, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED ADAPTERS</div>
                         <div>PCAN-USB</div>
                         <div>PCAN-USB FD</div>
                         <div>PCAN-USB Pro</div>
                         <div>Any python-can adapter</div>
                       </div>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
-                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>REQUIREMENTS</div>
-                        <div>Python 3.8+</div>
-                        <div>PEAK drivers installed</div>
-                        <div>python-can + websockets</div>
-                        <div>Bridge running locally</div>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>WHAT'S INCLUDED</div>
+                        <div>Python 3.11 (embedded)</div>
+                        <div>PEAK PCAN drivers</div>
+                        <div>Auto-start on login</div>
+                        <div>System tray icon</div>
                       </div>
                     </div>
-                    <div style={{ marginTop: '8px' }}>
+                    <div style={{ marginTop: '8px', fontSize: '0.68rem' }}>
                       Protocol: Raw CAN {'→'} ISO 15765-4 (ISO-TP) via bridge. 500 kbit/s default.
                       <br /><span style={{ color: sColor.orange }}>GM Mode 22 extended PIDs supported through raw CAN frame construction.</span>
                     </div>
+
+                    {/* Advanced / Manual setup collapsible */}
+                    <details style={{ marginTop: '10px' }}>
+                      <summary style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, cursor: 'pointer', letterSpacing: '0.04em' }}>ADVANCED: Manual setup (for developers)</summary>
+                      <div style={{ padding: '10px 12px', marginTop: '6px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
+                        <div style={{ color: sColor.textMuted, marginBottom: '4px' }}># 1. Install dependencies (one-time)</div>
+                        <div style={{ color: sColor.green }}>pip install python-can websockets</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in PCAN-USB, then run the bridge</div>
+                        <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
+                      </div>
+                    </details>
                   </div>
                 </>
               )}

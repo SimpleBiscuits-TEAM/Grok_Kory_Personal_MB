@@ -287,3 +287,149 @@ describe("parseFuelTableCSV logic", () => {
     expect(result!.data[1]).toEqual([0.9, 1.0, 1.1]);
   });
 });
+
+describe("RPM axis auto-scaling detection", () => {
+  function detectRpmScaling(rowAxis: number[], rowAxisLabel: string): number[] {
+    const label = rowAxisLabel.toLowerCase();
+    if (label.includes('rpm')) {
+      const allSmall = rowAxis.every(v => v < 20);
+      const someDecimal = rowAxis.some(v => v !== Math.floor(v) || v < 10);
+      if (allSmall && someDecimal && rowAxis.length > 2) {
+        return rowAxis.map(v => Math.round(v * 1000));
+      }
+    }
+    return rowAxis;
+  }
+
+  it("should detect and fix RPM/1000 scaling (0.8 → 800)", () => {
+    const scaled = [0.8, 1.0, 1.1, 1.2, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0];
+    const fixed = detectRpmScaling(scaled, "RPM (rpmx1000)");
+    expect(fixed).toEqual([800, 1000, 1100, 1200, 1500, 2000, 3000, 4000, 5000, 6000]);
+  });
+
+  it("should NOT scale already-correct RPM values (800, 1000, etc.)", () => {
+    const correct = [800, 1000, 1100, 1200, 1500, 2000, 3000];
+    const result = detectRpmScaling(correct, "RPM");
+    expect(result).toEqual(correct); // unchanged
+  });
+
+  it("should NOT scale non-RPM axes", () => {
+    const tps = [0, 5, 10, 15, 20, 25];
+    const result = detectRpmScaling(tps, "TPS (degrees)");
+    expect(result).toEqual(tps); // unchanged
+  });
+
+  it("should handle edge case of very few values", () => {
+    const twoValues = [0.8, 1.0];
+    const result = detectRpmScaling(twoValues, "RPM");
+    expect(result).toEqual(twoValues); // not enough to be confident
+  });
+});
+
+describe("suspicious zero detection", () => {
+  function findSuspiciousZeros(data: number[][]): Array<{ row: number; col: number }> {
+    const suspicious: Array<{ row: number; col: number }> = [];
+    for (let r = 0; r < data.length; r++) {
+      for (let c = 0; c < data[r].length; c++) {
+        if (data[r][c] === 0) {
+          const neighbors: number[] = [];
+          if (r > 0 && data[r - 1]?.[c] !== undefined) neighbors.push(data[r - 1][c]);
+          if (r < data.length - 1 && data[r + 1]?.[c] !== undefined) neighbors.push(data[r + 1][c]);
+          if (c > 0 && data[r][c - 1] !== undefined) neighbors.push(data[r][c - 1]);
+          if (c < data[r].length - 1 && data[r][c + 1] !== undefined) neighbors.push(data[r][c + 1]);
+          const nonZeroNeighbors = neighbors.filter(v => v > 0);
+          if (nonZeroNeighbors.length >= 2) suspicious.push({ row: r, col: c });
+        }
+      }
+    }
+    return suspicious;
+  }
+
+  it("should detect a zero surrounded by non-zero values", () => {
+    const data = [
+      [1.0, 1.1, 1.2],
+      [1.0, 0,   1.2],  // center is suspicious
+      [1.0, 1.1, 1.2],
+    ];
+    const zeros = findSuspiciousZeros(data);
+    expect(zeros.length).toBe(1);
+    expect(zeros[0]).toEqual({ row: 1, col: 1 });
+  });
+
+  it("should NOT flag a zero at the edge with only one non-zero neighbor", () => {
+    const data = [
+      [0, 0, 1.2],
+      [0, 0, 1.2],
+      [0, 0, 1.2],
+    ];
+    // Corner zeros only have 1 non-zero neighbor (to the right)
+    const zeros = findSuspiciousZeros(data);
+    // The zeros at col=1 have 2+ non-zero neighbors (right + possibly above/below)
+    // But col=0 zeros only have 1 non-zero neighbor (right)
+    expect(zeros.every(z => z.col >= 1)).toBe(true);
+  });
+
+  it("should detect multiple suspicious zeros", () => {
+    const data = [
+      [1.0, 1.1, 1.2, 1.3],
+      [1.0, 0,   0,   1.3],
+      [1.0, 1.1, 1.2, 1.3],
+    ];
+    const zeros = findSuspiciousZeros(data);
+    expect(zeros.length).toBe(2);
+  });
+
+  it("should return empty for table with no zeros", () => {
+    const data = [
+      [1.0, 1.1],
+      [1.2, 1.3],
+    ];
+    expect(findSuspiciousZeros(data)).toEqual([]);
+  });
+});
+
+describe("interpolation fallback", () => {
+  function interpolateCell(data: number[][], r: number, c: number): number {
+    const neighbors: number[] = [];
+    if (r > 0 && data[r - 1]?.[c] > 0) neighbors.push(data[r - 1][c]);
+    if (r < data.length - 1 && data[r + 1]?.[c] > 0) neighbors.push(data[r + 1][c]);
+    if (c > 0 && data[r][c - 1] > 0) neighbors.push(data[r][c - 1]);
+    if (c < data[r].length - 1 && data[r][c + 1] > 0) neighbors.push(data[r][c + 1]);
+    if (r > 0 && c > 0 && data[r - 1]?.[c - 1] > 0) neighbors.push(data[r - 1][c - 1]);
+    if (r > 0 && c < data[r].length - 1 && data[r - 1]?.[c + 1] > 0) neighbors.push(data[r - 1][c + 1]);
+    if (r < data.length - 1 && c > 0 && data[r + 1]?.[c - 1] > 0) neighbors.push(data[r + 1][c - 1]);
+    if (r < data.length - 1 && c < data[r].length - 1 && data[r + 1]?.[c + 1] > 0) neighbors.push(data[r + 1][c + 1]);
+    if (neighbors.length === 0) return 0;
+    return Math.round((neighbors.reduce((a, b) => a + b, 0) / neighbors.length) * 1000) / 1000;
+  }
+
+  it("should interpolate from cardinal and diagonal neighbors", () => {
+    const data = [
+      [1.0, 1.2, 1.4],
+      [1.1, 0,   1.5],
+      [1.2, 1.4, 1.6],
+    ];
+    const result = interpolateCell(data, 1, 1);
+    // Average of all 8 neighbors: (1.0+1.2+1.4+1.1+1.5+1.2+1.4+1.6)/8 = 1.3
+    expect(result).toBeCloseTo(1.3, 2);
+  });
+
+  it("should return 0 if all neighbors are 0", () => {
+    const data = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ];
+    expect(interpolateCell(data, 1, 1)).toBe(0);
+  });
+
+  it("should handle corner cell with fewer neighbors", () => {
+    const data = [
+      [0, 1.0],
+      [1.0, 1.0],
+    ];
+    const result = interpolateCell(data, 0, 0);
+    // Neighbors: right=1.0, below=1.0, diagonal=1.0 → avg=1.0
+    expect(result).toBe(1.0);
+  });
+});

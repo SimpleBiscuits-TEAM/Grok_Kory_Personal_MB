@@ -803,7 +803,7 @@ function FuelMapCard({
                               }}
                             />
                           ) : (
-                            val.toFixed(1)
+                            val.toFixed(3)
                           )}
                         </td>
                       );
@@ -816,7 +816,7 @@ function FuelMapCard({
           {/* Legend */}
           <div className="flex items-center gap-2 mt-2" style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
             <div style={{ width: 60, height: 8, background: 'linear-gradient(to right, oklch(0.35 0.12 145), oklch(0.50 0.18 90), oklch(0.35 0.22 25))', borderRadius: 2 }} />
-            <span>{min.toFixed(1)}</span>
+            <span>{min.toFixed(3)}</span>
             <span style={{ flex: 1, textAlign: 'center' }}>
               Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = log-based tuning reference
               {overlay?.isActive && (
@@ -827,7 +827,7 @@ function FuelMapCard({
                 </span>
               )}
             </span>
-            <span>{max.toFixed(1)}</span>
+            <span>{max.toFixed(3)}</span>
           </div>
         </div>
       )}
@@ -1114,15 +1114,15 @@ function FuelMapCompareSection({
                     let cellColor = 'white';
 
                     if (displayMode === 'diff') {
-                      cellText = delta === 0 ? stockVal.toFixed(1) : `${delta > 0 ? '+' : ''}${delta.toFixed(3)}`;
+                      cellText = delta === 0 ? stockVal.toFixed(3) : `${delta > 0 ? '+' : ''}${delta.toFixed(3)}`;
                       cellBg = getDiffColor(delta, diffData.maxAbs);
                       cellColor = delta === 0 ? sColor.textDim : 'white';
                     } else if (displayMode === 'original') {
-                      cellText = stockVal.toFixed(1);
+                      cellText = stockVal.toFixed(3);
                       cellBg = delta !== 0 ? 'oklch(0.18 0.04 200)' : 'transparent';
                       cellColor = delta !== 0 ? sColor.cyan : sColor.textDim;
                     } else {
-                      cellText = modVal.toFixed(1);
+                      cellText = modVal.toFixed(3);
                       cellBg = delta !== 0 ? 'oklch(0.18 0.04 200)' : 'transparent';
                       cellColor = delta !== 0 ? sColor.yellow : sColor.textDim;
                     }

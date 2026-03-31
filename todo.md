@@ -2743,3 +2743,10 @@
 - [x] IntelliSpy: Double-click arb IDs to select for targeted Knox analysis
 - [x] IntelliSpy: Module map in decode tab with click-to-select for Knox
 - [x] IntelliSpy: 20 vitest tests for UDS decode, flash services, NRC codes, frame formatting
+- [x] Enable right-click copy/paste across entire website — verified: no global restrictions exist, all user-select:none is scoped to drag/resize operations only
+- [x] VOP Bridge Installer: Create branded Windows installer for PCAN Bridge (no command prompt needed)
+- [x] VOP Bridge Installer: Bundle Python runtime, PCAN drivers, and bridge script into single .exe installer
+- [x] VOP Bridge Installer: Auto-start bridge on Windows login with system tray icon
+- [x] VOP Bridge Installer: Create download page in web app for easy customer access
+- [x] VOP Bridge Installer: Include PPEI/VOP branding (logo, colors, license agreement)
+- [x] Honda Talon Tuner: Fix OCR image-to-table import showing zeros instead of correct data values

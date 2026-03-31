@@ -162,7 +162,7 @@ CRITICAL RULES:
 - Be extremely precise — even small errors in fuel tables can cause engine damage
 - If you cannot read a value clearly, use your best estimate based on surrounding cell values — NEVER return 0 unless the cell actually shows 0
 - NEVER return 0 for a cell that has a visible non-zero value — this is the most critical rule
-- RPM values may be displayed as multiplied by 1000 (e.g., "0.800" means 800 RPM, "9.500" means 9500 RPM)
+- RPM values: Extract them EXACTLY as displayed in the screenshot. If the left column shows 800, 1000, 1100, etc., return those exact numbers. If it shows 0.800, 0.900, 1.100 (with decimal points), return those decimal numbers. Do NOT convert or scale RPM values
 - Pay careful attention to cells with colored backgrounds — green, yellow, orange, and red backgrounds all contain valid numeric values
 - Some cells may have small superscript markers (like "+" or "*") — ignore these and extract only the numeric value
 - Column headers may contain decimal values like 25.17, 28.83, 32.67 etc. — extract these precisely`;
@@ -189,7 +189,7 @@ const EXTRACTION_SCHEMA = {
         },
         rowAxisLabel: {
           type: "string",
-          description: "Row axis label (e.g., RPM (rpmx1000))",
+          description: "Row axis label (e.g., RPM, Engine Speed)",
         },
         colAxis: {
           type: "array",
@@ -338,6 +338,29 @@ Return the data as structured JSON with:
         rowAxis: number[];
         data: number[][];
       };
+
+      // 3.5. RPM axis auto-scaling: detect if LLM returned RPM/1000 (e.g., 0.8 instead of 800)
+      // If all rowAxis values are < 20 but the label says RPM, they're likely scaled by 1000
+      const rowLabel = (parsed.rowAxisLabel || '').toLowerCase();
+      if (rowLabel.includes('rpm')) {
+        const allSmall = parsed.rowAxis.every(v => v < 20);
+        const someDecimal = parsed.rowAxis.some(v => v !== Math.floor(v) || v < 10);
+        if (allSmall && someDecimal && parsed.rowAxis.length > 2) {
+          console.log(`[TalonOCR] Detected RPM/1000 scaling — multiplying rowAxis by 1000`);
+          parsed.rowAxis = parsed.rowAxis.map(v => Math.round(v * 1000));
+        }
+      }
+
+      // 3.6. Column axis auto-scaling: detect if LLM returned MAP/1000 or TPS/1000
+      const colLabel = (parsed.colAxisLabel || '').toLowerCase();
+      if (colLabel.includes('kpa') || colLabel.includes('map')) {
+        // MAP values should be 10-120+ kPa, not 0.01-0.12
+        const allTiny = parsed.colAxis.every(v => v < 1);
+        if (allTiny && parsed.colAxis.length > 2) {
+          console.log(`[TalonOCR] Detected MAP/1000 scaling — multiplying colAxis by 1000`);
+          parsed.colAxis = parsed.colAxis.map(v => Math.round(v * 1000 * 100) / 100);
+        }
+      }
 
       // 4. Validate and fix dimensions (pad missing rows/cols but DON'T pad with 0)
       if (parsed.rowAxis.length !== parsed.data.length) {
