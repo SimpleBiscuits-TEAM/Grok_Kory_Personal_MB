@@ -2661,3 +2661,5 @@
 - [x] Populate editable fuel table from OCR results
 - [x] Add Target Lambda row above RPM axis in fuel table editor
 - [x] Support all 4 cylinder fuel maps via screenshot upload
+- [x] Clipboard paste (Ctrl+V) support for fuel table screenshots — no file save needed
+- [x] Paste zone UI with visual feedback when pasting from snipping tool

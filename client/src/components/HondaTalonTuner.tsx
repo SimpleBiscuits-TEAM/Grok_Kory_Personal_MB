@@ -150,6 +150,7 @@ function FuelMapCard({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
+  const pasteZoneRef = useRef<HTMLDivElement>(null);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
@@ -157,6 +158,8 @@ function FuelMapCard({
   const [editValue, setEditValue] = useState('');
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const [pasteZoneFocused, setPasteZoneFocused] = useState(false);
+  const [pastedPreview, setPastedPreview] = useState<string | null>(null);
 
   const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
@@ -173,12 +176,17 @@ function FuelMapCard({
     });
   }, [config, onLoad]);
 
-  const handleScreenshotUpload = useCallback(async (file: File) => {
+  const processImageForOCR = useCallback(async (blob: Blob, mimeType: string) => {
     setOcrLoading(true);
     setOcrError(null);
+    setPastedPreview(null);
     try {
-      // Convert file to base64
-      const buffer = await file.arrayBuffer();
+      // Show preview
+      const previewUrl = URL.createObjectURL(blob);
+      setPastedPreview(previewUrl);
+
+      // Convert to base64
+      const buffer = await blob.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = '';
       for (let i = 0; i < bytes.length; i++) {
@@ -188,7 +196,7 @@ function FuelMapCard({
 
       const result = await extractMutation.mutateAsync({
         imageBase64: base64,
-        mimeType: file.type || 'image/png',
+        mimeType: mimeType || 'image/png',
         tableName: config.label,
       });
 
@@ -199,12 +207,13 @@ function FuelMapCard({
           rowAxis: result.rowAxis,
           colAxis: result.colAxis,
           data: result.data,
-          targetLambda: result.colAxis.map(() => 0.85), // Default target lambda
+          targetLambda: result.colAxis.map(() => 0.85),
           rowLabel: result.rowAxisLabel?.includes('RPM') ? 'RPM' : config.rowLabel,
           colLabel: result.colAxisLabel || config.colLabel,
           unit: result.unit || 'ms',
         };
         onLoad(fuelMap);
+        setPastedPreview(null);
       }
     } catch (err: any) {
       setOcrError(err?.message || 'Failed to extract fuel table from screenshot');
@@ -212,6 +221,28 @@ function FuelMapCard({
       setOcrLoading(false);
     }
   }, [config, onLoad, extractMutation]);
+
+  const handleScreenshotUpload = useCallback(async (file: File) => {
+    await processImageForOCR(file, file.type || 'image/png');
+  }, [processImageForOCR]);
+
+  // Clipboard paste handler — Ctrl+V from snipping tool
+  const handleClipboardPaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (blob) {
+          await processImageForOCR(blob, item.type);
+        }
+        return;
+      }
+    }
+  }, [processImageForOCR]);
 
   const handlePaste = useCallback(() => {
     const parsed = parseFuelTableCSV(pasteText);
@@ -301,75 +332,85 @@ function FuelMapCard({
 
       {/* Upload controls */}
       {!map && (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
-            <button
-              onClick={() => fileRef.current?.click()}
-              style={{
-                background: sColor.red, color: 'white', fontFamily: sFont.heading,
-                fontSize: '0.85rem', letterSpacing: '0.08em', padding: '6px 16px',
-                border: 'none', borderRadius: '2px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: '6px',
-              }}
-            >
-              <Upload style={{ width: 14, height: 14 }} />UPLOAD CSV
-            </button>
-            <button
-              onClick={() => setShowPaste(!showPaste)}
-              style={{
-                background: 'oklch(0.18 0.008 260)', color: sColor.textMid,
-                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
-                padding: '6px 16px', border: `1px solid ${sColor.border}`,
-                borderRadius: '2px', cursor: 'pointer',
-              }}
-            >
-              PASTE TABLE
-            </button>
-
-            {/* Screenshot OCR Upload Button */}
-            <input
-              ref={screenshotRef}
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/webp"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleScreenshotUpload(f); }}
-              className="hidden"
-            />
-            <button
-              onClick={() => screenshotRef.current?.click()}
-              disabled={ocrLoading}
-              style={{
-                background: ocrLoading ? 'oklch(0.25 0.010 260)' : sColor.cyan,
-                color: ocrLoading ? sColor.textDim : '#0a0a0a',
-                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
-                padding: '6px 16px', border: 'none',
-                borderRadius: '2px', cursor: ocrLoading ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: '6px',
-              }}
-            >
-              {ocrLoading ? (
-                <><Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />EXTRACTING...</>
-              ) : (
-                <><Camera style={{ width: 14, height: 14 }} />SCREENSHOT UPLOAD</>
-              )}
-            </button>
+        <div className="flex flex-col gap-3">
+          {/* ═══ PRIMARY: Clipboard Paste Zone ═══ */}
+          <div
+            ref={pasteZoneRef}
+            tabIndex={0}
+            onPaste={handleClipboardPaste}
+            onFocus={() => setPasteZoneFocused(true)}
+            onBlur={() => setPasteZoneFocused(false)}
+            onClick={() => pasteZoneRef.current?.focus()}
+            style={{
+              background: pasteZoneFocused ? 'oklch(0.14 0.06 200)' : 'oklch(0.11 0.02 200)',
+              border: `2px dashed ${pasteZoneFocused ? sColor.cyan : 'oklch(0.30 0.04 200)'}`,
+              borderRadius: '4px',
+              padding: '24px 16px',
+              textAlign: 'center',
+              cursor: 'pointer',
+              outline: 'none',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {ocrLoading ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 style={{ width: 28, height: 28, color: sColor.cyan, animation: 'spin 1s linear infinite' }} />
+                <span style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: sColor.cyan }}>
+                  AI IS READING YOUR FUEL TABLE...
+                </span>
+                <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim }}>
+                  Extracting values, axes, and table structure — 10-20 seconds
+                </span>
+                {pastedPreview && (
+                  <img src={pastedPreview} alt="Pasted screenshot" style={{
+                    maxWidth: '100%', maxHeight: '120px', marginTop: '8px',
+                    border: `1px solid ${sColor.cyan}`, borderRadius: '3px', opacity: 0.7,
+                  }} />
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <div style={{
+                  width: 48, height: 48, borderRadius: '50%',
+                  background: pasteZoneFocused ? 'oklch(0.20 0.08 200)' : 'oklch(0.16 0.04 200)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                }}>
+                  <Camera style={{ width: 24, height: 24, color: pasteZoneFocused ? sColor.cyan : 'oklch(0.55 0.08 200)' }} />
+                </div>
+                <span style={{
+                  fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em',
+                  color: pasteZoneFocused ? sColor.cyan : 'white',
+                }}>
+                  {pasteZoneFocused ? 'READY — PRESS CTRL+V TO PASTE' : 'CLICK HERE, THEN CTRL+V TO PASTE SCREENSHOT'}
+                </span>
+                <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.textDim }}>
+                  Use Snipping Tool (Win+Shift+S) to capture your C3 fuel table, then paste here
+                </span>
+                <div style={{
+                  display: 'flex', gap: '6px', marginTop: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem', color: 'oklch(0.50 0.04 200)',
+                }}>
+                  <span style={{
+                    background: 'oklch(0.18 0.03 200)', padding: '2px 8px',
+                    borderRadius: '2px', border: '1px solid oklch(0.25 0.04 200)',
+                  }}>Win+Shift+S</span>
+                  <span style={{ lineHeight: '1.8' }}>→</span>
+                  <span style={{
+                    background: 'oklch(0.18 0.03 200)', padding: '2px 8px',
+                    borderRadius: '2px', border: '1px solid oklch(0.25 0.04 200)',
+                  }}>Click here</span>
+                  <span style={{ lineHeight: '1.8' }}>→</span>
+                  <span style={{
+                    background: 'oklch(0.18 0.03 200)', padding: '2px 8px',
+                    borderRadius: '2px', border: '1px solid oklch(0.25 0.04 200)',
+                  }}>Ctrl+V</span>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* OCR Loading/Error state */}
-          {ocrLoading && (
-            <div style={{
-              background: 'oklch(0.15 0.06 200)',
-              border: `1px solid ${sColor.cyan}`,
-              borderRadius: '2px',
-              padding: '10px 14px',
-              display: 'flex', alignItems: 'center', gap: '8px',
-            }}>
-              <Loader2 style={{ width: 16, height: 16, color: sColor.cyan, animation: 'spin 1s linear infinite' }} />
-              <span style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.cyan }}>
-                AI is reading your fuel table screenshot... This may take 10-20 seconds.
-              </span>
-            </div>
-          )}
+          {/* OCR Error */}
           {ocrError && (
             <div style={{
               background: 'oklch(0.15 0.06 25)',
@@ -384,6 +425,62 @@ function FuelMapCard({
               </span>
             </div>
           )}
+
+          {/* ═══ SECONDARY: Other upload methods ═══ */}
+          <div style={{
+            borderTop: `1px solid ${sColor.border}`,
+            paddingTop: '10px',
+          }}>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, display: 'block', marginBottom: '8px' }}>
+              OTHER IMPORT OPTIONS:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} className="hidden" />
+              <button
+                onClick={() => fileRef.current?.click()}
+                style={{
+                  background: 'oklch(0.16 0.006 260)', color: sColor.textMid,
+                  fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+                  padding: '5px 14px', border: `1px solid ${sColor.border}`,
+                  borderRadius: '2px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                }}
+              >
+                <Upload style={{ width: 12, height: 12 }} />UPLOAD CSV
+              </button>
+              <button
+                onClick={() => setShowPaste(!showPaste)}
+                style={{
+                  background: 'oklch(0.16 0.006 260)', color: sColor.textMid,
+                  fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+                  padding: '5px 14px', border: `1px solid ${sColor.border}`,
+                  borderRadius: '2px', cursor: 'pointer',
+                }}
+              >
+                PASTE CSV TEXT
+              </button>
+              <input
+                ref={screenshotRef}
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleScreenshotUpload(f); }}
+                className="hidden"
+              />
+              <button
+                onClick={() => screenshotRef.current?.click()}
+                disabled={ocrLoading}
+                style={{
+                  background: 'oklch(0.16 0.006 260)', color: sColor.textMid,
+                  fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+                  padding: '5px 14px', border: `1px solid ${sColor.border}`,
+                  borderRadius: '2px', cursor: ocrLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '5px',
+                }}
+              >
+                <ImageIcon style={{ width: 12, height: 12 }} />UPLOAD IMAGE FILE
+              </button>
+            </div>
+          </div>
 
           {showPaste && (
             <div className="flex flex-col gap-2">
@@ -413,18 +510,12 @@ function FuelMapCard({
               </button>
             </div>
           )}
-
-          {/* Screenshot hint */}
-          <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '4px' }}>
-            <Camera style={{ width: 12, height: 12, display: 'inline', marginRight: 4, verticalAlign: 'middle' }} />
-            <strong style={{ color: sColor.cyan }}>Screenshot Upload:</strong> Take a screenshot of your C3 Tuning Software fuel table and upload it. AI will extract all values, axes, and populate the editor automatically.
-          </p>
         </div>
       )}
 
       {/* Heat map grid with Target Lambda row */}
       {map && (
-        <div>
+        <div tabIndex={0} onPaste={handleClipboardPaste} style={{ outline: 'none' }}>
           <div className="flex items-center justify-between mb-2">
             <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>
               {map.rowAxis.length}×{map.colAxis.length} | Min: {min.toFixed(2)} | Max: {max.toFixed(2)} | Avg: {(map.data.flat().reduce((a, b) => a + b, 0) / map.data.flat().length).toFixed(2)}
