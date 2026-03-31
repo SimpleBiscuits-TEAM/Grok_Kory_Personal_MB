@@ -2682,3 +2682,8 @@
 - [x] Copy task tracker components (StatsBar, FilterBar, TaskTable, SprintTimeline, ModuleSidebar, taskData, useTaskStore)
 - [x] Add @ppei email access gate for TASKS page (similar to Advanced tab gate)
 - [ ] Wire TASKS route in App.tsx and add nav button in PpeiHeader
+- [ ] Add Cummins 6.7L PID aliases to EFILive parser getColumnIndex calls
+- [x] - [ ] Add Cummins-unique channels to DuramaxData interface (turboSpeed, exhaustPressure, pilotInjection, postInjection, etc.)
+- [ ] Add Cummins-specific unit conversions (Nm→lb-ft, kPa→psi, km/h→mph, MPa→psi, deg C→deg F)
+- [ ] Add Cummins bitmask/status PID parsing (operating modes, alt tables, regen state)
+- [ ] Test with CMF_0031.csv to verify all 71 channels populate

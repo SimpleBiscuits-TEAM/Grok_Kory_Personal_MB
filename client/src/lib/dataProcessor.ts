@@ -71,6 +71,28 @@ export interface DuramaxData {
   injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
   intakeAirTemp: number[];       // Intake air temperature (°F)
   fuelQuantity: number[];         // Fuel quantity per injection (mm3/stroke)
+  // ── Cummins-specific channels ──────────────────────────────────────────
+  turboSpeed: number[];            // Turbo shaft speed (rpm) — Cummins only
+  exhaustPressure: number[];       // Exhaust back pressure (psi) — Cummins only
+  batteryVoltage: number[];        // Battery voltage (V)
+  dpfSootLevel: number[];          // DPF soot loading (g) — Cummins only
+  egrPosition: number[];           // EGR valve position (%)
+  egrTemp: number[];               // EGR temperature (°F)
+  intakeThrottlePosition: number[];// Intake throttle position (%) — separate from pedal
+  intakeManifoldTemp: number[];    // Intake manifold temp (°F) — Cummins only
+  chargeCoolerTemp: number[];      // Charge air cooler outlet temp (°F) — Cummins only
+  pilot1Qty: number[];             // Pilot 1 injection quantity (mm3)
+  pilot2Qty: number[];             // Pilot 2 injection quantity (mm3)
+  pilot1Timing: number[];          // Pilot 1 injection timing (°)
+  pilot2Timing: number[];          // Pilot 2 injection timing (°)
+  post1Qty: number[];              // Post 1 injection quantity (mm3)
+  post2Qty: number[];              // Post 2 injection quantity (mm3)
+  post1Timing: number[];           // Post 1 injection timing (°)
+  post2Timing: number[];           // Post 2 injection timing (°)
+  regenState: number[];            // DPF regen state — Cummins only
+  cspTuneNumber: number[];         // CSP5 tune number — Cummins only
+  fuelRegCurrent: number[];        // Fuel pressure regulator current (A) — Cummins only
+  // ── End Cummins-specific ───────────────────────────────────────────────
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
   pidsMissing: string[];       // channels that had no valid substitute
   timestamp: string;
@@ -113,6 +135,28 @@ export interface ProcessedMetrics {
   injectionTiming: number[];     // Injection timing / SOI (degrees BTDC)
   intakeAirTemp: number[];       // Intake air temperature (°F)
   fuelQuantity: number[];         // Fuel quantity per injection (mm3/stroke)
+  // ── Cummins-specific channels ──────────────────────────────────────────
+  turboSpeed: number[];            // Turbo shaft speed (rpm)
+  exhaustPressure: number[];       // Exhaust back pressure (psi)
+  batteryVoltage: number[];        // Battery voltage (V)
+  dpfSootLevel: number[];          // DPF soot loading (g)
+  egrPosition: number[];           // EGR valve position (%)
+  egrTemp: number[];               // EGR temperature (°F)
+  intakeThrottlePosition: number[];// Intake throttle position (%)
+  intakeManifoldTemp: number[];    // Intake manifold temp (°F)
+  chargeCoolerTemp: number[];      // Charge air cooler outlet temp (°F)
+  pilot1Qty: number[];             // Pilot 1 injection quantity (mm3)
+  pilot2Qty: number[];             // Pilot 2 injection quantity (mm3)
+  pilot1Timing: number[];          // Pilot 1 injection timing (°)
+  pilot2Timing: number[];          // Pilot 2 injection timing (°)
+  post1Qty: number[];              // Post 1 injection quantity (mm3)
+  post2Qty: number[];              // Post 2 injection quantity (mm3)
+  post1Timing: number[];           // Post 1 injection timing (°)
+  post2Timing: number[];           // Post 2 injection timing (°)
+  regenState: number[];            // DPF regen state
+  cspTuneNumber: number[];         // CSP5 tune number
+  fuelRegCurrent: number[];        // Fuel pressure regulator current (A)
+  // ── End Cummins-specific ───────────────────────────────────────────────
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
   boostCalibration: BoostCalibrationInfo; // atmospheric correction audit
@@ -223,9 +267,12 @@ export function parseCSV(content: string): DuramaxData {
   
   // EFILIVE format starts with "Frame", "Time", "Flags" and has "ECM.RPM", "ECM.MAF"
   // LB7/LLY EFILive logs use PCM.RPM / PCM.MAF instead of ECM prefix
+  // Cummins 6.7L EFILive (CMF) logs use ECM.RPM_F, ECM.MAF_CM_F, ECM.BOOSTG_F, etc.
   const isEFILive = cleanLines.some(line =>
     line.includes('ECM.RPM') || line.includes('ECM.MAF') ||
-    line.includes('PCM.RPM') || line.includes('PCM.MAF')
+    line.includes('PCM.RPM') || line.includes('PCM.MAF') ||
+    line.includes('ECM.RPM_F') || line.includes('ECM.MAF_CM_F') ||
+    line.includes('ECM.BOOSTG_F') || line.includes('ECM.ENGTRQA_F')
   );
 
   // EZ Lynk format: single header row with human-readable names + units in parentheses
@@ -598,6 +645,27 @@ function parseDataloggerCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
+    // Cummins-specific (defaults for non-Cummins formats)
+    turboSpeed: [],
+    exhaustPressure: [],
+    batteryVoltage: [],
+    dpfSootLevel: [],
+    egrPosition: [],
+    egrTemp: [],
+    intakeThrottlePosition: [],
+    intakeManifoldTemp: [],
+    chargeCoolerTemp: [],
+    pilot1Qty: [],
+    pilot2Qty: [],
+    pilot1Timing: [],
+    pilot2Timing: [],
+    post1Qty: [],
+    post2Qty: [],
+    post1Timing: [],
+    post2Timing: [],
+    regenState: [],
+    cspTuneNumber: [],
+    fuelRegCurrent: [],
     fileFormat: 'hptuners', // Use hptuners format for downstream compatibility
   };
 }
@@ -1003,6 +1071,27 @@ function parseHPTunersCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
+    // Cummins-specific (defaults for non-Cummins formats)
+    turboSpeed: [],
+    exhaustPressure: [],
+    batteryVoltage: [],
+    dpfSootLevel: [],
+    egrPosition: [],
+    egrTemp: [],
+    intakeThrottlePosition: [],
+    intakeManifoldTemp: [],
+    chargeCoolerTemp: [],
+    pilot1Qty: [],
+    pilot2Qty: [],
+    pilot1Timing: [],
+    pilot2Timing: [],
+    post1Qty: [],
+    post2Qty: [],
+    post1Timing: [],
+    post2Timing: [],
+    regenState: [],
+    cspTuneNumber: [],
+    fuelRegCurrent: [],
     fileFormat: 'hptuners',
   };
 }
@@ -1034,6 +1123,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
   // Detect LB7/LLY prefix: older Duramax EFILive logs use PCM.* instead of ECM.*
   const isLB7Style = pidHeaders.some(h => h.startsWith('PCM.'));
+  // Detect Cummins 6.7L: uses _F suffix PIDs (ECM.RPM_F, ECM.BOOSTG_F, etc.)
+  const isCummins = pidHeaders.some(h => /^ECM\.[A-Z]+_F$/.test(h));
 
   /**
    * Find column index by exact PID code match first, then fallback to substring.
@@ -1065,29 +1156,67 @@ function parseEFILiveCSV(content: string): DuramaxData {
   // We fall back to related PIDs and treat missing channels as optional.
   const timeIdx          = getColumnIndex(['Time']);
   const rpmIdx           = (() => {
-    const primary = getColumnIndex(['ECM.RPM', 'PCM.RPM']);
+    const primary = getColumnIndex(['ECM.RPM', 'PCM.RPM', 'ECM.RPM_F']);
     if (primary !== -1) return primary;
     // Fallback: ECM.IDLERPM (desired idle speed) or ECM.TOS (trans output speed)
     // These aren't true engine RPM but allow partial analysis
     return getColumnIndex(['ECM.IDLERPM', 'ECM.TOS']);
   })();
-  const rpmIsFallback    = getColumnIndex(['ECM.RPM', 'PCM.RPM']) === -1 && rpmIdx !== -1;
-  const mafIdx           = getColumnIndex(['ECM.MAF', 'PCM.MAF']);
+  const rpmIsFallback    = getColumnIndex(['ECM.RPM', 'PCM.RPM', 'ECM.RPM_F']) === -1 && rpmIdx !== -1;
+  const mafIdx           = getColumnIndex(['ECM.MAF', 'PCM.MAF', 'ECM.MAF_CM_F']);
   // MAP / Boost: LML uses ECM.MAP; LB7 uses PCM.BOOST_M (kPa absolute)
-  const mapIdx           = getColumnIndex(['ECM.MAP', 'PCM.BOOST_M', 'PCM.MAP']);
+  const mapIdx           = getColumnIndex(['ECM.MAP', 'PCM.BOOST_M', 'PCM.MAP', 'ECM.BOOSTG_F']);
   // Boost desired: LML uses ECM.TCDBPR; LB7 may not have a direct desired boost PID
   const boostDesiredIdx  = getColumnIndex(['ECM.TCDBPR', 'ECM.DESTQ', 'ECM.MAPDES', 'PCM.MAPDES']);
+  // Cummins: exhaust back pressure (kPa) — unique to Cummins platform
+  const exhaustPressureIdx = getColumnIndex(['ECM.EXHPRS_F']);
+  // Cummins: turbo shaft speed (rpm) — unique to Cummins platform
+  const turboSpeedIdx      = getColumnIndex(['ECM.TURBOSPD_F']);
+  // Cummins: compressor inlet density and pressure
+  const compressorDensityIdx  = getColumnIndex(['ECM.CMPDENS_F']);
+  const compressorPressureIdx = getColumnIndex(['ECM.CMPPRS_F']);
+  // Cummins: fuel pressure regulator current (A)
+  const fuelRegCurrentIdx     = getColumnIndex(['ECM.FRCURR_F']);
+  // Cummins: intake manifold temp (separate from IAT/CAT)
+  const intakeManifoldTempIdx = getColumnIndex(['ECM.INTMT_F']);
+  // Cummins: charge cooler (intercooler) outlet temp
+  const chargeCoolerTempIdx   = getColumnIndex(['ECM.CACT_F']);
+  // Cummins: pilot injection quantities and timing
+  const pilot1QtyIdx   = getColumnIndex(['ECM.PILINJ1Q_F']);
+  const pilot2QtyIdx   = getColumnIndex(['ECM.PILINJ2Q_F']);
+  const pilot1TimIdx   = getColumnIndex(['ECM.PILINJ1T_F']);
+  const pilot2TimIdx   = getColumnIndex(['ECM.PILINJ2T_F']);
+  // Cummins: post injection quantities and timing
+  const post1QtyIdx    = getColumnIndex(['ECM.POSTINJ1Q_F']);
+  const post2QtyIdx    = getColumnIndex(['ECM.POSTINJ2Q_F']);
+  const post1TimIdx    = getColumnIndex(['ECM.POSTINJ1T_F']);
+  const post2TimIdx    = getColumnIndex(['ECM.POSTINJ2T_F']);
+  // Cummins: regen state, fuel control, SCR pump, CSP tune number
+  const regenStateIdx  = getColumnIndex(['ECM.REGENST_F']);
+  const cspTuneIdx     = getColumnIndex(['ECM.CSPTUN_F']);
+  // Cummins: battery voltage
+  const batteryVoltageIdx = getColumnIndex(['ECM.BATTV_F']);
+  // Cummins: DPF soot level (g)
+  const dpfSootIdx        = getColumnIndex(['ECM.DPFSOOT_F']);
+  // Cummins: EGR position (%) and EGR temperature
+  const egrPositionIdx    = getColumnIndex(['ECM.EGRPOS_F']);
+  const egrTempIdx        = getColumnIndex(['ECM.EGRT_F']);
+  // Cummins: intake throttle position (separate from pedal/APP)
+  const intakeThrottleIdx = getColumnIndex(['ECM.INTTHR_F']);
+  // Cummins: post injection 3 & 4 (2014 Ram has 4 post events)
+  const post3QtyIdx       = getColumnIndex(['ECM.POSTINJ3Q_F']);
+  const post4QtyIdx       = getColumnIndex(['ECM.POSTINJ4Q_F']);
   // Torque: LML logs ECM.TQ_DD / ECM.TQ_ACT; LB7 uses TCM.TRQENG_B (Nm)
-  const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD', 'TCM.TRQENG_B', 'PCM.TQ_ACT']);
-  const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF', 'PCM.TQ_REF']);
-  const speedIdx         = getColumnIndex(['ECM.VSS', 'PCM.VSS']);
+  const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD', 'TCM.TRQENG_B', 'PCM.TQ_ACT', 'ECM.ENGTRQA_F']);
+  const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF', 'PCM.TQ_REF', 'ECM.ENGTRQD_F']);
+  const speedIdx         = getColumnIndex(['ECM.VSS', 'PCM.VSS', 'ECM.VSS_F']);
   const fuelRateIdx      = getColumnIndex(['ECM.FUEL_RATE', 'ECM.FUELRCALC', 'PCM.FUEL_RATE']);
 
   // ── Fuel rail PIDs ────────────────────────────────────────────────────────
   // LB7: PCM.FRPACT (MPa), PCM.FRP_C (kPa), PCM.FRPDES (MPa)
   // LML/L5P: ECM.FRP_A (kPa), ECM.FRPDI (kPa)
-  const railActualIdx    = getColumnIndex(['ECM.FRP_A', 'PCM.FRPACT', 'PCM.FRP_C']);
-  const railDesiredIdx   = getColumnIndex(['ECM.FRPDI', 'PCM.FRPDES']);
+  const railActualIdx    = getColumnIndex(['ECM.FRP_A', 'PCM.FRPACT', 'PCM.FRP_C', 'ECM.FPA_F']);
+  const railDesiredIdx   = getColumnIndex(['ECM.FRPDI', 'PCM.FRPDES', 'ECM.FPD_F']);
   // PCV desired current (mA) — what the ECM commands the PCV solenoid
   // LB7: PCM.FRPACOM (mA)
   const pcvIdx           = getColumnIndex(['ECM.FRPVDC', 'PCM.FRPACOM']);
@@ -1096,8 +1225,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
 
   // ── Turbo / VGT PIDs ─────────────────────────────────────────────────────
   // LB7 has a fixed-geometry turbo (no VGT) — these will be -1 for LB7 logs
-  const turboVaneIdx         = getColumnIndex(['ECM.TCVPOS', 'PCM.TCVPOS']);
-  const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD', 'PCM.TCVDES']);
+  const turboVaneIdx         = getColumnIndex(['ECM.TCVPOS', 'PCM.TCVPOS', 'ECM.VGTACT', 'ECM.TURBOAPOS_F']);
+  const turboVaneDesiredIdx  = getColumnIndex(['ECM.TCVDES', 'ECM.TCVCMD', 'PCM.TCVDES', 'ECM.VGTCMD2', 'ECM.TURBODPOS_F']);
 
   // ── EGT PIDs — LML has up to 5 sensors ───────────────────────────────────
   // Scan ALL EGT-matching columns and pick the one with the highest peak reading.
@@ -1107,7 +1236,8 @@ function parseEFILiveCSV(content: string): DuramaxData {
       .map((h, i) => ({ header: h, idx: i }))
       .filter(({ header }) =>
         /^ECM\.EGTS\d?$/i.test(header) || /^ECM\.EGT$/i.test(header) ||
-        /^PCM\.EGTS?\d?$/i.test(header) || /^PCM\.EGT$/i.test(header)
+        /^PCM\.EGTS?\d?$/i.test(header) || /^PCM\.EGT$/i.test(header) ||
+        /^ECM\.EGT\d_F$/i.test(header)
       );
     if (egtCandidates.length === 0) return -1;
     if (egtCandidates.length === 1) return egtCandidates[0].idx;
@@ -1145,22 +1275,22 @@ function parseEFILiveCSV(content: string): DuramaxData {
   // LB7 turbine speed: TCM.TURBINE (rpm) — used for converter stall analysis
   const turbineSpeedIdx    = getColumnIndex(['TCM.TURBINE']);
   // Gear: LB7 uses TCM.GEAR with text values ("First", "Second", etc.)
-  const currentGearIdx    = getColumnIndex(['TCM.CURGEAR', 'TCM.GEAR', 'TCM.CG', 'TCM.CMDGEAR']);
+  const currentGearIdx    = getColumnIndex(['TCM.CURGEAR', 'TCM.GEAR', 'TCM.CG', 'TCM.CMDGEAR', 'ECM.TRANSG_F']);
 
   // ── Other sensor PIDs ────────────────────────────────────────────────────────────────────────
-  const oilPressureIdx    = getColumnIndex(['ECM.OILP', 'PCM.OILP']);
-  const coolantTempIdx    = getColumnIndex(['ECM.ECT', 'PCM.ECT']);
+  const oilPressureIdx    = getColumnIndex(['ECM.OILP', 'PCM.OILP', 'ECM.OILPRS_F']);
+  const coolantTempIdx    = getColumnIndex(['ECM.ECT', 'PCM.ECT', 'ECM.ECT_F']);
   const oilTempIdx        = getColumnIndex(['ECM.EOT', 'PCM.EOT']);
   const transFluidTempIdx = getColumnIndex(['TCM.TFT']);
-  const baroIdx           = getColumnIndex(['ECM.BARO', 'PCM.BARO']);
-  const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'PCM.TP_A', 'PCM.TPS', 'PCM.APP', 'Accelerator Pedal Position', 'Throttle Position']);
+  const baroIdx           = getColumnIndex(['ECM.BARO', 'PCM.BARO', 'ECM.AAP_F', 'ECM.CMPPRS_F']);
+  const throttleIdx       = getColumnIndex(['ECM.TPS', 'ECM.THROTTLE', 'ECM.APP', 'PCM.TP_A', 'PCM.TPS', 'PCM.APP', 'Accelerator Pedal Position', 'Throttle Position', 'ECM.TP_F']);
   // LB7: PCM.MAINBPW (microseconds); LML/L5P: ECM.INJPW (ms)
-  const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW', 'PCM.MAINBPW']);
+  const injPulseWidthIdx  = getColumnIndex(['ECM.INJPW', 'ECM.IPW', 'ECM.INJPW1', 'ECM.FPW', 'PCM.MAINBPW', 'ECM.MAININJD_F']);
   // LB7: PCM.MNINJTIM (degrees)
-  const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING', 'PCM.MNINJTIM']);
-  const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT', 'PCM.IAT', 'PCM.INTAKEAIRTEMP']);
+  const injTimingIdx      = getColumnIndex(['ECM.TIMING', 'ECM.SOI', 'ECM.INJTMG', 'ECM.INJTIMING', 'PCM.MNINJTIM', 'ECM.MAININJT_F']);
+  const iatIdx            = getColumnIndex(['ECM.IAT', 'ECM.INTAKEAIRTEMP', 'ECM.CAT', 'PCM.IAT', 'PCM.INTAKEAIRTEMP', 'ECM.AAT_F', 'ECM.CACT_F']);
   // LB7: PCM.FUEL_MAIN_M (mm3)
-  const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate', 'PCM.FUEL_MAIN_M']);
+  const fuelQuantityIdx   = getColumnIndex(['ECM.INJQNTALL', 'Injection Quantity All', 'ECM.FUELQTY', 'Fuel Mass Desired', 'Main Fuel Rate', 'PCM.FUEL_MAIN_M', 'ECM.MAININJQ_F']);
 
   // ── Validate required columns ────────────────────────────────────────
   // Many EFILive logs are diagnostic state dumps that don't include ECM.RPM or ECM.MAF.
@@ -1199,8 +1329,28 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const transFluidTemp: number[] = [];
   const barometricPressure: number[] = [];
   const fuelQuantity: number[] = [];
-
-  // EFILive data starts at row 3 (after PID codes, descriptions, units)
+  // Cummins-specific arrays
+  const turboSpeed: number[] = [];
+  const exhaustPressure: number[] = [];
+  const batteryVoltage: number[] = [];
+  const dpfSootLevel: number[] = [];
+  const egrPosition: number[] = [];
+  const egrTemp: number[] = [];
+  const intakeThrottlePosition: number[] = [];
+  const intakeManifoldTemp: number[] = [];
+  const chargeCoolerTemp: number[] = [];
+  const pilot1Qty: number[] = [];
+  const pilot2Qty: number[] = [];
+  const pilot1Timing: number[] = [];
+  const pilot2Timing: number[] = [];
+  const post1Qty: number[] = [];
+  const post2Qty: number[] = [];
+  const post1Timing: number[] = [];
+  const post2Timing: number[] = [];
+  const regenState: number[] = [];
+  const cspTuneNumber: number[] = [];
+  const fuelRegCurrent: number[] = [];
+  // EFILive data starts at row 3 (after PID codes, descriptions, units))
   const dataStartRow = 3;
 
   for (let i = dataStartRow; i < lines.length; i++) {
@@ -1377,8 +1527,50 @@ function parseEFILiveCSV(content: string): DuramaxData {
     // LB7: can be negative (-512) when engine off — clamp to 0
     const fqVal = parseVal(fuelQuantityIdx);
     fuelQuantity.push(isNaN(fqVal) ? 0 : Math.max(0, fqVal));
-  }
 
+    // ── Cummins-specific data extraction ──────────────────────────────────
+    // Turbo speed (rpm) — direct
+    turboSpeed.push(turboSpeedIdx !== -1 ? (isNaN(parseVal(turboSpeedIdx)) ? 0 : parseVal(turboSpeedIdx)) : 0);
+    // Exhaust back pressure: kPa → psi
+    const exhPrsKpa = parseVal(exhaustPressureIdx);
+    exhaustPressure.push(exhaustPressureIdx !== -1 && !isNaN(exhPrsKpa) ? exhPrsKpa * 0.145038 : 0);
+    // Battery voltage (V) — direct
+    batteryVoltage.push(batteryVoltageIdx !== -1 ? (isNaN(parseVal(batteryVoltageIdx)) ? 0 : parseVal(batteryVoltageIdx)) : 0);
+    // DPF soot level (g) — direct
+    dpfSootLevel.push(dpfSootIdx !== -1 ? (isNaN(parseVal(dpfSootIdx)) ? 0 : parseVal(dpfSootIdx)) : 0);
+    // EGR position (%) — direct
+    egrPosition.push(egrPositionIdx !== -1 ? (isNaN(parseVal(egrPositionIdx)) ? 0 : parseVal(egrPositionIdx)) : 0);
+    // EGR temperature: °C → °F
+    const egrtC = parseVal(egrTempIdx);
+    egrTemp.push(egrTempIdx !== -1 && !isNaN(egrtC) ? (egrtC * 9/5) + 32 : 0);
+    // Intake throttle position (%) — direct
+    intakeThrottlePosition.push(intakeThrottleIdx !== -1 ? (isNaN(parseVal(intakeThrottleIdx)) ? 0 : parseVal(intakeThrottleIdx)) : 0);
+    // Intake manifold temp: °C → °F
+    const imtC = parseVal(intakeManifoldTempIdx);
+    intakeManifoldTemp.push(intakeManifoldTempIdx !== -1 && !isNaN(imtC) ? (imtC * 9/5) + 32 : 0);
+    // Charge cooler temp: °C → °F
+    const cactC = parseVal(chargeCoolerTempIdx);
+    chargeCoolerTemp.push(chargeCoolerTempIdx !== -1 && !isNaN(cactC) ? (cactC * 9/5) + 32 : 0);
+    // Pilot injection quantities (mm3) — direct
+    pilot1Qty.push(pilot1QtyIdx !== -1 ? (isNaN(parseVal(pilot1QtyIdx)) ? 0 : parseVal(pilot1QtyIdx)) : 0);
+    pilot2Qty.push(pilot2QtyIdx !== -1 ? (isNaN(parseVal(pilot2QtyIdx)) ? 0 : parseVal(pilot2QtyIdx)) : 0);
+    // Pilot injection timing (°) — direct
+    pilot1Timing.push(pilot1TimIdx !== -1 ? (isNaN(parseVal(pilot1TimIdx)) ? 0 : parseVal(pilot1TimIdx)) : 0);
+    pilot2Timing.push(pilot2TimIdx !== -1 ? (isNaN(parseVal(pilot2TimIdx)) ? 0 : parseVal(pilot2TimIdx)) : 0);
+    // Post injection quantities (mm3) — direct
+    post1Qty.push(post1QtyIdx !== -1 ? (isNaN(parseVal(post1QtyIdx)) ? 0 : parseVal(post1QtyIdx)) : 0);
+    post2Qty.push(post2QtyIdx !== -1 ? (isNaN(parseVal(post2QtyIdx)) ? 0 : parseVal(post2QtyIdx)) : 0);
+    // Post injection timing (°) — direct
+    post1Timing.push(post1TimIdx !== -1 ? (isNaN(parseVal(post1TimIdx)) ? 0 : parseVal(post1TimIdx)) : 0);
+    post2Timing.push(post2TimIdx !== -1 ? (isNaN(parseVal(post2TimIdx)) ? 0 : parseVal(post2TimIdx)) : 0);
+    // Regen state — direct
+    regenState.push(regenStateIdx !== -1 ? (isNaN(parseVal(regenStateIdx)) ? 0 : parseVal(regenStateIdx)) : 0);
+    // CSP5 tune number — direct
+    cspTuneNumber.push(cspTuneIdx !== -1 ? (isNaN(parseVal(cspTuneIdx)) ? 0 : parseVal(cspTuneIdx)) : 0);
+    // Fuel pressure regulator current (A) — direct
+    fuelRegCurrent.push(fuelRegCurrentIdx !== -1 ? (isNaN(parseVal(fuelRegCurrentIdx)) ? 0 : parseVal(fuelRegCurrentIdx)) : 0);
+    // ── End Cummins-specific ─────────────────────────────────────────────
+  }
   if (rpm.length === 0) {
     // If we have no rows at all, the file may be truly empty or all rows were filtered
     throw new Error('No valid data rows found in EFILive CSV. Check that the file is a valid EFILive datalog export.');
@@ -1433,6 +1625,27 @@ function parseEFILiveCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
+    // Cummins-specific channels (populated from EFILive Cummins PIDs)
+    turboSpeed,
+    exhaustPressure,
+    batteryVoltage,
+    dpfSootLevel,
+    egrPosition,
+    egrTemp,
+    intakeThrottlePosition,
+    intakeManifoldTemp,
+    chargeCoolerTemp,
+    pilot1Qty,
+    pilot2Qty,
+    pilot1Timing,
+    pilot2Timing,
+    post1Qty,
+    post2Qty,
+    post1Timing,
+    post2Timing,
+    regenState,
+    cspTuneNumber,
+    fuelRegCurrent,
     fileFormat: 'efilive',
   };
 }
@@ -1663,6 +1876,27 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
+    // Cummins-specific (defaults for non-Cummins formats)
+    turboSpeed: [],
+    exhaustPressure: [],
+    batteryVoltage: [],
+    dpfSootLevel: [],
+    egrPosition: [],
+    egrTemp: [],
+    intakeThrottlePosition: [],
+    intakeManifoldTemp: [],
+    chargeCoolerTemp: [],
+    pilot1Qty: [],
+    pilot2Qty: [],
+    pilot1Timing: [],
+    pilot2Timing: [],
+    post1Qty: [],
+    post2Qty: [],
+    post1Timing: [],
+    post2Timing: [],
+    regenState: [],
+    cspTuneNumber: [],
+    fuelRegCurrent: [],
     fileFormat: 'bankspower',
   };
 }
@@ -1884,6 +2118,27 @@ function parseEZLynkCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
+    // Cummins-specific (defaults for non-Cummins formats)
+    turboSpeed: [],
+    exhaustPressure: [],
+    batteryVoltage: [],
+    dpfSootLevel: [],
+    egrPosition: [],
+    egrTemp: [],
+    intakeThrottlePosition: [],
+    intakeManifoldTemp: [],
+    chargeCoolerTemp: [],
+    pilot1Qty: [],
+    pilot2Qty: [],
+    pilot1Timing: [],
+    pilot2Timing: [],
+    post1Qty: [],
+    post2Qty: [],
+    post1Timing: [],
+    post2Timing: [],
+    regenState: [],
+    cspTuneNumber: [],
+    fuelRegCurrent: [],
     fileFormat: 'ezlynk',
   };
 }
@@ -2161,6 +2416,27 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     pidsMissing: rawData.pidsMissing,
     boostCalibration,
     stats,
+    // Cummins-specific channels (pass through from raw data)
+    turboSpeed: rawData.turboSpeed || [],
+    exhaustPressure: rawData.exhaustPressure || [],
+    batteryVoltage: rawData.batteryVoltage || [],
+    dpfSootLevel: rawData.dpfSootLevel || [],
+    egrPosition: rawData.egrPosition || [],
+    egrTemp: rawData.egrTemp || [],
+    intakeThrottlePosition: rawData.intakeThrottlePosition || [],
+    intakeManifoldTemp: rawData.intakeManifoldTemp || [],
+    chargeCoolerTemp: rawData.chargeCoolerTemp || [],
+    pilot1Qty: rawData.pilot1Qty || [],
+    pilot2Qty: rawData.pilot2Qty || [],
+    pilot1Timing: rawData.pilot1Timing || [],
+    pilot2Timing: rawData.pilot2Timing || [],
+    post1Qty: rawData.post1Qty || [],
+    post2Qty: rawData.post2Qty || [],
+    post1Timing: rawData.post1Timing || [],
+    post2Timing: rawData.post2Timing || [],
+    regenState: rawData.regenState || [],
+    cspTuneNumber: rawData.cspTuneNumber || [],
+    fuelRegCurrent: rawData.fuelRegCurrent || [],
     fileFormat: rawData.fileFormat,
     vehicleMeta: rawData.vehicleMeta,
   };
@@ -2204,11 +2480,31 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
     barometricPressure: downsample(data.barometricPressure),
     throttlePosition: downsample(data.throttlePosition),
     fuelQuantity: downsample(data.fuelQuantity),
+    // Cummins-specific channels
+    turboSpeed: downsample(data.turboSpeed || []),
+    exhaustPressure: downsample(data.exhaustPressure || []),
+    batteryVoltage: downsample(data.batteryVoltage || []),
+    dpfSootLevel: downsample(data.dpfSootLevel || []),
+    egrPosition: downsample(data.egrPosition || []),
+    egrTemp: downsample(data.egrTemp || []),
+    intakeThrottlePosition: downsample(data.intakeThrottlePosition || []),
+    intakeManifoldTemp: downsample(data.intakeManifoldTemp || []),
+    chargeCoolerTemp: downsample(data.chargeCoolerTemp || []),
+    pilot1Qty: downsample(data.pilot1Qty || []),
+    pilot2Qty: downsample(data.pilot2Qty || []),
+    pilot1Timing: downsample(data.pilot1Timing || []),
+    pilot2Timing: downsample(data.pilot2Timing || []),
+    post1Qty: downsample(data.post1Qty || []),
+    post2Qty: downsample(data.post2Qty || []),
+    post1Timing: downsample(data.post1Timing || []),
+    post2Timing: downsample(data.post2Timing || []),
+    regenState: downsample(data.regenState || []),
+    cspTuneNumber: downsample(data.cspTuneNumber || []),
+    fuelRegCurrent: downsample(data.fuelRegCurrent || []),
   };
 }
-
 /**
- * Create binned data for trend lines
+ * Create binned data for trend liness
  */
 export function createBinnedData(
   data: ProcessedMetrics,
