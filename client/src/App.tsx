@@ -17,6 +17,7 @@ const SupportJoin = lazy(() => import("./pages/SupportJoin"));
 const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
 const Pitch = lazy(() => import("./pages/Pitch"));
 const Tasks = lazy(() => import("./pages/Tasks"));
+const Calibrations = lazy(() => import("./pages/Calibrations"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -69,6 +70,7 @@ function Router() {
         <Route path={"/community"} component={Community} />
         <Route path={"/pitch"} component={Pitch} />
         <Route path={"/tasks"} component={Tasks} />
+        <Route path={"/calibrations"} component={Calibrations} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />

@@ -1196,3 +1196,35 @@ export const castDynoSnapshots = mysqlTable("cast_dyno_snapshots", {
   capturedAt: timestamp("capturedAt").defaultNow().notNull(),
 });
 export type CastDynoSnapshot = typeof castDynoSnapshots.$inferSelect;
+
+// ── FCA Calibration Database ────────────────────────────────────────────────
+
+/**
+ * FCA/Stellantis calibration records — parsed from the FED WORLD REPORT.
+ * Each record maps old (superseded) part numbers to the current calibration,
+ * with cross-references to TSBs and recalls.
+ */
+export const fcaCalibrations = mysqlTable("fca_calibrations", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Vehicle/module description (e.g., "2007 2008 2009 VB CR4 | D1 - RAM 3500 PICKUP") */
+  calibration: text("calibration").notNull(),
+  /** Module type: ECM, PCM, TCM, BCM, etc. */
+  moduleType: varchar("moduleType", { length: 32 }).notNull(),
+  /** Current/latest calibration part number */
+  newPartNumber: varchar("newPartNumber", { length: 32 }).notNull(),
+  /** JSON array of superseded part numbers */
+  oldPartNumbers: json("oldPartNumbers").notNull(),
+  /** JSON array of related TSB references */
+  tsbs: json("tsbs").notNull(),
+  /** JSON array of related recall campaign numbers */
+  recalls: json("recalls").notNull(),
+  /** Extracted year range from calibration description */
+  yearStart: int("yearStart"),
+  yearEnd: int("yearEnd"),
+  /** Vehicle platform codes extracted from calibration */
+  platformCodes: varchar("platformCodes", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type FcaCalibration = typeof fcaCalibrations.$inferSelect;
+export type InsertFcaCalibration = typeof fcaCalibrations.$inferInsert;

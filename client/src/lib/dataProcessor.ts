@@ -92,6 +92,26 @@ export interface DuramaxData {
   regenState: number[];            // DPF regen state — Cummins only
   cspTuneNumber: number[];         // CSP5 tune number — Cummins only
   fuelRegCurrent: number[];        // Fuel pressure regulator current (A) — Cummins only
+  egt2: number[];                    // EGT probe 2 (°F) — Cummins 5-probe
+  egt3: number[];                    // EGT probe 3 (°F) — Cummins 5-probe
+  egt4: number[];                    // EGT probe 4 (°F) — Cummins 5-probe
+  egt5: number[];                    // EGT probe 5 (°F) — Cummins 5-probe
+  altitudeDensityHigh: number[];     // Altitude adjust table select high (count)
+  altitudeDensityLow: number[];      // Altitude adjust table select low (count)
+  compressorDensity: number[];       // Compressor inlet density (kg/m3)
+  engineTorqueState: number[];       // Engine torque control state
+  fuelControlMode: number[];         // Fuel control mode
+  mainInjDuration: number[];           // Main injection duration (µs) — Cummins only
+  calcLoad: number[];                  // Calculated load value (%) — Cummins only
+  outputShaftRpm: number[];            // Trans output shaft speed (rpm)
+  turbineRpm: number[];                // Torque converter turbine speed (rpm)
+  transLinePressureDesired: number[];  // Trans line pressure desired (psi)
+  transLinePressureActual: number[];   // Trans line pressure actual (psi)
+  transLinePressureDC: number[];       // Trans line pressure duty cycle (%)
+  driverDemandTorque: number[];        // Driver demanded engine torque (%)
+  actualEngineTorque: number[];        // Actual engine torque (%)
+  post3Qty: number[];                  // Post 3 injection quantity (mm3)
+  post4Qty: number[];                  // Post 4 injection quantity (mm3)
   // ── End Cummins-specific ───────────────────────────────────────────────
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[]; // audit trail
   pidsMissing: string[];       // channels that had no valid substitute
@@ -156,6 +176,26 @@ export interface ProcessedMetrics {
   regenState: number[];            // DPF regen state
   cspTuneNumber: number[];         // CSP5 tune number
   fuelRegCurrent: number[];        // Fuel pressure regulator current (A)
+  egt2: number[];                    // EGT probe 2 (°F)
+  egt3: number[];                    // EGT probe 3 (°F)
+  egt4: number[];                    // EGT probe 4 (°F)
+  egt5: number[];                    // EGT probe 5 (°F)
+  altitudeDensityHigh: number[];     // Altitude adjust table select high
+  altitudeDensityLow: number[];      // Altitude adjust table select low
+  compressorDensity: number[];       // Compressor inlet density (kg/m3)
+  engineTorqueState: number[];       // Engine torque control state
+  fuelControlMode: number[];         // Fuel control mode
+  mainInjDuration: number[];           // Main injection duration (µs)
+  calcLoad: number[];                  // Calculated load value (%)
+  outputShaftRpm: number[];            // Trans output shaft speed (rpm)
+  turbineRpm: number[];                // Torque converter turbine speed (rpm)
+  transLinePressureDesired: number[];  // Trans line pressure desired (psi)
+  transLinePressureActual: number[];   // Trans line pressure actual (psi)
+  transLinePressureDC: number[];       // Trans line pressure duty cycle (%)
+  driverDemandTorque: number[];        // Driver demanded engine torque (%)
+  actualEngineTorque: number[];        // Actual engine torque (%)
+  post3Qty: number[];                  // Post 3 injection quantity (mm3)
+  post4Qty: number[];                  // Post 4 injection quantity (mm3)
   // ── End Cummins-specific ───────────────────────────────────────────────
   pidSubstitutions: import('./pidSubstitution').PidSubstitution[];
   pidsMissing: string[];
@@ -666,6 +706,26 @@ function parseDataloggerCSV(content: string): DuramaxData {
     regenState: [],
     cspTuneNumber: [],
     fuelRegCurrent: [],
+    egt2: [],
+    egt3: [],
+    egt4: [],
+    egt5: [],
+    altitudeDensityHigh: [],
+    altitudeDensityLow: [],
+    compressorDensity: [],
+    engineTorqueState: [],
+    fuelControlMode: [],
+    mainInjDuration: [],
+    calcLoad: [],
+    outputShaftRpm: [],
+    turbineRpm: [],
+    transLinePressureDesired: [],
+    transLinePressureActual: [],
+    transLinePressureDC: [],
+    driverDemandTorque: [],
+    actualEngineTorque: [],
+    post3Qty: [],
+    post4Qty: [],
     fileFormat: 'hptuners', // Use hptuners format for downstream compatibility
   };
 }
@@ -1092,6 +1152,26 @@ function parseHPTunersCSV(content: string): DuramaxData {
     regenState: [],
     cspTuneNumber: [],
     fuelRegCurrent: [],
+    egt2: [],
+    egt3: [],
+    egt4: [],
+    egt5: [],
+    altitudeDensityHigh: [],
+    altitudeDensityLow: [],
+    compressorDensity: [],
+    engineTorqueState: [],
+    fuelControlMode: [],
+    mainInjDuration: [],
+    calcLoad: [],
+    outputShaftRpm: [],
+    turbineRpm: [],
+    transLinePressureDesired: [],
+    transLinePressureActual: [],
+    transLinePressureDC: [],
+    driverDemandTorque: [],
+    actualEngineTorque: [],
+    post3Qty: [],
+    post4Qty: [],
     fileFormat: 'hptuners',
   };
 }
@@ -1206,6 +1286,30 @@ function parseEFILiveCSV(content: string): DuramaxData {
   // Cummins: post injection 3 & 4 (2014 Ram has 4 post events)
   const post3QtyIdx       = getColumnIndex(['ECM.POSTINJ3Q_F']);
   const post4QtyIdx       = getColumnIndex(['ECM.POSTINJ4Q_F']);
+  // Cummins: individual EGT probes 2-5 (probe 1 is the primary egtIdx above)
+  const egt2Idx = getColumnIndex(['ECM.EGT2_F', 'ECM.EGTS2']);
+  const egt3Idx = getColumnIndex(['ECM.EGT3_F', 'ECM.EGTS3']);
+  const egt4Idx = getColumnIndex(['ECM.EGT4_F', 'ECM.EGTS4']);
+  const egt5Idx = getColumnIndex(['ECM.EGT5_F', 'ECM.EGTS5']);
+  // Cummins: altitude density table selects
+  const altDensHighIdx = getColumnIndex(['ECM.AIRDENH_F', 'ECM.AIRDENSC_F']);
+  const altDensLowIdx  = getColumnIndex(['ECM.AIRDENL_F']);
+  // Cummins: engine torque control state & fuel control mode
+  const engTorqueStateIdx = getColumnIndex(['ECM.ENGTRST_F']);
+  const fuelControlModeIdx = getColumnIndex(['ECM.FUELCTRL_F']);
+  // Cummins: main injection duration (µs) — distinct from pulse width
+  const mainInjDurationIdx = getColumnIndex(['ECM.MAININJD_F']);
+  // Cummins: calculated load (%)
+  const calcLoadIdx = getColumnIndex(['ECM.CALCLOAD_F', 'ECM.LOAD_F']);
+  // Cummins/GM: output shaft RPM
+  const outputShaftRpmIdx = getColumnIndex(['TCM.OSS', 'ECM.TOS', 'TCM.TOSS']);
+  // Cummins/GM: trans line pressure
+  const transLinePressDesIdx = getColumnIndex(['TCM.LINEPRS_D', 'TCM.LINEPRSD']);
+  const transLinePressActIdx = getColumnIndex(['TCM.LINEPRS_A', 'TCM.LINEPRSA']);
+  const transLinePressureDCIdx = getColumnIndex(['TCM.LINEPRSDC']);
+  // Cummins: driver demand torque (%) and actual engine torque (%)
+  const driverDemandTorqueIdx = getColumnIndex(['ECM.DRVDEMTQ_F', 'ECM.DRVDEMTQ']);
+  const actualEngineTorqueIdx = getColumnIndex(['ECM.ACTTRQ_F', 'ECM.ACTTRQ']);
   // Torque: LML logs ECM.TQ_DD / ECM.TQ_ACT; LB7 uses TCM.TRQENG_B (Nm)
   const torqueIdx        = getColumnIndex(['ECM.TQ_ACT', 'ECM.TQ_DD', 'TCM.TRQENG_B', 'PCM.TQ_ACT', 'ECM.ENGTRQA_F']);
   const maxTorqueIdx     = getColumnIndex(['ECM.TQ_REF', 'PCM.TQ_REF', 'ECM.ENGTRQD_F']);
@@ -1350,6 +1454,26 @@ function parseEFILiveCSV(content: string): DuramaxData {
   const regenState: number[] = [];
   const cspTuneNumber: number[] = [];
   const fuelRegCurrent: number[] = [];
+  // New Cummins-specific arrays (EGT probes, altitude density, torque state, etc.)
+  const egt2: number[] = [];
+  const egt3: number[] = [];
+  const egt4: number[] = [];
+  const egt5: number[] = [];
+  const altitudeDensityHigh: number[] = [];
+  const altitudeDensityLow: number[] = [];
+  const engineTorqueState: number[] = [];
+  const fuelControlMode: number[] = [];
+  const mainInjDuration: number[] = [];
+  const calcLoad: number[] = [];
+  const outputShaftRpm: number[] = [];
+  const turbineRpm: number[] = [];
+  const transLinePressureDesired: number[] = [];
+  const transLinePressureActual: number[] = [];
+  const transLinePressureDC: number[] = [];
+  const driverDemandTorque: number[] = [];
+  const actualEngineTorque: number[] = [];
+  const post3Qty: number[] = [];
+  const post4Qty: number[] = [];
   // EFILive data starts at row 3 (after PID codes, descriptions, units))
   const dataStartRow = 3;
 
@@ -1569,6 +1693,45 @@ function parseEFILiveCSV(content: string): DuramaxData {
     cspTuneNumber.push(cspTuneIdx !== -1 ? (isNaN(parseVal(cspTuneIdx)) ? 0 : parseVal(cspTuneIdx)) : 0);
     // Fuel pressure regulator current (A) — direct
     fuelRegCurrent.push(fuelRegCurrentIdx !== -1 ? (isNaN(parseVal(fuelRegCurrentIdx)) ? 0 : parseVal(fuelRegCurrentIdx)) : 0);
+    // EGT probes 2-5: °C → °F
+    const egt2C = parseVal(egt2Idx);
+    egt2.push(egt2Idx !== -1 && !isNaN(egt2C) && egt2C > -40 ? (egt2C * 9/5) + 32 : 0);
+    const egt3C = parseVal(egt3Idx);
+    egt3.push(egt3Idx !== -1 && !isNaN(egt3C) && egt3C > -40 ? (egt3C * 9/5) + 32 : 0);
+    const egt4C = parseVal(egt4Idx);
+    egt4.push(egt4Idx !== -1 && !isNaN(egt4C) && egt4C > -40 ? (egt4C * 9/5) + 32 : 0);
+    const egt5C = parseVal(egt5Idx);
+    egt5.push(egt5Idx !== -1 && !isNaN(egt5C) && egt5C > -40 ? (egt5C * 9/5) + 32 : 0);
+    // Altitude density table selects — direct
+    altitudeDensityHigh.push(altDensHighIdx !== -1 ? (isNaN(parseVal(altDensHighIdx)) ? 0 : parseVal(altDensHighIdx)) : 0);
+    altitudeDensityLow.push(altDensLowIdx !== -1 ? (isNaN(parseVal(altDensLowIdx)) ? 0 : parseVal(altDensLowIdx)) : 0);
+    // Engine torque control state — direct
+    engineTorqueState.push(engTorqueStateIdx !== -1 ? (isNaN(parseVal(engTorqueStateIdx)) ? 0 : parseVal(engTorqueStateIdx)) : 0);
+    // Fuel control mode — direct
+    fuelControlMode.push(fuelControlModeIdx !== -1 ? (isNaN(parseVal(fuelControlModeIdx)) ? 0 : parseVal(fuelControlModeIdx)) : 0);
+    // Main injection duration (µs) — direct (distinct from injector pulse width)
+    mainInjDuration.push(mainInjDurationIdx !== -1 ? (isNaN(parseVal(mainInjDurationIdx)) ? 0 : parseVal(mainInjDurationIdx)) : 0);
+    // Calculated load (%) — direct
+    calcLoad.push(calcLoadIdx !== -1 ? (isNaN(parseVal(calcLoadIdx)) ? 0 : parseVal(calcLoadIdx)) : 0);
+    // Output shaft RPM — direct
+    outputShaftRpm.push(outputShaftRpmIdx !== -1 ? (isNaN(parseVal(outputShaftRpmIdx)) ? 0 : parseVal(outputShaftRpmIdx)) : 0);
+    // Turbine RPM — use turbineSpeedIdx from earlier if available
+    turbineRpm.push(turbineSpeedIdx !== -1 ? (isNaN(parseVal(turbineSpeedIdx)) ? 0 : parseVal(turbineSpeedIdx)) : 0);
+    // Trans line pressure desired: kPa → psi
+    const tlpDesKpa = parseVal(transLinePressDesIdx);
+    transLinePressureDesired.push(transLinePressDesIdx !== -1 && !isNaN(tlpDesKpa) ? tlpDesKpa * 0.145038 : 0);
+    // Trans line pressure actual: kPa → psi
+    const tlpActKpa = parseVal(transLinePressActIdx);
+    transLinePressureActual.push(transLinePressActIdx !== -1 && !isNaN(tlpActKpa) ? tlpActKpa * 0.145038 : 0);
+    // Trans line pressure duty cycle (%) — direct
+    transLinePressureDC.push(transLinePressureDCIdx !== -1 ? (isNaN(parseVal(transLinePressureDCIdx)) ? 0 : parseVal(transLinePressureDCIdx)) : 0);
+    // Driver demand torque (%) — direct
+    driverDemandTorque.push(driverDemandTorqueIdx !== -1 ? (isNaN(parseVal(driverDemandTorqueIdx)) ? 0 : parseVal(driverDemandTorqueIdx)) : 0);
+    // Actual engine torque (%) — direct
+    actualEngineTorque.push(actualEngineTorqueIdx !== -1 ? (isNaN(parseVal(actualEngineTorqueIdx)) ? 0 : parseVal(actualEngineTorqueIdx)) : 0);
+    // Post injection 3 & 4 quantities (mm3) — direct
+    post3Qty.push(post3QtyIdx !== -1 ? (isNaN(parseVal(post3QtyIdx)) ? 0 : Math.max(0, parseVal(post3QtyIdx))) : 0);
+    post4Qty.push(post4QtyIdx !== -1 ? (isNaN(parseVal(post4QtyIdx)) ? 0 : Math.max(0, parseVal(post4QtyIdx))) : 0);
     // ── End Cummins-specific ─────────────────────────────────────────────
   }
   if (rpm.length === 0) {
@@ -1646,6 +1809,26 @@ function parseEFILiveCSV(content: string): DuramaxData {
     regenState,
     cspTuneNumber,
     fuelRegCurrent,
+    egt2,
+    egt3,
+    egt4,
+    egt5,
+    altitudeDensityHigh,
+    altitudeDensityLow,
+    compressorDensity: compressorDensityIdx !== -1 ? [] : [],  // populated below if needed
+    engineTorqueState,
+    fuelControlMode,
+    mainInjDuration,
+    calcLoad,
+    outputShaftRpm,
+    turbineRpm,
+    transLinePressureDesired,
+    transLinePressureActual,
+    transLinePressureDC,
+    driverDemandTorque,
+    actualEngineTorque,
+    post3Qty,
+    post4Qty,
     fileFormat: 'efilive',
   };
 }
@@ -1897,6 +2080,26 @@ function parseBanksPowerCSV(content: string): DuramaxData {
     regenState: [],
     cspTuneNumber: [],
     fuelRegCurrent: [],
+    egt2: [],
+    egt3: [],
+    egt4: [],
+    egt5: [],
+    altitudeDensityHigh: [],
+    altitudeDensityLow: [],
+    compressorDensity: [],
+    engineTorqueState: [],
+    fuelControlMode: [],
+    mainInjDuration: [],
+    calcLoad: [],
+    outputShaftRpm: [],
+    turbineRpm: [],
+    transLinePressureDesired: [],
+    transLinePressureActual: [],
+    transLinePressureDC: [],
+    driverDemandTorque: [],
+    actualEngineTorque: [],
+    post3Qty: [],
+    post4Qty: [],
     fileFormat: 'bankspower',
   };
 }
@@ -2139,6 +2342,26 @@ function parseEZLynkCSV(content: string): DuramaxData {
     regenState: [],
     cspTuneNumber: [],
     fuelRegCurrent: [],
+    egt2: [],
+    egt3: [],
+    egt4: [],
+    egt5: [],
+    altitudeDensityHigh: [],
+    altitudeDensityLow: [],
+    compressorDensity: [],
+    engineTorqueState: [],
+    fuelControlMode: [],
+    mainInjDuration: [],
+    calcLoad: [],
+    outputShaftRpm: [],
+    turbineRpm: [],
+    transLinePressureDesired: [],
+    transLinePressureActual: [],
+    transLinePressureDC: [],
+    driverDemandTorque: [],
+    actualEngineTorque: [],
+    post3Qty: [],
+    post4Qty: [],
     fileFormat: 'ezlynk',
   };
 }
@@ -2437,6 +2660,26 @@ export function processData(rawData: DuramaxData): ProcessedMetrics {
     regenState: rawData.regenState || [],
     cspTuneNumber: rawData.cspTuneNumber || [],
     fuelRegCurrent: rawData.fuelRegCurrent || [],
+    egt2: rawData.egt2 || [],
+    egt3: rawData.egt3 || [],
+    egt4: rawData.egt4 || [],
+    egt5: rawData.egt5 || [],
+    altitudeDensityHigh: rawData.altitudeDensityHigh || [],
+    altitudeDensityLow: rawData.altitudeDensityLow || [],
+    compressorDensity: rawData.compressorDensity || [],
+    engineTorqueState: rawData.engineTorqueState || [],
+    fuelControlMode: rawData.fuelControlMode || [],
+    mainInjDuration: rawData.mainInjDuration || [],
+    calcLoad: rawData.calcLoad || [],
+    outputShaftRpm: rawData.outputShaftRpm || [],
+    turbineRpm: rawData.turbineRpm || [],
+    transLinePressureDesired: rawData.transLinePressureDesired || [],
+    transLinePressureActual: rawData.transLinePressureActual || [],
+    transLinePressureDC: rawData.transLinePressureDC || [],
+    driverDemandTorque: rawData.driverDemandTorque || [],
+    actualEngineTorque: rawData.actualEngineTorque || [],
+    post3Qty: rawData.post3Qty || [],
+    post4Qty: rawData.post4Qty || [],
     fileFormat: rawData.fileFormat,
     vehicleMeta: rawData.vehicleMeta,
   };

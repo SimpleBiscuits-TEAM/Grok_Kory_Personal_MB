@@ -686,7 +686,8 @@ export const castingRouter = router({
 
       try {
         const response = await invokeLLM({ messages });
-        const commentary = response.choices?.[0]?.message?.content || "Let's keep this energy going!";
+        const rawContent = response.choices?.[0]?.message?.content;
+        const commentary: string = typeof rawContent === 'string' ? rawContent : (rawContent ? JSON.stringify(rawContent) : "Let's keep this energy going!");
         
         // Save Knox's message to chat
         await db.insert(castChat).values({

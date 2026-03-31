@@ -9,12 +9,13 @@
  * - ISB CM850 (Medium duty)
  * - ISL CM850/CM2350 (Light duty)
  * - CM2100/CM2150/CM2200 (Dodge RAM 6.7L)
+ * - CM2350B (Dodge RAM 6.7L 2013-2018, BDC product ID)
  * - CM2450 (Newer Dodge RAM)
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type CumminsECUType = 'ISX_CM871' | 'ISX_CM870' | 'ISB_CM850' | 'ISL_CM850' | 'ISL_CM2350' | 'CM2100' | 'CM2150' | 'CM2200' | 'CM2450';
+export type CumminsECUType = 'ISX_CM871' | 'ISX_CM870' | 'ISB_CM850' | 'ISL_CM850' | 'ISL_CM2350' | 'CM2100' | 'CM2150' | 'CM2200' | 'CM2350B' | 'CM2450';
 
 export type ParameterCategory = 'fuel' | 'timing' | 'boost' | 'egr' | 'dpf' | 'limiter' | 'vehicle' | 'diagnostic';
 
@@ -70,7 +71,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'mg/stroke',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Primary tuning parameter for power output. Affects emissions.',
   },
 
@@ -88,7 +89,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: '°BTDC',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Advanced timing increases power but increases NOx. Retarded timing reduces emissions.',
   },
 
@@ -106,7 +107,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'PSI',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Higher pressure improves atomization and power. Typical range 20000-26000 PSI.',
   },
 
@@ -125,7 +126,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'PSI',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'VGT turbo target. Stock typically 15-25 PSI. Higher = more power but more stress.',
   },
 
@@ -143,7 +144,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: '%',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Directly controls turbo vane position. Lower % = more boost.',
   },
 
@@ -162,7 +163,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'boolean',
     writable: true,
     persistent: true,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Disabling EGR improves power but increases emissions. Requires DPF delete.',
   },
 
@@ -180,7 +181,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: '%',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Controls how much exhaust is recirculated. Lower = more power.',
   },
 
@@ -199,7 +200,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'boolean',
     writable: true,
     persistent: true,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Disabling DPF improves power and fuel economy. Increases emissions.',
   },
 
@@ -217,7 +218,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: '°F',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Higher temp = faster regen but more fuel consumption.',
   },
 
@@ -236,7 +237,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'MPH',
     writable: true,
     persistent: true,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Electronic speed limiter. Stock typically 65-75 MPH.',
   },
 
@@ -254,7 +255,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'lb-ft',
     writable: true,
     persistent: false,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Protects drivetrain. Stock typically 600-800 lb-ft.',
   },
 
@@ -273,7 +274,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'inches',
     writable: true,
     persistent: true,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Affects speedometer calibration. Must match actual tire size.',
   },
 
@@ -291,7 +292,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'gallons',
     writable: true,
     persistent: true,
-    ecuTypes: ['CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Affects fuel gauge calibration. Common sizes: 25, 32, 40 gallons.',
   },
 
@@ -310,7 +311,7 @@ export const CUMMINS_PARAMETERS: CumminsParameter[] = [
     unit: 'hours',
     writable: true,
     persistent: true,
-    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2450'],
+    ecuTypes: ['ISX_CM871', 'ISX_CM870', 'ISB_CM850', 'ISL_CM850', 'CM2100', 'CM2150', 'CM2200', 'CM2350B', 'CM2450'],
     notes: 'Can be adjusted for warranty purposes (use with caution).',
   },
 ];
@@ -364,12 +365,26 @@ export const CUMMINS_ECU_DEFINITIONS: Map<CumminsECUType, CumminsECUDefinition> 
     },
   ],
   [
+    'CM2350B',
+    {
+      type: 'CM2350B',
+      productId: 'BDC',
+      moduleName: 'CM2350B',
+      marketingName: 'Dodge RAM 6.7L ISB (2013-2018)',
+      ramStart: 0x0,
+      ramEnd: 0xfffff,
+      flashStart: 0x100000,
+      flashEnd: 0x3fffff,
+      parameters: CUMMINS_PARAMETERS.filter(p => p.ecuTypes.includes('CM2350B')),
+    },
+  ],
+  [
     'CM2450',
     {
       type: 'CM2450',
       productId: 'CME',
       moduleName: 'CM2450',
-      marketingName: 'Dodge RAM 6.7L (2013+)',
+      marketingName: 'Dodge RAM 6.7L (2019+)',
       ramStart: 0x0,
       ramEnd: 0xfffff,
       flashStart: 0x100000,

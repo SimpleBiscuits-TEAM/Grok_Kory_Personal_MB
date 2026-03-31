@@ -24,6 +24,7 @@ import { dragRouter } from "./routers/drag";
 import { communityRouter } from "./routers/community";
 import { pitchRouter } from "./routers/pitch";
 import { talonOcrRouter } from "./routers/talonOcr";
+import { calibrationsRouter } from "./routers/calibrations";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -105,6 +106,9 @@ export const appRouter = router({
 
   // Honda Talon Screenshot-to-Fuel-Table OCR
   talonOcr: talonOcrRouter,
+
+  // FCA/Stellantis Calibration Supersession Database
+  calibrations: calibrationsRouter,
 
   // Feedback / Error Reports
   feedback: router({

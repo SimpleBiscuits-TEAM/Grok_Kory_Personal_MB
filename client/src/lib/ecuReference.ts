@@ -7019,6 +7019,61 @@ export const unitConvert = {
   lbFtToNm: (lbft: number) => lbft / 0.7375621,
 };
 
+// ─── CUMMINS CM2350B 6.7L ISB SPECS ─────────────────────────────────────────
+
+export const CM2350B_SPECS = {
+  engine: {
+    name: 'Cummins ISB 6.7L Turbodiesel I6 (CM2350B BDC)',
+    displacement: '6.7L (408 cu in)',
+    configuration: 'Inline-6',
+    bore: '107 mm (4.21 in)',
+    stroke: '124 mm (4.88 in)',
+    compressionRatio: '17.3:1',
+    injectionSystem: 'Bosch CP4.2 High-Pressure Common Rail',
+    maxRailPressure: '29,000 psi (200 MPa)',
+    turbocharger: 'Holset HE351VE Variable Geometry Turbocharger (VGT)',
+    intercooler: 'Air-to-Air Charge Air Cooler (CAC)',
+    aftertreatment: 'DOC + DPF + SCR (DEF)',
+    ecuPart: 'CM2350B BDC (2013-2018 Ram 2500/3500)',
+  },
+  performance: {
+    stockHp: 385,
+    stockTorque: 900,
+    stockTorqueUnit: 'lb\u00b7ft',
+    peakTorqueRpm: 1700,
+    peakHpRpm: 2800,
+    redline: 3200,
+    idleRpm: 680,
+    maxBoostStock: 35,
+  },
+  operatingLimits: {
+    maxEgt1_F: 1400,
+    maxRailPressure_psi: 29000,
+    maxBoost_psi: 45,
+    mafIdleNormal_gs: 15,
+    tccSlipWarning_rpm: 50,
+    tccSlipCritical_rpm: 200,
+    dpfRegenTrigger_pct: 100,
+  },
+  subsystems: {
+    FRPR: 'Fuel Rail Pressure Regulation \u2014 Bosch CP4.2 high-pressure pump with PCV solenoid for closed-loop rail pressure control. Max 29,000 psi. The CP4.2 is a 2-piston design; fuel contamination or low lift pump pressure can cause catastrophic failure sending metal debris through the entire fuel system.',
+    INJC: 'Fuel Injection Control \u2014 Bosch CRIN 3.3 solenoid injectors with up to 5 injection events per cycle (pilot 1, pilot 2, main, post 1, post 2). Injection timing and quantity controlled by CM2350B ECM based on torque demand, emissions targets, and aftertreatment requirements.',
+    BSTR: 'Boost Pressure Regulation \u2014 Holset HE351VE VGT with electronically actuated vane ring. The ECM modulates vane position for target boost pressure. Stock max ~35 psi. The VGT also provides exhaust braking capability.',
+    EGRV: 'EGR Valve Control \u2014 Electronically controlled EGR valve with position feedback. Cummins uses a cooled EGR system to reduce NOx. The CM2350B uses the Alpha algorithm to determine EGR fraction based on multiple inputs including fuel rate, SCR bed temp, and ambient conditions.',
+    DPFR: 'DPF Regeneration Control \u2014 Active regeneration uses post-injection fuel dosing to raise exhaust temps above 1,100\u00b0F for soot oxidation. Passive regen occurs during normal driving when EGT is sufficient. The CM2350B monitors soot load via differential pressure sensor.',
+    SCRR: 'SCR / DEF System \u2014 Selective Catalytic Reduction uses DEF (Diesel Exhaust Fluid) injection to convert NOx to N2 and H2O. The CM2350B monitors SCR inlet/outlet NOx sensors and bed temperature for dosing control. DEF quality and level are monitored with inducement derates for non-compliance.',
+    TCCR: 'Torque Converter Clutch Control \u2014 68RFE (2013-2018) or AISIN AS69RC (2019+) automatic transmission. TCC lockup controlled via line pressure and duty cycle. The CM2350B communicates torque demand to the TCM via CAN bus.',
+  },
+  ecfgInfo: {
+    calibrationVersion: '31.71.21.18',
+    productId: 'BDC',
+    moduleName: 'CM23xx',
+    totalParameters: 22836,
+    tuningRelevant: 16469,
+    description: 'Core-II Software - DCX-13-SH-C31.00.00.00 - CM2350B',
+  },
+};
+
 // ─── HEALTH SCORING WEIGHTS ───────────────────────────────────────────────────
 
 export const HEALTH_WEIGHTS = {

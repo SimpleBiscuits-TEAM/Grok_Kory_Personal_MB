@@ -18,6 +18,29 @@ vi.mock("../_core/llm", () => ({
 import { appRouter } from "../routers";
 import type { TrpcContext } from "../_core/context";
 
+function createAuthContext(): TrpcContext {
+  return {
+    user: {
+      id: 1,
+      openId: "test-user",
+      email: "test@example.com",
+      name: "Test User",
+      loginMethod: "manus",
+      role: "user",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    },
+    req: {
+      protocol: "https",
+      headers: {},
+    } as TrpcContext["req"],
+    res: {
+      clearCookie: () => {},
+    } as TrpcContext["res"],
+  };
+}
+
 function createPublicContext(): TrpcContext {
   return {
     user: null,
@@ -33,7 +56,7 @@ function createPublicContext(): TrpcContext {
 
 describe("compare.analyze", () => {
   it("returns an AI analysis for comparison data", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.compare.analyze({
@@ -59,7 +82,7 @@ MAF: 320 → 355 g/s (+35)`,
   });
 
   it("accepts optional user context describing changes", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.compare.analyze({
@@ -79,7 +102,7 @@ Boost: 28.0 → 38.5 PSI (+10.5)`,
   });
 
   it("returns usage statistics", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.compare.analyze({
@@ -97,7 +120,7 @@ Boost: 28.0 → 38.5 PSI (+10.5)`,
     // Temporarily make the mock reject
     mockInvoke.mockRejectedValueOnce(new Error("Service unavailable"));
 
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     await expect(

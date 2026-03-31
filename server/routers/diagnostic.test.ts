@@ -18,9 +18,19 @@ vi.mock("../_core/llm", () => ({
 import { appRouter } from "../routers";
 import type { TrpcContext } from "../_core/context";
 
-function createPublicContext(): TrpcContext {
+function createAuthContext(): TrpcContext {
   return {
-    user: null,
+    user: {
+      id: 1,
+      openId: "test-user",
+      email: "test@example.com",
+      name: "Test User",
+      loginMethod: "manus",
+      role: "user",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    },
     req: {
       protocol: "https",
       headers: {},
@@ -33,7 +43,7 @@ function createPublicContext(): TrpcContext {
 
 describe("diagnostic.chat", () => {
   it("returns a response for a diagnostic conversation", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.chat({
@@ -50,7 +60,7 @@ describe("diagnostic.chat", () => {
   });
 
   it("accepts optional knowledge context", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.chat({
@@ -66,7 +76,7 @@ describe("diagnostic.chat", () => {
   });
 
   it("accepts optional a2L context", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.chat({
@@ -81,7 +91,7 @@ describe("diagnostic.chat", () => {
   });
 
   it("preserves conversation history", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.chat({
@@ -100,7 +110,7 @@ describe("diagnostic.chat", () => {
   });
 
   it("returns usage statistics", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.chat({
@@ -114,7 +124,7 @@ describe("diagnostic.chat", () => {
 
 describe("diagnostic.quickLookup", () => {
   it("returns a response for a quick query", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.quickLookup({
@@ -128,7 +138,7 @@ describe("diagnostic.quickLookup", () => {
   });
 
   it("accepts optional knowledge context", async () => {
-    const ctx = createPublicContext();
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
     const result = await caller.diagnostic.quickLookup({

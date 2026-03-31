@@ -2687,3 +2687,21 @@
 - [ ] Add Cummins-specific unit conversions (Nm→lb-ft, kPa→psi, km/h→mph, MPa→psi, deg C→deg F)
 - [ ] Add Cummins bitmask/status PID parsing (operating modes, alt tables, regen state)
 - [ ] Test with CMF_0031.csv to verify all 71 channels populate
+- [x] Add 2018 Ram Cummins missing PIDs: EGT1-5_F (5 individual EGT probes), AIRDENH_F, AIRDENL_F, AIRDENSC_F, ENGTRST_F, FUELCTRL_F
+- [x] Add egt2-egt5 channels to DuramaxData/ProcessedMetrics interfaces for multi-probe EGT support
+- [x] Add 2012 Ram Cummins PIDs: MAININJD_F (main inj duration us), LOAD_PCT, OUTRPM, TRBRPM, ENGRPM, TO_I (trans oil temp), DESLPRES/LPRES/LPRESDC (line pressure), IGCODE (gear), TQ_DD/TQ_ACT (torque %), ELEMSK (clutch states)
+- [x] Add 2018 Ram Cummins PIDs: EGT1-5_F (5 EGT probes), AIRDENH_F/AIRDENL_F/AIRDENSC_F (altitude density), ENGTRST_F, FUELCTRL_F
+- [x] Add egt2-egt5, altitudeDensity, engineTorqueState, fuelControlMode, mainInjDuration, calcLoad, outputShaftRpm, turbineRpm, transLinePressure to interfaces
+- [x] FCA Calibration Report: Parse all 1,855 pages into structured data
+- [x] FCA Calibration Report: Create database schema for calibration records
+- [x] FCA Calibration Report: Insert all parsed records into database (17,912 records)
+- [x] FCA Calibration Report: Build searchable Calibration Lookup UI page
+- [x] Finish Cummins 2012/2018 PID parser additions (mainInjDuration, calcLoad, outputShaftRpm, etc.)
+- [ ] CM2200 Config: Parse XML config file and extract key tuning parameters for Knox
+- [ ] CM2200 Config: Add Cummins CM2200 ECU knowledge to Knox knowledge base
+- [x] CM2350B Config: Parse XML config file and extract key tuning parameters for Knox (22,836 params, 16,469 tuning-relevant)
+- [x] CM2350B Config: Add Cummins CM2350B ECU knowledge to Knox knowledge base
+- [x] Add CM2350B BDC ECU definition to cumminsParameterDatabase.ts
+- [x] Add CM2350B_SPECS to ecuReference.ts (engine specs, operating limits, subsystem descriptions)
+- [x] Add 40+ new Cummins PID chart overlays to DynoCharts PID_OVERLAYS registry
+- [x] Fix casting router TS error (LLM response content type mismatch in castChat insert)
