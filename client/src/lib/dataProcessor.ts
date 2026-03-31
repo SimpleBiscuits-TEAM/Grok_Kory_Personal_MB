@@ -2185,6 +2185,9 @@ function parseEZLynkCSV(content: string): DuramaxData {
   const coolantIdx = findCol(['Eng. Coolant Temp', 'Engine Coolant Temp', 'Coolant Temp']);
   const transIdx = findCol(['Transmission Temp']);
   const loadIdx = findCol(['Engine Load']);
+  // Torque: EZLynk may have "Est. Engine Torque(A)" in Ft-lbf (actual torque, not percentage)
+  const torqueActualIdx = findCol(['Est. Engine Torque(A)', 'Engine Torque(A)', 'Actual Torque']);
+  const torqueDesiredIdx = findCol(['Est. Engine Torque(D)', 'Engine Torque(D)', 'Desired Torque']);
   const railActualIdx = findCol(['Injection Pressure(A)', 'Fuel Pressure(A)', 'Rail Pressure(A)']);
   const railDesiredIdx = findCol(['Injection Pressure(D)', 'Fuel Pressure(D)', 'Rail Pressure(D)']);
   const speedIdx = findCol(['Vehicle Speed']);
@@ -2197,12 +2200,31 @@ function parseEZLynkCSV(content: string): DuramaxData {
   const pcvDesiredIdx = findCol(['Fuel Pres. Reg. Cur.(D)', 'FPR Current(D)']);
   const gearIdx = findCol(['Gear']);
   const tccStatusIdx = findCol(['TQ Conv. Status', 'TCC Status', 'Torque Converter Status']);
+  const turboVaneActualIdx = findCol(['Turbo Vane Position(A)', 'VGT Position(A)']);
+  const turboVaneDesiredIdx = findCol(['Turbo Vane Position(D)', 'VGT Position(D)']);
+  const iatIdx = findCol(['Intake Air Temp', 'IAT']);
+  const egtIdx = findCol(['Exhaust Gas Temp', 'EGT']);
+  const dpfSootLevelIdx = findCol(['DPF Soot Load', 'DPF Soot']);
+  const batteryIdx = findCol(['Battery Voltage', 'Module Voltage']);
 
   if (rpmIdx === -1 && mafIdx === -1 && boostIdx === -1) {
     throw new Error('EZ Lynk CSV: Cannot find Engine RPM, MAF, or Boost columns. Ensure this is a valid EZ Lynk datalog.');
   }
 
-  // Parse data rows — skip rows where key engine PIDs are all empty (GPS-only rows)
+  // ── EZLynk sparse data: forward-fill last known values ──────────────────
+  // EZLynk only logs a value when it changes, leaving cells empty otherwise.
+  // We must forward-fill to reconstruct continuous time-series data.
+  const lastKnown: Record<number, number> = {};
+  const valFF = (cols: string[], idx: number): number => {
+    if (idx === -1 || idx >= cols.length) return lastKnown[idx] ?? NaN;
+    const v = cols[idx].trim();
+    if (v === '') return lastKnown[idx] ?? NaN;
+    const n = parseFloat(v);
+    if (!isNaN(n)) lastKnown[idx] = n;
+    return n;
+  };
+
+  // Parse data rows
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -2233,96 +2255,135 @@ function parseEZLynkCSV(content: string): DuramaxData {
   const injectionTiming: number[] = [];
   const intakeAirTemp: number[] = [];
   const fuelQuantity: number[] = [];
+  const driverDemandTorque: number[] = [];
+  const actualEngineTorque: number[] = [];
+  const dpfSootLevel: number[] = [];
+  const batteryVoltage: number[] = [];
 
   const pidsMissing: string[] = [];
   if (rpmIdx === -1) pidsMissing.push('Engine RPM');
   if (mafIdx === -1) pidsMissing.push('Mass Air Flow');
 
+  // Detect if torque column is in Ft-lbf (actual) vs percentage
+  // Check header for "Ft-lbf" or "ft-lbf" to determine
+  const torqueIsAbsolute = torqueActualIdx !== -1 &&
+    headers[torqueActualIdx].toLowerCase().includes('ft-lbf');
+  // Cummins 6.7L max torque: 800 ft-lbf for 2013-2017 68RFE
+  const cumminsMaxTorqueFtLbf = 800;
+
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(',');
-    const val = (idx: number): number => {
-      if (idx === -1 || idx >= cols.length) return NaN;
-      const v = cols[idx].trim();
-      if (v === '') return NaN;
-      return parseFloat(v);
-    };
 
-    // Skip GPS-only rows: if RPM, boost, and rail pressure are all empty, skip
-    const rpmVal = val(rpmIdx);
-    const boostVal = val(boostIdx);
-    const railVal = val(railActualIdx);
-    if (isNaN(rpmVal) && isNaN(boostVal) && isNaN(railVal)) continue;
+    // Read time first — every row should have a timestamp
+    const timeVal = valFF(cols, timeIdx);
 
-    const timeVal = val(timeIdx);
+    // Forward-fill all channel values
+    const rpmVal = valFF(cols, rpmIdx);
+    const boostVal = valFF(cols, boostIdx);
+    const railVal = valFF(cols, railActualIdx);
+    const mafVal = valFF(cols, mafIdx);
+    const tpVal = valFF(cols, throttleIdx);
+    const gearVal = valFF(cols, gearIdx);
+    const tccVal = valFF(cols, tccStatusIdx);
+    const turboVAVal = valFF(cols, turboVaneActualIdx);
+    const turboVDVal = valFF(cols, turboVaneDesiredIdx);
+    const torqueAVal = valFF(cols, torqueActualIdx);
+    const torqueDVal = valFF(cols, torqueDesiredIdx);
+    const loadVal = valFF(cols, loadIdx);
+    const coolantVal = valFF(cols, coolantIdx);
+    const transVal = valFF(cols, transIdx);
+    const spdVal = valFF(cols, speedIdx);
+    const gpsSpdVal = valFF(cols, gpsSpeedIdx);
+    const rpActual = valFF(cols, railActualIdx);
+    const rpDesired = valFF(cols, railDesiredIdx);
+    const pcvA = valFF(cols, pcvActualIdx);
+    const slipVal = valFF(cols, slipIdx);
+    const timingVal = valFF(cols, timingIdx);
+    const fqVal = valFF(cols, fuelQtyIdx);
+    const iatVal = valFF(cols, iatIdx);
+    const egtVal = valFF(cols, egtIdx);
+    const dpfVal = valFF(cols, dpfSootLevelIdx);
+    const battVal = valFF(cols, batteryIdx);
 
-    rpm.push(isNaN(rpmVal) ? 0 : rpmVal);
-    maf.push(isNaN(val(mafIdx)) ? 0 : val(mafIdx));
+    // Skip rows where ALL channels are empty (no forward-fill available yet)
+    // Only skip if we have zero data at all — not just missing some channels
+    const hasAnyData = !isNaN(rpmVal) || !isNaN(boostVal) || !isNaN(mafVal) ||
+      !isNaN(tpVal) || !isNaN(gearVal) || !isNaN(turboVAVal) || !isNaN(torqueAVal);
+    if (!hasAnyData && rpm.length === 0) continue; // skip leading empty rows
+    if (!hasAnyData) continue; // skip rows with no data at all
+
+    rpm.push(!isNaN(rpmVal) ? rpmVal : 0);
+    maf.push(!isNaN(mafVal) ? mafVal : 0);
     // EZ Lynk boost is already gauge PSI
-    boost.push(isNaN(boostVal) ? 0 : Math.max(0, boostVal));
-    mapAbsolute.push(isNaN(boostVal) ? 0 : boostVal + 14.696); // approximate absolute from gauge
-    torquePercent.push(isNaN(val(loadIdx)) ? 0 : val(loadIdx));
-    maxTorque.push(879.174); // Default LML max torque
-    
+    boost.push(!isNaN(boostVal) ? Math.max(0, boostVal) : 0);
+    mapAbsolute.push(!isNaN(boostVal) ? boostVal + 14.696 : 14.696);
+
+    // Torque handling:
+    // 1. If "Est. Engine Torque(A) (Ft-lbf)" is present → actual torque in ft-lbf
+    //    Convert to percentage: (torque_ftlbf / maxTorque) * 100
+    // 2. If "Engine Load" is present → already percentage
+    // 3. Otherwise → 0
+    if (torqueIsAbsolute && !isNaN(torqueAVal)) {
+      // Convert ft-lbf to percentage for the HP calculation pipeline
+      torquePercent.push((torqueAVal / cumminsMaxTorqueFtLbf) * 100);
+      actualEngineTorque.push(torqueAVal);
+    } else if (!isNaN(loadVal)) {
+      torquePercent.push(loadVal);
+      actualEngineTorque.push(0);
+    } else {
+      torquePercent.push(0);
+      actualEngineTorque.push(0);
+    }
+    maxTorque.push(cumminsMaxTorqueFtLbf);
+
+    // Desired torque
+    driverDemandTorque.push(!isNaN(torqueDVal) ? torqueDVal : 0);
+
     // Speed: prefer vehicle speed, fall back to GPS speed
-    const spd = val(speedIdx);
-    const gpsSpd = val(gpsSpeedIdx);
-    vehicleSpeed.push(!isNaN(spd) ? spd : (!isNaN(gpsSpd) ? gpsSpd : 0));
-    
+    vehicleSpeed.push(!isNaN(spdVal) ? spdVal : (!isNaN(gpsSpdVal) ? gpsSpdVal : 0));
+
     fuelRate.push(0); // Not available in EZ Lynk
     offset.push(!isNaN(timeVal) ? timeVal : (rpm.length - 1) * 0.1);
-    
+
     // Rail pressure: EZ Lynk uses kPSI, convert to PSI (* 1000)
-    const rpActual = val(railActualIdx);
-    const rpDesired = val(railDesiredIdx);
     railPressureActual.push(!isNaN(rpActual) ? rpActual * 1000 : 0);
     railPressureDesired.push(!isNaN(rpDesired) ? rpDesired * 1000 : 0);
-    
-    // PCV: use actual current (mA) — similar to EFILive PCV duty
-    const pcvA = val(pcvActualIdx);
+
+    // PCV: use actual current (mA)
     pcvDutyCycle.push(!isNaN(pcvA) ? pcvA : 0);
-    
-    boostDesired.push(0); // Not typically in EZ Lynk logs
-    turboVanePosition.push(0);
-    turboVaneDesired.push(0);
-    exhaustGasTemp.push(0); // Not in this log
-    
-    const slip = val(slipIdx);
-    converterSlip.push(!isNaN(slip) ? slip : 0);
-    
+
+    boostDesired.push(0);
+    turboVanePosition.push(!isNaN(turboVAVal) ? turboVAVal : 0);
+    turboVaneDesired.push(!isNaN(turboVDVal) ? turboVDVal : 0);
+    exhaustGasTemp.push(!isNaN(egtVal) ? egtVal : 0);
+
+    converterSlip.push(!isNaN(slipVal) ? slipVal : 0);
+
     // TCC status to duty cycle
-    if (tccStatusIdx !== -1 && tccStatusIdx < cols.length) {
-      const tccVal = val(tccStatusIdx);
+    if (!isNaN(tccVal)) {
       // EZ Lynk TCC status is numeric: 0=off, 67=controlled, 98=locked
-      if (!isNaN(tccVal)) {
-        converterDutyCycle.push(tccVal > 90 ? 100 : tccVal > 50 ? 75 : tccVal > 0 ? 25 : 0);
-      } else {
-        converterDutyCycle.push(0);
-      }
+      converterDutyCycle.push(tccVal > 90 ? 100 : tccVal > 50 ? 75 : tccVal > 0 ? 25 : 0);
     } else {
       converterDutyCycle.push(0);
     }
     converterPressure.push(0);
-    
-    const gear = val(gearIdx);
-    currentGear.push(!isNaN(gear) ? gear : 0);
-    
+
+    currentGear.push(!isNaN(gearVal) ? gearVal : 0);
+
     oilPressure.push(0);
-    const ct = val(coolantIdx);
-    coolantTemp.push(!isNaN(ct) ? ct : 0);
+    coolantTemp.push(!isNaN(coolantVal) ? coolantVal : 0);
     oilTemp.push(0);
-    const tt = val(transIdx);
-    transFluidTemp.push(!isNaN(tt) ? tt : 0);
-    barometricPressure.push(14.696); // Not available, assume sea level
-    
-    const tp = val(throttleIdx);
-    throttlePosition.push(!isNaN(tp) ? tp : 0);
-    injectorPulseWidth.push(0); // Not in EZ Lynk
-    const timing = val(timingIdx);
-    injectionTiming.push(!isNaN(timing) ? timing : 0);
-    intakeAirTemp.push(0); // Not in this log
-    
-    const fq = val(fuelQtyIdx);
-    fuelQuantity.push(!isNaN(fq) ? fq : 0);
+    transFluidTemp.push(!isNaN(transVal) ? transVal : 0);
+    barometricPressure.push(14.696);
+
+    throttlePosition.push(!isNaN(tpVal) ? tpVal : 0);
+    injectorPulseWidth.push(0);
+    injectionTiming.push(!isNaN(timingVal) ? timingVal : 0);
+    intakeAirTemp.push(!isNaN(iatVal) ? iatVal : 0);
+
+    fuelQuantity.push(!isNaN(fqVal) ? fqVal : 0);
+    dpfSootLevel.push(!isNaN(dpfVal) ? dpfVal : 0);
+    batteryVoltage.push(!isNaN(battVal) ? battVal : 0);
   }
 
   if (rpm.length === 0) {
@@ -2369,11 +2430,11 @@ function parseEZLynkCSV(content: string): DuramaxData {
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
-    // Cummins-specific (defaults for non-Cummins formats)
+    // Cummins-specific
     turboSpeed: [],
     exhaustPressure: [],
-    batteryVoltage: [],
-    dpfSootLevel: [],
+    batteryVoltage,
+    dpfSootLevel,
     egrPosition: [],
     egrTemp: [],
     intakeThrottlePosition: [],
@@ -2406,8 +2467,8 @@ function parseEZLynkCSV(content: string): DuramaxData {
     transLinePressureDesired: [],
     transLinePressureActual: [],
     transLinePressureDC: [],
-    driverDemandTorque: [],
-    actualEngineTorque: [],
+    driverDemandTorque,
+    actualEngineTorque,
     post3Qty: [],
     post4Qty: [],
     fileFormat: 'ezlynk',

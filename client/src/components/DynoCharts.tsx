@@ -654,7 +654,20 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
   // Right margin grows with number of PID axes (60px each)
   const rightMargin = hasPids ? Math.max(60, activePidDefs.length * 60) : 40;
 
-  if (dynoData.length < 3) {
+  // If dyno data is insufficient but we have time-series data, auto-switch to time mode
+  // instead of blocking the entire Log Details section
+  const dynoInsufficient = dynoData.length < 3;
+  const hasTimeData = timeData.length > 0;
+
+  // Auto-switch to time mode when dyno data is insufficient but time data exists
+  useEffect(() => {
+    if (dynoInsufficient && hasTimeData && xMode === 'rpm') {
+      setXMode('time');
+    }
+  }, [dynoInsufficient, hasTimeData, xMode]);
+
+  // Only show the dead-end if we have NO data at all (no time series either)
+  if (dynoInsufficient && !hasTimeData) {
     return (
       <div ref={divRef} style={{
         background: 'linear-gradient(180deg, #0d0f14 0%, #111520 100%)',
@@ -662,8 +675,8 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
         textAlign: 'center', color: '#444', fontFamily: 'monospace', fontSize: 13,
       }}>
         <div style={{ color: '#ff4d00', fontSize: 16, fontWeight: 'bold', letterSpacing: 2, marginBottom: 8 }}>LOG DETAILS</div>
-        <div>Insufficient RPM/torque data to render dyno graph.</div>
-        <div style={{ fontSize: 11, marginTop: 6, color: '#333' }}>Log must contain RPM and torque percentage channels.</div>
+        <div>No PID data found in this log file.</div>
+        <div style={{ fontSize: 11, marginTop: 6, color: '#333' }}>Upload a datalog with at least one engine PID channel.</div>
       </div>
     );
   }
@@ -697,7 +710,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
             These numbers are calculated from the datalog and are heavily dependent on tuning configuration.
             They can be inaccurate vs. an actual chassis dyno. Use as a trend indicator, not bragging rights.
           </div>
-          {hpSource !== 'torque' && (
+          {hpSource !== 'torque' && !dynoInsufficient && (
             <div style={{
               color: '#ff8c42', fontSize: 10, fontFamily: 'monospace', marginTop: 4,
               padding: '4px 8px', background: 'rgba(255,140,66,0.08)', borderRadius: 4,
@@ -706,6 +719,16 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
               {hpSource === 'accel'
                 ? 'HP Source: Vehicle Weight + Acceleration (torque PID unavailable). Assumes 7500 lb vehicle weight. Includes rolling resistance and aero drag estimates.'
                 : 'HP Source: MAF-based estimate (torque and speed PIDs unavailable). Less accurate than torque or acceleration methods.'}
+            </div>
+          )}
+          {dynoInsufficient && (
+            <div style={{
+              color: '#00c8ff', fontSize: 10, fontFamily: 'monospace', marginTop: 4,
+              padding: '4px 8px', background: 'rgba(0,200,255,0.06)', borderRadius: 4,
+              borderLeft: '2px solid #00c8ff', lineHeight: 1.4, maxWidth: 500,
+            }}>
+              Dyno curve unavailable (insufficient HP/torque data). Showing time-series view.
+              Toggle PID channels below to explore available data.
             </div>
           )}
         </div>
@@ -942,17 +965,21 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       {/* X-axis mode toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ color: '#444', fontSize: 10, fontFamily: 'monospace', letterSpacing: 1 }}>X-AXIS:</span>
-        {(['rpm', 'time'] as const).map(mode => (
-          <button key={mode} onClick={() => setXMode(mode)} style={{
-            padding: '3px 10px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10,
-            cursor: 'pointer', letterSpacing: 1,
-            background: xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : '#2a2e3a'}`,
-            color: xMode === mode ? '#0a0c10' : '#555',
-            fontWeight: xMode === mode ? 'bold' : 'normal',
-            transition: 'all 0.15s',
-          }}>{mode === 'rpm' ? 'RPM' : 'TIME'}</button>
-        ))}
+        {(['rpm', 'time'] as const).map(mode => {
+          const disabled = mode === 'rpm' && dynoInsufficient;
+          return (
+            <button key={mode} onClick={() => !disabled && setXMode(mode)} style={{
+              padding: '3px 10px', borderRadius: 4, fontFamily: 'monospace', fontSize: 10,
+              cursor: disabled ? 'not-allowed' : 'pointer', letterSpacing: 1,
+              opacity: disabled ? 0.35 : 1,
+              background: xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${xMode === mode ? (mode === 'rpm' ? '#ff4d00' : '#00c8ff') : '#2a2e3a'}`,
+              color: xMode === mode ? '#0a0c10' : '#555',
+              fontWeight: xMode === mode ? 'bold' : 'normal',
+              transition: 'all 0.15s',
+            }} title={disabled ? 'Insufficient HP/torque data for RPM view' : undefined}>{mode === 'rpm' ? 'RPM' : 'TIME'}</button>
+          );
+        })}
         {xMode === 'time' && (
           <span style={{ color: '#333', fontSize: 9, fontFamily: 'monospace', marginLeft: 4 }}>DRAG BRUSH BELOW TO ZOOM</span>
         )}

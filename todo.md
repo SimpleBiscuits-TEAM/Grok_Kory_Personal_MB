@@ -2781,3 +2781,8 @@
 - [x] Honda Talon: Encode datalog review logic into Knox knowledge base (Alpha-N, AFR→Lambda, fuel table rules)
 - [x] Honda Talon: Clean up duplicate todo items and verify image-to-table OCR fix
 - [x] Honda Talon: AFR→Lambda conversion applied to chart traces, Y-axis labels, and crosshair tooltips (not just sidebar)
+
+## EZLynk CSV Parser Fixes (2026-03-31)
+- [x] Fix EZLynk CSV parser to correctly pull and map all PIDs from EZLynk datalog format
+- [x] Fix log details section to populate even if only 1 PID is present (remove RPM/torque requirement for dyno graph)
+- [x] Test with provided EZLynk CSV (2014 Ram 6.7L Cummins datalog)
