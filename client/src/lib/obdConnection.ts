@@ -2953,8 +2953,31 @@ export class OBDConnection {
       this.emit('log', null, `Device: ${deviceDesc}`);
 
       // Step 9: Read voltage
-      const voltage = await this.sendAT('ATRV');
-      this.emit('log', null, `Battery voltage: ${voltage}`);
+      let voltage = await this.sendAT('ATRV');
+      // ATRV returns something like "12.4V" or "12.4" — normalize it
+      // Some adapters return "0.0V" when not connected to vehicle power (pin 16)
+      const voltageNum = parseFloat(voltage.replace(/[^0-9.]/g, ''));
+      if (isNaN(voltageNum) || voltageNum < 0.1) {
+        this.emit('log', null, `WARNING: Battery voltage reads ${voltage || '0V'}. This usually means:`);
+        this.emit('log', null, '  1) Vehicle ignition is OFF (turn key to ON/RUN)');
+        this.emit('log', null, '  2) OBD adapter is not receiving 12V power from pin 16');
+        this.emit('log', null, '  3) Poor connection at the OBD-II port');
+        // Try reading voltage again after a short delay
+        await new Promise(r => setTimeout(r, 500));
+        const retry = await this.sendAT('ATRV');
+        const retryNum = parseFloat(retry.replace(/[^0-9.]/g, ''));
+        if (!isNaN(retryNum) && retryNum > 0.1) {
+          voltage = retry;
+          this.emit('log', null, `Voltage retry successful: ${voltage}`);
+        } else {
+          voltage = voltage || '0.0V';
+          this.emit('log', null, 'Voltage still reads 0V — continuing anyway. PID polling may still work.');
+        }
+      } else {
+        // Format nicely: ensure "V" suffix
+        voltage = voltageNum.toFixed(1) + 'V';
+        this.emit('log', null, `Battery voltage: ${voltage}`);
+      }
 
       // Step 10: Test connection - request supported PIDs
       this.emit('log', null, 'Testing vehicle connection...');
@@ -3489,13 +3512,26 @@ export class OBDConnection {
     // first poll, avoiding the noisy "not responding — disabled" messages.
     const { supported: filteredPids, unsupported: removedPids } = this.filterSupportedPids(pids);
 
-    if (removedPids.length > 0) {
-      this.emit('log', null, `Pre-filtered ${removedPids.length} unsupported PID(s): ${removedPids.map(p => `${p.shortName} (0x${p.pid.toString(16)})`).join(', ')}`);
-      this.emit('pidAvailability', { supported: filteredPids, unsupported: removedPids });
+    // If the bitmask filter removes ALL PIDs, bypass it entirely.
+    // This is common on Cummins 6.7L, Ford 6.7L, and other vehicles where
+    // the Mode 01 bitmask scan doesn't accurately report all supported PIDs.
+    // We'll attempt to poll them all and let the per-PID failure tracking
+    // handle any that truly don't respond.
+    let pidsToUse: PIDDefinition[];
+    if (filteredPids.length === 0 && pids.length > 0) {
+      this.emit('log', null, `Bitmask filter removed all ${pids.length} PIDs — bypassing filter and attempting all.`);
+      this.emit('log', null, 'PIDs that don\'t respond will be auto-disabled after a few attempts.');
+      pidsToUse = [...pids];
+    } else {
+      pidsToUse = filteredPids;
+      if (removedPids.length > 0) {
+        this.emit('log', null, `Pre-filtered ${removedPids.length} unsupported PID(s): ${removedPids.map(p => `${p.shortName} (0x${p.pid.toString(16)})`).join(', ')}`);
+        this.emit('pidAvailability', { supported: filteredPids, unsupported: removedPids });
+      }
     }
 
-    if (filteredPids.length === 0) {
-      this.emit('error', null, 'None of the selected PIDs are supported by this vehicle. Try a different preset or select individual PIDs.');
+    if (pidsToUse.length === 0) {
+      this.emit('error', null, 'No PIDs selected for logging.');
       throw new Error('No supported PIDs to log');
     }
 
@@ -3503,20 +3539,20 @@ export class OBDConnection {
       id: `log_${Date.now()}`,
       startTime: Date.now(),
       sampleRate: intervalMs,
-      pids: [...filteredPids],
+      pids: [...pidsToUse],
       readings: new Map(),
       vehicleInfo: this.vehicleInfo,
     };
 
     // Initialize reading arrays
-    for (const pid of filteredPids) {
+    for (const pid of pidsToUse) {
       session.readings.set(pid.pid, []);
     }
 
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${filteredPids.length}/${pids.length} PIDs supported)`);
+    this.emit('log', null, `Logging started: ${pidsToUse.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${pidsToUse.length}/${pids.length} PIDs)`);
 
     // Track per-PID failures with soft-disable and periodic retry.
     // Instead of permanently removing PIDs after N failures, we "pause" them
@@ -3526,7 +3562,7 @@ export class OBDConnection {
     const pidPausedUntilLoop = new Map<number, number>(); // pid → loop# when to retry
     const MAX_CONSECUTIVE_FAILS = 8; // more forgiving threshold
     const RETRY_INTERVAL = 20; // retry paused PIDs every 20 loops
-    let activePids = [...filteredPids];
+    let activePids = [...pidsToUse];
     let loopCount = 0;
 
     // Reset batch size limit for each new logging session
@@ -3542,7 +3578,7 @@ export class OBDConnection {
         // Re-add paused PIDs that are due for retry
         for (const [pidId, retryAt] of Array.from(pidPausedUntilLoop.entries())) {
           if (loopCount >= retryAt) {
-            const pidDef = filteredPids.find(p => p.pid === pidId);
+            const pidDef = pidsToUse.find(p => p.pid === pidId);
             if (pidDef && !activePids.find(p => p.pid === pidId)) {
               activePids.push(pidDef);
               pidFailCount.set(pidId, 0);
@@ -3592,12 +3628,12 @@ export class OBDConnection {
           
           // Log status on first loop
           if (loopCount === 1) {
-            this.emit('log', null, `First poll: ${readings.length}/${filteredPids.length} PIDs responded`);
+            this.emit('log', null, `First poll: ${readings.length}/${pidsToUse.length} PIDs responded`);
             if (readings.length > 0) {
               this.emit('log', null, `Active PIDs: ${readings.map(r => r.name).join(', ')}`);
             }
-            if (readings.length < filteredPids.length) {
-              const missingNames = filteredPids
+            if (readings.length < pidsToUse.length) {
+              const missingNames = pidsToUse
                 .filter(p => !respondedPids.has(p.pid))
                 .map(p => p.shortName);
               this.emit('log', null, `No initial response: ${missingNames.join(', ')} (will keep retrying)`);

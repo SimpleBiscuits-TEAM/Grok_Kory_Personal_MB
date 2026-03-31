@@ -2786,3 +2786,8 @@
 - [x] Fix EZLynk CSV parser to correctly pull and map all PIDs from EZLynk datalog format
 - [x] Fix log details section to populate even if only 1 PID is present (remove RPM/torque requirement for dyno graph)
 - [x] Test with provided EZLynk CSV (2014 Ram 6.7L Cummins datalog)
+
+## Logger Bug Fixes (2026-03-31)
+- [x] BUG: ELM327 "Start Log" button not working — logging doesn't begin after PID scan (fixed: bypass bitmask filter when all PIDs removed, force-add unsupported PIDs)
+- [x] BUG: PCAN CAN traffic still not showing in IntelliSpy monitor (fixed: PCANConnection listened for 'can_frame' but bridge sends 'bus_frame')
+- [x] BUG: Voltage reading 0V despite successful PID scanning on ELM327 (fixed: added retry, warning messages, and red ⚠ NO PWR indicator in UI)

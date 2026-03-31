@@ -1033,7 +1033,7 @@ export class PCANConnection {
     this.monitorFrameHandler = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'can_frame' && this.monitorActive && this.monitorCallback) {
+        if ((msg.type === 'can_frame' || msg.type === 'bus_frame') && this.monitorActive && this.monitorCallback) {
           const frame = this.decodeBusFrame(msg, options?.decodeFlash);
 
           // Apply ID filter if specified

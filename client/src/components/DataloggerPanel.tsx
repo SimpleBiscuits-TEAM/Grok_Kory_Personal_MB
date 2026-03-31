@@ -1021,17 +1021,50 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   const handleStartLogging = useCallback(async () => {
     const conn = connectionRef.current;
-    if (!conn || connectionState !== 'ready') return;
+    if (!conn || connectionState !== 'ready') {
+      addLog('ERROR: Cannot start logging — device not in ready state. Reconnect and try again.');
+      return;
+    }
 
     // Resolve selected PIDs from both standard and extended
     const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
     if (pidsToLog.length === 0) {
-      addLog('ERROR: No PIDs selected for logging');
+      addLog('ERROR: No PIDs selected for logging. Select at least one PID from the list below.');
       return;
     }
 
     const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
     const mode01Count = pidsToLog.length - mode22Count;
+
+    addLog(`Preparing to log ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms...`);
+
+    // Pre-check: warn if all selected PIDs might be filtered out by the
+    // supported-PID bitmask. This is the most common cause of "Start Log
+    // does nothing" — the vehicle didn't report these PIDs as supported
+    // during the Mode 01 bitmask scan, so filterSupportedPids() removes
+    // them all before the first poll.
+    if ('filterSupportedPids' in conn && typeof (conn as any).filterSupportedPids === 'function') {
+      const { supported, unsupported } = (conn as any).filterSupportedPids(pidsToLog);
+      if (supported.length === 0 && unsupported.length > 0) {
+        addLog(`WARNING: All ${unsupported.length} selected PIDs were marked unsupported by the Mode 01 bitmask scan.`);
+        addLog(`This is common on Cummins, Ford, and other vehicles that use extended PIDs.`);
+        addLog(`Bypassing bitmask filter — will attempt to poll all selected PIDs directly.`);
+        // Force-mark these PIDs as supported so startLogging doesn't filter them
+        if ('supportedPids' in conn) {
+          for (const pid of unsupported) {
+            (conn as any).supportedPids.add(pid.pid);
+          }
+        }
+      } else if (unsupported.length > 0) {
+        addLog(`Note: ${unsupported.length} PID(s) not in bitmask — will still attempt: ${unsupported.map((p: any) => p.shortName).join(', ')}`);
+        // Also force-add these so they aren't silently dropped
+        if ('supportedPids' in conn) {
+          for (const pid of unsupported) {
+            (conn as any).supportedPids.add(pid.pid);
+          }
+        }
+      }
+    }
 
     // Reset live data
     setLiveReadings(new Map());
@@ -1046,7 +1079,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     }, 1000);
 
     setIsLogging(true);
-    addLog(`Starting log: ${pidsToLog.map(p => p.shortName).join(', ')} (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms`);
+    addLog(`Starting log: ${pidsToLog.map(p => p.shortName).join(', ')} @ ${sampleRateMs}ms`);
 
     try {
       await conn.startLogging(pidsToLog, sampleRateMs, (readings) => {
@@ -1070,8 +1103,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setSampleCount(prev => prev + 1);
       });
     } catch (err) {
-      addLog(`ERROR: ${err instanceof Error ? err.message : 'Failed to start logging'}`);
+      const errMsg = err instanceof Error ? err.message : 'Failed to start logging';
+      addLog(`ERROR: ${errMsg}`);
+      if (errMsg.includes('No supported PIDs')) {
+        addLog('TIP: Try selecting different PIDs, or run "Scan Vehicle" first to detect supported PIDs.');
+      }
       setIsLogging(false);
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
     }
   }, [connectionState, selectedPids, sampleRateMs, addLog]);
 
@@ -1999,7 +2040,22 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           </div>
           <div>
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Voltage</span>
-            <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{vehicleInfo.voltage || '---'}</div>
+            <div style={{
+              fontFamily: sFont.mono, fontSize: '0.8rem',
+              color: (() => {
+                const v = vehicleInfo.voltage;
+                if (!v) return sColor.textDim;
+                const num = parseFloat(v.replace(/[^0-9.]/g, ''));
+                if (isNaN(num) || num < 0.5) return sColor.red; // 0V = problem
+                if (num < 11.5) return sColor.orange; // low voltage warning
+                return sColor.text;
+              })()
+            }}>
+              {vehicleInfo.voltage || '---'}
+              {vehicleInfo.voltage && parseFloat(vehicleInfo.voltage.replace(/[^0-9.]/g, '')) < 0.5 && (
+                <span style={{ fontSize: '0.6rem', color: sColor.red, marginLeft: 4 }} title="Adapter not receiving 12V power from OBD port pin 16. Check connection.">⚠ NO PWR</span>
+              )}
+            </div>
           </div>
           <div>
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Standard PIDs</span>
