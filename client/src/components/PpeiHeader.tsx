@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
   { label: 'DRAG', path: '/drag' },
   { label: 'COMMUNITY', path: '/community' },
   { label: 'PITCH', path: '/pitch' },
+  { label: 'TASKS', path: '/tasks', auth: true },
 ];
 
 export default function PpeiHeader() {

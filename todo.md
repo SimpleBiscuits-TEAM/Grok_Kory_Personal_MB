@@ -2678,3 +2678,7 @@
 - [ ] Fuel Table Diff/Compare: paste two screenshots side-by-side
 - [ ] Fuel Table Diff/Compare: color-coded difference map showing changed cells
 - [ ] Fuel Table Diff/Compare: show delta values (new - old) in each cell
+- [ ] Integrate vop-task-tracker into V-OP as TASKS nav button
+- [x] Copy task tracker components (StatsBar, FilterBar, TaskTable, SprintTimeline, ModuleSidebar, taskData, useTaskStore)
+- [x] Add @ppei email access gate for TASKS page (similar to Advanced tab gate)
+- [ ] Wire TASKS route in App.tsx and add nav button in PpeiHeader
