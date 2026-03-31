@@ -1,6 +1,6 @@
 /**
  * AuthGate — Blocks all application content until the user either:
- * 1. Signs in via Manus OAuth
+ * 1. Signs in via OAuth
  * 2. Enters a valid access code
  *
  * This wraps the entire Router in App.tsx.
@@ -211,7 +211,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             onMouseLeave={(e) => (e.currentTarget.style.background = sColor.red)}
           >
             <LogIn style={{ width: 18, height: 18 }} />
-            SIGN IN WITH MANUS
+            SIGN IN, HUMAN :-)
           </a>
 
           {/* Divider */}

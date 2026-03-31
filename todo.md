@@ -2794,3 +2794,5 @@
 
 ## PCAN Bridge Download/Execution Fix (2026-03-31)
 - [x] BUG: Python PCAN bridge did not download/work when attempting latest CAN bridge test (fixed: download button pointed to non-existent /api/download route, now serves from CDN with ZIP bundle + direct .py download)
+- [x] Remove ALL customer-facing references to "Manus" from the entire codebase
+- [x] Change sign-in button text to "Sign in, human :-)"
