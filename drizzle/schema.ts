@@ -53,6 +53,27 @@ export const accessCodes = mysqlTable("access_codes", {
 export type AccessCode = typeof accessCodes.$inferSelect;
 export type InsertAccessCode = typeof accessCodes.$inferInsert;
 
+// ── Share Tokens (single-session, single-page guest links) ──────────────
+/**
+ * Share tokens allow a guest to view exactly ONE page without signing in.
+ * Each token is single-use: once validated it is marked consumed.
+ * The viewer is locked to the allowedPath and cannot navigate elsewhere.
+ */
+export const shareTokens = mysqlTable("share_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  allowedPath: varchar("allowedPath", { length: 512 }).notNull(), // e.g. "/pitch"
+  label: varchar("label", { length: 255 }), // optional description
+  createdBy: int("createdBy"), // FK to users.id (admin/owner)
+  consumed: boolean("consumed").default(false).notNull(),
+  consumedAt: timestamp("consumedAt"),
+  expiresAt: timestamp("expiresAt"), // null = 24h default enforced in code
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ShareToken = typeof shareTokens.$inferSelect;
+export type InsertShareToken = typeof shareTokens.$inferInsert;
+
 // ── Feedback / Error Reports ──────────────────────────────────────────────
 export const feedback = mysqlTable("feedback", {
   id: int("id").autoincrement().primaryKey(),

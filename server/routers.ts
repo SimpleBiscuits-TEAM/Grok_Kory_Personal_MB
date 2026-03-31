@@ -28,7 +28,7 @@ import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { notifyOwner } from "./_core/notification";
-import { insertFeedback, verifyAccessCode } from "./db";
+import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken } from "./db";
 import { z } from "zod";
 
 export const appRouter = router({
@@ -62,6 +62,46 @@ export const appRouter = router({
       const hasAccessCode = ctx.req.cookies?.vop_access === "granted";
       return { authenticated: hasOAuth || hasAccessCode, method: hasOAuth ? "oauth" : hasAccessCode ? "access_code" : "none" } as const;
     }),
+
+    // ── Share Token (single-session, single-page guest links) ──
+    generateShareLink: publicProcedure
+      .input(z.object({
+        path: z.string().min(1).max(512),
+        label: z.string().max(255).optional(),
+        expiresInHours: z.number().min(1).max(720).optional(), // max 30 days
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Only owner/admin can generate share links
+        const user = ctx.user;
+        if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
+          return { success: false, message: 'Only admins can generate share links' } as const;
+        }
+        const result = await createShareToken(
+          input.path,
+          user.id,
+          input.label,
+          input.expiresInHours ?? 24
+        );
+        if (!result) {
+          return { success: false, message: 'Failed to create share token' } as const;
+        }
+        return {
+          success: true,
+          token: result.token,
+          allowedPath: result.allowedPath,
+          expiresAt: result.expiresAt,
+        } as const;
+      }),
+
+    validateShareToken: publicProcedure
+      .input(z.object({ token: z.string().min(1).max(64) }))
+      .mutation(async ({ input }) => {
+        const result = await validateShareToken(input.token);
+        if (!result) {
+          return { success: false, message: 'Invalid, expired, or already used share link' } as const;
+        }
+        return { success: true, allowedPath: result.allowedPath } as const;
+      }),
   }),
 
   // Diagnostic AI

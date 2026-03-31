@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens } from "../drizzle/schema";
 import { like, desc, sql, count, eq, and } from "drizzle-orm";
 import { ENV } from './_core/env';
 
@@ -277,6 +277,83 @@ export async function verifyAccessCode(code: string): Promise<{ id: number; labe
     return { id: row.id, label: row.label };
   } catch (error) {
     console.error("[Database] Failed to verify access code:", error);
+    return null;
+  }
+}
+
+// ── Share Token helpers ─────────────────────────────────────────────────
+
+/**
+ * Generate a cryptographically random share token string.
+ */
+function generateTokenString(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let token = '';
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  for (let i = 0; i < bytes.length; i++) token += chars[bytes[i] % chars.length];
+  return token;
+}
+
+/**
+ * Create a new single-session share token for a specific page.
+ * Returns the token string and full URL path.
+ */
+export async function createShareToken(
+  allowedPath: string,
+  createdBy: number | null,
+  label?: string,
+  expiresInHours: number = 24
+): Promise<{ token: string; allowedPath: string; expiresAt: Date } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const token = generateTokenString();
+    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+    await db.insert(shareTokens).values({
+      token,
+      allowedPath: allowedPath.replace(/\/+$/, '') || '/',
+      label: label || null,
+      createdBy,
+      consumed: false,
+      expiresAt,
+    });
+    return { token, allowedPath, expiresAt };
+  } catch (error) {
+    console.error("[Database] Failed to create share token:", error);
+    return null;
+  }
+}
+
+/**
+ * Validate a share token. If valid, marks it as consumed (single-use).
+ * Returns the allowed path or null if invalid/expired/already used.
+ */
+export async function validateShareToken(token: string): Promise<{ allowedPath: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [row] = await db
+      .select({
+        id: shareTokens.id,
+        allowedPath: shareTokens.allowedPath,
+        consumed: shareTokens.consumed,
+        expiresAt: shareTokens.expiresAt,
+      })
+      .from(shareTokens)
+      .where(eq(shareTokens.token, token.trim()))
+      .limit(1);
+    if (!row) return null;
+    if (row.consumed) return null;
+    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    // Mark as consumed — single use
+    await db
+      .update(shareTokens)
+      .set({ consumed: true, consumedAt: new Date() })
+      .where(eq(shareTokens.id, row.id));
+    return { allowedPath: row.allowedPath };
+  } catch (error) {
+    console.error("[Database] Failed to validate share token:", error);
     return null;
   }
 }

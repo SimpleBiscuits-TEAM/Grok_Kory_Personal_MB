@@ -2796,3 +2796,11 @@
 - [x] BUG: Python PCAN bridge did not download/work when attempting latest CAN bridge test (fixed: download button pointed to non-existent /api/download route, now serves from CDN with ZIP bundle + direct .py download)
 - [x] Remove ALL customer-facing references to "Manus" from the entire codebase
 - [x] Change sign-in button text to "Sign in, human :-)"
+
+## Single-Session Share Link Feature (2026-03-31)
+- [x] Create share_tokens DB table (token, allowed_page, expires_at, used flag)
+- [x] Server: tRPC procedure to generate share tokens (admin/owner only)
+- [x] Server: tRPC procedure to validate share tokens (public)
+- [x] Client: AuthGate recognizes ?share_token= param, bypasses gate for allowed page only
+- [x] Client: Lock navigation to only the allowed page when using a share token
+- [x] Generate share link for /pitch page

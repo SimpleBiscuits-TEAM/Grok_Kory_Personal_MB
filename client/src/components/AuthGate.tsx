@@ -2,10 +2,12 @@
  * AuthGate — Blocks all application content until the user either:
  * 1. Signs in via OAuth
  * 2. Enters a valid access code
+ * 3. Arrives via a valid share token (?share_token=xxx)
  *
- * This wraps the entire Router in App.tsx.
+ * Share tokens grant single-session, single-page access.
+ * The viewer is locked to the allowed path and cannot navigate elsewhere.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { trpc } from '@/lib/trpc';
 import { getLoginUrl } from '@/const';
 import { Loader2, Lock, KeyRound, LogIn, ShieldCheck, AlertCircle } from 'lucide-react';
@@ -28,6 +30,54 @@ interface AuthGateProps {
   children: React.ReactNode;
 }
 
+/**
+ * ShareLock wraps children and prevents navigation away from the allowed path.
+ * It intercepts clicks on <a> tags and blocks wouter navigation.
+ */
+function ShareLock({ allowedPath, children }: { allowedPath: string; children: React.ReactNode }) {
+  useEffect(() => {
+    // Force navigate to the allowed path on mount
+    if (window.location.pathname !== allowedPath) {
+      window.history.replaceState(null, '', allowedPath);
+    }
+
+    // Intercept all click events on links
+    const handleClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest('a');
+      if (!target) return;
+      const href = target.getAttribute('href');
+      if (!href) return;
+      // Allow external links (open in new tab)
+      if (href.startsWith('http') || href.startsWith('//')) return;
+      // Allow same-page anchors
+      if (href.startsWith('#')) return;
+      // Block navigation to any other internal page
+      const targetPath = href.split('?')[0].split('#')[0].replace(/\/+$/, '') || '/';
+      const allowed = allowedPath.replace(/\/+$/, '') || '/';
+      if (targetPath !== allowed) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    // Intercept popstate (back/forward)
+    const handlePopState = () => {
+      if (window.location.pathname !== allowedPath) {
+        window.history.replaceState(null, '', allowedPath);
+      }
+    };
+
+    document.addEventListener('click', handleClick, true);
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [allowedPath]);
+
+  return <>{children}</>;
+}
+
 export default function AuthGate({ children }: AuthGateProps) {
   const { data: accessData, isLoading } = trpc.auth.checkAccess.useQuery(undefined, {
     retry: false,
@@ -39,9 +89,47 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [isVerifying, setIsVerifying] = useState(false);
   const [granted, setGranted] = useState(false);
 
-  const verifyMutation = trpc.auth.verifyAccessCode.useMutation();
+  // Share token state
+  const [shareAllowedPath, setShareAllowedPath] = useState<string | null>(null);
+  const [shareTokenChecking, setShareTokenChecking] = useState(false);
+  const [shareTokenError, setShareTokenError] = useState('');
 
-  // If already authenticated, render children
+  const verifyMutation = trpc.auth.verifyAccessCode.useMutation();
+  const shareTokenMutation = trpc.auth.validateShareToken.useMutation();
+
+  // Extract share_token from URL on mount
+  const shareTokenFromUrl = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('share_token');
+  }, []);
+
+  // Auto-validate share token on mount
+  useEffect(() => {
+    if (!shareTokenFromUrl) return;
+    setShareTokenChecking(true);
+    shareTokenMutation.mutateAsync({ token: shareTokenFromUrl })
+      .then((result) => {
+        if (result.success && 'allowedPath' in result) {
+          setShareAllowedPath(result.allowedPath);
+          setGranted(true);
+          // Clean the token from the URL so it can't be reused
+          const url = new URL(window.location.href);
+          url.searchParams.delete('share_token');
+          window.history.replaceState(null, '', result.allowedPath);
+        } else {
+          setShareTokenError(('message' in result ? result.message : null) || 'Invalid share link');
+        }
+      })
+      .catch(() => {
+        setShareTokenError('Failed to validate share link');
+      })
+      .finally(() => {
+        setShareTokenChecking(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareTokenFromUrl]);
+
+  // If already authenticated via OAuth/access code
   useEffect(() => {
     if (accessData?.authenticated) {
       setGranted(true);
@@ -73,8 +161,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     if (e.key === 'Enter') handleAccessCode();
   }, [handleAccessCode]);
 
-  // Loading state
-  if (isLoading) {
+  // Loading state (either checking access or validating share token)
+  if (isLoading || shareTokenChecking) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -92,7 +180,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             letterSpacing: '0.15em',
             textTransform: 'uppercase',
           }}>
-            VERIFYING ACCESS...
+            {shareTokenChecking ? 'VALIDATING SHARE LINK...' : 'VERIFYING ACCESS...'}
           </span>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
@@ -100,12 +188,15 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  // Authenticated — render app
+  // Authenticated — render app (with optional page lock for share tokens)
   if (granted) {
+    if (shareAllowedPath) {
+      return <ShareLock allowedPath={shareAllowedPath}>{children}</ShareLock>;
+    }
     return <>{children}</>;
   }
 
-  // Gate — show login / access code form
+  // Gate — show login / access code form (with share token error if applicable)
   return (
     <div style={{
       minHeight: '100vh',
@@ -148,6 +239,29 @@ export default function AuthGate({ children }: AuthGateProps) {
             VEHICLE OPTIMIZER BY PPEI
           </p>
         </div>
+
+        {/* Share Token Error Banner */}
+        {shareTokenError && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '12px 16px',
+            background: 'oklch(0.52 0.22 25 / 0.1)',
+            border: '1px solid oklch(0.52 0.22 25 / 0.3)',
+            marginBottom: 20,
+          }}>
+            <AlertCircle style={{ width: 16, height: 16, color: sColor.red, flexShrink: 0 }} />
+            <span style={{
+              fontFamily: '"Share Tech Mono", monospace',
+              fontSize: '0.75rem',
+              color: sColor.red,
+              letterSpacing: '0.05em',
+            }}>
+              {shareTokenError}
+            </span>
+          </div>
+        )}
 
         {/* Gate Card */}
         <div style={{
