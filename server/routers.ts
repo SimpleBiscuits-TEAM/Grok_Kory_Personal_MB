@@ -25,6 +25,7 @@ import { communityRouter } from "./routers/community";
 import { pitchRouter } from "./routers/pitch";
 import { talonOcrRouter } from "./routers/talonOcr";
 import { calibrationsRouter } from "./routers/calibrations";
+import { intellispyRouter } from "./routers/intellispy";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -109,6 +110,9 @@ export const appRouter = router({
 
   // FCA/Stellantis Calibration Supersession Database
   calibrations: calibrationsRouter,
+
+  // IntelliSpy Knox-powered CAN bus analysis
+  intellispy: intellispyRouter,
 
   // Feedback / Error Reports
   feedback: router({

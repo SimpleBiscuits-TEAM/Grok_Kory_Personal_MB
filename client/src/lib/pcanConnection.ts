@@ -30,6 +30,7 @@ import {
   type PIDManufacturer,
 } from './obdConnection';
 import { decodeVinNhtsa } from './universalVinDecoder';
+import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
 
 type EventCallback = (event: ConnectionEvent) => void;
 
@@ -65,6 +66,49 @@ interface BridgeError {
 
 // ─── PCAN Connection Class ──────────────────────────────────────────────────
 
+// ─── Multi-Protocol Types ────────────────────────────────────────────────────
+
+export interface J1939Reading {
+  pgn: number;
+  pgnName: string;
+  source: number;
+  priority: number;
+  data: number[];
+  decoded?: Record<string, { value: number; unit: string; description: string }>;
+  timestamp: number;
+}
+
+export interface UDSResponse {
+  service: number;
+  serviceName: string;
+  subFunction?: number;
+  did?: number;
+  data: number[];
+  positiveResponse: boolean;
+  nrc?: number;
+  nrcName?: string;
+  isFlashRelated: boolean;
+  timestamp: number;
+}
+
+export interface BusMonitorFrame {
+  arbId: number;
+  arbIdHex: string;
+  data: number[];
+  dataHex: string;
+  isExtended: boolean;
+  dlc: number;
+  timestamp: number;
+  /** Decoded protocol info (if recognized) */
+  decoded?: {
+    protocol: 'obd2' | 'j1939' | 'uds' | 'raw';
+    description: string;
+    module?: string;
+    service?: string;
+    parameters?: Record<string, string | number>;
+  };
+}
+
 export interface PCANConnectionConfig {
   bridgeUrl?: string;       // Default: auto-detect (wss://localhost:8766 then ws://localhost:8765)
   bridgeUrlSecure?: string; // Default: wss://localhost:8766
@@ -92,6 +136,10 @@ export class PCANConnection {
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }> = new Map();
+  private currentProtocol: SupportedProtocol = 'obd2';
+  private monitorActive = false;
+  private monitorCallback: ((frame: BusMonitorFrame) => void) | null = null;
+  private monitorFrameHandler: ((event: MessageEvent) => void) | null = null;
 
   constructor(config: PCANConnectionConfig = {}) {
     this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
@@ -801,6 +849,397 @@ export class PCANConnection {
     return [...this.getAvailablePids(), ...this.getAvailableExtendedPids()];
   }
 
+  // ─── Protocol Switching ───────────────────────────────────────────────────
+
+  /**
+   * Switch the active protocol on the PCAN bridge.
+   * This reinitializes the CAN bus with the appropriate bitrate and settings.
+   * All protocols work with both Datalogger AND IntelliSpy.
+   */
+  async setProtocol(protocol: SupportedProtocol): Promise<boolean> {
+    const protocolInfo = ALL_PROTOCOLS[protocol];
+    if (!protocolInfo) {
+      this.emit('error', null, `Unknown protocol: ${protocol}`);
+      return false;
+    }
+
+    this.emit('log', null, `Switching to ${protocolInfo.name} (${protocolInfo.defaultBitrate} bps)...`);
+
+    try {
+      const response = await this.sendRequest({
+        type: 'set_protocol',
+        protocol,
+        bitrate: protocolInfo.defaultBitrate,
+        extended_ids: protocolInfo.extendedIds,
+        fd: protocol === 'canfd',
+      });
+
+      if (response.type === 'protocol_set') {
+        this.currentProtocol = protocol;
+        this.emit('log', null, `Protocol switched to ${protocolInfo.name}`);
+        this.emit('protocolChange', { protocol, name: protocolInfo.name });
+        return true;
+      }
+      return false;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.emit('error', null, `Protocol switch failed: ${msg}`);
+      return false;
+    }
+  }
+
+  getCurrentProtocol(): SupportedProtocol {
+    return this.currentProtocol;
+  }
+
+  // ─── J1939 Operations ────────────────────────────────────────────────────
+
+  /**
+   * Send a J1939 PGN request and receive the response.
+   * Automatically switches to J1939 protocol if not already active.
+   */
+  async requestJ1939PGN(pgn: number, destinationAddress = 0xFF): Promise<J1939Reading | null> {
+    if (this.currentProtocol !== 'j1939') {
+      await this.setProtocol('j1939');
+    }
+
+    try {
+      const response = await this.sendRequest({
+        type: 'j1939_request',
+        pgn,
+        da: destinationAddress,
+      });
+
+      if (response.type === 'j1939_response' && response.data) {
+        const pgnInfo = J1939_PGNS[pgn];
+        return {
+          pgn,
+          pgnName: pgnInfo?.name || `PGN ${pgn}`,
+          source: (response.source as number) || 0,
+          priority: (response.priority as number) || 6,
+          data: response.data as number[],
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Read common J1939 engine parameters (EEC1, EEC2, ET1, etc.)
+   */
+  async readJ1939EngineParams(): Promise<J1939Reading[]> {
+    const readings: J1939Reading[] = [];
+    const commonPGNs = [61444, 61443, 65262, 65263, 65265, 65266, 65270, 65271];
+
+    for (const pgn of commonPGNs) {
+      const reading = await this.requestJ1939PGN(pgn);
+      if (reading) readings.push(reading);
+    }
+
+    return readings;
+  }
+
+  // ─── UDS Operations ──────────────────────────────────────────────────────
+
+  /**
+   * Send a UDS service request.
+   * Used for diagnostics, flash monitoring, and parameter read/write.
+   */
+  async sendUDSRequest(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress = 0x7E0
+  ): Promise<UDSResponse | null> {
+    try {
+      const response = await this.sendRequest({
+        type: 'uds_request',
+        service,
+        sub_function: subFunction,
+        data: data || [],
+        target: targetAddress,
+      });
+
+      if (response.type === 'uds_response') {
+        const serviceInfo = UDS_SERVICES[service];
+        const isPositive = !response.nrc;
+        return {
+          service,
+          serviceName: serviceInfo?.name || `Service 0x${service.toString(16)}`,
+          subFunction,
+          did: (response.did as number) || undefined,
+          data: (response.data as number[]) || [],
+          positiveResponse: isPositive,
+          nrc: (response.nrc as number) || undefined,
+          nrcName: response.nrc ? decodeNRC(response.nrc as number) : undefined,
+          isFlashRelated: serviceInfo?.isFlashRelated || false,
+          timestamp: Date.now(),
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Read a UDS DID (Data Identifier) — ReadDataByIdentifier (0x22)
+   */
+  async readUDSDID(did: number, targetAddress = 0x7E0): Promise<UDSResponse | null> {
+    return this.sendUDSRequest(0x22, undefined, [(did >> 8) & 0xFF, did & 0xFF], targetAddress);
+  }
+
+  /**
+   * Switch UDS diagnostic session — DiagnosticSessionControl (0x10)
+   */
+  async setUDSSession(sessionType: 'default' | 'programming' | 'extended'): Promise<boolean> {
+    const sessionMap = { default: 0x01, programming: 0x02, extended: 0x03 };
+    const response = await this.sendUDSRequest(0x10, sessionMap[sessionType]);
+    return response?.positiveResponse || false;
+  }
+
+  // ─── Bus Monitor (IntelliSpy) ────────────────────────────────────────────
+
+  /**
+   * Start bus monitoring mode for IntelliSpy.
+   * Receives all CAN frames on the bus and decodes them based on active protocol.
+   * Can monitor flash operations in real-time.
+   */
+  async startBusMonitor(
+    onFrame: (frame: BusMonitorFrame) => void,
+    options?: {
+      protocol?: SupportedProtocol;
+      filterIds?: number[];
+      decodeFlash?: boolean;
+    }
+  ): Promise<boolean> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.emit('error', null, 'WebSocket not connected');
+      return false;
+    }
+
+    // Switch protocol if requested
+    if (options?.protocol && options.protocol !== this.currentProtocol) {
+      await this.setProtocol(options.protocol);
+    }
+
+    this.monitorActive = true;
+    this.monitorCallback = onFrame;
+
+    // Set up frame handler on the WebSocket
+    this.monitorFrameHandler = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'can_frame' && this.monitorActive && this.monitorCallback) {
+          const frame = this.decodeBusFrame(msg, options?.decodeFlash);
+
+          // Apply ID filter if specified
+          if (options?.filterIds && options.filterIds.length > 0) {
+            if (!options.filterIds.includes(frame.arbId)) return;
+          }
+
+          this.monitorCallback(frame);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    this.ws.addEventListener('message', this.monitorFrameHandler);
+
+    // Tell bridge to start monitor mode
+    try {
+      await this.sendRequest({
+        type: 'start_monitor',
+        filter_ids: options?.filterIds || [],
+      });
+      this.emit('log', null, `Bus monitor started (${ALL_PROTOCOLS[this.currentProtocol].name})`);
+      return true;
+    } catch (e) {
+      this.monitorActive = false;
+      this.monitorCallback = null;
+      if (this.monitorFrameHandler) {
+        this.ws.removeEventListener('message', this.monitorFrameHandler);
+        this.monitorFrameHandler = null;
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      this.emit('error', null, `Monitor start failed: ${msg}`);
+      return false;
+    }
+  }
+
+  /**
+   * Stop bus monitoring mode.
+   */
+  async stopBusMonitor(): Promise<void> {
+    this.monitorActive = false;
+    this.monitorCallback = null;
+
+    if (this.monitorFrameHandler && this.ws) {
+      this.ws.removeEventListener('message', this.monitorFrameHandler);
+      this.monitorFrameHandler = null;
+    }
+
+    try {
+      await this.sendRequest({ type: 'stop_monitor' });
+    } catch {
+      // ignore errors during stop
+    }
+
+    this.emit('log', null, 'Bus monitor stopped');
+  }
+
+  isMonitoring(): boolean {
+    return this.monitorActive;
+  }
+
+  /**
+   * Decode a raw CAN frame from the bridge into a structured BusMonitorFrame.
+   * Identifies OBD-II, J1939, UDS, and flash-related frames.
+   */
+  private decodeBusFrame(msg: BridgeMessage, decodeFlash = true): BusMonitorFrame {
+    const arbId = (msg.arb_id as number) || 0;
+    const data = (msg.data as number[]) || [];
+    const isExtended = (msg.is_extended as boolean) || arbId > 0x7FF;
+
+    const frame: BusMonitorFrame = {
+      arbId,
+      arbIdHex: `0x${arbId.toString(16).toUpperCase().padStart(isExtended ? 8 : 3, '0')}`,
+      data,
+      dataHex: data.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' '),
+      isExtended,
+      dlc: data.length,
+      timestamp: Date.now(),
+    };
+
+    // --- Decode based on protocol context ---
+
+    // J1939 frame decoding (29-bit extended IDs)
+    if (isExtended && this.currentProtocol === 'j1939') {
+      const pgn = (arbId >> 8) & 0x3FFFF;
+      const source = arbId & 0xFF;
+      const pgnInfo = J1939_PGNS[pgn];
+      if (pgnInfo) {
+        frame.decoded = {
+          protocol: 'j1939',
+          description: `${pgnInfo.name} — ${pgnInfo.description}`,
+          module: pgnInfo.source,
+          service: `PGN ${pgn} (0x${pgn.toString(16).toUpperCase()})`,
+          parameters: { source, pgn },
+        };
+      }
+    }
+
+    // OBD-II / UDS response decoding (standard 11-bit IDs 0x7E0-0x7EF)
+    if (!isExtended && arbId >= 0x7E0 && arbId <= 0x7EF && data.length >= 2) {
+      const serviceId = data[1];
+
+      // UDS positive response (service + 0x40)
+      if (serviceId >= 0x50 && decodeFlash) {
+        const requestService = serviceId - 0x40;
+        const serviceInfo = UDS_SERVICES[requestService];
+        if (serviceInfo) {
+          frame.decoded = {
+            protocol: 'uds',
+            description: `${serviceInfo.name} — ${serviceInfo.description}`,
+            module: `ECU 0x${(arbId - 8).toString(16).toUpperCase()}`,
+            service: `0x${requestService.toString(16).toUpperCase()} ${serviceInfo.name}`,
+            parameters: {},
+          };
+
+          // Decode flash-related parameters
+          if (serviceInfo.isFlashRelated) {
+            if (requestService === 0x2E && data.length >= 4) {
+              const did = (data[2] << 8) | data[3];
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                did: `0x${did.toString(16).toUpperCase()}`,
+                operation: 'WRITE DID (calibration parameter)',
+              };
+            } else if (requestService === 0x34 && data.length >= 3) {
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                operation: 'FLASH DOWNLOAD INITIATED',
+                dataFormat: data[2],
+              };
+            } else if (requestService === 0x36) {
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                operation: 'FLASH DATA TRANSFER',
+                blockSequence: data[2],
+                payloadSize: data.length - 3,
+              };
+            } else if (requestService === 0x37) {
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                operation: 'FLASH TRANSFER COMPLETE',
+              };
+            } else if (requestService === 0x31 && data.length >= 4) {
+              const routineId = (data[3] << 8) | (data[4] || 0);
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                routineId: `0x${routineId.toString(16).toUpperCase()}`,
+                subFunction: data[2] === 0x01 ? 'START' : data[2] === 0x02 ? 'STOP' : 'RESULTS',
+              };
+            } else if (requestService === 0x27) {
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                operation: data[2] % 2 === 1 ? 'SECURITY SEED REQUEST' : 'SECURITY KEY RESPONSE',
+                accessLevel: Math.ceil(data[2] / 2),
+              };
+            } else if (requestService === 0x10) {
+              const sessions: Record<number, string> = { 1: 'Default', 2: 'Programming', 3: 'Extended' };
+              frame.decoded.parameters = {
+                ...frame.decoded.parameters,
+                session: sessions[data[2]] || `Custom (0x${data[2]?.toString(16)})`,
+              };
+            }
+          }
+        }
+      }
+
+      // OBD-II response (Mode 41, 62, etc.)
+      if (serviceId === 0x41 || serviceId === 0x42) {
+        frame.decoded = {
+          protocol: 'obd2',
+          description: `OBD-II Mode ${(serviceId - 0x40).toString(16)} Response`,
+          module: `ECU 0x${(arbId - 8).toString(16).toUpperCase()}`,
+          service: `Mode 0x${(serviceId - 0x40).toString(16).toUpperCase()}`,
+          parameters: { pid: data[2] },
+        };
+      }
+      if (serviceId === 0x62) {
+        const did = data.length >= 4 ? (data[2] << 8) | data[3] : data[2];
+        frame.decoded = {
+          protocol: 'obd2',
+          description: `Extended PID Response (Mode 22)`,
+          module: `ECU 0x${(arbId - 8).toString(16).toUpperCase()}`,
+          service: 'Mode 0x22 ReadDID',
+          parameters: { did: `0x${did.toString(16).toUpperCase()}` },
+        };
+      }
+    }
+
+    // UDS negative response (0x7F)
+    if (!isExtended && data.length >= 3 && data[1] === 0x7F) {
+      const rejectedService = data[2];
+      const nrc = data[3];
+      const serviceInfo = UDS_SERVICES[rejectedService];
+      frame.decoded = {
+        protocol: 'uds',
+        description: `NEGATIVE RESPONSE — ${serviceInfo?.name || `Service 0x${rejectedService.toString(16)}`}: ${decodeNRC(nrc)}`,
+        module: `ECU 0x${(arbId - 8).toString(16).toUpperCase()}`,
+        service: `0x${rejectedService.toString(16).toUpperCase()} (REJECTED)`,
+        parameters: { nrc: `0x${nrc.toString(16).toUpperCase()}`, nrcName: decodeNRC(nrc) },
+      };
+    }
+
+    return frame;
+  }
+
   // ─── Raw Command (not applicable for PCAN, but needed for interface) ──────
 
   async sendRawCommand(command: string, _timeout = 5000): Promise<string> {
@@ -824,6 +1263,9 @@ export class PCANConnection {
 
   async disconnect(): Promise<void> {
     this.loggingActive = false;
+    if (this.monitorActive) {
+      await this.stopBusMonitor();
+    }
 
     // Cancel all pending requests
     for (const [id, pending] of Array.from(this.pendingRequests.entries())) {
@@ -848,4 +1290,36 @@ export class PCANConnection {
     this.setState('disconnected');
     this.emit('log', null, 'Disconnected from PCAN-USB bridge');
   }
+}
+
+
+// ─── UDS Negative Response Code Decoder ──────────────────────────────────────
+
+const NRC_CODES: Record<number, string> = {
+  0x10: 'General Reject',
+  0x11: 'Service Not Supported',
+  0x12: 'Sub-Function Not Supported',
+  0x13: 'Incorrect Message Length / Invalid Format',
+  0x14: 'Response Too Long',
+  0x21: 'Busy — Repeat Request',
+  0x22: 'Conditions Not Correct',
+  0x24: 'Request Sequence Error',
+  0x25: 'No Response From Sub-Net Component',
+  0x26: 'Failure Prevents Execution',
+  0x31: 'Request Out Of Range',
+  0x33: 'Security Access Denied',
+  0x35: 'Invalid Key',
+  0x36: 'Exceeded Number Of Attempts',
+  0x37: 'Required Time Delay Not Expired',
+  0x70: 'Upload/Download Not Accepted',
+  0x71: 'Transfer Data Suspended',
+  0x72: 'General Programming Failure',
+  0x73: 'Wrong Block Sequence Counter',
+  0x78: 'Request Correctly Received — Response Pending',
+  0x7E: 'Sub-Function Not Supported In Active Session',
+  0x7F: 'Service Not Supported In Active Session',
+};
+
+function decodeNRC(nrc: number): string {
+  return NRC_CODES[nrc] || `Unknown NRC (0x${nrc.toString(16).toUpperCase()})`;
 }

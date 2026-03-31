@@ -2719,3 +2719,27 @@
 - [x] CM2200 Config: Parse CM2200 BCA ECFG (17,160 params, 12,087 tuning-relevant)
 - [x] CM2200 Config: Update CM2200 ECU definition in cumminsParameterDatabase.ts (BCA product ID, CM22xx module, 2007-2012)
 - [x] CM2200 Config: Add CM2200_SPECS to ecuReference.ts (CP3 pump, CRIN 2.2 injectors, 350hp/650tq, 68RFE trans)
+- [ ] Honda Talon Tuner: Fix image-to-table import showing zeros instead of correct data values
+- [ ] Honda Talon Tuner: Fix red number readability issue in editor table color scheme
+- [ ] Honda Talon Tuner: Test fixes with provided Dynojet Speed Density screenshot
+- [x] PCAN Bridge: Add set_protocol message for switching between OBD-II/J1939/CAN-FD/UDS
+- [x] PCAN Bridge: Add j1939_request handler for PGN-based requests with 29-bit extended IDs
+- [x] PCAN Bridge: Add uds_request handler for ISO 14229 diagnostic services
+- [x] PCAN Bridge: Add CAN FD support (fd=True, 64-byte payloads)
+- [x] PCAN Bridge: Add extended ID support for J1939 frames
+- [x] Frontend: Update protocolDetection.ts with new protocol definitions (6 protocols, interchangeable)
+- [x] Frontend: Update pcanConnection.ts with setProtocol, J1939, UDS, bus monitor methods
+- [x] PCAN Drivers: Bundle PEAK System driver installer and create setup guide (tools/drivers/README.md)
+- [x] Honda Talon Tuner: Fix red number readability (brightened sColor.red to oklch 0.68, added text shadow)
+- [ ] Knox: Train on protocol compatibility (datalogger and IntelliSpy interchangeable)
+- [x] IntelliSpy: Integrate Knox AI for real-time CAN frame analysis and module identification
+- [x] IntelliSpy: Add live flash parameter decoding (UDS 0x2E/0x31/0x34/0x36 during calibration flashing)
+- [x] IntelliSpy: Display decoded parameter names/values being written during active flash sessions
+- [x] IntelliSpy: Add protocol selector dropdown (OBD-II, J1939, UDS, CAN FD, Raw) with runtime switching
+- [x] IntelliSpy: Add "Ask Knox" button in decode tab with question input and auto-analyze/flash-detect presets
+- [x] IntelliSpy: Knox AI frame analysis via tRPC (analyzeFrames mutation with protocol context)
+- [x] IntelliSpy: Live flash parameter decoding in live view (DECODE column with UDS service decode)
+- [x] IntelliSpy: Flash progress bar with stage tracking (session→security→erase→download→transfer→verify→reset)
+- [x] IntelliSpy: Double-click arb IDs to select for targeted Knox analysis
+- [x] IntelliSpy: Module map in decode tab with click-to-select for Knox
+- [x] IntelliSpy: 20 vitest tests for UDS decode, flash services, NRC codes, frame formatting

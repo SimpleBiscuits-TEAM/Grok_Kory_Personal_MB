@@ -173,7 +173,8 @@ export type ConnectionEventType =
   | 'scanProgress'
   | 'dtcRead'
   | 'dtcCleared'
-  | 'pidAvailability';
+  | 'pidAvailability'
+  | 'protocolChange';
 
 export interface ConnectionEvent {
   type: ConnectionEventType;

@@ -16,6 +16,8 @@
  *   - Frame freeze/pause for analysis
  *   - Export captured frames to CSV
  *   - AI-powered frame analysis (ask Knox about unknown frames)
+ *   - Protocol selector (OBD-II, J1939, UDS, CAN FD, Raw)
+ *   - Live flash parameter decoding (UDS 0x34/0x36/0x2E operations)
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -23,13 +25,17 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Radio, Square, Pause, Play, Trash2, Download, Filter, Search,
   Activity, Wifi, WifiOff, Eye, EyeOff, Zap, Brain, BarChart3,
-  ChevronDown, ChevronUp, AlertTriangle, CheckCircle, XCircle
+  ChevronDown, ChevronUp, AlertTriangle, CheckCircle, XCircle,
+  Send, Loader2, Shield, Cpu, ArrowUpDown, FlaskConical
 } from 'lucide-react';
 import { lookupModule, ALL_KNOWN_MODULES, type KnownModule } from '@/lib/moduleScanner';
+import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
+import { trpc } from '@/lib/trpc';
+import { Streamdown } from 'streamdown';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -48,6 +54,20 @@ interface CapturedFrame {
   moduleName?: string;
   moduleAcronym?: string;
   direction?: 'request' | 'response' | 'broadcast';
+  // Live flash decode
+  flashDecode?: FlashDecode | null;
+}
+
+interface FlashDecode {
+  type: 'request' | 'positive_response' | 'negative_response';
+  service: number;
+  serviceName: string;
+  isFlash: boolean;
+  module?: string;
+  description: string;
+  parameters?: Record<string, string | number>;
+  nrc?: number;
+  nrcName?: string;
 }
 
 interface ArbIdStats {
@@ -78,6 +98,57 @@ const FRAME_DISPLAY_LIMIT = 500;   // Show last N frames in live view
 // Known CAN ID ranges for direction detection
 const isRequestId = (id: number) => id >= 0x700 && id <= 0x7DF;
 const isResponseId = (id: number) => (id >= 0x7E8 && id <= 0x7EF) || (id >= 0x708 && id <= 0x7DF && (id & 0x08) !== 0);
+
+// UDS flash-related service IDs for live decode
+const FLASH_SERVICES = new Set([0x10, 0x27, 0x2E, 0x31, 0x34, 0x36, 0x37, 0x11]);
+const UDS_SERVICE_NAMES: Record<number, string> = {
+  0x10: 'DiagnosticSessionControl',
+  0x11: 'ECUReset',
+  0x14: 'ClearDTC',
+  0x19: 'ReadDTC',
+  0x22: 'ReadDataByIdentifier',
+  0x23: 'ReadMemoryByAddress',
+  0x27: 'SecurityAccess',
+  0x28: 'CommunicationControl',
+  0x2E: 'WriteDataByIdentifier',
+  0x2F: 'InputOutputControl',
+  0x31: 'RoutineControl',
+  0x34: 'RequestDownload',
+  0x35: 'RequestUpload',
+  0x36: 'TransferData',
+  0x37: 'RequestTransferExit',
+  0x3E: 'TesterPresent',
+};
+const NRC_NAMES: Record<number, string> = {
+  0x10: 'General Reject',
+  0x11: 'Service Not Supported',
+  0x12: 'Sub-Function Not Supported',
+  0x13: 'Incorrect Message Length',
+  0x21: 'Busy — Repeat Request',
+  0x22: 'Conditions Not Correct',
+  0x24: 'Request Sequence Error',
+  0x31: 'Request Out Of Range',
+  0x33: 'Security Access Denied',
+  0x35: 'Invalid Key',
+  0x36: 'Exceeded Number Of Attempts',
+  0x37: 'Required Time Delay Not Expired',
+  0x70: 'Upload/Download Not Accepted',
+  0x71: 'Transfer Data Suspended',
+  0x72: 'General Programming Failure',
+  0x73: 'Wrong Block Sequence Counter',
+  0x78: 'Response Pending',
+  0x7E: 'Sub-Function Not Supported In Active Session',
+  0x7F: 'Service Not Supported In Active Session',
+};
+
+// Protocol display info
+const PROTOCOL_OPTIONS: { value: SupportedProtocol; label: string; icon: string; color: string }[] = [
+  { value: 'obd2', label: 'OBD-II', icon: '⚡', color: 'text-blue-400 border-blue-700' },
+  { value: 'j1939', label: 'J1939', icon: '🚛', color: 'text-orange-400 border-orange-700' },
+  { value: 'uds', label: 'UDS', icon: '🔧', color: 'text-purple-400 border-purple-700' },
+  { value: 'canfd', label: 'CAN FD', icon: '⚡', color: 'text-cyan-400 border-cyan-700' },
+  { value: 'raw', label: 'Raw CAN', icon: '📡', color: 'text-zinc-400 border-zinc-600' },
+];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helper Functions
@@ -123,19 +194,247 @@ function detectDirection(arbId: number): 'request' | 'response' | 'broadcast' {
   if (arbId === 0x7DF) return 'broadcast';
   if (isRequestId(arbId)) return 'request';
   if (isResponseId(arbId)) return 'response';
-  // Non-diagnostic CAN IDs (< 0x700) are typically broadcast/periodic
   return 'broadcast';
 }
 
+/**
+ * Client-side UDS frame decode for live flash monitoring.
+ * Fast path — no LLM call, pure logic.
+ */
+function decodeUDSFrameLocal(arbId: number, data: number[]): FlashDecode | null {
+  if (data.length < 2) return null;
+
+  // ISO-TP single frame: first byte is length
+  const pciType = (data[0] >> 4) & 0x0F;
+  let serviceOffset = 1; // single frame
+  if (pciType === 0) {
+    serviceOffset = 1; // single frame: [len, SID, ...]
+  } else if (pciType === 1) {
+    serviceOffset = 2; // first frame: [10 len, SID, ...]
+  } else if (pciType === 2) {
+    return null; // consecutive frame — no service ID
+  } else if (pciType === 3) {
+    return null; // flow control
+  }
+
+  if (data.length <= serviceOffset) return null;
+  const serviceId = data[serviceOffset];
+
+  // Negative response (0x7F)
+  if (serviceId === 0x7F && data.length >= serviceOffset + 3) {
+    const rejectedService = data[serviceOffset + 1];
+    const nrc = data[serviceOffset + 2];
+    return {
+      type: 'negative_response',
+      service: rejectedService,
+      serviceName: UDS_SERVICE_NAMES[rejectedService] || `0x${rejectedService.toString(16)}`,
+      isFlash: FLASH_SERVICES.has(rejectedService),
+      nrc,
+      nrcName: NRC_NAMES[nrc] || `0x${nrc.toString(16)}`,
+      description: `REJECTED: ${UDS_SERVICE_NAMES[rejectedService] || 'Unknown'} — ${NRC_NAMES[nrc] || 'Unknown NRC'}`,
+    };
+  }
+
+  // UDS positive response (SID >= 0x50 means response to SID - 0x40)
+  if (serviceId >= 0x50 && serviceId <= 0x7E) {
+    const requestService = serviceId - 0x40;
+    return buildUDSDecode(requestService, data, serviceOffset, arbId, true);
+  }
+
+  // UDS request (SID <= 0x3F)
+  if (serviceId <= 0x3F && UDS_SERVICE_NAMES[serviceId]) {
+    return buildUDSDecode(serviceId, data, serviceOffset, arbId, false);
+  }
+
+  return null;
+}
+
+function buildUDSDecode(
+  service: number,
+  data: number[],
+  offset: number,
+  arbId: number,
+  isResponse: boolean
+): FlashDecode {
+  const serviceName = UDS_SERVICE_NAMES[service] || `Service 0x${service.toString(16)}`;
+  const isFlash = FLASH_SERVICES.has(service);
+  const module = `ECU 0x${(isResponse ? arbId - 8 : arbId).toString(16).toUpperCase()}`;
+
+  let description = `${isResponse ? '✓' : '→'} ${serviceName}`;
+  const parameters: Record<string, string | number> = {};
+
+  switch (service) {
+    case 0x10: { // DiagnosticSessionControl
+      const sessions: Record<number, string> = { 1: 'Default', 2: 'Programming', 3: 'Extended' };
+      const session = data[offset + 1];
+      parameters.session = sessions[session] || `Custom (0x${session?.toString(16)})`;
+      description += ` → ${parameters.session} Session`;
+      break;
+    }
+    case 0x22: { // ReadDataByIdentifier
+      if (data.length >= offset + 3) {
+        const did = (data[offset + 1] << 8) | data[offset + 2];
+        parameters.did = `0x${did.toString(16).toUpperCase()}`;
+        description += ` DID ${parameters.did}`;
+      }
+      break;
+    }
+    case 0x27: { // SecurityAccess
+      const subFn = data[offset + 1];
+      if (subFn !== undefined) {
+        const isSeedRequest = subFn % 2 === 1;
+        parameters.accessLevel = Math.ceil(subFn / 2);
+        parameters.operation = isSeedRequest ? 'SEED REQUEST' : 'KEY RESPONSE';
+        description += ` → ${parameters.operation} (Level ${parameters.accessLevel})`;
+      }
+      break;
+    }
+    case 0x2E: { // WriteDataByIdentifier
+      if (data.length >= offset + 3) {
+        const did = (data[offset + 1] << 8) | data[offset + 2];
+        parameters.did = `0x${did.toString(16).toUpperCase()}`;
+        parameters.payloadSize = data.length - offset - 3;
+        description += ` → WRITING DID ${parameters.did} (${parameters.payloadSize} bytes)`;
+      }
+      break;
+    }
+    case 0x31: { // RoutineControl
+      if (data.length >= offset + 3) {
+        const subFn = data[offset + 1];
+        const routineId = (data[offset + 2] << 8) | (data[offset + 3] || 0);
+        parameters.routineId = `0x${routineId.toString(16).toUpperCase()}`;
+        parameters.subFunction = subFn === 0x01 ? 'START' : subFn === 0x02 ? 'STOP' : 'RESULTS';
+        description += ` → ${parameters.subFunction} Routine ${parameters.routineId}`;
+      }
+      break;
+    }
+    case 0x34: { // RequestDownload
+      if (data.length >= offset + 2) {
+        parameters.dataFormat = data[offset + 1];
+        description += ' → FLASH DOWNLOAD INITIATED';
+      }
+      break;
+    }
+    case 0x36: { // TransferData
+      if (data.length >= offset + 2) {
+        parameters.blockSequence = data[offset + 1];
+        parameters.payloadSize = data.length - offset - 2;
+        description += ` → BLOCK #${data[offset + 1]} (${parameters.payloadSize} bytes)`;
+      }
+      break;
+    }
+    case 0x37: { // RequestTransferExit
+      description += ' → FLASH TRANSFER COMPLETE';
+      break;
+    }
+    case 0x11: { // ECUReset
+      const resetTypes: Record<number, string> = { 1: 'Hard Reset', 2: 'Key Off/On', 3: 'Soft Reset' };
+      const rt = data[offset + 1];
+      parameters.resetType = resetTypes[rt] || `Type ${rt}`;
+      description += ` → ${parameters.resetType}`;
+      break;
+    }
+    case 0x3E: {
+      description += ' (keepalive)';
+      break;
+    }
+  }
+
+  return {
+    type: isResponse ? 'positive_response' : 'request',
+    service,
+    serviceName,
+    isFlash,
+    module,
+    description,
+    parameters,
+  };
+}
+
 function exportFramesToCSV(frames: CapturedFrame[]): string {
-  const header = 'Frame#,Timestamp,ArbID,ArbID_Hex,DLC,Data_Hex,Data_ASCII,Module,Direction\n';
+  const header = 'Frame#,Timestamp,ArbID,ArbID_Hex,DLC,Data_Hex,Data_ASCII,Module,Direction,FlashDecode\n';
   const rows = frames.map(f => {
     const hex = formatHexData(f.data);
     const ascii = formatAsciiData(f.data);
-    return `${f.frameNumber},${f.timestamp.toFixed(6)},${f.arbId},${formatArbId(f.arbId)},${f.dlc},"${hex}","${ascii}",${f.moduleAcronym || 'Unknown'},${f.direction || 'unknown'}`;
+    const flash = f.flashDecode?.description || '';
+    return `${f.frameNumber},${f.timestamp.toFixed(6)},${f.arbId},${formatArbId(f.arbId)},${f.dlc},"${hex}","${ascii}",${f.moduleAcronym || 'Unknown'},${f.direction || 'unknown'},"${flash}"`;
   });
   return header + rows.join('\n');
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Flash Progress Tracker
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface FlashProgress {
+  stage: 'idle' | 'session' | 'security' | 'erase' | 'download' | 'transfer' | 'verify' | 'reset' | 'complete';
+  blocksTransferred: number;
+  totalBytes: number;
+  currentModule: string;
+  startTime: number | null;
+  lastActivity: number;
+  errors: string[];
+}
+
+function createFlashProgress(): FlashProgress {
+  return {
+    stage: 'idle',
+    blocksTransferred: 0,
+    totalBytes: 0,
+    currentModule: '',
+    startTime: null,
+    lastActivity: 0,
+    errors: [],
+  };
+}
+
+function updateFlashProgress(progress: FlashProgress, decode: FlashDecode): FlashProgress {
+  if (!decode.isFlash && decode.type !== 'negative_response') return progress;
+
+  const updated = { ...progress, lastActivity: Date.now() };
+  if (!updated.startTime) updated.startTime = Date.now();
+  if (decode.module) updated.currentModule = decode.module;
+
+  if (decode.type === 'negative_response') {
+    updated.errors = [...updated.errors, decode.description];
+    return updated;
+  }
+
+  switch (decode.service) {
+    case 0x10: updated.stage = 'session'; break;
+    case 0x27: updated.stage = 'security'; break;
+    case 0x31: {
+      const sub = decode.parameters?.subFunction;
+      if (sub === 'START') updated.stage = 'erase';
+      else if (sub === 'RESULTS') updated.stage = 'verify';
+      break;
+    }
+    case 0x34: updated.stage = 'download'; break;
+    case 0x36: {
+      updated.stage = 'transfer';
+      updated.blocksTransferred++;
+      const payloadSize = typeof decode.parameters?.payloadSize === 'number' ? decode.parameters.payloadSize : 0;
+      updated.totalBytes += payloadSize;
+      break;
+    }
+    case 0x37: updated.stage = 'complete'; break;
+    case 0x11: updated.stage = 'reset'; break;
+  }
+
+  return updated;
+}
+
+const FLASH_STAGE_LABELS: Record<string, { label: string; color: string; step: number }> = {
+  idle: { label: 'IDLE', color: 'text-zinc-500', step: 0 },
+  session: { label: 'SESSION CONTROL', color: 'text-blue-400', step: 1 },
+  security: { label: 'SECURITY ACCESS', color: 'text-yellow-400', step: 2 },
+  erase: { label: 'ERASING MEMORY', color: 'text-orange-400', step: 3 },
+  download: { label: 'DOWNLOAD INIT', color: 'text-purple-400', step: 4 },
+  transfer: { label: 'TRANSFERRING DATA', color: 'text-red-400', step: 5 },
+  verify: { label: 'VERIFYING', color: 'text-cyan-400', step: 6 },
+  reset: { label: 'ECU RESET', color: 'text-green-400', step: 7 },
+  complete: { label: 'COMPLETE', color: 'text-green-400', step: 8 },
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Component
@@ -146,6 +445,10 @@ export default function IntelliSpy() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [bridgeUrl, setBridgeUrl] = useState('wss://localhost:8766');
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Protocol state
+  const [activeProtocol, setActiveProtocol] = useState<SupportedProtocol>('obd2');
+  const [showProtocolMenu, setShowProtocolMenu] = useState(false);
 
   // Capture state
   const [frames, setFrames] = useState<CapturedFrame[]>([]);
@@ -165,6 +468,18 @@ export default function IntelliSpy() {
   const [showAscii, setShowAscii] = useState(true);
   const [expandedStats, setExpandedStats] = useState<Set<number>>(new Set());
 
+  // Flash progress tracking
+  const [flashProgress, setFlashProgress] = useState<FlashProgress>(createFlashProgress());
+  const flashProgressRef = useRef<FlashProgress>(createFlashProgress());
+
+  // Knox AI analysis state
+  const [knoxQuestion, setKnoxQuestion] = useState('');
+  const [knoxAnalysis, setKnoxAnalysis] = useState<string | null>(null);
+  const [selectedFramesForKnox, setSelectedFramesForKnox] = useState<Set<number>>(new Set());
+
+  // Knox tRPC mutation
+  const knoxMutation = trpc.intellispy.analyzeFrames.useMutation();
+
   // Refs for performance
   const frameBufferRef = useRef<CapturedFrame[]>([]);
   const statsRef = useRef<Map<number, ArbIdStats>>(new Map());
@@ -175,6 +490,22 @@ export default function IntelliSpy() {
 
   // Keep paused ref in sync
   useEffect(() => { pausedRef.current = isPaused; }, [isPaused]);
+
+  // ─── Protocol Switching ───────────────────────────────────────────────
+
+  const switchProtocol = useCallback((protocol: SupportedProtocol) => {
+    setActiveProtocol(protocol);
+    setShowProtocolMenu(false);
+
+    // Send protocol switch to bridge if connected
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'set_protocol',
+        protocol,
+        bitrate: ALL_PROTOCOLS[protocol]?.defaultBitrate || 500000,
+      }));
+    }
+  }, []);
 
   // ─── WebSocket Connection ──────────────────────────────────────────────
 
@@ -238,6 +569,13 @@ export default function IntelliSpy() {
           setStatus('error');
         };
 
+        // Send initial protocol setting
+        ws.send(JSON.stringify({
+          type: 'set_protocol',
+          protocol: activeProtocol,
+          bitrate: ALL_PROTOCOLS[activeProtocol]?.defaultBitrate || 500000,
+        }));
+
         break;
       } catch {
         continue;
@@ -247,7 +585,7 @@ export default function IntelliSpy() {
     if (!connected) {
       setStatus('error');
     }
-  }, []);
+  }, [activeProtocol]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -276,6 +614,8 @@ export default function IntelliSpy() {
     setStatus('monitoring');
     setCaptureStartTime(Date.now());
     frameCountRef.current = 0;
+    setFlashProgress(createFlashProgress());
+    flashProgressRef.current = createFlashProgress();
     startStatsTimer();
   }, []);
 
@@ -299,6 +639,15 @@ export default function IntelliSpy() {
       const moduleInfo = identifyModule(arbId);
       const direction = detectDirection(arbId);
 
+      // Live UDS flash decode
+      let flashDecode: FlashDecode | null = null;
+      if (arbId >= 0x700 && arbId <= 0x7FF) {
+        flashDecode = decodeUDSFrameLocal(arbId, data);
+        if (flashDecode) {
+          flashProgressRef.current = updateFlashProgress(flashProgressRef.current, flashDecode);
+        }
+      }
+
       const frame: CapturedFrame = {
         frameNumber,
         timestamp,
@@ -311,6 +660,7 @@ export default function IntelliSpy() {
         moduleName: moduleInfo?.name,
         moduleAcronym: moduleInfo?.acronym,
         direction,
+        flashDecode,
       };
 
       frameCountRef.current++;
@@ -359,6 +709,10 @@ export default function IntelliSpy() {
       setStatus('monitoring');
     } else if (msg.type === 'monitor_stopped') {
       setStatus('connected');
+    } else if (msg.type === 'protocol_changed') {
+      // Bridge confirmed protocol switch
+      const proto = msg.protocol as SupportedProtocol;
+      if (proto) setActiveProtocol(proto);
     }
   }, []);
 
@@ -372,6 +726,8 @@ export default function IntelliSpy() {
       setTotalFrames(frameCountRef.current);
       // Batch update stats
       setArbIdStats(new Map(statsRef.current));
+      // Batch update flash progress
+      setFlashProgress({ ...flashProgressRef.current });
     }, STATS_UPDATE_INTERVAL);
   }, []);
 
@@ -384,6 +740,7 @@ export default function IntelliSpy() {
     setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
     setTotalFrames(frameCountRef.current);
     setArbIdStats(new Map(statsRef.current));
+    setFlashProgress({ ...flashProgressRef.current });
   }, []);
 
   // Cleanup on unmount
@@ -412,6 +769,10 @@ export default function IntelliSpy() {
     setFrames([]);
     setArbIdStats(new Map());
     setTotalFrames(0);
+    setFlashProgress(createFlashProgress());
+    flashProgressRef.current = createFlashProgress();
+    setKnoxAnalysis(null);
+    setSelectedFramesForKnox(new Set());
   }, []);
 
   const exportCapture = useCallback(() => {
@@ -427,6 +788,89 @@ export default function IntelliSpy() {
 
   const toggleArbIdVisibility = useCallback((arbId: number) => {
     setHiddenArbIds(prev => {
+      const next = new Set(prev);
+      if (next.has(arbId)) next.delete(arbId);
+      else next.add(arbId);
+      return next;
+    });
+  }, []);
+
+  // ─── Knox AI Analysis ────────────────────────────────────────────────
+
+  const askKnox = useCallback(async (question?: string) => {
+    // Build frames to send — either selected frames or all unique stats
+    type FrameInput = {
+      arbId: number;
+      arbIdHex: string;
+      data: number[];
+      dataHex: string;
+      dlc: number;
+      isExtended?: boolean;
+      moduleName?: string;
+      moduleAcronym?: string;
+      direction?: string;
+      count?: number;
+      rateHz?: number;
+    };
+    let framesToAnalyze: FrameInput[];
+
+    if (selectedFramesForKnox.size > 0) {
+      // Send selected arb ID stats
+      framesToAnalyze = Array.from(selectedFramesForKnox).map(arbId => {
+        const stat = arbIdStats.get(arbId);
+        return {
+          arbId,
+          arbIdHex: formatArbId(arbId),
+          data: stat?.lastData || [],
+          dataHex: stat ? formatHexData(stat.lastData) : '',
+          dlc: stat?.lastData.length || 0,
+          isExtended: false,
+          moduleName: stat?.moduleName,
+          moduleAcronym: stat?.moduleAcronym,
+          count: stat?.count,
+          rateHz: stat?.rateHz,
+        };
+      });
+    } else {
+      // Send all discovered stats
+      framesToAnalyze = Array.from(arbIdStats.values()).map(stat => ({
+        arbId: stat.arbId,
+        arbIdHex: formatArbId(stat.arbId),
+        data: stat.lastData,
+        dataHex: formatHexData(stat.lastData),
+        dlc: stat.lastData.length,
+        isExtended: false,
+        moduleName: stat.moduleName,
+        moduleAcronym: stat.moduleAcronym,
+        count: stat.count,
+        rateHz: stat.rateHz,
+      }));
+    }
+
+    if (framesToAnalyze.length === 0) return;
+
+    // Limit to 200 frames max
+    const limited = framesToAnalyze.slice(0, 200);
+
+    const flashContext = flashProgress.stage !== 'idle'
+      ? `Flash operation in progress: Stage=${flashProgress.stage}, Blocks=${flashProgress.blocksTransferred}, Bytes=${flashProgress.totalBytes}, Module=${flashProgress.currentModule}`
+      : undefined;
+
+    try {
+      const result = await knoxMutation.mutateAsync({
+        frames: limited,
+        protocol: activeProtocol,
+        question: question || knoxQuestion || undefined,
+        context: flashContext,
+      });
+      setKnoxAnalysis(result.analysis);
+    } catch (err) {
+      setKnoxAnalysis(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [arbIdStats, selectedFramesForKnox, activeProtocol, flashProgress, knoxQuestion, knoxMutation]);
+
+  const toggleFrameForKnox = useCallback((arbId: number) => {
+    setSelectedFramesForKnox(prev => {
       const next = new Set(prev);
       if (next.has(arbId)) next.delete(arbId);
       else next.add(arbId);
@@ -456,7 +900,8 @@ export default function IntelliSpy() {
         formatArbId(f.arbId).toLowerCase().includes(lower) ||
         (f.moduleAcronym?.toLowerCase().includes(lower)) ||
         (f.moduleName?.toLowerCase().includes(lower)) ||
-        formatHexData(f.data).toLowerCase().includes(lower)
+        formatHexData(f.data).toLowerCase().includes(lower) ||
+        (f.flashDecode?.description.toLowerCase().includes(lower))
       );
     }
 
@@ -479,6 +924,12 @@ export default function IntelliSpy() {
     return `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   }, [captureStartTime, totalFrames]); // totalFrames triggers re-render
 
+  // ─── Flash frames count ──────────────────────────────────────────────
+
+  const flashFrameCount = useMemo(() => {
+    return frames.filter(f => f.flashDecode?.isFlash).length;
+  }, [frames]);
+
   // ═══════════════════════════════════════════════════════════════════════
   // Render
   // ═══════════════════════════════════════════════════════════════════════
@@ -494,6 +945,55 @@ export default function IntelliSpy() {
         </div>
 
         <div className="flex-1" />
+
+        {/* Protocol Badge */}
+        <div className="relative">
+          <button
+            onClick={() => setShowProtocolMenu(!showProtocolMenu)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-['Share_Tech_Mono',monospace] transition-colors hover:bg-zinc-800/50 ${
+              PROTOCOL_OPTIONS.find(p => p.value === activeProtocol)?.color || 'text-zinc-400 border-zinc-700'
+            }`}
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {PROTOCOL_OPTIONS.find(p => p.value === activeProtocol)?.label || activeProtocol.toUpperCase()}
+            <ChevronDown className="w-3 h-3" />
+          </button>
+
+          {showProtocolMenu && (
+            <div className="absolute right-0 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-xl min-w-[220px]">
+              <div className="px-3 py-1.5 border-b border-zinc-800">
+                <span className="text-[10px] text-zinc-500 font-['Share_Tech_Mono',monospace]">SELECT PROTOCOL</span>
+              </div>
+              {PROTOCOL_OPTIONS.map(opt => {
+                const proto = ALL_PROTOCOLS[opt.value];
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => switchProtocol(opt.value)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800/50 transition-colors ${
+                      activeProtocol === opt.value ? 'bg-zinc-800/30' : ''
+                    }`}
+                  >
+                    <span className="text-sm">{opt.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-xs font-['Share_Tech_Mono',monospace] ${
+                        activeProtocol === opt.value ? 'text-red-400' : 'text-zinc-300'
+                      }`}>
+                        {opt.label}
+                      </div>
+                      <div className="text-[10px] text-zinc-600 truncate">
+                        {proto?.description.split('.')[0] || ''}
+                      </div>
+                    </div>
+                    {activeProtocol === opt.value && (
+                      <CheckCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Connection status */}
         <div className="flex items-center gap-2">
@@ -615,6 +1115,47 @@ export default function IntelliSpy() {
         </Button>
       </div>
 
+      {/* ─── Flash Progress Bar (visible during flash operations) ──── */}
+      {flashProgress.stage !== 'idle' && (
+        <div className="px-4 py-2 border-b border-zinc-800/50 bg-gradient-to-r from-zinc-900/50 to-red-950/20">
+          <div className="flex items-center gap-3">
+            <FlaskConical className="w-4 h-4 text-red-500 animate-pulse" />
+            <span className="text-xs font-['Bebas_Neue',sans-serif] tracking-wider text-red-400">FLASH OPERATION DETECTED</span>
+            <div className="flex-1" />
+            <span className={`text-xs font-['Share_Tech_Mono',monospace] font-bold ${FLASH_STAGE_LABELS[flashProgress.stage]?.color || 'text-zinc-400'}`}>
+              {FLASH_STAGE_LABELS[flashProgress.stage]?.label || flashProgress.stage.toUpperCase()}
+            </span>
+          </div>
+
+          {/* Progress steps */}
+          <div className="flex items-center gap-1 mt-2">
+            {Object.entries(FLASH_STAGE_LABELS).filter(([k]) => k !== 'idle').map(([key, info]) => {
+              const currentStep = FLASH_STAGE_LABELS[flashProgress.stage]?.step || 0;
+              const isActive = info.step === currentStep;
+              const isComplete = info.step < currentStep;
+              return (
+                <div key={key} className="flex items-center gap-1 flex-1">
+                  <div className={`h-1.5 flex-1 rounded-full transition-colors ${
+                    isComplete ? 'bg-green-500' :
+                    isActive ? 'bg-red-500 animate-pulse' :
+                    'bg-zinc-800'
+                  }`} />
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-4 mt-1.5 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-500">
+            {flashProgress.currentModule && <span>MODULE: {flashProgress.currentModule}</span>}
+            {flashProgress.blocksTransferred > 0 && <span>BLOCKS: {flashProgress.blocksTransferred}</span>}
+            {flashProgress.totalBytes > 0 && <span>BYTES: {flashProgress.totalBytes.toLocaleString()}</span>}
+            {flashProgress.errors.length > 0 && (
+              <span className="text-red-400">ERRORS: {flashProgress.errors.length}</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ─── Main Content ────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex">
         {/* Left: Arb ID list / filter panel */}
@@ -634,8 +1175,9 @@ export default function IntelliSpy() {
                 <div key={stat.arbId}
                   className={`px-3 py-1.5 flex items-center gap-2 hover:bg-zinc-800/30 cursor-pointer transition-colors ${
                     hiddenArbIds.has(stat.arbId) ? 'opacity-40' : ''
-                  }`}
-                  onClick={() => toggleArbIdVisibility(stat.arbId)}>
+                  } ${selectedFramesForKnox.has(stat.arbId) ? 'bg-red-900/20 border-l-2 border-red-500' : ''}`}
+                  onClick={() => toggleArbIdVisibility(stat.arbId)}
+                  onDoubleClick={(e) => { e.preventDefault(); toggleFrameForKnox(stat.arbId); }}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="font-['Share_Tech_Mono',monospace] text-xs text-red-400">
@@ -652,13 +1194,27 @@ export default function IntelliSpy() {
                       <span>{stat.rateHz.toFixed(1)} Hz</span>
                     </div>
                   </div>
-                  {hiddenArbIds.has(stat.arbId) ? (
+                  {selectedFramesForKnox.has(stat.arbId) ? (
+                    <Brain className="w-3 h-3 text-red-400 flex-shrink-0" />
+                  ) : hiddenArbIds.has(stat.arbId) ? (
                     <EyeOff className="w-3 h-3 text-zinc-600 flex-shrink-0" />
                   ) : (
                     <Eye className="w-3 h-3 text-zinc-500 flex-shrink-0" />
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Knox selection hint */}
+          {sortedStats.length > 0 && (
+            <div className="px-3 py-2 border-t border-zinc-800/50">
+              <p className="text-[10px] text-zinc-600 leading-tight">
+                Double-click IDs to select for Knox analysis.
+                {selectedFramesForKnox.size > 0 && (
+                  <span className="text-red-400"> {selectedFramesForKnox.size} selected</span>
+                )}
+              </p>
             </div>
           )}
         </div>
@@ -677,6 +1233,7 @@ export default function IntelliSpy() {
                 <span className="flex-1">DATA (HEX)</span>
                 {showAscii && <span className="w-20">ASCII</span>}
                 <span className="w-12">DIR</span>
+                <span className="w-48">DECODE</span>
               </div>
 
               {/* Frame list */}
@@ -705,10 +1262,14 @@ export default function IntelliSpy() {
                 ) : (
                   filteredFrames.map((frame, idx) => {
                     const stat = arbIdStats.get(frame.arbId);
+                    const hasFlash = frame.flashDecode?.isFlash;
+                    const isNegative = frame.flashDecode?.type === 'negative_response';
                     return (
                       <div key={idx}
                         className={`flex items-center px-3 py-0.5 text-[11px] font-['Share_Tech_Mono',monospace] hover:bg-zinc-800/30 border-b border-zinc-900/30 ${
-                          frame.isError ? 'bg-red-900/20 text-red-400' : ''
+                          frame.isError ? 'bg-red-900/20 text-red-400' :
+                          isNegative ? 'bg-red-900/15' :
+                          hasFlash ? 'bg-yellow-900/10' : ''
                         }`}>
                         <span className="w-16 text-zinc-600">{frame.frameNumber}</span>
                         <span className="w-24 text-zinc-500">{frame.timestamp.toFixed(4)}</span>
@@ -736,11 +1297,28 @@ export default function IntelliSpy() {
                           {frame.direction === 'request' ? 'REQ' :
                            frame.direction === 'response' ? 'RSP' : 'BC'}
                         </span>
+                        {/* Live flash decode column */}
+                        <span className={`w-48 text-[10px] truncate ${
+                          isNegative ? 'text-red-400' :
+                          hasFlash ? 'text-yellow-400' :
+                          frame.flashDecode ? 'text-cyan-400' :
+                          'text-zinc-700'
+                        }`}>
+                          {frame.flashDecode?.description || '—'}
+                        </span>
                       </div>
                     );
                   })
                 )}
               </div>
+
+              {/* Flash frame count indicator */}
+              {flashFrameCount > 0 && (
+                <div className="px-3 py-1 bg-yellow-900/10 border-t border-yellow-900/30 text-[10px] font-['Share_Tech_Mono',monospace] text-yellow-400 flex items-center gap-2">
+                  <Shield className="w-3 h-3" />
+                  <span>{flashFrameCount} UDS/flash frames decoded in view</span>
+                </div>
+              )}
             </>
           )}
 
@@ -796,81 +1374,172 @@ export default function IntelliSpy() {
           )}
 
           {viewMode === 'decode' && (
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Knox AI Analysis Card */}
               <Card className="bg-zinc-900/50 border-zinc-800/50 p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <Brain className="w-6 h-6 text-red-500" />
-                  <div>
+                  <div className="flex-1">
                     <h3 className="font-['Bebas_Neue',sans-serif] text-lg tracking-wider text-red-400">
-                      AI FRAME DECODER
+                      ASK KNOX
                     </h3>
                     <p className="text-xs text-zinc-500">
-                      Select frames from the live view or stats panel, then ask Knox to analyze them.
+                      Knox AI analyzes captured CAN frames, identifies modules, decodes flash operations, and explains bus activity.
                     </p>
+                  </div>
+                  <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-[10px] font-['Share_Tech_Mono',monospace]">
+                    {activeProtocol.toUpperCase()} MODE
+                  </Badge>
+                </div>
+
+                {/* Question input */}
+                <div className="flex gap-2 mb-4">
+                  <Textarea
+                    value={knoxQuestion}
+                    onChange={e => setKnoxQuestion(e.target.value)}
+                    placeholder="Ask Knox about the captured frames... (e.g., 'What modules are on this bus?', 'Is there a flash in progress?', 'Decode the J1939 PGNs')"
+                    className="flex-1 min-h-[60px] max-h-[120px] text-xs bg-zinc-950/50 border-zinc-800 text-zinc-300 font-['Share_Tech_Mono',monospace] resize-y"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        askKnox();
+                      }
+                    }}
+                  />
+                  <div className="flex flex-col gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => askKnox()}
+                      disabled={knoxMutation.isPending || arbIdStats.size === 0}
+                      className="bg-red-900/50 border border-red-700 text-red-400 hover:bg-red-800/50 font-['Share_Tech_Mono',monospace] text-xs h-8"
+                    >
+                      {knoxMutation.isPending ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <Brain className="w-3.5 h-3.5 mr-1" />
+                          Ask Knox
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => askKnox('Identify all modules on the bus and decode their data. Highlight any flash or calibration operations.')}
+                      disabled={knoxMutation.isPending || arbIdStats.size === 0}
+                      className="border-zinc-700 text-zinc-500 hover:text-zinc-300 text-[10px] h-6"
+                    >
+                      <Cpu className="w-3 h-3 mr-1" /> Auto-Analyze
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => askKnox('Detect and explain any flash/calibration write operations. What stage is the flash at? What ECU is being programmed?')}
+                      disabled={knoxMutation.isPending || arbIdStats.size === 0}
+                      className="border-zinc-700 text-zinc-500 hover:text-zinc-300 text-[10px] h-6"
+                    >
+                      <Shield className="w-3 h-3 mr-1" /> Flash Detect
+                    </Button>
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  {/* Module map summary */}
-                  <div>
-                    <h4 className="text-xs font-['Share_Tech_Mono',monospace] text-zinc-500 mb-2">DISCOVERED MODULES</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {/* Selected frames indicator */}
+                {selectedFramesForKnox.size > 0 && (
+                  <div className="flex items-center gap-2 mb-3 px-2 py-1.5 bg-red-900/20 rounded border border-red-900/30">
+                    <Brain className="w-3.5 h-3.5 text-red-400" />
+                    <span className="text-xs text-red-400 font-['Share_Tech_Mono',monospace]">
+                      Analyzing {selectedFramesForKnox.size} selected IDs: {Array.from(selectedFramesForKnox).map(id => formatArbId(id)).join(', ')}
+                    </span>
+                    <button onClick={() => setSelectedFramesForKnox(new Set())} className="text-zinc-500 hover:text-zinc-300 text-xs ml-auto">
+                      Clear
+                    </button>
+                  </div>
+                )}
+
+                {/* Knox Analysis Result */}
+                {knoxAnalysis && (
+                  <div className="bg-zinc-950/50 rounded-lg border border-zinc-800/50 p-4 mt-2">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Brain className="w-4 h-4 text-red-500" />
+                      <span className="text-xs font-['Bebas_Neue',sans-serif] tracking-wider text-red-400">KNOX ANALYSIS</span>
+                    </div>
+                    <div className="text-xs text-zinc-300 leading-relaxed prose prose-invert prose-xs max-w-none">
+                      <Streamdown>{knoxAnalysis}</Streamdown>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading state */}
+                {knoxMutation.isPending && (
+                  <div className="flex items-center justify-center py-8 gap-3">
+                    <Loader2 className="w-5 h-5 text-red-500 animate-spin" />
+                    <span className="text-sm text-zinc-400">Knox is analyzing {arbIdStats.size} arbitration IDs...</span>
+                  </div>
+                )}
+              </Card>
+
+              {/* Module Map */}
+              <Card className="bg-zinc-900/50 border-zinc-800/50 p-4">
+                <h4 className="text-xs font-['Share_Tech_Mono',monospace] text-zinc-500 mb-3">DISCOVERED MODULES</h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {sortedStats
+                    .filter(s => s.moduleAcronym)
+                    .map(stat => (
+                      <div key={stat.arbId}
+                        className={`flex items-center gap-2 bg-zinc-950/50 rounded px-2 py-1.5 cursor-pointer transition-colors ${
+                          selectedFramesForKnox.has(stat.arbId) ? 'ring-1 ring-red-500' : 'hover:bg-zinc-800/30'
+                        }`}
+                        onClick={() => toggleFrameForKnox(stat.arbId)}>
+                        <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs text-red-400 font-['Share_Tech_Mono',monospace]">
+                            {formatArbId(stat.arbId)} — {stat.moduleAcronym}
+                          </div>
+                          <div className="text-[10px] text-zinc-600 truncate">{stat.moduleName}</div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Unknown IDs */}
+                {sortedStats.filter(s => !s.moduleAcronym).length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-xs font-['Share_Tech_Mono',monospace] text-zinc-500 mb-2">
+                      UNKNOWN IDs ({sortedStats.filter(s => !s.moduleAcronym).length})
+                    </h4>
+                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                       {sortedStats
-                        .filter(s => s.moduleAcronym)
+                        .filter(s => !s.moduleAcronym)
                         .map(stat => (
                           <div key={stat.arbId}
-                            className="flex items-center gap-2 bg-zinc-950/50 rounded px-2 py-1.5">
-                            <CheckCircle className="w-3 h-3 text-green-500 flex-shrink-0" />
+                            className={`flex items-center gap-2 bg-zinc-950/50 rounded px-2 py-1.5 cursor-pointer transition-colors ${
+                              selectedFramesForKnox.has(stat.arbId) ? 'ring-1 ring-red-500' : 'hover:bg-zinc-800/30'
+                            }`}
+                            onClick={() => toggleFrameForKnox(stat.arbId)}>
+                            <XCircle className="w-3 h-3 text-zinc-600 flex-shrink-0" />
                             <div className="min-w-0">
-                              <div className="text-xs text-red-400 font-['Share_Tech_Mono',monospace]">
-                                {formatArbId(stat.arbId)} — {stat.moduleAcronym}
+                              <div className="text-xs text-zinc-400 font-['Share_Tech_Mono',monospace]">
+                                {formatArbId(stat.arbId)}
                               </div>
-                              <div className="text-[10px] text-zinc-600 truncate">{stat.moduleName}</div>
+                              <div className="text-[10px] text-zinc-600">
+                                {stat.rateHz.toFixed(0)} Hz · {stat.count} frames
+                              </div>
                             </div>
                           </div>
                         ))}
                     </div>
+                    <p className="text-xs text-zinc-600 mt-2">
+                      Click unknown IDs to select them, then ask Knox to identify them based on data patterns.
+                    </p>
                   </div>
+                )}
 
-                  {/* Unknown IDs */}
-                  {sortedStats.filter(s => !s.moduleAcronym).length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-['Share_Tech_Mono',monospace] text-zinc-500 mb-2">
-                        UNKNOWN IDs ({sortedStats.filter(s => !s.moduleAcronym).length})
-                      </h4>
-                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                        {sortedStats
-                          .filter(s => !s.moduleAcronym)
-                          .map(stat => (
-                            <div key={stat.arbId}
-                              className="flex items-center gap-2 bg-zinc-950/50 rounded px-2 py-1.5">
-                              <XCircle className="w-3 h-3 text-zinc-600 flex-shrink-0" />
-                              <div className="min-w-0">
-                                <div className="text-xs text-zinc-400 font-['Share_Tech_Mono',monospace]">
-                                  {formatArbId(stat.arbId)}
-                                </div>
-                                <div className="text-[10px] text-zinc-600">
-                                  {stat.rateHz.toFixed(0)} Hz · {stat.count} frames
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                      <p className="text-xs text-zinc-600 mt-2">
-                        These IDs were not found in the module database. They may be manufacturer-specific
-                        broadcast messages, body electronics, or proprietary modules. Ask Knox to analyze
-                        the data patterns to help identify them.
-                      </p>
-                    </div>
-                  )}
-
-                  {sortedStats.length === 0 && (
-                    <div className="text-center py-8 text-zinc-600">
-                      <Brain className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
-                      <p className="text-sm">Capture some frames first, then switch here for AI analysis.</p>
-                    </div>
-                  )}
-                </div>
+                {sortedStats.length === 0 && (
+                  <div className="text-center py-8 text-zinc-600">
+                    <Brain className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
+                    <p className="text-sm">Capture some frames first, then switch here for AI analysis.</p>
+                  </div>
+                )}
               </Card>
             </div>
           )}
@@ -881,6 +1550,9 @@ export default function IntelliSpy() {
       <div className="flex items-center gap-4 px-4 py-1 border-t border-zinc-800/50 bg-zinc-950/50 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-600">
         <span>BRIDGE: {bridgeUrl}</span>
         <span>STATUS: {status.toUpperCase()}</span>
+        <span className={PROTOCOL_OPTIONS.find(p => p.value === activeProtocol)?.color.split(' ')[0] || 'text-zinc-400'}>
+          PROTO: {activeProtocol.toUpperCase()}
+        </span>
         {totalFrames > 0 && (
           <>
             <span>CAPTURED: {totalFrames.toLocaleString()}</span>
@@ -888,6 +1560,9 @@ export default function IntelliSpy() {
             <span>UNIQUE IDs: {arbIdStats.size}</span>
             <span>HIDDEN: {hiddenArbIds.size}</span>
           </>
+        )}
+        {flashProgress.stage !== 'idle' && (
+          <span className="text-yellow-400">FLASH: {flashProgress.stage.toUpperCase()}</span>
         )}
         {isPaused && <span className="text-yellow-500">FROZEN</span>}
       </div>

@@ -27,8 +27,8 @@ const sColor = {
   bg: '#0a0a0a',
   card: 'oklch(0.33 0.006 260)',
   border: 'oklch(0.22 0.008 260)',
-  red: 'oklch(0.52 0.22 25)',
-  redBright: 'oklch(0.60 0.24 25)',
+  red: 'oklch(0.68 0.20 25)',        // brightened from 0.52 for readability on dark bg
+  redBright: 'oklch(0.74 0.22 25)',   // brightened from 0.60
   text: 'white',
   textDim: 'oklch(0.68 0.010 260)',
   textMid: 'oklch(0.70 0.010 260)',
@@ -117,18 +117,19 @@ function parseFuelTableCSV(text: string): FuelMap | null {
 function getHeatColor(value: number, min: number, max: number): string {
   if (max === min) return 'oklch(0.45 0.15 145)'; // green
   const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  // Green (low) → Yellow (mid) → Red (high)
+  // Green (low) → Yellow (mid) → Orange-Red (high)
+  // Higher lightness range (0.38–0.52) ensures white text stays readable
   if (t < 0.5) {
     const s = t * 2;
-    const l = 0.35 + s * 0.15;
-    const c = 0.12 + s * 0.06;
-    const h = 145 - s * 55; // green → yellow
+    const l = 0.38 + s * 0.14;  // 0.38 → 0.52 (brighter greens/yellows)
+    const c = 0.14 + s * 0.06;  // slightly more saturated
+    const h = 145 - s * 55;     // green → yellow
     return `oklch(${l} ${c} ${h})`;
   } else {
     const s = (t - 0.5) * 2;
-    const l = 0.50 - s * 0.15;
+    const l = 0.52 - s * 0.10;  // 0.52 → 0.42 (reds stay brighter, min 0.42)
     const c = 0.18 + s * 0.04;
-    const h = 90 - s * 65; // yellow → red
+    const h = 90 - s * 55;      // yellow → orange-red (stops at hue 35, not 25)
     return `oklch(${l} ${c} ${h})`;
   }
 }
@@ -777,6 +778,7 @@ function FuelMapCard({
                               ? getDeviationColor(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2)
                               : getHeatColor(val, min, max),
                             color: 'white',
+                            textShadow: '0 1px 2px rgba(0,0,0,0.7)',
                             cursor: 'pointer',
                             minWidth: '40px',
                             fontSize: '0.68rem',
