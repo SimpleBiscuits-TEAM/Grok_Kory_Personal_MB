@@ -2364,7 +2364,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                       </div>
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <a
-                          href="/api/download/vop-bridge-installer"
+                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/VOP_Bridge_v2.0_7d80eafb.zip"
+                          download="VOP_Bridge_v2.0.zip"
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: '6px',
                             padding: '8px 20px', background: 'oklch(0.52 0.22 25)',
@@ -2373,9 +2374,22 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                             textDecoration: 'none', cursor: 'pointer',
                           }}
                         >
-                          ⬇ DOWNLOAD INSTALLER
+                          ⬇ DOWNLOAD BRIDGE
                         </a>
-                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim }}>~45 MB · VOP_Bridge_Setup_v2.0.exe</span>
+                        <a
+                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/pcan_bridge_dbcd85c1.py"
+                          download="pcan_bridge.py"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '6px',
+                            padding: '8px 14px', background: 'transparent',
+                            border: `1px solid ${sColor.border}`, borderRadius: '3px', color: sColor.text,
+                            fontFamily: sFont.mono, fontSize: '0.72rem',
+                            textDecoration: 'none', cursor: 'pointer',
+                          }}
+                        >
+                          .py only
+                        </a>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim }}>ZIP: bridge + quickstart + installer · 17 KB</span>
                       </div>
                     </div>
 

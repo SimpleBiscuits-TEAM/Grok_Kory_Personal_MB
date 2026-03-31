@@ -2791,3 +2791,6 @@
 - [x] BUG: ELM327 "Start Log" button not working — logging doesn't begin after PID scan (fixed: bypass bitmask filter when all PIDs removed, force-add unsupported PIDs)
 - [x] BUG: PCAN CAN traffic still not showing in IntelliSpy monitor (fixed: PCANConnection listened for 'can_frame' but bridge sends 'bus_frame')
 - [x] BUG: Voltage reading 0V despite successful PID scanning on ELM327 (fixed: added retry, warning messages, and red ⚠ NO PWR indicator in UI)
+
+## PCAN Bridge Download/Execution Fix (2026-03-31)
+- [x] BUG: Python PCAN bridge did not download/work when attempting latest CAN bridge test (fixed: download button pointed to non-existent /api/download route, now serves from CDN with ZIP bundle + direct .py download)
