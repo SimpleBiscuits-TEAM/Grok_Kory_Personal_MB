@@ -1,5 +1,5 @@
 /**
- * FCA Calibration Supersession Database — Search & Lookup
+ * FCA Calibration Supersession Database -- Search & Lookup
  * 17,912 calibration records from Stellantis (August 2025)
  * Covers PCM, TCM, ECM, BCM, ABS, IPC, HVAC, ORC, EPS, PM modules
  * 126,734 old part numbers, 44,246 TSBs, 11,240 recalls
@@ -7,7 +7,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { trpc } from '@/lib/trpc';
 import PpeiHeader from '@/components/PpeiHeader';
-import { Search, Database, Filter, ChevronDown, ChevronUp, ExternalLink, Hash, Calendar, Cpu, FileText, AlertTriangle, ArrowRight, X, Loader2, Info } from 'lucide-react';
+import { Search, Database, Filter, ChevronDown, ChevronUp, ExternalLink, Hash, Calendar, Cpu, FileText, AlertTriangle, ArrowRight, X, Loader2, Info, Car, Truck } from 'lucide-react';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
@@ -19,6 +19,7 @@ const sColor = {
   red: 'oklch(0.52 0.22 25)',
   bg: '#0a0a0a',
   panelBg: 'oklch(0.12 0.005 260)',
+  panelBgHover: 'oklch(0.14 0.008 260)',
   border: 'oklch(0.20 0.008 260)',
   textDim: 'oklch(0.60 0.010 260)',
   textMuted: 'oklch(0.50 0.010 260)',
@@ -29,7 +30,6 @@ const sColor = {
   blue: 'oklch(0.65 0.15 250)',
 };
 
-// Module type badge colors
 const moduleColors: Record<string, string> = {
   PCM: 'oklch(0.52 0.22 25)',
   TCM: 'oklch(0.65 0.15 250)',
@@ -41,6 +41,33 @@ const moduleColors: Record<string, string> = {
   ORC: 'oklch(0.60 0.20 50)',
   EPS: 'oklch(0.58 0.15 290)',
   PM: 'oklch(0.65 0.12 100)',
+};
+
+const selectStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '10px 12px',
+  fontFamily: sFont.mono,
+  fontSize: '0.8rem',
+  background: 'oklch(0.10 0.005 260)',
+  border: `1px solid oklch(0.20 0.008 260)`,
+  color: 'white',
+  outline: 'none',
+  cursor: 'pointer',
+  appearance: 'none',
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 10px center',
+  paddingRight: '30px',
+};
+
+const labelStyle: React.CSSProperties = {
+  fontFamily: sFont.mono,
+  fontSize: '0.6rem',
+  color: sColor.textMuted,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  display: 'block',
+  marginBottom: '6px',
 };
 
 function ModuleBadge({ type }: { type: string }) {
@@ -125,13 +152,12 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
 
   return (
     <div style={{
-      background: expanded ? 'oklch(0.14 0.008 260)' : sColor.panelBg,
+      background: expanded ? sColor.panelBgHover : sColor.panelBg,
       border: `1px solid ${expanded ? sColor.accent : sColor.border}`,
       borderLeft: `3px solid ${expanded ? sColor.accent : moduleColors[record.moduleType] || sColor.border}`,
       marginBottom: '6px',
       transition: 'all 0.15s ease',
     }}>
-      {/* Summary row */}
       <div
         onClick={onToggle}
         style={{
@@ -198,14 +224,12 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
         </div>
       </div>
 
-      {/* Expanded details */}
       {expanded && (
         <div style={{
           padding: '0 16px 16px',
           borderTop: `1px solid ${sColor.border}`,
           paddingTop: '12px',
         }}>
-          {/* Supersession chain */}
           {oldParts.length > 0 && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{
@@ -259,7 +283,6 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
             </div>
           )}
 
-          {/* TSBs */}
           {tsbs.length > 0 && (
             <div style={{ marginBottom: '10px' }}>
               <div style={{
@@ -295,13 +318,12 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
             </div>
           )}
 
-          {/* Recalls */}
           {recalls.length > 0 && (
             <div style={{ marginBottom: '10px' }}>
               <div style={{
                 fontFamily: sFont.mono,
                 fontSize: '0.65rem',
-                color: sColor.accent,
+                color: 'oklch(0.70 0.22 25)',
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
                 marginBottom: '4px',
@@ -313,11 +335,11 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
                   <span key={i} style={{
                     fontFamily: sFont.mono,
                     fontSize: '0.65rem',
-                    color: sColor.accent,
-                    background: sColor.accentDim,
+                    color: 'oklch(0.70 0.22 25)',
+                    background: 'oklch(0.52 0.22 25 / 0.1)',
                     padding: '1px 5px',
                     borderRadius: '2px',
-                    border: `1px solid oklch(0.52 0.22 25 / 0.3)`,
+                    border: '1px solid oklch(0.52 0.22 25 / 0.25)',
                   }}>
                     {recall}
                   </span>
@@ -326,7 +348,6 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
             </div>
           )}
 
-          {/* Platform codes */}
           {record.platformCodes && (
             <div>
               <div style={{
@@ -362,17 +383,80 @@ function CalibrationRow({ record, expanded, onToggle }: { record: CalibrationRec
   );
 }
 
+/** Pagination controls shared across all modes */
+function Pagination({ page, totalPages, onPageChange }: { page: number; totalPages: number; onPageChange: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: '4px', alignItems: 'center', marginTop: '12px' }}>
+      <button
+        onClick={() => onPageChange(Math.max(0, page - 1))}
+        disabled={page === 0}
+        style={{
+          padding: '6px 16px',
+          fontFamily: sFont.mono,
+          fontSize: '0.7rem',
+          background: 'transparent',
+          border: `1px solid ${sColor.border}`,
+          color: page === 0 ? sColor.textMuted : sColor.textDim,
+          cursor: page === 0 ? 'default' : 'pointer',
+          opacity: page === 0 ? 0.5 : 1,
+        }}
+      >
+        PREV
+      </button>
+      <span style={{
+        fontFamily: sFont.mono,
+        fontSize: '0.7rem',
+        color: sColor.textDim,
+        padding: '6px 12px',
+      }}>
+        PAGE {page + 1} OF {totalPages}
+      </span>
+      <button
+        onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+        disabled={page >= totalPages - 1}
+        style={{
+          padding: '6px 16px',
+          fontFamily: sFont.mono,
+          fontSize: '0.7rem',
+          background: 'transparent',
+          border: `1px solid ${sColor.border}`,
+          color: page >= totalPages - 1 ? sColor.textMuted : sColor.textDim,
+          cursor: page >= totalPages - 1 ? 'default' : 'pointer',
+          opacity: page >= totalPages - 1 ? 0.5 : 1,
+        }}
+      >
+        NEXT
+      </button>
+    </div>
+  );
+}
+
+type SearchMode = 'search' | 'vehicle' | 'partNumber';
+
 export default function Calibrations() {
+  const [mode, setMode] = useState<SearchMode>('vehicle');
+
+  // -- General search state --
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('');
   const [yearStart, setYearStart] = useState('');
   const [yearEnd, setYearEnd] = useState('');
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [page, setPage] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(0);
+
+  // -- Vehicle search state --
+  const [selectedYear, setSelectedYear] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [vehicleModuleFilter, setVehicleModuleFilter] = useState('');
+  const [vehiclePage, setVehiclePage] = useState(0);
+
+  // -- Part number lookup state --
   const [partNumberLookup, setPartNumberLookup] = useState('');
-  const [lookupMode, setLookupMode] = useState(false);
+
+  // -- Shared state --
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const PAGE_SIZE = 50;
 
   // Debounce search
@@ -383,9 +467,21 @@ export default function Calibrations() {
 
   // Reset page on filter change
   useEffect(() => { setPage(0); }, [debouncedQuery, moduleFilter, yearStart, yearEnd]);
+  useEffect(() => { setVehiclePage(0); }, [selectedYear, selectedModel, vehicleModuleFilter]);
+
+  // Reset model when year changes
+  useEffect(() => { setSelectedModel(''); setVehicleModuleFilter(''); }, [selectedYear]);
 
   const { data: filterOptions } = trpc.calibrations.filterOptions.useQuery();
+  const { data: years } = trpc.calibrations.getYears.useQuery();
 
+  const yearNum = selectedYear ? parseInt(selectedYear) : 0;
+  const { data: vehicleModels, isLoading: modelsLoading } = trpc.calibrations.getModelsForYear.useQuery(
+    { year: yearNum },
+    { enabled: yearNum > 0 }
+  );
+
+  // General search query
   const searchInput = useMemo(() => ({
     query: debouncedQuery || undefined,
     moduleType: moduleFilter || undefined,
@@ -395,14 +491,40 @@ export default function Calibrations() {
     offset: page * PAGE_SIZE,
   }), [debouncedQuery, moduleFilter, yearStart, yearEnd, page]);
 
-  const { data: searchResults, isLoading } = trpc.calibrations.search.useQuery(searchInput);
+  const { data: searchResults, isLoading } = trpc.calibrations.search.useQuery(
+    searchInput,
+    { enabled: mode === 'search' }
+  );
 
+  // Find platform codes for the selected model
+  const selectedModelData = useMemo(() => {
+    if (!selectedModel || !vehicleModels) return null;
+    return vehicleModels.find(m => m.model === selectedModel) || null;
+  }, [selectedModel, vehicleModels]);
+
+  // Vehicle search query
+  const vehicleSearchInput = useMemo(() => ({
+    year: yearNum,
+    model: selectedModel || undefined,
+    platformCodes: selectedModelData?.platformCodes || undefined,
+    moduleType: vehicleModuleFilter || undefined,
+    limit: PAGE_SIZE,
+    offset: vehiclePage * PAGE_SIZE,
+  }), [yearNum, selectedModel, selectedModelData, vehicleModuleFilter, vehiclePage]);
+
+  const { data: vehicleResults, isLoading: vehicleLoading } = trpc.calibrations.searchByVehicle.useQuery(
+    vehicleSearchInput,
+    { enabled: mode === 'vehicle' && yearNum > 0 }
+  );
+
+  // Part number lookup
   const { data: lookupResults, isLoading: lookupLoading } = trpc.calibrations.lookupPartNumber.useQuery(
     { partNumber: partNumberLookup },
-    { enabled: lookupMode && partNumberLookup.length >= 3 }
+    { enabled: mode === 'partNumber' && partNumberLookup.length >= 3 }
   );
 
   const totalPages = searchResults ? Math.ceil(searchResults.total / PAGE_SIZE) : 0;
+  const vehicleTotalPages = vehicleResults ? Math.ceil(vehicleResults.total / PAGE_SIZE) : 0;
 
   const handleClearFilters = useCallback(() => {
     setSearchQuery('');
@@ -411,6 +533,14 @@ export default function Calibrations() {
     setYearEnd('');
     setPage(0);
   }, []);
+
+  // Get unique module types from vehicle results for the filter
+  const vehicleModuleTypes = useMemo(() => {
+    if (!vehicleResults?.results) return [];
+    const types = new Map<string, number>();
+    // We only know what's in the current page, but the filterOptions gives us all types
+    return filterOptions?.moduleTypes || [];
+  }, [filterOptions, vehicleResults]);
 
   return (
     <div style={{ minHeight: '100vh', background: sColor.bg, color: 'white' }}>
@@ -463,49 +593,235 @@ export default function Calibrations() {
           </div>
         )}
 
-        {/* Mode toggle: Search vs Part Number Lookup */}
+        {/* Mode toggle: 3 tabs */}
         <div style={{
           display: 'flex',
           gap: '0',
           marginBottom: '16px',
         }}>
-          <button
-            onClick={() => setLookupMode(false)}
-            style={{
-              fontFamily: sFont.mono,
-              fontSize: '0.72rem',
-              letterSpacing: '0.08em',
-              padding: '8px 20px',
-              background: !lookupMode ? sColor.accent : 'transparent',
-              color: !lookupMode ? 'white' : sColor.textDim,
-              border: `1px solid ${!lookupMode ? sColor.accent : sColor.border}`,
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-          >
-            SEARCH DATABASE
-          </button>
-          <button
-            onClick={() => setLookupMode(true)}
-            style={{
-              fontFamily: sFont.mono,
-              fontSize: '0.72rem',
-              letterSpacing: '0.08em',
-              padding: '8px 20px',
-              background: lookupMode ? sColor.accent : 'transparent',
-              color: lookupMode ? 'white' : sColor.textDim,
-              border: `1px solid ${lookupMode ? sColor.accent : sColor.border}`,
-              borderLeft: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
-            }}
-          >
-            PART NUMBER LOOKUP
-          </button>
+          {([
+            { key: 'vehicle' as SearchMode, label: 'SEARCH BY VEHICLE', icon: Truck },
+            { key: 'search' as SearchMode, label: 'SEARCH DATABASE', icon: Search },
+            { key: 'partNumber' as SearchMode, label: 'PART NUMBER LOOKUP', icon: Hash },
+          ]).map((tab, i) => (
+            <button
+              key={tab.key}
+              onClick={() => setMode(tab.key)}
+              style={{
+                fontFamily: sFont.mono,
+                fontSize: '0.72rem',
+                letterSpacing: '0.08em',
+                padding: '10px 20px',
+                background: mode === tab.key ? sColor.accent : 'transparent',
+                color: mode === tab.key ? 'white' : sColor.textDim,
+                border: `1px solid ${mode === tab.key ? sColor.accent : sColor.border}`,
+                borderLeft: i === 0 ? undefined : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <tab.icon size={14} />
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* Part Number Lookup Mode */}
-        {lookupMode && (
+        {/* ============================================ */}
+        {/* VEHICLE SEARCH MODE                          */}
+        {/* ============================================ */}
+        {mode === 'vehicle' && (
+          <>
+            <div style={{
+              background: sColor.panelBg,
+              border: `1px solid ${sColor.border}`,
+              borderLeft: `3px solid ${sColor.accent}`,
+              padding: '20px',
+              marginBottom: '16px',
+            }}>
+              <div style={{
+                fontFamily: sFont.mono,
+                fontSize: '0.7rem',
+                color: sColor.accent,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                marginBottom: '14px',
+              }}>
+                SELECT YEAR, MODEL, AND MODULE TYPE
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '16px',
+              }}>
+                {/* Year dropdown */}
+                <div>
+                  <label style={labelStyle}>YEAR</label>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    style={selectStyle}
+                  >
+                    <option value="">Select Year...</option>
+                    {years?.map((y) => (
+                      <option key={y} value={y.toString()}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Model dropdown (cascading from year) */}
+                <div>
+                  <label style={labelStyle}>MODEL</label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    disabled={!selectedYear}
+                    style={{
+                      ...selectStyle,
+                      opacity: selectedYear ? 1 : 0.5,
+                      cursor: selectedYear ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <option value="">
+                      {!selectedYear ? 'Select year first...' : modelsLoading ? 'Loading models...' : 'All Models'}
+                    </option>
+                    {vehicleModels?.map((m) => (
+                      <option key={m.model} value={m.model}>
+                        {m.model} ({m.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Module type filter */}
+                <div>
+                  <label style={labelStyle}>MODULE TYPE</label>
+                  <select
+                    value={vehicleModuleFilter}
+                    onChange={(e) => setVehicleModuleFilter(e.target.value)}
+                    disabled={!selectedYear}
+                    style={{
+                      ...selectStyle,
+                      opacity: selectedYear ? 1 : 0.5,
+                      cursor: selectedYear ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    <option value="">All Modules</option>
+                    {filterOptions?.moduleTypes.map((m) => (
+                      <option key={m.type} value={m.type}>
+                        {m.type} ({m.count.toLocaleString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Quick info about selected vehicle */}
+              {selectedYear && selectedModel && vehicleResults && (
+                <div style={{
+                  marginTop: '14px',
+                  padding: '10px 14px',
+                  background: 'oklch(0.10 0.005 260)',
+                  border: `1px solid ${sColor.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                }}>
+                  <Car size={16} style={{ color: sColor.green, flexShrink: 0 }} />
+                  <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.green }}>
+                    {vehicleResults.total} calibration{vehicleResults.total !== 1 ? 's' : ''} found for {selectedYear} {selectedModel}
+                    {vehicleModuleFilter ? ` (${vehicleModuleFilter})` : ''}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Vehicle search results */}
+            {!selectedYear && (
+              <div style={{
+                textAlign: 'center',
+                padding: '60px 20px',
+                fontFamily: sFont.body,
+              }}>
+                <Truck size={48} style={{ color: sColor.border, marginBottom: '16px' }} />
+                <div style={{ fontSize: '1rem', color: sColor.textDim, marginBottom: '6px' }}>Select a year to begin</div>
+                <div style={{ fontSize: '0.8rem', color: sColor.textMuted }}>
+                  Choose a model year, then narrow by model and module type
+                </div>
+              </div>
+            )}
+
+            {selectedYear && vehicleLoading && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                padding: '40px',
+              }}>
+                <Loader2 size={20} style={{ color: sColor.accent, animation: 'spin 1s linear infinite' }} />
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.textDim }}>
+                  Searching calibrations for {selectedYear}...
+                </span>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            )}
+
+            {selectedYear && !vehicleLoading && vehicleResults && (
+              <>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '10px',
+                }}>
+                  <span style={{
+                    fontFamily: sFont.mono,
+                    fontSize: '0.68rem',
+                    color: sColor.textMuted,
+                    letterSpacing: '0.06em',
+                  }}>
+                    {vehicleResults.total.toLocaleString()} results for {selectedYear}
+                    {selectedModel ? ` ${selectedModel}` : ''}
+                    {vehicleModuleFilter ? ` | ${vehicleModuleFilter}` : ''}
+                  </span>
+                </div>
+
+                {vehicleResults.results.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '40px',
+                    fontFamily: sFont.body,
+                    color: sColor.textMuted,
+                  }}>
+                    <Database size={32} style={{ color: sColor.border, marginBottom: '12px' }} />
+                    <div style={{ fontSize: '0.9rem' }}>No calibrations found</div>
+                    <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>Try a different year or model</div>
+                  </div>
+                ) : (
+                  (vehicleResults.results as CalibrationRecord[]).map((record) => (
+                    <CalibrationRow
+                      key={record.id}
+                      record={record}
+                      expanded={expandedId === record.id}
+                      onToggle={() => setExpandedId(expandedId === record.id ? null : record.id)}
+                    />
+                  ))
+                )}
+
+                <Pagination page={vehiclePage} totalPages={vehicleTotalPages} onPageChange={setVehiclePage} />
+              </>
+            )}
+          </>
+        )}
+
+        {/* ============================================ */}
+        {/* PART NUMBER LOOKUP MODE                      */}
+        {/* ============================================ */}
+        {mode === 'partNumber' && (
           <div style={{
             background: sColor.panelBg,
             border: `1px solid ${sColor.border}`,
@@ -563,6 +879,7 @@ export default function Calibrations() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
                 <Loader2 size={16} style={{ color: sColor.accent, animation: 'spin 1s linear infinite' }} />
                 <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>Searching...</span>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
               </div>
             )}
 
@@ -605,8 +922,10 @@ export default function Calibrations() {
           </div>
         )}
 
-        {/* Search Mode */}
-        {!lookupMode && (
+        {/* ============================================ */}
+        {/* GENERAL SEARCH MODE                          */}
+        {/* ============================================ */}
+        {mode === 'search' && (
           <>
             {/* Search bar */}
             <div style={{
@@ -681,32 +1000,12 @@ export default function Calibrations() {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
                 gap: '12px',
               }}>
-                {/* Module type */}
                 <div>
-                  <label style={{
-                    fontFamily: sFont.mono,
-                    fontSize: '0.6rem',
-                    color: sColor.textMuted,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    display: 'block',
-                    marginBottom: '4px',
-                  }}>
-                    MODULE TYPE
-                  </label>
+                  <label style={labelStyle}>MODULE TYPE</label>
                   <select
                     value={moduleFilter}
                     onChange={(e) => setModuleFilter(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '8px',
-                      fontFamily: sFont.mono,
-                      fontSize: '0.75rem',
-                      background: 'oklch(0.10 0.005 260)',
-                      border: `1px solid ${sColor.border}`,
-                      color: 'white',
-                      outline: 'none',
-                    }}
+                    style={selectStyle}
                   >
                     <option value="">All Types</option>
                     {filterOptions?.moduleTypes.map((m) => (
@@ -717,19 +1016,8 @@ export default function Calibrations() {
                   </select>
                 </div>
 
-                {/* Year range */}
                 <div>
-                  <label style={{
-                    fontFamily: sFont.mono,
-                    fontSize: '0.6rem',
-                    color: sColor.textMuted,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    display: 'block',
-                    marginBottom: '4px',
-                  }}>
-                    YEAR RANGE
-                  </label>
+                  <label style={labelStyle}>YEAR RANGE</label>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <input
                       type="number"
@@ -740,9 +1028,9 @@ export default function Calibrations() {
                       max={2030}
                       style={{
                         width: '80px',
-                        padding: '8px',
+                        padding: '10px 8px',
                         fontFamily: sFont.mono,
-                        fontSize: '0.75rem',
+                        fontSize: '0.8rem',
                         background: 'oklch(0.10 0.005 260)',
                         border: `1px solid ${sColor.border}`,
                         color: 'white',
@@ -759,9 +1047,9 @@ export default function Calibrations() {
                       max={2030}
                       style={{
                         width: '80px',
-                        padding: '8px',
+                        padding: '10px 8px',
                         fontFamily: sFont.mono,
-                        fontSize: '0.75rem',
+                        fontSize: '0.8rem',
                         background: 'oklch(0.10 0.005 260)',
                         border: `1px solid ${sColor.border}`,
                         color: 'white',
@@ -790,50 +1078,6 @@ export default function Calibrations() {
                 {debouncedQuery && ` for "${debouncedQuery}"`}
                 {moduleFilter && ` | ${moduleFilter}`}
               </span>
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                  <button
-                    onClick={() => setPage(Math.max(0, page - 1))}
-                    disabled={page === 0}
-                    style={{
-                      padding: '4px 10px',
-                      fontFamily: sFont.mono,
-                      fontSize: '0.65rem',
-                      background: 'transparent',
-                      border: `1px solid ${sColor.border}`,
-                      color: page === 0 ? sColor.textMuted : sColor.textDim,
-                      cursor: page === 0 ? 'default' : 'pointer',
-                      opacity: page === 0 ? 0.5 : 1,
-                    }}
-                  >
-                    PREV
-                  </button>
-                  <span style={{
-                    fontFamily: sFont.mono,
-                    fontSize: '0.65rem',
-                    color: sColor.textDim,
-                    padding: '0 8px',
-                  }}>
-                    {page + 1} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                    disabled={page >= totalPages - 1}
-                    style={{
-                      padding: '4px 10px',
-                      fontFamily: sFont.mono,
-                      fontSize: '0.65rem',
-                      background: 'transparent',
-                      border: `1px solid ${sColor.border}`,
-                      color: page >= totalPages - 1 ? sColor.textMuted : sColor.textDim,
-                      cursor: page >= totalPages - 1 ? 'default' : 'pointer',
-                      opacity: page >= totalPages - 1 ? 0.5 : 1,
-                    }}
-                  >
-                    NEXT
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Loading state */}
@@ -880,59 +1124,7 @@ export default function Calibrations() {
               </div>
             )}
 
-            {/* Bottom pagination */}
-            {totalPages > 1 && !isLoading && (
-              <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                gap: '4px',
-                marginTop: '16px',
-                paddingBottom: '32px',
-              }}>
-                <button
-                  onClick={() => setPage(Math.max(0, page - 1))}
-                  disabled={page === 0}
-                  style={{
-                    padding: '6px 16px',
-                    fontFamily: sFont.mono,
-                    fontSize: '0.7rem',
-                    background: 'transparent',
-                    border: `1px solid ${sColor.border}`,
-                    color: page === 0 ? sColor.textMuted : sColor.textDim,
-                    cursor: page === 0 ? 'default' : 'pointer',
-                    opacity: page === 0 ? 0.5 : 1,
-                  }}
-                >
-                  PREV
-                </button>
-                <span style={{
-                  fontFamily: sFont.mono,
-                  fontSize: '0.7rem',
-                  color: sColor.textDim,
-                  padding: '6px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}>
-                  PAGE {page + 1} OF {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                  disabled={page >= totalPages - 1}
-                  style={{
-                    padding: '6px 16px',
-                    fontFamily: sFont.mono,
-                    fontSize: '0.7rem',
-                    background: 'transparent',
-                    border: `1px solid ${sColor.border}`,
-                    color: page >= totalPages - 1 ? sColor.textMuted : sColor.textDim,
-                    cursor: page >= totalPages - 1 ? 'default' : 'pointer',
-                    opacity: page >= totalPages - 1 ? 0.5 : 1,
-                  }}
-                >
-                  NEXT
-                </button>
-              </div>
-            )}
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
           </>
         )}
 

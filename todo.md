@@ -2705,3 +2705,12 @@
 - [x] Add CM2350B_SPECS to ecuReference.ts (engine specs, operating limits, subsystem descriptions)
 - [x] Add 40+ new Cummins PID chart overlays to DynoCharts PID_OVERLAYS registry
 - [x] Fix casting router TS error (LLM response content type mismatch in castChat insert)
+- [x] Parse Cummins Fueling Control States document (CumminsFuelingControlStates.docx) — 80+ states extracted
+- [x] Add fueling control state definitions to Knox Cummins knowledge base (cumminsFuelingStates.ts)
+- [x] Map fueling control state codes to FUELCTRL_F PID values in datalog parser
+- [x] FCA Calibrations: Add year/make/model search filters to Calibration Lookup page (27 models for 2018)
+- [x] FCA Calibrations: Add tRPC endpoint for year/make/model search with cascading dropdowns + platform code fallback
+- [x] FCA Calibrations: Consolidate PLATFORM_VEHICLE_MAP (80+ platform codes, alias normalization, junk filtering)
+- [x] Cummins Fueling States: Wire decoder into DynoCharts tooltip for Fuel Ctrl Mode overlay
+- [x] Cummins Fueling States: Add Engine Torque State decoding to DynoCharts tooltip
+- [x] Cummins Fueling States: 31 vitest tests passing

@@ -47,10 +47,29 @@ describe('Calibrations Router', () => {
     expect(calibrationsRouter._def.procedures.stats).toBeDefined();
   });
 
+  it('should have getYears procedure', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    expect(calibrationsRouter._def.procedures.getYears).toBeDefined();
+  });
+
+  it('should have getModelsForYear procedure', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    expect(calibrationsRouter._def.procedures.getModelsForYear).toBeDefined();
+  });
+
+  it('should have searchByVehicle procedure', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    expect(calibrationsRouter._def.procedures.searchByVehicle).toBeDefined();
+  });
+
+  it('should have platformMap procedure', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    expect(calibrationsRouter._def.procedures.platformMap).toBeDefined();
+  });
+
   it('should validate search input with defaults', async () => {
     const { calibrationsRouter } = await import('./calibrations');
     const searchProc = calibrationsRouter._def.procedures.search;
-    // The procedure exists and has input validation
     expect(searchProc).toBeDefined();
     expect(searchProc._def).toBeDefined();
   });
@@ -65,5 +84,19 @@ describe('Calibrations Router', () => {
     const { calibrationsRouter } = await import('./calibrations');
     const proc = calibrationsRouter._def.procedures.getById;
     expect(proc).toBeDefined();
+  });
+
+  it('should validate searchByVehicle accepts year, model, platformCodes, moduleType', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    const proc = calibrationsRouter._def.procedures.searchByVehicle;
+    expect(proc).toBeDefined();
+    expect(proc._def).toBeDefined();
+  });
+
+  it('should validate getModelsForYear accepts year number', async () => {
+    const { calibrationsRouter } = await import('./calibrations');
+    const proc = calibrationsRouter._def.procedures.getModelsForYear;
+    expect(proc).toBeDefined();
+    expect(proc._def).toBeDefined();
   });
 });

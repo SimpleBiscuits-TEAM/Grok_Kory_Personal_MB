@@ -36,6 +36,7 @@ import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { DiagnosticReport } from '@/lib/diagnostics';
 import { AlertCircle } from 'lucide-react';
 import { ZoomableChart } from './ZoomableChart';
+import { decodeFuelingState } from '@/lib/cumminsFuelingStates';
 
 export interface DynoChartHandle {
   jumpToTime: (startMin: number, endMin: number) => void;
@@ -1041,15 +1042,37 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                     <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6 }}>
                       {label ? `${Number(label).toFixed(0)} RPM` : ''}
                     </div>
-                    {payload.map((p: any, i: number) =>
-                      p.value != null && (
+                    {payload.map((p: any, i: number) => {
+                      if (p.value == null) return null;
+                      // Decode fueling control state for Cummins datalogs
+                      const isFuelCtrl = p.dataKey === 'fuelControlMode' || (p.name && p.name.toLowerCase().includes('fuel ctrl'));
+                      const isEngineTorqueState = p.dataKey === 'engineTorqueState';
+                      let displayValue = typeof p.value === 'number' ? p.value.toFixed(1) : p.value;
+                      let decodedLabel = '';
+                      if (isFuelCtrl && typeof p.value === 'number') {
+                        const state = decodeFuelingState(Math.round(p.value));
+                        if (state) decodedLabel = state.name;
+                      }
+                      if (isEngineTorqueState && typeof p.value === 'number') {
+                        const torqueStates: Record<number, string> = {
+                          0: 'No Request', 1: 'Accel Pedal', 2: 'Cruise Control',
+                          3: 'PTO', 4: 'Road Speed Governor', 5: 'Engine Protection',
+                        };
+                        decodedLabel = torqueStates[Math.round(p.value)] || '';
+                      }
+                      return (
                         <div key={i} style={{ color: p.color, marginBottom: 2 }}>
                           {p.name}: <span style={{ color: '#fff', fontWeight: 'bold' }}>
-                            {typeof p.value === 'number' ? p.value.toFixed(1) : p.value}
+                            {displayValue}
                           </span>
+                          {decodedLabel && (
+                            <span style={{ color: '#ffaa00', fontSize: 10, marginLeft: 4 }}>
+                              ({decodedLabel})
+                            </span>
+                          )}
                         </div>
-                      )
-                    )}
+                      );
+                    })}
                   </div>
                 );
               }}
