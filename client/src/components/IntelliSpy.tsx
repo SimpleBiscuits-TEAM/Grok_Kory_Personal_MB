@@ -564,6 +564,13 @@ export default function IntelliSpy() {
               const msg = JSON.parse(event.data);
               if (msg.type === 'connected') {
                 clearTimeout(timer);
+                // Read the bridge's active protocol instead of overwriting it
+                if (msg.active_protocol) {
+                  const bridgeProto = msg.active_protocol as SupportedProtocol;
+                  if (ALL_PROTOCOLS[bridgeProto]) {
+                    setActiveProtocol(bridgeProto);
+                  }
+                }
                 resolve(socket);
               }
             } catch { /* ignore */ }
@@ -598,12 +605,18 @@ export default function IntelliSpy() {
           setStatus('error');
         };
 
-        // Send initial protocol setting
-        ws.send(JSON.stringify({
-          type: 'set_protocol',
-          protocol: activeProtocol,
-          bitrate: ALL_PROTOCOLS[activeProtocol]?.defaultBitrate || 500000,
-        }));
+        // Do NOT send set_protocol on connect — it kills other clients' monitors
+        // and reinitializes the CAN bus. Instead, read the bridge's active protocol
+        // from the 'connected' message above. User can switch protocol manually later.
+
+        // Auto-start bus monitoring so traffic flows immediately
+        ws.send(JSON.stringify({ type: 'start_monitor' }));
+        setStatus('monitoring');
+        setCaptureStartTime(Date.now());
+        frameCountRef.current = 0;
+        setFlashProgress(createFlashProgress());
+        flashProgressRef.current = createFlashProgress();
+        startStatsTimer();
 
         break;
       } catch {
@@ -614,7 +627,7 @@ export default function IntelliSpy() {
     if (!connected) {
       setStatus('error');
     }
-  }, [activeProtocol, detectedBridgeUrl]);
+  }, [detectedBridgeUrl]);
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {

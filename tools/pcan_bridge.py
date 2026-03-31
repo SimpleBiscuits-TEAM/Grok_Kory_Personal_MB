@@ -1252,14 +1252,22 @@ class PCANBridge:
             new_bitrate = msg.get("bitrate", PROTOCOL_BITRATES.get(new_proto, 500000))
             is_fd = new_proto == 'canfd'
 
-            # Stop monitor clients before switching
-            for ws, info in list(self._monitor_clients.items()):
-                info["task"].cancel()
-            self._monitor_clients.clear()
+            # Only stop the REQUESTING client's monitor, not ALL monitors.
+            # This allows Datalogger and IntelliSpy to run simultaneously.
+            requesting_ws = msg.get("_ws")
+            if requesting_ws and requesting_ws in self._monitor_clients:
+                self._monitor_clients[requesting_ws]["task"].cancel()
+                del self._monitor_clients[requesting_ws]
 
-            # Reinitialize CAN bus if bitrate or FD mode changed
+            # Reinitialize CAN bus only if bitrate or FD mode actually changed
             needs_reinit = (new_bitrate != self.bitrate) or (is_fd != self.can_fd_enabled) or not self.can_initialized
             if needs_reinit:
+                # If other monitors are active, we must stop them too since CAN bus is being reinitialized
+                if self._monitor_clients:
+                    log.warning(f"Protocol switch requires CAN reinit — stopping {len(self._monitor_clients)} other monitor(s)")
+                    for ws, info in list(self._monitor_clients.items()):
+                        info["task"].cancel()
+                    self._monitor_clients.clear()
                 await self._stop_all_protocols()
                 success = await self._ensure_can_bus(new_bitrate, is_fd)
                 if not success:

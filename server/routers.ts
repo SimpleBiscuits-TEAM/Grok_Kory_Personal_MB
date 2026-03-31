@@ -26,6 +26,7 @@ import { pitchRouter } from "./routers/pitch";
 import { talonOcrRouter } from "./routers/talonOcr";
 import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
+import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback } from "./db";
 import { z } from "zod";
@@ -113,6 +114,9 @@ export const appRouter = router({
 
   // IntelliSpy Knox-powered CAN bus analysis
   intellispy: intellispyRouter,
+
+  // Knox Diagnostic Agent (complaint-to-PID mapping + analysis)
+  diagnosticAgent: diagnosticAgentRouter,
 
   // Feedback / Error Reports
   feedback: router({

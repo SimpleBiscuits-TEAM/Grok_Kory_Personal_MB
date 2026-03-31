@@ -832,9 +832,10 @@ function SessionList({
 
 export interface DataloggerPanelProps {
   onOpenInAnalyzer?: (csvData: string, filename: string) => void;
+  injectedPids?: { pid: number; service: number; name: string; shortName: string }[];
 }
 
-export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelProps) {
+export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
   // Connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo | null>(null);
@@ -848,6 +849,17 @@ export default function DataloggerPanel({ onOpenInAnalyzer }: DataloggerPanelPro
 
   // PID selection
   const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
+
+  // Handle PIDs injected from Knox Diagnostic Agent
+  useEffect(() => {
+    if (injectedPids && injectedPids.length > 0) {
+      setSelectedPids(prev => {
+        const next = new Set(prev);
+        injectedPids.forEach(p => next.add(p.pid));
+        return next;
+      });
+    }
+  }, [injectedPids]);
 
   // Custom presets
   const [customPresets, setCustomPresets] = useState<PIDPreset[]>(() => loadCustomPresets());

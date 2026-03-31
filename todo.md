@@ -2757,3 +2757,20 @@
 - [x] Fix analyzer to parse 2024+ L5P Banks iDash log format (Latin-1 encoding, EGT sentinel filtering)
 - [x] Add 2024-2026 L5P Banks iDash Full PID layout as selectable preset in Datalogger
 - [x] Export all Manus knowledge items to docs/knowledge-base.md as permanent unlimited repo-hosted knowledge base
+- [x] Analyze 2020 L5P datalog + stock vs tuned calibration for rapid soot loading / reduced engine power diagnosis (documented in docs/diagnostic_analysis_2020_l5p_soot.md)
+- [x] AI Diagnostic Helper: Build new tab in Advanced mode for guided diagnosis (DIAGNOSTIC tab)
+- [x] AI Diagnostic Helper: Auto-populate missing PIDs from A2L when problem is described
+- [ ] AI Diagnostic Helper: Show fault visualization (like fault graph) in same window (Phase 2)
+- [ ] AI Diagnostic Helper: Replay/explain findings with voice-like narration (Phase 2)
+- [x] AI Diagnostic Helper: Integrate with Datalogger for live diagnosis (PID injection from Diagnostic → Datalogger tab)
+- [x] AI Diagnostic Helper: Tell customer what test conditions are needed if not met (TestConditionCard)
+- [ ] Knox: Train on emissions control strategies (DPF regen, soot model, DEF dosing, NOx reduction) from A2L documentation
+- [ ] Knox: Cross-reference calibration changes with A2L measurements to diagnose emissions issues
+- [x] Knox Diagnostic Agent: Build chat interface that greets customer "What are you trying to figure out?"
+- [x] Knox Diagnostic Agent: Map customer complaints to required PID channels from A2L knowledge
+- [x] Knox Diagnostic Agent: Auto-populate PIDs in datalogger when customer accepts suggestions
+- [x] Knox Diagnostic Agent: Analyze uploaded datalogs with available PIDs, suggest additional PIDs if needed
+- [ ] Knox Diagnostic Agent: Fault visualization with problem area highlighting and replay explanation (Phase 2)
+- [x] Knox Diagnostic Agent: Server-side tRPC router with LLM-powered diagnosis (diagnosticAgent.ts)
+- [x] Knox Diagnostic Agent: Test condition guidance (tell customer what driving conditions are needed)
+- [x] IntelliSpy: Fix CAN traffic — removed destructive set_protocol on connect, auto-starts bus monitoring

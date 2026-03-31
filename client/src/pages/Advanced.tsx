@@ -67,6 +67,7 @@ import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
 import UserManagementPanel from '@/components/UserManagementPanel';
 import HondaTalonTuner from '@/components/HondaTalonTuner';
+import KnoxDiagnosticAgent from '@/components/KnoxDiagnosticAgent';
 import { WP8ParseResult } from '@/lib/wp8Parser';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
@@ -1356,11 +1357,12 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'calibrations';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'calibrations' | 'diagnostic';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
+  { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
@@ -1406,6 +1408,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
   const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const [injectedWP8, setInjectedWP8] = useState<WP8ParseResult | null>(null);
+  const [diagnosticPids, setDiagnosticPids] = useState<{ pid: number; service: number; name: string; shortName: string }[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Dynamically add Honda Talon tab when WP8 data is loaded or activeTab is talon
   const talonTab = { id: 'talon' as TabId, label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> };
@@ -1627,7 +1630,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             {devSubTab === 'notifprefs' && <NotificationPrefsPanel />}
           </div>
         )}
-        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} /></div>}
+        {activeTab === 'diagnostic' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 120px)' }}><KnoxDiagnosticAgent onInjectPids={(pids) => { setDiagnosticPids(pids); setActiveTab('datalogger'); }} onSwitchToDatalogger={() => setActiveTab('datalogger')} onSwitchToAnalyzer={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
         <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
