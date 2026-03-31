@@ -354,9 +354,9 @@ export const CUMMINS_ECU_DEFINITIONS: Map<CumminsECUType, CumminsECUDefinition> 
     'CM2200',
     {
       type: 'CM2200',
-      productId: 'CMD',
-      moduleName: 'CM2200',
-      marketingName: 'Dodge RAM 6.7L (2010-2012)',
+      productId: 'BCA',
+      moduleName: 'CM22xx',
+      marketingName: 'Dodge RAM 6.7L ISB (2007-2012)',
       ramStart: 0x0,
       ramEnd: 0xfffff,
       flashStart: 0x100000,

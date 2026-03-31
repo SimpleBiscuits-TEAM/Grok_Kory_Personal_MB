@@ -7074,6 +7074,60 @@ export const CM2350B_SPECS = {
   },
 };
 
+export const CM2200_SPECS = {
+  engine: {
+    name: 'Cummins ISB 6.7L Turbodiesel I6 (CM2200 BCA)',
+    displacement: '6.7L (408 cu in)',
+    configuration: 'Inline-6',
+    bore: '107 mm (4.21 in)',
+    stroke: '124 mm (4.88 in)',
+    compressionRatio: '17.3:1',
+    injectionSystem: 'Bosch CP3 High-Pressure Common Rail',
+    maxRailPressure: '26,100 psi (180 MPa)',
+    turbocharger: 'Holset HE351VE Variable Geometry Turbocharger (VGT)',
+    intercooler: 'Air-to-Air Charge Air Cooler (CAC)',
+    aftertreatment: 'DOC + DPF (2007.5-2009) / DOC + DPF + SCR (2010-2012)',
+    ecuPart: 'CM2200 BCA (2007.5-2012 Ram 2500/3500)',
+  },
+  performance: {
+    stockHp: 350,
+    stockTorque: 650,
+    stockTorqueUnit: 'lb\u00b7ft',
+    peakTorqueRpm: 1500,
+    peakHpRpm: 2800,
+    redline: 3200,
+    idleRpm: 700,
+    maxBoostStock: 32,
+  },
+  operatingLimits: {
+    maxEgt1_F: 1400,
+    maxRailPressure_psi: 26100,
+    maxBoost_psi: 42,
+    mafIdleNormal_gs: 14,
+    tccSlipWarning_rpm: 50,
+    tccSlipCritical_rpm: 200,
+    dpfRegenTrigger_pct: 100,
+  },
+  subsystems: {
+    FRPR: 'Fuel Rail Pressure Regulation \u2014 Bosch CP3 high-pressure pump (gear-driven, mechanical) with FCA (Fuel Control Actuator) solenoid for closed-loop rail pressure control. Max 26,100 psi. The CP3 is significantly more reliable than the later CP4.2 and is not susceptible to the same catastrophic failure modes from fuel contamination.',
+    INJC: 'Fuel Injection Control \u2014 Bosch CRIN 2.2 solenoid injectors with up to 5 injection events per cycle (pilot 1, pilot 2, main, post 1, post 2). Injection timing and quantity controlled by CM2200 ECM based on torque demand and emissions targets.',
+    BSTR: 'Boost Pressure Regulation \u2014 Holset HE351VE VGT with electronically actuated vane ring. The ECM modulates vane position for target boost pressure. Stock max ~32 psi. The VGT also provides exhaust braking capability.',
+    EGRV: 'EGR Valve Control \u2014 Electronically controlled EGR valve with position feedback. The CM2200 uses a cooled EGR system to reduce NOx. EGR fraction is determined based on fuel rate, ambient conditions, and aftertreatment status.',
+    DPFR: 'DPF Regeneration Control \u2014 Active regeneration uses post-injection fuel dosing (7th injector on 2007.5-2009, in-cylinder post-injection on 2010+) to raise exhaust temps above 1,100\u00b0F for soot oxidation. The CM2200 monitors soot load via differential pressure sensor across the DPF.',
+    SCRR: 'SCR / DEF System (2010-2012 only) \u2014 Selective Catalytic Reduction uses DEF injection to convert NOx to N2 and H2O. 2007.5-2009 models do NOT have SCR. The CM2200 monitors SCR inlet/outlet NOx sensors and bed temperature for dosing control on 2010+ models.',
+    TCCR: 'Torque Converter Clutch Control \u2014 68RFE 6-speed automatic transmission (2007.5-2012). TCC lockup controlled via line pressure and duty cycle. Known for valve body issues and converter clutch failures under high torque loads.',
+  },
+  ecfgInfo: {
+    calibrationVersion: '22.10.5.36',
+    productId: 'BCA',
+    moduleName: 'CM22xx',
+    partNumber: '5293869',
+    totalParameters: 17160,
+    tuningRelevant: 12087,
+    description: 'Core-II Software - CHRYSLER_BH_FLASH_REDUCTION_MY10 - CM2200',
+  },
+};
+
 // ─── HEALTH SCORING WEIGHTS ───────────────────────────────────────────────────
 
 export const HEALTH_WEIGHTS = {

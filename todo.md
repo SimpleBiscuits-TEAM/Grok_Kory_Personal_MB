@@ -2716,6 +2716,6 @@
 - [x] Cummins Fueling States: 31 vitest tests passing
 - [x] Move Calibrations page from top-level nav to Advanced tab (navigates to /calibrations when clicked)
 - [x] Tasks page: Restrict /tasks route to admin-only access (role-based guard, hidden from non-admin nav)
-- [ ] CM2200 Config: Locate and parse CM2200 ECU config file for Knox
-- [ ] CM2200 Config: Add CM2200 ECU definition to cumminsParameterDatabase.ts
-- [ ] CM2200 Config: Add CM2200_SPECS to ecuReference.ts
+- [x] CM2200 Config: Parse CM2200 BCA ECFG (17,160 params, 12,087 tuning-relevant)
+- [x] CM2200 Config: Update CM2200 ECU definition in cumminsParameterDatabase.ts (BCA product ID, CM22xx module, 2007-2012)
+- [x] CM2200 Config: Add CM2200_SPECS to ecuReference.ts (CP3 pump, CRIN 2.2 injectors, 350hp/650tq, 68RFE trans)
