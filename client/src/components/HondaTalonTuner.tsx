@@ -15,10 +15,11 @@ import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
-  Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon
+  Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
+  GitCompare, ArrowRight
 } from 'lucide-react';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
-import TalonLogViewer from '@/components/TalonLogViewer';
+import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
@@ -152,6 +153,59 @@ function getExpectedTableType(key: string): { mode: 'alphaN' | 'speedDensity'; c
 }
 
 // ─── Fuel Map Card Component ────────────────────────────────────────────────
+// ─── Overlay: find nearest cell in a fuel map for given RPM + axis value ─────
+interface CellOverlay {
+  row: number;       // nearest RPM row index
+  col: number;       // nearest TPS/MAP column index
+  lambda1: number;   // actual Lambda for Cyl 1
+  lambda2: number;   // actual Lambda for Cyl 2
+  targetLambda: number; // target Lambda for this column
+  deviation1: number;   // lambda1 - targetLambda
+  deviation2: number;   // lambda2 - targetLambda
+  isActive: boolean;    // true if this map's mode matches the current Alpha-N state
+}
+
+function findNearestIdx(axis: number[], value: number): number {
+  if (axis.length === 0) return 0;
+  let best = 0;
+  let bestDist = Math.abs(axis[0] - value);
+  for (let i = 1; i < axis.length; i++) {
+    const d = Math.abs(axis[i] - value);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
+}
+
+function computeCellOverlay(
+  map: FuelMap | null,
+  cursor: TalonCursorData | null,
+  mapKey: string,
+): CellOverlay | null {
+  if (!map || !cursor) return null;
+  const isAlphaN = mapKey.startsWith('alphaN');
+  const isActive = isAlphaN ? cursor.alphaN === 1 : cursor.alphaN !== 1;
+  const axisVal = isAlphaN ? cursor.tps : cursor.mapKpa;
+  const row = findNearestIdx(map.rowAxis, cursor.rpm);
+  const col = findNearestIdx(map.colAxis, axisVal);
+  const tgt = col < map.targetLambda.length ? map.targetLambda[col] : 0.85;
+  return {
+    row, col,
+    lambda1: cursor.lambda1,
+    lambda2: cursor.lambda2,
+    targetLambda: tgt,
+    deviation1: cursor.lambda1 - tgt,
+    deviation2: cursor.lambda2 - tgt,
+    isActive,
+  };
+}
+
+function getDeviationColor(deviation: number): string {
+  const abs = Math.abs(deviation);
+  if (abs <= 0.02) return 'oklch(0.65 0.20 145)'; // green — on target
+  if (abs <= 0.05) return 'oklch(0.80 0.18 90)';  // yellow — slight deviation
+  return 'oklch(0.55 0.24 25)';                    // red — significant deviation
+}
+
 function FuelMapCard({
   config,
   map,
@@ -159,6 +213,7 @@ function FuelMapCard({
   onClear,
   onCellEdit,
   onTargetLambdaEdit,
+  overlay,
 }: {
   config: typeof FUEL_MAP_CONFIGS[number];
   map: FuelMap | null;
@@ -166,6 +221,7 @@ function FuelMapCard({
   onClear: () => void;
   onCellEdit: (row: number, col: number, value: number) => void;
   onTargetLambdaEdit: (col: number, value: number) => void;
+  overlay?: CellOverlay | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
@@ -717,12 +773,18 @@ function FuelMapCard({
                           style={{
                             padding: '2px 4px',
                             textAlign: 'center',
-                            background: getHeatColor(val, min, max),
+                            background: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
+                              ? getDeviationColor(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2)
+                              : getHeatColor(val, min, max),
                             color: 'white',
                             cursor: 'pointer',
                             minWidth: '40px',
                             fontSize: '0.68rem',
-                            border: isEditing ? `2px solid ${sColor.redBright}` : '1px solid oklch(0.40 0.006 260)',
+                            border: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
+                              ? '3px solid white'
+                              : isEditing ? `2px solid ${sColor.redBright}` : '1px solid oklch(0.40 0.006 260)',
+                            boxShadow: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
+                              ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
                           }}
                         >
                           {isEditing ? (
@@ -753,7 +815,16 @@ function FuelMapCard({
           <div className="flex items-center gap-2 mt-2" style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
             <div style={{ width: 60, height: 8, background: 'linear-gradient(to right, oklch(0.35 0.12 145), oklch(0.50 0.18 90), oklch(0.35 0.22 25))', borderRadius: 2 }} />
             <span>{min.toFixed(1)}</span>
-            <span style={{ flex: 1, textAlign: 'center' }}>Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = future log-based tuning reference</span>
+            <span style={{ flex: 1, textAlign: 'center' }}>
+              Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = log-based tuning reference
+              {overlay?.isActive && (
+                <span style={{ marginLeft: 8, color: getDeviationColor(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2), fontWeight: 700 }}>
+                  | LIVE: λ={config.key.includes('cyl1') ? overlay.lambda1.toFixed(3) : overlay.lambda2.toFixed(3)}
+                  {' '}vs Target={overlay.targetLambda.toFixed(3)}
+                  {' '}(Δ={(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2) > 0 ? '+' : ''}{(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2).toFixed(3)})
+                </span>
+              )}
+            </span>
             <span>{max.toFixed(1)}</span>
           </div>
         </div>
@@ -762,9 +833,375 @@ function FuelMapCard({
   );
 }
 
+// ─── Fuel Map Compare Section ──────────────────────────────────────────────
+function getDiffColor(delta: number, maxAbs: number): string {
+  if (delta === 0) return 'transparent';
+  const norm = maxAbs > 0 ? Math.min(Math.abs(delta) / maxAbs, 1) : 0;
+  if (delta > 0) {
+    // Increase: green
+    const l = 0.20 + norm * 0.25;
+    return `oklch(${l} ${norm * 0.18} 145)`;
+  } else {
+    // Decrease: red
+    const l = 0.20 + norm * 0.25;
+    return `oklch(${l} ${norm * 0.22} 25)`;
+  }
+}
+
+function FuelMapCompareSection({
+  fuelMaps,
+  compareMaps,
+  onCompareLoad,
+  onCompareClear,
+}: {
+  fuelMaps: FuelMapState;
+  compareMaps: FuelMapState;
+  onCompareLoad: (key: keyof FuelMapState, map: FuelMap) => void;
+  onCompareClear: (key: keyof FuelMapState) => void;
+}) {
+  const [selectedMap, setSelectedMap] = useState<keyof FuelMapState>('alphaN_cyl1');
+  const [displayMode, setDisplayMode] = useState<'diff' | 'original' | 'compare'>('diff');
+  const ocrMutation = trpc.talonOcr.extractFuelTable.useMutation();
+  const pasteZoneRef = useRef<HTMLDivElement>(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+
+  const stockMap = fuelMaps[selectedMap];
+  const modMap = compareMaps[selectedMap];
+
+  // Compute diff data
+  const diffData = useMemo(() => {
+    if (!stockMap || !modMap) return null;
+    const rows = Math.min(stockMap.data.length, modMap.data.length);
+    const cols = rows > 0 ? Math.min(stockMap.data[0].length, modMap.data[0].length) : 0;
+    const deltas: number[][] = [];
+    let maxAbs = 0;
+    let totalChanged = 0;
+    let maxIncrease = 0;
+    let maxDecrease = 0;
+    for (let r = 0; r < rows; r++) {
+      const row: number[] = [];
+      for (let c = 0; c < cols; c++) {
+        const d = modMap.data[r][c] - stockMap.data[r][c];
+        row.push(d);
+        if (d !== 0) totalChanged++;
+        if (Math.abs(d) > maxAbs) maxAbs = Math.abs(d);
+        if (d > maxIncrease) maxIncrease = d;
+        if (d < maxDecrease) maxDecrease = d;
+      }
+      deltas.push(row);
+    }
+    return { deltas, maxAbs, totalChanged, totalCells: rows * cols, maxIncrease, maxDecrease, rows, cols };
+  }, [stockMap, modMap]);
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) return;
+        setOcrLoading(true);
+        try {
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const base64 = btoa(binary);
+          const result = await ocrMutation.mutateAsync({
+            imageBase64: base64,
+            mimeType: blob.type,
+            tableName: FUEL_MAP_CONFIGS.find(c => c.key === selectedMap)?.label,
+          });
+          if (result.success && result.data && result.rowAxis && result.colAxis) {
+            const map: FuelMap = {
+              name: result.tableName || 'Compare Table',
+              description: 'Imported via screenshot compare',
+              rowAxis: result.rowAxis,
+              colAxis: result.colAxis,
+              data: result.data,
+              targetLambda: result.colAxis.map(() => 0.85),
+              rowLabel: result.rowAxisLabel || 'RPM',
+              colLabel: result.colAxisLabel || 'Axis',
+              unit: result.unit || 'ms',
+            };
+            onCompareLoad(selectedMap, map);
+          }
+        } catch (err) {
+          console.error('OCR compare failed:', err);
+        } finally {
+          setOcrLoading(false);
+        }
+        return;
+      }
+    }
+  }, [ocrMutation, selectedMap, onCompareLoad]);
+
+  const configLabel = FUEL_MAP_CONFIGS.find(c => c.key === selectedMap)?.label || selectedMap;
+
+  return (
+    <div>
+      {/* Map selector + mode toggle */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        {FUEL_MAP_CONFIGS.map(cfg => (
+          <button
+            key={cfg.key}
+            onClick={() => setSelectedMap(cfg.key)}
+            style={{
+              background: selectedMap === cfg.key ? 'oklch(0.20 0.06 25)' : 'oklch(0.15 0.006 260)',
+              color: selectedMap === cfg.key ? sColor.redBright : sColor.textDim,
+              border: `1px solid ${selectedMap === cfg.key ? sColor.red : sColor.border}`,
+              borderRadius: '2px', padding: '6px 14px', cursor: 'pointer',
+              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.06em',
+            }}
+          >
+            {cfg.label.replace('Cylinder', 'CYL')}
+          </button>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          {(['diff', 'original', 'compare'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setDisplayMode(mode)}
+              style={{
+                background: displayMode === mode ? 'oklch(0.22 0.008 260)' : 'transparent',
+                color: displayMode === mode ? 'white' : sColor.textDim,
+                border: `1px solid ${displayMode === mode ? sColor.cyan : sColor.border}`,
+                borderRadius: '2px', padding: '4px 12px', cursor: 'pointer',
+                fontFamily: sFont.mono, fontSize: '0.7rem', textTransform: 'uppercase',
+              }}
+            >
+              {mode === 'diff' ? 'Δ DIFF' : mode === 'original' ? 'STOCK' : 'MODIFIED'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Two-panel layout: Stock (from fuel maps) vs Modified (paste compare) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        {/* Stock panel */}
+        <div style={{
+          background: sColor.card, border: `1px solid ${sColor.border}`,
+          borderRadius: '3px', padding: '12px',
+        }}>
+          <div className="flex items-center gap-2 mb-2">
+            <span style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: sColor.green, letterSpacing: '0.06em' }}>
+              STOCK (FROM FUEL MAPS TAB)
+            </span>
+          </div>
+          {stockMap ? (
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMid }}>
+              <span style={{ color: sColor.green }}>✓</span> {configLabel} loaded — {stockMap.data.length} rows × {stockMap.colAxis.length} cols
+            </div>
+          ) : (
+            <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, padding: '20px 0', textAlign: 'center' }}>
+              Load this map in the FUEL MAPS tab first
+            </div>
+          )}
+        </div>
+
+        {/* Modified panel — paste zone */}
+        <div
+          ref={pasteZoneRef}
+          tabIndex={0}
+          onPaste={handlePaste}
+          style={{
+            background: modMap ? sColor.card : 'oklch(0.12 0.02 25)',
+            border: `2px ${modMap ? 'solid' : 'dashed'} ${modMap ? sColor.border : sColor.red}`,
+            borderRadius: '3px', padding: '12px', cursor: 'pointer',
+            outline: 'none',
+          }}
+          onFocus={e => { e.currentTarget.style.borderColor = sColor.cyan; }}
+          onBlur={e => { e.currentTarget.style.borderColor = modMap ? sColor.border : sColor.red; }}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <span style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: sColor.redBright, letterSpacing: '0.06em' }}>
+              MODIFIED (PASTE SCREENSHOT)
+            </span>
+            {modMap && (
+              <button
+                onClick={() => onCompareClear(selectedMap)}
+                style={{ marginLeft: 'auto', background: 'none', border: 'none', color: sColor.textDim, cursor: 'pointer', fontSize: '0.7rem' }}
+              >
+                <Trash2 style={{ width: 14, height: 14 }} />
+              </button>
+            )}
+          </div>
+          {ocrLoading ? (
+            <div className="flex items-center gap-2" style={{ padding: '16px 0' }}>
+              <Loader2 style={{ width: 16, height: 16, color: sColor.cyan, animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.cyan }}>Extracting table from screenshot...</span>
+            </div>
+          ) : modMap ? (
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMid }}>
+              <span style={{ color: sColor.redBright }}>✓</span> Modified table loaded — {modMap.data.length} rows × {modMap.colAxis.length} cols
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <Camera style={{ width: 24, height: 24, color: sColor.red, margin: '0 auto 6px' }} />
+              <p style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.redBright, letterSpacing: '0.06em' }}>
+                CLICK HERE, THEN CTRL+V
+              </p>
+              <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim }}>
+                Paste a screenshot of the modified fuel table from C3 Tuning Software
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Diff summary */}
+      {diffData && (
+        <div style={{
+          background: 'oklch(0.14 0.008 260)', border: `1px solid ${sColor.border}`,
+          borderRadius: '3px', padding: '10px 16px', marginBottom: '12px',
+          display: 'flex', gap: '24px', flexWrap: 'wrap',
+          fontFamily: sFont.mono, fontSize: '0.75rem',
+        }}>
+          <span style={{ color: sColor.yellow }}>
+            CHANGED: {diffData.totalChanged}/{diffData.totalCells} cells ({((diffData.totalChanged / diffData.totalCells) * 100).toFixed(1)}%)
+          </span>
+          <span style={{ color: sColor.green }}>
+            MAX INCREASE: +{diffData.maxIncrease.toFixed(3)}
+          </span>
+          <span style={{ color: sColor.red }}>
+            MAX DECREASE: {diffData.maxDecrease.toFixed(3)}
+          </span>
+        </div>
+      )}
+
+      {/* Diff table */}
+      {stockMap && modMap && diffData && (
+        <div style={{ overflowX: 'auto', maxHeight: '520px', overflowY: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontFamily: sFont.mono, fontSize: '0.68rem' }}>
+            <thead>
+              <tr>
+                <th style={{
+                  padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                  fontSize: '0.72rem', position: 'sticky', top: 0, left: 0,
+                  background: sColor.card, zIndex: 3,
+                }}>
+                  {stockMap.rowLabel}\{stockMap.colLabel}
+                </th>
+                {stockMap.colAxis.slice(0, diffData.cols).map((v, i) => (
+                  <th key={i} style={{
+                    padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                    fontSize: '0.70rem', position: 'sticky', top: 0,
+                    background: sColor.card, zIndex: 2, textAlign: 'center',
+                  }}>
+                    {v}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {diffData.deltas.map((row, ri) => (
+                <tr key={ri}>
+                  <td style={{
+                    padding: '3px 6px', color: sColor.red, fontFamily: sFont.heading,
+                    fontSize: '0.70rem', position: 'sticky', left: 0,
+                    background: sColor.card, zIndex: 1,
+                  }}>
+                    {stockMap.rowAxis[ri]}
+                  </td>
+                  {row.map((delta, ci) => {
+                    const stockVal = stockMap.data[ri][ci];
+                    const modVal = modMap.data[ri]?.[ci] ?? stockVal;
+                    let cellText = '';
+                    let cellBg = 'transparent';
+                    let cellColor = 'white';
+
+                    if (displayMode === 'diff') {
+                      cellText = delta === 0 ? stockVal.toFixed(1) : `${delta > 0 ? '+' : ''}${delta.toFixed(3)}`;
+                      cellBg = getDiffColor(delta, diffData.maxAbs);
+                      cellColor = delta === 0 ? sColor.textDim : 'white';
+                    } else if (displayMode === 'original') {
+                      cellText = stockVal.toFixed(1);
+                      cellBg = delta !== 0 ? 'oklch(0.18 0.04 200)' : 'transparent';
+                      cellColor = delta !== 0 ? sColor.cyan : sColor.textDim;
+                    } else {
+                      cellText = modVal.toFixed(1);
+                      cellBg = delta !== 0 ? 'oklch(0.18 0.04 200)' : 'transparent';
+                      cellColor = delta !== 0 ? sColor.yellow : sColor.textDim;
+                    }
+
+                    return (
+                      <td
+                        key={ci}
+                        title={`Stock: ${stockVal.toFixed(3)} | Mod: ${modVal.toFixed(3)} | Δ: ${delta > 0 ? '+' : ''}${delta.toFixed(3)}`}
+                        style={{
+                          padding: '2px 4px',
+                          textAlign: 'center',
+                          background: cellBg,
+                          color: cellColor,
+                          minWidth: '42px',
+                          fontSize: '0.66rem',
+                          border: `1px solid oklch(0.25 0.006 260)`,
+                          fontWeight: delta !== 0 ? 600 : 400,
+                        }}
+                      >
+                        {cellText}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* No data message */}
+      {(!stockMap || !modMap) && !ocrLoading && (
+        <div style={{
+          background: sColor.card, border: `1px solid ${sColor.border}`,
+          borderRadius: '3px', padding: '32px', textAlign: 'center',
+        }}>
+          <GitCompare style={{ width: 32, height: 32, color: sColor.textDim, margin: '0 auto 8px' }} />
+          <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white', letterSpacing: '0.06em', marginBottom: '6px' }}>
+            FUEL TABLE DIFF / COMPARE
+          </h3>
+          <p style={{ fontFamily: sFont.body, fontSize: '0.82rem', color: sColor.textDim, maxWidth: '500px', margin: '0 auto' }}>
+            {!stockMap
+              ? `Load the ${configLabel} in the FUEL MAPS tab first (stock values), then paste a modified screenshot here.`
+              : `Paste a screenshot of the modified ${configLabel} from C3 Tuning Software above to see the diff.`
+            }
+          </p>
+          <div className="flex items-center justify-center gap-3 mt-4" style={{ fontFamily: sFont.mono, fontSize: '0.72rem', color: sColor.textDim }}>
+            <span style={{ color: sColor.green }}>STOCK (Fuel Maps tab)</span>
+            <ArrowRight style={{ width: 14, height: 14 }} />
+            <span style={{ color: sColor.redBright }}>MODIFIED (Paste here)</span>
+            <ArrowRight style={{ width: 14, height: 14 }} />
+            <span style={{ color: sColor.yellow }}>COLOR-CODED DIFF</span>
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      {diffData && (
+        <div className="flex items-center gap-4 mt-3" style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
+          <div className="flex items-center gap-1">
+            <div style={{ width: 12, height: 12, background: 'oklch(0.35 0.18 145)', borderRadius: 1 }} />
+            <span>Increase</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div style={{ width: 12, height: 12, background: 'oklch(0.35 0.22 25)', borderRadius: 1 }} />
+            <span>Decrease</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div style={{ width: 12, height: 12, background: 'transparent', border: '1px solid oklch(0.25 0.006 260)', borderRadius: 1 }} />
+            <span>No change</span>
+          </div>
+          <span style={{ marginLeft: 'auto' }}>Hover cells for Stock → Mod → Δ tooltip</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── WP8 Datalog Viewer — now uses the HPTuners/Dynojet hybrid TalonLogViewer ─
-function WP8DatalogViewer({ wp8Data }: { wp8Data: WP8ParseResult }) {
-  return <TalonLogViewer wp8Data={wp8Data} />;
+function WP8DatalogViewer({ wp8Data, onCursorData }: { wp8Data: WP8ParseResult; onCursorData?: (data: TalonCursorData | null) => void }) {
+  return <TalonLogViewer wp8Data={wp8Data} onCursorData={onCursorData} />;
 }
 
 // ─── Main Honda Talon Tuner Component ───────────────────────────────────────
@@ -782,7 +1219,20 @@ export default function HondaTalonTuner({
     speedDensity_cyl1: null,
     speedDensity_cyl2: null,
   });
-  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps'>('fuelmaps');
+  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare'>('fuelmaps');
+  const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
+
+  // Compare state: stock vs modified for each map slot
+  const [compareMaps, setCompareMaps] = useState<FuelMapState>({
+    alphaN_cyl1: null, alphaN_cyl2: null,
+    speedDensity_cyl1: null, speedDensity_cyl2: null,
+  });
+  const handleCompareMapLoad = useCallback((key: keyof FuelMapState, map: FuelMap) => {
+    setCompareMaps(prev => ({ ...prev, [key]: map }));
+  }, []);
+  const handleCompareMapClear = useCallback((key: keyof FuelMapState) => {
+    setCompareMaps(prev => ({ ...prev, [key]: null }));
+  }, []);
   const wp8FileRef = useRef<HTMLInputElement>(null);
 
   // Update if parent passes new data
@@ -917,6 +1367,19 @@ export default function HondaTalonTuner({
         >
           <Activity style={{ width: 16, height: 16 }} />DATALOG {localWP8 && `(${localWP8.totalRows})`}
         </button>
+        <button
+          onClick={() => setActiveSection('compare')}
+          style={{
+            background: activeSection === 'compare' ? 'oklch(0.18 0.008 260)' : 'transparent',
+            color: activeSection === 'compare' ? 'white' : sColor.textDim,
+            border: `1px solid ${activeSection === 'compare' ? sColor.red : sColor.border}`,
+            borderRadius: '2px', padding: '8px 20px', cursor: 'pointer',
+            fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}
+        >
+          <GitCompare style={{ width: 16, height: 16 }} />COMPARE
+        </button>
       </div>
 
       {/* Fuel Maps Section */}
@@ -931,16 +1394,27 @@ export default function HondaTalonTuner({
               onClear={() => handleFuelMapClear(config.key)}
               onCellEdit={(row, col, val) => handleCellEdit(config.key, row, col, val)}
               onTargetLambdaEdit={(col, val) => handleTargetLambdaEdit(config.key, col, val)}
+              overlay={computeCellOverlay(fuelMaps[config.key], cursorData, config.key)}
             />
           ))}
         </div>
+      )}
+
+      {/* Compare Section */}
+      {activeSection === 'compare' && (
+        <FuelMapCompareSection
+          fuelMaps={fuelMaps}
+          compareMaps={compareMaps}
+          onCompareLoad={handleCompareMapLoad}
+          onCompareClear={handleCompareMapClear}
+        />
       )}
 
       {/* Datalog Section */}
       {activeSection === 'datalog' && (
         <>
           {localWP8 ? (
-            <WP8DatalogViewer wp8Data={localWP8} />
+            <WP8DatalogViewer wp8Data={localWP8} onCursorData={setCursorData} />
           ) : (
             <div style={{
               background: sColor.card,

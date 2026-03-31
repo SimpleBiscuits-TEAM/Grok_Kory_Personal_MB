@@ -447,7 +447,20 @@ function ChartSection({
 }
 
 // ─── Main Log Viewer Component ──────────────────────────────────────────────
-export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult }) {
+export interface TalonCursorData {
+  rpm: number;
+  tps: number;
+  mapKpa: number;
+  afr1: number;
+  afr2: number;
+  lambda1: number;
+  lambda2: number;
+  alphaN: number; // 1 = Alpha-N active, 0 = Speed Density active
+  sampleIdx: number;
+  timestamp: number;
+}
+
+export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8ParseResult; onCursorData?: (data: TalonCursorData | null) => void }) {
   const keyChannels = useMemo(() => getHondaTalonKeyChannels(wp8Data), [wp8Data]);
 
   // Section channel assignments (4 sections, each up to 4 channels)
@@ -497,6 +510,31 @@ export default function TalonLogViewer({ wp8Data }: { wp8Data: WP8ParseResult })
 
   // Cursor position (synced across all sections)
   const [cursorIdx, setCursorIdx] = useState<number | null>(null);
+
+  // Fire onCursorData callback whenever cursor moves
+  useEffect(() => {
+    if (!onCursorData) return;
+    if (cursorIdx === null || cursorIdx >= wp8Data.rows.length) {
+      onCursorData(null);
+      return;
+    }
+    const row = wp8Data.rows[cursorIdx];
+    const v = (idx: number) => idx >= 0 && idx < row.values.length ? row.values[idx] : 0;
+    const afr1Raw = v(keyChannels.afr1);
+    const afr2Raw = v(keyChannels.afr2);
+    onCursorData({
+      rpm: v(keyChannels.engineSpeed),
+      tps: v(keyChannels.throttlePosition),
+      mapKpa: v(keyChannels.map),
+      afr1: afr1Raw,
+      afr2: afr2Raw,
+      lambda1: afr1Raw / 14.7,
+      lambda2: afr2Raw / 14.7,
+      alphaN: v(keyChannels.alphaN),
+      sampleIdx: cursorIdx,
+      timestamp: row.timestamp,
+    });
+  }, [cursorIdx, wp8Data, keyChannels, onCursorData]);
 
   // Channel search
   const [channelSearch, setChannelSearch] = useState('');

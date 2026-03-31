@@ -2670,3 +2670,11 @@
 - [ ] AFR→Lambda conversion in log viewer (AFR1 / 14.7, AFR2 / 14.7)
 - [ ] Alpha-N channel indicator — when Alpha-N = 1, show Alpha-N tables active; else Speed Density active
 - [ ] Encode Honda Talon datalog review logic into Knox knowledge base (Alpha-N mode detection, AFR→Lambda, fuel table cross-reference rules)
+- [ ] Log-to-Map Cell Overlay: highlight active fuel table cells during datalog, color by Lambda deviation
+- [ ] Log-to-Map: determine active mode (Alpha-N vs Speed Density) from Alpha-N channel
+- [ ] Log-to-Map: map RPM + TPS/MAP to nearest fuel table cell
+- [ ] Log-to-Map: color cells green (on target), yellow (slight deviation), red (significant lean/rich)
+- [ ] Log-to-Map: sync overlay with TalonLogViewer cursor position
+- [ ] Fuel Table Diff/Compare: paste two screenshots side-by-side
+- [ ] Fuel Table Diff/Compare: color-coded difference map showing changed cells
+- [ ] Fuel Table Diff/Compare: show delta values (new - old) in each cell
