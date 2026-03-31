@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, decimal, json } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -1007,3 +1007,40 @@ export const fleetMaintenance = mysqlTable("fleet_maintenance", {
 
 export type FleetMaintenance = typeof fleetMaintenance.$inferSelect;
 export type InsertFleetMaintenance = typeof fleetMaintenance.$inferInsert;
+
+// ── Knox ECU File Library ──────────────────────────────────────────────────
+/**
+ * Stores uploaded ECU definition files (A2L, VST, H32, ATI, VBF, C source).
+ * Files are stored in S3; this table holds metadata + analysis results.
+ * Used by Erika for learning ECU structures and building definition files.
+ */
+export const knoxFiles = mysqlTable("knox_files", {
+  id: int("id").autoincrement().primaryKey(),
+  filename: varchar("filename", { length: 512 }).notNull(),
+  fileType: varchar("fileType", { length: 32 }).notNull(), // a2l, binary, vst_text, vst_binary, source, ati, vbf, error_log
+  sizeMb: decimal("sizeMb", { precision: 10, scale: 2 }).notNull(),
+  sizeBytes: int("sizeBytes").notNull(),
+  s3Key: varchar("s3Key", { length: 512 }).notNull(),
+  s3Url: text("s3Url").notNull(),
+  // ECU identification
+  platform: varchar("platform", { length: 256 }).notNull(), // e.g., "Ford PCM / Coyote 5.0L"
+  ecuId: varchar("ecuId", { length: 128 }), // e.g., "MED17", "MG1CS019"
+  projectId: varchar("projectId", { length: 128 }), // A2L project ID
+  projectName: varchar("projectName", { length: 256 }), // A2L project name
+  version: varchar("version", { length: 256 }),
+  epk: text("epk"), // EPK string
+  cpuType: varchar("cpuType", { length: 64 }),
+  // Parameter counts
+  totalCalibratables: int("totalCalibratables").default(0),
+  totalMeasurements: int("totalMeasurements").default(0),
+  totalFunctions: int("totalFunctions").default(0),
+  // Full analysis JSON (memory segments, subsystems, etc.)
+  analysisJson: json("analysisJson"),
+  // Source collection
+  sourceCollection: varchar("sourceCollection", { length: 256 }), // e.g., "Mustang", "PCMTec", "Copperhead"
+  // Timestamps
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type KnoxFile = typeof knoxFiles.$inferSelect;
+export type InsertKnoxFile = typeof knoxFiles.$inferInsert;

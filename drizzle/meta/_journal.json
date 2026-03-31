@@ -134,6 +134,13 @@
       "when": 1774853451734,
       "tag": "0018_harsh_clint_barton",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1774920141221,
+      "tag": "0019_steep_scorpion",
+      "breakpoints": true
     }
   ]
 }

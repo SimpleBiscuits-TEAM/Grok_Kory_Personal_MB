@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles } from "../drizzle/schema";
+import { like, desc, sql, count } from "drizzle-orm";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -111,6 +112,91 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────────────
+// ── Knox ECU File Library ────────────────────────────────────────────────────
+
+export async function getKnoxFiles(opts: {
+  search?: string;
+  platform?: string;
+  fileType?: string;
+  collection?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const db = await getDb();
+  if (!db) return { files: [], total: 0 };
+
+  const conditions: any[] = [];
+  if (opts.search) {
+    conditions.push(like(knoxFiles.filename, `%${opts.search}%`));
+  }
+  if (opts.platform) {
+    conditions.push(like(knoxFiles.platform, `%${opts.platform}%`));
+  }
+  if (opts.fileType) {
+    conditions.push(eq(knoxFiles.fileType, opts.fileType));
+  }
+  if (opts.collection) {
+    conditions.push(eq(knoxFiles.sourceCollection, opts.collection));
+  }
+
+  const where = conditions.length > 0 ? sql`${sql.join(conditions, sql` AND `)}` : undefined;
+
+  const [files, totalResult] = await Promise.all([
+    db.select({
+      id: knoxFiles.id,
+      filename: knoxFiles.filename,
+      fileType: knoxFiles.fileType,
+      sizeMb: knoxFiles.sizeMb,
+      platform: knoxFiles.platform,
+      ecuId: knoxFiles.ecuId,
+      projectId: knoxFiles.projectId,
+      projectName: knoxFiles.projectName,
+      version: knoxFiles.version,
+      cpuType: knoxFiles.cpuType,
+      totalCalibratables: knoxFiles.totalCalibratables,
+      totalMeasurements: knoxFiles.totalMeasurements,
+      totalFunctions: knoxFiles.totalFunctions,
+      sourceCollection: knoxFiles.sourceCollection,
+      s3Url: knoxFiles.s3Url,
+      createdAt: knoxFiles.createdAt,
+    }).from(knoxFiles)
+      .where(where)
+      .orderBy(desc(knoxFiles.createdAt))
+      .limit(opts.limit || 50)
+      .offset(opts.offset || 0),
+    db.select({ cnt: count() }).from(knoxFiles).where(where),
+  ]);
+
+  return { files, total: totalResult[0]?.cnt || 0 };
+}
+
+export async function getKnoxFileById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(knoxFiles).where(eq(knoxFiles.id, id)).limit(1);
+  return result[0] || null;
+}
+
+export async function getKnoxPlatformSummary() {
+  const db = await getDb();
+  if (!db) return [];
+  const result = await db.select({
+    platform: knoxFiles.platform,
+    cnt: count(),
+  }).from(knoxFiles).groupBy(knoxFiles.platform).orderBy(desc(count()));
+  return result;
+}
+
+export async function getKnoxCollectionSummary() {
+  const db = await getDb();
+  if (!db) return [];
+  const result = await db.select({
+    collection: knoxFiles.sourceCollection,
+    cnt: count(),
+  }).from(knoxFiles).groupBy(knoxFiles.sourceCollection).orderBy(desc(count()));
+  return result;
+}
+
 export async function insertFeedback(data: InsertFeedback): Promise<boolean> {
   const db = await getDb();
   if (!db) {

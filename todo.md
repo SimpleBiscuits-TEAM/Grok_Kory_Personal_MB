@@ -2569,3 +2569,31 @@
 - [x] Equivalence Ratio Calculator (AFR/lambda)
 - [x] GM A6 Shift Calculator v1.1 (Allison 6-speed shift points)
 - [x] Tire Size & Shift Point Calculator
+
+## Knox Knowledge Base — Gas ECU Files Ingestion
+- [x] Analyze KTFKDC3.a2l + KTFKDC3.h32 (Bosch MG1CS019 gas ECU)
+- [x] Analyze PKCMA.A2L
+- [x] Analyze KGCP2G7.vst
+- [x] Analyze KGCP3K4.a2l
+- [x] Analyze KGCP7.A2L
+- [x] Analyze KGCT9.A2L
+- [x] Analyze KGCTA.A2L
+- [x] Store all files in Knox knowledge base with ECU metadata (106 files in DB)
+- [x] Analyze KGCF1_100628.h32 + KGCF1_100628.vst
+- [x] Analyze PKRJ5.A2L
+- [x] Analyze PKFKD.A2L + PKFKD.c (C source — ASAP2 parameter definitions, not ECU firmware)
+- [x] Analyze TPCL0EM.a2l + TPCL0EM.h32 (TCM files)
+- [x] Analyze KJDH2.A2L
+- [x] Analyze DFFH3F7.a2l
+- [x] Analyze TDRJ0XE.a2l
+- [x] Analyze 3.0LPowerstroke.zip contents
+- [x] Analyze Copperhead.zip contents
+- [x] Analyze TC1797.zip contents
+- [x] Analyze 2016FocusRS.7z contents
+- [x] Analyze Mustang.zip contents (30 files — 11-14 GT500, 15-17 EcoBoost/Coyote/GT350, 18-19 Coyote/EcoBoost/UK)
+- [x] Analyze PCMTec.zip contents (45 files — 39 A2L, 3 ATI, 2 err, 1 vst — Ford/GM ECU definitions)
+- [x] Analyze Random.zip contents
+- [x] Analyze fordecoboostCNBP1.A2L, fordecoboostCNBP2.A2L, fordecoboostKHDP1.A2L
+- [x] Analyze FPGS0.a2l, HAFFA.a2l, FHVJ1.a2l
+- [x] Knox file library tRPC procedures (list, detail, platforms, collections)
+- [x] Knox file library vitest tests (11 tests passing)

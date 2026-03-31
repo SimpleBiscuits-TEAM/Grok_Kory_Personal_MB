@@ -12,6 +12,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
+import { getKnoxFiles, getKnoxFileById, getKnoxPlatformSummary, getKnoxCollectionSummary } from "../db";
 
 export const editorRouter = router({
   /**
@@ -427,5 +428,40 @@ Examples of good translations:
           error: err.message
         };
       }
+    }),
+
+  // ── Knox ECU File Library ────────────────────────────────────────────
+
+  /** List Knox files with search/filter/pagination */
+  knoxFileList: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      platform: z.string().optional(),
+      fileType: z.string().optional(),
+      collection: z.string().optional(),
+      limit: z.number().min(1).max(200).optional(),
+      offset: z.number().min(0).optional(),
+    }))
+    .query(async ({ input }) => {
+      return getKnoxFiles(input);
+    }),
+
+  /** Get a single Knox file with full details */
+  knoxFileDetail: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      return getKnoxFileById(input.id);
+    }),
+
+  /** Get platform breakdown for filter dropdown */
+  knoxPlatforms: protectedProcedure
+    .query(async () => {
+      return getKnoxPlatformSummary();
+    }),
+
+  /** Get collection breakdown for filter dropdown */
+  knoxCollections: protectedProcedure
+    .query(async () => {
+      return getKnoxCollectionSummary();
     }),
 });
