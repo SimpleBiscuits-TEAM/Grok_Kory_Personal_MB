@@ -1,0 +1,15 @@
+{
+  "query": "SELECT COUNT(*) as total, COUNT(DISTINCT platform) as platforms, COUNT(DISTINCT ecuFamily) as ecu_families FROM knox_documents;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute SELECT COUNT(*) as total, COUNT(DISTINCT platform) as platforms, COUNT(DISTINCT ecuFamily) as ecu_families FROM knox_documents;",
+  "rows": [
+    {
+      "total": "248",
+      "platforms": "26",
+      "ecu_families": "90"
+    }
+  ],
+  "messages": [],
+  "stdout": "total\tplatforms\tecu_families\n248\t26\t90\n",
+  "stderr": "",
+  "execution_time_ms": 208
+}

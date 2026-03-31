@@ -2459,3 +2459,77 @@
 - [ ] Build EFD to BIN converter tool in editor tab (waiting for target BIN format from user)
 - [x] Store 67 Cummins EFD files (2013-2021 RAM 6.7L) with Knox for decompilation learning
 - [x] Train Knox to understand EFD parameter mapping → memory addresses for definition file building (BIN format analyzed: PowerPC BE, 4MB flat flash, cal at 0x6B43C)
+
+## Cummins ECU Security Research
+- [ ] Crack 2022-2024 Cummins ECU lock (currently requires downflash to 2019-2021 firmware first)
+- [ ] Analyze bootloader-level authentication difference between 2019-2021 and 2022-2024 ECUs
+- [ ] Crack 2025 Cummins ECU security
+- [x] Analyze 2019 D2 BIN format and compare against 2014 format
+- [x] Analyze 2014 D2 BIN format (reference: STOCK_2014D2DJRnoTv10024_32370231SF_efi.bin)
+
+## Map Readdressing / Map Moving
+- [ ] Learn map readdressing technique from WinOLS EDC17C69 example (WinOLS(edc17c69(Exampleofmapmoved)-060159).ols)
+- [ ] Implement map readdressing capability in editor (move maps to new flash addresses)
+- [ ] Document the breakdown of how map pointers work and how to safely relocate maps
+
+## 2025 Cummins ECU Analysis
+- [x] Analyzed 2025 Cummins FULL.bin (80MB flash dump) - RSA/SHA256 code signing found
+- [x] Mapped physical memory layout (5 blocks: cert/boot, config, secondary, main code+cal, Chrysler)
+- [x] Identified PKI infrastructure (PROD_PCM_000C_CS_CertStore, PROD_PCM_000C_CS_Application)
+- [x] Analyzed EFD EBML format (DocType version 27, encrypted payload, 7.98 bits/byte entropy)
+- [x] Extracted EFD metadata (Engine, Transmission, ModelYear, DriveTrain, Program, Version)
+- [x] Three-generation BIN comparison (2014 vs 2019 vs 2022) - documented format evolution
+- [ ] Decrypt EFD payload to extract calibration parameters for editor display
+- [ ] Study PowerCal/INSITE for EFD decryption routines
+- [ ] Build EFD parameter viewer in editor tab
+
+## RAM 1500 EcoDiesel
+- [ ] Analyze DodgeRam1500EcoDieselfromA2L.ols WinOLS file for 3.0L VM Motori diesel parameters
+- [ ] Store EcoDiesel A2L definitions with Knox for 2014-2017 model support
+
+## Live Tuning Tab (Editor Lite + Pro)
+- [ ] Build A2L parser library (extract CHARACTERISTIC, MEASUREMENT, AXIS_PTS, COMPU_METHOD, RECORD_LAYOUT)
+- [ ] Create Live Tuning tab in editor with ECU/A2L selection workflow
+- [ ] Build parameter browser (tree view by category: injection, boost, EGR, DPF, torque, etc.)
+- [ ] Build map/curve/scalar viewer (2D table, 3D surface, single value editors)
+- [ ] Build value editor with min/max bounds from A2L COMPU_METHOD
+- [ ] Add search/filter for parameters by name, address, or category
+- [ ] Support all Knox A2L files (GM EDC17, Ford EDC17/MG1, Cummins, Dodge EcoDiesel, etc.)
+- [ ] Add real-time value display (read from ECU via diagnostic link)
+- [ ] Add write-back capability (modify values in ECU RAM for live tuning)
+- [ ] Write tests for A2L parser
+
+## E42 Duramax L5P Gen 2 ECU Security Research
+- [ ] Analyze E42_12737238.a2l for security-related parameters, seed-key routines, flash protection maps
+- [ ] Analyze E42_12737238.bin for security architecture (code signing, bootloader checks, auth regions)
+- [ ] Compare E42A2L(Original).ols vs E42DuramaxKoryDenali(Original).ols WinOLS files
+- [ ] Map E42 memory layout and identify flash protection regions
+- [ ] Prepare Knox knowledge for IntelliSpy flash sniffing session
+- [ ] Crack E42 ECU security to enable custom calibration flashing
+
+## Knox Editor Integration - File Retrieval & Context Engine
+- [ ] Knox file retrieval: user asks for a part number, tune file, or A2L map and Knox searches DB, finds the file, opens it in a new editor tab
+- [ ] Knox opens files in separate editor tab so current work is not disrupted
+- [ ] Knox can map a tune file onto its A2L definition and display parameters in the editor
+- [ ] Knox part number search: query by PN, cal ID, or OS number to find matching files across the entire database
+- [ ] Knox context-aware suggestions: when editing a binary, Knox suggests related reference files (stock comparison, A2L, DAMOS)
+- [ ] Knox file comparison: open a reference file alongside current work for side-by-side comparison
+- [ ] As database grows with more binaries/A2Ls/calibrations, Knox search becomes the primary file access method
+
+## Transmission TCM Unlock Research
+- [ ] Diff T87A patched OLS vs stock BIN to identify exact unlock bytes (seed-key bypass, flash write protection)
+- [ ] Diff T93 unlocked OLS vs stock BIN to identify T93 unlock mechanism
+- [ ] Map security architecture from T87A/T93 A2Ls (security access params, write protection regions)
+- [ ] Build automatic TCM unlock patcher in editor (apply unlock to any T87A/T93 binary)
+- [ ] If bench unlock fails on different unit, adapt based on Knox security knowledge
+- [ ] Document C10 vs C11 address offset differences (133 params differ, C11 shifted +0x1000 in upper range)
+
+## Transmission Tuning in Editor
+- [ ] Add C10 Allison 6-speed address map support (2006-2010, 16055 params)
+- [ ] Add C11 Allison 6-speed address map support (2011-2016, 16128 params)
+- [ ] Add T87A 10L80/10L90 A2L support (2019+, PN 24293216)
+- [ ] Add T93 10L1000 Allison A2L support (2020+, PN 24048502)
+- [ ] Shift point editing with visual graph (gear ratio vs speed vs throttle)
+- [ ] TCC lockup strategy editing (pressure, slip targets, apply/release timing)
+- [ ] Line pressure editing (main pressure, converter charge, lube)
+- [ ] Adaptive learn reset capability
