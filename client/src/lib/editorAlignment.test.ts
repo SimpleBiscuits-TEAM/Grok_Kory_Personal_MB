@@ -128,8 +128,8 @@ function makeBinary(size: number, fills?: Array<{ offset: number; data: number[]
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('Version', () => {
-  it('should be v0.03', () => {
-    expect(APP_VERSION).toBe('v0.03');
+  it('should be v0.05', () => {
+    expect(APP_VERSION).toBe('v0.05');
   });
 });
 
