@@ -38,13 +38,15 @@ interface NavItem {
   auth?: boolean;
   /** If true, only show for admin/super_admin users */
   admin?: boolean;
+  /** If set, opens an external URL instead of navigating internally */
+  external?: string;
 }
 
 const navItems: NavItem[] = [
   { label: 'ANALYZE', path: '/' },
   { label: 'ADVANCED', path: '/advanced' },
-  { label: 'FLEET', path: '/fleet', auth: true },
-  { label: 'DRAG', path: '/drag' },
+  { label: 'SHOP', path: '/shop', external: 'https://ppei.com/' },
+  { label: 'SUPPORT', path: '/support', external: 'https://ppei.com/' },
   { label: 'COMMUNITY', path: '/community' },
 ];
 
@@ -144,23 +146,42 @@ export default function PpeiHeader() {
             {visibleItems.map(item => {
               const isActive = location === item.path || 
                 (item.path !== '/' && location.startsWith(item.path));
+              const navStyle = {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: isActive ? sColor.navActiveBg : 'transparent',
+                border: isActive ? `1px solid ${sColor.navActive}` : `1px solid transparent`,
+                color: isActive ? sColor.navActive : sColor.navText,
+                padding: '5px 14px',
+                borderRadius: '2px',
+                fontFamily: sFont.heading,
+                fontSize: '0.78rem',
+                letterSpacing: '0.08em',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+                textDecoration: 'none' as const,
+              };
+              if (item.external) {
+                return (
+                  <a
+                    key={item.path}
+                    href={item.external}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ppei-btn-hover"
+                    style={navStyle}
+                  >
+                    {item.label}
+                    <svg width="8" height="8" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                      <path d="M4 1h7v7" /><path d="M11 1L1 11" />
+                    </svg>
+                  </a>
+                );
+              }
               return (
                 <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                  <div className="ppei-btn-hover" style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    background: isActive ? sColor.navActiveBg : 'transparent',
-                    border: isActive ? `1px solid ${sColor.navActive}` : `1px solid transparent`,
-                    color: isActive ? sColor.navActive : sColor.navText,
-                    padding: '5px 14px',
-                    borderRadius: '2px',
-                    fontFamily: sFont.heading,
-                    fontSize: '0.78rem',
-                    letterSpacing: '0.08em',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}>
+                  <div className="ppei-btn-hover" style={navStyle}>
                     {item.label}
                   </div>
                 </Link>

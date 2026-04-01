@@ -66,8 +66,8 @@ function Router() {
       <Switch>
         <Route path={"/"} component={Home} />
         <Route path={"/advanced"} component={Advanced} />
-        <Route path={"/fleet"} component={Fleet} />
-        <Route path={"/drag"} component={DragRacing} />
+        <Route path={"/fleet"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/drag"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/community"} component={Community} />
         <Route path={"/pitch"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>

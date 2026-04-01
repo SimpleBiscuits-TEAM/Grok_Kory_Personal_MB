@@ -42,7 +42,11 @@ const sColor = {
 
 type DragTab = 'leaderboard' | 'callouts' | 'leagues' | 'timeslips' | 'profile';
 
-export default function DragRacing() {
+export function DragContent() {
+  return <DragRacing embedded />;
+}
+
+export default function DragRacing({ embedded = false }: { embedded?: boolean }) {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<DragTab>('leaderboard');
 
@@ -134,8 +138,8 @@ export default function DragRacing() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen" style={{ background: sColor.bg }}>
-        <PpeiHeader />
+      <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+        {!embedded && <PpeiHeader />}
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin" style={{ color: sColor.red }} />
         </div>
@@ -144,8 +148,8 @@ export default function DragRacing() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: sColor.bg }}>
-      <PpeiHeader />
+    <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+      {!embedded && <PpeiHeader />}
 
       {/* Hero Banner */}
       <div style={{

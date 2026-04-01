@@ -263,6 +263,7 @@ function FuelMapCard({
   onTargetLambdaEdit,
   overlay,
   correctedCells,
+  expectedDimensions,
 }: {
   config: typeof FUEL_MAP_CONFIGS[number];
   map: FuelMap | null;
@@ -272,6 +273,7 @@ function FuelMapCard({
   onTargetLambdaEdit: (col: number, value: number) => void;
   overlay?: CellOverlay | null;
   correctedCells?: Map<string, CorrectedCellInfo> | null;
+  expectedDimensions?: { rows: number; cols: number } | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
@@ -289,10 +291,27 @@ function FuelMapCard({
 
   const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
+  const validateDimensions = useCallback((parsed: FuelMap, source: string): boolean => {
+    if (!expectedDimensions) return true; // No reference to compare against
+    const { rows: expRows, cols: expCols } = expectedDimensions;
+    const actRows = parsed.data.length;
+    const actCols = parsed.data[0]?.length || 0;
+    if (actRows !== expRows || actCols !== expCols) {
+      toast.warning(
+        `Table size mismatch (${source}): expected ${expRows} rows \u00d7 ${expCols} cols but got ${actRows} \u00d7 ${actCols}. ` +
+        `Verify this is the correct table for ${config.label}.`,
+        { duration: 8000 }
+      );
+      return false;
+    }
+    return true;
+  }, [expectedDimensions, config.label]);
+
   const handleFile = useCallback((file: File) => {
     file.text().then(text => {
       const parsed = parseFuelTableCSV(text);
       if (parsed) {
+        validateDimensions(parsed, 'CSV file');
         parsed.name = config.label;
         parsed.description = config.desc;
         parsed.rowLabel = config.rowLabel;
@@ -300,7 +319,7 @@ function FuelMapCard({
         onLoad(parsed);
       }
     });
-  }, [config, onLoad]);
+  }, [config, onLoad, validateDimensions]);
 
   const processImageForOCR = useCallback(async (blob: Blob, mimeType: string) => {
     setOcrLoading(true);
@@ -353,6 +372,7 @@ function FuelMapCard({
           colLabel: result.colAxisLabel || config.colLabel,
           unit: result.unit || 'ms',
         };
+        validateDimensions(fuelMap, 'OCR screenshot');
         onLoad(fuelMap);
         setPastedPreview(null);
       }
@@ -388,6 +408,7 @@ function FuelMapCard({
   const handlePaste = useCallback(() => {
     const parsed = parseFuelTableCSV(pasteText);
     if (parsed) {
+      validateDimensions(parsed, 'pasted text');
       parsed.name = config.label;
       parsed.description = config.desc;
       parsed.rowLabel = config.rowLabel;
@@ -396,7 +417,7 @@ function FuelMapCard({
       setShowPaste(false);
       setPasteText('');
     }
-  }, [pasteText, config, onLoad]);
+  }, [pasteText, config, onLoad, validateDimensions]);
 
   const startEdit = (row: number, col: number) => {
     if (!map) return;
@@ -1585,6 +1606,23 @@ export default function HondaTalonTuner({
               onTargetLambdaEdit={(col, val) => handleTargetLambdaEdit(config.key, col, val)}
               overlay={computeCellOverlay(fuelMaps[config.key], cursorData, config.key)}
               correctedCells={correctedCells[config.key] || null}
+              expectedDimensions={(() => {
+                // Derive expected dimensions from any already-loaded sibling map of the same mode
+                const isAlphaN = config.key.startsWith('alphaN');
+                const siblingKeys = isAlphaN
+                  ? ['alphaN_cyl1', 'alphaN_cyl2'] as const
+                  : ['speedDensity_cyl1', 'speedDensity_cyl2'] as const;
+                for (const k of siblingKeys) {
+                  const m = fuelMaps[k];
+                  if (m && k !== config.key) {
+                    return { rows: m.data.length, cols: m.data[0]?.length || 0 };
+                  }
+                }
+                // Also check the current map itself (for re-paste validation)
+                const self = fuelMaps[config.key];
+                if (self) return { rows: self.data.length, cols: self.data[0]?.length || 0 };
+                return null;
+              })()}
             />
           ))}
         </div>

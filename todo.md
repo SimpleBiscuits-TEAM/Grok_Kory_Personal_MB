@@ -3113,3 +3113,19 @@
 ## Honda Talon: Fuel Map Copy Values Only
 - [x] Add "Copy Values" button to FuelMapCard that copies only cell data (no RPM/TPS axis headers) for C3 paste
 - [x] Ensure tab-separated format compatible with Dynojet C3 software paste
+
+## Honda Talon: Fuel Map Paste Dimension Validation
+- [x] Add dimension check when pasting table data into fuel map — warn if pasted rows/cols don't match expected map size
+- [x] Show clear error message with expected vs actual dimensions
+
+## Navigation Restructuring
+- [x] Add "Shop" tab to top nav that redirects to https://ppei.com/
+- [x] Add "Support" tab to top nav that redirects to https://ppei.com/
+- [x] Move "Drag" and "Fleet" from top nav into the "Advanced" tab
+- [x] Final top nav order: Analyze, Advanced, Shop, Support, Community
+
+## Honda Talon: Alpha-N vs Speed Density Correction Routing
+- [x] Verify correction engine routes samples to correct table based on Alpha-N channel value
+- [x] Alpha-N channel = 1 means PW comes from Alpha-N tables only (correct Alpha-N tables)
+- [x] Alpha-N channel = 0 means PW comes from Speed Density tables only (correct SD tables)
+- [x] VERIFIED: Logic is correct — uploaded WP8 log contains BOTH Alpha-N=1 (1526 samples) and Alpha-N=0 (615 samples), so corrections appearing in both tables is expected behavior (ECU switches modes during driving)

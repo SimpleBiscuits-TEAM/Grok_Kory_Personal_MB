@@ -40,7 +40,11 @@ interface GooseMessage {
   content: string;
 }
 
-export default function Fleet() {
+export function FleetContent() {
+  return <Fleet embedded />;
+}
+
+export default function Fleet({ embedded = false }: { embedded?: boolean }) {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<FleetTab>('dashboard');
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(null);
@@ -120,8 +124,8 @@ export default function Fleet() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen" style={{ background: sColor.bg }}>
-        <PpeiHeader />
+      <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+        {!embedded && <PpeiHeader />}
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin" style={{ color: sColor.red }} />
         </div>
@@ -131,8 +135,8 @@ export default function Fleet() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen" style={{ background: sColor.bg }}>
-        <PpeiHeader />
+      <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+        {!embedded && <PpeiHeader />}
         <div className="flex flex-col items-center justify-center h-[60vh] gap-6">
           <div className="ppei-section-header">
             <Shield className="h-8 w-8" style={{ color: sColor.red }} />
@@ -154,8 +158,8 @@ export default function Fleet() {
   // No org yet — onboarding
   if (orgsQuery.data && orgsQuery.data.length === 0) {
     return (
-      <div className="min-h-screen" style={{ background: sColor.bg }}>
-        <PpeiHeader />
+      <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+        {!embedded && <PpeiHeader />}
         <div className="container mx-auto px-4 py-12">
           <div className="max-w-lg mx-auto">
             <div className="ppei-section-header mb-6">
@@ -224,8 +228,8 @@ export default function Fleet() {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: sColor.bg }}>
-      <PpeiHeader />
+    <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
+      {!embedded && <PpeiHeader />}
 
       {/* Fleet Sub-nav */}
       <div style={{ background: 'oklch(0.08 0.004 260)', borderBottom: `1px solid ${sColor.border}` }}>

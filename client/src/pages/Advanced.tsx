@@ -77,6 +77,9 @@ import PpeiHeader from '@/components/PpeiHeader';
 // Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
 const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
 const TasksPanel = React.lazy(() => import('@/pages/Tasks').then(m => ({ default: m.TasksContent })));
+// Lazy-load Fleet and Drag panels (moved from top-level nav to Advanced tabs)
+const FleetPanel = React.lazy(() => import('@/pages/Fleet').then(m => ({ default: m.FleetContent })));
+const DragPanel = React.lazy(() => import('@/pages/DragRacing').then(m => ({ default: m.DragContent })));
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
@@ -1334,7 +1337,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'diagnostic' | 'pitch' | 'tasks';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'drag' | 'diagnostic' | 'pitch' | 'tasks';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1345,6 +1348,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'drag' as TabId, label: 'DRAG', icon: <Flag style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1475,7 +1479,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               {isAdmin && idx === tabs.length && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
-              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } setActiveTab(tab.id); }} style={{
+              <button onClick={() => { setActiveTab(tab.id); }} style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
                 color: activeTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
@@ -1652,6 +1656,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'pitch' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
         {activeTab === 'tasks' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div>}
+        {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
+        {activeTab === ('drag' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><DragPanel /></React.Suspense></div>}
       </main>
 
       {/* Voice Command Button */}
