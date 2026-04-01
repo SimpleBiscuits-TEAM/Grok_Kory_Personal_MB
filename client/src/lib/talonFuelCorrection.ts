@@ -17,9 +17,13 @@
  *     SD Cyl1 table (MAP not accurate enough on turbo applications)
  *   - When "Manifold Absolute Pressure Corrected" channel is available, use it for
  *     SD axis reference instead of raw MAP
+ *   - Transient fueling detection: "Additional Pulsewidth" = Final - Desired.
+ *     When Additional PW exceeds 15% of Desired, the sample is in transient fueling
+ *     enrichment and is excluded from correction. If transient fueling produces
+ *     excessively lean or rich AFR, a tuner note is generated.
  *
- * NOTE: Deceleration filter and STFT logic are designed to be reusable for
- * future Kawasaki fuel correction tool.
+ * NOTE: Deceleration filter, STFT logic, and transient fueling detection are
+ * designed to be reusable for future Kawasaki fuel correction tool.
  */
 
 import { WP8ParseResult, getHondaTalonKeyChannels } from './wp8Parser';
@@ -75,6 +79,17 @@ export interface MapCorrectionResult {
   totalSamplesUsed: number;
 }
 
+/** Tuner note for transient fueling anomalies */
+export interface TransientNote {
+  type: 'lean' | 'rich';
+  severity: 'warning' | 'critical';
+  message: string;
+  avgLambda: number;
+  avgAdditionalPW: number;
+  sampleCount: number;
+  rpmRange: [number, number];
+}
+
 /** Complete correction report */
 export interface CorrectionReport {
   results: MapCorrectionResult[];
@@ -86,6 +101,7 @@ export interface CorrectionReport {
   hasLambda1: boolean;
   hasLambda2: boolean;
   hasStft: boolean;
+  hasInjPwFinal: boolean;
   isDynoLog: boolean;
   /** Which source was used: 'afr' or 'lambda' */
   lambdaSource: 'afr' | 'lambda';
@@ -93,6 +109,9 @@ export interface CorrectionReport {
   alphaNSamples: number;
   sdSamples: number;
   decelSamplesSkipped: number;
+  transientSamplesSkipped: number;
+  /** Tuner notes about transient fueling anomalies */
+  transientNotes: TransientNote[];
 }
 
 // ─── Target Lambda Presets ──────────────────────────────────────────────────
@@ -237,9 +256,140 @@ function findSDColumnByPulsewidth(
     if (d < bestDist) { bestDist = d; bestCol = c; }
   }
   return bestCol;
-}
+}// ─── Transient Fueling Constants ────────────────────────────────────────────────────────
 
-// ─── Main Correction Engine ─────────────────────────────────────────────────
+/**
+ * Transient fueling detection thresholds.
+ *
+ * "Additional Pulsewidth" = Injector PW Final - Injector PW Desired
+ *
+ * During steady-state operation, Additional PW is near zero (typically <5% of
+ * Desired PW). When the driver makes a sudden throttle change, the ECU adds
+ * transient enrichment which shows up as a spike in Additional PW. This
+ * enrichment decays back to baseline as the engine stabilizes.
+ *
+ * Thresholds (as percentage of Desired PW):
+ *   - Normal operation: Additional PW < 15% of Desired
+ *   - Transient fueling: Additional PW >= 15% of Desired → skip correction
+ *   - Excessive transient (lean): lambda > 1.1 during transient → tuner note
+ *   - Excessive transient (rich): lambda < 0.75 during transient → tuner note
+ *
+ * This primarily applies to turbo applications where transient enrichment
+ * is more aggressive, but the filter runs on all logs for safety.
+ */
+export const TRANSIENT_THRESHOLD_PCT = 15;  // % of desired PW
+export const TRANSIENT_EXCESSIVE_LEAN_LAMBDA = 1.1;
+export const TRANSIENT_EXCESSIVE_RICH_LAMBDA = 0.75;
+
+// ─── Main Correction Engine ─────────────────────────────────────────────────────────
+
+/**
+ * Compute "Additional Pulsewidth" and detect transient fueling conditions.
+ * Returns per-sample boolean array (true = transient, skip for correction)
+ * and collects transient fueling statistics for tuner notes.
+ */
+export function detectTransientFueling(
+  injPwDesired: number[],
+  injPwFinal: number[],
+  rpm: number[],
+  cyl1Lambda: number[],
+  cyl2Lambda: number[],
+  isAlreadyLambda: boolean,
+): {
+  isTransient: boolean[];
+  additionalPW: number[];
+  transientNotes: TransientNote[];
+  transientCount: number;
+} {
+  const len = Math.min(injPwDesired.length, injPwFinal.length);
+  const isTransient: boolean[] = new Array(len).fill(false);
+  const additionalPW: number[] = new Array(len).fill(0);
+  let transientCount = 0;
+
+  // Collect transient samples for tuner note analysis
+  const transientSamples: { rpm: number; lambda: number; addPW: number }[] = [];
+
+  for (let i = 0; i < len; i++) {
+    const desired = injPwDesired[i];
+    const final_ = injPwFinal[i];
+
+    if (!Number.isFinite(desired) || !Number.isFinite(final_) || desired <= 0) {
+      continue;
+    }
+
+    const addPW = final_ - desired;
+    additionalPW[i] = addPW;
+
+    // Transient = Additional PW exceeds threshold % of Desired PW
+    const pctOfDesired = (addPW / desired) * 100;
+    if (Math.abs(pctOfDesired) >= TRANSIENT_THRESHOLD_PCT) {
+      isTransient[i] = true;
+      transientCount++;
+
+      // Collect lambda data for this transient sample
+      const rpmVal = i < rpm.length ? rpm[i] : NaN;
+      // Use average of both cylinders if available
+      let lambda = NaN;
+      const l1 = i < cyl1Lambda.length ? cyl1Lambda[i] : NaN;
+      const l2 = i < cyl2Lambda.length ? cyl2Lambda[i] : NaN;
+      const lam1 = Number.isFinite(l1) ? (isAlreadyLambda ? l1 : l1 / 14.7) : NaN;
+      const lam2 = Number.isFinite(l2) ? (isAlreadyLambda ? l2 : l2 / 14.7) : NaN;
+      if (Number.isFinite(lam1) && Number.isFinite(lam2)) lambda = (lam1 + lam2) / 2;
+      else if (Number.isFinite(lam1)) lambda = lam1;
+      else if (Number.isFinite(lam2)) lambda = lam2;
+
+      if (Number.isFinite(rpmVal) && Number.isFinite(lambda)) {
+        transientSamples.push({ rpm: rpmVal, lambda, addPW });
+      }
+    }
+  }
+
+  // Analyze transient samples for excessive lean/rich conditions
+  const transientNotes: TransientNote[] = [];
+
+  if (transientSamples.length > 5) {
+    const leanSamples = transientSamples.filter(s => s.lambda > TRANSIENT_EXCESSIVE_LEAN_LAMBDA);
+    const richSamples = transientSamples.filter(s => s.lambda < TRANSIENT_EXCESSIVE_RICH_LAMBDA);
+
+    if (leanSamples.length >= 3) {
+      const avgLambda = leanSamples.reduce((s, x) => s + x.lambda, 0) / leanSamples.length;
+      const avgAddPW = leanSamples.reduce((s, x) => s + x.addPW, 0) / leanSamples.length;
+      const rpms = leanSamples.map(s => s.rpm);
+      const severity = avgLambda > 1.2 ? 'critical' : 'warning';
+      transientNotes.push({
+        type: 'lean',
+        severity,
+        message: severity === 'critical'
+          ? `CRITICAL: Excessively lean during transient fueling (avg λ=${avgLambda.toFixed(3)}). Check transient enrichment settings — risk of detonation.`
+          : `WARNING: Lean condition during transient fueling (avg λ=${avgLambda.toFixed(3)}). Consider increasing transient enrichment.`,
+        avgLambda,
+        avgAdditionalPW: avgAddPW,
+        sampleCount: leanSamples.length,
+        rpmRange: [Math.min(...rpms), Math.max(...rpms)],
+      });
+    }
+
+    if (richSamples.length >= 3) {
+      const avgLambda = richSamples.reduce((s, x) => s + x.lambda, 0) / richSamples.length;
+      const avgAddPW = richSamples.reduce((s, x) => s + x.addPW, 0) / richSamples.length;
+      const rpms = richSamples.map(s => s.rpm);
+      const severity = avgLambda < 0.65 ? 'critical' : 'warning';
+      transientNotes.push({
+        type: 'rich',
+        severity,
+        message: severity === 'critical'
+          ? `CRITICAL: Excessively rich during transient fueling (avg λ=${avgLambda.toFixed(3)}). Check transient enrichment settings — wasting fuel and fouling plugs.`
+          : `WARNING: Rich condition during transient fueling (avg λ=${avgLambda.toFixed(3)}). Consider reducing transient enrichment.`,
+        avgLambda,
+        avgAdditionalPW: avgAddPW,
+        sampleCount: richSamples.length,
+        rpmRange: [Math.min(...rpms), Math.max(...rpms)],
+      });
+    }
+  }
+
+  return { isTransient, additionalPW, transientNotes, transientCount };
+}
 
 /**
  * Extract channel data arrays from WP8 for correction processing.
@@ -311,7 +461,9 @@ function extractChannelData(wp8Data: WP8ParseResult) {
     hasLambda1,
     hasLambda2,
     hasAlphaN: keys.alphaN !== -1,
+    injPwFinal: extract(keys.injPwFinal),
     hasInjPwDesired: keys.injPwDesired !== -1,
+    hasInjPwFinal: keys.injPwFinal !== -1,
     hasMapCorrected: keys.mapCorrected !== -1,
     hasVehicleSpeed: keys.vehicleSpeed !== -1,
     hasStft: keys.stft !== -1 || keys.polarisTotalFuelTrim !== -1,
@@ -334,6 +486,7 @@ function computeMapCorrections(
   sdCyl1Map: FuelMap | null,
   channelData: ReturnType<typeof extractChannelData>,
   config: CorrectionConfig,
+  transientMask: boolean[] = [],
 ): MapCorrectionResult {
   const isAlphaN = mapKey.startsWith('alphaN');
   const isCyl1 = mapKey.includes('cyl1');
@@ -381,6 +534,12 @@ function computeMapCorrections(
     if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
       if (tpsVal === 0 && vSpeed > 0) continue;
     }
+
+    // ── Transient fueling filter: skip samples during transient enrichment ──
+    // When Additional PW (Final - Desired) exceeds 15% of Desired PW,
+    // the ECU is applying transient enrichment. These samples don't
+    // reflect steady-state fueling and should not be used for corrections.
+    if (transientMask.length > i && transientMask[i]) continue;
 
     // Check if this sample belongs to this map's mode
     const sampleIsAlphaN = alphaNVal === 1;
@@ -528,6 +687,27 @@ export function computeCorrections(
     else sdSamples++;
   }
 
+  // ─── Transient fueling detection ─────────────────────────────────────
+  // Compute "Additional Pulsewidth" (Final - Desired) and detect transient
+  // fueling conditions. Transient samples are excluded from corrections.
+  let transientSamplesSkipped = 0;
+  let transientNotes: TransientNote[] = [];
+  let transientMask: boolean[] = [];
+
+  if (channelData.hasInjPwFinal && channelData.hasInjPwDesired) {
+    const transientResult = detectTransientFueling(
+      channelData.injPwDesired,
+      channelData.injPwFinal,
+      channelData.rpm,
+      channelData.cyl1,
+      channelData.cyl2,
+      channelData.isAlreadyLambda,
+    );
+    transientMask = transientResult.isTransient;
+    transientSamplesSkipped = transientResult.transientCount;
+    transientNotes = transientResult.transientNotes;
+  }
+
   const results: MapCorrectionResult[] = [];
   const mapKeys: (keyof FuelMapState)[] = [
     'alphaN_cyl1', 'alphaN_cyl2',
@@ -544,6 +724,7 @@ export function computeCorrections(
       fuelMaps.speedDensity_cyl1, // SD Cyl1 used for turbo pulsewidth interpolation
       channelData,
       config,
+      transientMask,
     );
     results.push(result);
   }
@@ -558,12 +739,15 @@ export function computeCorrections(
     hasLambda1: channelData.hasLambda1,
     hasLambda2: channelData.hasLambda2,
     hasStft: channelData.hasStft,
+    hasInjPwFinal: channelData.hasInjPwFinal,
     isDynoLog: channelData.isDynoLog,
     lambdaSource: channelData.isAlreadyLambda ? 'lambda' : 'afr',
     totalSamples: channelData.rpm.length,
     alphaNSamples,
     sdSamples,
     decelSamplesSkipped,
+    transientSamplesSkipped,
+    transientNotes,
   };
 }
 

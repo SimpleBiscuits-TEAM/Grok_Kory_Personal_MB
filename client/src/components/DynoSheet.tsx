@@ -76,6 +76,95 @@ const NA_TARGET_LAMBDA = 0.85;
 const TURBO_TARGET_LAMBDA = 0.80;
 
 /**
+ * Find individual RPM sweeps (acceleration pulls) within a WOT segment.
+ * A sweep = RPM increasing by at least MIN_RPM_RANGE over at least 1 second.
+ * This handles trail/track logs where the driver holds WOT for 90+ seconds
+ * but only has brief acceleration pulls within.
+ */
+function findRPMSweeps(
+  wp8: WP8ParseResult,
+  segStart: number,
+  segEnd: number,
+  rpmIdx: number,
+  sampleRate: number,
+): { start: number; end: number }[] {
+  const MIN_RPM_RANGE = 500;  // minimum RPM gain to qualify as a pull
+  const MIN_PULL_SAMPLES = Math.ceil(sampleRate * 1); // at least 1 second
+  const RPM_DROP_THRESHOLD = 300; // RPM drop that ends a pull
+
+  const pulls: { start: number; end: number; rpmGain: number }[] = [];
+  let pullStart = -1;
+  let pullMinRPM = Infinity;
+  let pullMaxRPM = 0;
+  let prevRPM = 0;
+  let decliningCount = 0;
+
+  for (let i = segStart; i <= segEnd; i++) {
+    const rpm = wp8.rows[i].values[rpmIdx];
+    if (!Number.isFinite(rpm)) continue;
+
+    if (pullStart < 0) {
+      // Not in a pull — look for RPM starting to rise
+      if (prevRPM > 0 && rpm > prevRPM + 20) {
+        pullStart = i;
+        pullMinRPM = prevRPM;
+        pullMaxRPM = rpm;
+        decliningCount = 0;
+      }
+    } else {
+      // In a pull — track the sweep
+      if (rpm > pullMaxRPM) {
+        pullMaxRPM = rpm;
+        decliningCount = 0;
+      } else if (rpm < pullMaxRPM - RPM_DROP_THRESHOLD) {
+        decliningCount++;
+      }
+
+      // End the pull if RPM drops significantly or declines for too long
+      if (decliningCount >= Math.ceil(sampleRate * 0.5) || rpm < pullMinRPM) {
+        const pullEnd = i - decliningCount;
+        const rpmGain = pullMaxRPM - pullMinRPM;
+        const pullLength = pullEnd - pullStart;
+
+        if (rpmGain >= MIN_RPM_RANGE && pullLength >= MIN_PULL_SAMPLES) {
+          pulls.push({ start: pullStart, end: pullEnd, rpmGain });
+        }
+
+        pullStart = -1;
+        pullMinRPM = Infinity;
+        pullMaxRPM = 0;
+        decliningCount = 0;
+      }
+    }
+
+    prevRPM = rpm;
+  }
+
+  // Check if we ended mid-pull
+  if (pullStart >= 0) {
+    const rpmGain = pullMaxRPM - pullMinRPM;
+    const pullLength = segEnd - pullStart;
+    if (rpmGain >= MIN_RPM_RANGE && pullLength >= MIN_PULL_SAMPLES) {
+      pulls.push({ start: pullStart, end: segEnd, rpmGain });
+    }
+  }
+
+  return pulls;
+}
+
+/** Get the RPM range of a WOT run (max RPM - min RPM) */
+function rpmRangeOfRun(run: WOTRun): number {
+  if (run.points.length === 0) return 0;
+  let minRPM = Infinity;
+  let maxRPM = 0;
+  for (const pt of run.points) {
+    if (pt.rpm < minRPM) minRPM = pt.rpm;
+    if (pt.rpm > maxRPM) maxRPM = pt.rpm;
+  }
+  return maxRPM - minRPM;
+}
+
+/**
  * Detect WOT runs in the datalog and build dyno sheet data
  */
 export function buildDynoSheetData(
@@ -155,7 +244,7 @@ export function buildDynoSheetData(
   const minWOTSamples = Math.ceil(WOT_MIN_DURATION_SEC * sampleRate);
 
   // Scan for consecutive WOT samples
-  const wotRuns: WOTRun[] = [];
+  const rawWotSegments: { start: number; end: number }[] = [];
   let wotStart = -1;
 
   for (let i = 0; i < wp8.rows.length; i++) {
@@ -170,7 +259,7 @@ export function buildDynoSheetData(
     } else if (!isWOT && wotStart >= 0) {
       const runLength = i - wotStart;
       if (runLength >= minWOTSamples) {
-        wotRuns.push(buildWOTRun(wp8, wotStart, i - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
+        rawWotSegments.push({ start: wotStart, end: i - 1 });
       }
       wotStart = -1;
     }
@@ -180,7 +269,46 @@ export function buildDynoSheetData(
   if (wotStart >= 0) {
     const runLength = wp8.rows.length - wotStart;
     if (runLength >= minWOTSamples) {
-      wotRuns.push(buildWOTRun(wp8, wotStart, wp8.rows.length - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
+      rawWotSegments.push({ start: wotStart, end: wp8.rows.length - 1 });
+    }
+  }
+
+  if (rawWotSegments.length === 0) {
+    return {
+      runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
+      peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
+      fileName, warnings,
+      qualified: false,
+      disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}\u00B0+ TPS)`,
+    };
+  }
+
+  // ─── Split long WOT segments into individual RPM sweep pulls ─────
+  // Trail/track driving can produce WOT segments of 90+ seconds where
+  // RPM stays relatively flat. Within these, we need to find individual
+  // acceleration pulls (RPM sweeping upward) for accurate dyno curves.
+  const wotRuns: WOTRun[] = [];
+
+  for (const seg of rawWotSegments) {
+    const segDuration = (seg.end - seg.start) / sampleRate;
+
+    // Short segments (< 15s) are likely individual pulls — use as-is
+    if (segDuration < 15) {
+      wotRuns.push(buildWOTRun(wp8, seg.start, seg.end, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
+      continue;
+    }
+
+    // Long segments: scan for RPM sweeps (acceleration pulls)
+    // A pull = RPM increasing by 500+ over at least 1 second
+    const pulls = findRPMSweeps(wp8, seg.start, seg.end, rpmIdx, sampleRate);
+
+    if (pulls.length > 0) {
+      for (const pull of pulls) {
+        wotRuns.push(buildWOTRun(wp8, pull.start, pull.end, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
+      }
+    } else {
+      // No clear sweeps found — fall back to using the whole segment
+      wotRuns.push(buildWOTRun(wp8, seg.start, seg.end, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
     }
   }
 
@@ -190,12 +318,17 @@ export function buildDynoSheetData(
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
       fileName, warnings,
       qualified: false,
-      disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}°+ TPS)`,
+      disqualifyReason: `No acceleration pull detected within WOT segments`,
     };
   }
 
-  // Use the best (longest) WOT run for the dyno sheet
-  const bestRun = wotRuns.reduce((a, b) => a.durationSec > b.durationSec ? a : b);
+  // Select the best run: prefer the pull with the widest RPM range
+  // (not the longest duration — trail driving at flat RPM is not useful)
+  const bestRun = wotRuns.reduce((a, b) => {
+    const aRange = rpmRangeOfRun(a);
+    const bRange = rpmRangeOfRun(b);
+    return aRange >= bRange ? a : b;
+  });
 
   // Build RPM-binned curve from the best run
   const RPM_BIN_SIZE = 250;
@@ -400,21 +533,24 @@ function drawDynoSheet(
   if (logoImg && logoImg.complete) {
     const logoSize = 50;
     const logoX = W / 2 - logoSize / 2;
-    ctx.drawImage(logoImg, logoX, 8, logoSize, logoSize);
+    ctx.drawImage(logoImg, logoX, 4, logoSize, logoSize);
   }
 
-  // "PPEI Virtual Dyno" text
+  // "PPEI Virtual Dyno" title text
+  const titleText = 'PPEI Virtual Dyno';
   ctx.fillStyle = COLORS.text;
-  ctx.font = 'bold 16px Arial, sans-serif';
+  ctx.font = 'bold 18px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('PPEI Virtual Dyno', W / 2, 72);
+  // Measure title width with the correct font before drawing
+  const titleWidth = ctx.measureText(titleText).width;
+  ctx.fillText(titleText, W / 2, 72);
 
-  // MEASURED vs ESTIMATED badge
+  // MEASURED vs ESTIMATED badge — positioned after title using measured width
   const badgeText = data.hasDynoData ? 'MEASURED' : 'ESTIMATED';
   const badgeColor = data.hasDynoData ? '#22c55e' : '#f59e0b';
   ctx.font = 'bold 10px Arial, sans-serif';
   const badgeW = ctx.measureText(badgeText).width + 12;
-  const badgeX = W / 2 + ctx.measureText('PPEI Virtual Dyno').width / 2 + 8;
+  const badgeX = W / 2 + titleWidth / 2 + 8;
   ctx.fillStyle = badgeColor;
   ctx.beginPath();
   ctx.roundRect(badgeX - 2, 60, badgeW, 16, 3);
@@ -486,18 +622,18 @@ function drawDynoSheet(
   ctx.translate(15, rpmChartTop + rpmChartHeight / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = 'bold 12px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Engine Speed (rpmx1000)', 0, 0);
+  ctx.fillText('Engine Speed (RPM x1000)', 0, 0);
   ctx.restore();
 
   // Y-axis ticks
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = '11px Arial, sans-serif';
   ctx.textAlign = 'right';
   for (let r = 0; r <= maxRPMDisplay; r += 2) {
     const y = rpmChartBottom - (r / maxRPMDisplay) * rpmChartHeight;
-    ctx.fillText(String(r), chartLeft - 5, y + 3);
+    ctx.fillText(String(r), chartLeft - 5, y + 4);
   }
 
   // Draw comparison RPM trace (behind main)
@@ -537,7 +673,7 @@ function drawDynoSheet(
   ctx.fillStyle = COLORS.rpmLine;
   ctx.font = 'bold 11px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText((peakRPMPt.rpm / 1000).toFixed(3), peakRPMx, peakRPMy - 8);
+  ctx.fillText(peakRPMPt.rpm.toLocaleString(), peakRPMx, peakRPMy - 8);
 
   // Separator bar
   drawSeparator(ctx, 0, rpmPanelY + rpmPanelHeight, W, SEPARATOR_HEIGHT);
@@ -559,18 +695,18 @@ function drawDynoSheet(
   ctx.translate(15, hpChartTop + hpChartHeight / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = 'bold 12px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Power (hp)', 0, 0);
+  ctx.fillText('Power (HP)', 0, 0);
   ctx.restore();
 
   // Y-axis ticks
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = '11px Arial, sans-serif';
   ctx.textAlign = 'right';
   for (let hp = 0; hp <= maxHP; hp += 20) {
     const y = hpToY(hp);
-    ctx.fillText(String(hp), chartLeft - 5, y + 3);
+    ctx.fillText(String(hp), chartLeft - 5, y + 4);
   }
 
   // Draw comparison HP curve (behind main)
@@ -621,7 +757,7 @@ function drawDynoSheet(
     // Peak value text
     ctx.font = 'bold 11px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(data.peakHP.toFixed(3), px, py - 10);
+    ctx.fillText(data.peakHP.toFixed(1), px, py - 10);
   }
 
   // Legend box
@@ -634,7 +770,7 @@ function drawDynoSheet(
   ctx.font = '10px Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(
-    `Max Power = ${data.peakHP.toFixed(3)} at Engine RPM = ${(data.peakHPRpm / 1000).toFixed(3)}`,
+    `Max Power = ${data.peakHP.toFixed(1)} HP at ${data.peakHPRpm.toLocaleString()} RPM`,
     chartLeft + chartWidth * 0.25 + 20, legendY + 3,
   );
   if (compareData && compareData.qualified) {
@@ -642,7 +778,7 @@ function drawDynoSheet(
     ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, legendY + 11, 10, 10);
     ctx.fillStyle = COLORS.textLight;
     ctx.fillText(
-      `Baseline Power = ${compareData.peakHP.toFixed(3)} at ${(compareData.peakHPRpm / 1000).toFixed(3)}`,
+      `Baseline Power = ${compareData.peakHP.toFixed(1)} HP at ${compareData.peakHPRpm.toLocaleString()} RPM`,
       chartLeft + chartWidth * 0.25 + 20, legendY + 19,
     );
   }
@@ -667,18 +803,18 @@ function drawDynoSheet(
   ctx.translate(15, torqueChartTop + torqueChartHeight / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = 'bold 12px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Torque (ft-lbs)', 0, 0);
+  ctx.fillText('Torque (ft-lb)', 0, 0);
   ctx.restore();
 
   // Y-axis ticks
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '10px Arial, sans-serif';
+  ctx.font = '11px Arial, sans-serif';
   ctx.textAlign = 'right';
   for (let t = 0; t <= maxTorque; t += 10) {
     const y = torqueToY(t);
-    ctx.fillText(String(t), chartLeft - 5, y + 3);
+    ctx.fillText(String(t), chartLeft - 5, y + 4);
   }
 
   // Draw comparison Torque curve (behind main)
@@ -729,7 +865,7 @@ function drawDynoSheet(
     // Peak value text
     ctx.font = 'bold 11px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(data.peakTorque.toFixed(3), px, py - 10);
+    ctx.fillText(data.peakTorque.toFixed(1), px, py - 10);
   }
 
   // Legend box
@@ -742,7 +878,7 @@ function drawDynoSheet(
   ctx.font = '10px Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(
-    `Max Torque = ${data.peakTorque.toFixed(3)} at Engine RPM = ${(data.peakTorqueRpm / 1000).toFixed(3)}`,
+    `Max Torque = ${data.peakTorque.toFixed(1)} ft-lb at ${data.peakTorqueRpm.toLocaleString()} RPM`,
     chartLeft + chartWidth * 0.25 + 20, tqLegendY + 3,
   );
   if (compareData && compareData.qualified) {
@@ -750,22 +886,23 @@ function drawDynoSheet(
     ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, tqLegendY + 11, 10, 10);
     ctx.fillStyle = COLORS.textLight;
     ctx.fillText(
-      `Baseline Torque = ${compareData.peakTorque.toFixed(3)} at ${(compareData.peakTorqueRpm / 1000).toFixed(3)}`,
+      `Baseline Torque = ${compareData.peakTorque.toFixed(1)} ft-lb at ${compareData.peakTorqueRpm.toLocaleString()} RPM`,
       chartLeft + chartWidth * 0.25 + 20, tqLegendY + 19,
     );
   }
 
   // ─── X-axis (shared) ───────────────────────────────────────────────
   ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '11px Arial, sans-serif';
+  ctx.font = '12px Arial, sans-serif';
   ctx.textAlign = 'center';
 
   for (let rpm = minRPM; rpm <= maxRPM; rpm += 1000) {
     const x = rpmToX(rpm);
-    ctx.fillText((rpm / 1000).toString(), x, torqueChartBottom + 15);
+    ctx.fillText(rpm.toLocaleString(), x, torqueChartBottom + 16);
   }
 
-  ctx.fillText('Engine RPM (rpmx1000)', chartLeft + chartWidth / 2, torqueChartBottom + 30);
+  ctx.font = 'bold 13px Arial, sans-serif';
+  ctx.fillText('Engine RPM', chartLeft + chartWidth / 2, torqueChartBottom + 32);
 
   // ─── Footer ─────────────────────────────────────────────────────────
   const footerY = H - FOOTER_HEIGHT;

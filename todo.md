@@ -3078,3 +3078,21 @@
 - [x] Change WOT threshold from 90% to 72° for Honda Talon (TPS measured in degrees, full throttle ≈ 80°)
 - [x] Update disqualify message to show degrees instead of percent for Talon logs
 - [x] Ensure correction engine and other TPS-dependent logic also use degree-aware thresholds
+
+## Honda Talon: Injector PW Final + Transient Fueling Detection (2026-04-01)
+- [x] Switch dyno power calculations to use "Injector Pulsewidth Final" instead of "Injector Pulsewidth Desired" (already implemented — DynoSheet prefers injPwFinal over injPwDesired)
+- [x] Create computed "Additional Pulsewidth" channel (Final - Desired) for transient fueling detection
+- [x] Determine acceptable Additional PW percentage for normal vs transient conditions (15% of Desired PW = transient threshold)
+- [x] Filter transient fueling conditions from fuel correction engine (skip samples during transient enrichment)
+- [x] Add tuner notes when transient fueling is excessively lean or rich (λ>1.1 lean warning, λ>1.2 critical; λ<0.75 rich warning, λ<0.65 critical)
+- [x] Update wp8Parser getHondaTalonKeyChannels with Injector Pulsewidth Final (already mapped as injPwFinal)
+- [ ] Write tests for transient fueling detection and filtering (pending)
+
+## Honda Talon Virtual Dyno: Power Calculation & Rendering Fixes (2026-04-01)
+- [x] Analyze uploaded WP8 file to understand why dyno shows ~50 HP instead of expected ~100+ HP
+- [x] Fix WOT detection producing 813s "best run" — added RPM sweep detection within long WOT runs (findRPMSweeps)
+- [x] Fix power calculation formula for ID1050 injectors — RPM sweep extraction now produces proper acceleration pulls
+- [x] Fix dyno sheet title being cut off — measured title width with correct font before positioning badge
+- [x] Fix flat/nearly-flat HP and torque curves — RPM sweep detection isolates acceleration pulls from steady-state WOT
+- [x] Fix axis scaling and readability — larger fonts, RPM in integers, HP/torque to 1 decimal, clearer axis labels
+- [x] Parse filename for injector type detection (ID1050s in filename) — already handled by detectInjectorType

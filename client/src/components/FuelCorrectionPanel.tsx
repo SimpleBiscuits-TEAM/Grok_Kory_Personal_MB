@@ -578,6 +578,7 @@ export default function FuelCorrectionPanel({
             <span style={{ color: sColor.textDim }}>
               TOTAL: {report.totalSamples} samples
               {report.decelSamplesSkipped > 0 && ` (−${report.decelSamplesSkipped} decel)`}
+              {report.transientSamplesSkipped > 0 && ` (−${report.transientSamplesSkipped} transient)`}
             </span>
             <span style={{ color: sColor.cyan }}>
               ALPHA-N: {report.alphaNSamples} | SD: {report.sdSamples}
@@ -588,7 +589,38 @@ export default function FuelCorrectionPanel({
             {report.hasStft && (
               <span style={{ color: sColor.yellow }}>STFT APPLIED</span>
             )}
+            {report.hasInjPwFinal && (
+              <span style={{ color: sColor.cyan }}>TRANSIENT FILTER ON</span>
+            )}
           </div>
+
+          {/* Transient fueling tuner notes */}
+          {report.transientNotes.length > 0 && (
+            <div style={{
+              marginTop: 8,
+              padding: '10px 14px',
+              background: 'oklch(0.18 0.008 260)',
+              borderLeft: `3px solid ${sColor.orange}`,
+            }}>
+              <div style={{ fontFamily: sFont.heading, fontSize: '0.9rem', color: sColor.orange, marginBottom: 6 }}>
+                TRANSIENT FUELING NOTES
+              </div>
+              {report.transientNotes.map((note, idx) => (
+                <div key={idx} style={{
+                  fontFamily: sFont.mono,
+                  fontSize: '0.75rem',
+                  color: note.severity === 'critical' ? 'oklch(0.70 0.22 25)' : sColor.yellow,
+                  marginBottom: 4,
+                  lineHeight: 1.4,
+                }}>
+                  {note.message}
+                  <span style={{ color: sColor.textDim, marginLeft: 8 }}>
+                    ({note.sampleCount} samples, RPM {note.rpmRange[0].toFixed(0)}–{note.rpmRange[1].toFixed(0)})
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Per-map correction previews */}
           {report.results.map(result => {
