@@ -57,16 +57,16 @@ function idleBaseline(rpm: number[], values: number[], offsets: number[]): numbe
 
 // ─── Column finder helpers ───────────────────────────────────────────────────
 
-type HeaderFinder = (keywords: string[]) => number;
+type HeaderFinder = (keywords: string[], exclude?: (h: string) => boolean) => number;
 
 function makeColumnFinder(headers: string[]): HeaderFinder {
-  return (keywords: string[]) => {
+  return (keywords: string[], exclude?: (h: string) => boolean) => {
     for (const kw of keywords) {
-      const exact = headers.indexOf(kw);
+      const exact = headers.findIndex((h, _i) => h === kw && (!exclude || !exclude(h)));
       if (exact !== -1) return exact;
     }
     for (const kw of keywords) {
-      const sub = headers.findIndex(h => h.toLowerCase().includes(kw.toLowerCase()));
+      const sub = headers.findIndex(h => h.toLowerCase().includes(kw.toLowerCase()) && (!exclude || !exclude(h)));
       if (sub !== -1) return sub;
     }
     return -1;
@@ -107,12 +107,15 @@ export function resolvePids(
   // Priority: direct gauge PID → MAP absolute (subtract idle baseline) → zero
   {
     const directIdx = find(['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M']);
+    // IMPORTANT: Exclude exhaust-side headers ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")
+    // which are backpressure, NOT intake boost.
+    const isExhaust = (h: string) => /exhaust/i.test(h);
     const mapAbsIdx = find([
       'ECM.MAP', 'PCM.MAP',               // EFILive absolute kPa
       'Intake Manifold Absolute Pressure', // HP Tuners absolute PSIA
       'Manifold Absolute Pressure',
       'MAP',
-    ]);
+    ], isExhaust);
     const baroIdx = find([
       'ECM.BARO', 'PCM.BARO', 'Barometric Pressure', 'Baro Pressure', 'Ambient Air Pressure',
       'B-Bus Ambient Air Pressure',

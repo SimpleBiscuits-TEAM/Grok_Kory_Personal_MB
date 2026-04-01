@@ -2973,3 +2973,9 @@
 - [ ] All targets editable after preset population
 - [ ] Column lookup via Desired Injector Pulsewidth → interpolate to SD Cyl1 table position
 - [ ] Turbo Alpha-N target = 0.95 across all columns
+
+## Fix: Backpressure Still Being Read as Boost on 2025 Ford (2026-03-31)
+- [x] dataProcessor.ts boostIdx fallback matches 'Exhaust MAP' via generic h.includes('MAP') - must exclude exhaust headers
+- [x] pidSubstitution.ts mapAbsIdx find(['MAP']) also matches 'Exhaust MAP' - must exclude exhaust headers
+- [x] Verify boost is correctly derived from Intake MAP only, not exhaust side pressure
+- [x] Add test for Ford Powerstroke log to prevent regression (8 tests in fordExhaustMap.test.ts)

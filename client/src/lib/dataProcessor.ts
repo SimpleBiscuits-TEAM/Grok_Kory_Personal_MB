@@ -846,7 +846,13 @@ function parseHPTunersCSV(content: string): DuramaxData {
     if (hiResAny !== -1 && colHasData(hiResAny)) return hiResAny;
     const sae = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure (SAE)');
     if (sae !== -1) return sae;
-    return headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') || h.includes('MAP'));
+    // IMPORTANT: Exclude exhaust-side pressure columns ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")
+    // which are backpressure, NOT intake boost. Only match intake-side MAP.
+    const isExhaust = (h: string) => /exhaust/i.test(h);
+    const intakeMap = headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') && !isExhaust(h));
+    if (intakeMap !== -1) return intakeMap;
+    // Generic 'MAP' fallback -- but NEVER match exhaust headers
+    return headers.findIndex(h => h.includes('MAP') && !isExhaust(h));
   })();
 
   const torqueIdx         = getColumnIndex(['Actual Engine Torque (SAE)', 'Actual Engine Torque']);
