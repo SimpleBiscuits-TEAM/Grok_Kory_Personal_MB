@@ -3109,3 +3109,7 @@
 - [x] Add PDF export button to interactive dyno chart
 - [x] Include PPEI branding, V-OP BETA watermark, and disclaimer in PDF
 - [x] Export chart as high-quality image embedded in landscape PDF
+
+## Honda Talon: Fuel Map Copy Values Only
+- [x] Add "Copy Values" button to FuelMapCard that copies only cell data (no RPM/TPS axis headers) for C3 paste
+- [x] Ensure tab-separated format compatible with Dynojet C3 software paste

@@ -16,8 +16,9 @@ import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
   Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
-  GitCompare, ArrowRight, Wrench, TrendingUp
+  GitCompare, ArrowRight, Wrench, TrendingUp, Copy, ClipboardCheck
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
 import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
@@ -682,6 +683,23 @@ function FuelMapCard({
                 }}
               >
                 <Camera style={{ width: 12, height: 12 }} />{ocrLoading ? 'EXTRACTING...' : 'RE-SCAN'}
+              </button>
+              <button
+                onClick={() => {
+                  if (!map) return;
+                  // Copy only cell values (no axis labels) as tab-separated text for C3 paste
+                  const valuesOnly = map.data.map(row => row.map(v => v.toFixed(3)).join('\t')).join('\n');
+                  navigator.clipboard.writeText(valuesOnly)
+                    .then(() => toast.success('Values copied to clipboard — paste into C3'))
+                    .catch(() => toast.error('Failed to copy to clipboard'));
+                }}
+                style={{
+                  background: 'transparent', color: sColor.green, border: 'none',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                }}
+              >
+                <Copy style={{ width: 12, height: 12 }} />COPY VALUES
               </button>
               <button
                 onClick={() => {
