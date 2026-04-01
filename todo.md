@@ -3019,3 +3019,15 @@
 - [x] Track which cells were corrected after applying corrections
 - [x] Highlight corrected cells in the fuel table editor with a distinct visual style (green border + glow)
 - [x] Clear highlights when corrections are reverted
+
+## Honda Talon: Virtual Dyno Feature (COMPLETED 2026-04-01)
+- [x] Study WP8 dyno log channels: HP, Torque, Inj PW, AFR/Lambda, MAP, RPM, TPS, Ignition Timing
+- [x] Parse log metadata (notes, name) for injector size detection (ID1050s, ID1300s, stock)
+- [x] Parse log metadata for fuel type detection (Pump Gas, UTV96, E85, E90, Ignite Red)
+- [x] Build virtual dyno engine: estimate HP/torque from street logs using dyno-learned correlations
+- [x] Power estimation model: fuel flow based (HP = FuelFlow lb/hr / BSFC)
+- [x] Account for injector size and fuel stoich ratio in power calculations
+- [x] Build Virtual Dyno UI: estimated HP/torque vs RPM chart, injector/fuel badges, confidence level
+- [x] Integrate as DYNO tab in HondaTalonTuner
+- [x] Add disclaimer: "Virtual dyno estimates — actual results may vary based on conditions"
+- [x] Write tests for virtual dyno engine (44 tests passing)

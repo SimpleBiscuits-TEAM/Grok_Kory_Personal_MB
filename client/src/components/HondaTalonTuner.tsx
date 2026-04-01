@@ -16,13 +16,14 @@ import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
   Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
-  GitCompare, ArrowRight, Wrench
+  GitCompare, ArrowRight, Wrench, TrendingUp
 } from 'lucide-react';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
 import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
 import FuelCorrectionPanel from '@/components/FuelCorrectionPanel';
 import { FuelMapState as CorrectionFuelMapState, MapCorrectionResult } from '@/lib/talonFuelCorrection';
+import VirtualDynoPanel from '@/components/VirtualDynoPanel';
 
 /** Tracks which cells were corrected per fuel map, keyed by mapKey */
 export type CorrectedCellsMap = Record<string, Set<string>>;
@@ -1232,7 +1233,8 @@ export default function HondaTalonTuner({
     speedDensity_cyl1: null,
     speedDensity_cyl2: null,
   });
-  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct'>('fuelmaps');
+  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct' | 'dyno'>('fuelmaps');
+  const [wp8FileName, setWp8FileName] = useState('');
   const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
 
   // Track which cells were corrected (for highlighting in fuel map editor)
@@ -1261,6 +1263,7 @@ export default function HondaTalonTuner({
     const buffer = await file.arrayBuffer();
     const result = parseWP8(buffer);
     setLocalWP8(result);
+    setWp8FileName(file.name);
     setActiveSection('datalog');
   }, []);
 
@@ -1462,6 +1465,19 @@ export default function HondaTalonTuner({
         >
           <Wrench style={{ width: 16, height: 16 }} />CORRECT
         </button>
+        <button
+          onClick={() => setActiveSection('dyno')}
+          style={{
+            background: activeSection === 'dyno' ? 'oklch(0.18 0.008 260)' : 'transparent',
+            color: activeSection === 'dyno' ? 'white' : sColor.textDim,
+            border: `1px solid ${activeSection === 'dyno' ? sColor.red : sColor.border}`,
+            borderRadius: '2px', padding: '8px 20px', cursor: 'pointer',
+            fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}
+        >
+          <TrendingUp style={{ width: 16, height: 16 }} />DYNO
+        </button>
       </div>
 
       {/* Fuel Maps Section */}
@@ -1490,6 +1506,14 @@ export default function HondaTalonTuner({
           compareMaps={compareMaps}
           onCompareLoad={handleCompareMapLoad}
           onCompareClear={handleCompareMapClear}
+        />
+      )}
+
+      {/* Dyno Section */}
+      {activeSection === 'dyno' && (
+        <VirtualDynoPanel
+          wp8Data={localWP8}
+          fileName={wp8FileName}
         />
       )}
 
