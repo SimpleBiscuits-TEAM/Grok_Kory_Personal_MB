@@ -6,8 +6,12 @@
  * LLM-powered commentary.
  */
 
-import { useState, useRef, useCallback } from 'react';
-import { Upload, Loader2, AlertTriangle, CheckCircle, ArrowRight, ArrowUp, ArrowDown, Minus, MessageSquare, Sparkles, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useRef, useCallback, useMemo } from 'react';
+import { Upload, Loader2, AlertTriangle, CheckCircle, ArrowRight, ArrowUp, ArrowDown, Minus, MessageSquare, Sparkles, X, ChevronDown, ChevronRight, BarChart3 } from 'lucide-react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, BarChart, Bar, Cell,
+} from 'recharts';
 import { parseCSV, processData, downsampleData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { compareDatasets, buildComparisonContext, ComparisonReport, EventComparison, PidDelta } from '@/lib/compareEngine';
 import { trpc } from '@/lib/trpc';
@@ -336,6 +340,16 @@ export default function CompareView({ onBack }: CompareViewProps) {
             </div>
           </div>
 
+          {/* Overlay Charts */}
+          {logA.data && logB.data && (
+            <CompareCharts
+              dataA={logA.data}
+              dataB={logB.data}
+              labelA={logA.fileName || 'Log A'}
+              labelB={logB.fileName || 'Log B'}
+            />
+          )}
+
           {/* PID Coverage */}
           {(report.pidCoverage.aOnlyPids.length > 0 || report.pidCoverage.bOnlyPids.length > 0) && (
             <div style={{
@@ -407,6 +421,329 @@ export default function CompareView({ onBack }: CompareViewProps) {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Compare Charts ──────────────────────────────────────────────────────────
+
+interface PidOption {
+  key: string;
+  label: string;
+  unit: string;
+  getA: (d: ProcessedMetrics) => number[];
+  getB: (d: ProcessedMetrics) => number[];
+}
+
+const ALL_PID_OPTIONS: PidOption[] = [
+  { key: 'rpm', label: 'RPM', unit: 'RPM', getA: d => d.rpm, getB: d => d.rpm },
+  { key: 'boost', label: 'Boost', unit: 'PSI', getA: d => d.boost, getB: d => d.boost },
+  { key: 'vehicleSpeed', label: 'Vehicle Speed', unit: 'MPH', getA: d => d.vehicleSpeed, getB: d => d.vehicleSpeed },
+  { key: 'railPressureActual', label: 'Rail Pressure (Actual)', unit: 'PSI', getA: d => d.railPressureActual, getB: d => d.railPressureActual },
+  { key: 'railPressureDesired', label: 'Rail Pressure (Desired)', unit: 'PSI', getA: d => d.railPressureDesired, getB: d => d.railPressureDesired },
+  { key: 'exhaustGasTemp', label: 'EGT', unit: '°F', getA: d => d.exhaustGasTemp, getB: d => d.exhaustGasTemp },
+  { key: 'maf', label: 'MAF', unit: 'g/s', getA: d => d.maf, getB: d => d.maf },
+  { key: 'hpTorque', label: 'HP (Torque)', unit: 'HP', getA: d => d.hpTorque, getB: d => d.hpTorque },
+  { key: 'boostDesired', label: 'Boost (Desired)', unit: 'PSI', getA: d => d.boostDesired, getB: d => d.boostDesired },
+  { key: 'turboVanePosition', label: 'Turbo Vane Position', unit: '%', getA: d => d.turboVanePosition, getB: d => d.turboVanePosition },
+  { key: 'converterSlip', label: 'Converter Slip', unit: 'RPM', getA: d => d.converterSlip, getB: d => d.converterSlip },
+  { key: 'converterPressure', label: 'TCC Pressure', unit: 'kPa', getA: d => d.converterPressure, getB: d => d.converterPressure },
+  { key: 'coolantTemp', label: 'Coolant Temp', unit: '°F', getA: d => d.coolantTemp, getB: d => d.coolantTemp },
+  { key: 'oilTemp', label: 'Oil Temp', unit: '°F', getA: d => d.oilTemp, getB: d => d.oilTemp },
+  { key: 'transFluidTemp', label: 'Trans Fluid Temp', unit: '°F', getA: d => d.transFluidTemp, getB: d => d.transFluidTemp },
+  { key: 'throttlePosition', label: 'Throttle Position', unit: '%', getA: d => d.throttlePosition, getB: d => d.throttlePosition },
+  { key: 'injectorPulseWidth', label: 'Injector Pulse Width', unit: 'ms', getA: d => d.injectorPulseWidth, getB: d => d.injectorPulseWidth },
+  { key: 'injectionTiming', label: 'Injection Timing', unit: '°BTDC', getA: d => d.injectionTiming, getB: d => d.injectionTiming },
+  { key: 'intakeAirTemp', label: 'Intake Air Temp', unit: '°F', getA: d => d.intakeAirTemp, getB: d => d.intakeAirTemp },
+  { key: 'fuelQuantity', label: 'Fuel Quantity', unit: 'mm³', getA: d => d.fuelQuantity, getB: d => d.fuelQuantity },
+  { key: 'oilPressure', label: 'Oil Pressure', unit: 'PSI', getA: d => d.oilPressure, getB: d => d.oilPressure },
+  { key: 'batteryVoltage', label: 'Battery Voltage', unit: 'V', getA: d => d.batteryVoltage, getB: d => d.batteryVoltage },
+  { key: 'currentGear', label: 'Current Gear', unit: '', getA: d => d.currentGear, getB: d => d.currentGear },
+  { key: 'exhaustPressure', label: 'Exhaust Backpressure', unit: 'PSI', getA: d => d.exhaustPressure, getB: d => d.exhaustPressure },
+  { key: 'barometricPressure', label: 'Barometric Pressure', unit: 'PSI', getA: d => d.barometricPressure, getB: d => d.barometricPressure },
+  { key: 'pcvDutyCycle', label: 'PCV Duty Cycle', unit: '%', getA: d => d.pcvDutyCycle, getB: d => d.pcvDutyCycle },
+  { key: 'turboSpeed', label: 'Turbo Speed', unit: 'RPM', getA: d => d.turboSpeed, getB: d => d.turboSpeed },
+  { key: 'egrPosition', label: 'EGR Position', unit: '%', getA: d => d.egrPosition, getB: d => d.egrPosition },
+  { key: 'calcLoad', label: 'Calculated Load', unit: '%', getA: d => d.calcLoad, getB: d => d.calcLoad },
+  { key: 'converterDutyCycle', label: 'TCC Duty Cycle', unit: '%', getA: d => d.converterDutyCycle, getB: d => d.converterDutyCycle },
+];
+
+function CompareCharts({ dataA, dataB, labelA, labelB }: {
+  dataA: ProcessedMetrics;
+  dataB: ProcessedMetrics;
+  labelA: string;
+  labelB: string;
+}) {
+  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm']);
+  const [showPidPicker, setShowPidPicker] = useState(false);
+
+  // Filter to PIDs that have data in at least one log
+  const availablePids = useMemo(() => {
+    return ALL_PID_OPTIONS.filter(p => {
+      const aData = p.getA(dataA);
+      const bData = p.getB(dataB);
+      return (aData.some(v => v !== 0) || bData.some(v => v !== 0));
+    });
+  }, [dataA, dataB]);
+
+  const togglePid = (key: string) => {
+    setSelectedPids(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  // Build overlay chart data — time-aligned
+  const chartDataSets = useMemo(() => {
+    return selectedPids.map(pidKey => {
+      const pidOpt = ALL_PID_OPTIONS.find(p => p.key === pidKey);
+      if (!pidOpt) return null;
+      const aVals = pidOpt.getA(dataA);
+      const bVals = pidOpt.getB(dataB);
+      const maxLen = Math.max(aVals.length, bVals.length);
+      // Downsample to max 500 points for performance
+      const step = Math.max(1, Math.floor(maxLen / 500));
+      const points: { time: number; a: number | null; b: number | null }[] = [];
+      for (let i = 0; i < maxLen; i += step) {
+        const timeA = i < dataA.timeMinutes.length ? dataA.timeMinutes[i] * 60 : null;
+        const timeB = i < dataB.timeMinutes.length ? dataB.timeMinutes[i] * 60 : null;
+        points.push({
+          time: (timeA ?? timeB ?? i) as number,
+          a: i < aVals.length ? aVals[i] : null,
+          b: i < bVals.length ? bVals[i] : null,
+        });
+      }
+      return { pidKey, label: pidOpt.label, unit: pidOpt.unit, points };
+    }).filter(Boolean) as { pidKey: string; label: string; unit: string; points: { time: number; a: number | null; b: number | null }[] }[];
+  }, [selectedPids, dataA, dataB]);
+
+  // Bar chart data for peak comparison
+  const barData = useMemo(() => {
+    return availablePids.slice(0, 12).map(p => {
+      const aVals = p.getA(dataA).filter(v => v !== 0);
+      const bVals = p.getB(dataB).filter(v => v !== 0);
+      const peakA = aVals.length > 0 ? Math.max(...aVals) : 0;
+      const peakB = bVals.length > 0 ? Math.max(...bVals) : 0;
+      return { name: p.label, peakA, peakB, unit: p.unit };
+    }).filter(d => d.peakA > 0 || d.peakB > 0);
+  }, [availablePids, dataA, dataB]);
+
+  const PPEI_RED = 'oklch(0.52 0.22 25)';
+  const CYAN = 'oklch(0.72 0.15 200)';
+
+  return (
+    <div>
+      <SectionHeader title="OVERLAY CHARTS" />
+
+      {/* PID Selector */}
+      <div style={{
+        background: 'oklch(0.12 0.005 260)',
+        border: '1px solid oklch(0.22 0.008 260)',
+        borderRadius: '3px',
+        padding: '0.75rem 1rem',
+        marginBottom: '1rem',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+          <span style={{
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.85rem',
+            letterSpacing: '0.06em',
+            color: 'oklch(0.68 0.010 260)',
+          }}>
+            <BarChart3 style={{ width: '14px', height: '14px', display: 'inline', marginRight: '6px', verticalAlign: 'middle' }} />
+            SELECT PIDs TO OVERLAY ({selectedPids.length} selected)
+          </span>
+          <button
+            onClick={() => setShowPidPicker(!showPidPicker)}
+            style={{
+              background: 'oklch(0.18 0.005 260)',
+              border: '1px solid oklch(0.30 0.008 260)',
+              borderRadius: '3px',
+              color: 'oklch(0.75 0.010 260)',
+              fontFamily: '"Rajdhani", sans-serif',
+              fontSize: '0.8rem',
+              padding: '4px 10px',
+              cursor: 'pointer',
+            }}
+          >
+            {showPidPicker ? 'CLOSE' : 'ADD / REMOVE PIDs'}
+          </button>
+        </div>
+
+        {/* Selected PID tags */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          {selectedPids.map(key => {
+            const opt = ALL_PID_OPTIONS.find(p => p.key === key);
+            return opt ? (
+              <span
+                key={key}
+                onClick={() => togglePid(key)}
+                style={{
+                  fontSize: '0.7rem',
+                  fontFamily: '"Share Tech Mono", monospace',
+                  background: 'oklch(0.52 0.22 25 / 0.15)',
+                  border: '1px solid oklch(0.52 0.22 25 / 0.4)',
+                  color: 'oklch(0.80 0.15 25)',
+                  padding: '2px 8px',
+                  borderRadius: '2px',
+                  cursor: 'pointer',
+                }}
+              >
+                {opt.label} × 
+              </span>
+            ) : null;
+          })}
+        </div>
+
+        {/* PID picker grid */}
+        {showPidPicker && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+            gap: '4px',
+            marginTop: '0.75rem',
+            maxHeight: '200px',
+            overflowY: 'auto',
+            padding: '0.5rem',
+            background: 'oklch(0.09 0.004 260)',
+            borderRadius: '3px',
+          }}>
+            {availablePids.map(p => (
+              <label
+                key={p.key}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.75rem',
+                  fontFamily: '"Rajdhani", sans-serif',
+                  color: selectedPids.includes(p.key) ? 'oklch(0.85 0.15 25)' : 'oklch(0.65 0.010 260)',
+                  cursor: 'pointer',
+                  padding: '3px 6px',
+                  borderRadius: '2px',
+                  background: selectedPids.includes(p.key) ? 'oklch(0.52 0.22 25 / 0.10)' : 'transparent',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedPids.includes(p.key)}
+                  onChange={() => togglePid(p.key)}
+                  style={{ accentColor: 'oklch(0.52 0.22 25)' }}
+                />
+                {p.label} {p.unit && `(${p.unit})`}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Overlay Line Charts */}
+      {chartDataSets.map(ds => (
+        <div key={ds.pidKey} style={{
+          background: 'oklch(0.10 0.004 260)',
+          border: '1px solid oklch(0.22 0.008 260)',
+          borderRadius: '3px',
+          padding: '1rem',
+          marginBottom: '0.75rem',
+        }}>
+          <div style={{
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.9rem',
+            letterSpacing: '0.06em',
+            color: 'oklch(0.75 0.010 260)',
+            marginBottom: '0.5rem',
+          }}>
+            {ds.label} {ds.unit && `(${ds.unit})`}
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={ds.points} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.20 0.005 260)" />
+              <XAxis
+                dataKey="time"
+                tickFormatter={(v: number) => `${v.toFixed(0)}s`}
+                stroke="oklch(0.50 0.005 260)"
+                tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
+              />
+              <YAxis
+                stroke="oklch(0.50 0.005 260)"
+                tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'oklch(0.12 0.005 260)',
+                  border: '1px solid oklch(0.30 0.008 260)',
+                  borderRadius: '3px',
+                  fontFamily: '"Share Tech Mono", monospace',
+                  fontSize: '0.75rem',
+                }}
+                labelFormatter={(v: number) => `Time: ${Number(v).toFixed(1)}s`}
+                formatter={(value: number, name: string) => [
+                  `${value?.toFixed(2)} ${ds.unit}`,
+                  name === 'a' ? labelA : labelB,
+                ]}
+              />
+              <Legend
+                formatter={(value: string) => value === 'a' ? labelA : labelB}
+                wrapperStyle={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem' }}
+              />
+              <Line type="monotone" dataKey="a" stroke={PPEI_RED} strokeWidth={2} dot={false} name="a" connectNulls />
+              <Line type="monotone" dataKey="b" stroke={CYAN} strokeWidth={2} dot={false} name="b" connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ))}
+
+      {/* Peak Comparison Bar Chart */}
+      {barData.length > 0 && (
+        <div style={{
+          background: 'oklch(0.10 0.004 260)',
+          border: '1px solid oklch(0.22 0.008 260)',
+          borderRadius: '3px',
+          padding: '1rem',
+          marginTop: '1rem',
+        }}>
+          <div style={{
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.9rem',
+            letterSpacing: '0.06em',
+            color: 'oklch(0.75 0.010 260)',
+            marginBottom: '0.5rem',
+          }}>
+            PEAK VALUES COMPARISON
+          </div>
+          <ResponsiveContainer width="100%" height={Math.max(250, barData.length * 35)}>
+            <BarChart data={barData} layout="vertical" margin={{ top: 5, right: 30, bottom: 5, left: 100 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.20 0.005 260)" />
+              <XAxis type="number" stroke="oklch(0.50 0.005 260)" tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                stroke="oklch(0.50 0.005 260)"
+                tick={{ fontSize: 10, fontFamily: '"Rajdhani", sans-serif' }}
+                width={95}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'oklch(0.12 0.005 260)',
+                  border: '1px solid oklch(0.30 0.008 260)',
+                  borderRadius: '3px',
+                  fontFamily: '"Share Tech Mono", monospace',
+                  fontSize: '0.75rem',
+                }}
+                formatter={(value: number, name: string) => [
+                  value.toFixed(1),
+                  name === 'peakA' ? labelA : labelB,
+                ]}
+              />
+              <Legend
+                formatter={(value: string) => value === 'peakA' ? labelA : labelB}
+                wrapperStyle={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem' }}
+              />
+              <Bar dataKey="peakA" fill={PPEI_RED} name="peakA" barSize={12} />
+              <Bar dataKey="peakB" fill={CYAN} name="peakB" barSize={12} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       )}
     </div>

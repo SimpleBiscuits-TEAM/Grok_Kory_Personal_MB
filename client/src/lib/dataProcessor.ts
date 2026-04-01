@@ -902,6 +902,16 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const iatIdx            = getColumnIndex(['Intake Air Temp (SAE)', 'Intake Air Temp', 'Intake Air Temperature', 'IAT', 'Charge Air Temp', 'Charge Air Temperature']);
   const fuelQuantityIdx   = getColumnIndex(['Fuel Mass Desired', 'Main Fuel Rate', 'Injection Quantity All', 'Fuel Quantity', 'Cylinder Fuel Rate']);
 
+  // ── Exhaust Backpressure / Exhaust MAP (Ford Powerstroke, etc.) ──────────
+  // These are EXHAUST SIDE pressures — NOT intake boost. Must be differentiated.
+  const exhaustBackpressureIdx = getColumnIndex(['Exhaust Backpressure', 'Exhaust Back Pressure', 'Exhaust Pressure']);
+  const exhaustMapIdx          = getColumnIndex(['Exhaust MAP', 'Exhaust Manifold Absolute Pressure']);
+
+  // ── Absolute Load fallback for throttle ──────────────────────────────────
+  // Ford Powerstroke "Accelerator Pedal Position" may read 0% even under load.
+  // Use Absolute Load (SAE) as a fallback indicator of engine load.
+  const absoluteLoadIdx = getColumnIndex(['Absolute Load (SAE)', 'Absolute Load', 'Calculated Load', 'Engine Load']);
+
   if (rpmIdx === -1 || mafIdx === -1) {
     throw new Error('Missing required columns: RPM or MAF');
   }
@@ -1066,7 +1076,10 @@ function parseHPTunersCSV(content: string): DuramaxData {
     oilTemp.push(oilTempIdx !== -1 ? hptConvert(oilTempIdx, values[oilTempIdx]) : 0);
     transFluidTemp.push(transFluidTempIdx !== -1 ? hptConvert(transFluidTempIdx, values[transFluidTempIdx]) : 0);
     barometricPressure.push(baroVal);
-    throttlePosition.push(throttleIdx !== -1 ? values[throttleIdx] : 0);
+    // Throttle: use Accelerator Pedal Position; if it reads 0 but Absolute Load > 50%,
+    // the pedal PID is likely broken (common on Ford Powerstroke). Use Absolute Load as proxy.
+    let throttleVal = throttleIdx !== -1 ? values[throttleIdx] : 0;
+    throttlePosition.push(throttleVal);
     injectorPulseWidth.push(injPulseWidthIdx !== -1 ? hptConvert(injPulseWidthIdx, values[injPulseWidthIdx]) : 0);
     injectionTiming.push(injTimingIdx !== -1 ? hptConvert(injTimingIdx, values[injTimingIdx]) : 0);
     intakeAirTemp.push(iatIdx !== -1 ? hptConvert(iatIdx, values[iatIdx]) : 0);
@@ -1094,6 +1107,60 @@ function parseHPTunersCSV(content: string): DuramaxData {
   }
   
   const duration = offset[offset.length - 1] - offset[0];
+
+  // ── Exhaust Backpressure: parse from dedicated exhaust columns ─────────────
+  // Ford Powerstroke logs have "Exhaust Backpressure" and "Exhaust MAP" which are
+  // EXHAUST SIDE pressures, NOT intake boost. Parse them into exhaustPressure[].
+  const exhaustPressure: number[] = [];
+  if (exhaustBackpressureIdx !== -1 || exhaustMapIdx !== -1) {
+    const exhIdx = exhaustBackpressureIdx !== -1 ? exhaustBackpressureIdx : exhaustMapIdx;
+    for (let i = dataStart; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || line.startsWith('[')) break;
+      const values = line.split(',').map(v => { const n = parseFloat(v.trim()); return isNaN(n) ? 0 : n; });
+      if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
+      exhaustPressure.push(hptConvert(exhIdx, values[exhIdx]));
+    }
+  }
+  // Ensure exhaustPressure matches rpm length
+  while (exhaustPressure.length < rpm.length) exhaustPressure.push(0);
+  if (exhaustPressure.length > rpm.length) exhaustPressure.length = rpm.length;
+
+  // ── Throttle fallback: if pedal position is always near 0 but Absolute Load
+  // shows significant values, the pedal PID is broken. Use Absolute Load as proxy.
+  const maxThrottle = Math.max(...throttlePosition);
+  const pidSubstitutions: import('./pidSubstitution').PidSubstitution[] = [];
+  if (maxThrottle < 5 && absoluteLoadIdx !== -1) {
+    // Check if Absolute Load has meaningful variation
+    // Re-parse Absolute Load values
+    const absLoadValues: number[] = [];
+    let parseIdx = 0;
+    for (let i = dataStart; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || line.startsWith('[')) break;
+      const values = line.split(',').map(v => { const n = parseFloat(v.trim()); return isNaN(n) ? 0 : n; });
+      if (values.length < Math.max(rpmIdx, mafIdx, torqueIdx) + 1) continue;
+      absLoadValues.push(values[absoluteLoadIdx]);
+      parseIdx++;
+    }
+    const maxAbsLoad = Math.max(...absLoadValues);
+    if (maxAbsLoad > 50) {
+      // Absolute Load has meaningful data — use it as throttle proxy
+      // Scale: Absolute Load 0-200% → Throttle 0-100%
+      for (let k = 0; k < Math.min(absLoadValues.length, throttlePosition.length); k++) {
+        throttlePosition[k] = Math.min(100, absLoadValues[k] / 2);
+      }
+      pidSubstitutions.push({
+        channel: 'Throttle Position',
+        primaryAttempted: 'Accelerator Pedal Position',
+        usedPid: 'Absolute Load (SAE)',
+        transform: 'Absolute Load 0-200% scaled to Throttle 0-100% (value / 2)',
+        reason: 'Accelerator Pedal Position PID reads 0% throughout the log. Absolute Load used as proxy.',
+        confidence: 'medium',
+      });
+    }
+  }
+
   // Determine boost source for HP Tuners
   const hpBoostSource: DuramaxData['boostSource'] =
     boostGaugePsigIdx !== -1 ? 'direct' :
@@ -1133,14 +1200,14 @@ function parseHPTunersCSV(content: string): DuramaxData {
     boostSource: hpBoostSource,
     // HP Tuners: boost is direct or MAP-derived; actual is available if any non-zero values exist
     boostActualAvailable: boost.some(v => v > 0),
-    pidSubstitutions: [],
+    pidSubstitutions,
     pidsMissing: [],
     boostCalibration: { corrected: false, atmosphericOffsetPsi: 0, method: 'none', idleBaselinePsia: 0, idleSampleCount: 0, desiredAlreadyGauge: true },
     timestamp: new Date().toLocaleString(),
     duration,
-    // Cummins-specific (defaults for non-Cummins formats)
+    // Exhaust pressure parsed from Exhaust Backpressure / Exhaust MAP columns (Ford, etc.)
     turboSpeed: [],
-    exhaustPressure: [],
+    exhaustPressure,
     batteryVoltage: [],
     dpfSootLevel: [],
     egrPosition: [],

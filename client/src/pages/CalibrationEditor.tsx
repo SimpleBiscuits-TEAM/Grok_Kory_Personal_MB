@@ -47,6 +47,7 @@ import KnoxFileBrowser from '@/components/editor/KnoxFileBrowser';
 import LimitAnalysisPanel from '@/components/editor/LimitAnalysisPanel';
 import { ECUDetectionPanel } from '@/components/editor/ECUDetectionPanel';
 import { trpc } from '@/lib/trpc';
+import { CalibrationContent } from '@/pages/Calibrations';
 import { toast } from 'sonner';
 import {
   saveEditorSession, getEditorSession, restoreBinaryData,
@@ -1143,6 +1144,7 @@ export default function CalibrationEditor() {
                 <TabsList className="shrink-0 mx-2 mt-2">
                   <TabsTrigger value="maps" className="text-[11px]">Maps</TabsTrigger>
                   <TabsTrigger value="hex" className="text-[11px]">Hex</TabsTrigger>
+                  <TabsTrigger value="calibdb" className="text-[11px]">Calibrations</TabsTrigger>
                   <TabsTrigger value="compare" className="text-[11px]">Compare</TabsTrigger>
                   <TabsTrigger value="ecu" className="text-[11px]">ECU</TabsTrigger>
                   <TabsTrigger value="info" className="text-[11px]">Info</TabsTrigger>
@@ -1187,6 +1189,10 @@ export default function CalibrationEditor() {
                       Load a binary file to view hex
                     </div>
                   )}
+                </TabsContent>
+
+                <TabsContent value="calibdb" className="flex-1 overflow-auto mt-0 min-h-0">
+                  <CalibrationContent />
                 </TabsContent>
 
                  <TabsContent value="compare" className="flex-1 overflow-auto mt-0 min-h-0">

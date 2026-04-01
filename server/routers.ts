@@ -18,6 +18,7 @@ import { binaryAnalysisRouter } from "./routers/binaryAnalysis";
 import { adminMessagingRouter } from "./routers/adminMessaging";
 import { supportAdminRouter } from "./routers/supportAdmin";
 import { datalogCacheRouter } from "./routers/datalogCache";
+import { datalogNamingRouter } from "./routers/datalogNaming";
 import { accessManagementRouter } from "./routers/accessManagement";
 import { fleetRouter } from "./routers/fleet";
 import { dragRouter } from "./routers/drag";
@@ -28,7 +29,7 @@ import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { notifyOwner } from "./_core/notification";
-import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken } from "./db";
+import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
 
 export const appRouter = router({
@@ -98,9 +99,71 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const result = await validateShareToken(input.token);
         if (!result) {
-          return { success: false, message: 'Invalid, expired, or already used share link' } as const;
+          return { success: false, message: 'Invalid or expired share link' } as const;
         }
-        return { success: true, allowedPath: result.allowedPath } as const;
+        return { success: true, tokenId: result.id, allowedPath: result.allowedPath } as const;
+      }),
+
+    // ── NDA (tied to signer email, valid 180 days) ──
+    submitNda: publicProcedure
+      .input(z.object({
+        tokenId: z.number(),
+        signerName: z.string().min(1).max(255),
+        signerEmail: z.string().email().max(320),
+        signatureImageUrl: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await submitNda(input);
+        if (!result) {
+          return { success: false, message: 'Failed to submit NDA' } as const;
+        }
+        return { success: true, ndaId: result.id } as const;
+      }),
+
+    checkNdaStatus: publicProcedure
+      .input(z.object({ email: z.string().email().max(320) }))
+      .query(async ({ input }) => {
+        const nda = await checkNdaStatus(input.email);
+        if (!nda) {
+          return { hasNda: false, status: null } as const;
+        }
+        // NDA valid for 180 days from creation
+        const ndaAgeMs = Date.now() - new Date(nda.createdAt).getTime();
+        const NDA_VALIDITY_MS = 180 * 24 * 60 * 60 * 1000;
+        if (ndaAgeMs > NDA_VALIDITY_MS) {
+          return { hasNda: false, status: 'expired' as const } as const;
+        }
+        return {
+          hasNda: true,
+          status: nda.status,
+          signerName: nda.signerName,
+          rejectionReason: nda.rejectionReason,
+          createdAt: nda.createdAt,
+        } as const;
+      }),
+
+    // Admin: list all NDA submissions
+    listNdas: publicProcedure
+      .query(async ({ ctx }) => {
+        if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'super_admin')) {
+          return [];
+        }
+        return getPendingNdas();
+      }),
+
+    // Admin: verify or reject an NDA
+    verifyNda: publicProcedure
+      .input(z.object({
+        ndaId: z.number(),
+        action: z.enum(['verified', 'rejected']),
+        rejectionReason: z.string().max(1000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'super_admin')) {
+          return { success: false, message: 'Only admins can verify NDAs' } as const;
+        }
+        const ok = await verifyNda(input.ndaId, ctx.user.id, input.action, input.rejectionReason);
+        return { success: ok } as const;
       }),
   }),
 
@@ -150,6 +213,7 @@ export const appRouter = router({
 
   // Datalog caching for dev/debug (8hr TTL)
   datalogCache: datalogCacheRouter,
+  datalogNaming: datalogNamingRouter,
 
   // Access Management (user approval, role management)
   access: accessManagementRouter,

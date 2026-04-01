@@ -128,42 +128,36 @@ export function FeedbackPanel({ isOpen, onClose, context }: FeedbackPanelProps) 
         }}
       />
 
-      {/* Panel — bottom-sheet on mobile, centered modal on desktop */}
+      {/* Panel — always centered modal overlay */}
       <div
         className="ppei-anim-scale-in ppei-feedback-panel"
         style={{
           position: 'fixed',
           zIndex: 999,
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 'min(520px, 92vw)',
+          maxHeight: '88vh',
           background: 'oklch(0.11 0.005 260)',
           border: '1px solid oklch(0.25 0.008 260)',
           borderTop: '3px solid oklch(0.52 0.22 25)',
-          boxShadow: '0 20px 60px oklch(0 0 0 / 0.7)',
+          boxShadow: '0 20px 60px oklch(0 0 0 / 0.7), 0 0 120px oklch(0.52 0.22 25 / 0.15)',
+          borderRadius: '4px',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
         }}
       >
         <style>{`
-          .ppei-feedback-panel {
-            /* Mobile: bottom sheet */
-            bottom: 0;
-            left: 0;
-            right: 0;
-            max-height: 90vh;
-            max-height: 90dvh;
-            border-radius: 12px 12px 0 0 !important;
-            width: 100% !important;
-          }
-          @media (min-width: 640px) {
+          @media (max-width: 480px) {
             .ppei-feedback-panel {
-              /* Desktop: centered modal */
-              bottom: auto !important;
-              left: 50% !important;
-              right: auto !important;
-              top: 50%;
-              transform: translate(-50%, -50%);
-              width: min(520px, 95vw) !important;
-              max-height: 85vh !important;
-              border-radius: 4px !important;
+              width: 100vw !important;
+              max-height: 92vh !important;
+              max-height: 92dvh !important;
+              border-radius: 12px 12px 0 0 !important;
+              top: auto !important;
+              bottom: 0 !important;
+              transform: translate(-50%, 0) !important;
             }
           }
         `}</style>

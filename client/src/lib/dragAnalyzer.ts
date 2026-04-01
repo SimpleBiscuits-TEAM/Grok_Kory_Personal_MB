@@ -54,6 +54,13 @@ export interface DragRun {
   tccSlipEvents: number;         // number of slip events > 50 RPM
   tccLockedByGear3: boolean;     // was TCC locked by 3rd gear?
   tccSlipTorqueLoss: number;     // estimated % torque not reaching ground
+  tccSlipPerGear: { gear: number; avgSlip: number; maxSlip: number; locked: boolean }[];
+
+  // Wheel slip analysis
+  wheelSlipDetected: boolean;    // rear wheel slip detected
+  maxWheelSlipMph: number;       // peak speed delta (rear - front or GPS - wheel)
+  wheelSlipEvents: number;       // number of slip events > 2 mph delta
+  wheelSlipMethod: 'gps_vs_wheel' | 'front_vs_rear' | 'none'; // detection method used
 
   railPressureDropMax: number;   // max rail pressure drop from baseline (kPa)
   railPressureDropPct: number;   // as percentage of baseline
@@ -79,7 +86,7 @@ export interface DragAnalysis {
 }
 
 export interface DragTip {
-  category: 'launch' | 'tcc' | 'fuel' | 'boost' | 'shift' | 'general';
+  category: 'launch' | 'tcc' | 'fuel' | 'boost' | 'shift' | 'wheelslip' | 'general';
   severity: 'critical' | 'warning' | 'info';
   title: string;
   detail: string;
@@ -361,6 +368,62 @@ export function analyzeDragRuns(data: ProcessedMetrics): DragAnalysis {
       const avgRpmDuringRun = rpm.slice(wotIdx, endIdx + 1).reduce((a, b) => a + b, 0) / (endIdx - wotIdx + 1);
       const tccSlipTorqueLoss = estimateTccTorqueLoss(avgSlip, avgRpmDuringRun);
 
+      // ── Per-gear TCC slip breakdown ──────────────────────────────────
+      const runGears = data.currentGear.slice(wotIdx, endIdx + 1);
+      const tccSlipPerGear: DragRun['tccSlipPerGear'] = [];
+      if (runGears.some(g => g > 0)) {
+        const gearSet = new Set(runGears.filter(g => g > 0));
+        for (const gear of Array.from(gearSet).sort((a, b) => a - b)) {
+          const gearSlips = runSlip.filter((_, idx) => runGears[idx] === gear);
+          if (gearSlips.length > 0) {
+            const gearAvgSlip = gearSlips.reduce((a, b) => a + Math.abs(b), 0) / gearSlips.length;
+            const gearMaxSlip = Math.max(...gearSlips.map(Math.abs));
+            // Locked = avg slip < 25 RPM (noise floor) AND max slip < 50 RPM
+            const locked = gearAvgSlip < 25 && gearMaxSlip < 50;
+            tccSlipPerGear.push({ gear, avgSlip: gearAvgSlip, maxSlip: gearMaxSlip, locked });
+          }
+        }
+      }
+
+      // ── Wheel slip detection ──────────────────────────────────────────
+      // Method 1: GPS speed vs ECU vehicle speed (if GPS available in future)
+      // Method 2: Front wheel speed vs rear wheel speed (if available in future)
+      // Method 3: Output shaft RPM vs vehicle speed ratio anomaly
+      let wheelSlipDetected = false;
+      let maxWheelSlipMph = 0;
+      let wheelSlipEvents = 0;
+      let wheelSlipMethod: DragRun['wheelSlipMethod'] = 'none';
+
+      const runOutputShaft = data.outputShaftRpm.slice(wotIdx, endIdx + 1);
+      const runVehicleSpeed = vehicleSpeed.slice(wotIdx, endIdx + 1);
+      if (runOutputShaft.some(v => v > 0) && runVehicleSpeed.some(v => v > 5)) {
+        // Calculate expected ratio from steady-state (mid-run where no shifts)
+        const steadyPairs: { ratio: number }[] = [];
+        for (let k = Math.floor(runOutputShaft.length * 0.4); k < Math.floor(runOutputShaft.length * 0.7); k++) {
+          if (runVehicleSpeed[k] > 20 && runOutputShaft[k] > 100) {
+            steadyPairs.push({ ratio: runOutputShaft[k] / runVehicleSpeed[k] });
+          }
+        }
+        if (steadyPairs.length > 5) {
+          const medianRatio = steadyPairs.sort((a, b) => a.ratio - b.ratio)[Math.floor(steadyPairs.length / 2)].ratio;
+          // Check for wheel slip: output shaft spinning faster than expected for the speed
+          for (let k = 0; k < runOutputShaft.length; k++) {
+            if (runVehicleSpeed[k] > 5 && runOutputShaft[k] > 100) {
+              const expectedSpeed = runOutputShaft[k] / medianRatio;
+              const slipMph = expectedSpeed - runVehicleSpeed[k];
+              if (slipMph > 2) { // > 2 mph delta indicates wheel slip
+                wheelSlipEvents++;
+                maxWheelSlipMph = Math.max(maxWheelSlipMph, slipMph);
+              }
+            }
+          }
+          if (wheelSlipEvents > 3) {
+            wheelSlipDetected = true;
+            wheelSlipMethod = 'front_vs_rear'; // using output shaft as proxy
+          }
+        }
+      }
+
       // ── Rail pressure analysis ────────────────────────────────────────
       const runRail = railPressureActual.slice(wotIdx, endIdx + 1).filter(v => v > 0);
       const baselineRail = runRail.length > 0 ? runRail[0] : 0;
@@ -418,6 +481,11 @@ export function analyzeDragRuns(data: ProcessedMetrics): DragAnalysis {
         tccSlipEvents,
         tccLockedByGear3,
         tccSlipTorqueLoss,
+        tccSlipPerGear,
+        wheelSlipDetected,
+        maxWheelSlipMph,
+        wheelSlipEvents,
+        wheelSlipMethod,
         railPressureDropMax,
         railPressureDropPct,
         boostDropMax,
@@ -506,8 +574,36 @@ function generateDragTips(
       category: 'tcc',
       severity: 'warning',
       title: 'TCC Not Confirmed Locked by 3rd Gear',
-      detail: 'For maximum performance on the drag strip, the torque converter should be fully locked by 3rd gear. An unlocked converter wastes power as heat. Add TCC Commanded Pressure and Converter Slip Speed to your datalog for definitive TCC status.',
+      detail: 'For maximum performance on the drag strip, the torque converter should be fully locked by 3rd gear. An unlocked converter wastes power as heat — that is torque NOT being transferred to the tires. 3rd gear lock is better than stock, but there is still more left on the table if the converter is not locking earlier. Add TCC Commanded Pressure and Converter Slip Speed to your datalog for definitive TCC status.',
       estimatedGain: '0.05-0.10 sec ET',
+    });
+  }
+
+  // Per-gear TCC slip breakdown
+  if (bestRun.tccSlipPerGear && bestRun.tccSlipPerGear.length > 0) {
+    const unlockedGears = bestRun.tccSlipPerGear.filter(g => !g.locked);
+    if (unlockedGears.length > 0) {
+      const gearDetails = bestRun.tccSlipPerGear.map(g =>
+        `Gear ${g.gear}: avg ${g.avgSlip.toFixed(0)} RPM slip, peak ${g.maxSlip.toFixed(0)} RPM — ${g.locked ? 'LOCKED \u2713' : 'NOT LOCKED \u2717'}`
+      ).join('. ');
+      tips.push({
+        category: 'tcc',
+        severity: unlockedGears.some(g => g.gear >= 3) ? 'warning' : 'info',
+        title: `Per-Gear TCC Analysis: ${unlockedGears.length} Gear(s) Not Locked`,
+        detail: `${gearDetails}. For drag racing, every gear the converter is unlocked means power being wasted as heat instead of going to the tires. An unlocked converter in 1st-2nd is common on stock tunes, but by 3rd gear the TCC must be fully locked for maximum performance.`,
+        estimatedGain: `${(unlockedGears.length * 0.03).toFixed(2)}-${(unlockedGears.length * 0.08).toFixed(2)} sec ET`,
+      });
+    }
+  }
+
+  // Wheel slip tips
+  if (bestRun.wheelSlipDetected) {
+    tips.push({
+      category: 'wheelslip',
+      severity: bestRun.maxWheelSlipMph > 5 ? 'warning' : 'info',
+      title: `Rear Wheel Slip Detected: ${bestRun.maxWheelSlipMph.toFixed(1)} mph peak`,
+      detail: `Detected ${bestRun.wheelSlipEvents} wheel slip events during the run with a peak speed delta of ${bestRun.maxWheelSlipMph.toFixed(1)} mph. Wheel slip means the rear tires are spinning faster than the vehicle is actually moving — that is wasted energy. For drag racing: lower rear tire pressure to 18-22 psi, consider stickier tires (drag radials or slicks), and if 4WD, ensure the transfer case is locked. On a prepped surface, traction compound on the tires can also help.`,
+      estimatedGain: '0.10-0.30 sec ET',
     });
   }
 

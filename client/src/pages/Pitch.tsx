@@ -39,6 +39,53 @@ const SUGGESTED_PROMPTS = [
   "What plans can I start with zero investment?",
 ];
 
+/**
+ * PitchContent — Embeddable version for use inside Advanced tabs (no header/wrapper)
+ */
+export function PitchContent() {
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const chatMut = trpc.pitch.chat.useMutation({
+    onSuccess: (data) => {
+      setMessages(prev => [...prev, { role: 'assistant', content: String(data.reply ?? '') }]);
+    },
+    onError: (error) => {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Connection issue — give me a sec. Error: ${error.message}` }]);
+    },
+  });
+
+  const handleSend = (content: string) => {
+    const userMessage: Message = { role: 'user', content };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    const history = newMessages.filter(m => m.role !== 'system').slice(-20).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+    chatMut.mutate({ message: content, history: history.slice(0, -1) });
+  };
+
+  if (authLoading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
+  if (!isAuthenticated) return <div style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', padding: '2rem', textAlign: 'center' }}>Sign in to access Pitch.</div>;
+
+  return (
+    <div className="max-w-4xl mx-auto" style={{ padding: '1rem 0' }}>
+      <div className="flex items-center gap-3 mb-4">
+        <Lightbulb size={24} style={{ color: sColor.gold }} />
+        <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>AI BUSINESS CHAT</h2>
+        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.gold, background: 'rgba(255,200,0,0.1)', border: '1px solid rgba(255,200,0,0.3)', borderRadius: '3px', padding: '2px 6px', letterSpacing: '0.08em' }}>PITCH</span>
+      </div>
+      <AIChatBox
+        messages={messages}
+        onSendMessage={handleSend}
+        isLoading={chatMut.isPending}
+        placeholder="Ask Pitch about business opportunities, the Innovator Program, or how to make money with V-OP..."
+        height="calc(100vh - 280px)"
+        emptyStateMessage="Hey — I'm Pitch. Let's find you a way to make money with V-OP. What are you interested in?"
+        suggestedPrompts={SUGGESTED_PROMPTS}
+      />
+    </div>
+  );
+}
+
 export default function Pitch() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);

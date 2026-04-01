@@ -486,6 +486,12 @@ export default function IntelliSpy() {
   // Knox tRPC mutation
   const knoxMutation = trpc.intellispy.analyzeFrames.useMutation();
 
+  // ECU Communication Loss Detection
+  const [ecuLostReason, setEcuLostReason] = useState<string | null>(null);
+  const lastFrameTimeRef = useRef<number>(Date.now());
+  const ecuLostTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ECU_TIMEOUT_MS = 10000; // 10 seconds without frames = ECU lost
+
   // Refs for performance
   const frameBufferRef = useRef<CapturedFrame[]>([]);
   const statsRef = useRef<Map<number, ArbIdStats>>(new Map());
@@ -659,6 +665,20 @@ export default function IntelliSpy() {
     setFlashProgress(createFlashProgress());
     flashProgressRef.current = createFlashProgress();
     startStatsTimer();
+
+    // Start ECU loss detection timer
+    lastFrameTimeRef.current = Date.now();
+    setEcuLostReason(null);
+    if (ecuLostTimerRef.current) clearInterval(ecuLostTimerRef.current);
+    ecuLostTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - lastFrameTimeRef.current;
+      if (elapsed > ECU_TIMEOUT_MS) {
+        const reason = elapsed > 30000
+          ? 'No CAN bus traffic for over 30 seconds. The vehicle may be off, the adapter disconnected, or the CAN bus is inactive.'
+          : `No CAN frames received for ${Math.round(elapsed / 1000)}s. Possible causes: vehicle ignition off, adapter disconnected, CAN bus error, or wiring issue.`;
+        setEcuLostReason(reason);
+      }
+    }, 2000);
   }, []);
 
   const stopMonitor = useCallback(() => {
@@ -666,6 +686,12 @@ export default function IntelliSpy() {
     wsRef.current.send(JSON.stringify({ type: 'stop_monitor' }));
     setStatus('connected');
     stopStatsTimer();
+    // Stop ECU loss detection timer
+    if (ecuLostTimerRef.current) {
+      clearInterval(ecuLostTimerRef.current);
+      ecuLostTimerRef.current = null;
+    }
+    setEcuLostReason(null);
   }, []);
 
   // ─── Frame Processing ─────────────────────────────────────────────────
@@ -706,6 +732,12 @@ export default function IntelliSpy() {
       };
 
       frameCountRef.current++;
+
+      // ECU communication recovery — we got a frame, so ECU is alive
+      lastFrameTimeRef.current = Date.now();
+      if (ecuLostReason) {
+        setEcuLostReason(null);
+      }
 
       // Update stats
       const stats = statsRef.current;
@@ -1070,6 +1102,24 @@ export default function IntelliSpy() {
           </div>
         )}
       </div>
+      {/* ─── ECU Communication Lost Banner ─────────────────────────────── */}
+      {ecuLostReason && (
+        <div className="flex items-start gap-3 px-4 py-3 border-b border-red-900/50 bg-red-950/30" style={{ animation: 'pulse 2s infinite' }}>
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="font-['Bebas_Neue',sans-serif] text-sm text-red-500 tracking-wider mb-1">
+              ⚠ ECU COMMUNICATION LOST
+            </div>
+            <div className="font-['Rajdhani',sans-serif] text-xs text-zinc-400 leading-relaxed">
+              {ecuLostReason}
+            </div>
+            <div className="font-['Share_Tech_Mono',monospace] text-[10px] text-zinc-500 mt-2 leading-relaxed">
+              • Check vehicle ignition is ON &nbsp;• Verify PCAN adapter connection &nbsp;• Check CAN bus wiring
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800/50">
         {/* Bridge Check */}

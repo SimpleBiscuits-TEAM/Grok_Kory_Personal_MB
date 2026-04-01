@@ -10,7 +10,8 @@ import {
   MessageSquare, Inbox, Users, BarChart3, Search, Send,
   ChevronRight, Clock, Star, AlertCircle, CheckCircle,
   XCircle, Filter, RefreshCw, Plus, ArrowLeft, Loader2,
-  Mail, Phone, User, Calendar, Hash, ExternalLink
+  Mail, Phone, User, Calendar, Hash, ExternalLink,
+  Link2, Copy, Check, Trash2, FileText, Shield, Eye
 } from 'lucide-react';
 
 // ── Styling constants (matches Advanced.tsx PPEI theme) ──────────────────
@@ -35,7 +36,7 @@ const sFont = {
 };
 
 // ── Sub-panel type ───────────────────────────────────────────────────────
-type SubPanel = 'dashboard' | 'feedback' | 'sessions' | 'conversations' | 'users';
+type SubPanel = 'dashboard' | 'feedback' | 'sessions' | 'conversations' | 'users' | 'sharelinks' | 'ndas';
 
 // ── Main Component ───────────────────────────────────────────────────────
 export default function SupportAdminPanel() {
@@ -47,6 +48,8 @@ export default function SupportAdminPanel() {
     { id: 'sessions', label: 'SESSIONS', icon: <Users size={16} /> },
     { id: 'conversations', label: 'MESSAGES', icon: <MessageSquare size={16} /> },
     { id: 'users', label: 'USERS', icon: <User size={16} /> },
+    { id: 'sharelinks', label: 'SHARE LINKS', icon: <Link2 size={16} /> },
+    { id: 'ndas', label: 'NDA REVIEW', icon: <FileText size={16} /> },
   ];
 
   return (
@@ -106,6 +109,8 @@ export default function SupportAdminPanel() {
         {activePanel === 'sessions' && <SessionsPanel />}
         {activePanel === 'conversations' && <ConversationsPanel />}
         {activePanel === 'users' && <UsersPanel />}
+        {activePanel === 'sharelinks' && <ShareLinksPanel />}
+        {activePanel === 'ndas' && <NdaReviewPanel />}
       </div>
     </div>
   );
@@ -951,6 +956,643 @@ function UsersPanel() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Share Links Panel ───────────────────────────────────────────────────
+const AVAILABLE_PAGES = [
+  { path: '/pitch', label: 'Pitch' },
+  { path: '/', label: 'Home (Analyze)' },
+  { path: '/advanced', label: 'Advanced' },
+  { path: '/fleet', label: 'Fleet' },
+  { path: '/drag', label: 'Drag Racing' },
+  { path: '/community', label: 'Community' },
+  { path: '/tasks', label: 'Tasks' },
+  { path: '/calibrations', label: 'Calibrations' },
+];
+
+const EXPIRY_OPTIONS = [
+  { hours: 1, label: '1 hour' },
+  { hours: 4, label: '4 hours' },
+  { hours: 12, label: '12 hours' },
+  { hours: 24, label: '24 hours' },
+  { hours: 48, label: '48 hours' },
+  { hours: 72, label: '3 days' },
+  { hours: 168, label: '7 days' },
+];
+
+function ShareLinksPanel() {
+  const [selectedPath, setSelectedPath] = useState('/pitch');
+  const [expiryHours, setExpiryHours] = useState(24);
+  const [label, setLabel] = useState('');
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+
+  const generateMutation = trpc.auth.generateShareLink.useMutation();
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setError('');
+    setGeneratedLink('');
+    setCopied(false);
+    try {
+      const result = await generateMutation.mutateAsync({
+        path: selectedPath,
+        expiresInHours: expiryHours,
+        label: label || undefined,
+      });
+      if (result.success && 'token' in result) {
+        const baseUrl = window.location.origin;
+        const link = `${baseUrl}${result.allowedPath}?share_token=${result.token}`;
+        setGeneratedLink(link);
+      } else {
+        setError(('message' in result ? result.message : null) || 'Failed to generate link');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Failed to generate share link');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = generatedLink;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const selectStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '0.6rem 0.75rem',
+    background: sColor.panel,
+    border: `1px solid ${sColor.panelBorder}`,
+    borderRadius: '4px',
+    color: 'white',
+    fontFamily: sFont.body,
+    fontSize: '0.85rem',
+    outline: 'none',
+    cursor: 'pointer',
+    appearance: 'none' as const,
+    WebkitAppearance: 'none' as const,
+  };
+
+  return (
+    <div>
+      <div style={{
+        fontFamily: sFont.heading,
+        fontSize: '1.4rem',
+        letterSpacing: '0.1em',
+        color: sColor.textPrimary,
+        marginBottom: '0.5rem',
+        borderBottom: `1px solid ${sColor.borderLight}`,
+        paddingBottom: '0.75rem',
+      }}>
+        SHARE LINKS
+      </div>
+      <p style={{
+        fontFamily: sFont.body,
+        fontSize: '0.85rem',
+        color: sColor.textSecondary,
+        marginBottom: '1.5rem',
+        lineHeight: 1.5,
+      }}>
+        Generate single-use, time-limited links that bypass the auth gate and lock the viewer to one page.
+        Once clicked, the link is consumed and cannot be reused.
+      </p>
+
+      {/* Generator Form */}
+      <div style={{
+        background: sColor.panel,
+        border: `1px solid ${sColor.panelBorder}`,
+        borderRadius: '4px',
+        padding: '1.25rem',
+        marginBottom: '1.5rem',
+      }}>
+        <div style={{
+          fontFamily: sFont.heading,
+          fontSize: '1rem',
+          letterSpacing: '0.08em',
+          color: sColor.red,
+          marginBottom: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}>
+          <Plus size={16} /> GENERATE NEW LINK
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+          {/* Page Select */}
+          <div>
+            <label style={{
+              display: 'block',
+              fontFamily: sFont.body,
+              fontSize: '0.75rem',
+              color: sColor.textSecondary,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: '0.35rem',
+            }}>PAGE</label>
+            <select
+              value={selectedPath}
+              onChange={(e) => setSelectedPath(e.target.value)}
+              style={selectStyle}
+            >
+              {AVAILABLE_PAGES.map((p) => (
+                <option key={p.path} value={p.path} style={{ background: '#1a1a1a' }}>
+                  {p.label} ({p.path})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Expiry Select */}
+          <div>
+            <label style={{
+              display: 'block',
+              fontFamily: sFont.body,
+              fontSize: '0.75rem',
+              color: sColor.textSecondary,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: '0.35rem',
+            }}>EXPIRES IN</label>
+            <select
+              value={expiryHours}
+              onChange={(e) => setExpiryHours(Number(e.target.value))}
+              style={selectStyle}
+            >
+              {EXPIRY_OPTIONS.map((o) => (
+                <option key={o.hours} value={o.hours} style={{ background: '#1a1a1a' }}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Label (optional) */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{
+            display: 'block',
+            fontFamily: sFont.body,
+            fontSize: '0.75rem',
+            color: sColor.textSecondary,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            marginBottom: '0.35rem',
+          }}>LABEL (OPTIONAL)</label>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Demo for John, Investor pitch"
+            style={{
+              width: '100%',
+              padding: '0.6rem 0.75rem',
+              background: 'oklch(0.10 0.005 260)',
+              border: `1px solid ${sColor.panelBorder}`,
+              borderRadius: '4px',
+              color: 'white',
+              fontFamily: sFont.body,
+              fontSize: '0.85rem',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Generate Button */}
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            width: '100%',
+            padding: '0.7rem',
+            background: generating ? sColor.panelBorder : sColor.red,
+            border: 'none',
+            borderRadius: '4px',
+            color: 'white',
+            fontFamily: sFont.heading,
+            fontSize: '1rem',
+            letterSpacing: '0.1em',
+            cursor: generating ? 'wait' : 'pointer',
+            transition: 'background 0.15s',
+          }}
+        >
+          {generating ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+          {generating ? 'GENERATING...' : 'GENERATE SHARE LINK'}
+        </button>
+
+        {/* Error */}
+        {error && (
+          <div style={{
+            marginTop: '0.75rem',
+            padding: '0.6rem 0.75rem',
+            background: 'oklch(0.14 0.010 25)',
+            border: `1px solid oklch(0.52 0.22 25 / 0.4)`,
+            borderRadius: '4px',
+            fontFamily: sFont.body,
+            fontSize: '0.8rem',
+            color: 'oklch(0.75 0.18 25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}>
+            <AlertCircle size={14} /> {error}
+          </div>
+        )}
+
+        {/* Generated Link */}
+        {generatedLink && (
+          <div style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            background: 'oklch(0.12 0.015 145 / 0.15)',
+            border: '1px solid oklch(0.65 0.20 145 / 0.3)',
+            borderRadius: '4px',
+          }}>
+            <div style={{
+              fontFamily: sFont.body,
+              fontSize: '0.75rem',
+              color: sColor.green,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              marginBottom: '0.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+            }}>
+              <CheckCircle size={14} /> LINK GENERATED
+            </div>
+            <div style={{
+              display: 'flex',
+              gap: '0.5rem',
+              alignItems: 'center',
+            }}>
+              <input
+                readOnly
+                value={generatedLink}
+                style={{
+                  flex: 1,
+                  padding: '0.5rem 0.75rem',
+                  background: 'oklch(0.08 0.005 260)',
+                  border: `1px solid ${sColor.panelBorder}`,
+                  borderRadius: '4px',
+                  color: 'white',
+                  fontFamily: sFont.mono,
+                  fontSize: '0.75rem',
+                  outline: 'none',
+                }}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <button
+                onClick={handleCopy}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  padding: '0.5rem 1rem',
+                  background: copied ? sColor.green : sColor.panel,
+                  border: `1px solid ${copied ? sColor.green : sColor.panelBorder}`,
+                  borderRadius: '4px',
+                  color: 'white',
+                  fontFamily: sFont.heading,
+                  fontSize: '0.85rem',
+                  letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {copied ? <><Check size={14} /> COPIED</> : <><Copy size={14} /> COPY</>}
+              </button>
+            </div>
+            <div style={{
+              fontFamily: sFont.mono,
+              fontSize: '0.7rem',
+              color: sColor.textMuted,
+              marginTop: '0.5rem',
+            }}>
+              Single-use &middot; Expires in {EXPIRY_OPTIONS.find(o => o.hours === expiryHours)?.label || `${expiryHours}h`} &middot; Locked to {selectedPath}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Info Box */}
+      <div style={{
+        background: sColor.panel,
+        border: `1px solid ${sColor.panelBorder}`,
+        borderLeft: `3px solid oklch(0.60 0.18 250)`,
+        borderRadius: '4px',
+        padding: '1rem 1.25rem',
+      }}>
+        <div style={{
+          fontFamily: sFont.heading,
+          fontSize: '0.9rem',
+          letterSpacing: '0.08em',
+          color: 'oklch(0.60 0.18 250)',
+          marginBottom: '0.5rem',
+        }}>
+          HOW SHARE LINKS WORK
+        </div>
+        <ul style={{
+          fontFamily: sFont.body,
+          fontSize: '0.8rem',
+          color: sColor.textSecondary,
+          lineHeight: 1.8,
+          margin: 0,
+          paddingLeft: '1.25rem',
+        }}>
+          <li>Each link bypasses the auth gate for the specified page only</li>
+          <li>The viewer cannot navigate to any other page in the app</li>
+          <li>Once clicked, the token is consumed — the link cannot be reused</li>
+          <li>Links automatically expire after the set duration</li>
+          <li>Back/forward browser navigation is blocked to the allowed page</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+
+// ── NDA Review Panel ─────────────────────────────────────────────────────
+function NdaReviewPanel() {
+  const ndas = trpc.auth.listNdas.useQuery();
+  const verifyMut = trpc.auth.verifyNda.useMutation();
+  const utils = trpc.useUtils();
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [expandedSig, setExpandedSig] = useState<number | null>(null);
+
+  const handleVerify = async (ndaId: number) => {
+    await verifyMut.mutateAsync({ ndaId, action: 'verified' });
+    utils.auth.listNdas.invalidate();
+  };
+
+  const handleReject = async (ndaId: number) => {
+    await verifyMut.mutateAsync({ ndaId, action: 'rejected', rejectionReason: rejectReason });
+    setRejectingId(null);
+    setRejectReason('');
+    utils.auth.listNdas.invalidate();
+  };
+
+  const statusColor = (status: string) => {
+    if (status === 'verified') return sColor.green;
+    if (status === 'rejected') return sColor.red;
+    return sColor.yellow;
+  };
+
+  const statusLabel = (status: string) => {
+    if (status === 'verified') return 'VERIFIED';
+    if (status === 'rejected') return 'REJECTED';
+    return 'PENDING';
+  };
+
+  return (
+    <div style={{ flex: 1 }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '1rem',
+      }}>
+        <div>
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>
+            NDA REVIEW
+          </h2>
+          <p style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textSecondary, margin: 0 }}>
+            Review and verify NDA submissions from share link recipients
+          </p>
+        </div>
+        <button
+          onClick={() => utils.auth.listNdas.invalidate()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
+            background: 'transparent', border: `1px solid ${sColor.borderLight}`,
+            color: sColor.textSecondary, padding: '0.4rem 0.8rem',
+            borderRadius: '3px', cursor: 'pointer', fontFamily: sFont.mono, fontSize: '0.7rem',
+          }}
+        >
+          <RefreshCw size={12} /> REFRESH
+        </button>
+      </div>
+
+      {/* Stats row */}
+      {ndas.data && (
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+          {[
+            { label: 'PENDING', count: ndas.data.filter(n => n.status === 'pending').length, color: sColor.yellow },
+            { label: 'VERIFIED', count: ndas.data.filter(n => n.status === 'verified').length, color: sColor.green },
+            { label: 'REJECTED', count: ndas.data.filter(n => n.status === 'rejected').length, color: sColor.red },
+          ].map(s => (
+            <div key={s.label} style={{
+              background: sColor.panel, border: `1px solid ${sColor.panelBorder}`,
+              borderRadius: '3px', padding: '0.6rem 1rem', flex: 1, textAlign: 'center',
+            }}>
+              <div style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: s.color }}>{s.count}</div>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.1em' }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* NDA list */}
+      {ndas.isLoading && (
+        <div style={{ textAlign: 'center', padding: '2rem', color: sColor.textMuted }}>
+          <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 0.5rem' }} />
+          <div style={{ fontFamily: sFont.body, fontSize: '0.85rem' }}>Loading NDAs...</div>
+        </div>
+      )}
+
+      {ndas.data && ndas.data.length === 0 && (
+        <div style={{
+          textAlign: 'center', padding: '3rem',
+          background: sColor.panel, border: `1px solid ${sColor.panelBorder}`, borderRadius: '3px',
+        }}>
+          <Shield size={32} style={{ color: sColor.textMuted, margin: '0 auto 0.75rem' }} />
+          <div style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textSecondary }}>
+            No NDA submissions yet
+          </div>
+        </div>
+      )}
+
+      {ndas.data && ndas.data.map(nda => (
+        <div key={nda.id} style={{
+          background: sColor.panel, border: `1px solid ${sColor.panelBorder}`,
+          borderLeft: `3px solid ${statusColor(nda.status)}`,
+          borderRadius: '3px', padding: '1rem', marginBottom: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
+                <span style={{ fontFamily: sFont.body, fontSize: '1rem', color: 'white', fontWeight: 600 }}>
+                  {nda.signerName}
+                </span>
+                <span style={{
+                  fontFamily: sFont.mono, fontSize: '0.6rem', letterSpacing: '0.1em',
+                  padding: '0.15rem 0.5rem', borderRadius: '2px',
+                  background: `${statusColor(nda.status)}22`, color: statusColor(nda.status),
+                  border: `1px solid ${statusColor(nda.status)}44`,
+                }}>
+                  {statusLabel(nda.status)}
+                </span>
+              </div>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.textSecondary }}>
+                {nda.signerEmail || 'No email'}
+              </div>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginTop: '0.25rem' }}>
+                Token #{nda.tokenId} · Signed {new Date(nda.createdAt).toLocaleString()}
+              </div>
+            </div>
+
+            {/* Signature preview */}
+            {nda.signatureImageUrl && nda.signatureImageUrl.startsWith('data:') && (
+              <button
+                onClick={() => setExpandedSig(expandedSig === nda.id ? null : nda.id)}
+                style={{
+                  background: '#111', border: `1px solid ${sColor.borderLight}`,
+                  borderRadius: '3px', padding: '0.25rem', cursor: 'pointer',
+                }}
+                title="View signature"
+              >
+                <Eye size={14} style={{ color: sColor.textSecondary }} />
+              </button>
+            )}
+          </div>
+
+          {/* Expanded signature */}
+          {expandedSig === nda.id && nda.signatureImageUrl && nda.signatureImageUrl.startsWith('data:') && (
+            <div style={{
+              marginTop: '0.75rem', background: '#0d0d0d',
+              border: `1px solid ${sColor.borderLight}`, borderRadius: '3px',
+              padding: '0.5rem', textAlign: 'center',
+            }}>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginBottom: '0.25rem', letterSpacing: '0.1em' }}>
+                DIGITAL SIGNATURE
+              </div>
+              <img
+                src={nda.signatureImageUrl}
+                alt="Signature"
+                style={{ maxWidth: '400px', maxHeight: '100px', background: '#0a0a0a', borderRadius: '2px' }}
+              />
+            </div>
+          )}
+
+          {/* Action buttons for pending NDAs */}
+          {nda.status === 'pending' && (
+            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {rejectingId === nda.id ? (
+                <>
+                  <input
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Rejection reason (optional)"
+                    style={{
+                      flex: 1, background: '#111', border: `1px solid ${sColor.borderLight}`,
+                      color: 'white', padding: '0.4rem 0.6rem', borderRadius: '3px',
+                      fontFamily: sFont.body, fontSize: '0.8rem',
+                    }}
+                  />
+                  <button
+                    onClick={() => handleReject(nda.id)}
+                    disabled={verifyMut.isPending}
+                    style={{
+                      background: sColor.red, color: 'white', border: 'none',
+                      padding: '0.4rem 0.8rem', borderRadius: '3px', cursor: 'pointer',
+                      fontFamily: sFont.mono, fontSize: '0.7rem', letterSpacing: '0.05em',
+                    }}
+                  >
+                    CONFIRM REJECT
+                  </button>
+                  <button
+                    onClick={() => { setRejectingId(null); setRejectReason(''); }}
+                    style={{
+                      background: 'transparent', color: sColor.textSecondary, border: `1px solid ${sColor.borderLight}`,
+                      padding: '0.4rem 0.6rem', borderRadius: '3px', cursor: 'pointer',
+                      fontFamily: sFont.mono, fontSize: '0.7rem',
+                    }}
+                  >
+                    CANCEL
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => handleVerify(nda.id)}
+                    disabled={verifyMut.isPending}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      background: `${sColor.green}22`, color: sColor.green,
+                      border: `1px solid ${sColor.green}44`,
+                      padding: '0.4rem 0.8rem', borderRadius: '3px', cursor: 'pointer',
+                      fontFamily: sFont.mono, fontSize: '0.7rem', letterSpacing: '0.05em',
+                    }}
+                  >
+                    <CheckCircle size={13} /> VERIFY
+                  </button>
+                  <button
+                    onClick={() => setRejectingId(nda.id)}
+                    disabled={verifyMut.isPending}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      background: `${sColor.red}22`, color: sColor.red,
+                      border: `1px solid ${sColor.red}44`,
+                      padding: '0.4rem 0.8rem', borderRadius: '3px', cursor: 'pointer',
+                      fontFamily: sFont.mono, fontSize: '0.7rem', letterSpacing: '0.05em',
+                    }}
+                  >
+                    <XCircle size={13} /> REJECT
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Info box */}
+      <div style={{
+        marginTop: '1.5rem', background: sColor.panel,
+        border: `1px solid ${sColor.panelBorder}`, borderRadius: '3px',
+        padding: '1rem',
+      }}>
+        <div style={{
+          fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+          color: sColor.textSecondary, marginBottom: '0.5rem',
+        }}>
+          HOW NDA VERIFICATION WORKS
+        </div>
+        <ul style={{
+          fontFamily: sFont.body, fontSize: '0.8rem',
+          color: sColor.textSecondary, lineHeight: 1.8,
+          margin: 0, paddingLeft: '1.25rem',
+        }}>
+          <li>Share link recipients must sign an NDA before accessing any content</li>
+          <li>NDAs are tied to the signer's email — once verified, valid for 180 days</li>
+          <li>A verified NDA works across all share links for that person</li>
+          <li>Screen capture detection is active on all share-token-gated pages</li>
+          <li>Rejected NDAs can be re-submitted by the user</li>
+        </ul>
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ const categoryLabels: Record<DragTip['category'], string> = {
   fuel: 'FUEL SYSTEM',
   boost: 'BOOST',
   shift: 'SHIFT TIMING',
+  wheelslip: 'WHEEL SLIP',
   general: 'GENERAL',
 };
 
@@ -190,6 +191,16 @@ function TimeslipCard({ run, runIndex, isBest }: { run: DragRun; runIndex: numbe
           {run.tccSlipTorqueLoss > 2 && (
             <span style={{ fontSize: '0.65rem', background: 'oklch(0.65 0.20 145 / 0.15)', border: '1px solid oklch(0.65 0.20 145 / 0.4)', color: 'oklch(0.70 0.18 145)', padding: '2px 7px', borderRadius: '2px', letterSpacing: '0.04em' }}>
               ~{run.tccSlipTorqueLoss.toFixed(1)}% TORQUE LOST
+            </span>
+          )}
+          {run.wheelSlipDetected && (
+            <span style={{ fontSize: '0.65rem', background: 'oklch(0.65 0.20 300 / 0.15)', border: '1px solid oklch(0.65 0.20 300 / 0.4)', color: 'oklch(0.75 0.18 300)', padding: '2px 7px', borderRadius: '2px', letterSpacing: '0.04em' }}>
+              WHEEL SLIP {run.maxWheelSlipMph.toFixed(1)} MPH
+            </span>
+          )}
+          {run.tccSlipPerGear && run.tccSlipPerGear.length > 0 && run.tccSlipPerGear.some(g => !g.locked) && (
+            <span style={{ fontSize: '0.65rem', background: 'oklch(0.52 0.22 25 / 0.12)', border: '1px solid oklch(0.52 0.22 25 / 0.35)', color: 'oklch(0.75 0.18 25)', padding: '2px 7px', borderRadius: '2px', letterSpacing: '0.04em' }}>
+              TCC UNLOCKED: {run.tccSlipPerGear.filter(g => !g.locked).map(g => `G${g.gear}`).join(', ')}
             </span>
           )}
           {run.estimatedEtGain > 0.05 && (

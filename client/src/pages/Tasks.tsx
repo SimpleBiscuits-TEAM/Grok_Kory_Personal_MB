@@ -205,6 +205,67 @@ function TasksAccessGate() {
 }
 
 /** Main Tasks Dashboard */
+/**
+ * TasksContent — Embeddable version for use inside Advanced tabs (no header/wrapper)
+ */
+export function TasksContent() {
+  const { user, isAuthenticated, loading } = useAuth();
+  const store = useTaskStore();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+
+  if (loading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
+  if (!isAuthenticated || !isAdmin) return <div style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', padding: '2rem', textAlign: 'center' }}>Admin access required.</div>;
+
+  return (
+    <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 200px)' }}>
+      {/* Tasks Header Bar */}
+      <div style={{ borderBottom: `1px solid ${sColor.border}`, background: 'oklch(0.10 0.004 260)' }}>
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 rounded-sm transition-colors" style={{ color: sColor.textDim }}>
+              {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+            </button>
+            <div className="flex items-center gap-2">
+              <div style={{ width: '3px', height: '24px', background: sColor.red }} />
+              <h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: 'white', lineHeight: 1, margin: 0, paddingTop: '2px' }}>V-OP QA TRACKER</h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }} className="hidden md:block">PPEI Engineering</span>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs border-border/60 hover:border-destructive hover:text-destructive" style={{ fontFamily: sFont.mono }}>
+                  <RotateCcw className="w-3 h-3" /> RESET
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="bg-card border-border">
+                <AlertDialogHeader>
+                  <AlertDialogTitle style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em' }}>RESET ALL PROGRESS?</AlertDialogTitle>
+                  <AlertDialogDescription className="text-muted-foreground">This will reset all task statuses back to "Not Started". This action cannot be undone.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel style={{ fontFamily: sFont.mono, fontSize: '0.7rem' }}>CANCEL</AlertDialogCancel>
+                  <AlertDialogAction onClick={store.resetAll} className="bg-destructive text-destructive-foreground" style={{ fontFamily: sFont.mono, fontSize: '0.7rem' }}>RESET ALL</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </div>
+      </div>
+      <SprintTimeline />
+      <StatsBar stats={store.stats} />
+      <div className="flex-1 flex overflow-hidden">
+        <ModuleSidebar open={sidebarOpen} tasks={store.tasks} activeModule={store.filters.module} onSelectModule={(m: number) => store.setFilters((prev) => ({ ...prev, module: prev.module === m ? null : m }))} onClose={() => setSidebarOpen(false)} />
+        <main className="flex-1 min-w-0 flex flex-col">
+          <FilterBar filters={store.filters} setFilters={store.setFilters} />
+          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} />
+        </main>
+      </div>
+    </div>
+  );
+}
+
 export default function Tasks() {
   const { user, isAuthenticated, loading } = useAuth();
   const store = useTaskStore();

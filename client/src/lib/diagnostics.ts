@@ -158,6 +158,8 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   const timeMinutes = data.timeMinutes || [];
   const currentGear = data.currentGear || [];
   const throttlePosition = data.throttlePosition || [];
+  const exhaustPressure = data.exhaustPressure || [];
+  const vehicleSpeed = data.vehicleSpeed || [];
 
   // Debug logging — helps trace false positives
   if (railPressureActual.length > 0) {
@@ -292,6 +294,17 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   // P1089 - Rail Pressure High on Decel — diesel only
   if (isDiesel && railPressureActual.length > 0) {
     issues.push(...checkHighRailOnDecel(railPressureActual, railPressureDesired, rpm));
+  }
+
+  // TURBO SURGE / TURBO BRAKING — diesel VGT only
+  if (isDiesel && vgtHasRealData && boostActual.length > 0) {
+    issues.push(...checkTurboSurge(boostActual, boostDesired, turboVanePosition, turboVaneDesired, throttlePosition, rpm));
+  }
+
+  // EXHAUST BACKPRESSURE vs BOOST ANALYSIS — diesel turbo only
+  const exhHasData = exhaustPressure.length > 0 && exhaustPressure.some((v: number) => v > 0);
+  if (isDiesel && exhHasData && boostActual.length > 0) {
+    issues.push(...checkBackpressureVsBoost(exhaustPressure, boostActual, throttlePosition, rpm, vehicleSpeed));
   }
 
   // ── Global deduplication: one entry per fault code, keep the most severe ──
@@ -1553,3 +1566,252 @@ export function checkHighRailOnDecel(
 }
 
 // checkEgtSensorPerformance removed -- its logic is now part of checkAllEgtIssues above.
+
+
+/**
+ * TURBO SURGE / TURBO BRAKING DETECTION
+ *
+ * Detects turbo surge caused by turbo braking on deceleration.
+ * Turbo braking is an intentional ECU feature in tow tunes (especially DSP5 tunes)
+ * that closes VGT vanes on decel to create exhaust restriction for engine braking.
+ *
+ * Diagnostic signature:
+ * 1. Throttle at 0% (decel)
+ * 2. Desired boost elevated well above atmospheric (>150 kPa) — ECU commanding turbo braking
+ * 3. Desired vane position at 99% (fully closed) — vanes trying to achieve desired boost
+ * 4. Actual boost stays high (>120 kPa / 17+ psi) despite 0% throttle
+ *
+ * The desired boost being high on decel is the smoking gun — it proves the ECU is
+ * intentionally commanding turbo braking, not a stuck vane or sensor issue.
+ */
+export function checkTurboSurge(
+  boostActual: number[],
+  boostDesired: number[],
+  vaneActual: number[],
+  vaneDesired: number[],
+  throttle: number[],
+  rpm: number[]
+): DiagnosticIssue[] {
+  const issues: DiagnosticIssue[] = [];
+  if (!boostActual.length || !vaneActual.length || !throttle.length) return issues;
+
+  // Need at least some of the arrays to have data
+  const hasVaneDesired = vaneDesired.length > 0 && vaneDesired.some(v => v > 0);
+  const hasBoostDesired = boostDesired.length > 0 && boostDesired.some(v => v > 0);
+
+  // Atmospheric pressure baseline (approx 100 kPa / 14.5 psi)
+  const ATMO_KPA = 100;
+  const BOOST_ELEVATED_THRESHOLD = 120; // kPa — boost above this on decel is suspicious
+  const DESIRED_BOOST_BRAKING_THRESHOLD = 150; // kPa — desired boost above this on decel = turbo braking
+  const VANE_CLOSED_THRESHOLD = 85; // % — vanes above this are nearly fully closed
+  const DESIRED_VANE_BRAKING_THRESHOLD = 95; // % — desired vane above this = turbo braking command
+  const THROTTLE_DECEL_THRESHOLD = 5; // % — throttle below this = decel
+  const MIN_SURGE_SAMPLES = 10; // ~1 second at typical sample rates
+
+  let surgeCount = 0;
+  let turboBrakingConfirmed = false;
+  let maxBoostOnDecel = 0;
+  let maxVaneOnDecel = 0;
+  let maxDesiredBoostOnDecel = 0;
+  let surgeEvents = 0;
+
+  const len = Math.min(boostActual.length, vaneActual.length, throttle.length, rpm.length);
+
+  for (let i = 0; i < len; i++) {
+    const isDecel = throttle[i] < THROTTLE_DECEL_THRESHOLD && rpm[i] > 800;
+    const boostElevated = boostActual[i] > BOOST_ELEVATED_THRESHOLD;
+    const vanesClosed = vaneActual[i] > VANE_CLOSED_THRESHOLD;
+
+    if (isDecel && boostElevated && vanesClosed) {
+      surgeCount++;
+      maxBoostOnDecel = Math.max(maxBoostOnDecel, boostActual[i]);
+      maxVaneOnDecel = Math.max(maxVaneOnDecel, vaneActual[i]);
+
+      // Check if desired boost is also elevated (confirms turbo braking vs stuck vane)
+      if (hasBoostDesired && i < boostDesired.length && boostDesired[i] > DESIRED_BOOST_BRAKING_THRESHOLD) {
+        turboBrakingConfirmed = true;
+        maxDesiredBoostOnDecel = Math.max(maxDesiredBoostOnDecel, boostDesired[i]);
+      }
+      // Also check if desired vane is commanding closed
+      if (hasVaneDesired && i < vaneDesired.length && vaneDesired[i] > DESIRED_VANE_BRAKING_THRESHOLD) {
+        turboBrakingConfirmed = true;
+      }
+
+      if (surgeCount >= MIN_SURGE_SAMPLES) {
+        surgeEvents++;
+        surgeCount = 0; // reset to count next event
+      }
+    } else {
+      surgeCount = 0;
+    }
+  }
+
+  if (surgeEvents > 0) {
+    const boostPsi = ((maxBoostOnDecel - ATMO_KPA) * 0.145038).toFixed(1);
+    const desiredBoostPsi = maxDesiredBoostOnDecel > 0
+      ? ((maxDesiredBoostOnDecel - ATMO_KPA) * 0.145038).toFixed(1)
+      : 'N/A';
+
+    if (turboBrakingConfirmed) {
+      issues.push({
+        code: 'TURBO-BRAKING-SURGE',
+        severity: 'info',
+        title: 'Turbo Braking Active — Turbo Surge on Deceleration',
+        description: `Detected ${surgeEvents} turbo surge event(s) on deceleration. Boost reached ${boostPsi} psi above atmospheric with vanes at ${maxVaneOnDecel.toFixed(0)}% while throttle was at 0%. Desired boost was ${desiredBoostPsi} psi above atmospheric on decel — this confirms the ECU is intentionally commanding turbo braking. This is a calibration feature, not a hardware fault. Common in tow tunes (DSP5.1/DSP5.2 on EFI Live systems).`,
+        recommendation: 'This is normal behavior for tunes with turbo braking enabled. If the surge is undesirable, switch to a non-tow tune (higher DSP5 level) or have the tuner reduce turbo braking aggressiveness by lowering the decel vane position target from 99% to 60-70%.',
+      });
+    } else {
+      // Surge detected but no turbo braking confirmation — could be stuck vanes
+      issues.push({
+        code: 'TURBO-SURGE-DECEL',
+        severity: 'warning',
+        title: 'Turbo Surge on Deceleration — Possible Stuck VGT Vanes',
+        description: `Detected ${surgeEvents} turbo surge event(s) on deceleration. Boost reached ${boostPsi} psi above atmospheric with vanes at ${maxVaneOnDecel.toFixed(0)}% while throttle was at 0%. Could not confirm turbo braking from desired boost/vane data. This may indicate stuck VGT vanes, carbon buildup, or unison ring failure.`,
+        recommendation: 'Inspect VGT vanes for carbon buildup or sticking. Check unison ring for wear. Test VGT actuator movement. If the vehicle has a tow tune, verify turbo braking settings with the tuner.',
+      });
+    }
+  }
+
+  return issues;
+}
+
+
+// ── EXHAUST BACKPRESSURE vs BOOST ANALYSIS ─────────────────────────────────
+/**
+ * Analyzes the relationship between exhaust backpressure and intake boost.
+ * 
+ * Key metrics:
+ *   - Backpressure Ratio (BPR) = Exhaust Pressure / Boost Pressure
+ *     Ideal: < 2.0 for performance, < 2.5 for tow, > 3.0 is a problem
+ *   - Delta = Exhaust Pressure - Boost Pressure
+ *     Shows how much harder the engine works to push exhaust vs pull intake
+ *   - Backpressure at idle should be near atmospheric (~14.7 psi absolute)
+ *
+ * Common causes of high backpressure:
+ *   - Clogged DPF (soot load too high)
+ *   - Restrictive exhaust (crushed pipe, plugged cat)
+ *   - VGT vanes stuck closed
+ *   - Aftermarket exhaust restriction (wrong size, kinks)
+ *   - Turbo braking active (intentional — tow tunes)
+ *
+ * The S&B filter baffle case: removing the intake baffle can cause turbulence
+ * in the intake tract that disrupts MAF readings and turbo spool behavior,
+ * leading to sluggish throttle response despite theoretically more airflow.
+ */
+function checkBackpressureVsBoost(
+  exhaustPressure: number[],
+  boostActual: number[],
+  throttlePosition: number[],
+  rpm: number[],
+  vehicleSpeed: number[],
+): DiagnosticIssue[] {
+  const issues: DiagnosticIssue[] = [];
+  const len = Math.min(exhaustPressure.length, boostActual.length, rpm.length);
+  if (len < 20) return issues;
+
+  // ── Compute per-sample metrics under load ──────────────────────────────
+  const loadSamples: { exh: number; boost: number; ratio: number; delta: number; rpm: number; idx: number }[] = [];
+  const idleSamples: { exh: number; boost: number }[] = [];
+
+  for (let i = 0; i < len; i++) {
+    const exh = exhaustPressure[i];
+    const bst = boostActual[i];
+    const r = rpm[i] || 0;
+    const t = throttlePosition[i] || 0;
+
+    // Skip zero/invalid readings
+    if (exh <= 0 && bst <= 0) continue;
+
+    // Idle: RPM < 1000 and throttle < 5%
+    if (r < 1000 && t < 5) {
+      idleSamples.push({ exh, boost: bst });
+      continue;
+    }
+
+    // Under load: RPM > 1500 and (throttle > 20% or boost > 3 psi)
+    if (r > 1500 && (t > 20 || bst > 3)) {
+      const ratio = bst > 0.5 ? exh / bst : 0;
+      const delta = exh - bst;
+      loadSamples.push({ exh, boost: bst, ratio, delta, rpm: r, idx: i });
+    }
+  }
+
+  if (loadSamples.length < 5) return issues;
+
+  // ── Peak metrics ──────────────────────────────────────────────────────
+  const peakExhaust = Math.max(...loadSamples.map(s => s.exh));
+  const peakBoost = Math.max(...loadSamples.map(s => s.boost));
+  const avgRatio = loadSamples.reduce((sum, s) => sum + s.ratio, 0) / loadSamples.length;
+  const peakRatio = Math.max(...loadSamples.filter(s => s.ratio > 0).map(s => s.ratio));
+  const avgDelta = loadSamples.reduce((sum, s) => sum + s.delta, 0) / loadSamples.length;
+  const peakDelta = Math.max(...loadSamples.map(s => s.delta));
+
+  // ── High Backpressure Ratio Warning ────────────────────────────────────
+  // Sustained BPR > 2.5 indicates exhaust restriction
+  const highBprSamples = loadSamples.filter(s => s.ratio > 2.5);
+  const highBprPercent = (highBprSamples.length / loadSamples.length) * 100;
+
+  if (highBprPercent > 20 && peakRatio > 3.0) {
+    issues.push({
+      title: 'High Exhaust Backpressure Ratio',
+      code: 'BACKPRESSURE_HIGH_RATIO',
+      severity: 'warning',
+      description: `Exhaust backpressure ratio (exhaust/boost) averages ${avgRatio.toFixed(1)}:1 under load with peak of ${peakRatio.toFixed(1)}:1. ` +
+        `${highBprPercent.toFixed(0)}% of load samples exceed 2.5:1 ratio. ` +
+        `Peak exhaust pressure: ${peakExhaust.toFixed(1)} PSI vs peak boost: ${peakBoost.toFixed(1)} PSI (delta: ${peakDelta.toFixed(1)} PSI). ` +
+        `High backpressure forces the engine to work harder pushing exhaust out than pulling intake air in, reducing efficiency and power.`,
+      recommendation: 'Check DPF soot load and regeneration status. Inspect exhaust system for restrictions (crushed pipes, clogged catalytic converter). ' +
+        'If VGT-equipped, verify vane operation — stuck closed vanes cause excessive backpressure. ' +
+        'Consider a forced regen if DPF soot load is high. For aftermarket exhaust, verify proper sizing and routing.',
+    });
+  } else if (highBprPercent > 10 && peakRatio > 2.5) {
+    issues.push({
+      title: 'Elevated Exhaust Backpressure',
+      code: 'BACKPRESSURE_ELEVATED',
+      severity: 'info',
+      description: `Exhaust backpressure ratio averages ${avgRatio.toFixed(1)}:1 under load (peak ${peakRatio.toFixed(1)}:1). ` +
+        `Peak exhaust: ${peakExhaust.toFixed(1)} PSI, peak boost: ${peakBoost.toFixed(1)} PSI, peak delta: ${peakDelta.toFixed(1)} PSI. ` +
+        `This is slightly elevated but within acceptable range for most driving conditions.`,
+      recommendation: 'Monitor DPF soot load. If backpressure continues to rise over time, schedule a forced regen or exhaust inspection.',
+    });
+  }
+
+  // ── Backpressure spike detection (sudden restriction) ──────────────────
+  // Look for rapid backpressure increases that don't correlate with boost increases
+  let spikeCount = 0;
+  for (let i = 5; i < loadSamples.length; i++) {
+    const prev5Exh = loadSamples.slice(i - 5, i).reduce((s, v) => s + v.exh, 0) / 5;
+    const curr = loadSamples[i];
+    // Exhaust jumped > 5 psi above recent average while boost stayed flat
+    if (curr.exh - prev5Exh > 5 && curr.boost - loadSamples[i - 1].boost < 1) {
+      spikeCount++;
+    }
+  }
+
+  if (spikeCount >= 3) {
+    issues.push({
+      title: 'Exhaust Backpressure Spikes Detected',
+      code: 'BACKPRESSURE_SPIKES',
+      severity: 'warning',
+      description: `Detected ${spikeCount} sudden exhaust backpressure spikes (>5 PSI above rolling average) that don't correlate with boost changes. ` +
+        `This pattern suggests intermittent exhaust restriction — possibly a partially clogged DPF, sticking VGT vanes, or exhaust valve issue.`,
+      recommendation: 'Inspect VGT vane actuator for sticking. Check DPF differential pressure sensor. ' +
+        'If equipped with exhaust brake, verify it is not engaging unexpectedly.',
+    });
+  }
+
+  // ── Summary info: always report backpressure stats when data is available ──
+  if (issues.length === 0) {
+    issues.push({
+      title: 'Exhaust Backpressure Normal',
+      code: 'BACKPRESSURE_NORMAL',
+      severity: 'info',
+      description: `Exhaust backpressure ratio averages ${avgRatio.toFixed(1)}:1 under load (peak ${peakRatio.toFixed(1)}:1). ` +
+        `Peak exhaust: ${peakExhaust.toFixed(1)} PSI, peak boost: ${peakBoost.toFixed(1)} PSI. ` +
+        `Exhaust system appears to be flowing well with no significant restrictions detected.`,
+      recommendation: 'No action needed. Continue monitoring during regular maintenance intervals.',
+    });
+  }
+
+  return issues;
+}

@@ -169,6 +169,13 @@
       "when": 1774997295783,
       "tag": "0023_fluffy_gressill",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1774999070850,
+      "tag": "0024_thick_jackpot",
+      "breakpoints": true
     }
   ]
 }

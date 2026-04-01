@@ -139,6 +139,7 @@ export interface PIDReading {
 
 export interface LogSession {
   id: string;
+  name?: string;  // AI-generated descriptive name
   startTime: number;
   endTime?: number;
   sampleRate: number;

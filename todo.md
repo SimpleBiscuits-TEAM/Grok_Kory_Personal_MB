@@ -2804,3 +2804,172 @@
 - [x] Client: AuthGate recognizes ?share_token= param, bypasses gate for allowed page only
 - [x] Client: Lock navigation to only the allowed page when using a share token
 - [x] Generate share link for /pitch page
+
+## Share Link Improvements (2026-03-31)
+- [x] Update existing /pitch token to 24hr expiry (regenerate)
+- [x] Build admin UI page for share link generation (select page, set expiry, copy link)
+- [x] Write thorough vitest tests for token validation flow (18 tests: valid, expired, consumed, invalid, page lock, uniqueness, whitespace trim)
+- [x] BUG: Report Center (Feedback/Error Report) panel is cut off at bottom — repositioned as centered modal overlay with red glow shadow
+
+## NDA Gate for Share Token Access (2026-03-31)
+- [ ] DB: Create nda_submissions table (token_id, signer_name, signer_email, signature_image_url, uploaded_doc_url, status: pending/verified/rejected, verified_by, verified_at)
+- [ ] Server: tRPC procedures for NDA submission, status check, admin verify/reject
+- [ ] Client: NDA signing page with signature canvas pad, name/email fields, NDA text
+- [ ] Client: Drag/drop upload option for pre-signed NDA document
+- [ ] Admin: NDA verification panel in Support Admin (view signature, approve/reject)
+- [ ] AuthGate: Integrate NDA gate into share token flow (token valid → NDA required → VOP verifies → access granted)
+- [ ] NDA stored for 180 days — once signed & verified, user skips NDA on all future tokens
+- [ ] Token no longer consumed on first click — reusable until expiry (user may need multiple visits before NDA verified)
+- [ ] Tests: Write vitest tests for NDA submission and verification flow
+
+## Screenshot/Screen Recording Detection (2026-03-31)
+- [ ] Detect screen recording or screenshot attempts on share-token-gated pages
+- [ ] Notify admin when potential screen capture is detected (with IP, timestamp, page)
+- [ ] Show user escalating scare messages: 1st = "We are a neural network. Did you really think you could screenshot and get away with it?", 2nd = "Seriously? Again? We have your IP, your browser fingerprint, and your questionable life choices."
+
+## Honda Talon: Correct Fuel Tables Button (2026-03-31)
+- [ ] Add "Correct Fuel Tables" button to Honda Talon Tuner
+- [ ] AFR1 → Cylinder 1, AFR2 → Cylinder 2 association when both channels present
+- [ ] Correction factor = AFR reading / target AFR per cell, averaged per cell basis
+- [ ] No correction applied to cells not used in the datalog
+- [ ] Alpha-N channel = 1 → only Alpha-N fuel tables; Alpha-N ≠ 1 → only Speed Density tables
+- [ ] Turbo/NA switch: auto-detect via MAP > 100 kPa, or manual toggle
+- [ ] Target lambda presets change based on turbo/NA selection (still editable)
+- [ ] Turbo mode: additional switch for stock MAP sensor vs 3-bar MAP sensor
+- [ ] NA targets: Speed Density all columns = 0.95 lambda; Alpha-N 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
+- [ ] Turbo + stock MAP targets: min-100 kPa = 0.95, 100-120 = 0.9, 120-145 = 0.85, 145+ = 0.8
+- [ ] Turbo + 3-bar MAP targets: min-60 kPa = 0.95, 60-80 = 0.9, 80-90 = 0.85, 90+ = 0.8
+- [ ] Turbo Alpha-N target = 0.95 across all columns
+- [ ] Turbo: use desired injector pulsewidth to determine active SD column (MAP not 100% accurate), interpolate against SD Cyl1 table
+- [ ] Honda Talon: When "Manifold Absolute Pressure Corrected" channel is available in datalog, use it for SD table axis reference instead of raw MAP
+
+## Navigation Restructure (2026-03-31)
+- [ ] Move "Task" tab to Advanced section
+- [ ] Move "Pitch" tab to Advanced section
+- [ ] Gate Advanced section with access code "KingKong"
+
+## TCC Lockup Drag Analysis Improvement (2026-03-31)
+- [x] Update TCC lockup analysis: 3rd gear lock is better than stock but still leaving power on the table
+- [x] Add knowledge: converter should be fully locked by 3rd gear for max drag performance, unlocked = heat = wasted power
+- [x] Add recommendation: "Add TCC Commanded Pressure and Converter Slip Speed to your datalog for definitive TCC status"
+- [x] Calculate percentage of estimated torque not applied to ground due to converter slippage per gear
+- [x] Calculate shift times to show time lost between gears
+
+## Wheel Slip Detection (2026-03-31)
+- [x] Detect rear wheel slip: if GPS speed available + wheel speed PID available, compare for slip
+- [x] Detect rear wheel slip: if front tire speed is >2mph lower than rear tire speed = rear wheel slip
+- [x] Note: front/rear speed mismatch could also be calibration mismatch between speed sensors
+- [x] Add wheel slip % calculation and flag in drag analysis
+
+## Knox Drag Racing Training (2026-03-31)
+- [x] Add comprehensive drag racing knowledge to Knox knowledge base
+- [x] TCC lockup by 3rd gear: better than stock but still leaving power on table
+- [x] Converter should be fully locked by 3rd gear for max drag performance
+- [x] Unlocked converter = heat = wasted power = drivetrain loss that is fixable in calibration
+- [x] Recommend logging TCC Commanded Pressure and Converter Slip Speed for definitive TCC status
+- [x] Calculate converter slip % per gear and estimated torque loss
+- [x] Calculate shift times and time lost between gears
+- [x] Wheel slip detection: GPS speed vs wheel speed comparison
+- [x] Wheel slip detection: front tire speed >2mph lower than rear = rear wheel slip
+- [x] Note: front/rear speed mismatch could also be calibration mismatch between speed sensors
+- [x] Add drag racing tips and improvement recommendations to Knox reasoning
+- [x] Knox should study: 60ft optimization, launch techniques, shift point optimization, tire slip management
+
+## All Graphs Show All PIDs (2026-03-31)
+- [ ] Every chart/graph in the analyzer must have ability to display all available PIDs
+- [ ] Add PID selector/overlay toggle to all chart components
+- [ ] Users should be able to add any PID as an overlay on any graph
+
+## Move Calibrations Into Editor (2026-03-31)
+- [x] Remove Calibrations as standalone Advanced tab
+- [x] Add Calibrations as sub-tab inside Editor, next to "Edit Binary"
+- [ ] Add brand dropdown/filter (FCA, Chevrolet, etc.) based on uploaded calibrations
+- [ ] Brand list auto-expands only when calibration of new brand is uploaded
+- [ ] Calibrations tied to specific brand stay within brand tab
+- [ ] Add export/download button for each uploaded calibration
+
+## Datalogger Live View + AI Naming (2026-03-31)
+- [x] Add live data viewing mode: show real-time PID data without requiring recording
+- [x] Separate "view" and "record" modes — user sees live data first, then chooses to record
+- [x] After recording stops, AI automatically names the datalog based on data content (e.g., "WOT Pull 3rd Gear 45psi Boost", "Highway Cruise 65mph Steady State")
+- [x] User does NOT need to name datalogs — AI handles it automatically
+
+## ECU Communication Loss Detection (2026-03-31)
+- [x] Datalogger: Detect when ECU stops responding during live monitoring or recording
+- [x] Datalogger: Track consecutive failed PID polls and identify reason (adapter disconnect, vehicle off, CAN bus error, timeout)
+- [x] Datalogger: Show clear visual alert with specific reason and suggested action (reconnect, check ignition, check cable)
+- [x] IntelliSpy: Detect when ECU stops responding during CAN bus analysis
+- [x] IntelliSpy: Show reason for communication loss and suggested recovery action
+- [x] IntelliSpy: Handle graceful degradation when ECU goes offline mid-session
+
+## Advanced Datalogger Health Report (2026-03-31)
+- [ ] Datalogger recordings generate the "advanced" vehicle health report (deeper analysis than standard upload)
+- [ ] Advanced report includes per-gear breakdown, shift quality metrics, detailed fault analysis
+- [ ] Advanced report leverages live-captured data quality (higher sample rate, no CSV conversion artifacts)
+- [ ] "Generate Health Report" button on completed sessions in datalogger
+
+## Advanced Datalogger Compare Function (2026-03-31)
+- [ ] Add compare mode to datalogger for overlaying multiple recorded sessions
+- [ ] Side-by-side or overlay view for before/after tune comparison
+- [ ] AI-powered comparison report highlighting differences between sessions
+- [ ] Compare sessions under similar conditions (RPM range, throttle position, gear)
+- [ ] Show delta values for key metrics (peak boost, peak rail pressure, shift times, etc.)
+
+## Calibration Upload + Commanded vs Actual Analysis (2026-03-31) [BETA]
+- [ ] Add calibration file upload option in Advanced Datalogger (binary/A2L)
+- [ ] Cross-reference calibration maps (commanded values) against live PID data (actual values)
+- [ ] Show commanded vs actual overlay on live gauges and charts during monitoring
+- [ ] Knox reasoning on deviations: explain why commanded != actual (fuel system limits, turbo lag, sensor drift, safety limiters, etc.)
+- [ ] Knox analysis report after recording: summarize all commanded vs actual deltas with explanations
+- [ ] Display "BETA — In Development" badge on this feature prominently
+- [ ] Support common calibration formats (HP Tuners .hpt, EFILive .tun, raw binary + A2L)
+
+## 2025 Ford Powerstroke Backpressure vs Boost Fix (2026-03-31)
+- [x] Fix backpressure PID being displayed as boost — must differentiate exhaust backpressure from intake boost
+- [x] Add proper backpressure PID mapping for 2025 Ford Powerstroke (6.7L)
+- [x] Add backpressure + boost math and reporting (backpressure ratio, boost efficiency, etc.)
+- [x] Fix compare function not working / no display for 2025 Powerstroke datalogs
+- [ ] Test with provided S&B filter baffle in/out datalogs
+
+## LLY Turbo Surge / DSP5 Turbo Braking Knowledge (2026-03-31)
+- [x] Analyze LLY turbo surge datalog to verify vane position and boost pattern
+- [x] Train Knox on DSP5 tune selector switch mapping (non-dsp=tune1, dsp1=tune2, dsp2=tune3, dsp3=tune4, dsp4=tune5)
+- [x] Train Knox on turbo braking: tow tunes use high vane position (99%) on decel for engine braking
+- [x] Train Knox on turbo surge diagnosis: vanes at 99% on decel causes boost to rise after initial drop = surge
+- [x] Add turbo surge detection rule to diagnostics: detect vane position spike to 99%+ on decel with boost rise
+- [x] Knox should identify DSP5 custom operating system and explain tune level from selector switch position
+
+## HP Tuners .hpl Native File Support (2026-03-31)
+- [x] Research HP Tuners .hpl file format (reportedly SQLite with compressed channel data)
+- [x] If not feasible, document why and move on — NO public parser exists, format is proprietary, decompiling would violate EULA
+
+## Killer Sign-In Animation
+- [x] Design animated sign-in page with PPEI motorsport/industrial aesthetic
+- [x] Background particle effects or turbo spool animation
+- [x] Red glow pulse on PPEI logo
+- [x] Scan-line / data stream effect behind form
+- [x] Smooth mechanical entrance animations for form elements
+- [x] Input fields "ignite" with red glow on focus
+- [x] Match existing dark industrial theme (black + PPEI red)
+
+## Compare View Graphs
+- [x] Overlay line charts — same PID from both datalogs on one graph (different colors)
+- [x] Side-by-side bar charts for key metrics (peak boost, RPM, rail pressure, EGT, etc.)
+- [x] Delta visualization highlighting differences between runs
+- [x] PID selector dropdown to pick any available PID from either datalog for overlay
+- [ ] Time-aligned or RPM-aligned x-axis options
+
+## Honda Talon Tuner — Correct Fuel Tables (PENDING — after current Duramax work)
+- [ ] Add "Correct Fuel Tables" button to Honda Talon Tuner
+- [ ] Map AFR1 → Cylinder 1, AFR2 → Cylinder 2 from datalog
+- [ ] Implement correction factor: AFR_reading / target_AFR per cell, averaged
+- [ ] Only correct cells actually used in the datalog
+- [ ] Alpha-N channel = 1 → Alpha-N tables; ≠ 1 → Speed Density tables
+- [ ] Add Turbo/NA switch with auto-detection (MAP > 100 kPa = turbo)
+- [ ] Add Stock MAP / 3-Bar MAP sub-switch when Turbo selected
+- [ ] Implement NA target lambda presets (SD=0.95, Alpha-N graduated by TPS)
+- [ ] Implement Turbo Stock MAP target lambda presets (0.95/0.9/0.85/0.8 by MAP range)
+- [ ] Implement Turbo 3-Bar MAP target lambda presets (different MAP breakpoints)
+- [ ] All targets editable after preset population
+- [ ] Column lookup via Desired Injector Pulsewidth → interpolate to SD Cyl1 table position
+- [ ] Turbo Alpha-N target = 0.95 across all columns

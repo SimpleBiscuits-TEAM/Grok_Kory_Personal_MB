@@ -73,6 +73,11 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 import PpeiHeader from '@/components/PpeiHeader';
+
+// Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
+const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
+const TasksPanel = React.lazy(() => import('@/pages/Tasks').then(m => ({ default: m.TasksContent })));
+
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
 
@@ -90,170 +95,142 @@ const sColor = {
 // ─── V-OP Pro Access Gate ────────────────────────────────────────────────────
 
 /**
- * AccessGate — Two paths to V-OP Pro:
- * 1. Logged in with approved access / admin / super_admin → auto-unlock
- * 2. Not logged in or not approved → sign-in + request access screen
+ * AccessGate — KingKong access code gate for V-OP Pro
+ * Enter the correct code to unlock the Advanced section.
+ * Once unlocked, persists in localStorage until cleared.
  */
+const ADVANCED_CODE = 'KINGKONG';
+
 function AccessGate({ onUnlock }: { onUnlock: () => void }) {
-  const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const accessQuery = trpc.access.myAccess.useQuery(undefined, {
-    enabled: isAuthenticated,
-    retry: false,
-  });
-  const requestAccess = trpc.access.requestAccess.useMutation({
-    onSuccess: () => accessQuery.refetch(),
-  });
+  useEffect(() => { inputRef.current?.focus(); }, []);
 
-  // Auto-unlock if user has access
-  useEffect(() => {
-    if (accessQuery.data?.canAccessAdvanced) {
+  const handleSubmit = () => {
+    if (code.toUpperCase() === ADVANCED_CODE) {
       localStorage.setItem(STORAGE_KEY, 'true');
       onUnlock();
+    } else {
+      setError(true);
+      setShake(true);
+      setAttempts(prev => prev + 1);
+      setTimeout(() => setShake(false), 500);
+      setTimeout(() => setError(false), 2000);
     }
-  }, [accessQuery.data, onUnlock]);
+  };
 
-  // Also auto-unlock if previously approved (cached)
-  useEffect(() => {
-    if (isAuthenticated && localStorage.getItem(STORAGE_KEY) === 'true') {
-      onUnlock();
-    }
-  }, [isAuthenticated, onUnlock]);
+  const funnyMessages = [
+    "Wrong code. The ECU is judging you right now.",
+    "Nope. Even your mom's minivan has better security than your guesses.",
+    "Access denied. Try turning the key off and back on... oh wait, wrong tool.",
+    "That ain't it chief. The turbo just spooled down in disappointment.",
+    "Incorrect. The injectors are crying.",
+    "Wrong again. At this rate, you'll need a flash tool just to unlock the door.",
+    "Still no. Your ECU called — it wants a competent operator.",
+    "Denied. Even the DPF has more flow than your password game.",
+  ];
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
-        <Loader2 style={{ width: 32, height: 32, color: sColor.red }} className="animate-spin" />
-      </div>
-    );
-  }
-
-  // ── Logged in but NOT approved ──
-  if (isAuthenticated && accessQuery.data && !accessQuery.data.canAccessAdvanced) {
-    const isPending = user && accessQuery.data.advancedAccess === 'pending';
-    const isRevoked = user && accessQuery.data.advancedAccess === 'revoked';
-
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
-        <div className="ppei-anim-scale-in" style={{
-          background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
-          borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
-          textAlign: 'center',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
-            <img src={PPEI_LOGO_URL} alt="PPEI" style={{ height: '56px', objectFit: 'contain' }} />
-          </div>
-          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', marginBottom: '0.5rem' }}>
-            V-OP PRO
-          </h2>
-
-          {isPending ? (
-            <>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: '6px',
-                padding: '8px 16px', background: 'oklch(0.75 0.18 60 / 0.12)', border: '1px solid oklch(0.75 0.18 60 / 0.3)',
-                borderRadius: '4px', marginBottom: '1.5rem',
-              }}>
-                <Clock style={{ width: 16, height: 16, color: sColor.yellow }} />
-                <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.yellow }}>ACCESS REQUEST PENDING</span>
-              </div>
-              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                Your request is being reviewed by the PPEI team. You'll get access once approved.
-              </p>
-            </>
-          ) : isRevoked ? (
-            <>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: '6px',
-                padding: '8px 16px', background: 'oklch(0.52 0.22 25 / 0.12)', border: '1px solid oklch(0.52 0.22 25 / 0.3)',
-                borderRadius: '4px', marginBottom: '1.5rem',
-              }}>
-                <ShieldX style={{ width: 16, height: 16, color: sColor.red }} />
-                <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.red }}>ACCESS REVOKED</span>
-              </div>
-              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                Your V-OP Pro access has been revoked. Contact PPEI for more information.
-              </p>
-            </>
-          ) : (
-            <>
-              <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim, lineHeight: 1.6, marginBottom: '1.5rem' }}>
-                V-OP Pro requires approval from PPEI. Request access below or contact us directly.
-              </p>
-              <button
-                onClick={() => requestAccess.mutate()}
-                disabled={requestAccess.isPending}
-                style={{
-                  background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1rem',
-                  letterSpacing: '0.1em', padding: '12px 32px', borderRadius: '3px', border: 'none',
-                  cursor: 'pointer', marginBottom: '1rem', display: 'inline-flex', alignItems: 'center', gap: '8px',
-                }}
-              >
-                {requestAccess.isPending ? <Loader2 style={{ width: 16, height: 16 }} className="animate-spin" /> : null}
-                REQUEST ACCESS
-              </button>
-            </>
-          )}
-
-          <div style={{ borderTop: `1px solid ${sColor.border}`, paddingTop: '1.5rem', marginTop: '0.5rem' }}>
-            <p style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textMuted, marginBottom: '8px' }}>
-              CONTACT PPEI
-            </p>
-            <a href="https://ppei.com" target="_blank" rel="noopener noreferrer" style={{
-              fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.blue, textDecoration: 'none',
-            }}>
-              ppei.com
-            </a>
-          </div>
-
-          <div style={{ marginTop: '1.5rem' }}>
-            <Link href="/" style={{ textDecoration: 'none' }}>
-              <span style={{
-                fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-                color: sColor.textMuted, cursor: 'pointer',
-              }}>
-                ← BACK TO V-OP LITE
-              </span>
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Not logged in → Sign in required ──
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
       <div className="ppei-anim-scale-in" style={{
-        background: 'oklch(0.12 0.006 260)', border: `1px solid ${sColor.border}`,
-        borderTop: `3px solid ${sColor.red}`, padding: '3rem 2.5rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
-        textAlign: 'center',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        textAlign: 'center', padding: '2rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
-          <img src={PPEI_LOGO_URL} alt="PPEI" style={{ height: '56px', objectFit: 'contain' }} />
+        {/* Big lock icon with glow */}
+        <div style={{
+          width: '80px', height: '80px', borderRadius: '50%',
+          background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
+        }}>
+          <Lock style={{ width: 36, height: 36, color: sColor.red }} />
         </div>
-        <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.1em', color: 'white', marginBottom: '0.5rem' }}>
+
+        <h2 style={{
+          fontFamily: sFont.heading, fontSize: '2rem', letterSpacing: '0.12em',
+          color: 'white', marginBottom: '0.5rem',
+        }}>
           V-OP PRO
         </h2>
-        <p style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: 'oklch(0.75 0.010 260)', marginBottom: '2rem', lineHeight: 1.6 }}>
-          Sign in to access V-OP Pro features. Access requires approval from PPEI.
+
+        <p style={{
+          fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim,
+          maxWidth: '400px', marginBottom: '0.5rem',
+        }}>
+          This area is restricted. Enter the access code to proceed.
         </p>
 
-        {/* Primary: Login button */}
-        <a href={getLoginUrl()} style={{
-          display: 'inline-flex', alignItems: 'center', gap: '8px',
-          background: sColor.red, color: 'white', fontFamily: sFont.heading, fontSize: '1.1rem',
-          letterSpacing: '0.1em', padding: '14px 40px', borderRadius: '3px', border: 'none',
-          cursor: 'pointer', textDecoration: 'none', marginBottom: '1.5rem',
+        <p style={{
+          fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)',
+          maxWidth: '400px', marginBottom: '2rem', fontStyle: 'italic',
         }}>
-          <Lock style={{ width: 18, height: 18 }} /> SIGN IN
-        </a>
+          "I asked my ECU for the password. It said 'knock knock.' I said 'who's there?' It threw a P0300."
+        </p>
 
-        <div style={{ marginTop: '1rem' }}>
+        <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
+          <div style={{
+            display: 'flex', gap: '8px', marginBottom: '12px',
+          }}>
+            <input
+              ref={inputRef}
+              type="password"
+              value={code}
+              onChange={e => setCode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              placeholder="Enter access code..."
+              style={{
+                flex: 1, padding: '12px 16px',
+                fontFamily: sFont.mono, fontSize: '1rem', letterSpacing: '0.15em',
+                background: sColor.bgDark,
+                border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
+                borderRadius: '3px', color: 'white', outline: 'none',
+                textAlign: 'center', textTransform: 'uppercase',
+                transition: 'border-color 0.2s',
+              }}
+            />
+            <button
+              onClick={handleSubmit}
+              style={{
+                padding: '12px 20px',
+                background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
+                borderRadius: '3px', color: sColor.red,
+                fontFamily: sFont.heading, fontSize: '0.9rem', letterSpacing: '0.08em',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >
+              UNLOCK
+            </button>
+          </div>
+
+          {error && attempts > 0 && (
+            <p style={{
+              fontFamily: sFont.body, fontSize: '0.8rem',
+              color: sColor.red, marginTop: '8px',
+              animation: 'fadeIn 0.3s ease',
+            }}>
+              {funnyMessages[(attempts - 1) % funnyMessages.length]}
+            </p>
+          )}
+        </div>
+
+        {attempts >= 3 && (
+          <p style={{
+            fontFamily: sFont.mono, fontSize: '0.7rem',
+            color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
+          }}>
+            Hint: Think big. Think primate. Think chest-pounding dominance.
+          </p>
+        )}
+
+        <div style={{ marginTop: '2rem' }}>
           <Link href="/" style={{ textDecoration: 'none' }}>
             <span style={{
               fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-              color: 'oklch(0.60 0.010 260)', cursor: 'pointer',
+              color: sColor.textMuted, cursor: 'pointer',
             }}>
               ← BACK TO V-OP LITE
             </span>
@@ -1357,7 +1334,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'calibrations' | 'diagnostic';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'diagnostic' | 'pitch' | 'tasks';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1369,7 +1346,6 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'calibrations', label: 'CALIBRATIONS', icon: <Database style={{ width: 16, height: 16, color: 'oklch(0.70 0.15 280)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1389,6 +1365,8 @@ const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
@@ -1497,7 +1475,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
               {isAdmin && idx === tabs.length && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
-              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } if (tab.id === 'calibrations') { navigate('/calibrations'); return; } setActiveTab(tab.id); }} style={{
+              <button onClick={() => { if (tab.id === 'fleet') { navigate('/fleet'); return; } setActiveTab(tab.id); }} style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 14px',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.06em',
                 color: activeTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
@@ -1672,6 +1650,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
+        {activeTab === 'pitch' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
+        {activeTab === 'tasks' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div>}
       </main>
 
       {/* Voice Command Button */}
@@ -1693,18 +1673,9 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
-  const { isAuthenticated, loading: authLoading } = useAuth();
   const [unlocked, setUnlocked] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
   const handleLock = () => { localStorage.removeItem(STORAGE_KEY); setUnlocked(false); };
 
-  // Clear stale localStorage if user is not authenticated
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated && localStorage.getItem(STORAGE_KEY) === 'true') {
-      localStorage.removeItem(STORAGE_KEY);
-      setUnlocked(false);
-    }
-  }, [authLoading, isAuthenticated]);
-
-  if (!unlocked || !isAuthenticated) return <AccessGate onUnlock={() => setUnlocked(true)} />;
+  if (!unlocked) return <AccessGate onUnlock={() => setUnlocked(true)} />;
   return <AdvancedDashboard onLock={handleLock} />;
 }

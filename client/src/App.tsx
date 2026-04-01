@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
+import { Redirect } from "wouter";
 import AuthGate from "./components/AuthGate";
 
 // Lazy-load all heavy pages for code splitting
@@ -16,8 +17,7 @@ const DragRacing = lazy(() => import("./pages/DragRacing"));
 const Community = lazy(() => import("./pages/Community"));
 const SupportJoin = lazy(() => import("./pages/SupportJoin"));
 const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
-const Pitch = lazy(() => import("./pages/Pitch"));
-const Tasks = lazy(() => import("./pages/Tasks"));
+// Pitch and Tasks now live inside Advanced tab (redirected)
 const Calibrations = lazy(() => import("./pages/Calibrations"));
 
 // Full-page loading spinner matching PPEI dark theme
@@ -69,8 +69,8 @@ function Router() {
         <Route path={"/fleet"} component={Fleet} />
         <Route path={"/drag"} component={DragRacing} />
         <Route path={"/community"} component={Community} />
-        <Route path={"/pitch"} component={Pitch} />
-        <Route path={"/tasks"} component={Tasks} />
+        <Route path={"/pitch"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/calibrations"} component={Calibrations} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
         <Route path={"/debug"} component={DebugDashboard} />

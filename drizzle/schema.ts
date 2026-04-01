@@ -74,6 +74,24 @@ export const shareTokens = mysqlTable("share_tokens", {
 export type ShareToken = typeof shareTokens.$inferSelect;
 export type InsertShareToken = typeof shareTokens.$inferInsert;
 
+// ── NDA Submissions (for share token gated access) ──────────────────────
+export const ndaSubmissions = mysqlTable("nda_submissions", {
+  id: int("id").autoincrement().primaryKey(),
+  tokenId: int("tokenId").notNull(), // FK to share_tokens.id
+  signerName: varchar("signerName", { length: 255 }).notNull(),
+  signerEmail: varchar("signerEmail", { length: 320 }),
+  signatureImageUrl: text("signatureImageUrl"), // S3 URL of drawn signature
+  uploadedDocUrl: text("uploadedDocUrl"), // S3 URL of uploaded pre-signed NDA
+  status: mysqlEnum("status", ["pending", "verified", "rejected"]).default("pending").notNull(),
+  verifiedBy: int("verifiedBy"), // FK to users.id (admin who verified)
+  verifiedAt: timestamp("verifiedAt"),
+  rejectionReason: text("rejectionReason"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type NdaSubmission = typeof ndaSubmissions.$inferSelect;
+export type InsertNdaSubmission = typeof ndaSubmissions.$inferInsert;
+
 // ── Feedback / Error Reports ──────────────────────────────────────────────
 export const feedback = mysqlTable("feedback", {
   id: int("id").autoincrement().primaryKey(),

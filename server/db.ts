@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens, ndaSubmissions } from "../drizzle/schema";
 import { like, desc, sql, count, eq, and } from "drizzle-orm";
 import { ENV } from './_core/env';
 
@@ -270,7 +270,7 @@ export async function verifyAccessCode(code: string): Promise<{ id: number; labe
       .limit(1);
     if (!row) return null;
     if (!row.isActive) return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
     if (row.maxUses !== null && row.currentUses >= row.maxUses) return null;
     // Increment usage counter
     await db.update(accessCodes).set({ currentUses: sql`${accessCodes.currentUses} + 1` }).where(eq(accessCodes.id, row.id));
@@ -318,7 +318,8 @@ export async function createShareToken(
       consumed: false,
       expiresAt,
     });
-    return { token, allowedPath, expiresAt };
+    const normalizedPath = allowedPath.replace(/\/+$/, '') || '/';
+    return { token, allowedPath: normalizedPath, expiresAt };
   } catch (error) {
     console.error("[Database] Failed to create share token:", error);
     return null;
@@ -326,10 +327,11 @@ export async function createShareToken(
 }
 
 /**
- * Validate a share token. If valid, marks it as consumed (single-use).
- * Returns the allowed path or null if invalid/expired/already used.
+ * Validate a share token. Checks validity but does NOT consume it.
+ * Tokens are reusable until expiry (user may need multiple visits before NDA is verified).
+ * Returns the allowed path and token ID, or null if invalid/expired.
  */
-export async function validateShareToken(token: string): Promise<{ allowedPath: string } | null> {
+export async function validateShareToken(token: string): Promise<{ id: number; allowedPath: string } | null> {
   const db = await getDb();
   if (!db) return null;
   try {
@@ -337,23 +339,162 @@ export async function validateShareToken(token: string): Promise<{ allowedPath: 
       .select({
         id: shareTokens.id,
         allowedPath: shareTokens.allowedPath,
-        consumed: shareTokens.consumed,
         expiresAt: shareTokens.expiresAt,
       })
       .from(shareTokens)
       .where(eq(shareTokens.token, token.trim()))
       .limit(1);
     if (!row) return null;
-    if (row.consumed) return null;
-    if (row.expiresAt && row.expiresAt < new Date()) return null;
-    // Mark as consumed — single use
-    await db
-      .update(shareTokens)
-      .set({ consumed: true, consumedAt: new Date() })
-      .where(eq(shareTokens.id, row.id));
-    return { allowedPath: row.allowedPath };
+    if (row.expiresAt && row.expiresAt <= new Date()) return null;
+    return { id: row.id, allowedPath: row.allowedPath };
   } catch (error) {
     console.error("[Database] Failed to validate share token:", error);
+    return null;
+  }
+}
+
+// ── NDA Submissions ──────────────────────────────────────────────────────
+
+/**
+ * Submit an NDA signature. Tied to signer email — once verified, all share links work.
+ */
+export async function submitNda(data: {
+  tokenId: number;
+  signerName: string;
+  signerEmail: string;
+  signatureImageUrl: string;
+}): Promise<{ id: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [result] = await db.insert(ndaSubmissions).values({
+      tokenId: data.tokenId,
+      signerName: data.signerName,
+      signerEmail: data.signerEmail.toLowerCase().trim(),
+      signatureImageUrl: data.signatureImageUrl,
+      status: 'pending',
+    }).$returningId();
+    return { id: result.id };
+  } catch (error) {
+    console.error("[Database] Failed to submit NDA:", error);
+    return null;
+  }
+}
+
+/**
+ * Check NDA status by email. Returns the most recent NDA submission for this email.
+ * If verified, user can access any share link.
+ */
+export async function checkNdaStatus(signerEmail: string): Promise<{
+  id: number;
+  status: 'pending' | 'verified' | 'rejected';
+  signerName: string;
+  signatureImageUrl: string | null;
+  rejectionReason: string | null;
+  createdAt: Date;
+} | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [row] = await db
+      .select({
+        id: ndaSubmissions.id,
+        status: ndaSubmissions.status,
+        signerName: ndaSubmissions.signerName,
+        signatureImageUrl: ndaSubmissions.signatureImageUrl,
+        rejectionReason: ndaSubmissions.rejectionReason,
+        createdAt: ndaSubmissions.createdAt,
+      })
+      .from(ndaSubmissions)
+      .where(eq(ndaSubmissions.signerEmail, signerEmail.toLowerCase().trim()))
+      .orderBy(desc(ndaSubmissions.createdAt))
+      .limit(1);
+    return row ?? null;
+  } catch (error) {
+    console.error("[Database] Failed to check NDA status:", error);
+    return null;
+  }
+}
+
+/**
+ * Get all pending NDA submissions for admin review.
+ */
+export async function getPendingNdas(): Promise<Array<{
+  id: number;
+  tokenId: number;
+  signerName: string;
+  signerEmail: string | null;
+  signatureImageUrl: string | null;
+  uploadedDocUrl: string | null;
+  status: string;
+  createdAt: Date;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    return await db
+      .select({
+        id: ndaSubmissions.id,
+        tokenId: ndaSubmissions.tokenId,
+        signerName: ndaSubmissions.signerName,
+        signerEmail: ndaSubmissions.signerEmail,
+        signatureImageUrl: ndaSubmissions.signatureImageUrl,
+        uploadedDocUrl: ndaSubmissions.uploadedDocUrl,
+        status: ndaSubmissions.status,
+        createdAt: ndaSubmissions.createdAt,
+      })
+      .from(ndaSubmissions)
+      .orderBy(desc(ndaSubmissions.createdAt));
+  } catch (error) {
+    console.error("[Database] Failed to get pending NDAs:", error);
+    return [];
+  }
+}
+
+/**
+ * Admin verify or reject an NDA submission.
+ */
+export async function verifyNda(
+  ndaId: number,
+  adminId: number,
+  action: 'verified' | 'rejected',
+  rejectionReason?: string
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db
+      .update(ndaSubmissions)
+      .set({
+        status: action,
+        verifiedBy: adminId,
+        verifiedAt: new Date(),
+        rejectionReason: action === 'rejected' ? (rejectionReason || null) : null,
+      })
+      .where(eq(ndaSubmissions.id, ndaId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to verify NDA:", error);
+    return false;
+  }
+}
+
+/**
+ * Get share token ID by token string (without consuming it).
+ * Used to associate NDA submissions with tokens.
+ */
+export async function getShareTokenId(token: string): Promise<{ id: number; allowedPath: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [row] = await db
+      .select({ id: shareTokens.id, allowedPath: shareTokens.allowedPath })
+      .from(shareTokens)
+      .where(eq(shareTokens.token, token.trim()))
+      .limit(1);
+    return row ?? null;
+  } catch (error) {
+    console.error("[Database] Failed to get share token ID:", error);
     return null;
   }
 }

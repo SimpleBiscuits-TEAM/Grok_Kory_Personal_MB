@@ -434,6 +434,140 @@ function Pagination({ page, totalPages, onPageChange }: { page: number; totalPag
 
 type SearchMode = 'search' | 'vehicle' | 'partNumber';
 
+/**
+ * CalibrationContent — Embeddable version for use inside Editor tabs (no header/outer wrapper)
+ */
+export function CalibrationContent() {
+  const [mode, setMode] = useState<SearchMode>('vehicle');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [moduleFilter, setModuleFilter] = useState('');
+  const [yearStart, setYearStart] = useState('');
+  const [yearEnd, setYearEnd] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [page, setPage] = useState(0);
+  const [selectedYear, setSelectedYear] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [vehicleModuleFilter, setVehicleModuleFilter] = useState('');
+  const [vehiclePage, setVehiclePage] = useState(0);
+  const [partNumberLookup, setPartNumberLookup] = useState('');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+  useEffect(() => { setPage(0); }, [debouncedQuery, moduleFilter, yearStart, yearEnd]);
+  useEffect(() => { setVehiclePage(0); }, [selectedYear, selectedModel, vehicleModuleFilter]);
+  useEffect(() => { setSelectedModel(''); setVehicleModuleFilter(''); }, [selectedYear]);
+
+  const { data: filterOptions } = trpc.calibrations.filterOptions.useQuery();
+  const { data: years } = trpc.calibrations.getYears.useQuery();
+  const yearNum = selectedYear ? parseInt(selectedYear) : 0;
+  const { data: vehicleModels, isLoading: modelsLoading } = trpc.calibrations.getModelsForYear.useQuery(
+    { year: yearNum }, { enabled: yearNum > 0 }
+  );
+  const searchInput = useMemo(() => ({
+    query: debouncedQuery || undefined, moduleType: moduleFilter || undefined,
+    yearStart: yearStart ? parseInt(yearStart) : undefined, yearEnd: yearEnd ? parseInt(yearEnd) : undefined,
+    limit: PAGE_SIZE, offset: page * PAGE_SIZE,
+  }), [debouncedQuery, moduleFilter, yearStart, yearEnd, page]);
+  const { data: searchResults, isLoading } = trpc.calibrations.search.useQuery(searchInput, { enabled: mode === 'search' });
+  const selectedModelData = useMemo(() => {
+    if (!selectedModel || !vehicleModels) return null;
+    return vehicleModels.find(m => m.model === selectedModel) || null;
+  }, [selectedModel, vehicleModels]);
+  const vehicleInput = useMemo(() => ({
+    year: yearNum, platformCodes: selectedModelData?.platformCodes || [],
+    moduleType: vehicleModuleFilter || undefined, limit: PAGE_SIZE, offset: vehiclePage * PAGE_SIZE,
+  }), [yearNum, selectedModelData, vehicleModuleFilter, vehiclePage]);
+  const { data: vehicleResults, isLoading: vehicleLoading } = trpc.calibrations.searchByVehicle.useQuery(
+    vehicleInput, { enabled: mode === 'vehicle' && yearNum > 0 && (selectedModelData?.platformCodes?.length ?? 0) > 0 }
+  );
+  const { data: lookupResults, isLoading: lookupLoading } = trpc.calibrations.lookupPartNumber.useQuery(
+    { partNumber: partNumberLookup }, { enabled: mode === 'partNumber' && partNumberLookup.length >= 5 }
+  );
+  const vehicleModuleTypes = useMemo(() => {
+    if (!vehicleResults?.results) return [];
+    return filterOptions?.moduleTypes || [];
+  }, [vehicleResults, filterOptions]);
+
+  // This is a simplified embedded version - renders the same content without the outer page wrapper
+  return (
+    <div style={{ maxWidth: '100%', padding: '8px', color: 'white', fontSize: '0.85rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <Database size={20} style={{ color: sColor.accent }} />
+        <h3 style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>CALIBRATION DATABASE</h3>
+        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim, background: 'oklch(0.14 0.006 260)', padding: '2px 6px', border: `1px solid ${sColor.border}` }}>
+          {filterOptions?.totalRecords?.toLocaleString() || '17,912'} records
+        </span>
+      </div>
+      <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, margin: '0 0 12px 0' }}>
+        Search calibrations by vehicle, part number, or keyword. Currently loaded: <strong style={{ color: 'white' }}>FCA / Stellantis</strong>. More brands appear as calibrations are uploaded.
+      </p>
+      {/* Brand tabs - only show brands that have data */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '12px', flexWrap: 'wrap' }}>
+        {['FCA / Stellantis'].map(brand => (
+          <button key={brand} style={{
+            padding: '4px 12px', fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+            background: 'oklch(0.16 0.008 260)', border: `1px solid ${sColor.accent}`, color: 'white',
+            cursor: 'pointer',
+          }}>{brand}</button>
+        ))}
+        <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, alignSelf: 'center', marginLeft: '8px' }}>
+          Upload calibrations for new brands to expand this list
+        </span>
+      </div>
+      {/* Inline search */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '12px' }}>
+        <input
+          value={searchQuery} onChange={e => { setSearchQuery(e.target.value); setMode('search' as SearchMode); }}
+          placeholder="Search by part number, description, or keyword..."
+          style={{
+            flex: 1, padding: '6px 10px', fontFamily: sFont.mono, fontSize: '0.75rem',
+            background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, color: 'white', outline: 'none',
+          }}
+        />
+      </div>
+      {/* Results count */}
+      {isLoading || vehicleLoading ? (
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, padding: '1rem', textAlign: 'center' }}>Searching...</div>
+      ) : (
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginBottom: '8px' }}>
+          {mode === 'search' && searchResults ? `${searchResults.total} results` : ''}
+        </div>
+      )}
+      {/* Results list */}
+      {mode === 'search' && searchResults?.results?.map((cal: any) => (
+        <div key={cal.id} style={{
+          padding: '8px 10px', marginBottom: '4px',
+          background: expandedId === cal.id ? 'oklch(0.14 0.008 260)' : 'oklch(0.11 0.005 260)',
+          border: `1px solid ${sColor.border}`, cursor: 'pointer',
+        }} onClick={() => setExpandedId(expandedId === cal.id ? null : cal.id)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: 'white' }}>{cal.currentPartNumber}</span>
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }}>{cal.moduleType}</span>
+          </div>
+          <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim, marginTop: '2px' }}>{cal.description}</div>
+          {expandedId === cal.id && (
+            <div style={{ marginTop: '8px', padding: '8px', background: 'oklch(0.10 0.004 260)', border: `1px solid ${sColor.border}` }}>
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
+                {cal.yearStart && cal.yearEnd && <div>Years: {cal.yearStart}–{cal.yearEnd}</div>}
+                {cal.oldPartNumbers?.length > 0 && <div>Supersedes: {cal.oldPartNumbers.join(', ')}</div>}
+              </div>
+              <button style={{
+                marginTop: '6px', padding: '3px 10px', fontFamily: sFont.heading, fontSize: '0.7rem',
+                letterSpacing: '0.06em', background: sColor.accent, color: 'white', border: 'none', cursor: 'pointer',
+              }}>EXPORT</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Calibrations() {
   const [mode, setMode] = useState<SearchMode>('vehicle');
 

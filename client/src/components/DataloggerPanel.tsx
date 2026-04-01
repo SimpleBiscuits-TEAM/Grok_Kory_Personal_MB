@@ -12,6 +12,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { trpc } from '@/lib/trpc';
 import {
   Wifi, WifiOff, Play, Square, Download, BarChart3,
   Settings, AlertCircle, CheckCircle, Loader2, Gauge,
@@ -868,12 +869,28 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // Logging state
   const [isLogging, setIsLogging] = useState(false);
+  const [isMonitoring, setIsMonitoring] = useState(false);  // Live view without recording
+  const [isRecording, setIsRecording] = useState(false);    // Actively capturing data for saving
   const [liveReadings, setLiveReadings] = useState<Map<number, PIDReading>>(new Map());
   const [readingHistory, setReadingHistory] = useState<Map<number, PIDReading[]>>(new Map());
+  const [recordedReadings, setRecordedReadings] = useState<Map<number, PIDReading[]>>(new Map()); // Only captured during recording
   const [sampleCount, setSampleCount] = useState(0);
+  const [recordSampleCount, setRecordSampleCount] = useState(0);
   const [logDuration, setLogDuration] = useState(0);
+  const [recordDuration, setRecordDuration] = useState(0);
   const logStartRef = useRef<number>(0);
+  const recordStartRef = useRef<number>(0);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ECU Communication Loss Detection
+  const [ecuLostReason, setEcuLostReason] = useState<string | null>(null);
+  const consecutiveFailsRef = useRef(0);
+  const ECU_FAIL_THRESHOLD = 5; // consecutive failed polls before declaring ECU lost
+
+  // AI Auto-Naming
+  const [isAutoNaming, setIsAutoNaming] = useState(false);
+  const autoNameMutation = trpc.datalogNaming.autoName.useMutation();
 
   // Sample rate
   const [sampleRateMs, setSampleRateMs] = useState(200);
@@ -1019,58 +1036,57 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // ─── Logging handlers ────────────────────────────────────────────────
 
-  const handleStartLogging = useCallback(async () => {
+  // Helper: prepare PIDs and force-add unsupported ones
+  const preparePidsForLogging = useCallback(() => {
     const conn = connectionRef.current;
-    if (!conn || connectionState !== 'ready') {
-      addLog('ERROR: Cannot start logging — device not in ready state. Reconnect and try again.');
-      return;
-    }
+    if (!conn) return null;
 
-    // Resolve selected PIDs from both standard and extended
     const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
     if (pidsToLog.length === 0) {
-      addLog('ERROR: No PIDs selected for logging. Select at least one PID from the list below.');
-      return;
+      addLog('ERROR: No PIDs selected. Select at least one PID from the list below.');
+      return null;
     }
 
-    const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
-    const mode01Count = pidsToLog.length - mode22Count;
-
-    addLog(`Preparing to log ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms...`);
-
-    // Pre-check: warn if all selected PIDs might be filtered out by the
-    // supported-PID bitmask. This is the most common cause of "Start Log
-    // does nothing" — the vehicle didn't report these PIDs as supported
-    // during the Mode 01 bitmask scan, so filterSupportedPids() removes
-    // them all before the first poll.
+    // Force-add unsupported PIDs to bypass bitmask filter
     if ('filterSupportedPids' in conn && typeof (conn as any).filterSupportedPids === 'function') {
       const { supported, unsupported } = (conn as any).filterSupportedPids(pidsToLog);
       if (supported.length === 0 && unsupported.length > 0) {
-        addLog(`WARNING: All ${unsupported.length} selected PIDs were marked unsupported by the Mode 01 bitmask scan.`);
-        addLog(`This is common on Cummins, Ford, and other vehicles that use extended PIDs.`);
-        addLog(`Bypassing bitmask filter — will attempt to poll all selected PIDs directly.`);
-        // Force-mark these PIDs as supported so startLogging doesn't filter them
+        addLog(`WARNING: All ${unsupported.length} selected PIDs marked unsupported — bypassing bitmask filter.`);
         if ('supportedPids' in conn) {
-          for (const pid of unsupported) {
-            (conn as any).supportedPids.add(pid.pid);
-          }
+          for (const pid of unsupported) (conn as any).supportedPids.add(pid.pid);
         }
       } else if (unsupported.length > 0) {
-        addLog(`Note: ${unsupported.length} PID(s) not in bitmask — will still attempt: ${unsupported.map((p: any) => p.shortName).join(', ')}`);
-        // Also force-add these so they aren't silently dropped
+        addLog(`Note: ${unsupported.length} PID(s) not in bitmask — will still attempt.`);
         if ('supportedPids' in conn) {
-          for (const pid of unsupported) {
-            (conn as any).supportedPids.add(pid.pid);
-          }
+          for (const pid of unsupported) (conn as any).supportedPids.add(pid.pid);
         }
       }
     }
+    return pidsToLog;
+  }, [selectedPids, addLog]);
+
+  // ─── MONITOR: Start live data view WITHOUT recording ─────────────────
+  const handleStartMonitoring = useCallback(async () => {
+    const conn = connectionRef.current;
+    if (!conn || connectionState !== 'ready') {
+      addLog('ERROR: Cannot start — device not in ready state. Reconnect and try again.');
+      return;
+    }
+
+    const pidsToLog = preparePidsForLogging();
+    if (!pidsToLog) return;
+
+    const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
+    const mode01Count = pidsToLog.length - mode22Count;
+    addLog(`Starting live monitor: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms`);
 
     // Reset live data
     setLiveReadings(new Map());
     setReadingHistory(new Map());
     setSampleCount(0);
     setLogDuration(0);
+    setEcuLostReason(null);
+    consecutiveFailsRef.current = 0;
     logStartRef.current = Date.now();
 
     // Start duration timer
@@ -1079,14 +1095,31 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     }, 1000);
 
     setIsLogging(true);
-    addLog(`Starting log: ${pidsToLog.map(p => p.shortName).join(', ')} @ ${sampleRateMs}ms`);
+    setIsMonitoring(true);
 
     try {
       await conn.startLogging(pidsToLog, sampleRateMs, (readings) => {
-        const newLive = new Map<number, PIDReading>();
-        for (const r of readings) {
-          newLive.set(r.pid, r);
+        // ECU communication loss detection
+        if (!readings || readings.length === 0) {
+          consecutiveFailsRef.current++;
+          if (consecutiveFailsRef.current >= ECU_FAIL_THRESHOLD && !ecuLostReason) {
+            const reason = 'ECU stopped responding — possible causes: vehicle ignition turned off, adapter disconnected, CAN bus error, or ECU entered sleep mode.';
+            setEcuLostReason(reason);
+            addLog(`⚠ ECU COMMUNICATION LOST: ${reason}`);
+          }
+          return;
         }
+        // Reset fail counter on successful read
+        if (consecutiveFailsRef.current > 0) {
+          if (ecuLostReason) {
+            addLog('✓ ECU communication restored.');
+            setEcuLostReason(null);
+          }
+          consecutiveFailsRef.current = 0;
+        }
+
+        const newLive = new Map<number, PIDReading>();
+        for (const r of readings) newLive.set(r.pid, r);
         setLiveReadings(newLive);
 
         setReadingHistory(prev => {
@@ -1101,38 +1134,145 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         });
 
         setSampleCount(prev => prev + 1);
+
+        // If recording, also capture into recorded readings
+        if (isRecording) {
+          setRecordedReadings(prev => {
+            const next = new Map(prev);
+            for (const r of readings) {
+              const arr = next.get(r.pid) || [];
+              arr.push(r);
+              next.set(r.pid, [...arr]);
+            }
+            return next;
+          });
+          setRecordSampleCount(prev => prev + 1);
+        }
       });
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Failed to start logging';
+      const errMsg = err instanceof Error ? err.message : 'Failed to start monitoring';
       addLog(`ERROR: ${errMsg}`);
       if (errMsg.includes('No supported PIDs')) {
-        addLog('TIP: Try selecting different PIDs, or run "Scan Vehicle" first to detect supported PIDs.');
+        addLog('TIP: Try selecting different PIDs, or run "Scan Vehicle" first.');
       }
       setIsLogging(false);
+      setIsMonitoring(false);
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
         durationIntervalRef.current = null;
       }
     }
-  }, [connectionState, selectedPids, sampleRateMs, addLog]);
+  }, [connectionState, preparePidsForLogging, sampleRateMs, addLog, isRecording, ecuLostReason]);
 
-  const handleStopLogging = useCallback(() => {
+  // ─── RECORD: Start capturing data for saving (while monitoring) ──────
+  const handleStartRecording = useCallback(() => {
+    setRecordedReadings(new Map());
+    setRecordSampleCount(0);
+    setRecordDuration(0);
+    recordStartRef.current = Date.now();
+    recordIntervalRef.current = setInterval(() => {
+      setRecordDuration(Math.floor((Date.now() - recordStartRef.current) / 1000));
+    }, 1000);
+    setIsRecording(true);
+    addLog('⏺ RECORDING STARTED — capturing data for session save');
+  }, [addLog]);
+
+  // ─── STOP RECORD: Save session + AI auto-name ───────────────────────
+  const handleStopRecording = useCallback(async () => {
+    setIsRecording(false);
+    if (recordIntervalRef.current) {
+      clearInterval(recordIntervalRef.current);
+      recordIntervalRef.current = null;
+    }
+
+    const endTime = Date.now();
+    const duration = (endTime - recordStartRef.current) / 1000;
+    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+
+    // Build session from recorded readings
+    const session: LogSession = {
+      id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      startTime: recordStartRef.current,
+      endTime,
+      sampleRate: sampleRateMs,
+      pids: pidsToLog,
+      readings: new Map(recordedReadings),
+      vehicleInfo: vehicleInfo || undefined,
+    };
+
+    setCompletedSessions(prev => [session, ...prev]);
+    addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples`);
+
+    // AI Auto-Name the session
+    try {
+      setIsAutoNaming(true);
+      // Compute summary stats for AI naming
+      const rpmReadings = session.readings.get(0x0C) || []; // Engine RPM
+      const speedReadings = session.readings.get(0x0D) || []; // Vehicle Speed
+      const boostReadings = session.readings.get(0x0B) || []; // MAP (boost proxy)
+      const throttleReadings = session.readings.get(0x11) || []; // Throttle
+      const egtReadings = session.readings.get(0x220078) || session.readings.get(0x2200A0) || []; // EGT
+      const railReadings = session.readings.get(0x220023) || []; // Rail pressure
+
+      const getMax = (arr: PIDReading[]) => arr.length ? Math.max(...arr.map(r => r.value)) : undefined;
+      const getAvg = (arr: PIDReading[]) => arr.length ? arr.reduce((s, r) => s + r.value, 0) / arr.length : undefined;
+
+      const summary = {
+        durationSeconds: Math.round(duration),
+        sampleCount: recordSampleCount,
+        peakRpm: getMax(rpmReadings) ?? 0,
+        avgRpm: getAvg(rpmReadings) ? Math.round(getAvg(rpmReadings)!) : 0,
+        peakSpeedMph: getMax(speedReadings) ?? 0,
+        avgSpeedMph: getAvg(speedReadings) ? Math.round(getAvg(speedReadings)!) : 0,
+        peakBoostPsi: boostReadings.length ? Math.max(...boostReadings.map(r => (r.value * 0.145038) - 14.696)) : 0,
+        maxThrottle: getMax(throttleReadings) ?? 0,
+        maxEgt: getMax(egtReadings),
+        maxRailPressure: getMax(railReadings),
+        hadWotEvent: throttleReadings.some(r => r.value > 80),
+        hadIdlePeriod: rpmReadings.some(r => r.value < 900),
+        vehicleInfo: vehicleInfo ? `${vehicleInfo.year ?? ''} ${vehicleInfo.make ?? ''} ${vehicleInfo.model ?? ''}`.trim() : undefined,
+      };
+
+      const result = await autoNameMutation.mutateAsync(summary);
+      if (result.name) {
+        session.name = result.name;
+        // Update the session in state
+        setCompletedSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: result.name } : s));
+        addLog(`🤖 AI named session: "${result.name}"`);
+      }
+    } catch (err) {
+      addLog(`AI naming skipped: ${err instanceof Error ? err.message : 'unavailable'}`);
+    } finally {
+      setIsAutoNaming(false);
+    }
+  }, [selectedPids, sampleRateMs, recordedReadings, recordSampleCount, vehicleInfo, addLog, autoNameMutation]);
+
+  // ─── STOP MONITOR: Stop all polling ─────────────────────────────────
+  const handleStopMonitoring = useCallback(() => {
+    // If recording, stop that first
+    if (isRecording) {
+      handleStopRecording();
+    }
+
     const conn = connectionRef.current;
-    if (!conn) return;
+    if (conn) conn.stopLogging();
 
-    const session = conn.stopLogging();
     setIsLogging(false);
+    setIsMonitoring(false);
+    setEcuLostReason(null);
+    consecutiveFailsRef.current = 0;
 
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
 
-    if (session) {
-      setCompletedSessions(prev => [session, ...prev]);
-      addLog(`Session saved: ${((session.endTime! - session.startTime) / 1000).toFixed(1)}s`);
-    }
-  }, [addLog]);
+    addLog('Monitor stopped.');
+  }, [isRecording, handleStopRecording, addLog]);
+
+  // Legacy aliases for backward compatibility
+  const handleStartLogging = handleStartMonitoring;
+  const handleStopLogging = handleStopMonitoring;
 
   // ─── PID selection handlers ──────────────────────────────────────────
 
@@ -1493,10 +1633,40 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             </button>
           )}
 
-          {/* Start/Stop Logging */}
-          {connectionState === 'ready' && !isLogging && !isScanning && (
+          {/* MONITOR: Start live data view */}
+          {connectionState === 'ready' && !isMonitoring && !isScanning && (
             <button
-              onClick={handleStartLogging}
+              onClick={handleStartMonitoring}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: sColor.green, border: 'none',
+                borderRadius: '3px', color: 'oklch(0.10 0.005 260)',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer',
+              }}
+            >
+              <Activity style={{ width: 14, height: 14 }} /> MONITOR
+            </button>
+          )}
+          {/* STOP MONITOR */}
+          {isMonitoring && (
+            <button
+              onClick={handleStopMonitoring}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: 'oklch(0.20 0.01 145)',
+                border: `2px solid ${sColor.green}`, borderRadius: '3px', color: sColor.green,
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer',
+              }}
+            >
+              <Square style={{ width: 14, height: 14 }} /> STOP · {logDuration}s · {sampleCount} polls
+            </button>
+          )}
+          {/* RECORD: Start capturing data (only while monitoring) */}
+          {isMonitoring && !isRecording && (
+            <button
+              onClick={handleStartRecording}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '6px 14px', background: sColor.red, border: 'none',
@@ -1505,12 +1675,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 cursor: 'pointer',
               }}
             >
-              <Play style={{ width: 14, height: 14 }} /> START LOG
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'white', display: 'inline-block' }} /> RECORD
             </button>
           )}
-          {isLogging && (
+          {/* STOP RECORD */}
+          {isRecording && (
             <button
-              onClick={handleStopLogging}
+              onClick={handleStopRecording}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '6px 14px', background: 'oklch(0.20 0.01 25)',
@@ -1519,8 +1690,17 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 cursor: 'pointer', animation: 'pulse 2s infinite',
               }}
             >
-              <Square style={{ width: 14, height: 14 }} /> STOP · {logDuration}s · {sampleCount} samples
+              <Square style={{ width: 14, height: 14 }} /> STOP REC · {recordDuration}s · {recordSampleCount} samples
             </button>
+          )}
+          {/* AI Auto-Naming indicator */}
+          {isAutoNaming && (
+            <span style={{
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.blue,
+              display: 'flex', alignItems: 'center', gap: '4px',
+            }}>
+              <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} /> AI NAMING...
+            </span>
           )}
 
           {/* Read DTCs */}
@@ -1561,6 +1741,34 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             </div>
             <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, lineHeight: 1.5 }}>
               Your browser does not support the WebSerial API. Please use <strong style={{ color: sColor.text }}>Google Chrome</strong> or <strong style={{ color: sColor.text }}>Microsoft Edge</strong> on desktop to connect to an ELM327-compatible OBD-II adapter. Safari and Firefox do not support WebSerial.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ECU Communication Lost Banner */}
+      {ecuLostReason && (
+        <div style={{
+          background: 'oklch(0.15 0.03 25 / 0.5)', border: `2px solid ${sColor.red}`,
+          borderRadius: '3px', padding: '16px 20px', marginBottom: '16px',
+          display: 'flex', alignItems: 'flex-start', gap: '12px',
+          animation: 'pulse 2s infinite',
+        }}>
+          <AlertCircle style={{ width: 24, height: 24, color: sColor.red, flexShrink: 0, marginTop: '2px' }} />
+          <div>
+            <div style={{ fontFamily: sFont.heading, fontSize: '1rem', color: sColor.red, letterSpacing: '0.1em', marginBottom: '6px' }}>
+              ⚠ ECU COMMUNICATION LOST
+            </div>
+            <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, lineHeight: 1.6 }}>
+              {ecuLostReason}
+            </div>
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, marginTop: '8px', lineHeight: 1.5 }}>
+              <strong style={{ color: sColor.text }}>Troubleshooting:</strong><br />
+              • Check that the vehicle ignition is ON (not just ACC)<br />
+              • Verify the OBD-II adapter is firmly seated in the port<br />
+              • Check the USB cable connection to your computer<br />
+              • Try power-cycling the adapter (unplug and replug)<br />
+              • If the issue persists, disconnect and reconnect
             </div>
           </div>
         </div>

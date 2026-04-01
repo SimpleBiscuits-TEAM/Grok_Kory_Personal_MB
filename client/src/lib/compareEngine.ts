@@ -149,6 +149,20 @@ export function detectRegenMode(data: ProcessedMetrics): RegenDetection {
 function getNormalModeIndices(data: ProcessedMetrics): Set<number> {
   const normal = new Set<number>();
   const timing = data.injectionTiming;
+  const rpm = data.rpm;
+  const sampleCount = Math.max(rpm.length, timing.length);
+
+  // If no timing data at all, assume all samples are normal mode
+  // (Ford Powerstroke, gas engines, etc. may not have injection timing)
+  const hasTimingData = timing.length > 0 && timing.some(t => t !== 0);
+
+  if (!hasTimingData) {
+    for (let i = 0; i < sampleCount; i++) {
+      normal.add(i);
+    }
+    return normal;
+  }
+
   for (let i = 0; i < timing.length; i++) {
     const t = timing[i];
     // Normal mode: timing is positive (or slightly negative but not in regen range)
@@ -312,6 +326,11 @@ const PID_CONFIGS: PidConfig[] = [
   { key: 'intakeAirTemp', label: 'Intake Air Temp', unit: '°F' },
   { key: 'fuelQuantity', label: 'Fuel Quantity', unit: 'mm³' },
   { key: 'oilPressure', label: 'Oil Pressure', unit: 'PSI' },
+  { key: 'exhaustPressure', label: 'Exhaust Backpressure', unit: 'PSI' },
+  { key: 'barometricPressure', label: 'Barometric Pressure', unit: 'PSI' },
+  { key: 'batteryVoltage', label: 'Battery Voltage', unit: 'V' },
+  { key: 'throttlePosition', label: 'Throttle Position', unit: '%' },
+  { key: 'currentGear', label: 'Current Gear', unit: '' },
 ];
 
 function hasData(arr: number[]): boolean {
