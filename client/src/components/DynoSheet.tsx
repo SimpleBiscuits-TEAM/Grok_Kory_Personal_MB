@@ -331,13 +331,16 @@ export function buildDynoSheetData(
   });
 
   // Build RPM-binned curve from the best run
-  const RPM_BIN_SIZE = 250;
-  const rpmBins = new Map<number, { hpMax: number; torqueMax: number; count: number }>();
+  // Use 100 RPM bins for a smoother, more detailed curve
+  const RPM_BIN_SIZE = 100;
+  const rpmBins = new Map<number, { hpSum: number; torqueSum: number; hpMax: number; torqueMax: number; count: number }>();
 
   for (const pt of bestRun.points) {
     if (pt.rpm < 2000) continue;
     const bin = Math.round(pt.rpm / RPM_BIN_SIZE) * RPM_BIN_SIZE;
-    const existing = rpmBins.get(bin) || { hpMax: 0, torqueMax: 0, count: 0 };
+    const existing = rpmBins.get(bin) || { hpSum: 0, torqueSum: 0, hpMax: 0, torqueMax: 0, count: 0 };
+    existing.hpSum += pt.hp;
+    existing.torqueSum += pt.torque;
     existing.hpMax = Math.max(existing.hpMax, pt.hp);
     existing.torqueMax = Math.max(existing.torqueMax, pt.torque);
     existing.count++;
@@ -345,16 +348,17 @@ export function buildDynoSheetData(
   }
 
   let hpCurve = Array.from(rpmBins.entries())
-    .filter(([_, bin]) => bin.count >= 2)
+    .filter(([_, bin]) => bin.count >= 1)
     .map(([rpm, bin]) => ({
       rpm,
-      hp: Math.round(bin.hpMax * 100) / 100,
-      torque: Math.round(bin.torqueMax * 100) / 100,
+      // Use peak values for dyno-style curves (not averages)
+      hp: Math.round(bin.hpMax * 10) / 10,
+      torque: Math.round(bin.torqueMax * 10) / 10,
     }))
     .sort((a, b) => a.rpm - b.rpm);
 
-  // Smooth the curve
-  hpCurve = smoothCurve(hpCurve, 3);
+  // Smooth the curve with a wider window for cleaner display
+  hpCurve = smoothCurve(hpCurve, 5);
 
   // Find peaks
   let peakHP = 0, peakHPRpm = 0, peakTorque = 0, peakTorqueRpm = 0;
@@ -475,7 +479,21 @@ function buildWOTRun(
   };
 }
 
-// ─── Canvas Renderer ────────────────────────────────────────────────────────
+// ─── Interactive Recharts Renderer ──────────────────────────────────────────
+
+import { useMemo } from 'react';
+import {
+  ComposedChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
+import { ZoomableChart } from './ZoomableChart';
 
 interface DynoSheetProps {
   data: DynoSheetData;
@@ -483,546 +501,84 @@ interface DynoSheetProps {
   compareData?: DynoSheetData | null;
 }
 
-const CANVAS_WIDTH = 1200;
-const CANVAS_HEIGHT = 900;
-const HEADER_HEIGHT = 80;
-const FOOTER_HEIGHT = 60;
-const PANEL_GAP = 8;
-const MARGIN = { left: 70, right: 70, top: 10, bottom: 25 };
-const SEPARATOR_HEIGHT = 6;
-
-// Colors
+// Colors — dark motorsport theme matching the app
 const COLORS = {
-  bg: '#FFFFFF',
-  grid: '#E0E0E0',
-  gridMinor: '#F0F0F0',
-  text: '#333333',
-  textLight: '#888888',
-  axisLabel: '#555555',
-  hpLine: '#2563EB',       // blue
-  torqueLine: '#DC2626',   // red
-  rpmLine: '#DC2626',      // red for RPM trace
-  separator: '#888888',
-  peakMarker: '#333333',
-  warning: '#B45309',
-  ppeiRed: '#CC0000',
-  // Comparison overlay colors (dashed, lighter)
-  hpLineCompare: '#93C5FD',     // light blue for comparison HP
-  torqueLineCompare: '#FCA5A5', // light red for comparison torque
-  rpmLineCompare: '#FCA5A5',    // light red for comparison RPM
+  bg: '#0d0f14',
+  grid: 'rgba(255,255,255,0.06)',
+  text: '#e0e0e0',
+  textDim: '#888888',
+  hpLine: '#ff4d00',         // Dynojet orange-red for HP
+  torqueLine: '#00c8ff',     // cyan for Torque
+  hpLineCompare: '#ff4d0066',
+  torqueLineCompare: '#00c8ff66',
+  peakHP: '#ff6b00',
+  peakTorque: '#00e5ff',
+  warning: '#f59e0b',
 };
 
-function drawDynoSheet(
-  canvas: HTMLCanvasElement,
-  data: DynoSheetData,
-  logoImg: HTMLImageElement | null,
-  compareData?: DynoSheetData | null,
-) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const W = canvas.width;
-  const H = canvas.height;
-
-  // Clear
-  ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(0, 0, W, H);
-
-  // ─── Header ─────────────────────────────────────────────────────────
-  // PPEI Logo
-  if (logoImg && logoImg.complete) {
-    const logoSize = 50;
-    const logoX = W / 2 - logoSize / 2;
-    ctx.drawImage(logoImg, logoX, 4, logoSize, logoSize);
-  }
-
-  // "PPEI Virtual Dyno" title text
-  const titleText = 'PPEI Virtual Dyno';
-  ctx.fillStyle = COLORS.text;
-  ctx.font = 'bold 18px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  // Measure title width with the correct font before drawing
-  const titleWidth = ctx.measureText(titleText).width;
-  ctx.fillText(titleText, W / 2, 72);
-
-  // MEASURED vs ESTIMATED badge — positioned after title using measured width
-  const badgeText = data.hasDynoData ? 'MEASURED' : 'ESTIMATED';
-  const badgeColor = data.hasDynoData ? '#22c55e' : '#f59e0b';
-  ctx.font = 'bold 10px Arial, sans-serif';
-  const badgeW = ctx.measureText(badgeText).width + 12;
-  const badgeX = W / 2 + titleWidth / 2 + 8;
-  ctx.fillStyle = badgeColor;
-  ctx.beginPath();
-  ctx.roundRect(badgeX - 2, 60, badgeW, 16, 3);
-  ctx.fill();
-  ctx.fillStyle = '#000';
-  ctx.textAlign = 'left';
-  ctx.fillText(badgeText, badgeX + 4, 72);
-
-  // Config info (right side)
-  ctx.font = '11px Arial, sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillStyle = COLORS.textLight;
-  ctx.fillText('CF: SAE Smoothing: 5', W - 20, 20);
-
-  // ─── Calculate panel dimensions ─────────────────────────────────────
-  const chartAreaHeight = H - HEADER_HEIGHT - FOOTER_HEIGHT - SEPARATOR_HEIGHT * 2 - PANEL_GAP * 2;
-  const rpmPanelHeight = Math.floor(chartAreaHeight * 0.25);
-  const hpPanelHeight = Math.floor(chartAreaHeight * 0.375);
-  const torquePanelHeight = chartAreaHeight - rpmPanelHeight - hpPanelHeight;
-
-  const rpmPanelY = HEADER_HEIGHT;
-  const hpPanelY = rpmPanelY + rpmPanelHeight + SEPARATOR_HEIGHT + PANEL_GAP;
-  const torquePanelY = hpPanelY + hpPanelHeight + SEPARATOR_HEIGHT + PANEL_GAP;
-
-  // ─── Determine axis ranges ─────────────────────────────────────────
-  const curve = data.hpCurve;
-  if (curve.length === 0) {
-    ctx.fillStyle = COLORS.text;
-    ctx.font = '18px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No qualifying WOT data', W / 2, H / 2);
-    return;
-  }
-
-  const minRPM = Math.floor(curve[0].rpm / 1000) * 1000;
-  const maxRPM = Math.ceil(curve[curve.length - 1].rpm / 1000) * 1000;
-  const rpmRange = maxRPM - minRPM || 1000;
-
-  // HP axis: round up to nearest 20
-  const maxHP = Math.ceil((data.peakHP * 1.15) / 20) * 20;
-  // Torque axis: round up to nearest 10
-  const maxTorque = Math.ceil((data.peakTorque * 1.15) / 10) * 10;
-  // RPM axis for top panel: show in thousands
-  const maxRPMDisplay = Math.ceil(maxRPM / 1000);
-
-  // Chart area bounds (shared X axis)
-  const chartLeft = MARGIN.left;
-  const chartRight = W - MARGIN.right;
-  const chartWidth = chartRight - chartLeft;
-
-  function rpmToX(rpm: number): number {
-    return chartLeft + ((rpm - minRPM) / rpmRange) * chartWidth;
-  }
-
-  // ─── Draw Panel 1: Engine Speed ─────────────────────────────────────
-  const rpmChartTop = rpmPanelY + MARGIN.top;
-  const rpmChartBottom = rpmPanelY + rpmPanelHeight - MARGIN.bottom;
-  const rpmChartHeight = rpmChartBottom - rpmChartTop;
-
-  function rpmToY_panel1(rpm: number): number {
-    return rpmChartBottom - (rpm / (maxRPMDisplay * 1000)) * rpmChartHeight;
-  }
-
-  // Grid
-  drawGrid(ctx, chartLeft, rpmChartTop, chartWidth, rpmChartHeight, minRPM, maxRPM, 1000, 0, maxRPMDisplay * 1000, maxRPMDisplay * 1000 / 5);
-
-  // Y-axis label
-  ctx.save();
-  ctx.translate(15, rpmChartTop + rpmChartHeight / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = 'bold 12px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Engine Speed (RPM x1000)', 0, 0);
-  ctx.restore();
-
-  // Y-axis ticks
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '11px Arial, sans-serif';
-  ctx.textAlign = 'right';
-  for (let r = 0; r <= maxRPMDisplay; r += 2) {
-    const y = rpmChartBottom - (r / maxRPMDisplay) * rpmChartHeight;
-    ctx.fillText(String(r), chartLeft - 5, y + 4);
-  }
-
-  // Draw comparison RPM trace (behind main)
-  if (compareData && compareData.hpCurve.length > 0) {
-    ctx.beginPath();
-    ctx.strokeStyle = COLORS.rpmLineCompare;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([6, 4]);
-    let cFirst = true;
-    for (const pt of compareData.hpCurve) {
-      const x = rpmToX(pt.rpm);
-      const y = rpmToY_panel1(pt.rpm);
-      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Draw RPM trace line
-  ctx.beginPath();
-  ctx.strokeStyle = COLORS.rpmLine;
-  ctx.lineWidth = 2;
-  let first = true;
-  for (const pt of curve) {
-    const x = rpmToX(pt.rpm);
-    const y = rpmToY_panel1(pt.rpm);
-    if (first) { ctx.moveTo(x, y); first = false; }
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  // Peak RPM annotation
-  const peakRPMPt = curve[curve.length - 1];
-  const peakRPMx = rpmToX(peakRPMPt.rpm);
-  const peakRPMy = rpmToY_panel1(peakRPMPt.rpm);
-  ctx.fillStyle = COLORS.rpmLine;
-  ctx.font = 'bold 11px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(peakRPMPt.rpm.toLocaleString(), peakRPMx, peakRPMy - 8);
-
-  // Separator bar
-  drawSeparator(ctx, 0, rpmPanelY + rpmPanelHeight, W, SEPARATOR_HEIGHT);
-
-  // ─── Draw Panel 2: Power (HP) ───────────────────────────────────────
-  const hpChartTop = hpPanelY + MARGIN.top;
-  const hpChartBottom = hpPanelY + hpPanelHeight - MARGIN.bottom;
-  const hpChartHeight = hpChartBottom - hpChartTop;
-
-  function hpToY(hp: number): number {
-    return hpChartBottom - (hp / maxHP) * hpChartHeight;
-  }
-
-  // Grid
-  drawGrid(ctx, chartLeft, hpChartTop, chartWidth, hpChartHeight, minRPM, maxRPM, 1000, 0, maxHP, 20);
-
-  // Y-axis label
-  ctx.save();
-  ctx.translate(15, hpChartTop + hpChartHeight / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = 'bold 12px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Power (HP)', 0, 0);
-  ctx.restore();
-
-  // Y-axis ticks
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '11px Arial, sans-serif';
-  ctx.textAlign = 'right';
-  for (let hp = 0; hp <= maxHP; hp += 20) {
-    const y = hpToY(hp);
-    ctx.fillText(String(hp), chartLeft - 5, y + 4);
-  }
-
-  // Draw comparison HP curve (behind main)
-  if (compareData && compareData.hpCurve.length > 0) {
-    ctx.beginPath();
-    ctx.strokeStyle = COLORS.hpLineCompare;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    let cFirst = true;
-    for (const pt of compareData.hpCurve) {
-      const x = rpmToX(pt.rpm);
-      const y = hpToY(pt.hp);
-      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Draw HP curve
-  ctx.beginPath();
-  ctx.strokeStyle = COLORS.hpLine;
-  ctx.lineWidth = 2.5;
-  first = true;
-  for (const pt of curve) {
-    const x = rpmToX(pt.rpm);
-    const y = hpToY(pt.hp);
-    if (first) { ctx.moveTo(x, y); first = false; }
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  // Peak HP annotation
-  const peakHPPt = curve.find(p => p.hp === Math.max(...curve.map(c => c.hp)));
-  if (peakHPPt) {
-    const px = rpmToX(peakHPPt.rpm);
-    const py = hpToY(peakHPPt.hp);
-
-    // Peak marker triangle
-    ctx.fillStyle = COLORS.hpLine;
-    ctx.beginPath();
-    ctx.moveTo(px, py - 6);
-    ctx.lineTo(px - 4, py);
-    ctx.lineTo(px + 4, py);
-    ctx.closePath();
-    ctx.fill();
-
-    // Peak value text
-    ctx.font = 'bold 11px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(data.peakHP.toFixed(1), px, py - 10);
-  }
-
-  // Legend box
-  const legendY = hpChartTop + 15;
-  ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(chartLeft + chartWidth * 0.25, legendY - 12, 320, compareData ? 36 : 20);
-  ctx.fillStyle = COLORS.hpLine;
-  ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, legendY - 5, 10, 10);
-  ctx.fillStyle = COLORS.text;
-  ctx.font = '10px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(
-    `Max Power = ${data.peakHP.toFixed(1)} HP at ${data.peakHPRpm.toLocaleString()} RPM`,
-    chartLeft + chartWidth * 0.25 + 20, legendY + 3,
+// ─── Custom Dyno Tooltip ───────────────────────────────────────────────────────
+const DynoTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: 'rgba(13,15,20,0.97)',
+      border: '1px solid #ff4d00',
+      borderRadius: '6px',
+      padding: '10px 14px',
+      fontFamily: 'monospace',
+      fontSize: '12px',
+      color: '#e0e0e0',
+      boxShadow: '0 0 12px rgba(255,77,0,0.3)',
+      minWidth: 160,
+    }}>
+      <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>
+        {label != null ? `${Number(label).toLocaleString()} RPM` : ''}
+      </div>
+      {payload.map((p: any, i: number) => (
+        p.value != null && (
+          <div key={i} style={{ color: p.color || p.stroke, marginBottom: 3, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span>{p.name}:</span>
+            <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
+          </div>
+        )
+      ))}
+    </div>
   );
-  if (compareData && compareData.qualified) {
-    ctx.fillStyle = COLORS.hpLineCompare;
-    ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, legendY + 11, 10, 10);
-    ctx.fillStyle = COLORS.textLight;
-    ctx.fillText(
-      `Baseline Power = ${compareData.peakHP.toFixed(1)} HP at ${compareData.peakHPRpm.toLocaleString()} RPM`,
-      chartLeft + chartWidth * 0.25 + 20, legendY + 19,
-    );
-  }
+};
 
-  // Separator bar
-  drawSeparator(ctx, 0, hpPanelY + hpPanelHeight, W, SEPARATOR_HEIGHT);
-
-  // ─── Draw Panel 3: Torque ───────────────────────────────────────────
-  const torqueChartTop = torquePanelY + MARGIN.top;
-  const torqueChartBottom = torquePanelY + torquePanelHeight - MARGIN.bottom;
-  const torqueChartHeight = torqueChartBottom - torqueChartTop;
-
-  function torqueToY(torque: number): number {
-    return torqueChartBottom - (torque / maxTorque) * torqueChartHeight;
-  }
-
-  // Grid
-  drawGrid(ctx, chartLeft, torqueChartTop, chartWidth, torqueChartHeight, minRPM, maxRPM, 1000, 0, maxTorque, 10);
-
-  // Y-axis label
-  ctx.save();
-  ctx.translate(15, torqueChartTop + torqueChartHeight / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = 'bold 12px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Torque (ft-lb)', 0, 0);
-  ctx.restore();
-
-  // Y-axis ticks
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '11px Arial, sans-serif';
-  ctx.textAlign = 'right';
-  for (let t = 0; t <= maxTorque; t += 10) {
-    const y = torqueToY(t);
-    ctx.fillText(String(t), chartLeft - 5, y + 4);
-  }
-
-  // Draw comparison Torque curve (behind main)
-  if (compareData && compareData.hpCurve.length > 0) {
-    ctx.beginPath();
-    ctx.strokeStyle = COLORS.torqueLineCompare;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    let cFirst = true;
-    for (const pt of compareData.hpCurve) {
-      const x = rpmToX(pt.rpm);
-      const y = torqueToY(pt.torque);
-      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Draw Torque curve
-  ctx.beginPath();
-  ctx.strokeStyle = COLORS.torqueLine;
-  ctx.lineWidth = 2.5;
-  first = true;
-  for (const pt of curve) {
-    const x = rpmToX(pt.rpm);
-    const y = torqueToY(pt.torque);
-    if (first) { ctx.moveTo(x, y); first = false; }
-    else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  // Peak Torque annotation
-  const peakTqPt = curve.find(p => p.torque === Math.max(...curve.map(c => c.torque)));
-  if (peakTqPt) {
-    const px = rpmToX(peakTqPt.rpm);
-    const py = torqueToY(peakTqPt.torque);
-
-    // Peak marker triangle
-    ctx.fillStyle = COLORS.torqueLine;
-    ctx.beginPath();
-    ctx.moveTo(px, py - 6);
-    ctx.lineTo(px - 4, py);
-    ctx.lineTo(px + 4, py);
-    ctx.closePath();
-    ctx.fill();
-
-    // Peak value text
-    ctx.font = 'bold 11px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(data.peakTorque.toFixed(1), px, py - 10);
-  }
-
-  // Legend box
-  const tqLegendY = torqueChartTop + 15;
-  ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(chartLeft + chartWidth * 0.25, tqLegendY - 12, 340, compareData ? 36 : 20);
-  ctx.fillStyle = COLORS.torqueLine;
-  ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, tqLegendY - 5, 10, 10);
-  ctx.fillStyle = COLORS.text;
-  ctx.font = '10px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(
-    `Max Torque = ${data.peakTorque.toFixed(1)} ft-lb at ${data.peakTorqueRpm.toLocaleString()} RPM`,
-    chartLeft + chartWidth * 0.25 + 20, tqLegendY + 3,
-  );
-  if (compareData && compareData.qualified) {
-    ctx.fillStyle = COLORS.torqueLineCompare;
-    ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, tqLegendY + 11, 10, 10);
-    ctx.fillStyle = COLORS.textLight;
-    ctx.fillText(
-      `Baseline Torque = ${compareData.peakTorque.toFixed(1)} ft-lb at ${compareData.peakTorqueRpm.toLocaleString()} RPM`,
-      chartLeft + chartWidth * 0.25 + 20, tqLegendY + 19,
-    );
-  }
-
-  // ─── X-axis (shared) ───────────────────────────────────────────────
-  ctx.fillStyle = COLORS.axisLabel;
-  ctx.font = '12px Arial, sans-serif';
-  ctx.textAlign = 'center';
-
-  for (let rpm = minRPM; rpm <= maxRPM; rpm += 1000) {
-    const x = rpmToX(rpm);
-    ctx.fillText(rpm.toLocaleString(), x, torqueChartBottom + 16);
-  }
-
-  ctx.font = 'bold 13px Arial, sans-serif';
-  ctx.fillText('Engine RPM', chartLeft + chartWidth / 2, torqueChartBottom + 32);
-
-  // ─── Footer ─────────────────────────────────────────────────────────
-  const footerY = H - FOOTER_HEIGHT;
-
-  // Run name
-  ctx.fillStyle = COLORS.hpLine;
-  ctx.fillRect(20, footerY + 8, 10, 10);
-  ctx.fillStyle = COLORS.text;
-  ctx.font = '10px Arial, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(data.fileName || 'Uploaded Datalog', 35, footerY + 17);
-
-  // Wideband warning
-  if (!data.hasWideband) {
-    ctx.fillStyle = COLORS.warning;
-    ctx.font = 'bold 10px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('⚠ No wideband data — HP numbers may not be accurate', W / 2, footerY + 35);
-  }
-
-  // Disclaimer
-  ctx.fillStyle = COLORS.textLight;
-  ctx.font = '9px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(
-    'Virtual dyno estimates are dependent on tuning setup and conditions — results serve as reference only.',
-    W / 2, footerY + 50,
-  );
-
-  // PPEI watermark (semi-transparent in center)
-  if (logoImg && logoImg.complete) {
-    ctx.globalAlpha = 0.06;
-    const wmSize = 200;
-    ctx.drawImage(logoImg, W / 2 - wmSize / 2, H / 2 - wmSize / 2, wmSize, wmSize);
-    ctx.globalAlpha = 1.0;
-  }
-}
-
-function drawGrid(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number,
-  xMin: number, xMax: number, xStep: number,
-  yMin: number, yMax: number, yStep: number,
-) {
-  ctx.strokeStyle = COLORS.grid;
-  ctx.lineWidth = 0.5;
-
-  // Vertical gridlines (RPM)
-  for (let v = xMin; v <= xMax; v += xStep) {
-    const px = x + ((v - xMin) / (xMax - xMin)) * w;
-    ctx.beginPath();
-    ctx.moveTo(px, y);
-    ctx.lineTo(px, y + h);
-    ctx.stroke();
-  }
-
-  // Horizontal gridlines
-  const yRange = yMax - yMin || 1;
-  for (let v = yMin; v <= yMax; v += yStep) {
-    const py = y + h - ((v - yMin) / yRange) * h;
-    ctx.beginPath();
-    ctx.moveTo(x, py);
-    ctx.lineTo(x + w, py);
-    ctx.stroke();
-  }
-
-  // Border
-  ctx.strokeStyle = COLORS.text;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, w, h);
-}
-
-function drawSeparator(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number,
-) {
-  const gradient = ctx.createLinearGradient(x, y, x, y + h);
-  gradient.addColorStop(0, '#999999');
-  gradient.addColorStop(0.5, '#666666');
-  gradient.addColorStop(1, '#999999');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(x, y, w, h);
-}
-
-// ─── React Component ────────────────────────────────────────────────────────
+// ─── React Component (Interactive Recharts) ───────────────────────────────────────
 
 export default function DynoSheet({ data, config, compareData }: DynoSheetProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [logoImg, setLogoImg] = useState<HTMLImageElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Load PPEI logo
-  useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => setLogoImg(img);
-    img.src = PPEI_LOGO_URL;
-  }, []);
+  // Merge main + comparison data for Recharts
+  const chartData = useMemo(() => {
+    if (!data.qualified || data.hpCurve.length === 0) return [];
 
-  // Draw on canvas when data or logo changes
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !data.qualified) return;
+    // Build a map keyed by RPM
+    const rpmMap = new Map<number, any>();
 
-    canvas.width = CANVAS_WIDTH;
-    canvas.height = CANVAS_HEIGHT;
-    drawDynoSheet(canvas, data, logoImg, compareData);
-  }, [data, logoImg, compareData]);
+    for (const pt of data.hpCurve) {
+      rpmMap.set(pt.rpm, {
+        rpm: pt.rpm,
+        hp: pt.hp,
+        torque: pt.torque,
+      });
+    }
 
-  // Download as PNG
-  const handleDownload = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    // Merge comparison data if present
+    if (compareData?.qualified && compareData.hpCurve.length > 0) {
+      for (const pt of compareData.hpCurve) {
+        const existing = rpmMap.get(pt.rpm) || { rpm: pt.rpm };
+        existing.hpBaseline = pt.hp;
+        existing.torqueBaseline = pt.torque;
+        rpmMap.set(pt.rpm, existing);
+      }
+    }
 
-    const link = document.createElement('a');
-    link.download = `PPEI_Virtual_Dyno_${data.fileName.replace(/\.[^.]+$/, '')}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  }, [data.fileName]);
+    return Array.from(rpmMap.values()).sort((a: any, b: any) => a.rpm - b.rpm);
+  }, [data, compareData]);
 
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {
@@ -1040,6 +596,30 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
+  // Axis domain calculations
+  const maxHP = useMemo(() => {
+    let max = data.peakHP;
+    if (compareData?.qualified) max = Math.max(max, compareData.peakHP);
+    return Math.ceil((max * 1.15) / 20) * 20;
+  }, [data, compareData]);
+
+  const maxTorque = useMemo(() => {
+    let max = data.peakTorque;
+    if (compareData?.qualified) max = Math.max(max, compareData.peakTorque);
+    return Math.ceil((max * 1.15) / 10) * 10;
+  }, [data, compareData]);
+
+  // Best run stats
+  const bestRunDuration = useMemo(() => {
+    if (data.runs.length === 0) return 0;
+    // Best run = widest RPM range
+    return data.runs.reduce((a, b) => {
+      const aRange = rpmRangeOfRun(a);
+      const bRange = rpmRangeOfRun(b);
+      return aRange >= bRange ? a : b;
+    }).durationSec;
+  }, [data.runs]);
+
   // ─── Not Qualified ──────────────────────────────────────────────────
   if (!data.qualified) {
     return (
@@ -1049,7 +629,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
         <p className="text-zinc-400 mb-4">{data.disqualifyReason}</p>
         <p className="text-zinc-500 text-sm">
           The datalog must contain at least {WOT_MIN_DURATION_SEC} seconds of full throttle
-          (TPS &gt; {WOT_TPS_THRESHOLD}°) to generate a virtual dyno sheet.
+          (TPS &gt; {WOT_TPS_THRESHOLD}&deg;) to generate a virtual dyno sheet.
         </p>
         {data.warnings.length > 0 && (
           <div className="mt-4 text-left max-w-md mx-auto">
@@ -1065,14 +645,31 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
     );
   }
 
+  const hasCompare = compareData?.qualified && compareData.hpCurve.length > 0;
+
   return (
-    <div ref={containerRef} className={`${isFullscreen ? 'bg-black flex items-center justify-center h-full' : ''}`}>
-      {/* Controls */}
-      <div className="flex items-center justify-between mb-3">
+    <div ref={containerRef} className={`${isFullscreen ? 'bg-black flex flex-col items-center justify-center h-full p-4' : ''}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h3 className="text-lg font-bold text-white tracking-wider" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+          <img
+            src={PPEI_LOGO_URL}
+            alt="PPEI"
+            className="w-8 h-8 object-contain"
+            crossOrigin="anonymous"
+          />
+          <h3 className="text-xl font-bold text-white tracking-wider" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
             PPEI VIRTUAL DYNO
           </h3>
+          <span
+            className="text-[10px] font-bold px-2 py-0.5 rounded"
+            style={{
+              background: data.hasDynoData ? '#22c55e' : '#f59e0b',
+              color: '#000',
+            }}
+          >
+            {data.hasDynoData ? 'MEASURED' : 'ESTIMATED'}
+          </span>
           {!data.hasWideband && (
             <span className="text-xs bg-amber-900/50 text-amber-400 px-2 py-1 rounded flex items-center gap-1">
               <AlertTriangle className="w-3 h-3" />
@@ -1084,15 +681,6 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
           <Button
             variant="outline"
             size="sm"
-            onClick={handleDownload}
-            className="text-zinc-300 border-zinc-600 hover:bg-zinc-800"
-          >
-            <Download className="w-4 h-4 mr-1" />
-            Download PNG
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             onClick={toggleFullscreen}
             className="text-zinc-300 border-zinc-600 hover:bg-zinc-800"
           >
@@ -1101,49 +689,214 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="bg-white rounded-lg overflow-hidden shadow-lg">
-        <canvas
-          ref={canvasRef}
-          style={{
-            width: '100%',
-            height: 'auto',
-            maxHeight: isFullscreen ? '90vh' : '700px',
-          }}
-        />
+      {/* Interactive Chart */}
+      <div
+        className="rounded-lg overflow-hidden"
+        style={{ background: COLORS.bg, border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <ZoomableChart data={chartData} height={isFullscreen ? '75vh' : 500}>
+          {(visibleData) => (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={visibleData}
+                margin={{ top: 20, right: 60, left: 20, bottom: 20 }}
+              >
+                <CartesianGrid
+                  stroke="rgba(255,255,255,0.06)"
+                  strokeDasharray="3 3"
+                  vertical={false}
+                />
+
+                {/* X-axis: RPM */}
+                <XAxis
+                  dataKey="rpm"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={(v: number) => v.toLocaleString()}
+                  tick={{ fill: COLORS.textDim, fontSize: 11, fontFamily: 'monospace' }}
+                  axisLine={{ stroke: 'rgba(255,255,255,0.15)' }}
+                  tickLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+                  label={{
+                    value: 'Engine RPM',
+                    position: 'insideBottom',
+                    offset: -10,
+                    fill: COLORS.text,
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                  }}
+                />
+
+                {/* Left Y-axis: HP */}
+                <YAxis
+                  yAxisId="hp"
+                  orientation="left"
+                  domain={[0, maxHP]}
+                  tick={{ fill: COLORS.hpLine, fontSize: 11, fontFamily: 'monospace' }}
+                  axisLine={{ stroke: COLORS.hpLine }}
+                  tickLine={{ stroke: COLORS.hpLine }}
+                  label={{
+                    value: 'HP',
+                    angle: -90,
+                    position: 'insideLeft',
+                    offset: 10,
+                    fill: COLORS.hpLine,
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                  }}
+                />
+
+                {/* Right Y-axis: Torque */}
+                <YAxis
+                  yAxisId="torque"
+                  orientation="right"
+                  domain={[0, maxTorque]}
+                  tick={{ fill: COLORS.torqueLine, fontSize: 11, fontFamily: 'monospace' }}
+                  axisLine={{ stroke: COLORS.torqueLine }}
+                  tickLine={{ stroke: COLORS.torqueLine }}
+                  label={{
+                    value: 'ft-lb',
+                    angle: 90,
+                    position: 'insideRight',
+                    offset: 10,
+                    fill: COLORS.torqueLine,
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                  }}
+                />
+
+                {/* Tooltip */}
+                <Tooltip content={<DynoTooltip />} />
+
+                {/* Peak reference lines */}
+                <ReferenceLine
+                  yAxisId="hp"
+                  y={data.peakHP}
+                  stroke={COLORS.hpLine}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.4}
+                />
+                <ReferenceLine
+                  yAxisId="torque"
+                  y={data.peakTorque}
+                  stroke={COLORS.torqueLine}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.4}
+                />
+
+                {/* Comparison curves (behind main) */}
+                {hasCompare && (
+                  <>
+                    <Line
+                      yAxisId="hp"
+                      type="monotone"
+                      dataKey="hpBaseline"
+                      name="HP (Baseline)"
+                      stroke={COLORS.hpLineCompare}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      dot={false}
+                      connectNulls
+                    />
+                    <Line
+                      yAxisId="torque"
+                      type="monotone"
+                      dataKey="torqueBaseline"
+                      name="Torque (Baseline)"
+                      stroke={COLORS.torqueLineCompare}
+                      strokeWidth={2}
+                      strokeDasharray="6 4"
+                      dot={false}
+                      connectNulls
+                    />
+                  </>
+                )}
+
+                {/* Main HP curve */}
+                <Line
+                  yAxisId="hp"
+                  type="monotone"
+                  dataKey="hp"
+                  name="HP"
+                  stroke={COLORS.hpLine}
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r: 5, fill: COLORS.hpLine, stroke: '#fff', strokeWidth: 2 }}
+                />
+
+                {/* Main Torque curve */}
+                <Line
+                  yAxisId="torque"
+                  type="monotone"
+                  dataKey="torque"
+                  name="Torque (ft-lb)"
+                  stroke={COLORS.torqueLine}
+                  strokeWidth={3}
+                  dot={false}
+                  activeDot={{ r: 5, fill: COLORS.torqueLine, stroke: '#fff', strokeWidth: 2 }}
+                />
+
+                {/* Legend */}
+                <Legend
+                  verticalAlign="top"
+                  height={30}
+                  wrapperStyle={{ fontSize: 11, fontFamily: 'monospace', color: COLORS.text }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </ZoomableChart>
+
+        {/* Disclaimer */}
+        <div className="text-center pb-2">
+          <span className="text-[10px] text-zinc-600" style={{ fontFamily: 'monospace' }}>
+            Virtual dyno estimates are dependent on tuning setup and conditions — results serve as reference only.
+          </span>
+        </div>
       </div>
 
-      {/* Stats below canvas */}
+      {/* Warnings */}
+      {data.warnings.length > 0 && (
+        <div className="mt-2">
+          {data.warnings.map((w, i) => (
+            <p key={i} className="text-amber-400 text-xs flex items-start gap-2 mb-1">
+              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Stats cards below chart */}
       <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider">Peak HP</div>
-          <div className="text-xl font-bold text-blue-400">{data.peakHP.toFixed(1)}</div>
-          <div className="text-xs text-zinc-500">@ {data.peakHPRpm} RPM</div>
-          {compareData && compareData.qualified && (
-            <div className="text-xs mt-1" style={{ color: data.peakHP > compareData.peakHP ? '#22c55e' : data.peakHP < compareData.peakHP ? '#ef4444' : '#888' }}>
-              {data.peakHP > compareData.peakHP ? '+' : ''}{(data.peakHP - compareData.peakHP).toFixed(1)} HP vs baseline
+          <div className="text-xs text-zinc-500 uppercase tracking-wider" style={{ fontFamily: 'monospace' }}>Peak HP</div>
+          <div className="text-2xl font-bold" style={{ color: COLORS.hpLine }}>{data.peakHP.toFixed(1)}</div>
+          <div className="text-xs text-zinc-500">@ {data.peakHPRpm.toLocaleString()} RPM</div>
+          {hasCompare && (
+            <div className="text-xs mt-1" style={{ color: data.peakHP > compareData!.peakHP ? '#22c55e' : data.peakHP < compareData!.peakHP ? '#ef4444' : '#888' }}>
+              {data.peakHP > compareData!.peakHP ? '+' : ''}{(data.peakHP - compareData!.peakHP).toFixed(1)} HP vs baseline
             </div>
           )}
         </div>
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider">Peak Torque</div>
-          <div className="text-xl font-bold text-red-400">{data.peakTorque.toFixed(1)}</div>
-          <div className="text-xs text-zinc-500">@ {data.peakTorqueRpm} RPM</div>
-          {compareData && compareData.qualified && (
-            <div className="text-xs mt-1" style={{ color: data.peakTorque > compareData.peakTorque ? '#22c55e' : data.peakTorque < compareData.peakTorque ? '#ef4444' : '#888' }}>
-              {data.peakTorque > compareData.peakTorque ? '+' : ''}{(data.peakTorque - compareData.peakTorque).toFixed(1)} ft-lbs vs baseline
+          <div className="text-xs text-zinc-500 uppercase tracking-wider" style={{ fontFamily: 'monospace' }}>Peak Torque</div>
+          <div className="text-2xl font-bold" style={{ color: COLORS.torqueLine }}>{data.peakTorque.toFixed(1)}</div>
+          <div className="text-xs text-zinc-500">@ {data.peakTorqueRpm.toLocaleString()} RPM</div>
+          {hasCompare && (
+            <div className="text-xs mt-1" style={{ color: data.peakTorque > compareData!.peakTorque ? '#22c55e' : data.peakTorque < compareData!.peakTorque ? '#ef4444' : '#888' }}>
+              {data.peakTorque > compareData!.peakTorque ? '+' : ''}{(data.peakTorque - compareData!.peakTorque).toFixed(1)} ft-lbs vs baseline
             </div>
           )}
         </div>
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider">WOT Runs</div>
-          <div className="text-xl font-bold text-green-400">{data.runs.length}</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-wider" style={{ fontFamily: 'monospace' }}>WOT Runs</div>
+          <div className="text-2xl font-bold text-green-400">{data.runs.length}</div>
           <div className="text-xs text-zinc-500">detected</div>
         </div>
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
-          <div className="text-xs text-zinc-500 uppercase tracking-wider">Best Run</div>
-          <div className="text-xl font-bold text-zinc-300">
-            {data.runs.length > 0 ? data.runs.reduce((a, b) => a.durationSec > b.durationSec ? a : b).durationSec.toFixed(1) : '—'}s
+          <div className="text-xs text-zinc-500 uppercase tracking-wider" style={{ fontFamily: 'monospace' }}>Best Run</div>
+          <div className="text-2xl font-bold text-zinc-300">
+            {bestRunDuration > 0 ? bestRunDuration.toFixed(1) : '—'}s
           </div>
           <div className="text-xs text-zinc-500">duration</div>
         </div>

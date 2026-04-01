@@ -3096,3 +3096,11 @@
 - [x] Fix flat/nearly-flat HP and torque curves — RPM sweep detection isolates acceleration pulls from steady-state WOT
 - [x] Fix axis scaling and readability — larger fonts, RPM in integers, HP/torque to 1 decimal, clearer axis labels
 - [x] Parse filename for injector type detection (ID1050s in filename) — already handled by detectInjectorType
+
+## Honda Talon Virtual Dyno: Interactive Chart Rebuild (2026-04-01)
+- [x] Rebuild dyno chart with interactive Recharts ComposedChart (hover crosshairs, tooltips showing HP/Torque/RPM)
+- [x] Fix flat/nearly-flat curves — reduced RPM bin size to 100 RPM, increased smoothing window
+- [x] Improve layout — combined HP and Torque on single chart with dual Y-axes (orange HP left, cyan Torque right)
+- [x] Add interactive cursor with ZoomableChart wrapper (scroll zoom, drag pan, pinch zoom, active dot highlights)
+- [x] Keep fullscreen mode (removed PNG export since canvas renderer is gone)
+- [x] Keep comparison overlay support (baseline curves with dashed lines, delta stats in cards)
