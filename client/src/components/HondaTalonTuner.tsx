@@ -23,7 +23,11 @@ import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
 import FuelCorrectionPanel from '@/components/FuelCorrectionPanel';
 import { FuelMapState as CorrectionFuelMapState, MapCorrectionResult } from '@/lib/talonFuelCorrection';
-import VirtualDynoPanel from '@/components/VirtualDynoPanel';
+import DynoSheet, { buildDynoSheetData, DynoSheetData } from '@/components/DynoSheet';
+import {
+  VirtualDynoConfig, InjectorType, FuelType,
+  FUEL_PROFILES, detectInjectorType, detectFuelType, isDynoLog,
+} from '@/lib/talonVirtualDyno';
 
 /** Tracks which cells were corrected per fuel map, keyed by mapKey */
 export type CorrectedCellsMap = Record<string, Set<string>>;
@@ -1511,7 +1515,7 @@ export default function HondaTalonTuner({
 
       {/* Dyno Section */}
       {activeSection === 'dyno' && (
-        <VirtualDynoPanel
+        <DynoTabContent
           wp8Data={localWP8}
           fileName={wp8FileName}
         />
@@ -1562,6 +1566,222 @@ export default function HondaTalonTuner({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── DynoTabContent ─────────────────────────────────────────────────────────
+
+const dynoSColor = {
+  bg: '#0a0a0a',
+  card: 'oklch(0.15 0.006 260)',
+  cardBorder: 'oklch(0.22 0.008 260)',
+  red: 'oklch(0.68 0.20 25)',
+  green: 'oklch(0.75 0.18 145)',
+  yellow: 'oklch(0.80 0.18 90)',
+  textWhite: '#ffffff',
+  textDim: 'oklch(0.55 0.008 260)',
+  border: 'oklch(0.22 0.008 260)',
+};
+
+function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null; fileName: string }) {
+  const autoInjector = useMemo(() => detectInjectorType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
+  const autoFuel = useMemo(() => detectFuelType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
+
+  const [injectorType, setInjectorType] = useState<InjectorType>(autoInjector);
+  const [fuelType, setFuelType] = useState<FuelType>(autoFuel);
+  const [isTurbo, setIsTurbo] = useState(false);
+  const [calibrationFactor, setCalibrationFactor] = useState(1.0);
+  const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    setInjectorType(autoInjector);
+    setFuelType(autoFuel);
+  }, [autoInjector, autoFuel]);
+
+  // Auto-detect turbo from MAP data
+  useEffect(() => {
+    if (!wp8Data) return;
+    const keys = getHondaTalonKeyChannels(wp8Data);
+    const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
+    if (mapIdx < 0) return;
+    const maxMAP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[mapIdx]), 0);
+    if (maxMAP > 100) setIsTurbo(true);
+  }, [wp8Data]);
+
+  const config = useMemo<VirtualDynoConfig>(() => ({
+    injectorType, fuelType, isTurbo, dynoCalibrationFactor: calibrationFactor,
+  }), [injectorType, fuelType, isTurbo, calibrationFactor]);
+
+  const dynoData = useMemo<DynoSheetData | null>(() => {
+    if (!wp8Data) return null;
+    return buildDynoSheetData(wp8Data, config, fileName);
+  }, [wp8Data, config, fileName]);
+
+  // Learn calibration from dyno log
+  useEffect(() => {
+    if (!wp8Data || !dynoData) return;
+    if (isDynoLog(wp8Data) && dynoData.qualified) {
+      const keys = getHondaTalonKeyChannels(wp8Data);
+      if (keys.horsepower >= 0) {
+        const maxActualHP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[keys.horsepower]), 0);
+        if (maxActualHP > 0 && dynoData.peakHP > 0) {
+          const factor = maxActualHP / dynoData.peakHP;
+          if (factor > 0.5 && factor < 2.0 && Math.abs(factor - calibrationFactor) > 0.01) {
+            setCalibrationFactor(Math.round(factor * 100) / 100);
+          }
+        }
+      }
+    }
+  }, [wp8Data, dynoData?.qualified]);
+
+  if (!wp8Data) {
+    return (
+      <div style={{
+        background: dynoSColor.card, border: `1px solid ${dynoSColor.cardBorder}`,
+        padding: '40px', textAlign: 'center', borderRadius: '2px',
+      }}>
+        <p style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '1.2rem', color: dynoSColor.textWhite, letterSpacing: '0.1em' }}>
+          PPEI VIRTUAL DYNO
+        </p>
+        <p style={{ fontFamily: "'Rajdhani', sans-serif", color: dynoSColor.textDim, fontSize: '0.85rem', marginTop: '8px' }}>
+          Upload a WP8 datalog to generate a virtual dyno sheet
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Config Header */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '12px', flexWrap: 'wrap', gap: '8px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {wp8Data && isDynoLog(wp8Data) && (
+            <span style={{
+              fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.green,
+              background: 'oklch(0.75 0.18 145 / 0.15)', padding: '2px 8px',
+              border: '1px solid oklch(0.75 0.18 145 / 0.3)', borderRadius: '2px',
+            }}>
+              DYNO LOG DETECTED
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          style={{
+            background: 'transparent', border: `1px solid ${dynoSColor.border}`,
+            color: dynoSColor.textDim, cursor: 'pointer', padding: '4px 12px',
+            fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem', borderRadius: '2px',
+            display: 'flex', alignItems: 'center', gap: '4px',
+          }}
+        >
+          CONFIG {showSettings ? '\u25B2' : '\u25BC'}
+        </button>
+      </div>
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <div style={{
+          background: dynoSColor.card, border: `1px solid ${dynoSColor.cardBorder}`,
+          padding: '16px', marginBottom: '12px', borderRadius: '2px',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px',
+        }}>
+          <div>
+            <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+              INJECTOR TYPE {autoInjector !== 'stock' && <span style={{ color: dynoSColor.green }}>(AUTO)</span>}
+            </label>
+            <select
+              value={injectorType}
+              onChange={e => setInjectorType(e.target.value as InjectorType)}
+              style={{
+                width: '100%', background: dynoSColor.bg, color: dynoSColor.textWhite,
+                border: `1px solid ${dynoSColor.border}`, padding: '6px 8px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem', borderRadius: '2px',
+              }}
+            >
+              <option value="stock">Stock (~310cc)</option>
+              <option value="id1050">ID1050X (1050cc)</option>
+              <option value="id1300">ID1300X (1300cc)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+              FUEL TYPE {autoFuel !== 'pump' && <span style={{ color: dynoSColor.green }}>(AUTO)</span>}
+            </label>
+            <select
+              value={fuelType}
+              onChange={e => setFuelType(e.target.value as FuelType)}
+              style={{
+                width: '100%', background: dynoSColor.bg, color: dynoSColor.textWhite,
+                border: `1px solid ${dynoSColor.border}`, padding: '6px 8px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem', borderRadius: '2px',
+              }}
+            >
+              {Object.entries(FUEL_PROFILES).map(([key, profile]) => (
+                <option key={key} value={key}>{profile.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+              CONFIGURATION
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setIsTurbo(false)}
+                style={{
+                  flex: 1, padding: '6px', fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem',
+                  background: !isTurbo ? dynoSColor.red : 'transparent',
+                  color: !isTurbo ? 'white' : dynoSColor.textDim,
+                  border: `1px solid ${!isTurbo ? dynoSColor.red : dynoSColor.border}`,
+                  cursor: 'pointer', borderRadius: '2px',
+                }}
+              >
+                NA
+              </button>
+              <button
+                onClick={() => setIsTurbo(true)}
+                style={{
+                  flex: 1, padding: '6px', fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem',
+                  background: isTurbo ? dynoSColor.red : 'transparent',
+                  color: isTurbo ? 'white' : dynoSColor.textDim,
+                  border: `1px solid ${isTurbo ? dynoSColor.red : dynoSColor.border}`,
+                  cursor: 'pointer', borderRadius: '2px',
+                }}
+              >
+                TURBO
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+              CALIBRATION FACTOR
+            </label>
+            <input
+              type="number"
+              value={calibrationFactor}
+              onChange={e => setCalibrationFactor(parseFloat(e.target.value) || 1.0)}
+              step={0.01} min={0.5} max={2.0}
+              style={{
+                width: '100%', background: dynoSColor.bg, color: dynoSColor.textWhite,
+                border: `1px solid ${dynoSColor.border}`, padding: '6px 8px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem', borderRadius: '2px',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Dyno Sheet */}
+      {dynoData && (
+        <DynoSheet data={dynoData} config={config} />
       )}
     </div>
   );

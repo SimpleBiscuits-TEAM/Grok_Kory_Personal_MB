@@ -3031,3 +3031,17 @@
 - [x] Integrate as DYNO tab in HondaTalonTuner
 - [x] Add disclaimer: "Virtual dyno estimates — actual results may vary based on conditions"
 - [x] Write tests for virtual dyno engine (44 tests passing)
+
+## PPEI Virtual Dyno Sheet (Dynojet-Style) (COMPLETED 2026-04-01)
+- [x] WOT qualification: require 3+ seconds of full throttle (TPS > 90%) to generate dyno sheet
+- [x] AFR correction factor: adjust injector PW by (actual_lambda / target_lambda) for HP calc when wideband available
+- [x] Target lambda for NA = 0.85, Turbo = 0.80 (for correction factor only)
+- [x] If no wideband reading available, show warning on dyno sheet: "No wideband data — numbers may not be accurate"
+- [x] 3-panel Dynojet-style layout: RPM trace (top), HP curve (middle), Torque curve (bottom)
+- [x] PPEI logo watermark on dyno sheet
+- [x] "PPEI Virtual Dyno" branding text
+- [x] Peak annotations on HP and Torque curves with RPM callouts
+- [x] Legend showing run name (filename)
+- [x] Downloadable/printable dyno sheet (PNG export)
+- [x] Integrate into DYNO tab in HondaTalonTuner
+- [x] Write tests for WOT detection and AFR correction logic (15 tests passing)
