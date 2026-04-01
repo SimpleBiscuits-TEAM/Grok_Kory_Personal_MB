@@ -3007,3 +3007,10 @@
 - [x] Keep logic reusable/documented for future Kawasaki fuel correction tool
 - [x] Update tests for deceleration filtering (2 tests)
 - [x] Update tests for STFT integration (4 tests)
+
+## Honda Talon Fuel Correction: Lambda Channel + Single-Sensor Fallback (2026-04-01)
+- [x] Add Lambda1 and Lambda2 channel lookups to wp8Parser getHondaTalonKeyChannels
+- [x] Update correction engine: when AFR1/AFR2 not available, use Lambda1/Lambda2 (skip /14.7 conversion)
+- [x] Single-sensor fallback: if only AFR1/Lambda1 present (no AFR2/Lambda2), use it for both cylinders
+- [x] Detect dyno logs by presence of horsepower/torque channels (informational)
+- [x] Update tests for Lambda channel usage and single-sensor fallback (5 new tests, 28 total)

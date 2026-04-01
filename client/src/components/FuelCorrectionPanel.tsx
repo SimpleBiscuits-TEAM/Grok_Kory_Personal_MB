@@ -568,10 +568,16 @@ export default function FuelCorrectionPanel({
             fontFamily: sFont.mono, fontSize: '0.75rem',
           }}>
             <span style={{ color: sColor.green }}>
-              AFR1: {report.hasAfr1 ? 'YES' : 'NO'} | AFR2: {report.hasAfr2 ? 'YES' : 'NO'}
+              {report.lambdaSource === 'lambda'
+                ? `λ1: ${report.hasLambda1 ? 'YES' : 'NO'} | λ2: ${report.hasLambda2 ? 'YES' : 'NO'}`
+                : `AFR1: ${report.hasAfr1 ? 'YES' : 'NO'} | AFR2: ${report.hasAfr2 ? 'YES' : 'NO'}`
+              }
+              {report.lambdaSource === 'lambda' && <span style={{ color: sColor.orange, marginLeft: 6 }}>[DYNO]</span>}
+              {(!report.hasAfr2 && !report.hasLambda2) && <span style={{ color: sColor.yellow, marginLeft: 6 }}>[SINGLE SENSOR]</span>}
             </span>
             <span style={{ color: sColor.textDim }}>
               TOTAL: {report.totalSamples} samples
+              {report.decelSamplesSkipped > 0 && ` (−${report.decelSamplesSkipped} decel)`}
             </span>
             <span style={{ color: sColor.cyan }}>
               ALPHA-N: {report.alphaNSamples} | SD: {report.sdSamples}
@@ -579,6 +585,9 @@ export default function FuelCorrectionPanel({
             <span style={{ color: report.isTurboDetected ? sColor.orange : sColor.blue }}>
               {report.isTurboDetected ? 'TURBO DETECTED' : 'NA DETECTED'}
             </span>
+            {report.hasStft && (
+              <span style={{ color: sColor.yellow }}>STFT APPLIED</span>
+            )}
           </div>
 
           {/* Per-map correction previews */}

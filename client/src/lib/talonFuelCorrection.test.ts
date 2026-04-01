@@ -736,3 +736,210 @@ describe('STFT Integration', () => {
     expect(cell.avgStft).toBeCloseTo((-5 + 10 + -3) / 3, 2);
   });
 });
+
+// ─── Lambda Channel (Dyno Log) Tests ────────────────────────────────────────
+
+describe('Lambda Channel Support (Dyno Logs)', () => {
+  const alphaNMap = makeFuelMap({
+    rowAxis: [2000, 4000, 6000],
+    colAxis: [20, 40, 60],
+    data: [
+      [5.0, 5.5, 6.0],
+      [5.5, 6.0, 6.5],
+      [6.0, 6.5, 7.0],
+    ],
+    targetLambda: [0.95, 0.95, 0.85],
+    colLabel: 'TPS %',
+  });
+
+  it('uses Lambda1/Lambda2 when AFR channels are absent (dyno log)', () => {
+    // Dyno log: has Lambda1, Lambda2, Horsepower, Torque — no AFR channels
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Lambda 1', 'Lambda 2', 'Alpha N',
+        'Injector Pulsewidth Desired', 'Horsepower', 'Torque',
+      ],
+      rows: [
+        // Lambda1 = 1.0, Lambda2 = 0.85 (already lambda, no /14.7 needed)
+        [4000, 40, 80, 1.0, 0.85, 1, 6.0, 150, 120],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: alphaNMap,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.lambdaSource).toBe('lambda');
+    expect(report.isDynoLog).toBe(true);
+    expect(report.hasLambda1).toBe(true);
+    expect(report.hasLambda2).toBe(true);
+    expect(report.hasAfr1).toBe(false);
+
+    // Cyl1: Lambda1 = 1.0, target = 0.95, factor = 1.0/0.95
+    const cyl1 = report.results.find(r => r.mapKey === 'alphaN_cyl1');
+    expect(cyl1).toBeDefined();
+    const cell1 = cyl1!.corrections[0];
+    expect(cell1.avgActualLambda).toBeCloseTo(1.0, 3);
+    expect(cell1.correctionFactor).toBeCloseTo(1.0 / 0.95, 3);
+
+    // Cyl2: Lambda2 = 0.85, target = 0.95, factor = 0.85/0.95
+    const cyl2 = report.results.find(r => r.mapKey === 'alphaN_cyl2');
+    expect(cyl2).toBeDefined();
+    const cell2 = cyl2!.corrections[0];
+    expect(cell2.avgActualLambda).toBeCloseTo(0.85, 3);
+    expect(cell2.correctionFactor).toBeCloseTo(0.85 / 0.95, 3);
+  });
+
+  it('does NOT divide lambda by 14.7 when using Lambda channels', () => {
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Lambda 1', 'Alpha N', 'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // Lambda1 = 0.90 — should be used directly, NOT divided by 14.7
+        [2000, 20, 80, 0.90, 1, 5.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const cell = report.results[0].corrections[0];
+    // Should be 0.90, NOT 0.90/14.7 = 0.0612
+    expect(cell.avgActualLambda).toBeCloseTo(0.90, 3);
+  });
+
+  it('prefers AFR over Lambda when both are present', () => {
+    // If both AFR1 and Lambda1 exist, AFR1 takes priority
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Lambda 1', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // AFR1 = 14.7 (lambda 1.0), Lambda1 = 0.5 (should be ignored)
+        [2000, 20, 80, 14.7, 0.5, 1, 5.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.lambdaSource).toBe('afr');
+    const cell = report.results[0].corrections[0];
+    // Should use AFR1: 14.7/14.7 = 1.0, NOT Lambda1 = 0.5
+    expect(cell.avgActualLambda).toBeCloseTo(1.0, 3);
+  });
+});
+
+// ─── Single-Sensor Fallback Tests ───────────────────────────────────────────
+
+describe('Single-Sensor Fallback', () => {
+  const alphaNMap = makeFuelMap({
+    rowAxis: [2000, 4000],
+    colAxis: [20, 40],
+    data: [
+      [5.0, 5.5],
+      [5.5, 6.0],
+    ],
+    targetLambda: [0.95, 0.95],
+    colLabel: 'TPS %',
+  });
+
+  it('uses AFR1 for both cylinders when AFR2 is missing', () => {
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Alpha N', 'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // Only AFR1 = 14.7, no AFR2 channel at all
+        [2000, 20, 80, 14.7, 1, 5.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: alphaNMap,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.hasAfr1).toBe(true);
+    expect(report.hasAfr2).toBe(false);
+
+    // Both cylinders should get corrections from AFR1
+    const cyl1 = report.results.find(r => r.mapKey === 'alphaN_cyl1');
+    const cyl2 = report.results.find(r => r.mapKey === 'alphaN_cyl2');
+    expect(cyl1!.totalCellsCorrected).toBe(1);
+    expect(cyl2!.totalCellsCorrected).toBe(1);
+
+    // Both should have same lambda value (from AFR1)
+    expect(cyl1!.corrections[0].avgActualLambda).toBeCloseTo(1.0, 3);
+    expect(cyl2!.corrections[0].avgActualLambda).toBeCloseTo(1.0, 3);
+  });
+
+  it('uses Lambda1 for both cylinders when Lambda2 is missing (dyno log)', () => {
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Lambda 1', 'Alpha N', 'Injector Pulsewidth Desired',
+        'Horsepower',
+      ],
+      rows: [
+        // Only Lambda1 = 0.92, no Lambda2
+        [2000, 20, 80, 0.92, 1, 5.0, 100],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: alphaNMap,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.lambdaSource).toBe('lambda');
+    expect(report.hasLambda1).toBe(true);
+    expect(report.hasLambda2).toBe(false);
+    expect(report.isDynoLog).toBe(true);
+
+    // Both cylinders should get corrections from Lambda1
+    const cyl1 = report.results.find(r => r.mapKey === 'alphaN_cyl1');
+    const cyl2 = report.results.find(r => r.mapKey === 'alphaN_cyl2');
+    expect(cyl1!.totalCellsCorrected).toBe(1);
+    expect(cyl2!.totalCellsCorrected).toBe(1);
+
+    expect(cyl1!.corrections[0].avgActualLambda).toBeCloseTo(0.92, 3);
+    expect(cyl2!.corrections[0].avgActualLambda).toBeCloseTo(0.92, 3);
+  });
+});

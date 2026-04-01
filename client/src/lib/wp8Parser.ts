@@ -480,6 +480,8 @@ export function getHondaTalonKeyChannels(result: WP8ParseResult) {
     mapSensorVoltage: find('Manifold Absolute Pressure Sensor Voltage'),
     afr1: find('Air Fuel Ratio 1'),
     afr2: find('Air Fuel Ratio 2'),
+    lambda1: find('Lambda 1'),
+    lambda2: find('Lambda 2'),
     o2Voltage: find('Oxygen Sensor Voltage'),
     stft: find('Short Term Fuel Trim'),
     injPwFinal: find('Injector Pulsewidth Final'),
@@ -498,5 +500,8 @@ export function getHondaTalonKeyChannels(result: WP8ParseResult) {
     dctClutch1SlipSpeed: find('DCT Clutch 1 Slip Speed'),
     dctClutch2SlipSpeed: find('DCT Clutch 2 Slip Speed'),
     launchStatus: find('Launch Status'),
+    // Dyno-specific channels
+    horsepower: find('Horsepower'),
+    torque: find('Torque'),
   };
 }

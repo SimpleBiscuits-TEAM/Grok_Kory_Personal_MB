@@ -83,7 +83,12 @@ export interface CorrectionReport {
   isTurboDetected: boolean;
   hasAfr1: boolean;
   hasAfr2: boolean;
+  hasLambda1: boolean;
+  hasLambda2: boolean;
   hasStft: boolean;
+  isDynoLog: boolean;
+  /** Which source was used: 'afr' or 'lambda' */
+  lambdaSource: 'afr' | 'lambda';
   totalSamples: number;
   alphaNSamples: number;
   sdSamples: number;
@@ -250,23 +255,61 @@ function extractChannelData(wp8Data: WP8ParseResult) {
     });
   };
 
+  // Detect dyno log: presence of Horsepower or Torque channels
+  const isDynoLog = keys.horsepower !== -1 || keys.torque !== -1;
+
+  // Lambda source priority:
+  //   1. If AFR1 exists → use AFR channels (convert to lambda via /14.7)
+  //   2. If Lambda1 exists (dyno logs) → use Lambda channels directly (no conversion)
+  //   3. Single-sensor fallback: if only one channel exists (AFR1 or Lambda1),
+  //      use it for both cylinders
+  const hasAfr1 = keys.afr1 !== -1;
+  const hasAfr2 = keys.afr2 !== -1;
+  const hasLambda1 = keys.lambda1 !== -1;
+  const hasLambda2 = keys.lambda2 !== -1;
+
+  // Determine which source to use
+  const useLambdaChannels = !hasAfr1 && hasLambda1;
+
+  let cyl1Data: number[];
+  let cyl2Data: number[];
+  let isAlreadyLambda: boolean;
+
+  if (useLambdaChannels) {
+    // Dyno log: use Lambda channels directly
+    cyl1Data = extract(keys.lambda1);
+    // Single-sensor fallback: if Lambda2 not available, use Lambda1 for both
+    cyl2Data = hasLambda2 ? extract(keys.lambda2) : cyl1Data;
+    isAlreadyLambda = true;
+  } else {
+    // Standard log: use AFR channels
+    cyl1Data = extract(keys.afr1);
+    // Single-sensor fallback: if AFR2 not available, use AFR1 for both
+    cyl2Data = hasAfr2 ? extract(keys.afr2) : cyl1Data;
+    isAlreadyLambda = false;
+  }
+
   return {
     rpm: extract(keys.engineSpeed),
     tps: extract(keys.throttlePosition),
     map: keys.mapCorrected !== -1 ? extract(keys.mapCorrected) : extract(keys.map),
-    afr1: extract(keys.afr1),
-    afr2: extract(keys.afr2),
+    cyl1: cyl1Data,
+    cyl2: cyl2Data,
+    isAlreadyLambda,
     alphaN: extract(keys.alphaN),
     injPwDesired: extract(keys.injPwDesired),
     vehicleSpeed: extract(keys.vehicleSpeed),
     stft: extract(keys.stft),
-    hasAfr1: keys.afr1 !== -1,
-    hasAfr2: keys.afr2 !== -1,
+    hasAfr1,
+    hasAfr2,
+    hasLambda1,
+    hasLambda2,
     hasAlphaN: keys.alphaN !== -1,
     hasInjPwDesired: keys.injPwDesired !== -1,
     hasMapCorrected: keys.mapCorrected !== -1,
     hasVehicleSpeed: keys.vehicleSpeed !== -1,
     hasStft: keys.stft !== -1,
+    isDynoLog,
   };
 }
 
@@ -289,13 +332,13 @@ function computeMapCorrections(
   const isAlphaN = mapKey.startsWith('alphaN');
   const isCyl1 = mapKey.includes('cyl1');
 
-  // Pick the right AFR channel
-  const afrData = isCyl1 ? channelData.afr1 : channelData.afr2;
-  // If the specific cylinder AFR isn't available, fall back to whichever exists
-  const afrFallback = afrData.length > 0 ? afrData
-    : (channelData.afr1.length > 0 ? channelData.afr1 : channelData.afr2);
+  // Pick the right cylinder data (AFR or Lambda, depending on what's available)
+  // extractChannelData already handles the single-sensor fallback:
+  //   - cyl1 = AFR1 or Lambda1
+  //   - cyl2 = AFR2 or Lambda2 (falls back to cyl1 if not available)
+  const cylData = isCyl1 ? channelData.cyl1 : channelData.cyl2;
 
-  if (afrFallback.length === 0) {
+  if (cylData.length === 0) {
     return {
       mapKey,
       corrections: [],
@@ -319,9 +362,9 @@ function computeMapCorrections(
   for (let i = 0; i < channelData.rpm.length; i++) {
     const rpm = channelData.rpm[i];
     const alphaNVal = channelData.alphaN[i];
-    const afr = afrFallback[i];
+    const rawVal = cylData[i];
 
-    if (isNaN(rpm) || isNaN(afr) || afr <= 0) continue;
+    if (isNaN(rpm) || isNaN(rawVal) || rawVal <= 0) continue;
 
     // ── Deceleration filter: skip TPS=0 + vehicle speed > 0 ──
     // When throttle is closed and vehicle is moving, the engine is in
@@ -340,23 +383,27 @@ function computeMapCorrections(
 
     // ── STFT adjustment ──
     // If Short Term Fuel Trims are present, we need to account for the ECU's
-    // real-time corrections. The measured AFR already includes the STFT effect,
-    // so to get what the AFR *would have been* without the ECU's correction:
-    //   true_afr = measured_afr / (1 + STFT/100)
-    // Negative STFT = ECU pulling fuel → measured AFR is leaner than table commands
-    // Positive STFT = ECU adding fuel → measured AFR is richer than table commands
+    // real-time corrections. The measured value already includes the STFT effect,
+    // so to get what the value *would have been* without the ECU's correction:
+    //   true_val = measured_val / (1 + STFT/100)
+    // Negative STFT = ECU pulling fuel → measured is leaner than table commands
+    // Positive STFT = ECU adding fuel → measured is richer than table commands
     // (Reusable pattern for Kawasaki tool)
-    let correctedAfr = afr;
+    let correctedVal = rawVal;
     let stftVal = NaN;
     if (channelData.hasStft) {
       stftVal = channelData.stft[i];
       if (Number.isFinite(stftVal)) {
-        correctedAfr = afr / (1 + stftVal / 100);
+        correctedVal = rawVal / (1 + stftVal / 100);
       }
     }
 
-    // Convert corrected AFR to lambda
-    const actualLambda = correctedAfr / 14.7;
+    // Convert to lambda:
+    // - If data is already lambda (dyno log Lambda1/Lambda2), use directly
+    // - If data is AFR, divide by 14.7 (stoichiometric ratio for gasoline)
+    const actualLambda = channelData.isAlreadyLambda
+      ? correctedVal
+      : correctedVal / 14.7;
 
     // Find the RPM row
     const rpmRow = findNearestIdx(map.rowAxis, rpm);
@@ -502,7 +549,11 @@ export function computeCorrections(
     isTurboDetected,
     hasAfr1: channelData.hasAfr1,
     hasAfr2: channelData.hasAfr2,
+    hasLambda1: channelData.hasLambda1,
+    hasLambda2: channelData.hasLambda2,
     hasStft: channelData.hasStft,
+    isDynoLog: channelData.isDynoLog,
+    lambdaSource: channelData.isAlreadyLambda ? 'lambda' : 'afr',
     totalSamples: channelData.rpm.length,
     alphaNSamples,
     sdSamples,
