@@ -3157,10 +3157,13 @@
 - [x] Ensure tier label updates dynamically based on current page/tab context
 
 ## Geo-Fencing Display in User Management
-- [ ] Investigate existing geo-fencing code and DB schema
-- [ ] Display geo-fencing function/controls in user management area
-- [ ] Allow admins to define geographical zones that restrict tune upload/download
-- [ ] Implement GOD MODE override for owner (Kory Willis)
+- [x] Display geo-fencing function/controls in user management area (GeofencePanel in Dev Tools > GEOFENCE sub-tab)
+- [x] Allow admins to define geographical zones that restrict tune upload/download (create/update/delete zones with polygon drawing)
+- [x] Implement GOD MODE override for owner (super_admin can create user overrides — exempt or enforce)
+- [x] DB schema: geofence_zones + geofence_user_overrides tables
+- [x] tRPC procedures: listZones, createZone, updateZone, deleteZone, listOverrides, createOverride, deleteOverride
+- [x] Google Maps integration with polygon drawing, zone visualization, restriction type legend
+- [x] Vitest tests for admin/super_admin access control and CRUD operations
 
 ## Fix: Feedback Button Overlapping Error Messages
 - [x] Move error toast above feedback button (bottom: 5rem, zIndex: 1000)

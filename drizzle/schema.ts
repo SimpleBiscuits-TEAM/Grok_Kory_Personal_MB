@@ -1308,3 +1308,59 @@ export const pitchAnalytics = mysqlTable("pitch_analytics", {
 
 export type PitchAnalytic = typeof pitchAnalytics.$inferSelect;
 export type InsertPitchAnalytic = typeof pitchAnalytics.$inferInsert;
+
+// ── Geo-Fencing ─────────────────────────────────────────────────────────────
+/**
+ * Geofence zones define geographical areas where tune upload/download is restricted.
+ * Each zone stores a polygon as a JSON array of {lat, lng} coordinates.
+ * Admins can create, edit, enable/disable, and delete zones.
+ * The owner (Kory Willis / super_admin) has GOD MODE override authority.
+ */
+export const geofenceZones = mysqlTable("geofence_zones", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Human-readable zone name (e.g., "SEMA Restricted Area", "Competitor Shop") */
+  name: varchar("name", { length: 255 }).notNull(),
+  /** Optional description of why this zone exists */
+  description: text("description"),
+  /** Restriction type: what actions are blocked inside this zone */
+  restrictionType: mysqlEnum("restrictionType", ["block_upload", "block_download", "block_both"]).default("block_both").notNull(),
+  /** Zone color for map display (hex string) */
+  color: varchar("color", { length: 7 }).default("#FF0000"),
+  /** Polygon coordinates as JSON array: [{lat: number, lng: number}, ...] */
+  polygon: json("polygon").notNull(),
+  /** Center point for quick map centering */
+  centerLat: decimal("centerLat", { precision: 10, scale: 7 }),
+  centerLng: decimal("centerLng", { precision: 10, scale: 7 }),
+  /** Whether this zone is currently enforced */
+  isActive: boolean("isActive").default(true).notNull(),
+  /** FK to users.id — admin who created this zone */
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type GeofenceZone = typeof geofenceZones.$inferSelect;
+export type InsertGeofenceZone = typeof geofenceZones.$inferInsert;
+
+/**
+ * Per-user geofence overrides — allows super_admin (GOD MODE) to exempt
+ * specific users from geofence restrictions, or to apply extra restrictions.
+ */
+export const geofenceUserOverrides = mysqlTable("geofence_user_overrides", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the user being overridden */
+  userId: int("userId").notNull(),
+  /** FK to geofence_zones.id — null means override applies to ALL zones */
+  zoneId: int("zoneId"),
+  /** Override type: exempt (bypass restriction) or enforce (add restriction even outside zone) */
+  overrideType: mysqlEnum("overrideType", ["exempt", "enforce"]).default("exempt").notNull(),
+  /** Reason for the override */
+  reason: text("reason"),
+  /** FK to users.id — super_admin who granted this override */
+  grantedBy: int("grantedBy").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GeofenceUserOverride = typeof geofenceUserOverrides.$inferSelect;
+export type InsertGeofenceUserOverride = typeof geofenceUserOverrides.$inferInsert;

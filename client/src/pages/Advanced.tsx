@@ -18,7 +18,7 @@ import {
   FileText, Activity, AlertCircle, Clock, ShieldX, Users,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck
+  Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin
 } from 'lucide-react';
 import { getLoginUrl } from '@/const';
 import { useLocation } from 'wouter';
@@ -66,6 +66,7 @@ import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
 import UserManagementPanel from '@/components/UserManagementPanel';
+import GeofencePanel from '@/components/GeofencePanel';
 import HondaTalonTuner from '@/components/HondaTalonTuner';
 import KnoxDiagnosticAgent from '@/components/KnoxDiagnosticAgent';
 import { WP8ParseResult } from '@/lib/wp8Parser';
@@ -1517,6 +1518,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                 { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 13, height: 13 }} /> },
                 { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 13, height: 13 }} /> },
                 { id: 'users', label: 'USER MGMT', icon: <Users style={{ width: 13, height: 13 }} /> },
+                { id: 'geofence', label: 'GEOFENCE', icon: <MapPin style={{ width: 13, height: 13 }} /> },
                 { id: 'qa', label: 'QA TESTS', icon: <CheckCircle style={{ width: 13, height: 13 }} /> },
                 { id: 'notifications', label: 'NOTIFICATIONS', icon: <MessageSquare style={{ width: 13, height: 13 }} /> },
                 { id: 'offsets', label: 'OFFSETS', icon: <Wrench style={{ width: 13, height: 13 }} /> },
@@ -1605,6 +1607,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             {devSubTab === 'procedures' && <div style={{ height: 'calc(100vh - 280px)' }}><ServiceProcedures /></div>}
             {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} />}
             {devSubTab === 'users' && <UserManagementPanel />}
+            {devSubTab === 'geofence' && <GeofencePanel />}
             {devSubTab === 'qa' && <QAChecklistPanel />}
             {devSubTab === 'notifications' && <AdminNotificationPanel onClose={() => setActiveTab('analyzer')} />}
             {devSubTab === 'offsets' && <OffsetCalibrationPanel binary={new Uint8Array()} a2lOffsets={new Map()} />}

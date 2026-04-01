@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens, ndaSubmissions, pitchAnalytics } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens, ndaSubmissions, pitchAnalytics, geofenceZones, geofenceUserOverrides } from "../drizzle/schema";
 import { like, desc, sql, count, eq, and } from "drizzle-orm";
 import { ENV } from './_core/env';
 
@@ -594,5 +594,196 @@ export async function getPitchAnalyticsSummary(days: number = 30): Promise<{
   } catch (error) {
     console.error("[Database] Failed to get pitch analytics:", error);
     return { totals: [], daily: [], uniqueUsers: 0, avgSessionDuration: null };
+  }
+}
+
+// ── Geo-Fencing ─────────────────────────────────────────────────────────────
+
+export type GeofenceZoneRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  restrictionType: "block_upload" | "block_download" | "block_both";
+  color: string | null;
+  polygon: Array<{ lat: number; lng: number }>;
+  centerLat: string | null;
+  centerLng: string | null;
+  isActive: boolean;
+  createdBy: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+/**
+ * List all geofence zones, optionally filtered by active status.
+ */
+export async function listGeofenceZones(activeOnly = false): Promise<GeofenceZoneRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    const query = db.select().from(geofenceZones).orderBy(desc(geofenceZones.createdAt));
+    if (activeOnly) {
+      return await query.where(eq(geofenceZones.isActive, true)) as unknown as GeofenceZoneRow[];
+    }
+    return await query as unknown as GeofenceZoneRow[];
+  } catch (error) {
+    console.error("[Database] Failed to list geofence zones:", error);
+    return [];
+  }
+}
+
+/**
+ * Create a new geofence zone.
+ */
+export async function createGeofenceZone(data: {
+  name: string;
+  description?: string;
+  restrictionType: "block_upload" | "block_download" | "block_both";
+  color?: string;
+  polygon: Array<{ lat: number; lng: number }>;
+  createdBy: number;
+}): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    // Calculate center from polygon
+    const lats = data.polygon.map(p => p.lat);
+    const lngs = data.polygon.map(p => p.lng);
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+
+    const [result] = await db.insert(geofenceZones).values({
+      name: data.name,
+      description: data.description ?? null,
+      restrictionType: data.restrictionType,
+      color: data.color ?? "#FF0000",
+      polygon: data.polygon,
+      centerLat: centerLat.toFixed(7),
+      centerLng: centerLng.toFixed(7),
+      isActive: true,
+      createdBy: data.createdBy,
+    }).$returningId();
+    return result.id;
+  } catch (error) {
+    console.error("[Database] Failed to create geofence zone:", error);
+    return null;
+  }
+}
+
+/**
+ * Update a geofence zone.
+ */
+export async function updateGeofenceZone(
+  zoneId: number,
+  data: Partial<{
+    name: string;
+    description: string | null;
+    restrictionType: "block_upload" | "block_download" | "block_both";
+    color: string;
+    polygon: Array<{ lat: number; lng: number }>;
+    isActive: boolean;
+  }>
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    const updateData: any = { ...data };
+    // Recalculate center if polygon changed
+    if (data.polygon) {
+      const lats = data.polygon.map(p => p.lat);
+      const lngs = data.polygon.map(p => p.lng);
+      updateData.centerLat = ((Math.min(...lats) + Math.max(...lats)) / 2).toFixed(7);
+      updateData.centerLng = ((Math.min(...lngs) + Math.max(...lngs)) / 2).toFixed(7);
+    }
+    await db.update(geofenceZones).set(updateData).where(eq(geofenceZones.id, zoneId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to update geofence zone:", error);
+    return false;
+  }
+}
+
+/**
+ * Delete a geofence zone.
+ */
+export async function deleteGeofenceZone(zoneId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.delete(geofenceZones).where(eq(geofenceZones.id, zoneId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to delete geofence zone:", error);
+    return false;
+  }
+}
+
+/**
+ * List user overrides for geofence zones.
+ */
+export async function listGeofenceOverrides(userId?: number): Promise<Array<{
+  id: number;
+  userId: number;
+  zoneId: number | null;
+  overrideType: "exempt" | "enforce";
+  reason: string | null;
+  grantedBy: number;
+  isActive: boolean;
+  createdAt: Date;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    const query = db.select().from(geofenceUserOverrides);
+    if (userId) {
+      return await query.where(eq(geofenceUserOverrides.userId, userId)) as any[];
+    }
+    return await query.orderBy(desc(geofenceUserOverrides.createdAt)) as any[];
+  } catch (error) {
+    console.error("[Database] Failed to list geofence overrides:", error);
+    return [];
+  }
+}
+
+/**
+ * Create a user override for geofence zones.
+ */
+export async function createGeofenceOverride(data: {
+  userId: number;
+  zoneId?: number;
+  overrideType: "exempt" | "enforce";
+  reason?: string;
+  grantedBy: number;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.insert(geofenceUserOverrides).values({
+      userId: data.userId,
+      zoneId: data.zoneId ?? null,
+      overrideType: data.overrideType,
+      reason: data.reason ?? null,
+      grantedBy: data.grantedBy,
+      isActive: true,
+    });
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to create geofence override:", error);
+    return false;
+  }
+}
+
+/**
+ * Delete a geofence user override.
+ */
+export async function deleteGeofenceOverride(overrideId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.delete(geofenceUserOverrides).where(eq(geofenceUserOverrides.id, overrideId));
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to delete geofence override:", error);
+    return false;
   }
 }

@@ -28,6 +28,7 @@ import { talonOcrRouter } from "./routers/talonOcr";
 import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
+import { geofenceRouter } from "./routers/geofence";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -241,6 +242,9 @@ export const appRouter = router({
 
   // Knox Diagnostic Agent (complaint-to-PID mapping + analysis)
   diagnosticAgent: diagnosticAgentRouter,
+
+  // Geofence Zone Management
+  geofence: geofenceRouter,
 
   // Feedback / Error Reports
   feedback: router({
