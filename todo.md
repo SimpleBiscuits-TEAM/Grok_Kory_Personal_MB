@@ -3104,3 +3104,8 @@
 - [x] Add interactive cursor with ZoomableChart wrapper (scroll zoom, drag pan, pinch zoom, active dot highlights)
 - [x] Keep fullscreen mode (removed PNG export since canvas renderer is gone)
 - [x] Keep comparison overlay support (baseline curves with dashed lines, delta stats in cards)
+
+## Honda Talon Dyno Chart: PDF Export
+- [x] Add PDF export button to interactive dyno chart
+- [x] Include PPEI branding, V-OP BETA watermark, and disclaimer in PDF
+- [x] Export chart as high-quality image embedded in landscape PDF
