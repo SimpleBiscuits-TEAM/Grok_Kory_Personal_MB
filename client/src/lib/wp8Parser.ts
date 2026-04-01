@@ -75,9 +75,10 @@ interface V2ChannelData {
 function parseV2(data: Uint8Array, view: DataView): WP8ParseResult {
   const channels: WP8Channel[] = [];
   const channelData: V2ChannelData[] = [];
+  let v3PartNumber = '';
 
-  // Start after magic (4 bytes) + version byte (1 byte)
-  let pos = 5;
+  // Find where protobuf blocks start (handles V2 and V3+ header variants)
+  let pos = findProtobufStart(data);
 
   while (pos < data.length - 2) {
     const [tag, pos2] = readVarint(data, pos);
@@ -86,6 +87,30 @@ function parseV2(data: Uint8Array, view: DataView): WP8ParseResult {
 
     // We only expect field=1, wire_type=2 (length-delimited) at the top level
     if (wireType !== 2) break;
+
+    // V3 part number block: field!=1, wire=2 — extract raw ASCII string and stop channel parsing
+    if (fieldNum !== 1) {
+      const [blockLen, blockStart] = readVarint(data, pos2);
+      const blockEnd = blockStart + blockLen;
+      if (blockEnd <= data.length) {
+        // Read the block content as a raw ASCII string
+        let candidate = '';
+        let isAscii = true;
+        for (let i = blockStart; i < blockEnd; i++) {
+          if (data[i] >= 0x20 && data[i] <= 0x7E) {
+            candidate += String.fromCharCode(data[i]);
+          } else {
+            isAscii = false;
+            break;
+          }
+        }
+        if (isAscii && candidate.length > 0) {
+          v3PartNumber = candidate;
+        }
+        pos = blockEnd;
+      }
+      break; // After part number block, data rows follow
+    }
 
     const [length, pos3] = readVarint(data, pos2);
     const blockEnd = pos3 + length;
@@ -185,56 +210,76 @@ function parseV2(data: Uint8Array, view: DataView): WP8ParseResult {
     pos = blockEnd;
   }
 
-  // Convert columnar data to row-oriented format
-  // Collect all unique timestamps across all channels, then build rows
-  const tsSet = new Set<number>();
-  for (const ch of channelData) {
-    for (const pt of ch.points) {
-      tsSet.add(pt.ts);
-    }
-  }
-  const allTimestamps = Array.from(tsSet).sort((a, b) => a - b);
-
-  // Build lookup maps: for each channel, map timestamp → value
-  const channelMaps: Map<number, number>[] = channelData.map(ch => {
-    const m = new Map<number, number>();
-    for (const pt of ch.points) {
-      m.set(pt.ts, pt.val);
-    }
-    return m;
-  });
-
-  // Build rows
+  // Check if channels have data points (V2 columnar) or not (V3 flat rows)
+  const hasColumnarData = channelData.some(ch => ch.points.length > 0);
   const numChannels = channels.length;
   const rows: WP8DataRow[] = [];
-  for (const ts of allTimestamps) {
-    const values = new Float32Array(numChannels);
-    for (let i = 0; i < numChannels; i++) {
-      const val = channelMaps[i].get(ts);
-      if (val !== undefined) {
-        values[i] = val;
-      } else {
-        // Interpolate: use last known value (forward-fill)
-        values[i] = NaN;
+  let partNumber = '';
+
+  if (hasColumnarData) {
+    // ── V2 columnar format: data points embedded in channel blocks ──
+    const tsSet = new Set<number>();
+    for (const ch of channelData) {
+      for (const pt of ch.points) {
+        tsSet.add(pt.ts);
       }
     }
-    rows.push({ timestamp: ts, values });
-  }
+    const allTimestamps = Array.from(tsSet).sort((a, b) => a - b);
 
-  // Forward-fill NaN values so each row has complete data
-  for (let col = 0; col < numChannels; col++) {
-    let lastVal = 0;
-    for (let row = 0; row < rows.length; row++) {
-      if (Number.isNaN(rows[row].values[col])) {
-        rows[row].values[col] = lastVal;
-      } else {
-        lastVal = rows[row].values[col];
+    const channelMaps: Map<number, number>[] = channelData.map(ch => {
+      const m = new Map<number, number>();
+      for (const pt of ch.points) {
+        m.set(pt.ts, pt.val);
+      }
+      return m;
+    });
+
+    for (const ts of allTimestamps) {
+      const values = new Float32Array(numChannels);
+      for (let i = 0; i < numChannels; i++) {
+        const val = channelMaps[i].get(ts);
+        if (val !== undefined) {
+          values[i] = val;
+        } else {
+          values[i] = NaN;
+        }
+      }
+      rows.push({ timestamp: ts, values });
+    }
+
+    // Forward-fill NaN values
+    for (let col = 0; col < numChannels; col++) {
+      let lastVal = 0;
+      for (let row = 0; row < rows.length; row++) {
+        if (Number.isNaN(rows[row].values[col])) {
+          rows[row].values[col] = lastVal;
+        } else {
+          lastVal = rows[row].values[col];
+        }
       }
     }
-  }
+  } else {
+    // ── V3 flat-row format: data stored after channel definitions ──
+    // Part number was already extracted during the channel loop (v3PartNumber)
+    // pos now points to the start of flat data rows
+    let dataPos = pos;
+    partNumber = v3PartNumber;
 
-  // V2 files don't have a traditional part number — extract from channel context
-  const partNumber = '';
+    // Parse flat data rows: 4-byte LE uint32 timestamp + numChannels × 4-byte LE float32
+    const rowSize = 4 + numChannels * 4;
+    const remaining = data.length - dataPos;
+    const numRows = Math.floor(remaining / rowSize);
+
+    for (let r = 0; r < numRows; r++) {
+      const rowOffset = dataPos + r * rowSize;
+      const timestamp = view.getUint32(rowOffset, true);
+      const values = new Float32Array(numChannels);
+      for (let ch = 0; ch < numChannels; ch++) {
+        values[ch] = view.getFloat32(rowOffset + 4 + ch * 4, true);
+      }
+      rows.push({ timestamp, values });
+    }
+  }
 
   const vehicleType = detectVehicleType(partNumber, channels);
 
@@ -371,17 +416,46 @@ function parseV1(data: Uint8Array, view: DataView): WP8ParseResult {
 // ─── Format detection ───────────────────────────────────────────────
 
 /**
- * Detect whether a WP8 file uses V1 (legacy binary) or V2 (protobuf) format.
+ * Detect whether a WP8 file uses protobuf-based format (V2/V3+).
  *
- * V2 files have a version byte (0x01) at offset 4, followed by protobuf field
- * tag 0x0a (field=1, wire_type=2) at offset 5.
+ * V2 files: magic(4) + version=0x01(1) + protobuf tag 0x0a at offset 5
+ * V3 files: magic(4) + version varint + metadata varints + protobuf tag 0x0a
  *
- * V1 files have raw binary header bytes at offset 4 that don't match this pattern.
+ * V1 files have raw binary channel markers (0x00 0x10) which are distinct.
  */
 function isV2Format(data: Uint8Array): boolean {
   if (data.length < 7) return false;
-  // V2: magic(4) + version=0x01(1) + protobuf field tag 0x0a(1)
-  return data[4] === 0x01 && data[5] === 0x0a;
+  // Quick check: V2 classic
+  if (data[4] === 0x01 && data[5] === 0x0a) return true;
+  // V3+: scan for the first protobuf field=1 tag (0x0a) within the first 20 bytes
+  // after magic, and verify it's NOT a V1 file (V1 has 0x00 0x10 channel markers)
+  for (let i = 5; i < Math.min(data.length, 20); i++) {
+    if (data[i] === 0x0a) {
+      // Verify this looks like a protobuf length-delimited block
+      // by checking the next bytes form a valid varint length
+      const [len, nextPos] = readVarint(data, i + 1);
+      if (len > 10 && len < 10000 && nextPos < data.length) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Find the offset where protobuf channel blocks begin.
+ * V2: offset 5 (magic + 1 version byte)
+ * V3+: scan for first 0x0a tag that starts a valid protobuf block
+ */
+function findProtobufStart(data: Uint8Array): number {
+  // V2 classic: version byte 0x01 at offset 4
+  if (data[4] === 0x01 && data[5] === 0x0a) return 5;
+  // V3+: scan from offset 5 for the first valid protobuf field=1 tag
+  for (let i = 5; i < Math.min(data.length, 20); i++) {
+    if (data[i] === 0x0a) {
+      const [len, nextPos] = readVarint(data, i + 1);
+      if (len > 10 && len < 10000 && nextPos < data.length) return i;
+    }
+  }
+  return 5; // fallback
 }
 
 // ─── Public API ─────────────────────────────────────────────────────

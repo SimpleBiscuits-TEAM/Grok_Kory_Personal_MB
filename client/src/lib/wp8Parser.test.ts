@@ -257,6 +257,73 @@ describe('WP8 Parser', () => {
     });
   });
 
+  // Integration test with V3 format file (flat-row data)
+  const V3_SAMPLE_PATH = '/home/ubuntu/upload/PPEITuned_Rev_11_LOG_4.wp8';
+  const hasV3SampleFile = fs.existsSync(V3_SAMPLE_PATH);
+
+  describe.skipIf(!hasV3SampleFile)('parseWP8 - V3 flat-row format', () => {
+    it('should parse the V3 Honda Talon WP8 file', () => {
+      const fileBuffer = fs.readFileSync(V3_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const result = parseWP8(arrayBuffer);
+
+      expect(result.magic).toBe(0xFECEFACE);
+      expect(result.partNumber).toBe('0801EB0502');
+      expect(result.vehicleType).toBe('HONDA_TALON');
+      expect(result.channels.length).toBe(53);
+      expect(result.totalRows).toBe(972);
+    });
+
+    it('should have correct channel names', () => {
+      const fileBuffer = fs.readFileSync(V3_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const result = parseWP8(arrayBuffer);
+      const names = result.channels.map(c => c.name);
+
+      expect(names).toContain('Manifold Absolute Pressure');
+      expect(names).toContain('Alpha N');
+      expect(names).toContain('Engine Speed');
+      expect(names).toContain('Air Fuel Ratio 1');
+      expect(names).toContain('DCT Clutch 1 Pressure');
+      expect(names).toContain('Vehicle Speed');
+    });
+
+    it('should have reasonable data values', () => {
+      const fileBuffer = fs.readFileSync(V3_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const result = parseWP8(arrayBuffer);
+      const keys = getHondaTalonKeyChannels(result);
+
+      // First row: MAP ~67, Alpha N = 1, Engine Speed ~1213
+      const row0 = result.rows[0];
+      expect(row0.timestamp).toBe(13);
+      expect(row0.values[keys.engineSpeed]).toBeCloseTo(1213, 0);
+      expect(row0.values[keys.alphaN]).toBe(1);
+      expect(row0.values[keys.afr1]).toBeCloseTo(13.95, 1);
+    });
+
+    it('should produce valid CSV from V3 file', () => {
+      const fileBuffer = fs.readFileSync(V3_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const result = parseWP8(arrayBuffer);
+      const csv = wp8ToCSV(result);
+
+      const lines = csv.split('\n');
+      expect(lines.length).toBe(973); // header + 972 rows
+      expect(lines[0].split(',').length).toBe(53);
+    });
+
+    it('should have monotonically increasing timestamps', () => {
+      const fileBuffer = fs.readFileSync(V3_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const result = parseWP8(arrayBuffer);
+
+      for (let i = 1; i < result.rows.length; i++) {
+        expect(result.rows[i].timestamp).toBeGreaterThan(result.rows[i - 1].timestamp);
+      }
+    });
+  });
+
   // Integration test with real sample file (only runs if file exists)
   describe.skipIf(!hasSampleFile)('parseWP8 - real sample file', () => {
     it('should parse the real Honda Talon WP8 file', () => {

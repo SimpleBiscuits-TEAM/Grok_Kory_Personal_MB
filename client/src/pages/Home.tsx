@@ -953,11 +953,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* Error toast */}
+        {/* Error toast — positioned above the feedback button */}
         {(error || exportError) && (
           <div style={{
             position: 'fixed',
-            bottom: '1rem',
+            bottom: '5rem',
             right: '1rem',
             background: 'oklch(0.13 0.006 260)',
             border: '1px solid oklch(0.52 0.22 25)',
@@ -968,7 +968,7 @@ export default function Home() {
             alignItems: 'flex-start',
             gap: '12px',
             maxWidth: '420px',
-            zIndex: 50,
+            zIndex: 1000,
             boxShadow: '0 4px 20px oklch(0 0 0 / 0.5)'
           }}>
             <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />

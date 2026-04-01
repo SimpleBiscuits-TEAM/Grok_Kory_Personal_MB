@@ -3155,3 +3155,22 @@
 - [x] Display "V-OP PRO" badge in top-right when using Advanced feature (gold)
 - [x] Add "UPGRADE TO PRO" prompt for non-admin public users on Advanced page
 - [x] Ensure tier label updates dynamically based on current page/tab context
+
+## Geo-Fencing Display in User Management
+- [ ] Investigate existing geo-fencing code and DB schema
+- [ ] Display geo-fencing function/controls in user management area
+- [ ] Allow admins to define geographical zones that restrict tune upload/download
+- [ ] Implement GOD MODE override for owner (Kory Willis)
+
+## Fix: Feedback Button Overlapping Error Messages
+- [x] Move error toast above feedback button (bottom: 5rem, zIndex: 1000)
+- [x] Ensure error messages are fully readable when displayed
+
+## Fix: File Load Error on Upload (V3 WP8 Format)
+- [x] Investigated: file PPEITuned_Rev_11_LOG_4.wp8 uses V3 flat-row format (version byte 0x03)
+- [x] V3 stores data as flat rows (4-byte timestamp + N×float32) after channel defs, not columnar
+- [x] Updated parseV2 to detect V3 format: channel blocks have no data points → parse flat rows
+- [x] Fixed part number extraction from field=18 raw ASCII block
+- [x] Added findProtobufStart() to handle V2/V3 header variants
+- [x] Added 5 integration tests for V3 format (channels, data values, CSV, timestamps)
+- [x] All V2 tests still pass — backward compatible
