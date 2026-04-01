@@ -495,3 +495,244 @@ describe('Apply Corrections', () => {
     expect(map.data[1][1]).toBe(6.0);
   });
 });
+
+// ─── Deceleration Filter Tests ──────────────────────────────────────────────
+
+describe('Deceleration Filter', () => {
+  const alphaNMap = makeFuelMap({
+    rowAxis: [2000, 4000, 6000],
+    colAxis: [20, 40, 60],
+    data: [
+      [5.0, 5.5, 6.0],
+      [5.5, 6.0, 6.5],
+      [6.0, 6.5, 7.0],
+    ],
+    targetLambda: [0.95, 0.95, 0.85],
+    colLabel: 'TPS %',
+  });
+
+  it('skips samples where TPS=0 and vehicle speed > 0 (deceleration)', () => {
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired', 'Vehicle Speed',
+      ],
+      rows: [
+        // Normal sample: TPS=20, speed=30 → should be included
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0, 30],
+        // Decel sample: TPS=0, speed=50 → should be SKIPPED
+        [4000, 0, 80, 18.0, 18.0, 1, 6.0, 50],
+        // Idle sample: TPS=0, speed=0 → should be INCLUDED (not decel, just idle)
+        [2000, 0, 80, 14.7, 14.7, 1, 5.0, 0],
+        // Another decel: TPS=0, speed=10 → should be SKIPPED
+        [6000, 0, 80, 20.0, 20.0, 1, 7.0, 10],
+        // Normal sample: TPS=40, speed=60 → should be included
+        [4000, 40, 80, 13.0, 13.0, 1, 6.0, 60],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    // 2 decel samples should be skipped
+    expect(report.decelSamplesSkipped).toBe(2);
+
+    // Only 3 non-decel samples should count (2 Alpha-N + 1 idle Alpha-N)
+    expect(report.alphaNSamples).toBe(3);
+
+    // The Alpha-N map should only have corrections from non-decel samples
+    const result = report.results[0];
+    expect(result.totalSamplesUsed).toBe(3);
+  });
+
+  it('does not filter when vehicle speed channel is missing', () => {
+    // No Vehicle Speed channel → decel filter cannot apply
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // TPS=0 but no speed channel → should NOT be filtered
+        [2000, 0, 80, 14.7, 14.7, 1, 5.0],
+        [4000, 20, 80, 13.0, 13.0, 1, 6.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.decelSamplesSkipped).toBe(0);
+    expect(report.alphaNSamples).toBe(2);
+  });
+});
+
+// ─── STFT Integration Tests ─────────────────────────────────────────────────
+
+describe('STFT Integration', () => {
+  const alphaNMap = makeFuelMap({
+    rowAxis: [2000, 4000],
+    colAxis: [20, 40],
+    data: [
+      [5.0, 5.5],
+      [5.5, 6.0],
+    ],
+    targetLambda: [0.95, 0.95],
+    colLabel: 'TPS %',
+  });
+
+  it('factors negative STFT into correction (ECU pulling fuel)', () => {
+    // STFT = -10% means ECU is pulling 10% fuel
+    // Measured AFR = 14.7, but without ECU correction it would have been:
+    // true_afr = 14.7 / (1 + (-10)/100) = 14.7 / 0.9 = 16.33
+    // true_lambda = 16.33 / 14.7 = 1.111
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired', 'Short Term Fuel Trim',
+      ],
+      rows: [
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0, -10],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.hasStft).toBe(true);
+
+    const result = report.results[0];
+    const cell = result.corrections[0];
+
+    // true_afr = 14.7 / 0.9 = 16.333
+    // true_lambda = 16.333 / 14.7 ≈ 1.111
+    const expectedLambda = (14.7 / 0.9) / 14.7;
+    expect(cell.avgActualLambda).toBeCloseTo(expectedLambda, 3);
+    expect(cell.avgStft).toBe(-10);
+
+    // Correction factor should be higher than without STFT
+    // (table is too lean, needs more fuel)
+    expect(cell.correctionFactor).toBeGreaterThan(1.0);
+  });
+
+  it('factors positive STFT into correction (ECU adding fuel)', () => {
+    // STFT = +15% means ECU is adding 15% fuel
+    // Measured AFR = 12.5, but without ECU correction:
+    // true_afr = 12.5 / (1 + 15/100) = 12.5 / 1.15 = 10.87
+    // true_lambda = 10.87 / 14.7 = 0.739
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired', 'Short Term Fuel Trim',
+      ],
+      rows: [
+        [2000, 20, 80, 12.5, 12.5, 1, 5.0, 15],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const cell = report.results[0].corrections[0];
+
+    const expectedLambda = (12.5 / 1.15) / 14.7;
+    expect(cell.avgActualLambda).toBeCloseTo(expectedLambda, 3);
+    expect(cell.avgStft).toBe(15);
+
+    // Table is too rich, correction factor should be < 1
+    expect(cell.correctionFactor).toBeLessThan(1.0);
+  });
+
+  it('works without STFT channel (no adjustment applied)', () => {
+    // No STFT channel → correction should use raw AFR
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    expect(report.hasStft).toBe(false);
+
+    const cell = report.results[0].corrections[0];
+    // Without STFT, lambda = 14.7 / 14.7 = 1.0
+    expect(cell.avgActualLambda).toBeCloseTo(1.0, 3);
+    expect(cell.avgStft).toBeUndefined();
+  });
+
+  it('averages STFT across multiple samples in same cell', () => {
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired', 'Short Term Fuel Trim',
+      ],
+      rows: [
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0, -5],   // STFT = -5%
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0, 10],    // STFT = +10%
+        [2000, 20, 80, 14.7, 14.7, 1, 5.0, -3],    // STFT = -3%
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: alphaNMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const cell = report.results[0].corrections[0];
+    expect(cell.sampleCount).toBe(3);
+    // Average STFT = (-5 + 10 + -3) / 3 = 0.667%
+    expect(cell.avgStft).toBeCloseTo((-5 + 10 + -3) / 3, 2);
+  });
+});

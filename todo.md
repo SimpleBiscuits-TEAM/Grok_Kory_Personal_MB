@@ -2999,3 +2999,11 @@
 - [x] Build UI: "Correct Fuel Tables" button, correction preview, apply/revert
 - [x] Integrate corrections into existing fuel table editor (update cell values)
 - [x] Write tests for correction engine (17 tests passing)
+
+## Honda Talon Fuel Correction: Deceleration Filter + STFT Integration (2026-04-01)
+- [x] Skip correction samples where TPS = 0 AND vehicle speed > 0 (deceleration event)
+- [x] Integrate Short Term Fuel Trims (STFT) into correction factor when present in datalog
+- [x] STFT negative = ECU pulling fuel (subtract %), STFT positive = ECU adding fuel (add %)
+- [x] Keep logic reusable/documented for future Kawasaki fuel correction tool
+- [x] Update tests for deceleration filtering (2 tests)
+- [x] Update tests for STFT integration (4 tests)

@@ -8,11 +8,18 @@
  *   - Correction factor = actual_lambda / target_lambda per cell, averaged
  *   - Alpha-N channel = 1 → only Alpha-N tables; ≠ 1 → only Speed Density tables
  *   - Only cells visited in the datalog get corrected
+ *   - Skip deceleration events: TPS = 0 AND vehicle speed > 0
+ *   - When Short Term Fuel Trims (STFT) are present, factor them into the
+ *     actual AFR before computing lambda. Negative STFT = ECU pulling fuel,
+ *     positive STFT = ECU adding fuel. Corrected AFR = measured AFR / (1 + STFT/100).
  *   - Turbo auto-detection: MAP > 100 kPa = turbo
  *   - Turbo SD column lookup: use Desired Injector Pulsewidth interpolated against
  *     SD Cyl1 table (MAP not accurate enough on turbo applications)
  *   - When "Manifold Absolute Pressure Corrected" channel is available, use it for
  *     SD axis reference instead of raw MAP
+ *
+ * NOTE: Deceleration filter and STFT logic are designed to be reusable for
+ * future Kawasaki fuel correction tool.
  */
 
 import { WP8ParseResult, getHondaTalonKeyChannels } from './wp8Parser';
@@ -56,6 +63,7 @@ export interface CellCorrection {
   sampleCount: number;       // how many datalog samples hit this cell
   avgActualLambda: number;
   targetLambda: number;
+  avgStft?: number;          // average STFT % for this cell (if available)
 }
 
 /** Full correction result for one fuel map */
@@ -75,9 +83,11 @@ export interface CorrectionReport {
   isTurboDetected: boolean;
   hasAfr1: boolean;
   hasAfr2: boolean;
+  hasStft: boolean;
   totalSamples: number;
   alphaNSamples: number;
   sdSamples: number;
+  decelSamplesSkipped: number;
 }
 
 // ─── Target Lambda Presets ──────────────────────────────────────────────────
@@ -248,11 +258,15 @@ function extractChannelData(wp8Data: WP8ParseResult) {
     afr2: extract(keys.afr2),
     alphaN: extract(keys.alphaN),
     injPwDesired: extract(keys.injPwDesired),
+    vehicleSpeed: extract(keys.vehicleSpeed),
+    stft: extract(keys.stft),
     hasAfr1: keys.afr1 !== -1,
     hasAfr2: keys.afr2 !== -1,
     hasAlphaN: keys.alphaN !== -1,
     hasInjPwDesired: keys.injPwDesired !== -1,
     hasMapCorrected: keys.mapCorrected !== -1,
+    hasVehicleSpeed: keys.vehicleSpeed !== -1,
+    hasStft: keys.stft !== -1,
   };
 }
 
@@ -291,12 +305,12 @@ function computeMapCorrections(
     };
   }
 
-  // Accumulator: [row][col] → { sumLambda, count }
-  const accum: { sumLambda: number; count: number }[][] = [];
+  // Accumulator: [row][col] → { sumLambda, count, sumStft, stftCount }
+  const accum: { sumLambda: number; count: number; sumStft: number; stftCount: number }[][] = [];
   for (let r = 0; r < map.data.length; r++) {
     accum.push([]);
     for (let c = 0; c < map.data[r].length; c++) {
-      accum[r].push({ sumLambda: 0, count: 0 });
+      accum[r].push({ sumLambda: 0, count: 0, sumStft: 0, stftCount: 0 });
     }
   }
 
@@ -309,13 +323,40 @@ function computeMapCorrections(
 
     if (isNaN(rpm) || isNaN(afr) || afr <= 0) continue;
 
+    // ── Deceleration filter: skip TPS=0 + vehicle speed > 0 ──
+    // When throttle is closed and vehicle is moving, the engine is in
+    // decel fuel cut or overrun — AFR readings are meaningless.
+    // (Reusable pattern for Kawasaki tool)
+    const tpsVal = channelData.tps[i];
+    const vSpeed = channelData.vehicleSpeed[i];
+    if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
+      if (tpsVal === 0 && vSpeed > 0) continue;
+    }
+
     // Check if this sample belongs to this map's mode
     const sampleIsAlphaN = alphaNVal === 1;
     if (isAlphaN && !sampleIsAlphaN) continue;
     if (!isAlphaN && sampleIsAlphaN) continue;
 
-    // Convert AFR to lambda
-    const actualLambda = afr / 14.7;
+    // ── STFT adjustment ──
+    // If Short Term Fuel Trims are present, we need to account for the ECU's
+    // real-time corrections. The measured AFR already includes the STFT effect,
+    // so to get what the AFR *would have been* without the ECU's correction:
+    //   true_afr = measured_afr / (1 + STFT/100)
+    // Negative STFT = ECU pulling fuel → measured AFR is leaner than table commands
+    // Positive STFT = ECU adding fuel → measured AFR is richer than table commands
+    // (Reusable pattern for Kawasaki tool)
+    let correctedAfr = afr;
+    let stftVal = NaN;
+    if (channelData.hasStft) {
+      stftVal = channelData.stft[i];
+      if (Number.isFinite(stftVal)) {
+        correctedAfr = afr / (1 + stftVal / 100);
+      }
+    }
+
+    // Convert corrected AFR to lambda
+    const actualLambda = correctedAfr / 14.7;
 
     // Find the RPM row
     const rpmRow = findNearestIdx(map.rowAxis, rpm);
@@ -349,6 +390,10 @@ function computeMapCorrections(
 
     accum[rpmRow][col].sumLambda += actualLambda;
     accum[rpmRow][col].count++;
+    if (Number.isFinite(stftVal)) {
+      accum[rpmRow][col].sumStft += stftVal;
+      accum[rpmRow][col].stftCount++;
+    }
     totalSamples++;
   }
 
@@ -370,7 +415,7 @@ function computeMapCorrections(
       const originalValue = map.data[r][c];
       const correctedValue = originalValue * correctionFactor;
 
-      corrections.push({
+      const correction: CellCorrection = {
         row: r,
         col: c,
         originalValue,
@@ -379,7 +424,11 @@ function computeMapCorrections(
         sampleCount: cell.count,
         avgActualLambda: avgLambda,
         targetLambda,
-      });
+      };
+      if (cell.stftCount > 0) {
+        correction.avgStft = cell.sumStft / cell.stftCount;
+      }
+      corrections.push(correction);
     }
   }
 
@@ -408,10 +457,20 @@ export function computeCorrections(
   const channelData = extractChannelData(wp8Data);
   const isTurboDetected = detectTurbo(wp8Data);
 
-  // Count Alpha-N vs SD samples
+  // Count Alpha-N vs SD samples, and decel-filtered samples
   let alphaNSamples = 0;
   let sdSamples = 0;
+  let decelSamplesSkipped = 0;
   for (let i = 0; i < channelData.alphaN.length; i++) {
+    // Check decel filter at the top-level count too
+    const tpsVal = channelData.tps[i];
+    const vSpeed = channelData.vehicleSpeed[i];
+    if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
+      if (tpsVal === 0 && vSpeed > 0) {
+        decelSamplesSkipped++;
+        continue;
+      }
+    }
     if (channelData.alphaN[i] === 1) alphaNSamples++;
     else sdSamples++;
   }
@@ -443,9 +502,11 @@ export function computeCorrections(
     isTurboDetected,
     hasAfr1: channelData.hasAfr1,
     hasAfr2: channelData.hasAfr2,
+    hasStft: channelData.hasStft,
     totalSamples: channelData.rpm.length,
     alphaNSamples,
     sdSamples,
+    decelSamplesSkipped,
   };
 }
 
