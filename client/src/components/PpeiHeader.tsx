@@ -400,19 +400,40 @@ export default function PpeiHeader() {
           {visibleItems.map(item => {
             const isActive = location === item.path || 
               (item.path !== '/' && location.startsWith(item.path));
+            const mobileNavStyle = {
+              background: isActive ? sColor.navActiveBg : 'transparent',
+              border: isActive ? `1px solid ${sColor.navActive}` : `1px solid transparent`,
+              color: isActive ? sColor.navActive : sColor.navText,
+              padding: '4px 10px',
+              borderRadius: '2px',
+              fontFamily: sFont.heading,
+              fontSize: '0.7rem',
+              letterSpacing: '0.06em',
+              whiteSpace: 'nowrap' as const,
+              textDecoration: 'none' as const,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            };
+            if (item.external) {
+              return (
+                <a
+                  key={item.path}
+                  href={item.external}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={mobileNavStyle}
+                >
+                  {item.label}
+                  <svg width="7" height="7" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                    <path d="M4 1h7v7" /><path d="M11 1L1 11" />
+                  </svg>
+                </a>
+              );
+            }
             return (
               <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                <div style={{
-                  background: isActive ? sColor.navActiveBg : 'transparent',
-                  border: isActive ? `1px solid ${sColor.navActive}` : `1px solid transparent`,
-                  color: isActive ? sColor.navActive : sColor.navText,
-                  padding: '4px 10px',
-                  borderRadius: '2px',
-                  fontFamily: sFont.heading,
-                  fontSize: '0.7rem',
-                  letterSpacing: '0.06em',
-                  whiteSpace: 'nowrap',
-                }}>
+                <div style={mobileNavStyle}>
                   {item.label}
                 </div>
               </Link>
