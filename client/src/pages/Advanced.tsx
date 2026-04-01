@@ -1350,7 +1350,6 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'drag' as TabId, label: 'DRAG', icon: <Flag style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
-  { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1370,6 +1369,7 @@ const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
   { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
@@ -1654,8 +1654,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
-        {activeTab === 'pitch' && (isAdmin ? <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div> : <div className="ppei-anim-fade-up" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', gap: '1rem' }}><Lock style={{ width: 48, height: 48, color: sColor.red, opacity: 0.6 }} /><h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: sColor.red }}>ADMIN ACCESS REQUIRED</h2><p style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim, textAlign: 'center', maxWidth: '400px' }}>The Pitch panel requires administrator privileges. Please sign in with an admin account to access this feature.</p></div>)}
-        {activeTab === 'tasks' && (isAdmin ? <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div> : <div className="ppei-anim-fade-up" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', gap: '1rem' }}><Lock style={{ width: 48, height: 48, color: sColor.red, opacity: 0.6 }} /><h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: sColor.red }}>ADMIN ACCESS REQUIRED</h2><p style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim, textAlign: 'center', maxWidth: '400px' }}>The Tasks panel requires administrator privileges. Please sign in with an admin account to access this feature.</p></div>)}
+        {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
+        {activeTab === 'tasks' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div>}
         {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
         {activeTab === ('drag' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><DragPanel /></React.Suspense></div>}
       </main>

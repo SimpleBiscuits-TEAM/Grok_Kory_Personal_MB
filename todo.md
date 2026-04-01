@@ -3134,3 +3134,7 @@
 - [x] Move Tasks and Pitch from admin-only tab list to user-visible tab list in Advanced.tsx
 - [x] Keep admin password/access requirement for viewing content (show access denied if not admin)
 - [x] Ensure tabs are visible to all users under Advanced
+
+## Tasks/Pitch Access Control Update
+- [x] Move Tasks back to admin-only tab list (visible only when isAdmin, no password gate)
+- [x] Make Pitch fully public (visible to all users, no admin gate on content)
