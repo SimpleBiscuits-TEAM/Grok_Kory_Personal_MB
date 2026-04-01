@@ -9,7 +9,7 @@
  *   - Footer: Run name, warnings, disclaimer
  *
  * Features:
- *   - WOT qualification: requires 3+ seconds of TPS > 90%
+ *   - WOT qualification: requires 3+ seconds of TPS > 72° (Honda Talon uses degrees, full throttle ≈ 80°)
  *   - AFR correction factor applied to injector PW for HP calculation
  *   - Wideband availability warning
  *   - PNG export / download
@@ -70,7 +70,7 @@ export interface DynoSheetData {
 
 // ─── WOT Detection & AFR Correction ────────────────────────────────────────
 
-const WOT_TPS_THRESHOLD = 90;    // degrees — consider WOT above this
+const WOT_TPS_THRESHOLD = 72;    // degrees — Honda Talon TPS is in degrees of rotation (full throttle ≈ 80°)
 const WOT_MIN_DURATION_SEC = 3;  // minimum 3 seconds of WOT
 const NA_TARGET_LAMBDA = 0.85;
 const TURBO_TARGET_LAMBDA = 0.80;
@@ -190,7 +190,7 @@ export function buildDynoSheetData(
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
       fileName, warnings,
       qualified: false,
-      disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}%+ TPS)`,
+      disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}°+ TPS)`,
     };
   }
 
@@ -912,7 +912,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
         <p className="text-zinc-400 mb-4">{data.disqualifyReason}</p>
         <p className="text-zinc-500 text-sm">
           The datalog must contain at least {WOT_MIN_DURATION_SEC} seconds of full throttle
-          (TPS &gt; {WOT_TPS_THRESHOLD}%) to generate a virtual dyno sheet.
+          (TPS &gt; {WOT_TPS_THRESHOLD}°) to generate a virtual dyno sheet.
         </p>
         {data.warnings.length > 0 && (
           <div className="mt-4 text-left max-w-md mx-auto">

@@ -3073,3 +3073,8 @@
 - [x] Legend entries for both current and baseline peak values
 - [x] Delta stats below canvas (green/red +/- HP and torque vs baseline)
 - [x] Move DIAGNOSTIC tab from user-facing tabs to admin-only tabs
+
+## Honda Talon: Fix WOT Detection for Degrees-Based TPS (2026-04-01)
+- [x] Change WOT threshold from 90% to 72° for Honda Talon (TPS measured in degrees, full throttle ≈ 80°)
+- [x] Update disqualify message to show degrees instead of percent for Talon logs
+- [x] Ensure correction engine and other TPS-dependent logic also use degree-aware thresholds

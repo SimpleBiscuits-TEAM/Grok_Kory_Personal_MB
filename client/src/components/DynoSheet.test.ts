@@ -2,7 +2,7 @@
  * Tests for PPEI Virtual Dyno Sheet — buildDynoSheetData
  *
  * Covers:
- *   - WOT qualification (3s minimum at TPS > 90%)
+ *   - WOT qualification (3s minimum at TPS > 72°)
  *   - Disqualification when no WOT run found
  *   - Missing channel handling (RPM, Inj PW)
  *   - Wideband availability detection and warning
@@ -57,7 +57,7 @@ function makeWP8(
 
 /**
  * Generate a WOT pull: ramps RPM from startRPM to endRPM over durationMs
- * at full throttle (TPS=100), with a given injector PW.
+ * at full throttle (TPS=80°, Honda Talon degrees), with a given injector PW.
  */
 function generateWOTPull(
   channelNames: string[],
@@ -75,7 +75,7 @@ function generateWOTPull(
     startRPM = 3000,
     endRPM = 9000,
     durationMs = 5000,
-    tps = 100,
+    tps = 80,
     injPW = 5.0,
     afr = 12.5,
     sampleIntervalMs = 50,
