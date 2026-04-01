@@ -3129,3 +3129,8 @@
 - [x] Alpha-N channel = 1 means PW comes from Alpha-N tables only (correct Alpha-N tables)
 - [x] Alpha-N channel = 0 means PW comes from Speed Density tables only (correct SD tables)
 - [x] VERIFIED: Logic is correct — uploaded WP8 log contains BOTH Alpha-N=1 (1526 samples) and Alpha-N=0 (615 samples), so corrections appearing in both tables is expected behavior (ECU switches modes during driving)
+
+## Fix: Tasks and Pitch Tabs Missing from Advanced Page
+- [x] Move Tasks and Pitch from admin-only tab list to user-visible tab list in Advanced.tsx
+- [x] Keep admin password/access requirement for viewing content (show access denied if not admin)
+- [x] Ensure tabs are visible to all users under Advanced
