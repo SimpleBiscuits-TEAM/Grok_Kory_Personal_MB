@@ -3014,3 +3014,8 @@
 - [x] Single-sensor fallback: if only AFR1/Lambda1 present (no AFR2/Lambda2), use it for both cylinders
 - [x] Detect dyno logs by presence of horsepower/torque channels (informational)
 - [x] Update tests for Lambda channel usage and single-sensor fallback (5 new tests, 28 total)
+
+## Honda Talon Fuel Correction: Highlight Corrected Cells (2026-04-01)
+- [x] Track which cells were corrected after applying corrections
+- [x] Highlight corrected cells in the fuel table editor with a distinct visual style (green border + glow)
+- [x] Clear highlights when corrections are reverted

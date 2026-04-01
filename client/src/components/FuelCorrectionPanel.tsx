@@ -313,7 +313,7 @@ export default function FuelCorrectionPanel({
 }: {
   fuelMaps: FuelMapState;
   wp8Data: WP8ParseResult | null;
-  onApplyCorrections: (correctedMaps: Partial<FuelMapState>) => void;
+  onApplyCorrections: (correctedMaps: Partial<FuelMapState>, correctionResults?: MapCorrectionResult[]) => void;
   onUpdateTargetLambda: (mapKey: keyof FuelMapState, targets: number[]) => void;
 }) {
   const [vehicleMode, setVehicleMode] = useState<VehicleMode>('na');
@@ -356,14 +356,14 @@ export default function FuelCorrectionPanel({
         corrected[result.mapKey] = applyCorrectionToMap(map, result.corrections);
       }
     }
-    onApplyCorrections(corrected);
+    onApplyCorrections(corrected, report.results);
     setHasApplied(true);
   }, [report, fuelMaps, onApplyCorrections]);
 
   // Revert corrections
   const handleRevert = useCallback(() => {
     if (preApplyMaps) {
-      onApplyCorrections(preApplyMaps);
+      onApplyCorrections(preApplyMaps); // no correctionResults = clear highlights
       setHasApplied(false);
       setPreApplyMaps(null);
     }

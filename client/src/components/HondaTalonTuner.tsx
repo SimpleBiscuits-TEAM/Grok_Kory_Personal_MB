@@ -22,7 +22,10 @@ import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '
 import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
 import FuelCorrectionPanel from '@/components/FuelCorrectionPanel';
-import { FuelMapState as CorrectionFuelMapState } from '@/lib/talonFuelCorrection';
+import { FuelMapState as CorrectionFuelMapState, MapCorrectionResult } from '@/lib/talonFuelCorrection';
+
+/** Tracks which cells were corrected per fuel map, keyed by mapKey */
+export type CorrectedCellsMap = Record<string, Set<string>>;
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
 const sColor = {
@@ -217,6 +220,7 @@ function FuelMapCard({
   onCellEdit,
   onTargetLambdaEdit,
   overlay,
+  correctedCells,
 }: {
   config: typeof FUEL_MAP_CONFIGS[number];
   map: FuelMap | null;
@@ -225,6 +229,7 @@ function FuelMapCard({
   onCellEdit: (row: number, col: number, value: number) => void;
   onTargetLambdaEdit: (col: number, value: number) => void;
   overlay?: CellOverlay | null;
+  correctedCells?: Set<string> | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
@@ -786,9 +791,13 @@ function FuelMapCard({
                             fontSize: '0.68rem',
                             border: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '3px solid white'
-                              : isEditing ? `2px solid ${sColor.redBright}` : '1px solid oklch(0.40 0.006 260)',
+                              : isEditing ? `2px solid ${sColor.redBright}`
+                              : correctedCells?.has(`${ri}:${ci}`) ? '2px solid oklch(0.75 0.18 145)'
+                              : '1px solid oklch(0.40 0.006 260)',
                             boxShadow: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
-                              ? '0 0 8px rgba(255,255,255,0.5)' : 'none',
+                              ? '0 0 8px rgba(255,255,255,0.5)'
+                              : correctedCells?.has(`${ri}:${ci}`) ? '0 0 6px oklch(0.65 0.18 145 / 0.5)'
+                              : 'none',
                           }}
                         >
                           {isEditing ? (
@@ -1226,6 +1235,9 @@ export default function HondaTalonTuner({
   const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct'>('fuelmaps');
   const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
 
+  // Track which cells were corrected (for highlighting in fuel map editor)
+  const [correctedCells, setCorrectedCells] = useState<CorrectedCellsMap>({});
+
   // Compare state: stock vs modified for each map slot
   const [compareMaps, setCompareMaps] = useState<FuelMapState>({
     alphaN_cyl1: null, alphaN_cyl2: null,
@@ -1307,7 +1319,10 @@ export default function HondaTalonTuner({
   }, []);
 
   // ─── Fuel Correction Handlers ────────────────────────────────────────────
-  const handleApplyCorrections = useCallback((correctedMaps: Partial<FuelMapState>) => {
+  const handleApplyCorrections = useCallback((
+    correctedMaps: Partial<FuelMapState>,
+    correctionResults?: MapCorrectionResult[],
+  ) => {
     setFuelMaps(prev => {
       const next = { ...prev };
       for (const [key, map] of Object.entries(correctedMaps)) {
@@ -1315,6 +1330,22 @@ export default function HondaTalonTuner({
       }
       return next;
     });
+
+    // Build corrected cells map for highlighting
+    if (correctionResults) {
+      const cellsMap: CorrectedCellsMap = {};
+      for (const result of correctionResults) {
+        const cellSet = new Set<string>();
+        for (const corr of result.corrections) {
+          cellSet.add(`${corr.row}:${corr.col}`);
+        }
+        cellsMap[result.mapKey] = cellSet;
+      }
+      setCorrectedCells(cellsMap);
+    } else {
+      // Revert: clear all highlights
+      setCorrectedCells({});
+    }
   }, []);
 
   const handleUpdateTargetLambda = useCallback((mapKey: keyof FuelMapState, targets: number[]) => {
@@ -1446,6 +1477,7 @@ export default function HondaTalonTuner({
               onCellEdit={(row, col, val) => handleCellEdit(config.key, row, col, val)}
               onTargetLambdaEdit={(col, val) => handleTargetLambdaEdit(config.key, col, val)}
               overlay={computeCellOverlay(fuelMaps[config.key], cursorData, config.key)}
+              correctedCells={correctedCells[config.key] || null}
             />
           ))}
         </div>
@@ -1466,7 +1498,7 @@ export default function HondaTalonTuner({
         <FuelCorrectionPanel
           fuelMaps={fuelMaps as unknown as CorrectionFuelMapState}
           wp8Data={localWP8}
-          onApplyCorrections={(corrected) => handleApplyCorrections(corrected as Partial<FuelMapState>)}
+          onApplyCorrections={(corrected, results) => handleApplyCorrections(corrected as Partial<FuelMapState>, results)}
           onUpdateTargetLambda={(key, targets) => handleUpdateTargetLambda(key as keyof FuelMapState, targets)}
         />
       )}
