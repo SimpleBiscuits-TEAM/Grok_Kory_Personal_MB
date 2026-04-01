@@ -265,8 +265,10 @@ function extractChannelData(wp8Data: WP8ParseResult) {
   //      use it for both cylinders
   const hasAfr1 = keys.afr1 !== -1;
   const hasAfr2 = keys.afr2 !== -1;
-  const hasLambda1 = keys.lambda1 !== -1;
-  const hasLambda2 = keys.lambda2 !== -1;
+  const hasLambda1 = keys.lambda1 !== -1 || keys.pc5Lambda1 !== -1;
+  const hasLambda2 = keys.lambda2 !== -1 || keys.pc5Lambda2 !== -1;
+  const lambda1Idx = keys.lambda1 !== -1 ? keys.lambda1 : keys.pc5Lambda1;
+  const lambda2Idx = keys.lambda2 !== -1 ? keys.lambda2 : keys.pc5Lambda2;
 
   // Determine which source to use
   const useLambdaChannels = !hasAfr1 && hasLambda1;
@@ -276,10 +278,10 @@ function extractChannelData(wp8Data: WP8ParseResult) {
   let isAlreadyLambda: boolean;
 
   if (useLambdaChannels) {
-    // Dyno log: use Lambda channels directly
-    cyl1Data = extract(keys.lambda1);
+    // Dyno log or PC5: use Lambda channels directly
+    cyl1Data = extract(lambda1Idx);
     // Single-sensor fallback: if Lambda2 not available, use Lambda1 for both
-    cyl2Data = hasLambda2 ? extract(keys.lambda2) : cyl1Data;
+    cyl2Data = hasLambda2 ? extract(lambda2Idx) : cyl1Data;
     isAlreadyLambda = true;
   } else {
     // Standard log: use AFR channels
@@ -292,14 +294,18 @@ function extractChannelData(wp8Data: WP8ParseResult) {
   return {
     rpm: extract(keys.engineSpeed),
     tps: extract(keys.throttlePosition),
-    map: keys.mapCorrected !== -1 ? extract(keys.mapCorrected) : extract(keys.map),
+    map: keys.mapCorrected !== -1 ? extract(keys.mapCorrected)
+      : keys.honda3BarMap !== -1 ? extract(keys.honda3BarMap)
+      : extract(keys.map),
     cyl1: cyl1Data,
     cyl2: cyl2Data,
     isAlreadyLambda,
     alphaN: extract(keys.alphaN),
     injPwDesired: extract(keys.injPwDesired),
     vehicleSpeed: extract(keys.vehicleSpeed),
-    stft: extract(keys.stft),
+    stft: keys.stft !== -1 ? extract(keys.stft)
+      : keys.polarisTotalFuelTrim !== -1 ? extract(keys.polarisTotalFuelTrim)
+      : [],
     hasAfr1,
     hasAfr2,
     hasLambda1,
@@ -308,7 +314,7 @@ function extractChannelData(wp8Data: WP8ParseResult) {
     hasInjPwDesired: keys.injPwDesired !== -1,
     hasMapCorrected: keys.mapCorrected !== -1,
     hasVehicleSpeed: keys.vehicleSpeed !== -1,
-    hasStft: keys.stft !== -1,
+    hasStft: keys.stft !== -1 || keys.polarisTotalFuelTrim !== -1,
     isDynoLog,
   };
 }

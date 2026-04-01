@@ -60,6 +60,7 @@ export interface DynoSheetData {
   peakTorque: number;
   peakTorqueRpm: number;
   hasWideband: boolean;
+  hasDynoData: boolean;
   isTurbo: boolean;
   fileName: string;
   warnings: string[];
@@ -95,12 +96,33 @@ export function buildDynoSheetData(
   const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
   const ignIdx = keys.ignitionTiming;
 
-  // AFR/Lambda channels
+  // AFR/Lambda channels — check multiple sources (PC5 lambda, standard lambda, AFR, AFR Average)
   const afr1Idx = keys.afr1;
-  const lambda1Idx = keys.lambda1;
-  const hasWideband = afr1Idx >= 0 || lambda1Idx >= 0;
+  const lambda1Idx = keys.lambda1 >= 0 ? keys.lambda1 : keys.pc5Lambda1;
+  const afrAvgIdx = keys.afrAverage;
+  const hasWideband = afr1Idx >= 0 || lambda1Idx >= 0 || afrAvgIdx >= 0;
+  // Determine which channel to use: AFR1 > Lambda1/PC5 > AFR Average
   const isLambdaChannel = afr1Idx < 0 && lambda1Idx >= 0;
-  const afrSourceIdx = afr1Idx >= 0 ? afr1Idx : lambda1Idx;
+  const afrSourceIdx = afr1Idx >= 0 ? afr1Idx : (lambda1Idx >= 0 ? lambda1Idx : afrAvgIdx);
+
+  // Check for real dyno HP/Torque channels (from actual dyno runs)
+  const realHPIdx = keys.horsepower >= 0 ? keys.horsepower
+    : keys.power >= 0 ? keys.power
+    : keys.normalizedPower >= 0 ? keys.normalizedPower
+    : keys.power1 >= 0 ? keys.power1 : -1;
+  const realTorqueIdx = keys.torque >= 0 ? keys.torque
+    : keys.torqueUncorrected >= 0 ? keys.torqueUncorrected : -1;
+  const hasDynoData = realHPIdx >= 0 && realTorqueIdx >= 0;
+
+  if (hasDynoData) {
+    warnings.push('Real dyno HP/Torque channels detected — using measured power data.');
+  }
+
+  // Honda 3-bar MAP for turbo detection
+  const honda3BarIdx = keys.honda3BarMap;
+  if (honda3BarIdx >= 0 && !config.isTurbo) {
+    warnings.push('Honda 3-bar MAP sensor detected — vehicle may be turbocharged.');
+  }
 
   if (!hasWideband) {
     warnings.push('No wideband AFR/Lambda data available — HP numbers may not be accurate. Install a wideband O2 sensor for more precise results.');
@@ -109,7 +131,7 @@ export function buildDynoSheetData(
   if (rpmIdx < 0) {
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
-      peakTorque: 0, peakTorqueRpm: 0, hasWideband, isTurbo: config.isTurbo,
+      peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
       fileName, warnings: ['Missing Engine Speed channel — cannot generate dyno sheet'],
       qualified: false, disqualifyReason: 'Missing Engine Speed channel',
     };
@@ -118,7 +140,7 @@ export function buildDynoSheetData(
   if (injPWIdx < 0) {
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
-      peakTorque: 0, peakTorqueRpm: 0, hasWideband, isTurbo: config.isTurbo,
+      peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
       fileName, warnings: ['Missing Injector Pulsewidth channel — cannot estimate power'],
       qualified: false, disqualifyReason: 'Missing Injector Pulsewidth channel',
     };
@@ -148,7 +170,7 @@ export function buildDynoSheetData(
     } else if (!isWOT && wotStart >= 0) {
       const runLength = i - wotStart;
       if (runLength >= minWOTSamples) {
-        wotRuns.push(buildWOTRun(wp8, wotStart, i - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate));
+        wotRuns.push(buildWOTRun(wp8, wotStart, i - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
       }
       wotStart = -1;
     }
@@ -158,14 +180,14 @@ export function buildDynoSheetData(
   if (wotStart >= 0) {
     const runLength = wp8.rows.length - wotStart;
     if (runLength >= minWOTSamples) {
-      wotRuns.push(buildWOTRun(wp8, wotStart, wp8.rows.length - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate));
+      wotRuns.push(buildWOTRun(wp8, wotStart, wp8.rows.length - 1, keys, config, fuel, injFlowRate, targetLambda, hasWideband, isLambdaChannel, afrSourceIdx, sampleRate, hasDynoData, realHPIdx, realTorqueIdx));
     }
   }
 
   if (wotRuns.length === 0) {
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
-      peakTorque: 0, peakTorqueRpm: 0, hasWideband, isTurbo: config.isTurbo,
+      peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
       fileName, warnings,
       qualified: false,
       disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}%+ TPS)`,
@@ -216,6 +238,7 @@ export function buildDynoSheetData(
     peakTorque: Math.round(peakTorque * 1000) / 1000,
     peakTorqueRpm,
     hasWideband,
+    hasDynoData,
     isTurbo: config.isTurbo,
     fileName,
     warnings,
@@ -236,11 +259,16 @@ function buildWOTRun(
   isLambdaChannel: boolean,
   afrSourceIdx: number,
   sampleRate: number,
+  hasDynoData: boolean = false,
+  realHPIdx: number = -1,
+  realTorqueIdx: number = -1,
 ): WOTRun {
   const rpmIdx = keys.engineSpeed;
   const tpsIdx = keys.throttlePosition;
   const injPWIdx = keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired;
-  const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
+  const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected
+    : keys.honda3BarMap >= 0 ? keys.honda3BarMap
+    : keys.map;
 
   const points: RunDataPoint[] = [];
 
@@ -279,12 +307,20 @@ function buildWOTRun(
       correctedPW, rpm, injFlowRate, fuel.density,
     );
 
-    // Estimate HP
-    let hp = estimateHP(fuelFlowGPerSec, fuel.bsfc);
-    hp *= config.dynoCalibrationFactor;
-
-    // Calculate torque
-    const torque = calculateTorque(hp, rpm);
+    // Use real dyno data if available, otherwise estimate from fuel flow
+    let hp: number;
+    let torque: number;
+    if (hasDynoData && realHPIdx >= 0 && realTorqueIdx >= 0) {
+      hp = Math.abs(row.values[realHPIdx]);
+      torque = Math.abs(row.values[realTorqueIdx]);
+      // Filter out unrealistic values (sensor noise / roller artifacts)
+      if (hp > 500) hp = 0;
+      if (torque > 500) torque = 0;
+    } else {
+      hp = estimateHP(fuelFlowGPerSec, fuel.bsfc);
+      hp *= config.dynoCalibrationFactor;
+      torque = calculateTorque(hp, rpm);
+    }
 
     points.push({
       rpm,
@@ -311,6 +347,7 @@ function buildWOTRun(
 interface DynoSheetProps {
   data: DynoSheetData;
   config: VirtualDynoConfig;
+  compareData?: DynoSheetData | null;
 }
 
 const CANVAS_WIDTH = 1200;
@@ -336,12 +373,17 @@ const COLORS = {
   peakMarker: '#333333',
   warning: '#B45309',
   ppeiRed: '#CC0000',
+  // Comparison overlay colors (dashed, lighter)
+  hpLineCompare: '#93C5FD',     // light blue for comparison HP
+  torqueLineCompare: '#FCA5A5', // light red for comparison torque
+  rpmLineCompare: '#FCA5A5',    // light red for comparison RPM
 };
 
 function drawDynoSheet(
   canvas: HTMLCanvasElement,
   data: DynoSheetData,
   logoImg: HTMLImageElement | null,
+  compareData?: DynoSheetData | null,
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -366,6 +408,20 @@ function drawDynoSheet(
   ctx.font = 'bold 16px Arial, sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('PPEI Virtual Dyno', W / 2, 72);
+
+  // MEASURED vs ESTIMATED badge
+  const badgeText = data.hasDynoData ? 'MEASURED' : 'ESTIMATED';
+  const badgeColor = data.hasDynoData ? '#22c55e' : '#f59e0b';
+  ctx.font = 'bold 10px Arial, sans-serif';
+  const badgeW = ctx.measureText(badgeText).width + 12;
+  const badgeX = W / 2 + ctx.measureText('PPEI Virtual Dyno').width / 2 + 8;
+  ctx.fillStyle = badgeColor;
+  ctx.beginPath();
+  ctx.roundRect(badgeX - 2, 60, badgeW, 16, 3);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.textAlign = 'left';
+  ctx.fillText(badgeText, badgeX + 4, 72);
 
   // Config info (right side)
   ctx.font = '11px Arial, sans-serif';
@@ -444,6 +500,23 @@ function drawDynoSheet(
     ctx.fillText(String(r), chartLeft - 5, y + 3);
   }
 
+  // Draw comparison RPM trace (behind main)
+  if (compareData && compareData.hpCurve.length > 0) {
+    ctx.beginPath();
+    ctx.strokeStyle = COLORS.rpmLineCompare;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    let cFirst = true;
+    for (const pt of compareData.hpCurve) {
+      const x = rpmToX(pt.rpm);
+      const y = rpmToY_panel1(pt.rpm);
+      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // Draw RPM trace line
   ctx.beginPath();
   ctx.strokeStyle = COLORS.rpmLine;
@@ -500,6 +573,23 @@ function drawDynoSheet(
     ctx.fillText(String(hp), chartLeft - 5, y + 3);
   }
 
+  // Draw comparison HP curve (behind main)
+  if (compareData && compareData.hpCurve.length > 0) {
+    ctx.beginPath();
+    ctx.strokeStyle = COLORS.hpLineCompare;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    let cFirst = true;
+    for (const pt of compareData.hpCurve) {
+      const x = rpmToX(pt.rpm);
+      const y = hpToY(pt.hp);
+      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // Draw HP curve
   ctx.beginPath();
   ctx.strokeStyle = COLORS.hpLine;
@@ -537,7 +627,7 @@ function drawDynoSheet(
   // Legend box
   const legendY = hpChartTop + 15;
   ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(chartLeft + chartWidth * 0.25, legendY - 12, 320, 20);
+  ctx.fillRect(chartLeft + chartWidth * 0.25, legendY - 12, 320, compareData ? 36 : 20);
   ctx.fillStyle = COLORS.hpLine;
   ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, legendY - 5, 10, 10);
   ctx.fillStyle = COLORS.text;
@@ -547,6 +637,15 @@ function drawDynoSheet(
     `Max Power = ${data.peakHP.toFixed(3)} at Engine RPM = ${(data.peakHPRpm / 1000).toFixed(3)}`,
     chartLeft + chartWidth * 0.25 + 20, legendY + 3,
   );
+  if (compareData && compareData.qualified) {
+    ctx.fillStyle = COLORS.hpLineCompare;
+    ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, legendY + 11, 10, 10);
+    ctx.fillStyle = COLORS.textLight;
+    ctx.fillText(
+      `Baseline Power = ${compareData.peakHP.toFixed(3)} at ${(compareData.peakHPRpm / 1000).toFixed(3)}`,
+      chartLeft + chartWidth * 0.25 + 20, legendY + 19,
+    );
+  }
 
   // Separator bar
   drawSeparator(ctx, 0, hpPanelY + hpPanelHeight, W, SEPARATOR_HEIGHT);
@@ -580,6 +679,23 @@ function drawDynoSheet(
   for (let t = 0; t <= maxTorque; t += 10) {
     const y = torqueToY(t);
     ctx.fillText(String(t), chartLeft - 5, y + 3);
+  }
+
+  // Draw comparison Torque curve (behind main)
+  if (compareData && compareData.hpCurve.length > 0) {
+    ctx.beginPath();
+    ctx.strokeStyle = COLORS.torqueLineCompare;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    let cFirst = true;
+    for (const pt of compareData.hpCurve) {
+      const x = rpmToX(pt.rpm);
+      const y = torqueToY(pt.torque);
+      if (cFirst) { ctx.moveTo(x, y); cFirst = false; }
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   // Draw Torque curve
@@ -619,7 +735,7 @@ function drawDynoSheet(
   // Legend box
   const tqLegendY = torqueChartTop + 15;
   ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(chartLeft + chartWidth * 0.25, tqLegendY - 12, 340, 20);
+  ctx.fillRect(chartLeft + chartWidth * 0.25, tqLegendY - 12, 340, compareData ? 36 : 20);
   ctx.fillStyle = COLORS.torqueLine;
   ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, tqLegendY - 5, 10, 10);
   ctx.fillStyle = COLORS.text;
@@ -629,6 +745,15 @@ function drawDynoSheet(
     `Max Torque = ${data.peakTorque.toFixed(3)} at Engine RPM = ${(data.peakTorqueRpm / 1000).toFixed(3)}`,
     chartLeft + chartWidth * 0.25 + 20, tqLegendY + 3,
   );
+  if (compareData && compareData.qualified) {
+    ctx.fillStyle = COLORS.torqueLineCompare;
+    ctx.fillRect(chartLeft + chartWidth * 0.25 + 5, tqLegendY + 11, 10, 10);
+    ctx.fillStyle = COLORS.textLight;
+    ctx.fillText(
+      `Baseline Torque = ${compareData.peakTorque.toFixed(3)} at ${(compareData.peakTorqueRpm / 1000).toFixed(3)}`,
+      chartLeft + chartWidth * 0.25 + 20, tqLegendY + 19,
+    );
+  }
 
   // ─── X-axis (shared) ───────────────────────────────────────────────
   ctx.fillStyle = COLORS.axisLabel;
@@ -727,7 +852,7 @@ function drawSeparator(
 
 // ─── React Component ────────────────────────────────────────────────────────
 
-export default function DynoSheet({ data, config }: DynoSheetProps) {
+export default function DynoSheet({ data, config, compareData }: DynoSheetProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [logoImg, setLogoImg] = useState<HTMLImageElement | null>(null);
@@ -748,8 +873,8 @@ export default function DynoSheet({ data, config }: DynoSheetProps) {
 
     canvas.width = CANVAS_WIDTH;
     canvas.height = CANVAS_HEIGHT;
-    drawDynoSheet(canvas, data, logoImg);
-  }, [data, logoImg]);
+    drawDynoSheet(canvas, data, logoImg, compareData);
+  }, [data, logoImg, compareData]);
 
   // Download as PNG
   const handleDownload = useCallback(() => {
@@ -857,11 +982,21 @@ export default function DynoSheet({ data, config }: DynoSheetProps) {
           <div className="text-xs text-zinc-500 uppercase tracking-wider">Peak HP</div>
           <div className="text-xl font-bold text-blue-400">{data.peakHP.toFixed(1)}</div>
           <div className="text-xs text-zinc-500">@ {data.peakHPRpm} RPM</div>
+          {compareData && compareData.qualified && (
+            <div className="text-xs mt-1" style={{ color: data.peakHP > compareData.peakHP ? '#22c55e' : data.peakHP < compareData.peakHP ? '#ef4444' : '#888' }}>
+              {data.peakHP > compareData.peakHP ? '+' : ''}{(data.peakHP - compareData.peakHP).toFixed(1)} HP vs baseline
+            </div>
+          )}
         </div>
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
           <div className="text-xs text-zinc-500 uppercase tracking-wider">Peak Torque</div>
           <div className="text-xl font-bold text-red-400">{data.peakTorque.toFixed(1)}</div>
           <div className="text-xs text-zinc-500">@ {data.peakTorqueRpm} RPM</div>
+          {compareData && compareData.qualified && (
+            <div className="text-xs mt-1" style={{ color: data.peakTorque > compareData.peakTorque ? '#22c55e' : data.peakTorque < compareData.peakTorque ? '#ef4444' : '#888' }}>
+              {data.peakTorque > compareData.peakTorque ? '+' : ''}{(data.peakTorque - compareData.peakTorque).toFixed(1)} ft-lbs vs baseline
+            </div>
+          )}
         </div>
         <div className="bg-zinc-900 border border-zinc-700 rounded p-3 text-center">
           <div className="text-xs text-zinc-500 uppercase tracking-wider">WOT Runs</div>

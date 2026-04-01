@@ -11,7 +11,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Zap, Wind, Gauge, CheckCircle, AlertTriangle, RotateCcw,
-  ChevronDown, ChevronRight, Wrench, Target, Info
+  ChevronDown, ChevronRight, Wrench, Target, Info, Download
 } from 'lucide-react';
 import { WP8ParseResult } from '@/lib/wp8Parser';
 import {
@@ -652,6 +652,49 @@ export default function FuelCorrectionPanel({
                 >
                   <RotateCcw style={{ width: 14, height: 14 }} />
                   REVERT
+                </button>
+                <button
+                  onClick={() => {
+                    // Export all corrected fuel maps as CSV files
+                    for (const result of report.results) {
+                      const map = fuelMaps[result.mapKey];
+                      if (!map || result.corrections.length === 0) continue;
+                      // Apply corrections to get the corrected map
+                      const correctedMap = applyCorrectionToMap(map, result.corrections);
+                      // Build CSV
+                      const lines: string[] = [];
+                      lines.push([`${correctedMap.rowLabel}\\${correctedMap.colLabel}`, ...correctedMap.colAxis.map(v => v.toString())].join(','));
+                      for (let ri = 0; ri < correctedMap.rowAxis.length; ri++) {
+                        lines.push([correctedMap.rowAxis[ri].toString(), ...correctedMap.data[ri].map(v => v.toFixed(3))].join(','));
+                      }
+                      const csv = lines.join('\n') + '\n';
+                      const safeName = result.mapKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+/g, '_');
+                      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${safeName}_corrected.csv`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    }
+                  }}
+                  style={{
+                    background: 'transparent',
+                    color: sColor.cyan,
+                    border: `1px solid ${sColor.cyan}`,
+                    borderRadius: '2px',
+                    padding: '8px 16px',
+                    cursor: 'pointer',
+                    fontFamily: sFont.heading,
+                    fontSize: '0.9rem',
+                    letterSpacing: '0.06em',
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                  }}
+                >
+                  <Download style={{ width: 14, height: 14 }} />
+                  EXPORT ALL CSV
                 </button>
               </>
             )}

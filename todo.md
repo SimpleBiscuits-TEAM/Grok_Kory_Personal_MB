@@ -3045,3 +3045,31 @@
 - [x] Downloadable/printable dyno sheet (PNG export)
 - [x] Integrate into DYNO tab in HondaTalonTuner
 - [x] Write tests for WOT detection and AFR correction logic (15 tests passing)
+
+## WP8 Dyno Log Analysis Findings (2026-04-01)
+- [x] Analyzed 602 WP8 dyno logs across 4 customer batches (BradBuller, CrossKirchmeier, GaryNicholson, George)
+- [x] Identified Engine Oil Temperature Sensor Voltage channel (%Engine Oil Temperature Sensor Voltage)
+- [x] Identified IR Temp Probe Reading channel (infrared temp)
+- [x] Identified Module Voltage channel (ECU supply voltage)
+- [ ] Add Engine Oil Temperature Sensor Voltage to wp8Parser getHondaTalonKeyChannels
+- [ ] Add IR Temp Probe Reading channel to wp8Parser
+- [ ] Add Module Voltage channel to wp8Parser
+- [ ] Study oil temp voltage correlation with power output across runs
+- [ ] Build NTC thermistor voltage-to-temperature conversion for Honda Talon
+- [ ] Update virtual dyno engine with calibration data from real dyno logs
+- [ ] Add oil temp voltage display to TalonLogViewer cursor data
+
+## Honda Talon Sprint: CSV Export, Tooltips, Dyno Overlay, Admin Tab (2026-04-01)
+- [x] Add MEASURED/ESTIMATED badge to virtual dyno sheet (based on wideband availability)
+- [x] Add corrected fuel table CSV export for re-import into C3 Tuning Software
+- [x] Add CSV export button to individual FuelMapCard (per-table export)
+- [x] Add EXPORT ALL CORRECTED CSV button to FuelCorrectionPanel (bulk export)
+- [x] CSV format matches C3 Tuning Software import format (RPM rows × axis columns)
+- [x] Add rich tooltips on corrected cells showing original value, corrected value, correction factor, actual/target lambda, sample count, STFT
+- [x] Changed CorrectedCellsMap from Set<string> to Map<string, CorrectedCellInfo> for metadata storage
+- [x] Add dyno comparison overlay feature (before/after tune overlay)
+- [x] Upload baseline WP8 datalog for comparison overlay on dyno sheet
+- [x] Dashed lighter curves for baseline HP/Torque/RPM traces behind main curves
+- [x] Legend entries for both current and baseline peak values
+- [x] Delta stats below canvas (green/red +/- HP and torque vs baseline)
+- [x] Move DIAGNOSTIC tab from user-facing tabs to admin-only tabs

@@ -1339,7 +1339,6 @@ type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' |
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'analyzer', label: 'ANALYZER', icon: <BarChart3 style={{ width: 16, height: 16 }} /> },
-  { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
@@ -1365,6 +1364,7 @@ const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },

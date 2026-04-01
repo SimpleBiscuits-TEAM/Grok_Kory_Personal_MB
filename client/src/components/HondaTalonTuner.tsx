@@ -30,7 +30,16 @@ import {
 } from '@/lib/talonVirtualDyno';
 
 /** Tracks which cells were corrected per fuel map, keyed by mapKey */
-export type CorrectedCellsMap = Record<string, Set<string>>;
+export interface CorrectedCellInfo {
+  originalValue: number;
+  correctedValue: number;
+  correctionFactor: number;
+  sampleCount: number;
+  avgActualLambda: number;
+  targetLambda: number;
+  avgStft?: number;
+}
+export type CorrectedCellsMap = Record<string, Map<string, CorrectedCellInfo>>;
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
 const sColor = {
@@ -121,6 +130,33 @@ function parseFuelTableCSV(text: string): FuelMap | null {
     colLabel,
     unit: '%',
   };
+}
+
+// ─── CSV Export Utility ─────────────────────────────────────────────────────
+/** Convert a FuelMap back to C3 Tuning Software-compatible CSV format */
+function fuelMapToCSV(map: FuelMap): string {
+  const lines: string[] = [];
+  // Header row: label + column axis values
+  lines.push([`${map.rowLabel}\\${map.colLabel}`, ...map.colAxis.map(v => v.toString())].join(','));
+  // Data rows: row axis value + cell values
+  for (let ri = 0; ri < map.rowAxis.length; ri++) {
+    const row = map.data[ri];
+    lines.push([map.rowAxis[ri].toString(), ...row.map(v => v.toFixed(3))].join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Trigger a browser download of a text file */
+function downloadCSV(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ─── Heat Map Color ─────────────────────────────────────────────────────────
@@ -234,7 +270,7 @@ function FuelMapCard({
   onCellEdit: (row: number, col: number, value: number) => void;
   onTargetLambdaEdit: (col: number, value: number) => void;
   overlay?: CellOverlay | null;
-  correctedCells?: Set<string> | null;
+  correctedCells?: Map<string, CorrectedCellInfo> | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const screenshotRef = useRef<HTMLInputElement>(null);
@@ -647,6 +683,21 @@ function FuelMapCard({
               >
                 <Camera style={{ width: 12, height: 12 }} />{ocrLoading ? 'EXTRACTING...' : 'RE-SCAN'}
               </button>
+              <button
+                onClick={() => {
+                  if (!map) return;
+                  const csv = fuelMapToCSV(map);
+                  const safeName = config.label.replace(/\s+/g, '_');
+                  downloadCSV(csv, `${safeName}_corrected.csv`);
+                }}
+                style={{
+                  background: 'transparent', color: sColor.cyan, border: 'none',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                }}
+              >
+                <Download style={{ width: 12, height: 12 }} />EXPORT CSV
+              </button>
               <button onClick={onClear} style={{
                 background: 'transparent', color: sColor.textDim, border: 'none',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
@@ -779,10 +830,20 @@ function FuelMapCard({
                     </td>
                     {row.map((val, ci) => {
                       const isEditing = editingCell?.row === ri && editingCell?.col === ci;
+                      const cellKey = `${ri}:${ci}`;
+                      const corrInfo = correctedCells?.get(cellKey) || null;
+                      const isCorrected = !!corrInfo;
+
+                      // Build rich tooltip for corrected cells
+                      const cellTitle = isCorrected
+                        ? `Original: ${corrInfo.originalValue.toFixed(3)} → Corrected: ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\nActual λ: ${corrInfo.avgActualLambda.toFixed(3)} vs Target λ: ${corrInfo.targetLambda.toFixed(3)}\nSamples: ${corrInfo.sampleCount}${corrInfo.avgStft !== undefined ? `\nAvg STFT: ${corrInfo.avgStft.toFixed(1)}%` : ''}`
+                        : `${val.toFixed(3)} (no correction data)`;
+
                       return (
                         <td
                           key={ci}
                           onDoubleClick={() => startEdit(ri, ci)}
+                          title={cellTitle}
                           style={{
                             padding: '2px 4px',
                             textAlign: 'center',
@@ -797,11 +858,11 @@ function FuelMapCard({
                             border: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '3px solid white'
                               : isEditing ? `2px solid ${sColor.redBright}`
-                              : correctedCells?.has(`${ri}:${ci}`) ? '2px solid oklch(0.75 0.18 145)'
+                              : isCorrected ? '2px solid oklch(0.75 0.18 145)'
                               : '1px solid oklch(0.40 0.006 260)',
                             boxShadow: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '0 0 8px rgba(255,255,255,0.5)'
-                              : correctedCells?.has(`${ri}:${ci}`) ? '0 0 6px oklch(0.65 0.18 145 / 0.5)'
+                              : isCorrected ? '0 0 6px oklch(0.65 0.18 145 / 0.5)'
                               : 'none',
                           }}
                         >
@@ -1338,15 +1399,23 @@ export default function HondaTalonTuner({
       return next;
     });
 
-    // Build corrected cells map for highlighting
+    // Build corrected cells map for highlighting + tooltips
     if (correctionResults) {
       const cellsMap: CorrectedCellsMap = {};
       for (const result of correctionResults) {
-        const cellSet = new Set<string>();
+        const cellMap = new Map<string, CorrectedCellInfo>();
         for (const corr of result.corrections) {
-          cellSet.add(`${corr.row}:${corr.col}`);
+          cellMap.set(`${corr.row}:${corr.col}`, {
+            originalValue: corr.originalValue,
+            correctedValue: corr.correctedValue,
+            correctionFactor: corr.correctionFactor,
+            sampleCount: corr.sampleCount,
+            avgActualLambda: corr.avgActualLambda,
+            targetLambda: corr.targetLambda,
+            avgStft: corr.avgStft,
+          });
         }
-        cellsMap[result.mapKey] = cellSet;
+        cellsMap[result.mapKey] = cellMap;
       }
       setCorrectedCells(cellsMap);
     } else {
@@ -1595,6 +1664,11 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
   const [calibrationFactor, setCalibrationFactor] = useState(1.0);
   const [showSettings, setShowSettings] = useState(false);
 
+  // Comparison overlay state
+  const [compareWP8, setCompareWP8] = useState<WP8ParseResult | null>(null);
+  const [compareFileName, setCompareFileName] = useState('');
+  const compareFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     setInjectorType(autoInjector);
     setFuelType(autoFuel);
@@ -1618,6 +1692,22 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
     if (!wp8Data) return null;
     return buildDynoSheetData(wp8Data, config, fileName);
   }, [wp8Data, config, fileName]);
+
+  // Build comparison dyno data using the same config
+  const compareDynoData = useMemo<DynoSheetData | null>(() => {
+    if (!compareWP8) return null;
+    return buildDynoSheetData(compareWP8, config, compareFileName);
+  }, [compareWP8, config, compareFileName]);
+
+  const handleCompareUpload = useCallback(async (file: File) => {
+    const { parseWP8 } = await import('@/lib/wp8Parser');
+    const buffer = await file.arrayBuffer();
+    const parsed = parseWP8(buffer);
+    if (parsed) {
+      setCompareWP8(parsed);
+      setCompareFileName(file.name);
+    }
+  }, []);
 
   // Learn calibration from dyno log
   useEffect(() => {
@@ -1779,9 +1869,71 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
         </div>
       )}
 
+      {/* Comparison Overlay Upload */}
+      <div style={{
+        background: dynoSColor.card, border: `1px solid ${dynoSColor.cardBorder}`,
+        padding: '12px 16px', marginBottom: '12px', borderRadius: '2px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{
+            fontFamily: "'Bebas Neue', sans-serif", fontSize: '0.9rem', color: dynoSColor.textWhite,
+            letterSpacing: '0.06em',
+          }}>
+            COMPARISON OVERLAY
+          </span>
+          {compareWP8 ? (
+            <span style={{
+              fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.green,
+              background: 'oklch(0.75 0.18 145 / 0.15)', padding: '2px 8px',
+              border: '1px solid oklch(0.75 0.18 145 / 0.3)', borderRadius: '2px',
+            }}>
+              {compareFileName} LOADED
+            </span>
+          ) : (
+            <span style={{
+              fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim,
+            }}>
+              Upload a baseline WP8 to overlay before/after curves
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            ref={compareFileRef}
+            type="file"
+            accept=".wp8,.WP8"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleCompareUpload(f); }}
+            className="hidden"
+          />
+          <button
+            onClick={() => compareFileRef.current?.click()}
+            style={{
+              background: 'transparent', border: `1px solid ${dynoSColor.border}`,
+              color: dynoSColor.textDim, cursor: 'pointer', padding: '4px 12px',
+              fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem', borderRadius: '2px',
+            }}
+          >
+            {compareWP8 ? 'CHANGE BASELINE' : 'UPLOAD BASELINE WP8'}
+          </button>
+          {compareWP8 && (
+            <button
+              onClick={() => { setCompareWP8(null); setCompareFileName(''); }}
+              style={{
+                background: 'transparent', border: `1px solid ${dynoSColor.border}`,
+                color: dynoSColor.yellow, cursor: 'pointer', padding: '4px 12px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem', borderRadius: '2px',
+              }}
+            >
+              REMOVE
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Dyno Sheet */}
       {dynoData && (
-        <DynoSheet data={dynoData} config={config} />
+        <DynoSheet data={dynoData} config={config} compareData={compareDynoData} />
       )}
     </div>
   );
