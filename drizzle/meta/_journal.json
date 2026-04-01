@@ -176,6 +176,13 @@
       "when": 1774999070850,
       "tag": "0024_thick_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1775066515926,
+      "tag": "0025_secret_toxin",
+      "breakpoints": true
     }
   ]
 }

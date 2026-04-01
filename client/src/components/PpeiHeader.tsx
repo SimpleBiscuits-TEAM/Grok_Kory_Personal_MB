@@ -189,8 +189,61 @@ export default function PpeiHeader() {
             })}
           </nav>
 
-          {/* Right: Version + Notifications + User/Auth */}
+          {/* Right: Tier Badge + Version + Notifications + User/Auth */}
           <div className="flex items-center gap-3">
+            {/* V-OP Lite / Pro tier badge */}
+            {(() => {
+              const isAdvanced = location.startsWith('/advanced');
+              const tierLabel = isAdvanced ? 'V-OP PRO' : 'V-OP LITE';
+              const tierColor = isAdvanced ? 'oklch(0.78 0.15 80)' : 'oklch(0.65 0.20 145)';
+              const tierBg = isAdvanced ? 'rgba(255,200,0,0.10)' : 'rgba(0,200,100,0.10)';
+              const tierBorder = isAdvanced ? 'rgba(255,200,0,0.35)' : 'rgba(0,200,100,0.35)';
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{
+                    fontFamily: sFont.mono,
+                    fontSize: '0.55rem',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.08em',
+                    color: tierColor,
+                    background: tierBg,
+                    border: `1px solid ${tierBorder}`,
+                    borderRadius: '3px',
+                    padding: '2px 8px',
+                    lineHeight: 1.4,
+                    userSelect: 'none',
+                    whiteSpace: 'nowrap',
+                  }}>{tierLabel}</span>
+                  {/* Upgrade prompt for non-admin users on Advanced */}
+                  {isAdvanced && !isAdmin && (
+                    <span
+                      style={{
+                        fontFamily: sFont.mono,
+                        fontSize: '0.5rem',
+                        letterSpacing: '0.06em',
+                        color: 'oklch(0.78 0.15 80)',
+                        background: 'rgba(255,200,0,0.08)',
+                        border: '1px solid rgba(255,200,0,0.25)',
+                        borderRadius: '3px',
+                        padding: '2px 8px',
+                        lineHeight: 1.4,
+                        cursor: 'default',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                      title="Upgrade to V-OP Pro for full access to Advanced tools and features"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'oklch(0.78 0.15 80)' }}>
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                      </svg>
+                      UPGRADE TO PRO
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
             <span style={{
               fontFamily: sFont.mono,
               fontSize: '0.6rem',

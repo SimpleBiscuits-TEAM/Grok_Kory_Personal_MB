@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens, ndaSubmissions } from "../drizzle/schema";
+import { InsertUser, users, feedback, InsertFeedback, knoxFiles, accessCodes, shareTokens, ndaSubmissions, pitchAnalytics } from "../drizzle/schema";
 import { like, desc, sql, count, eq, and } from "drizzle-orm";
 import { ENV } from './_core/env';
 
@@ -496,5 +496,103 @@ export async function getShareTokenId(token: string): Promise<{ id: number; allo
   } catch (error) {
     console.error("[Database] Failed to get share token ID:", error);
     return null;
+  }
+}
+
+// ── Pitch Analytics ─────────────────────────────────────────────────────────
+
+/**
+ * Log a pitch analytics event.
+ */
+export async function logPitchEvent(data: {
+  userId: number | null;
+  eventType: "tab_view" | "chat_message" | "prompt_click" | "session_end";
+  metadata?: Record<string, unknown>;
+  sessionId?: string;
+}): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.insert(pitchAnalytics).values({
+      userId: data.userId ?? null,
+      eventType: data.eventType,
+      metadata: data.metadata ?? null,
+      sessionId: data.sessionId ?? null,
+    });
+    return true;
+  } catch (error) {
+    console.error("[Database] Failed to log pitch event:", error);
+    return false;
+  }
+}
+
+/**
+ * Get pitch analytics summary for admin dashboard.
+ * Returns aggregated counts by event type and daily breakdown.
+ */
+export async function getPitchAnalyticsSummary(days: number = 30): Promise<{
+  totals: { eventType: string; count: number }[];
+  daily: { date: string; eventType: string; count: number }[];
+  uniqueUsers: number;
+  avgSessionDuration: number | null;
+}> {
+  const db = await getDb();
+  if (!db) return { totals: [], daily: [], uniqueUsers: 0, avgSessionDuration: null };
+  try {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Totals by event type
+    const totals = await db
+      .select({
+        eventType: pitchAnalytics.eventType,
+        count: count(),
+      })
+      .from(pitchAnalytics)
+      .where(sql`${pitchAnalytics.createdAt} >= ${since}`)
+      .groupBy(pitchAnalytics.eventType);
+
+    // Daily breakdown
+    const daily = await db
+      .select({
+        date: sql<string>`DATE(${pitchAnalytics.createdAt})`.as("date"),
+        eventType: pitchAnalytics.eventType,
+        count: count(),
+      })
+      .from(pitchAnalytics)
+      .where(sql`${pitchAnalytics.createdAt} >= ${since}`)
+      .groupBy(sql`DATE(${pitchAnalytics.createdAt})`, pitchAnalytics.eventType)
+      .orderBy(sql`DATE(${pitchAnalytics.createdAt})`);
+
+    // Unique users
+    const [uniqueRow] = await db
+      .select({
+        uniqueUsers: sql<number>`COUNT(DISTINCT ${pitchAnalytics.userId})`.as("uniqueUsers"),
+      })
+      .from(pitchAnalytics)
+      .where(and(
+        sql`${pitchAnalytics.createdAt} >= ${since}`,
+        sql`${pitchAnalytics.userId} IS NOT NULL`
+      ));
+
+    // Average session duration from session_end events
+    const [avgRow] = await db
+      .select({
+        avgDuration: sql<number>`AVG(JSON_EXTRACT(${pitchAnalytics.metadata}, '$.durationSec'))`.as("avgDuration"),
+      })
+      .from(pitchAnalytics)
+      .where(and(
+        sql`${pitchAnalytics.createdAt} >= ${since}`,
+        eq(pitchAnalytics.eventType, "session_end")
+      ));
+
+    return {
+      totals: totals.map(t => ({ eventType: t.eventType, count: Number(t.count) })),
+      daily: daily.map(d => ({ date: String(d.date), eventType: d.eventType, count: Number(d.count) })),
+      uniqueUsers: Number(uniqueRow?.uniqueUsers ?? 0),
+      avgSessionDuration: avgRow?.avgDuration ? Number(avgRow.avgDuration) : null,
+    };
+  } catch (error) {
+    console.error("[Database] Failed to get pitch analytics:", error);
+    return { totals: [], daily: [], uniqueUsers: 0, avgSessionDuration: null };
   }
 }

@@ -10,6 +10,7 @@
 import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { logPitchEvent, getPitchAnalyticsSummary } from "../db";
 
 /**
  * Pitch's complete knowledge of the V-OP Innovator Program and all 100 business avenues.
@@ -178,6 +179,44 @@ PPEI is turning its user base into the largest decentralized R&D team in the aut
 `;
 
 export const pitchRouter = router({
+  /**
+   * Log a pitch analytics event (works for any authenticated user)
+   */
+  logEvent: protectedProcedure
+    .input(
+      z.object({
+        eventType: z.enum(["tab_view", "chat_message", "prompt_click", "session_end"]),
+        metadata: z.record(z.string(), z.any()).optional(),
+        sessionId: z.string().max(64).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const userId = ctx.user?.id ?? null;
+      const ok = await logPitchEvent({
+        userId,
+        eventType: input.eventType,
+        metadata: input.metadata,
+        sessionId: input.sessionId,
+      });
+      return { success: ok };
+    }),
+
+  /**
+   * Get pitch analytics summary (admin only)
+   */
+  analytics: protectedProcedure
+    .input(
+      z.object({
+        days: z.number().min(1).max(365).optional(),
+      }).optional()
+    )
+    .query(async ({ input, ctx }) => {
+      if (ctx.user?.role !== "admin" && ctx.user?.role !== "super_admin") {
+        return { totals: [], daily: [], uniqueUsers: 0, avgSessionDuration: null };
+      }
+      return getPitchAnalyticsSummary(input?.days ?? 30);
+    }),
+
   /**
    * Pitch AI Chat — business strategy and Innovator Program assistant
    */

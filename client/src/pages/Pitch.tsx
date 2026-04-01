@@ -3,7 +3,7 @@
  * Dedicated business strategy AI agent for the Innovator Program.
  * Helps users brainstorm business models, form teams, and prepare proposals.
  */
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { getLoginUrl } from '@/const';
@@ -11,6 +11,7 @@ import PpeiHeader from '@/components/PpeiHeader';
 import { AIChatBox, type Message } from '@/components/AIChatBox';
 import { Button } from '@/components/ui/button';
 import { Briefcase, TrendingUp, Users, DollarSign, Lightbulb, Lock } from 'lucide-react';
+import { usePitchAnalytics } from '@/hooks/usePitchAnalytics';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -45,6 +46,7 @@ const SUGGESTED_PROMPTS = [
 export function PitchContent() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
+  const { trackChatMessage, trackPromptClick } = usePitchAnalytics();
 
   const chatMut = trpc.pitch.chat.useMutation({
     onSuccess: (data) => {
@@ -55,13 +57,21 @@ export function PitchContent() {
     },
   });
 
-  const handleSend = (content: string) => {
+  const handleSend = useCallback((content: string) => {
+    // Track analytics
+    if (SUGGESTED_PROMPTS.includes(content)) {
+      trackPromptClick(content);
+    }
+    trackChatMessage(content.length);
+
     const userMessage: Message = { role: 'user', content };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    const history = newMessages.filter(m => m.role !== 'system').slice(-20).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    chatMut.mutate({ message: content, history: history.slice(0, -1) });
-  };
+    setMessages(prev => {
+      const newMessages = [...prev, userMessage];
+      const history = newMessages.filter(m => m.role !== 'system').slice(-20).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      chatMut.mutate({ message: content, history: history.slice(0, -1) });
+      return newMessages;
+    });
+  }, [chatMut, trackChatMessage, trackPromptClick]);
 
   if (authLoading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
   if (!isAuthenticated) return <div style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', padding: '2rem', textAlign: 'center' }}>Sign in to access Pitch.</div>;

@@ -1287,3 +1287,24 @@ export const fcaCalibrations = mysqlTable("fca_calibrations", {
 
 export type FcaCalibration = typeof fcaCalibrations.$inferSelect;
 export type InsertFcaCalibration = typeof fcaCalibrations.$inferInsert;
+
+// ── Pitch Analytics ─────────────────────────────────────────────────────────
+/**
+ * Tracks engagement events for the Pitch (AI Business Chat) tab.
+ * Events: tab_view, chat_message, prompt_click, session_end
+ */
+export const pitchAnalytics = mysqlTable("pitch_analytics", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — null for unauthenticated visitors (future) */
+  userId: int("userId"),
+  /** Event type */
+  eventType: mysqlEnum("eventType", ["tab_view", "chat_message", "prompt_click", "session_end"]).notNull(),
+  /** Additional event data (e.g., prompt text, message length, session duration in seconds) */
+  metadata: json("metadata"),
+  /** Client-side session ID to group events from the same visit */
+  sessionId: varchar("sessionId", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PitchAnalytic = typeof pitchAnalytics.$inferSelect;
+export type InsertPitchAnalytic = typeof pitchAnalytics.$inferInsert;

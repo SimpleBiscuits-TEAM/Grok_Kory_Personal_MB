@@ -3138,3 +3138,20 @@
 ## Tasks/Pitch Access Control Update
 - [x] Move Tasks back to admin-only tab list (visible only when isAdmin, no password gate)
 - [x] Make Pitch fully public (visible to all users, no admin gate on content)
+
+## Fix: Tasks Tab Not Visible Under Advanced for Admins
+- [x] Ensure Tasks tab appears under Advanced page for admin users (was already correct — Tasks in adminTabs, shown when isAdmin)
+- [x] Verify all collaborators in the system have admin roles assigned (promoted 10 users, Cash Lecroy kept as user per request)
+
+## Pitch Tab Analytics Tracking
+- [x] Create pitch_analytics DB table (tab_view, chat_message, prompt_click, session_end events)
+- [x] Add DB helpers (logPitchEvent, getPitchAnalyticsSummary) in server/db.ts
+- [x] Add tRPC procedures (pitch.logEvent, pitch.analytics) in server/routers/pitch.ts
+- [x] Create usePitchAnalytics frontend hook for automatic tracking
+- [x] Instrument PitchContent component with analytics (tab views, chats, prompt clicks, session duration)
+
+## V-OP Lite / V-OP Pro Tier Labels
+- [x] Display "V-OP LITE" badge in top-right when using Analyze feature (green)
+- [x] Display "V-OP PRO" badge in top-right when using Advanced feature (gold)
+- [x] Add "UPGRADE TO PRO" prompt for non-admin public users on Advanced page
+- [x] Ensure tier label updates dynamically based on current page/tab context
