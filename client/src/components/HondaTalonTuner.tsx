@@ -16,11 +16,13 @@ import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
   Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
-  GitCompare, ArrowRight
+  GitCompare, ArrowRight, Wrench
 } from 'lucide-react';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
 import TalonLogViewer, { TalonCursorData } from '@/components/TalonLogViewer';
 import { trpc } from '@/lib/trpc';
+import FuelCorrectionPanel from '@/components/FuelCorrectionPanel';
+import { FuelMapState as CorrectionFuelMapState } from '@/lib/talonFuelCorrection';
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
 const sColor = {
@@ -1221,7 +1223,7 @@ export default function HondaTalonTuner({
     speedDensity_cyl1: null,
     speedDensity_cyl2: null,
   });
-  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare'>('fuelmaps');
+  const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct'>('fuelmaps');
   const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
 
   // Compare state: stock vs modified for each map slot
@@ -1304,6 +1306,40 @@ export default function HondaTalonTuner({
     });
   }, []);
 
+  // ─── Fuel Correction Handlers ────────────────────────────────────────────
+  const handleApplyCorrections = useCallback((correctedMaps: Partial<FuelMapState>) => {
+    setFuelMaps(prev => {
+      const next = { ...prev };
+      for (const [key, map] of Object.entries(correctedMaps)) {
+        if (map) (next as any)[key] = map;
+      }
+      return next;
+    });
+  }, []);
+
+  const handleUpdateTargetLambda = useCallback((mapKey: keyof FuelMapState, targets: number[]) => {
+    setFuelMaps(prev => {
+      const next = { ...prev };
+      const map = next[mapKey];
+      if (map) {
+        next[mapKey] = { ...map, targetLambda: targets };
+      }
+      // Sync to sibling (same mode, other cylinder)
+      let siblingKey: keyof FuelMapState | null = null;
+      if (mapKey === 'alphaN_cyl1') siblingKey = 'alphaN_cyl2';
+      else if (mapKey === 'alphaN_cyl2') siblingKey = 'alphaN_cyl1';
+      else if (mapKey === 'speedDensity_cyl1') siblingKey = 'speedDensity_cyl2';
+      else if (mapKey === 'speedDensity_cyl2') siblingKey = 'speedDensity_cyl1';
+      if (siblingKey) {
+        const sibling = next[siblingKey];
+        if (sibling) {
+          next[siblingKey] = { ...sibling, targetLambda: [...targets] };
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const loadedCount = Object.values(fuelMaps).filter(Boolean).length;
 
   return (
@@ -1382,6 +1418,19 @@ export default function HondaTalonTuner({
         >
           <GitCompare style={{ width: 16, height: 16 }} />COMPARE
         </button>
+        <button
+          onClick={() => setActiveSection('correct')}
+          style={{
+            background: activeSection === 'correct' ? 'oklch(0.18 0.008 260)' : 'transparent',
+            color: activeSection === 'correct' ? 'white' : sColor.textDim,
+            border: `1px solid ${activeSection === 'correct' ? sColor.red : sColor.border}`,
+            borderRadius: '2px', padding: '8px 20px', cursor: 'pointer',
+            fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em',
+            display: 'flex', alignItems: 'center', gap: '6px',
+          }}
+        >
+          <Wrench style={{ width: 16, height: 16 }} />CORRECT
+        </button>
       </div>
 
       {/* Fuel Maps Section */}
@@ -1409,6 +1458,16 @@ export default function HondaTalonTuner({
           compareMaps={compareMaps}
           onCompareLoad={handleCompareMapLoad}
           onCompareClear={handleCompareMapClear}
+        />
+      )}
+
+      {/* Correct Section */}
+      {activeSection === 'correct' && (
+        <FuelCorrectionPanel
+          fuelMaps={fuelMaps as unknown as CorrectionFuelMapState}
+          wp8Data={localWP8}
+          onApplyCorrections={(corrected) => handleApplyCorrections(corrected as Partial<FuelMapState>)}
+          onUpdateTargetLambda={(key, targets) => handleUpdateTargetLambda(key as keyof FuelMapState, targets)}
         />
       )}
 

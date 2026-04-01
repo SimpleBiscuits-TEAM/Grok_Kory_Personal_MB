@@ -2828,20 +2828,20 @@
 - [ ] Show user escalating scare messages: 1st = "We are a neural network. Did you really think you could screenshot and get away with it?", 2nd = "Seriously? Again? We have your IP, your browser fingerprint, and your questionable life choices."
 
 ## Honda Talon: Correct Fuel Tables Button (2026-03-31)
-- [ ] Add "Correct Fuel Tables" button to Honda Talon Tuner
-- [ ] AFR1 → Cylinder 1, AFR2 → Cylinder 2 association when both channels present
-- [ ] Correction factor = AFR reading / target AFR per cell, averaged per cell basis
-- [ ] No correction applied to cells not used in the datalog
-- [ ] Alpha-N channel = 1 → only Alpha-N fuel tables; Alpha-N ≠ 1 → only Speed Density tables
-- [ ] Turbo/NA switch: auto-detect via MAP > 100 kPa, or manual toggle
-- [ ] Target lambda presets change based on turbo/NA selection (still editable)
-- [ ] Turbo mode: additional switch for stock MAP sensor vs 3-bar MAP sensor
-- [ ] NA targets: Speed Density all columns = 0.95 lambda; Alpha-N 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
-- [ ] Turbo + stock MAP targets: min-100 kPa = 0.95, 100-120 = 0.9, 120-145 = 0.85, 145+ = 0.8
-- [ ] Turbo + 3-bar MAP targets: min-60 kPa = 0.95, 60-80 = 0.9, 80-90 = 0.85, 90+ = 0.8
-- [ ] Turbo Alpha-N target = 0.95 across all columns
-- [ ] Turbo: use desired injector pulsewidth to determine active SD column (MAP not 100% accurate), interpolate against SD Cyl1 table
-- [ ] Honda Talon: When "Manifold Absolute Pressure Corrected" channel is available in datalog, use it for SD table axis reference instead of raw MAP
+- [x] Add "Correct Fuel Tables" button to Honda Talon Tuner
+- [x] AFR1 → Cylinder 1, AFR2 → Cylinder 2 association when both channels present
+- [x] Correction factor = AFR reading / target AFR per cell, averaged per cell basis
+- [x] No correction applied to cells not used in the datalog
+- [x] Alpha-N channel = 1 → only Alpha-N fuel tables; Alpha-N ≠ 1 → only Speed Density tables
+- [x] Turbo/NA switch: auto-detect via MAP > 100 kPa, or manual toggle
+- [x] Target lambda presets change based on turbo/NA selection (still editable)
+- [x] Turbo mode: additional switch for stock MAP sensor vs 3-bar MAP sensor
+- [x] NA targets: Speed Density all columns = 0.95 lambda; Alpha-N 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
+- [x] Turbo + stock MAP targets: min-100 kPa = 0.95, 100-120 = 0.9, 120-145 = 0.85, 145+ = 0.8
+- [x] Turbo + 3-bar MAP targets: min-60 kPa = 0.95, 60-80 = 0.9, 80-90 = 0.85, 90+ = 0.8
+- [x] Turbo Alpha-N target = 0.95 across all columns
+- [x] Turbo: use desired injector pulsewidth to determine active SD column (MAP not 100% accurate), interpolate against SD Cyl1 table
+- [x] Honda Talon: When "Manifold Absolute Pressure Corrected" channel is available in datalog, use it for SD table axis reference instead of raw MAP
 
 ## Navigation Restructure (2026-03-31)
 - [ ] Move "Task" tab to Advanced section
@@ -2959,23 +2959,43 @@
 - [x] PID selector dropdown to pick any available PID from either datalog for overlay
 - [ ] Time-aligned or RPM-aligned x-axis options
 
-## Honda Talon Tuner — Correct Fuel Tables (PENDING — after current Duramax work)
-- [ ] Add "Correct Fuel Tables" button to Honda Talon Tuner
-- [ ] Map AFR1 → Cylinder 1, AFR2 → Cylinder 2 from datalog
-- [ ] Implement correction factor: AFR_reading / target_AFR per cell, averaged
-- [ ] Only correct cells actually used in the datalog
-- [ ] Alpha-N channel = 1 → Alpha-N tables; ≠ 1 → Speed Density tables
-- [ ] Add Turbo/NA switch with auto-detection (MAP > 100 kPa = turbo)
-- [ ] Add Stock MAP / 3-Bar MAP sub-switch when Turbo selected
-- [ ] Implement NA target lambda presets (SD=0.95, Alpha-N graduated by TPS)
-- [ ] Implement Turbo Stock MAP target lambda presets (0.95/0.9/0.85/0.8 by MAP range)
-- [ ] Implement Turbo 3-Bar MAP target lambda presets (different MAP breakpoints)
-- [ ] All targets editable after preset population
-- [ ] Column lookup via Desired Injector Pulsewidth → interpolate to SD Cyl1 table position
-- [ ] Turbo Alpha-N target = 0.95 across all columns
+## Honda Talon Tuner — Correct Fuel Tables (COMPLETED 2026-04-01)
+- [x] Add "Correct Fuel Tables" button to Honda Talon Tuner
+- [x] Map AFR1 → Cylinder 1, AFR2 → Cylinder 2 from datalog
+- [x] Implement correction factor: AFR_reading / target_AFR per cell, averaged
+- [x] Only correct cells actually used in the datalog
+- [x] Alpha-N channel = 1 → Alpha-N tables; ≠ 1 → Speed Density tables
+- [x] Add Turbo/NA switch with auto-detection (MAP > 100 kPa = turbo)
+- [x] Add Stock MAP / 3-Bar MAP sub-switch when Turbo selected
+- [x] Implement NA target lambda presets (SD=0.95, Alpha-N graduated by TPS)
+- [x] Implement Turbo Stock MAP target lambda presets (0.95/0.9/0.85/0.8 by MAP range)
+- [x] Implement Turbo 3-Bar MAP target lambda presets (different MAP breakpoints)
+- [x] All targets editable after preset population
+- [x] Column lookup via Desired Injector Pulsewidth → interpolate to SD Cyl1 table position
+- [x] Turbo Alpha-N target = 0.95 across all columns
 
 ## Fix: Backpressure Still Being Read as Boost on 2025 Ford (2026-03-31)
 - [x] dataProcessor.ts boostIdx fallback matches 'Exhaust MAP' via generic h.includes('MAP') - must exclude exhaust headers
 - [x] pidSubstitution.ts mapAbsIdx find(['MAP']) also matches 'Exhaust MAP' - must exclude exhaust headers
 - [x] Verify boost is correctly derived from Intake MAP only, not exhaust side pressure
 - [x] Add test for Ford Powerstroke log to prevent regression (8 tests in fordExhaustMap.test.ts)
+
+## Honda Talon: Correct Fuel Tables — Full Implementation (2026-04-01)
+- [x] Build talonFuelCorrection.ts correction engine
+- [x] AFR1 → Cylinder 1, AFR2 → Cylinder 2 association
+- [x] Correction factor = AFR_reading / target_AFR, averaged per cell
+- [x] Only correct cells actually visited in the datalog (no correction for unused cells)
+- [x] Alpha-N channel = 1 → only Alpha-N tables; ≠ 1 → only Speed Density tables
+- [x] Turbo/NA auto-detection: MAP > 100 kPa = turbo (also turbo stays in SD mode entire log)
+- [x] Turbo/NA manual toggle switch in UI
+- [x] Stock MAP / 3-Bar MAP sub-switch when Turbo selected
+- [x] NA target lambda presets: SD all columns = 0.95; Alpha-N 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
+- [x] Turbo + Stock MAP targets: min-100 kPa = 0.95, 100-120 = 0.9, 120-145 = 0.85, 145+ = 0.8
+- [x] Turbo + 3-Bar MAP targets: min-60 kPa = 0.95, 60-80 = 0.9, 80-90 = 0.85, 90+ = 0.8
+- [x] Turbo Alpha-N target = 0.95 across all columns
+- [x] All target lambda presets still editable after population
+- [x] Turbo SD column lookup: use Desired Injector Pulsewidth interpolated against SD Cyl1 table (MAP not accurate enough)
+- [x] Use "Manifold Absolute Pressure Corrected" channel when available for SD axis reference
+- [x] Build UI: "Correct Fuel Tables" button, correction preview, apply/revert
+- [x] Integrate corrections into existing fuel table editor (update cell values)
+- [x] Write tests for correction engine (17 tests passing)
