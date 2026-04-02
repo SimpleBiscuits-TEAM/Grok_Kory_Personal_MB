@@ -144,3 +144,8 @@
 - [x] Updated FlashContainerPanel PCAN section with 3-state status (ok/warn/fail) instead of binary ok/fail
 - [x] Updated FlashMissionControl ValidationPanel to display warnings in amber
 - [x] Added 3 new tests + enhanced 1 existing test for warning behavior (57 flash tests total)
+
+## Bug Fix — file_fingerprints Table Schema Mismatch
+- [x] Fix "Failed query" error on file_fingerprints table — table existed with old schema (column `hash` instead of `fileHash`, etc.)
+- [x] Dropped and recreated all 6 flash tables (flash_sessions, flash_session_logs, ecu_snapshots, flash_queue, flash_stats, file_fingerprints) with correct Drizzle schema — all were empty (0 rows)
+- [x] Verified all 57 flash integration tests pass after table recreation
