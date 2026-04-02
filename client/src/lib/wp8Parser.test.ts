@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWP8, isWP8File, wp8ToCSV, getHondaTalonKeyChannels } from './wp8Parser';
+import { parseWP8, isWP8File, wp8ToCSV, getHondaTalonKeyChannels, wp8ToDuramaxData } from './wp8Parser';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -363,6 +363,112 @@ describe('WP8 Parser', () => {
 
       expect(keys.engineSpeed).toBeGreaterThanOrEqual(0);
       expect(keys.dctClutch1Pressure).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('wp8ToDuramaxData', () => {
+    it('should convert a synthetic Honda Talon WP8 to DuramaxData', () => {
+      const wp8 = parseWP8(buildWP8Binary({
+        partNumber: '0801EB0401',
+        channelNames: ['Engine Speed', 'Throttle Position', 'DCT Clutch 1 Pressure', 'Alpha N', 'Vehicle Speed', 'Coolant Temperature'],
+        rowCount: 5,
+      }));
+
+      const data = wp8ToDuramaxData(wp8);
+
+      // Should have arrays of length 5
+      expect(data.rpm.length).toBe(5);
+      expect(data.throttlePosition.length).toBe(5);
+      expect(data.vehicleSpeed.length).toBe(5);
+      expect(data.coolantTemp.length).toBe(5);
+      expect(data.boost.length).toBe(5);
+      expect(data.offset.length).toBe(5);
+
+      // RPM should have non-zero values from the synthetic data
+      expect(data.rpm[0]).toBeGreaterThan(0);
+
+      // Should have gasoline fuel type in vehicleMeta
+      expect(data.vehicleMeta?.fuelType).toBe('gasoline');
+      expect(data.vehicleMeta?.make).toBe('Honda');
+      expect(data.vehicleMeta?.model).toBe('Talon');
+
+      // Should have correct boost source
+      expect(data.boostSource).toBe('none'); // no MAP channel in this synthetic
+
+      // Diesel-specific channels should be empty
+      expect(data.turboSpeed).toEqual([]);
+      expect(data.dpfSootLevel).toEqual([]);
+      expect(data.egrPosition).toEqual([]);
+
+      // Missing PIDs should be listed
+      expect(data.pidsMissing.length).toBeGreaterThan(0);
+    });
+
+    it('should handle UNKNOWN vehicle type', () => {
+      const wp8 = parseWP8(buildWP8Binary({
+        partNumber: 'GENERIC123',
+        channelNames: ['Engine Speed', 'Throttle Position'],
+        rowCount: 2,
+      }));
+
+      const data = wp8ToDuramaxData(wp8);
+
+      expect(data.rpm.length).toBe(2);
+      expect(data.vehicleMeta?.make).toBeUndefined();
+      expect(data.vehicleMeta?.model).toBeUndefined();
+      expect(data.vehicleMeta?.fuelType).toBe('gasoline');
+    });
+
+    it('should produce data that processData can consume without throwing', async () => {
+      const { processData } = await import('./dataProcessor');
+      const wp8 = parseWP8(buildWP8Binary({
+        partNumber: '0801EB0401',
+        channelNames: ['Engine Speed', 'Throttle Position', 'DCT Clutch 1 Pressure', 'Vehicle Speed', 'Coolant Temperature'],
+        rowCount: 10,
+      }));
+
+      const rawData = wp8ToDuramaxData(wp8);
+      // This should not throw
+      const processed = processData(rawData);
+
+      expect(processed.rpm.length).toBe(10);
+      expect(processed.timeMinutes.length).toBe(10);
+    });
+  });
+
+  // Integration test: wp8ToDuramaxData with real V4 file
+  const V4_SAMPLE_PATH = '/home/ubuntu/upload/PPEI_Rev_0_4_0801EB0402(6)_LOG_1.wp8';
+  const hasV4SampleFile = fs.existsSync(V4_SAMPLE_PATH);
+
+  describe.skipIf(!hasV4SampleFile)('wp8ToDuramaxData - V4 real file', () => {
+    it('should convert the V4 Honda Talon WP8 file to DuramaxData', () => {
+      const fileBuffer = fs.readFileSync(V4_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const wp8 = parseWP8(arrayBuffer);
+      const data = wp8ToDuramaxData(wp8);
+
+      expect(data.rpm.length).toBeGreaterThan(100);
+      expect(data.vehicleMeta?.make).toBe('Honda');
+      expect(data.vehicleMeta?.model).toBe('Talon');
+      expect(data.vehicleMeta?.fuelType).toBe('gasoline');
+
+      // Should have some non-zero RPM values
+      expect(data.rpm.some(v => v > 0)).toBe(true);
+    });
+
+    it('should produce data that processData can consume', async () => {
+      const { processData, downsampleData } = await import('./dataProcessor');
+      const fileBuffer = fs.readFileSync(V4_SAMPLE_PATH);
+      const arrayBuffer = fileBuffer.buffer.slice(fileBuffer.byteOffset, fileBuffer.byteOffset + fileBuffer.byteLength);
+      const wp8 = parseWP8(arrayBuffer);
+      const rawData = wp8ToDuramaxData(wp8);
+
+      const processed = processData(rawData);
+      expect(processed.rpm.length).toBeGreaterThan(100);
+
+      const downsampled = downsampleData(processed, 2000);
+      expect(downsampled.rpm.length).toBeGreaterThan(0);
+      expect(downsampled.rpm.length).toBeLessThanOrEqual(2000);
     });
   });
 });

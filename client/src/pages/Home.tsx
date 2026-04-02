@@ -88,12 +88,11 @@ export default function Home() {
       // Detect .wp8 files (Dynojet Power Vision datalogs)
       // On the Home page, always generate a general health report (no redirect to Honda Talon Tuner)
       if (file.name.toLowerCase().endsWith('.wp8')) {
-        const { parseWP8, wp8ToCSV } = await import('@/lib/wp8Parser');
+        const { parseWP8, wp8ToDuramaxData } = await import('@/lib/wp8Parser');
         const buffer = await file.arrayBuffer();
         const wp8Result = parseWP8(buffer);
-        // Convert WP8 data to CSV format and process through the standard pipeline
-        const csvContent = wp8ToCSV(wp8Result);
-        const rawData = parseCSV(csvContent);
+        // Convert WP8 data directly to DuramaxData (avoids CSV format detection issues)
+        const rawData = wp8ToDuramaxData(wp8Result);
         const processed = processData(rawData);
         const downsampled = downsampleData(processed, 2000);
         const binned = createBinnedData(processed, 40);

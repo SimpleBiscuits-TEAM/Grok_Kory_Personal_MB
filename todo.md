@@ -3187,3 +3187,11 @@
 - [x] Home page analyzer: accept .wp8 files and generate general health report (no Honda Talon Tuner redirect)
 - [x] Advanced analyzer: accept .wp8 files — Honda Talon detected → switch to Talon tab with parsed WP8 data; non-Talon → convert to CSV and process through standard analyzer pipeline
 - [x] Update file accept text/labels on both upload zones to reflect .wp8 support (CSV & WP8 FORMATS SUPPORTED)
+
+## Fix: Home Page WP8 File Load Error
+- [x] Diagnose why PPEI_Rev_0_4_0801EB0402(6)_LOG_1.wp8 fails on Home page but loads in Advanced
+  - Root cause: V4 WP8 file parses fine, but wp8ToCSV output has Honda Talon channel names that parseCSV cannot recognize (no HP Tuners/EFILive/Banks format match)
+- [x] Fix: Created wp8ToDuramaxData() that directly converts WP8ParseResult → DuramaxData, bypassing the CSV pipeline entirely
+- [x] Updated Home.tsx to use wp8ToDuramaxData instead of wp8ToCSV + parseCSV
+- [x] Added 5 new tests for wp8ToDuramaxData (synthetic + real V4 file + processData compatibility)
+- [x] Test with the provided WP8 file (1271 tests passed)

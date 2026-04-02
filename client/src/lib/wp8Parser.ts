@@ -615,3 +615,258 @@ export function getHondaTalonKeyChannels(result: WP8ParseResult) {
     veError: find('X3_VE Error'),
   };
 }
+
+/**
+ * Convert a WP8ParseResult directly to a DuramaxData object.
+ * This avoids the wp8ToCSV → parseCSV path which fails for Honda Talon
+ * and other non-diesel WP8 logs because the CSV format doesn't match
+ * any known parser (HP Tuners, EFILive, Banks, etc.).
+ *
+ * Maps WP8 channel names to the DuramaxData structure with sensible defaults
+ * for channels that don't exist in the WP8 data.
+ */
+export function wp8ToDuramaxData(result: WP8ParseResult): import('./dataProcessor').DuramaxData {
+  // Build channel name → index lookup
+  const chIdx = new Map<string, number>();
+  for (const ch of result.channels) {
+    chIdx.set(ch.name, ch.index);
+  }
+
+  const idx = (name: string): number => chIdx.get(name) ?? -1;
+
+  // Channel indices for Honda Talon / generic WP8
+  const rpmI = idx('Engine Speed');
+  const tpI = idx('Throttle Position');
+  const vsI = idx('Vehicle Speed');
+  const ectI = idx('Coolant Temperature');
+  const iatI = idx('Intake Air Temperature');
+  const mapI = idx('Manifold Absolute Pressure');
+  const mapCorrI = idx('Manifold Absolute Pressure Corrected');
+  const baroI = idx('Barometric Pressure');
+  const injPwI = idx('Injector Pulsewidth Final');
+  const injPwDesI = idx('Injector Pulsewidth Desired');
+  const ignTimI = idx('Ignition Timing Final');
+  const gearI = idx('Commanded Gear');
+  const moduleVI = idx('Module Voltage');
+  const o2VI = idx('Oxygen Sensor Voltage');
+  const stftI = idx('Short Term Fuel Trim');
+  const afr1I = idx('Air Fuel Ratio 1');
+  const afr2I = idx('Air Fuel Ratio 2');
+  const injDutyI = idx('Injector Duty Cycle');
+  const dctOutputI = idx('DCT Output Shaft Speed');
+  const baroSensorVI = idx('Baro Sensor Voltage');
+
+  // Helper to get a value from a row, or 0 if index is -1 or out of range
+  const getVal = (row: WP8DataRow, i: number): number => {
+    if (i === -1 || i >= row.values.length) return 0;
+    const v = row.values[i];
+    return Number.isFinite(v) ? v : 0;
+  };
+
+  const n = result.rows.length;
+
+  // Pre-allocate arrays
+  const rpm: number[] = new Array(n);
+  const maf: number[] = new Array(n);
+  const boost: number[] = new Array(n);
+  const mapAbsolute: number[] = new Array(n);
+  const torquePercent: number[] = new Array(n);
+  const maxTorque: number[] = new Array(n);
+  const vehicleSpeed: number[] = new Array(n);
+  const fuelRate: number[] = new Array(n);
+  const offset: number[] = new Array(n);
+  const railPressureActual: number[] = new Array(n);
+  const railPressureDesired: number[] = new Array(n);
+  const pcvDutyCycle: number[] = new Array(n);
+  const boostDesired: number[] = new Array(n);
+  const turboVanePosition: number[] = new Array(n);
+  const turboVaneDesired: number[] = new Array(n);
+  const exhaustGasTemp: number[] = new Array(n);
+  const converterSlip: number[] = new Array(n);
+  const converterDutyCycle: number[] = new Array(n);
+  const converterPressure: number[] = new Array(n);
+  const currentGear: number[] = new Array(n);
+  const oilPressure: number[] = new Array(n);
+  const coolantTemp: number[] = new Array(n);
+  const oilTemp: number[] = new Array(n);
+  const transFluidTemp: number[] = new Array(n);
+  const barometricPressure: number[] = new Array(n);
+  const throttlePosition: number[] = new Array(n);
+  const injectorPulseWidth: number[] = new Array(n);
+  const injectionTiming: number[] = new Array(n);
+  const intakeAirTemp: number[] = new Array(n);
+  const fuelQuantity: number[] = new Array(n);
+  const batteryVoltage: number[] = new Array(n);
+  const outputShaftRpm: number[] = new Array(n);
+
+  // Determine baro baseline for boost calculation
+  // Use first valid baro reading, or fall back to 14.7 psi (sea level)
+  let baroBaseline = 14.7;
+  if (baroI !== -1) {
+    for (const row of result.rows) {
+      const v = getVal(row, baroI);
+      if (v > 5 && v < 20) { baroBaseline = v; break; }
+    }
+  }
+
+  // Use the first timestamp as the base for offset calculation
+  const baseTs = n > 0 ? result.rows[0].timestamp : 0;
+
+  for (let i = 0; i < n; i++) {
+    const row = result.rows[i];
+
+    // Offset in seconds (WP8 timestamps are typically in ms or sample index)
+    // Timestamps are monotonic counters; convert to seconds assuming ~10ms per unit
+    offset[i] = (row.timestamp - baseTs) / 100;
+
+    rpm[i] = getVal(row, rpmI);
+    throttlePosition[i] = getVal(row, tpI);
+    vehicleSpeed[i] = getVal(row, vsI);
+
+    // Coolant temp — WP8 Honda Talon logs are typically in °F already
+    coolantTemp[i] = getVal(row, ectI);
+    intakeAirTemp[i] = getVal(row, iatI);
+
+    // MAP: use corrected if available, otherwise raw
+    const mapVal = mapCorrI !== -1 ? getVal(row, mapCorrI) : getVal(row, mapI);
+    // WP8 MAP is typically in kPa — convert to psi absolute
+    const mapPsi = mapVal > 200 ? mapVal : mapVal * 0.145038; // if > 200, assume already psi
+    mapAbsolute[i] = mapPsi;
+
+    // Boost = MAP - baro (gauge pressure)
+    const baroVal = baroI !== -1 ? getVal(row, baroI) : baroBaseline;
+    const baroPsi = baroVal > 200 ? baroVal : baroVal > 5 ? baroVal : baroBaseline;
+    barometricPressure[i] = baroPsi;
+    boost[i] = Math.max(0, mapPsi - baroPsi);
+    boostDesired[i] = 0;
+
+    // Injector pulse width (ms)
+    injectorPulseWidth[i] = getVal(row, injPwI);
+    injectionTiming[i] = getVal(row, ignTimI);
+
+    // Gear
+    currentGear[i] = getVal(row, gearI);
+
+    // Battery / module voltage
+    batteryVoltage[i] = getVal(row, moduleVI);
+
+    // Output shaft speed (DCT)
+    outputShaftRpm[i] = getVal(row, dctOutputI);
+
+    // Channels not available in Honda Talon WP8 logs — fill with 0
+    maf[i] = 0;
+    torquePercent[i] = 0;
+    maxTorque[i] = 0;
+    fuelRate[i] = 0;
+    railPressureActual[i] = 0;
+    railPressureDesired[i] = 0;
+    pcvDutyCycle[i] = 0;
+    turboVanePosition[i] = 0;
+    turboVaneDesired[i] = 0;
+    exhaustGasTemp[i] = 0;
+    converterSlip[i] = 0;
+    converterDutyCycle[i] = 0;
+    converterPressure[i] = 0;
+    oilPressure[i] = 0;
+    oilTemp[i] = 0;
+    transFluidTemp[i] = 0;
+    fuelQuantity[i] = 0;
+  }
+
+  const duration = n > 1 ? offset[n - 1] - offset[0] : 0;
+
+  return {
+    rpm,
+    maf,
+    boost,
+    mapAbsolute,
+    torquePercent,
+    maxTorque,
+    vehicleSpeed,
+    fuelRate,
+    offset,
+    railPressureActual,
+    railPressureDesired,
+    pcvDutyCycle,
+    boostDesired,
+    turboVanePosition,
+    turboVaneDesired,
+    exhaustGasTemp,
+    converterSlip,
+    converterDutyCycle,
+    converterPressure,
+    currentGear,
+    oilPressure,
+    coolantTemp,
+    oilTemp,
+    transFluidTemp,
+    barometricPressure,
+    throttlePosition,
+    injectorPulseWidth,
+    injectionTiming,
+    intakeAirTemp,
+    fuelQuantity,
+    boostSource: mapI !== -1 ? 'map_derived' : 'none',
+    boostActualAvailable: boost.some(v => v > 0),
+    pidSubstitutions: [],
+    pidsMissing: ['MAF', 'Rail Pressure', 'EGT', 'TCC Slip'],
+    boostCalibration: {
+      corrected: false,
+      atmosphericOffsetPsi: 0,
+      method: 'none',
+      idleBaselinePsia: baroBaseline,
+      idleSampleCount: 0,
+      desiredAlreadyGauge: true,
+    },
+    timestamp: new Date().toLocaleString(),
+    duration,
+    batteryVoltage,
+    outputShaftRpm,
+    // Channels not available in WP8 logs — empty arrays
+    turboSpeed: [],
+    exhaustPressure: [],
+    dpfSootLevel: [],
+    egrPosition: [],
+    egrTemp: [],
+    intakeThrottlePosition: [],
+    intakeManifoldTemp: [],
+    chargeCoolerTemp: [],
+    pilot1Qty: [],
+    pilot2Qty: [],
+    pilot1Timing: [],
+    pilot2Timing: [],
+    post1Qty: [],
+    post2Qty: [],
+    post1Timing: [],
+    post2Timing: [],
+    regenState: [],
+    cspTuneNumber: [],
+    fuelRegCurrent: [],
+    egt2: [],
+    egt3: [],
+    egt4: [],
+    egt5: [],
+    altitudeDensityHigh: [],
+    altitudeDensityLow: [],
+    compressorDensity: [],
+    engineTorqueState: [],
+    fuelControlMode: [],
+    mainInjDuration: [],
+    calcLoad: [],
+    turbineRpm: [],
+    transLinePressureDesired: [],
+    transLinePressureActual: [],
+    transLinePressureDC: [],
+    driverDemandTorque: [],
+    actualEngineTorque: [],
+    post3Qty: [],
+    post4Qty: [],
+    fileFormat: 'hptuners', // Use hptuners as generic fallback format tag
+    vehicleMeta: {
+      make: result.vehicleType === 'HONDA_TALON' ? 'Honda' : undefined,
+      model: result.vehicleType === 'HONDA_TALON' ? 'Talon' : undefined,
+      fuelType: 'gasoline',
+      manufacturer: 'universal',
+    },
+  };
+}
