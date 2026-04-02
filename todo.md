@@ -41,8 +41,12 @@
 
 ## Auth Simplification
 - [x] Remove OAuth login button/option from AuthGate — access code only entry
-- [ ] ~~Remove access code/login requirement on the Advanced tab~~ (reverted — user wants gate to stay)
+- [x] ~~Remove access code/login requirement on the Advanced tab~~ (reverted — user wants gate to stay)
 - [x] Update tests to reflect the changes
 
 ## Auth Correction
 - [x] Restore AccessGate on Advanced tab — KINGKONG code required for both site entry AND Advanced
+
+## Tasks Panel Restoration
+- [x] Find the Tasks button/panel in Advanced section that was hidden by admin-only check
+- [x] Restore Tasks so it's visible to all users after entering access code in Advanced
