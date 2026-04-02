@@ -116,7 +116,7 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
 
   const handleSubmit = () => {
     if (code.toUpperCase() === ADVANCED_CODE) {
-      localStorage.setItem(STORAGE_KEY, 'true');
+      // No localStorage persistence — require code every session
       onUnlock();
     } else {
       setError(true);
@@ -1742,8 +1742,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
-  const handleLock = () => { localStorage.removeItem(STORAGE_KEY); setUnlocked(false); };
+  const [unlocked, setUnlocked] = useState(false);
+  const handleLock = () => { setUnlocked(false); };
 
   if (!unlocked) return <AccessGate onUnlock={() => setUnlocked(true)} />;
   return <AdvancedDashboard onLock={handleLock} />;
