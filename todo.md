@@ -38,3 +38,11 @@
 - [x] Seed KINGKONG as the required access code when site launches
 - [x] Verify AuthGate prompts for access code on first visit
 - [x] Verify entering KINGKONG grants access to the site
+
+## Auth Simplification
+- [x] Remove OAuth login button/option from AuthGate — access code only entry
+- [ ] ~~Remove access code/login requirement on the Advanced tab~~ (reverted — user wants gate to stay)
+- [x] Update tests to reflect the changes
+
+## Auth Correction
+- [x] Restore AccessGate on Advanced tab — KINGKONG code required for both site entry AND Advanced

@@ -729,74 +729,11 @@ export default function AuthGate({ children }: AuthGateProps) {
               color: sColor.textMuted,
               marginTop: 6,
             }}>
-              Sign in or enter your access code to continue
+              Enter your access code to continue
             </p>
           </div>
 
-          {/* Sign In Button with glow */}
-          <div style={{
-            opacity: mounted ? 1 : 0,
-            transform: mounted ? 'translateY(0)' : 'translateY(15px)',
-            transition: 'all 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.6s',
-          }}>
-            <a
-              href={getLoginUrl()}
-              className="auth-btn-glow"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 10,
-                width: '100%',
-                padding: '14px 0',
-                background: 'linear-gradient(135deg, oklch(0.52 0.22 25), oklch(0.48 0.20 20))',
-                color: '#fff',
-                fontFamily: '"Bebas Neue", sans-serif',
-                fontSize: '1.2rem',
-                letterSpacing: '0.12em',
-                textDecoration: 'none',
-                textTransform: 'uppercase',
-                cursor: 'pointer',
-                border: 'none',
-                transition: 'all 0.2s ease',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, oklch(0.58 0.22 25), oklch(0.52 0.20 20))';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, oklch(0.52 0.22 25), oklch(0.48 0.20 20))';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}
-            >
-              <LogIn style={{ width: 20, height: 20 }} />
-              SIGN IN, HUMAN :-)
-            </a>
-          </div>
 
-          {/* Divider */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            margin: '24px 0',
-            opacity: mounted ? 1 : 0,
-            transition: 'opacity 0.6s ease 0.7s',
-          }}>
-            <div style={{ flex: 1, height: 1, background: 'rgba(220, 38, 38, 0.12)' }} />
-            <span style={{
-              fontFamily: '"Share Tech Mono", monospace',
-              fontSize: '0.65rem',
-              color: sColor.textDim,
-              letterSpacing: '0.15em',
-              textTransform: 'uppercase',
-            }}>
-              or enter code
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'rgba(220, 38, 38, 0.12)' }} />
-          </div>
 
           {/* Access Code Input — with shake on error */}
           <div
