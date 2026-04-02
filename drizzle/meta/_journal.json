@@ -15,6 +15,13 @@
       "when": 1775144320939,
       "tag": "0001_gray_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1775166276180,
+      "tag": "0002_silly_piledriver",
+      "breakpoints": true
     }
   ]
 }

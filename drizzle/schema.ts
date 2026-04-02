@@ -1364,3 +1364,189 @@ export const geofenceUserOverrides = mysqlTable("geofence_user_overrides", {
 
 export type GeofenceUserOverride = typeof geofenceUserOverrides.$inferSelect;
 export type InsertGeofenceUserOverride = typeof geofenceUserOverrides.$inferInsert;
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FLASH SYSTEM TABLES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Flash sessions — records each flash attempt (simulator or real PCAN).
+ */
+export const flashSessions = mysqlTable("flash_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Unique session UUID for client reference */
+  uuid: varchar("uuid", { length: 64 }).notNull().unique(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** ECU type string (e.g., "E88", "E41") */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** ECU display name */
+  ecuName: varchar("ecuName", { length: 128 }),
+  /** Flash mode: full_flash, calibration, patch_only */
+  flashMode: mysqlEnum("flashMode", ["full_flash", "calibration", "patch_only"]).notNull(),
+  /** Connection mode: simulator or pcan */
+  connectionMode: mysqlEnum("connectionMode", ["simulator", "pcan"]).notNull(),
+  /** Session status */
+  status: mysqlEnum("status", ["pending", "running", "success", "failed", "aborted"]).default("pending").notNull(),
+  /** File hash (FNV-1a) for duplicate detection */
+  fileHash: varchar("fileHash", { length: 64 }),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** File size in bytes */
+  fileSize: int("fileSize"),
+  /** VIN from container header */
+  vin: varchar("vin", { length: 32 }),
+  /** File ID from container header */
+  fileId: varchar("fileId", { length: 128 }),
+  /** Total blocks in flash plan */
+  totalBlocks: int("totalBlocks").default(0),
+  /** Total bytes to transfer */
+  totalBytes: int("totalBytes").default(0),
+  /** Final progress percentage (0-100) */
+  progress: int("progress").default(0),
+  /** Duration in milliseconds */
+  durationMs: int("durationMs"),
+  /** Error message if failed */
+  errorMessage: text("errorMessage"),
+  /** NRC code if failed */
+  nrcCode: int("nrcCode"),
+  /** JSON metadata (flash plan summary, recovery info, etc.) */
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashSession = typeof flashSessions.$inferSelect;
+export type InsertFlashSession = typeof flashSessions.$inferInsert;
+
+/**
+ * Flash session logs — individual log entries for a flash session.
+ */
+export const flashSessionLogs = mysqlTable("flash_session_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to flash_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Log timestamp (ms since session start) */
+  timestampMs: int("timestampMs").notNull(),
+  /** Flash phase */
+  phase: varchar("phase", { length: 32 }).notNull(),
+  /** Log type: info, success, warning, error, can_tx, can_rx, nrc */
+  type: varchar("type", { length: 16 }).notNull(),
+  /** Log message */
+  message: text("message").notNull(),
+  /** Block ID if applicable */
+  blockId: int("blockId"),
+  /** NRC code if applicable */
+  nrcCode: int("nrcCode"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FlashSessionLog = typeof flashSessionLogs.$inferSelect;
+export type InsertFlashSessionLog = typeof flashSessionLogs.$inferInsert;
+
+/**
+ * Flash queue — pending flash jobs.
+ */
+export const flashQueue = mysqlTable("flash_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Flash mode */
+  flashMode: mysqlEnum("flashMode", ["full_flash", "calibration", "patch_only"]).notNull(),
+  /** Queue status */
+  status: mysqlEnum("status", ["queued", "processing", "completed", "failed", "cancelled"]).default("queued").notNull(),
+  /** Priority (lower = higher priority) */
+  priority: int("priority").default(10).notNull(),
+  /** File hash for the container */
+  fileHash: varchar("fileHash", { length: 64 }),
+  /** S3 URL for the uploaded container */
+  fileUrl: varchar("fileUrl", { length: 512 }),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** FK to flash_sessions.id when processing starts */
+  sessionId: int("sessionId"),
+  /** JSON metadata */
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashQueueItem = typeof flashQueue.$inferSelect;
+export type InsertFlashQueueItem = typeof flashQueue.$inferInsert;
+
+/**
+ * ECU snapshots — captured ECU state before/after flash.
+ */
+export const ecuSnapshots = mysqlTable("ecu_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to flash_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Snapshot type: pre_flash or post_flash */
+  snapshotType: mysqlEnum("snapshotType", ["pre_flash", "post_flash"]).notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** VIN at time of snapshot */
+  vin: varchar("vin", { length: 32 }),
+  /** Software version identifiers (JSON array) */
+  softwareVersions: json("softwareVersions"),
+  /** Hardware number */
+  hardwareNumber: varchar("hardwareNumber", { length: 64 }),
+  /** DTC snapshot (JSON array of codes) */
+  dtcSnapshot: json("dtcSnapshot"),
+  /** Raw DID responses (JSON object) */
+  didResponses: json("didResponses"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EcuSnapshot = typeof ecuSnapshots.$inferSelect;
+export type InsertEcuSnapshot = typeof ecuSnapshots.$inferInsert;
+
+/**
+ * Flash stats — aggregated statistics per ECU type.
+ */
+export const flashStats = mysqlTable("flash_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Total flash attempts */
+  totalAttempts: int("totalAttempts").default(0).notNull(),
+  /** Successful flashes */
+  successCount: int("successCount").default(0).notNull(),
+  /** Failed flashes */
+  failCount: int("failCount").default(0).notNull(),
+  /** Average duration in ms */
+  avgDurationMs: int("avgDurationMs").default(0),
+  /** Last flash timestamp */
+  lastFlashAt: timestamp("lastFlashAt"),
+  /** Most common NRC code */
+  commonNrc: int("commonNrc"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashStat = typeof flashStats.$inferSelect;
+export type InsertFlashStat = typeof flashStats.$inferInsert;
+
+/**
+ * File fingerprints — for duplicate detection and flash history.
+ */
+export const fileFingerprints = mysqlTable("file_fingerprints", {
+  id: int("id").autoincrement().primaryKey(),
+  /** File hash (FNV-1a) */
+  fileHash: varchar("fileHash", { length: 64 }).notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** File size in bytes */
+  fileSize: int("fileSize"),
+  /** Number of times this file has been flashed */
+  flashCount: int("flashCount").default(0).notNull(),
+  /** Last flash session ID */
+  lastSessionId: int("lastSessionId"),
+  /** Last flash result */
+  lastResult: mysqlEnum("lastResult", ["success", "failed"]),
+  /** FK to users.id — who first uploaded this file */
+  uploadedBy: int("uploadedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FileFingerprint = typeof fileFingerprints.$inferSelect;
+export type InsertFileFingerprint = typeof fileFingerprints.$inferInsert;

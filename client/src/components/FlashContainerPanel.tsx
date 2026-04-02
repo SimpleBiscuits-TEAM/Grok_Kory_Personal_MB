@@ -12,7 +12,16 @@
  * - 50+ ECU platform support from shared ECU database
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
+import { trpc } from '@/lib/trpc';
+import PreFlightChecklist from './PreFlightChecklist';
+import FlashMissionControl from './FlashMissionControl';
+import FlashDashboard from './FlashDashboard';
+import {
+  type FlashPlan,
+  generateFlashPlan, formatBytes,
+} from '../../../shared/pcanFlashOrchestrator';
+import { type ContainerFileHeader as EcuContainerFileHeader } from '../../../shared/ecuDatabase';
 import {
   parsePpeiContainer,
   isPpeiContainer,
@@ -23,7 +32,7 @@ import {
   Upload, FileCheck, Shield, Cpu, Zap, AlertTriangle,
   CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
   HardDrive, Binary, Wifi, Bluetooth, RotateCcw, Eye,
-  Database, Clock, Lock,
+  Database, Clock, Lock, Radio, Activity, BarChart3,
 } from 'lucide-react';
 
 // ── Hex Viewer Sub-component ─────────────────────────────────────────────
@@ -152,7 +161,96 @@ export default function FlashContainerPanel() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'ready' | 'uploading' | 'done'>('idle');
+  const [missionControlMode, setMissionControlMode] = useState<'simulator' | 'pcan' | null>(null);
+  const [showPreFlight, setShowPreFlight] = useState(false);
+  const [pendingMode, setPendingMode] = useState<'simulator' | 'pcan' | null>(null);
+  const [fileHash, setFileHash] = useState<string>('');
+  const [sessionUuid, setSessionUuid] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const createSession = trpc.flash.createSession.useMutation();
+
+  const effectiveFlashType: FlashType = flashTypeOverride ?? analysis?.flashType ?? 'unknown';
+
+  // Convert client-side analysis to ContainerFileHeader for generateFlashPlan
+  const containerFileHeader = useMemo((): EcuContainerFileHeader | null => {
+    if (!analysis) return null;
+    const dp = analysis.devProgHeader;
+    if (dp) {
+      return {
+        offset: '0', flashernumber: dp.flashernumber, udid: dp.udid,
+        vin: dp.vin, seed: dp.seed, key: dp.key, file_id: dp.fileId,
+        create_date: dp.createDate, expire_date: dp.expireDate,
+        max_flash_count: dp.maxFlashCount, header_length: '0',
+        block_count: dp.blockCount, block_boot: dp.blockBoot,
+        block_erase: dp.blockErase, file_size: dp.fileSize.toString(16),
+        comp_enc: dp.compEnc.toString(16), lzss: dp.lzss ? 'true' : 'false',
+        xferSize: dp.xferSize.toString(16), ForceOS: dp.forceOS ? 'true' : 'false',
+        block_struct: dp.blocks, ecu_type: dp.ecuType,
+        hardware_number: dp.hardwareNumber,
+      };
+    }
+    const h = analysis.header;
+    if (h) {
+      return {
+        offset: '0', flashernumber: 0, udid: '', vin: '', seed: '', key: '',
+        file_id: '', create_date: 0, expire_date: 0, max_flash_count: 0,
+        header_length: '0', block_count: 1, block_boot: 0, block_erase: 0,
+        file_size: analysis.totalSize.toString(16), comp_enc: '0',
+        lzss: 'false', xferSize: '0', ForceOS: h.isFullFlash ? 'true' : 'false',
+        block_struct: [{ block_id: 0, start_adresse: analysis.dataOffset.toString(16), end_adresse: (analysis.dataOffset + analysis.dataSize).toString(16), block_length: analysis.dataSize.toString(16), OS: h.isFullFlash ? 'true' : 'false' }],
+        ecu_type: h.ecuType || analysis.ecuFamily, hardware_number: '',
+      };
+    }
+    return null;
+  }, [analysis]);
+
+  // Generate flash plan from analysis
+  const flashPlan = useMemo((): FlashPlan | null => {
+    if (!containerFileHeader || !analysis) return null;
+    const ecuType = analysis.ecuConfig?.ecuType || analysis.devProgHeader?.ecuType || analysis.ecuFamily;
+    const mode = effectiveFlashType === 'fullflash' ? 'FULL_FLASH' : 'CALIBRATION';
+    return generateFlashPlan(containerFileHeader, ecuType, mode);
+  }, [containerFileHeader, analysis, effectiveFlashType]);
+
+  // Compute file hash on upload
+  const computeFileHash = useCallback(async (data: Uint8Array): Promise<string> => {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }, []);
+
+  // Handle launch (PCAN or Simulator)
+  const handleLaunch = useCallback((mode: 'simulator' | 'pcan') => {
+    setPendingMode(mode);
+    setShowPreFlight(true);
+  }, []);
+
+  // After pre-flight passes, create session and launch MissionControl
+  const handlePreFlightPassed = useCallback(async () => {
+    if (!pendingMode || !analysis || !flashPlan) return;
+    setShowPreFlight(false);
+    try {
+      const ecuType = analysis.ecuConfig?.ecuType || analysis.devProgHeader?.ecuType || analysis.ecuFamily;
+      const uuid = crypto.randomUUID();
+      const result = await createSession.mutateAsync({
+        uuid, ecuType, connectionMode: pendingMode, fileName,
+        fileHash: fileHash || undefined,
+        flashMode: effectiveFlashType === 'fullflash' ? 'full_flash' : 'calibration',
+        totalBlocks: flashPlan.totalBlocks, totalBytes: flashPlan.totalBytes,
+      });
+      setSessionUuid(result.uuid);
+      setMissionControlMode(pendingMode);
+    } catch (err) {
+      console.error('Failed to create flash session:', err);
+    }
+  }, [pendingMode, analysis, flashPlan, fileName, fileHash, effectiveFlashType, createSession]);
+
+  // Handle MissionControl completion
+  const handleFlashComplete = useCallback((result: 'SUCCESS' | 'FAILED' | 'ABORTED') => {
+    setMissionControlMode(null);
+    setSessionUuid('');
+    setPendingMode(null);
+  }, []);
 
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true);
@@ -161,6 +259,9 @@ export default function FlashContainerPanel() {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       setRawData(bytes);
+
+      // Compute file hash
+      computeFileHash(bytes).then(h => setFileHash(h));
 
       if (isPpeiContainer(buffer)) {
         const result = parsePpeiContainer(buffer);
@@ -201,8 +302,6 @@ export default function FlashContainerPanel() {
     setIsDragOver(true);
   }, []);
 
-  const effectiveFlashType = flashTypeOverride ?? analysis?.flashType ?? 'unknown';
-
   const resetAll = () => {
     setAnalysis(null);
     setRawData(null);
@@ -210,6 +309,11 @@ export default function FlashContainerPanel() {
     setFlashTypeOverride(null);
     setUploadStatus('idle');
     setActiveSection('overview');
+    setMissionControlMode(null);
+    setShowPreFlight(false);
+    setPendingMode(null);
+    setFileHash('');
+    setSessionUuid('');
   };
 
   // ── Upload Screen ──────────────────────────────────────────────────────
@@ -278,7 +382,50 @@ export default function FlashContainerPanel() {
     { id: 'sequence', label: 'Flash Sequence', icon: Zap },
     { id: 'hex', label: 'Hex Viewer', icon: Binary },
     { id: 'upload', label: 'Upload to Flasher', icon: Wifi },
+    { id: 'pcan', label: 'PCAN Flash', icon: Radio },
+    { id: 'simulator', label: 'Simulator', icon: Activity },
+    { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   ];
+
+  // ── MissionControl overlay ──────────────────────────────────────────────
+  if (missionControlMode && flashPlan && sessionUuid) {
+    return (
+      <div className="h-full flex flex-col">
+        <FlashMissionControl
+          plan={flashPlan}
+          connectionMode={missionControlMode}
+          sessionUuid={sessionUuid}
+          onComplete={handleFlashComplete}
+          onBack={() => { setMissionControlMode(null); setSessionUuid(''); }}
+        />
+      </div>
+    );
+  }
+
+  // ── PreFlight overlay ──────────────────────────────────────────────────
+  if (showPreFlight && pendingMode && analysis) {
+    const ecuType = analysis.ecuConfig?.ecuType || analysis.devProgHeader?.ecuType || analysis.ecuFamily;
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
+            <Shield className="w-5 h-5 text-cyan-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-zinc-100">Pre-Flight Diagnostics</h2>
+            <p className="text-xs text-zinc-500">Validating ECU and container before {pendingMode.toUpperCase()} flash</p>
+          </div>
+        </div>
+        <PreFlightChecklist
+          ecuType={ecuType}
+          fileHash={fileHash || undefined}
+          connectionMode={pendingMode}
+          onAllPassed={handlePreFlightPassed}
+          onCancel={() => { setShowPreFlight(false); setPendingMode(null); }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -680,6 +827,100 @@ export default function FlashContainerPanel() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── PCAN Flash Section ── */}
+        {activeSection === 'pcan' && (
+          <div className="space-y-4">
+            <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30 flex items-center justify-center">
+                  <Radio className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-100">PCAN Hardware Flash</h3>
+                  <p className="text-[10px] text-zinc-500">Flash ECU via PCAN-USB adapter — requires physical CAN bus connection</p>
+                </div>
+              </div>
+              <div className="space-y-2 text-xs">
+                {[
+                  { ok: !!analysis.ecuConfig, text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — manual CAN setup required' },
+                  { ok: analysis.valid, text: 'Container validated and CRC32 verified' },
+                  { ok: !!flashPlan && flashPlan.validationErrors.length === 0, text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
+                  { ok: false, text: 'PCAN-USB adapter — not detected (requires hardware)' },
+                ].map((req, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    {req.ok ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+                    <span className={req.ok ? 'text-zinc-300' : 'text-zinc-500'}>{req.text}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => handleLaunch('pcan')}
+                disabled={!flashPlan || flashPlan.validationErrors.length > 0}
+                className="mt-4 w-full py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Radio className="w-4 h-4 inline mr-2" />
+                Launch PCAN Flash
+              </button>
+            </div>
+            <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 text-xs text-amber-400/80">
+              <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5" />
+              PCAN flash requires a physical PCAN-USB adapter connected to the vehicle's OBD-II port.
+              Ensure ignition is ON and battery voltage is stable before proceeding.
+            </div>
+          </div>
+        )}
+
+        {/* ── Simulator Section ── */}
+        {activeSection === 'simulator' && (
+          <div className="space-y-4">
+            <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
+                  <Activity className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-100">Flash Simulator</h3>
+                  <p className="text-[10px] text-zinc-500">Simulate the full flash sequence without hardware — safe for testing and training</p>
+                </div>
+              </div>
+              {flashPlan && (
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="p-2 bg-zinc-800/50 rounded text-center">
+                    <div className="text-lg font-bold text-cyan-400">{flashPlan.totalBlocks}</div>
+                    <div className="text-[10px] text-zinc-500">Blocks</div>
+                  </div>
+                  <div className="p-2 bg-zinc-800/50 rounded text-center">
+                    <div className="text-lg font-bold text-cyan-400">{flashPlan.commands.length}</div>
+                    <div className="text-[10px] text-zinc-500">Commands</div>
+                  </div>
+                  <div className="p-2 bg-zinc-800/50 rounded text-center">
+                    <div className="text-lg font-bold text-cyan-400">{formatBytes(flashPlan.totalBytes)}</div>
+                    <div className="text-[10px] text-zinc-500">Total Data</div>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={() => handleLaunch('simulator')}
+                disabled={!flashPlan || flashPlan.validationErrors.length > 0}
+                className="w-full py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-sm hover:from-cyan-500 hover:to-blue-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Activity className="w-4 h-4 inline mr-2" />
+                Launch Simulator
+              </button>
+            </div>
+            <div className="p-3 bg-blue-500/5 rounded-lg border border-blue-500/20 text-xs text-blue-400/80">
+              <Info className="w-3.5 h-3.5 inline mr-1.5" />
+              The simulator runs the full flash sequence with realistic timing and CAN bus emulation.
+              No hardware required — all events are logged to the session history.
+            </div>
+          </div>
+        )}
+
+        {/* ── Dashboard Section ── */}
+        {activeSection === 'dashboard' && (
+          <FlashDashboard />
         )}
       </div>
     </div>

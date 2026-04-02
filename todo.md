@@ -108,3 +108,18 @@
 - [x] Integrate DevProg flash knowledge into Flash Container panel
 - [x] Integrate datalogging knowledge into V-OP platform
 - [x] Update Knox AI with complete DevProg codebase knowledge
+
+## Flash System — Full Build (Orchestrator, Sessions, UI)
+- [x] Create shared/pcanFlashOrchestrator.ts (flash plan generation, simulator engine, recovery plans, NRC descriptions, fun facts)
+- [x] Create shared/flashFileValidator.ts (CRC32 big-endian, format detection, file validation, pre-flight checklist, battery voltage evaluation)
+- [x] Create DB schema for flash sessions, session logs, ECU snapshots, flash queue, flash stats, file fingerprints, rollback files
+- [x] Run drizzle migration for flash tables
+- [x] Create server/flashDb.ts with all database helpers (CRUD for sessions, logs, snapshots, queue, stats, comparison, export)
+- [x] Expand server/routers/flash.ts with 20+ endpoints (createSession, updateSession, appendLogs, getSessionLogs, exportSession, saveSnapshot, getSnapshots, compareSnapshots, addToQueue, getQueue, updateQueueItem, stats, allStats, compareSessions, checkDuplicate, preFlightChecklist, notifyFlashComplete, completeSession)
+- [x] Create PreFlightChecklist component (server-side validation, ECU recognition, security profile, hardware check, duplicate detection)
+- [x] Create FlashMissionControl component (full simulation UI with progress bars, phase indicators, log viewer, recovery plans, fun facts, server session recording)
+- [x] Update FlashContainerPanel with PCAN Flash section, Simulator section, Dashboard section, PreFlight gate, session creation, file hash computation
+- [x] Create FlashDashboard component (session history table, overall stats, queue management, session comparison)
+- [x] Write 54 vitest tests for flash orchestrator, file validator, session management, queue/stats, pre-flight checklist, snapshots, notifications
+- [x] Verify CRC32 uses big-endian at offset 0x1000 (confirmed correct in flashFileValidator.ts)
+- [x] All 69 flash tests pass (15 original + 54 new)
