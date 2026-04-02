@@ -64,3 +64,47 @@
 
 ## Tasks Tab Access Code Gate
 - [x] Add separate access code gate to the Tasks tab — must enter KINGKONG again after entering Advanced
+
+## Flash Container Tab (E88 ECU Flasher)
+- [x] Review existing Flash tab placeholder in Advanced section
+- [x] Build PPEI container binary parser (header extraction: creator, vendor, version, block info, checksums)
+- [x] Build file management system (drag-and-drop upload, organize by type: OEM/aftermarket/full flash)
+- [x] Build hex viewer component for inspecting binary files at byte level
+- [x] Build flash procedure viewer (parse E88 v1.4 script, syntax highlighting, command flow)
+- [x] Build validation engine (file integrity, size compatibility, header validation, checksum verification)
+- [x] Integrate all components into the FLASH tab in Advanced section
+- [x] Consider datalogger bridge integration for future hardware connectivity
+
+## Knox AI Training
+- [x] Train Knox on E88 flash procedure commands and documentation
+- [x] Train Knox on PPEI container format and binary structure
+- [x] Train Knox on GMLAN protocol basics and CAN communication for E88
+
+## Flash Container Tab Build (Updated)
+- [x] Add "Calibration Flash" vs "Full Flash" toggle button in Flash tab
+- [x] Build binary upload tool for uploading .bin files into the flasher
+- [x] Build flash readiness validator (checks container integrity, block count, checksums)
+- [x] Assess and report what is missing to flash the L5P ECU
+
+## Security DLL Integration & Flash Pipeline
+- [x] Document GM dllsecurity.dll exports (CSecurity::SetSeedAndGetKey) and algorithm
+- [x] Document Ford FordSeedKeyDll.dll exports (SeedCalculation) and algorithm
+- [x] Implement GM seed/key algorithm in TypeScript (AES-128 ECB for 5B, DLL-based for 2B)
+- [x] Add Ford ECU family support to flash container parser
+- [x] Build seed/key computation module (shared/seedKeyAlgorithms.ts)
+- [x] Add security algorithm details to Flash Container readiness checks
+- [x] Build WiFi upload endpoint for VOP 3.0 flasher (server-side)
+- [x] Implement flash file preparation (strip header, extract data blocks, compute checksums)
+- [x] Update Knox AI with complete flash procedure knowledge (E88, L5P, Ford, seed/key)
+- [x] Write vitest tests for flash container parser and seed/key algorithms
+
+## DevProg V2 MAUI Codebase Integration
+- [x] Clone DevProg V2 MAUI repository from GitLab
+- [x] Analyze flash procedure implementations (all ECU types)
+- [x] Extract datalogging protocol and PID definitions
+- [x] Document hardware communication (PCAN, WiFi, BLE) protocols
+- [x] Extract container format parsing logic for all supported ECUs
+- [x] Map ECU type detection and flash file validation logic
+- [x] Integrate DevProg flash knowledge into Flash Container panel
+- [x] Integrate datalogging knowledge into V-OP platform
+- [x] Update Knox AI with complete DevProg codebase knowledge

@@ -808,6 +808,53 @@ When Knox reviews a Honda Talon WP8 datalog:
 | Intake Air Temperature | °F | Affects air density calculations |
 | Vehicle Speed | mph | Useful for gear ratio analysis |
 | Commanded Gear | gear | DCT gear position |
-| Module Voltage | V | Battery/charging system health |
+|| Module Voltage | V | Battery/charging system health |
 
+## Flash Container Analysis (Public Reference)
+
+The VOP platform supports two container formats for ECU flash files:
+
+### PPEI Container Format
+- Magic header: "IPF" at offset 0x000
+- ASCII header fields: creator, version, vendor, build number, ECU type, vehicle type
+- Part numbers at offsets 0x480-0x520 (6 slots)
+- Flash tags at offset 0x600 (e.g., #fullflash, #rescue, #gmcrypt)
+- Data block starts at configurable offset (typically 0x1000+)
+
+### DevProg V2 Container Format
+- CRC32 at offset 0x1000 (4 bytes, big-endian)
+- JSON header at offset 0x1004 (0x1FFC bytes)
+- Block data at offset 0x3000+
+- Supports LZSS compression for data blocks
+- Contains VIN binding, expiration dates, and flash count limits
+
+### Supported ECU Platforms (50+)
+The system recognizes ECUs from these manufacturers:
+- **GM**: E41 (L5P), E88, E90, E92, E98, E83, E78, E80, E86, E99, E39, E46, E67, E35
+- **GM TCU/Allison**: T87, T87A, T76, T43
+- **Ford**: MG1CS015, MG1CS018, MG1CS019, EDC17CP05, EDC17CP65, MD1CP006, MEDG17
+- **Ford TCU**: 10R80, 6R140
+- **Cummins**: CM2350B, CM2450B
+- **CAN-am/BRP**: MG1CA920, ME17CA1
+- **Polaris**: MG1CA007
+- **Segway**: MG1CA920 (Segway variant)
+
+### Flash Types
+- **Calibration Only**: Only data/calibration blocks are transferred (OS blocks skipped)
+- **Full Flash**: All blocks transferred including Operating System + Calibration
+- **Patch Mode**: OS patch blocks applied before main calibration flash
+
+### Communication Protocols
+- **GMLAN**: GM proprietary CAN protocol (older GM vehicles)
+- **UDS**: Unified Diagnostic Services ISO 14229 (newer vehicles, Ford, Cummins)
+- **CAN-am**: BRP-specific variant of UDS
+
+### Security Access
+All flash operations require security access (UDS Service 0x27). The seed level varies by ECU:
+- Level 0x01: Standard GM GMLAN ECUs
+- Level 0x03: CAN-am/BRP ECUs
+- Level 0x09: GM UDS ECUs (E41, E86, T87A)
+- Level 0x61: Ford UDS ECUs
+
+**Note:** All seed/key algorithms and secret material are stored server-side only.
 `;

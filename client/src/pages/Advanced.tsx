@@ -53,6 +53,7 @@ import DragTimeslip from '@/components/DragTimeslip';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import DataloggerPanel from '@/components/DataloggerPanel';
 import BinaryUploadPanel from '@/components/BinaryUploadPanel';
+import FlashContainerPanel from '@/components/FlashContainerPanel';
 import CalibrationEditor from '@/pages/CalibrationEditor';
 import IntelliSpy from '@/components/IntelliSpy';
 import VehicleCoding from '@/components/VehicleCoding';
@@ -1680,41 +1681,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
-        {activeTab === 'flash' && <div className="ppei-anim-fade-up">
-          <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' }}>
-            <div style={{ background: 'oklch(0.13 0.008 260)', border: '1px solid oklch(0.22 0.010 260)', borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '2rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem' }}>
-                <ShieldCheck style={{ width: 32, height: 32, color: sColor.red }} />
-                <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>PPEI EXCLUSIVE FLASH</h2>
-              </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim, lineHeight: 1.7 }}>
-                <p style={{ marginBottom: '1rem' }}>This is a <strong style={{ color: 'white' }}>bespoke product built for and by PPEI</strong> for the exclusive use of PPEI calibrations and OEM flashes.</p>
-                <p style={{ marginBottom: '1rem' }}>V-OP Flash <strong style={{ color: 'white' }}>does not flash any third-party tunes</strong>. Only aftermarket calibrations approved and built by PPEI will be flashed by this device.</p>
-                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1.5rem' }}>
-                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: sColor.red, marginBottom: '0.75rem' }}>WHAT V-OP FLASH SUPPORTS</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                    {['PPEI Custom Calibrations', 'OEM Stock Flashes', 'PPEI Performance Tunes', 'PPEI Economy Tunes', 'PPEI Tow Tunes', 'Multi-Tune Switching'].map(item => (
-                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.65 0.20 145)' }}>
-                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1rem' }}>
-                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.75 0.18 60)', marginBottom: '0.75rem' }}>OPEN TO ALL USERS</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                    {['Datalogger', 'Diagnostics / Health Analysis', 'AI Chat (Knox)', 'IntelliSpy Live Monitor', 'Drag Racing Terminal', 'Community Forums'].map(item => (
-                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.70 0.18 200)' }}>
-                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <p style={{ marginTop: '1.5rem', fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)', textAlign: 'center' }}>V-OP Flash requires a connected V-OP OBD device and an active PPEI account.</p>
-              </div>
-            </div>
-          </div>
-        </div>}
+        {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}

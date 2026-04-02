@@ -29,6 +29,7 @@ import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { geofenceRouter } from "./routers/geofence";
+import { flashRouter } from "./routers/flash";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -247,6 +248,9 @@ export const appRouter = router({
 
   // Geofence Zone Management
   geofence: geofenceRouter,
+
+  // Flash Container Management & VOP 3.0 Upload Pipeline
+  flash: flashRouter,
 
   // Feedback / Error Reports
   feedback: router({

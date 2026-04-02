@@ -822,6 +822,197 @@ Security Status: SEED request returns NEGATIVE RESPONSE on locked units — this
 The 6 software segments (SW1-SW6) represent the complete ECU firmware: calibration, operating system, boot loader, and auxiliary modules. All must be read and verified before flashing. The VOP flash scripting language FLASH_BLOCKS command iterates through all segments during a full flash.
 `;
 
+const DEVPROG_FLASH_KNOWLEDGE = `
+## DevProg V2 Flash System Knowledge (CONFIDENTIAL — Server-Only)
+
+### Container File Format
+DevProg V2 uses a binary container format for flash files:
+- Offset 0x0000-0x0FFF: Reserved padding (4096 bytes)
+- Offset 0x1000-0x1003: CRC32 checksum (big-endian) of all data from 0x1004 to EOF
+- Offset 0x1004-0x2FFF: JSON header (0x1FFC bytes, null-terminated ASCII)
+- Offset 0x3000+: Block data (sequential, may be LZSS compressed)
+
+### JSON Header Fields
+The JSON header contains:
+- flashernumber: Unique flasher device ID
+- udid: Device unique identifier
+- vin: Target vehicle VIN (for VIN-locked containers)
+- seed/key: Pre-computed security access values
+- file_id: Unique container identifier
+- create_date/expire_date: Unix timestamps for container validity
+- max_flash_count: Maximum allowed flash attempts
+- block_count: Number of data blocks
+- block_boot/block_erase: Boot and erase block indices
+- file_size: Total file size (hex string)
+- comp_enc: Compression/encryption flags (hex)
+- lzss: "true"/"false" for LZSS compression
+- xferSize: Transfer size per block (hex, e.g., "0xFF8" = 4088 bytes)
+- ForceOS: "true" forces OS blocks to flash (full flash mode)
+- block_struct: Array of block definitions with addresses, lengths, and flags
+- ecu_type: Target ECU type identifier
+- hardware_number: ECU hardware part number
+- sw_c1 through sw_c9: Software calibration part numbers
+- verify: Optional verification config with CAN addresses and speed
+
+### Block Structure
+Each block in block_struct contains:
+- block_id: Sequential block number
+- pri_rc: Primary Routine Control hex data
+- rc34: RequestDownload (0x34) parameters
+- rc36: TransferData (0x36) parameters
+- start_adresse/end_adresse: Memory address range (hex)
+- PrgByAdr: Program-by-address flag
+- block_length: Uncompressed block size (hex)
+- LzssLen: Compressed size if LZSS (hex)
+- post_rc: Post-flash Routine Control hex data
+- comp_enc: Per-block compression flag
+- xferSize: Per-block transfer size override
+- erase: Erase command for this block
+- OS: Block type — "true" (OS), "false" (calibration), "patch" (OS patch), "forcepatch" (forced patch)
+
+### LZSS Compression Format
+When lzss="true", each sub-block in the data area:
+1. 4 bytes: compressed size (big-endian uint32)
+2. N bytes: LZSS compressed data
+3. 2 bytes: LZSS flags (0x0000 = compressed, else raw)
+4. 2 bytes: CRC16-CCITT checksum of decompressed data
+
+LZSS parameters: ring buffer size = 4096, match threshold = 2, lookahead = 18
+
+### Flash Sequence State Machine
+The DevProg flash procedure follows this state machine (FSPARAM enum):
+1. OPENPS_UDS/OPENPS_GMLAN — Open programming session
+2. REQUEST_SEED_PS — Request security seed at configured level
+3. SEND_KEY_PS — Send computed key response
+4. CUSTOM_GM_PRIRC — GM-specific priority routine control (GMLAN only)
+5. FLASH_BLOCKS — Main block transfer loop:
+   a. Write PriRC (primary routine control)
+   b. RequestDownload (0x34) with block address/length
+   c. TransferData (0x36) in xferSize chunks
+   d. RequestTransferExit (0x37) if protocol requires it
+   e. Write PostRC (post routine control)
+6. ECU_RESET_UDS — Hard reset (0x11 0x01)
+7. CLEAR_DTCS — Clear diagnostic trouble codes (0x14)
+
+For ECUs with patchNecessary=true (e.g., E88, E90, E92, E98):
+- Patch sequence runs first: OPENPS_GMLAN → SEED → KEY → PRIRC → FLASH_PATCH
+- Then main flash sequence runs
+
+### Complete ECU Database (50+ platforms)
+The system supports these ECU families with full CAN configuration:
+
+#### GM GMLAN ECUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed | Transfer Size |
+|-----|------|----|----|-----------|-----------|---------------|
+| E41 | Bosch MG1CS111 (L5P) | 0x7E0 | 0x7E8 | 0x09 | 500 | 0xFFE |
+| E88 | GM-DELCO E88 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E90 | GM-DELCO E90 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E92 | GM-DELCO E92 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E98 | GM-DELCO E98 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E83 | GM-DELCO E83 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E78 | GM-DELCO E78 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E80 | GM-DELCO E80 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E39 | GM-DELCO E39 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E67 | GM-DELCO E67 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E86 | GM E86 | 0x7E0 | 0x7E8 | 0x09 | 500 | 0xFFE |
+| E99 | GM E99 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E35 | GM E35 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E46 | GM E46 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+
+#### GM TCU/Allison
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| T87 | Allison TCM T87 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+| T87A | Allison TCM T87A | 0x7E1 | 0x7E9 | 0x09 | 500 |
+| T76 | Allison TCM T76 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+| T43 | Allison TCM T43 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+
+#### Ford UDS ECUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| MG1CS015 | Bosch MG1CS015 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MG1CS018 | Bosch MG1CS018 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MG1CS019 | Bosch MG1CS019 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| EDC17CP05 | Bosch EDC17CP05 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| EDC17CP65 | Bosch EDC17CP65 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MD1CP006 | Bosch MD1CP006 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MEDG17 | Bosch MEDG17 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+
+#### Ford TCUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| TCU10R80 | Ford 10R80 TCU | 0x7E1 | 0x7E9 | 0x61 | 500 |
+| TCU6R140 | Ford 6R140 TCU | 0x7E1 | 0x7E9 | 0x61 | 500 |
+
+#### Cummins
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| CM2350B | Cummins CM2350B | 0x18DA00FA | 0x18DAFA00 | 0x01 | 250 |
+| CM2450B | Cummins CM2450B | 0x18DA00FA | 0x18DAFA00 | 0x01 | 250 |
+
+#### CAN-am / BRP
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| MG1CA920 | BRP MG1CA920 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| ME17CA1 | BRP ME17CA1 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| MG1CA007 | Polaris MG1CA007 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+
+### Seed/Key Algorithm Details
+
+#### GM 5-Byte AES (E88/E90/E92/E98/T87)
+- 5-byte seed, 5-byte key
+- Algorithm: AES-128 ECB encryption
+- Key schedule: derived from fixed 16-byte AES key
+- Process: pad seed to 16 bytes → AES-128 ECB encrypt → extract 5 bytes from result
+- The AES key is ECU-family specific (stored in dllsecurity.dll CSecurity class)
+
+#### GM UDS (E41/E86/T87A)
+- Uses UDS SecurityAccess at level 0x09
+- 5-byte seed, 5-byte key with AES-128
+- E41 additionally requires hardware unlock box for CMAC authentication
+
+#### Ford LFSR 3-Byte
+- 3-byte seed, 3-byte key
+- Linear Feedback Shift Register algorithm
+- 5 secret bytes per ECU variant determine the LFSR taps
+- Process: extract bits from seed → shift through LFSR → XOR chain → 3-byte key
+
+#### Cummins 32-bit
+- 4-byte seed, 4-byte key
+- Byte-swap seed → rotate left 11 bits → XOR with two 32-bit constants
+- Constants are ECU-variant specific
+
+#### CAN-am/BRP 16-bit
+- 2-byte seed, 2-byte key
+- Lookup table with 8x4 matrix (cucakeysB)
+- Seed bits select matrix indices → multiply → shift
+
+#### Polaris 16-bit
+- 2-byte seed, 2-byte key
+- Polynomial with rotating 8-byte coefficient array
+
+### Datalogging Protocol
+DevProg supports three PID transmission types:
+1. REQUESTBYID (0x22): UDS ReadDataByIdentifier — standard diagnostic read
+2. REQUESTBYADRESS (0x23): UDS ReadMemoryByAddress — direct memory access
+3. BROADCAST: Passive CAN bus monitoring — no request needed
+
+Each PID has:
+- DSI (Data Storage Identifier): UDS DID for the parameter
+- Factor/Offset: Linear conversion (value = raw * factor + offset)
+- Adjustment points: Non-linear correction table
+- Metric/Imperial units: Dual-unit support
+- SAE standard bitmasks: 4 x 32-bit visibility masks (vsb0, vsb20, vsb40, vsb60)
+
+### Recovery Mode
+DevProg supports recovery flashing for bricked ECUs:
+- Recovery detection via IS_RECOVERY check in flash script
+- Separate recovery flash sequence with different block ordering
+- Boot block (block_boot) is flashed first in recovery
+- Erase block (block_erase) handles sector erase before write
+- Recovery can be triggered by "Start_Recovery" BLE command
+`;
+
 const VOP3_FLASH_ENCRYPTION = `
 ## VOP 3.0 Flash Script Encryption System (CONFIDENTIAL — Server-Only)
 
@@ -938,7 +1129,7 @@ Uses the 'cryptography' Python package with identical HKDF and AES-GCM parameter
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + VOP3_FLASH_ENCRYPTION;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION;
 }
 
 /**
