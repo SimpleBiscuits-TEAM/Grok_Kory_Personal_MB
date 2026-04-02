@@ -123,3 +123,12 @@
 - [x] Write 54 vitest tests for flash orchestrator, file validator, session management, queue/stats, pre-flight checklist, snapshots, notifications
 - [x] Verify CRC32 uses big-endian at offset 0x1000 (confirmed correct in flashFileValidator.ts)
 - [x] All 69 flash tests pass (15 original + 54 new)
+
+## Analyzer UX Improvements
+- [x] Move Compare feature from public Analyzer to Advanced mode Analyzer only
+- [x] Add "Quick Rundown" toggle to HealthReport for simplified breakdown
+- [x] Add "Quick Rundown" toggle to DiagnosticReport for simplified breakdown
+- [x] Add fun upgrade prompt in public Analyzer ("YOU'RE RUNNING ON STOCK BOOST") to nudge users toward V-OP Pro
+
+## Bug Fix — PCAN Flash Detection
+- [x] Fix PCAN detection in flash system — use same PCANConnection.isBridgeAvailable() as datalogger/bridge

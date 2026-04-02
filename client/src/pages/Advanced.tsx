@@ -64,6 +64,7 @@ import AdminNotificationPanel from '@/components/AdminNotificationPanel';
 import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
 import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
+import CompareView from '@/components/CompareView';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
 import UserManagementPanel from '@/components/UserManagementPanel';
@@ -904,6 +905,7 @@ function VehiclePanel() {
 // ─── Analyzer Panel (Merged Normal Mode) ────────────────────────────────────
 
 function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult) => void }) {
+  const [analyzerMode, setAnalyzerMode] = useState<'analyze' | 'compare'>('analyze');
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
@@ -1089,6 +1091,42 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
   ) ?? false;
   const hasFaults = (diagnostics && diagnostics.issues.length > 0) || hasReasoningFaults;
 
+  // Mode toggle component (shared between upload and results views)
+  const ModeToggle = () => (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 0, marginBottom: '1.5rem' }}>
+      <button onClick={() => setAnalyzerMode('analyze')} style={{
+        background: analyzerMode === 'analyze' ? sColor.red : 'oklch(0.14 0.006 260)',
+        color: analyzerMode === 'analyze' ? 'white' : sColor.textDim,
+        fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em', padding: '10px 28px',
+        border: analyzerMode === 'analyze' ? `1px solid ${sColor.red}` : `1px solid oklch(0.48 0.008 260)`,
+        borderRadius: '3px 0 0 3px', cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: '8px',
+      }}>
+        <BarChart3 style={{ width: 16, height: 16 }} />ANALYZE
+      </button>
+      <button onClick={() => setAnalyzerMode('compare')} style={{
+        background: analyzerMode === 'compare' ? sColor.red : 'oklch(0.14 0.006 260)',
+        color: analyzerMode === 'compare' ? 'white' : sColor.textDim,
+        fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em', padding: '10px 28px',
+        border: analyzerMode === 'compare' ? `1px solid ${sColor.red}` : `1px solid oklch(0.48 0.008 260)`,
+        borderRadius: '0 3px 3px 0', cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: '8px', borderLeft: 'none',
+      }}>
+        <Gauge style={{ width: 16, height: 16 }} />COMPARE
+      </button>
+    </div>
+  );
+
+  // Compare mode — full-screen compare view
+  if (analyzerMode === 'compare') {
+    return (
+      <div>
+        <ModeToggle />
+        <CompareView onBack={() => setAnalyzerMode('analyze')} />
+      </div>
+    );
+  }
+
   if (!data) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -1096,6 +1134,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
           <h2 className="ppei-gradient-text" style={{ fontFamily: sFont.heading, fontSize: '2.2rem', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>DATALOG ANALYZER</h2>
           <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim }}>Upload your CSV datalog for full diagnostic analysis, dyno chart, and PDF report</p>
         </div>
+        <ModeToggle />
         <div
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -1143,6 +1182,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
   return (
     <div className="space-y-6">
+      <ModeToggle />
       {/* File info bar */}
       <div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: hasFaults ? `4px solid ${sColor.red}` : `4px solid ${sColor.green}`, borderRadius: '3px', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

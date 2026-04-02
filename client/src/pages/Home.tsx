@@ -11,7 +11,7 @@ import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary } from '@/components/Charts';
@@ -31,7 +31,7 @@ import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
-import CompareView from '@/components/CompareView';
+
 import { APP_VERSION } from '@/lib/version';
 import { ShareCard, buildDynoShareData, buildDiagnosticShareData, buildHealthShareData } from '@/components/ShareCard';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
@@ -55,7 +55,7 @@ export default function Home() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
-  const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
+  const [showProTeaser, setShowProTeaser] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -124,7 +124,7 @@ export default function Home() {
           });
         }
 
-        // Cache datalog (fire-and-forget)
+         // Cache datalog (fire-and-forget)
         try {
           const reader = new FileReader();
           reader.onload = () => {
@@ -136,7 +136,7 @@ export default function Home() {
           };
           reader.readAsDataURL(file);
         } catch { /* silent */ }
-
+        setShowProTeaser(true);
         setLoading(false);
         return;
       }
@@ -195,6 +195,7 @@ export default function Home() {
         };
         reader.readAsDataURL(file);
       } catch { /* silent — caching is best-effort */ }
+      setShowProTeaser(true);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setError('File load error \u2014 This file format has been reported to the PPEI team for review. We\'ll update the tool to support it.');
@@ -317,61 +318,73 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Mode Toggle: Analyze vs Compare */}
-            <div className="ppei-anim-fade-up" style={{
-              display: 'flex',
-              justifyContent: 'center',
-              gap: '0',
-              marginBottom: '1.5rem',
-            }}>
-              <button
-                onClick={() => setMode('analyze')}
-                style={{
-                  background: mode === 'analyze' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'analyze' ? 'white' : 'oklch(0.68 0.010 260)',
-                  fontFamily: '"Bebas Neue", sans-serif',
-                  fontSize: '1rem',
-                  letterSpacing: '0.08em',
-                  padding: '10px 28px',
-                  border: mode === 'analyze' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
-                  borderRadius: '3px 0 0 3px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <BarChart3 style={{ width: '16px', height: '16px' }} />
-                ANALYZE
-              </button>
-              <button
-                onClick={() => setMode('compare')}
-                style={{
-                  background: mode === 'compare' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'compare' ? 'white' : 'oklch(0.68 0.010 260)',
-                  fontFamily: '"Bebas Neue", sans-serif',
-                  fontSize: '1rem',
-                  letterSpacing: '0.08em',
-                  padding: '10px 28px',
-                  border: mode === 'compare' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
-                  borderRadius: '0 3px 3px 0',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  borderLeft: 'none',
-                }}
-              >
-                <Gauge style={{ width: '16px', height: '16px' }} />
-                COMPARE
-              </button>
-            </div>
+            {/* V-OP Pro Upgrade Teaser */}
+            {showProTeaser && (
+              <div className="ppei-anim-fade-up" style={{
+                background: 'linear-gradient(135deg, oklch(0.12 0.015 25) 0%, oklch(0.10 0.005 260) 60%, oklch(0.12 0.012 200) 100%)',
+                border: '1px solid oklch(0.52 0.22 25 / 0.4)',
+                borderRadius: '4px',
+                padding: '1.5rem',
+                marginBottom: '1.5rem',
+                position: 'relative',
+                overflow: 'hidden',
+              }}>
+                {/* Animated corner accent */}
+                <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle at top right, oklch(0.52 0.22 25 / 0.15), transparent 70%)', pointerEvents: 'none' }} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '4px',
+                    background: 'oklch(0.52 0.22 25 / 0.15)', border: '1px solid oklch(0.52 0.22 25 / 0.4)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <Rocket style={{ width: '24px', height: '24px', color: 'oklch(0.52 0.22 25)' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', margin: 0, marginBottom: '4px' }}>
+                      YOU'RE RUNNING ON STOCK BOOST
+                    </h3>
+                    <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.92rem', color: 'oklch(0.72 0.010 260)', margin: 0, lineHeight: 1.5, marginBottom: '12px' }}>
+                      This analyzer is great for quick checks — but V-OP Pro unlocks the <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 600 }}>full dyno</span>. Side-by-side tune comparison, calibration editing, live gauges, AI diagnostics, flash tools, and more. It's like going from a stock tune to a PPEI custom — same truck, completely different animal.
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <Link href="/advanced">
+                        <button style={{
+                          background: 'oklch(0.52 0.22 25)', color: 'white', fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.95rem', letterSpacing: '0.08em', padding: '8px 24px', borderRadius: '3px',
+                          border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                        }}>
+                          <Rocket style={{ width: '14px', height: '14px' }} />
+                          UNLOCK V-OP PRO
+                        </button>
+                      </Link>
+                      <button
+                        onClick={() => setShowProTeaser(false)}
+                        style={{
+                          background: 'transparent', color: 'oklch(0.55 0.008 260)', fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem', letterSpacing: '0.06em', padding: '8px 16px', borderRadius: '3px',
+                          border: '1px solid oklch(0.25 0.008 260)', cursor: 'pointer',
+                        }}
+                      >
+                        MAYBE LATER
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', gap: '16px', marginTop: '14px', flexWrap: 'wrap' }}>
+                      {['Tune Compare', 'Calibration Editor', 'Live Gauges', 'AI Chat', 'Flash Tools'].map(feat => (
+                        <span key={feat} style={{
+                          fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', letterSpacing: '0.05em',
+                          color: 'oklch(0.58 0.008 260)', padding: '3px 10px',
+                          background: 'oklch(0.14 0.006 260)', border: '1px solid oklch(0.22 0.008 260)',
+                          borderRadius: '2px',
+                        }}>
+                          {feat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
-            {mode === 'compare' ? (
-              <CompareView onBack={() => setMode('analyze')} />
-            ) : (
             <>
 
             {/* Drop zone */}
@@ -626,7 +639,7 @@ export default function Home() {
                 POWERED BY PPEI · CUSTOM TUNING · REDEFINING THE LIMITS
               </p>
             </div>
-            </>)}
+            </>
           </div>
         ) : (
           /* ── Dashboard Section ── */

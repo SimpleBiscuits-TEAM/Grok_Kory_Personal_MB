@@ -2,142 +2,309 @@
  * V-OP by PPEI — DiagnosticReport Component
  * Dark theme: black bg, red critical, amber warning, cyan info
  * Typography: Bebas Neue headings, Rajdhani body, Share Tech Mono for codes
+ * Features: Full detailed view + "Quick Rundown" simplified summary toggle
  */
 
-import { AlertCircle, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, AlertTriangle, Info, CheckCircle2, Gauge } from 'lucide-react';
 import { DiagnosticIssue, DiagnosticReport } from '@/lib/diagnostics';
 
 interface DiagnosticReportProps {
   report: DiagnosticReport;
 }
 
+/* ── Quick Rundown: plain-English diagnostic summary ── */
+function DiagnosticQuickRundown({ report }: { report: DiagnosticReport }) {
+  const criticalCount = report.issues.filter(i => i.severity === 'critical').length;
+  const warningCount = report.issues.filter(i => i.severity === 'warning').length;
+  const infoCount = report.issues.filter(i => i.severity === 'info').length;
+  const total = report.issues.length;
+
+  const getVerdict = () => {
+    if (total === 0) return "Clean bill of health — no fault conditions found in this log. Your truck's behaving.";
+    if (criticalCount > 0) return `Found ${criticalCount} critical condition${criticalCount > 1 ? 's' : ''} that need${criticalCount === 1 ? 's' : ''} attention right away. Don't ignore these — they can leave you on the side of the road.`;
+    if (warningCount > 0) return `Nothing critical, but ${warningCount} warning${warningCount > 1 ? 's' : ''} worth watching. Keep an eye on these before your next long haul or heavy tow.`;
+    return `Just ${infoCount} informational note${infoCount > 1 ? 's' : ''} — nothing to lose sleep over. Good shape overall.`;
+  };
+
+  const severityColor = (s: string) => {
+    if (s === 'critical') return 'oklch(0.52 0.22 25)';
+    if (s === 'warning') return 'oklch(0.75 0.18 60)';
+    return 'oklch(0.70 0.18 200)';
+  };
+
+  const borderColor = total === 0 ? 'oklch(0.65 0.20 145)' : criticalCount > 0 ? 'oklch(0.52 0.22 25)' : warningCount > 0 ? 'oklch(0.75 0.18 60)' : 'oklch(0.70 0.18 200)';
+
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, oklch(0.12 0.008 260) 0%, oklch(0.14 0.006 260) 100%)',
+      border: `1px solid ${borderColor}44`,
+      borderLeft: `4px solid ${borderColor}`,
+      borderRadius: '3px',
+      padding: '1.25rem 1.5rem',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1rem' }}>
+        <Gauge style={{ width: '22px', height: '22px', color: borderColor }} />
+        <div style={{ flex: 1 }}>
+          <h3 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1.1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+            QUICK RUNDOWN
+          </h3>
+          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.78rem', color: 'oklch(0.58 0.008 260)', margin: 0 }}>
+            The short version — no jargon, just what matters
+          </p>
+        </div>
+        {/* Severity counter badges */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {criticalCount > 0 && (
+            <div style={{ background: 'oklch(0.52 0.22 25 / 0.15)', border: '1px solid oklch(0.52 0.22 25 / 0.4)', borderRadius: '2px', padding: '2px 10px', fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.06em', color: 'oklch(0.75 0.18 25)' }}>
+              {criticalCount} CRITICAL
+            </div>
+          )}
+          {warningCount > 0 && (
+            <div style={{ background: 'oklch(0.75 0.18 60 / 0.12)', border: '1px solid oklch(0.75 0.18 60 / 0.35)', borderRadius: '2px', padding: '2px 10px', fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.06em', color: 'oklch(0.80 0.18 60)' }}>
+              {warningCount} WARNING
+            </div>
+          )}
+          {infoCount > 0 && (
+            <div style={{ background: 'oklch(0.70 0.18 200 / 0.12)', border: '1px solid oklch(0.70 0.18 200 / 0.35)', borderRadius: '2px', padding: '2px 10px', fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.06em', color: 'oklch(0.70 0.18 200)' }}>
+              {infoCount} INFO
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Plain English Verdict */}
+      <div style={{
+        background: 'oklch(0.10 0.005 260)',
+        border: '1px solid oklch(0.20 0.008 260)',
+        borderRadius: '2px',
+        padding: '12px 14px',
+        marginBottom: '1rem',
+      }}>
+        <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.95rem', color: 'oklch(0.80 0.010 260)', margin: 0, lineHeight: 1.5 }}>
+          {getVerdict()}
+        </p>
+      </div>
+
+      {/* Issue one-liners (max 5) */}
+      {total > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {report.issues.slice(0, 5).map((issue, i) => (
+            <div key={`${issue.code}-${i}`} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '8px 12px',
+              background: 'oklch(0.10 0.005 260)',
+              border: `1px solid ${severityColor(issue.severity)}22`,
+              borderLeft: `3px solid ${severityColor(issue.severity)}`,
+              borderRadius: '2px',
+            }}>
+              <div style={{
+                width: '6px', height: '6px', borderRadius: '50%',
+                background: severityColor(issue.severity), flexShrink: 0,
+              }} />
+              <div style={{ flex: 1 }}>
+                <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.88rem', fontWeight: 600, color: 'oklch(0.80 0.010 260)' }}>
+                  {issue.title}
+                </span>
+                <span style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', color: 'oklch(0.55 0.008 260)', marginLeft: '8px' }}>
+                  {issue.code.replace(/-/g, ' ')}
+                </span>
+              </div>
+              <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.78rem', color: severityColor(issue.severity), textTransform: 'uppercase', fontWeight: 600, flexShrink: 0 }}>
+                {issue.severity}
+              </span>
+            </div>
+          ))}
+          {total > 5 && (
+            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.55 0.008 260)', margin: 0, paddingLeft: '20px' }}>
+              + {total - 5} more in full report
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Top recommendations (max 2) */}
+      {total > 0 && (
+        <div style={{ marginTop: '1rem' }}>
+          <div style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '0.75rem', letterSpacing: '0.08em', color: 'oklch(0.55 0.008 260)', marginBottom: '6px' }}>
+            TOP ACTIONS:
+          </div>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {report.issues.filter(i => i.severity === 'critical' || i.severity === 'warning').slice(0, 2).map((issue, i) => (
+              <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.70 0.010 260)' }}>
+                <span style={{ color: 'oklch(0.70 0.18 200)', fontWeight: 'bold', flexShrink: 0 }}>→</span>{issue.recommendation}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
+  const [quickRundown, setQuickRundown] = useState(false);
   const criticalIssues = report.issues.filter((i) => i.severity === 'critical');
   const warningIssues = report.issues.filter((i) => i.severity === 'warning');
   const infoIssues = report.issues.filter((i) => i.severity === 'info');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      {/* Summary Card */}
-      <div style={{
-        background: 'oklch(0.13 0.006 260)',
-        border: '1px solid oklch(0.22 0.008 260)',
-        borderLeft: '4px solid oklch(0.70 0.18 200)',
-        borderRadius: '3px',
-        padding: '1rem 1.25rem',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '12px'
-      }}>
-        <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.70 0.18 200)', flexShrink: 0, marginTop: '2px' }} />
-        <div>
-          <h3 style={{
-            fontFamily: '"Bebas Neue", "Impact", sans-serif',
-            fontSize: '1rem',
-            letterSpacing: '0.06em',
-            color: 'white',
-            margin: 0,
-            marginBottom: '4px'
-          }}>DIAGNOSTIC SUMMARY</h3>
-          <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
-            {report.summary}
-          </p>
-          <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.60 0.008 260)', margin: 0, marginTop: '6px' }}>
-            Generated: {report.timestamp.toLocaleString()}
-          </p>
-        </div>
+
+      {/* ── QUICK RUNDOWN TOGGLE ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => setQuickRundown(q => !q)}
+          style={{
+            background: quickRundown ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
+            color: quickRundown ? 'white' : 'oklch(0.68 0.010 260)',
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.8rem',
+            letterSpacing: '0.08em',
+            padding: '6px 16px',
+            borderRadius: '3px',
+            border: quickRundown ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.30 0.008 260)',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Gauge style={{ width: '13px', height: '13px' }} />
+          {quickRundown ? 'FULL REPORT' : 'QUICK RUNDOWN'}
+        </button>
       </div>
 
-      {/* Critical Issues */}
-      {criticalIssues.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <AlertCircle style={{ width: '16px', height: '16px', color: 'oklch(0.52 0.22 25)' }} />
-            <h4 style={{
-              fontFamily: '"Bebas Neue", "Impact", sans-serif',
-              fontSize: '1rem',
-              letterSpacing: '0.06em',
-              color: 'oklch(0.75 0.18 25)',
-              margin: 0
-            }}>
-                CRITICAL CONDITIONS DETECTED ({criticalIssues.length})
-            </h4>
+      {quickRundown ? (
+        <DiagnosticQuickRundown report={report} />
+      ) : (
+        <>
+          {/* Summary Card */}
+          <div style={{
+            background: 'oklch(0.13 0.006 260)',
+            border: '1px solid oklch(0.22 0.008 260)',
+            borderLeft: '4px solid oklch(0.70 0.18 200)',
+            borderRadius: '3px',
+            padding: '1rem 1.25rem',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px'
+          }}>
+            <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.70 0.18 200)', flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <h3 style={{
+                fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                fontSize: '1rem',
+                letterSpacing: '0.06em',
+                color: 'white',
+                margin: 0,
+                marginBottom: '4px'
+              }}>DIAGNOSTIC SUMMARY</h3>
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.75 0.010 260)', margin: 0 }}>
+                {report.summary}
+              </p>
+              <p style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: '0.72rem', color: 'oklch(0.60 0.008 260)', margin: 0, marginTop: '6px' }}>
+                Generated: {report.timestamp.toLocaleString()}
+              </p>
+            </div>
           </div>
-          {criticalIssues.map((issue, i) => (
-            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-          ))}
-        </div>
-      )}
 
-      {/* Warning Issues */}
-      {warningIssues.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <AlertTriangle style={{ width: '16px', height: '16px', color: 'oklch(0.75 0.18 60)' }} />
-            <h4 style={{
-              fontFamily: '"Bebas Neue", "Impact", sans-serif',
-              fontSize: '1rem',
-              letterSpacing: '0.06em',
-              color: 'oklch(0.80 0.18 60)',
-              margin: 0
-            }}>
-              WARNING CONDITIONS ({warningIssues.length})
-            </h4>
-          </div>
-          {warningIssues.map((issue, i) => (
-            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-          ))}
-        </div>
-      )}
+          {/* Critical Issues */}
+          {criticalIssues.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <AlertCircle style={{ width: '16px', height: '16px', color: 'oklch(0.52 0.22 25)' }} />
+                <h4 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.06em',
+                  color: 'oklch(0.75 0.18 25)',
+                  margin: 0
+                }}>
+                    CRITICAL CONDITIONS DETECTED ({criticalIssues.length})
+                </h4>
+              </div>
+              {criticalIssues.map((issue, i) => (
+                <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+              ))}
+            </div>
+          )}
 
-      {/* Info Issues */}
-      {infoIssues.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <Info style={{ width: '16px', height: '16px', color: 'oklch(0.70 0.18 200)' }} />
-            <h4 style={{
-              fontFamily: '"Bebas Neue", "Impact", sans-serif',
-              fontSize: '1rem',
-              letterSpacing: '0.06em',
-              color: 'oklch(0.70 0.18 200)',
-              margin: 0
-            }}>
-              INFORMATIONAL CONDITIONS ({infoIssues.length})
-            </h4>
-          </div>
-          {infoIssues.map((issue, i) => (
-            <IssueCard key={`${issue.code}-${i}`} issue={issue} />
-          ))}
-        </div>
-      )}
+          {/* Warning Issues */}
+          {warningIssues.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <AlertTriangle style={{ width: '16px', height: '16px', color: 'oklch(0.75 0.18 60)' }} />
+                <h4 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.06em',
+                  color: 'oklch(0.80 0.18 60)',
+                  margin: 0
+                }}>
+                  WARNING CONDITIONS ({warningIssues.length})
+                </h4>
+              </div>
+              {warningIssues.map((issue, i) => (
+                <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+              ))}
+            </div>
+          )}
 
-      {/* No Issues */}
-      {report.issues.length === 0 && (
-        <div style={{
-          background: 'oklch(0.13 0.006 260)',
-          border: '1px solid oklch(0.22 0.008 260)',
-          borderLeft: '4px solid oklch(0.65 0.20 145)',
-          borderRadius: '3px',
-          padding: '1rem 1.25rem',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '12px'
-        }}>
-          <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.65 0.20 145)', flexShrink: 0, marginTop: '2px' }} />
-          <div>
-            <h3 style={{
-              fontFamily: '"Bebas Neue", "Impact", sans-serif',
-              fontSize: '1rem',
-              letterSpacing: '0.06em',
-              color: 'white',
-              margin: 0,
-              marginBottom: '4px'
-            }}>ALL SYSTEMS NORMAL</h3>
-            <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
-              No potential fault areas detected. Engine parameters are within normal operating ranges.
-            </p>
-          </div>
-        </div>
+          {/* Info Issues */}
+          {infoIssues.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <Info style={{ width: '16px', height: '16px', color: 'oklch(0.70 0.18 200)' }} />
+                <h4 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.06em',
+                  color: 'oklch(0.70 0.18 200)',
+                  margin: 0
+                }}>
+                  INFORMATIONAL CONDITIONS ({infoIssues.length})
+                </h4>
+              </div>
+              {infoIssues.map((issue, i) => (
+                <IssueCard key={`${issue.code}-${i}`} issue={issue} />
+              ))}
+            </div>
+          )}
+
+          {/* No Issues */}
+          {report.issues.length === 0 && (
+            <div style={{
+              background: 'oklch(0.13 0.006 260)',
+              border: '1px solid oklch(0.22 0.008 260)',
+              borderLeft: '4px solid oklch(0.65 0.20 145)',
+              borderRadius: '3px',
+              padding: '1rem 1.25rem',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px'
+            }}>
+              <CheckCircle2 style={{ width: '20px', height: '20px', color: 'oklch(0.65 0.20 145)', flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.06em',
+                  color: 'white',
+                  margin: 0,
+                  marginBottom: '4px'
+                }}>ALL SYSTEMS NORMAL</h3>
+                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.9rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
+                  No potential fault areas detected. Engine parameters are within normal operating ranges.
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

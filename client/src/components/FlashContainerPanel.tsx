@@ -12,7 +12,7 @@
  * - 50+ ECU platform support from shared ECU database
  */
 
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { trpc } from '@/lib/trpc';
 import PreFlightChecklist from './PreFlightChecklist';
 import FlashMissionControl from './FlashMissionControl';
@@ -22,6 +22,7 @@ import {
   generateFlashPlan, formatBytes,
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader as EcuContainerFileHeader } from '../../../shared/ecuDatabase';
+import { PCANConnection } from '../lib/pcanConnection';
 import {
   parsePpeiContainer,
   isPpeiContainer,
@@ -166,11 +167,36 @@ export default function FlashContainerPanel() {
   const [pendingMode, setPendingMode] = useState<'simulator' | 'pcan' | null>(null);
   const [fileHash, setFileHash] = useState<string>('');
   const [sessionUuid, setSessionUuid] = useState<string>('');
+  const [pcanBridgeAvailable, setPcanBridgeAvailable] = useState<boolean | null>(null);
+  const [pcanBridgeUrl, setPcanBridgeUrl] = useState<string | null>(null);
+  const [checkingBridge, setCheckingBridge] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const createSession = trpc.flash.createSession.useMutation();
 
   const effectiveFlashType: FlashType = flashTypeOverride ?? analysis?.flashType ?? 'unknown';
+
+  // Auto-detect PCAN bridge — same method used by Datalogger and IntelliSpy
+  const checkPcanBridge = useCallback(async () => {
+    setCheckingBridge(true);
+    try {
+      const result = await PCANConnection.isBridgeAvailable();
+      setPcanBridgeAvailable(result.available);
+      setPcanBridgeUrl(result.available ? result.url : null);
+    } catch {
+      setPcanBridgeAvailable(false);
+      setPcanBridgeUrl(null);
+    } finally {
+      setCheckingBridge(false);
+    }
+  }, []);
+
+  // Check bridge when PCAN section becomes active
+  useEffect(() => {
+    if (activeSection === 'pcan' && pcanBridgeAvailable === null) {
+      checkPcanBridge();
+    }
+  }, [activeSection, pcanBridgeAvailable, checkPcanBridge]);
 
   // Convert client-side analysis to ContainerFileHeader for generateFlashPlan
   const containerFileHeader = useMemo((): EcuContainerFileHeader | null => {
@@ -314,6 +340,8 @@ export default function FlashContainerPanel() {
     setPendingMode(null);
     setFileHash('');
     setSessionUuid('');
+    setPcanBridgeAvailable(null);
+    setPcanBridgeUrl(null);
   };
 
   // ── Upload Screen ──────────────────────────────────────────────────────
@@ -847,7 +875,7 @@ export default function FlashContainerPanel() {
                   { ok: !!analysis.ecuConfig, text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — manual CAN setup required' },
                   { ok: analysis.valid, text: 'Container validated and CRC32 verified' },
                   { ok: !!flashPlan && flashPlan.validationErrors.length === 0, text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
-                  { ok: false, text: 'PCAN-USB adapter — not detected (requires hardware)' },
+                  { ok: pcanBridgeAvailable === true, text: checkingBridge ? 'Checking PCAN-USB bridge...' : pcanBridgeAvailable === true ? `PCAN-USB bridge detected${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'secure' : 'standard'})` : ''}` : 'PCAN-USB bridge — not detected (ensure pcan_bridge.py is running)' },
                 ].map((req, i) => (
                   <div key={i} className="flex items-center gap-2">
                     {req.ok ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
@@ -857,12 +885,21 @@ export default function FlashContainerPanel() {
               </div>
               <button
                 onClick={() => handleLaunch('pcan')}
-                disabled={!flashPlan || flashPlan.validationErrors.length > 0}
+                disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
                 className="mt-4 w-full py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Radio className="w-4 h-4 inline mr-2" />
                 Launch PCAN Flash
               </button>
+              {pcanBridgeAvailable === false && (
+                <button
+                  onClick={checkPcanBridge}
+                  disabled={checkingBridge}
+                  className="mt-2 w-full py-2 rounded-lg border border-zinc-700 text-zinc-400 text-xs hover:border-zinc-600 hover:text-zinc-300 transition-all disabled:opacity-40"
+                >
+                  {checkingBridge ? 'Checking...' : '↻ Re-check PCAN Bridge Connection'}
+                </button>
+              )}
             </div>
             <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 text-xs text-amber-400/80">
               <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5" />
