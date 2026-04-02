@@ -92,6 +92,8 @@ export interface SimulatorState {
   result: 'SUCCESS' | 'FAILED' | 'ABORTED' | null;
   recoveryPlan: RecoveryPlan | null;
   recoveryAttempt: number;
+  /** Internal: ticks spent on the current non-block command */
+  commandTickCount: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -233,9 +235,15 @@ export function generateFlashPlan(
     canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
   });
 
+  // Realistic timing: ~4 KB/s for block transfers, phase-specific delays for commands
+  const PHASE_EST: Record<string, number> = {
+    PRE_CHECK: 1500, VOLTAGE_INIT: 2000, SESSION_OPEN: 2500,
+    SECURITY_ACCESS: 3000, PRE_FLASH: 8000, POST_FLASH: 4000,
+    VERIFICATION: 3000, CLEANUP: 2000,
+  };
   const estimatedTimeMs = commands.reduce((sum, c) => {
-    if (c.blockData) return sum + Math.max(c.blockData.totalBytes / 4000, 2000);
-    return sum + c.timeoutMs * 0.3;
+    if (c.blockData) return sum + (c.blockData.totalBytes / 4000) * 1000; // 4 KB/s → ms
+    return sum + (PHASE_EST[c.phase] || 1500);
   }, 0);
 
   return {
@@ -281,6 +289,7 @@ export function createSimulatorState(plan: FlashPlan): SimulatorState {
     result: null,
     recoveryPlan: null,
     recoveryAttempt: 0,
+    commandTickCount: 0,
   };
 }
 
@@ -321,14 +330,55 @@ export function advanceSimulator(
 
   next.currentPhase = cmd.phase;
 
-  // Handle block transfer progress
+  // ── Realistic per-phase delays (ms) ──────────────────────────────────
+  const PHASE_DELAY: Record<string, number> = {
+    PRE_CHECK: 1500,      // TesterPresent handshake
+    VOLTAGE_INIT: 2000,   // Relay board settling
+    SESSION_OPEN: 2500,   // DiagnosticSessionControl
+    SECURITY_ACCESS: 3000,// Seed/key exchange + computation
+    PRE_FLASH: 8000,      // Erase can take 5-15s per block
+    POST_FLASH: 4000,     // Dependency check
+    VERIFICATION: 3000,   // Read ECU ID
+    CLEANUP: 2000,        // Reset + DTC clear
+  };
+
+  // Handle block transfer progress — realistic CAN bus UDS speed
   if (cmd.blockData) {
-    const transferRate = 4000; // bytes per 100ms tick
+    // Real CAN bus at 500kbps with UDS overhead: ~3-6 KB/s
+    // We simulate ~4 KB/s = 4 bytes per ms, scaled by deltaMs
+    const transferRate = Math.round(4 * deltaMs);
+    const prevBytes = next.transferredBytes;
     next.transferredBytes = Math.min(
       next.transferredBytes + transferRate,
-      cmd.blockData.totalBytes + (next.transferredBytes - (next.blockProgress * cmd.blockData.totalBytes / 100)),
+      next.totalBytes,
     );
-    next.blockProgress = Math.min(next.blockProgress + (transferRate / cmd.blockData.totalBytes) * 100, 100);
+    const blockBytesTransferred = Math.min(
+      (next.blockProgress / 100) * cmd.blockData.totalBytes + transferRate,
+      cmd.blockData.totalBytes,
+    );
+    next.blockProgress = Math.min((blockBytesTransferred / cmd.blockData.totalBytes) * 100, 100);
+
+    // Add periodic CAN TX/RX log entries (every ~5% of block)
+    const prevPct = Math.floor(((blockBytesTransferred - transferRate) / cmd.blockData.totalBytes) * 20);
+    const currPct = Math.floor((blockBytesTransferred / cmd.blockData.totalBytes) * 20);
+    if (currPct > prevPct && currPct < 20) {
+      // Extract ECU-specific CAN addresses from the plan's first command
+      const txCmd = plan.commands.find(c => c.canTx);
+      const txAddr = txCmd?.canTx?.split(' ')[0] || '0x7E0';
+      const rxCmd = plan.commands.find(c => c.canRx);
+      const rxAddr = rxCmd?.canRx?.split(' ')[0] || '0x7E8';
+      const seqByte = (currPct & 0x0F).toString(16).toUpperCase().padStart(2, '0');
+      next.log.push({
+        timestamp: next.elapsedMs, phase: cmd.phase, type: 'can_tx',
+        message: `${txAddr} 36 ${seqByte} [${transferRate} bytes] → Block #${cmd.blockData.blockId}`,
+        blockId: cmd.blockData.blockId,
+      });
+      next.log.push({
+        timestamp: next.elapsedMs + 5, phase: cmd.phase, type: 'can_rx',
+        message: `${rxAddr} 76 ${seqByte} — Transfer ACK`,
+        blockId: cmd.blockData.blockId,
+      });
+    }
 
     if (next.blockProgress >= 100) {
       next.log.push({
@@ -343,13 +393,42 @@ export function advanceSimulator(
 
     next.statusMessage = `Transferring Block #${cmd.blockData.blockId} (${cmd.blockData.blockType}) — ${next.blockProgress.toFixed(0)}%`;
   } else {
-    // Non-block command: complete in one tick
-    next.log.push({
-      timestamp: next.elapsedMs, phase: cmd.phase, type: 'success',
-      message: `✓ ${cmd.label}`,
-    });
-    next.currentCommandIndex++;
-    next.statusMessage = cmd.label;
+    // Non-block command: simulate realistic delay based on phase
+    const requiredDelay = PHASE_DELAY[cmd.phase] || 1500;
+    // Track accumulated time on this command via a simple heuristic:
+    // Each tick is deltaMs; we need requiredDelay/deltaMs ticks to complete
+    // Use elapsedMs modulo to determine if enough time has passed
+    // We track this by checking if we've been on this command long enough
+    const ticksNeeded = Math.ceil(requiredDelay / deltaMs);
+    const ticksOnCommand = next.commandTickCount;
+    next.commandTickCount = ticksOnCommand + 1;
+
+    if (ticksOnCommand === 0) {
+      // First tick: log the CAN TX
+      if (cmd.canTx) {
+        next.log.push({
+          timestamp: next.elapsedMs, phase: cmd.phase, type: 'can_tx',
+          message: `TX: ${cmd.canTx}`,
+        });
+      }
+      next.statusMessage = `${cmd.label}...`;
+    } else if (ticksOnCommand >= ticksNeeded) {
+      // Command complete — log success and CAN RX
+      if (cmd.canRx) {
+        next.log.push({
+          timestamp: next.elapsedMs, phase: cmd.phase, type: 'can_rx',
+          message: `RX: ${cmd.canRx}`,
+        });
+      }
+      next.log.push({
+        timestamp: next.elapsedMs, phase: cmd.phase, type: 'success',
+        message: `✓ ${cmd.label}`,
+      });
+      next.currentCommandIndex++;
+      next.statusMessage = cmd.label;
+      next.commandTickCount = 0;
+    }
+    // Otherwise: still waiting — don't advance
   }
 
   next.progress = (next.currentCommandIndex / plan.commands.length) * 100;

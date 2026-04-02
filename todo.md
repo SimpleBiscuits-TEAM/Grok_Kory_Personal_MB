@@ -149,3 +149,13 @@
 - [x] Fix "Failed query" error on file_fingerprints table — table existed with old schema (column `hash` instead of `fileHash`, etc.)
 - [x] Dropped and recreated all 6 flash tables (flash_sessions, flash_session_logs, ecu_snapshots, flash_queue, flash_stats, file_fingerprints) with correct Drizzle schema — all were empty (0 rows)
 - [x] Verified all 57 flash integration tests pass after table recreation
+
+## Bug Fix — Flash Simulator Too Fast + Completion Screen Disappears
+- [x] Flash simulator completes unrealistically fast — reduced transfer rate from 4000 bytes/tick to 4 bytes/ms (~4 KB/s realistic CAN bus UDS speed)
+- [x] Completion screen disappears without showing log report — removed auto-dismiss setTimeout, added DONE + DOWNLOAD LOG buttons, auto-expand log on completion
+- [x] Seed/key exchange appeared to work but download phase was instant — added realistic per-phase delays (1.5s-8s per command type)
+- [x] Added CAN TX/RX log entries during block transfers for realism (every ~5% of block)
+- [x] Fix E41 ECU name — now displays as "E41 (L5P Duramax)" instead of "Bosch MG1CS111 (L5P Duramax)"
+- [x] Verify ECU names against strategy docs / A2L references — all GM-Delco ECUs use PPEI strategy names (E41, E88, E90, etc.), Bosch/Ford/Cummins use part numbers
+- [x] Updated estimated time calculation to match realistic timing
+- [x] Log area expands to h-72 on completion and shows ALL entries (not just last 100)

@@ -197,7 +197,7 @@ describe('pcanFlashOrchestrator', () => {
       header.key = '';
       const plan = generateFlashPlan(header, 'E41', 'CALIBRATION');
       expect(plan.isValid).toBe(true);
-      expect(plan.ecuName).toContain('MG1CS111');
+      expect(plan.ecuName).toContain('E41');
       expect(plan.validationErrors).toHaveLength(0);
       // Should have seed/key warning but ECU should be found
       expect(plan.warnings.some(w => w.includes('Seed/key'))).toBe(true);
@@ -254,7 +254,10 @@ describe('pcanFlashOrchestrator', () => {
     it('eventually completes the simulation', () => {
       let current = { ...state, isRunning: true };
       let iterations = 0;
-      const maxIterations = plan.commands.length * 5 + 200;
+      // With realistic timing: ~4 KB/s transfer + phase delays, need more iterations
+      // Each tick = 500ms, block transfer ~250 bytes/tick (scaled from 400/100ms)
+      // For test header with ~64KB block: ~256 ticks + ~80 ticks for commands = ~336
+      const maxIterations = 5000;
       while (!current.result && iterations < maxIterations) {
         current = advanceSimulator(current, plan, 500);
         iterations++;

@@ -173,7 +173,7 @@ const FORD_UDS_FLASH_SEQUENCE: FlashStep[] = [
 export const ECU_DATABASE: Record<string, EcuConfig> = {
   // ── GM Delco ECUs ────────────────────────────────────────────────────
   E41: {
-    ecuType: 'E41', name: 'Bosch MG1CS111 (L5P Duramax)',
+    ecuType: 'E41', name: 'E41 (L5P Duramax)',
     oem: 'GM', controllerType: 'ecu', protocol: 'GMLAN',
     xferSize: 0xFF8, canSpeed: 500, seedLevel: 0x01,
     txAddr: 0x7E0, rxAddr: 0x7E8, txPrefix: null, rxPrefix: null,

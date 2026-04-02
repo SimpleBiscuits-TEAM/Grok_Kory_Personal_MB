@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Play, Pause, Square, AlertTriangle, CheckCircle2, XCircle,
-  Radio, ArrowLeft, RotateCcw, ChevronDown, ChevronUp,
+  Radio, ArrowLeft, RotateCcw, ChevronDown, ChevronUp, Download, FileText,
 } from 'lucide-react';
 import {
   type FlashPlan, type SimulatorState, type SimulatorLogEntry,
@@ -215,13 +215,40 @@ export default function FlashMissionControl({
   // Auto-scroll log
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [sim.log.length]);
 
-  // Notify parent on completion
+  // Auto-expand log when flash completes so user can review
   useEffect(() => {
-    if (sim.result) {
-      const timer = setTimeout(() => onComplete(sim.result!), 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [sim.result, onComplete]);
+    if (sim.result && !showLog) setShowLog(true);
+  }, [sim.result]);
+
+  // Download log as text file
+  const handleDownloadLog = useCallback(() => {
+    const lines = sim.log.map(e => {
+      const ts = (e.timestamp / 1000).toFixed(3).padStart(10);
+      const phase = e.phase.padEnd(16);
+      const type = e.type.padEnd(8);
+      return `[${ts}s] ${phase} ${type} ${e.message}`;
+    });
+    const header = [
+      `=== FLASH SESSION LOG ===${''} `,
+      `ECU: ${plan.ecuName}`,
+      `Mode: ${plan.flashMode}`,
+      `Connection: ${connectionMode}`,
+      `Session: ${sessionUuid}`,
+      `Result: ${sim.result}`,
+      `Duration: ${formatDuration(sim.elapsedMs)}`,
+      `Transferred: ${formatBytes(sim.transferredBytes)} / ${formatBytes(sim.totalBytes)}`,
+      `Total Log Entries: ${sim.log.length}`,
+      `${'='.repeat(60)}`,
+      '',
+    ];
+    const blob = new Blob([header.join('\n') + lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `flash-log-${sessionUuid.slice(0, 8)}-${sim.result?.toLowerCase() || 'unknown'}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [sim, plan, connectionMode, sessionUuid]);
 
   return (
     <div className="relative min-h-[600px] rounded-lg border border-zinc-800 bg-black/90 overflow-hidden">
@@ -288,9 +315,17 @@ export default function FlashMissionControl({
             </>
           )}
           {sim.result && (
-            <Button size="sm" variant="outline" onClick={onBack} className="font-mono text-xs border-zinc-700">
-              <ArrowLeft className="h-3 w-3 mr-1" /> BACK
-            </Button>
+            <>
+              <Button size="sm" onClick={() => onComplete(sim.result!)} className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs">
+                <CheckCircle2 className="h-3 w-3 mr-1" /> DONE
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDownloadLog} className="font-mono text-xs border-zinc-700">
+                <Download className="h-3 w-3 mr-1" /> DOWNLOAD LOG
+              </Button>
+              <Button size="sm" variant="outline" onClick={onBack} className="font-mono text-xs border-zinc-700">
+                <ArrowLeft className="h-3 w-3 mr-1" /> BACK
+              </Button>
+            </>
           )}
         </div>
 
@@ -343,9 +378,9 @@ export default function FlashMissionControl({
             CAN BUS LOG ({sim.log.length} entries)
           </button>
           {showLog && (
-            <ScrollArea className="h-48 rounded border border-zinc-800 bg-zinc-950/80 p-2">
+            <ScrollArea className={`${sim.result ? 'h-72' : 'h-48'} rounded border border-zinc-800 bg-zinc-950/80 p-2`}>
               <div className="space-y-0.5">
-                {sim.log.slice(-100).map((entry, i) => (
+                {(sim.result ? sim.log : sim.log.slice(-100)).map((entry, i) => (
                   <div key={i} className="flex gap-2 text-[11px] font-mono leading-tight">
                     <span className="text-zinc-600 w-16 shrink-0">{(entry.timestamp / 1000).toFixed(1)}s</span>
                     <span className={`w-20 shrink-0 ${PHASE_COLORS[entry.phase] || 'text-zinc-500'}`}>
