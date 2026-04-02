@@ -1718,7 +1718,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
-        {activeTab === 'tasks' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div>}
+        {activeTab === 'tasks' && <div className="ppei-anim-fade-up"><TasksGate /></div>}
         {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
         {activeTab === ('drag' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><DragPanel /></React.Suspense></div>}
       </main>
@@ -1735,6 +1735,124 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
           </p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ─── Tasks Access Gate ──────────────────────────────────────────────────────
+
+const TASKS_CODE = 'KINGKONG';
+
+function TasksGate() {
+  const [unlocked, setUnlocked] = useState(false);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = () => {
+    if (code.toUpperCase() === TASKS_CODE) {
+      setUnlocked(true);
+    } else {
+      setError(true);
+      setShake(true);
+      setAttempts(prev => prev + 1);
+      setTimeout(() => setShake(false), 500);
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  const funnyMessages = [
+    "Wrong code. The task tracker doesn't trust you yet.",
+    "Nope. Even the bug backlog has better luck than your guesses.",
+    "Access denied. Try reading the sprint notes... oh wait.",
+    "That ain't it chief. The CI pipeline just failed in sympathy.",
+    "Incorrect. The unit tests are weeping.",
+  ];
+
+  if (unlocked) {
+    return (
+      <React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}>
+        <TasksPanel />
+      </React.Suspense>
+    );
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', padding: '3rem 2rem', minHeight: '400px',
+    }}>
+      <div style={{
+        width: '64px', height: '64px', borderRadius: '50%',
+        background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
+      }}>
+        <Lock style={{ width: 28, height: 28, color: sColor.red }} />
+      </div>
+
+      <h3 style={{
+        fontFamily: sFont.heading, fontSize: '1.6rem', letterSpacing: '0.12em',
+        color: 'white', marginBottom: '0.5rem',
+      }}>QA TASK TRACKER</h3>
+
+      <p style={{
+        fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim,
+        maxWidth: '360px', marginBottom: '2rem',
+      }}>Enter the access code to view the task tracker.</p>
+
+      <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <input
+            ref={inputRef}
+            type="password"
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            placeholder="Enter access code..."
+            style={{
+              flex: 1, padding: '10px 14px',
+              fontFamily: sFont.mono, fontSize: '0.95rem', letterSpacing: '0.15em',
+              background: sColor.bgDark,
+              border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
+              borderRadius: '3px', color: 'white', outline: 'none',
+              textAlign: 'center', textTransform: 'uppercase',
+              transition: 'border-color 0.2s',
+            }}
+          />
+          <button
+            onClick={handleSubmit}
+            style={{
+              padding: '10px 18px',
+              background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
+              borderRadius: '3px', color: sColor.red,
+              fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >UNLOCK</button>
+        </div>
+
+        {error && attempts > 0 && (
+          <p style={{
+            fontFamily: sFont.body, fontSize: '0.8rem',
+            color: sColor.red, marginTop: '8px',
+            animation: 'fadeIn 0.3s ease',
+          }}>
+            {funnyMessages[(attempts - 1) % funnyMessages.length]}
+          </p>
+        )}
+      </div>
+
+      {attempts >= 3 && (
+        <p style={{
+          fontFamily: sFont.mono, fontSize: '0.7rem',
+          color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
+        }}>Hint: Think big. Think primate. Think chest-pounding dominance.</p>
+      )}
     </div>
   );
 }

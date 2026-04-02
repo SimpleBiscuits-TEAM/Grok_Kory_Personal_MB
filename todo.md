@@ -61,3 +61,6 @@
 
 ## Advanced Tab Access Code Gate Bug
 - [x] Fix Advanced tab AccessGate — not requiring access code entry, letting users straight through
+
+## Tasks Tab Access Code Gate
+- [x] Add separate access code gate to the Tasks tab — must enter KINGKONG again after entering Advanced
