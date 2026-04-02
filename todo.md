@@ -50,3 +50,6 @@
 ## Tasks Panel Restoration
 - [x] Find the Tasks button/panel in Advanced section that was hidden by admin-only check
 - [x] Restore Tasks so it's visible to all users after entering access code in Advanced
+
+## Tasks Panel Admin Check Bug
+- [x] Remove admin-only check inside TasksPanel component (shows "admin required" when non-admin clicks TASKS)

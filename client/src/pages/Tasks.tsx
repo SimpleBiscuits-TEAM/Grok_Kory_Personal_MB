@@ -212,10 +212,7 @@ export function TasksContent() {
   const { user, isAuthenticated, loading } = useAuth();
   const store = useTaskStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-
   if (loading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
-  if (!isAuthenticated || !isAdmin) return <div style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', padding: '2rem', textAlign: 'center' }}>Admin access required.</div>;
 
   return (
     <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 200px)' }}>
