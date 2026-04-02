@@ -4,7 +4,7 @@ import type { TrpcContext } from "./_core/context";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
-function createAuthContext(overrides: Partial<AuthenticatedUser> = {}): TrpcContext {
+function createAuthContext(overrides: Partial<AuthenticatedUser> = {}, cookieHeader?: string): TrpcContext {
   const user: AuthenticatedUser = {
     id: 1,
     openId: "test-user-001",
@@ -19,56 +19,68 @@ function createAuthContext(overrides: Partial<AuthenticatedUser> = {}): TrpcCont
   };
   return {
     user,
-    req: { protocol: "https", headers: {}, cookies: {} } as TrpcContext["req"],
+    req: { protocol: "https", headers: { cookie: cookieHeader || "" } } as TrpcContext["req"],
     res: { clearCookie: () => {}, cookie: () => {} } as TrpcContext["res"],
   };
 }
 
-function createUnauthContext(cookies: Record<string, string> = {}): TrpcContext {
+function createUnauthContext(cookieHeader?: string): TrpcContext {
   return {
     user: null,
-    req: { protocol: "https", headers: {}, cookies } as TrpcContext["req"],
-    res: { clearCookie: () => {}, cookie: () => {} } as TrpcContext["res"],
+    req: { protocol: "https", headers: { cookie: cookieHeader || "" } } as TrpcContext["req"],
+    res: { clearCookie: () => {}, cookie: () => {} } as TrpcContext["req"] as any,
   };
 }
 
 describe("auth.checkAccess", () => {
-  it("returns authenticated=true for OAuth users", async () => {
+  it("returns authenticated=false for OAuth users WITHOUT access code cookie", async () => {
+    // OAuth alone should NOT grant access — access code is mandatory
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
     const result = await caller.auth.checkAccess();
 
-    expect(result.authenticated).toBe(true);
-    expect(result.method).toBe("oauth");
+    expect(result.authenticated).toBe(false);
+    expect(result.method).toBe("none");
+    expect(result.hasOAuth).toBe(true);
   });
 
-  it("returns authenticated=true for access-code cookie", async () => {
-    const ctx = createUnauthContext({ vop_access: "granted" });
+  it("returns authenticated=true for access-code cookie (no OAuth)", async () => {
+    const ctx = createUnauthContext("vop_access=granted");
     const caller = appRouter.createCaller(ctx);
     const result = await caller.auth.checkAccess();
 
     expect(result.authenticated).toBe(true);
     expect(result.method).toBe("access_code");
+    expect(result.hasOAuth).toBe(false);
   });
 
-  it("returns authenticated=false for unauthenticated users", async () => {
+  it("returns authenticated=false for unauthenticated users with no cookies", async () => {
     const ctx = createUnauthContext();
     const caller = appRouter.createCaller(ctx);
     const result = await caller.auth.checkAccess();
 
     expect(result.authenticated).toBe(false);
     expect(result.method).toBe("none");
+    expect(result.hasOAuth).toBe(false);
   });
 
-  it("prefers OAuth method over access_code when both present", async () => {
-    const ctx = createAuthContext();
-    // Also set the access code cookie
-    (ctx.req as any).cookies = { vop_access: "granted" };
+  it("returns authenticated=true when OAuth AND access code cookie are both present", async () => {
+    const ctx = createAuthContext({}, "vop_access=granted; session=some_token");
     const caller = appRouter.createCaller(ctx);
     const result = await caller.auth.checkAccess();
 
     expect(result.authenticated).toBe(true);
-    expect(result.method).toBe("oauth");
+    expect(result.method).toBe("access_code");
+    expect(result.hasOAuth).toBe(true);
+  });
+
+  it("parses vop_access cookie correctly among multiple cookies", async () => {
+    const ctx = createUnauthContext("session=abc123; vop_access=granted; other=value");
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.auth.checkAccess();
+
+    expect(result.authenticated).toBe(true);
+    expect(result.method).toBe("access_code");
   });
 });
 
@@ -86,7 +98,6 @@ describe("auth.verifyAccessCode", () => {
     const ctx = createUnauthContext();
     const caller = appRouter.createCaller(ctx);
 
-    // Single character should still work (min length is 1)
     const result = await caller.auth.verifyAccessCode({ code: "x" });
     expect(result.success).toBe(false);
   });

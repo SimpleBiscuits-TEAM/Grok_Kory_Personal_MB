@@ -53,3 +53,8 @@
 
 ## Tasks Panel Admin Check Bug
 - [x] Remove admin-only check inside TasksPanel component (shows "admin required" when non-admin clicks TASKS)
+
+## Mandatory Access Code for ALL Users
+- [x] Fix AuthGate: access code must be required even if user is signed in via OAuth
+- [x] Fix server checkAccess: do not return authenticated=true based on OAuth alone — always require vop_access cookie
+- [x] Verify: OAuth-signed-in users still see the access code gate before entering the site

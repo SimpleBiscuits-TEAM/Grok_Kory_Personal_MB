@@ -60,9 +60,11 @@ export const appRouter = router({
         return { success: true, label: result.label } as const;
       }),
     checkAccess: publicProcedure.query(({ ctx }) => {
+      // Parse cookies from raw header (no cookie-parser middleware)
+      const cookieHeader = ctx.req.headers.cookie || "";
+      const hasAccessCode = cookieHeader.split(";").some(c => c.trim() === "vop_access=granted");
       const hasOAuth = Boolean(ctx.user);
-      const hasAccessCode = ctx.req.cookies?.vop_access === "granted";
-      return { authenticated: hasOAuth || hasAccessCode, method: hasOAuth ? "oauth" : hasAccessCode ? "access_code" : "none" } as const;
+      return { authenticated: hasAccessCode, method: hasAccessCode ? "access_code" : "none", hasOAuth } as const;
     }),
 
     // ── Share Token (single-session, single-page guest links) ──
