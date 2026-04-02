@@ -433,10 +433,6 @@ export default function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  // ── Dev mode bypass — skip auth gate when OAuth is not configured ──────
-  if (!granted && import.meta.env.DEV && !import.meta.env.VITE_OAUTH_PORTAL_URL) {
-    return <>{children}</>;
-  }
 
   // ── Authenticated — render app ────────────────────────────────────────
   if (granted) {

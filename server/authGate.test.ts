@@ -91,7 +91,7 @@ describe("auth.verifyAccessCode", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts valid access code (PPEI-VOP-2026)", async () => {
+  it("accepts valid access code (KINGKONG)", async () => {
     let setCookieName = "";
     let setCookieValue = "";
     const ctx = createUnauthContext();
@@ -100,7 +100,7 @@ describe("auth.verifyAccessCode", () => {
       setCookieValue = value;
     };
     const caller = appRouter.createCaller(ctx);
-    const result = await caller.auth.verifyAccessCode({ code: "PPEI-VOP-2026" });
+    const result = await caller.auth.verifyAccessCode({ code: "KINGKONG" });
 
     expect(result.success).toBe(true);
     if (result.success) {

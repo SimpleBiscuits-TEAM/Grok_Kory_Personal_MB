@@ -33,3 +33,8 @@
 - [x] Tune library and sharing
 - [x] Protocol support (J1939, K-Line, OBD-II)
 - [x] Live casting (DynoCast)
+
+## Access Code Setup
+- [x] Seed KINGKONG as the required access code when site launches
+- [x] Verify AuthGate prompts for access code on first visit
+- [x] Verify entering KINGKONG grants access to the site
