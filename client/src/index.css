@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* PPEI Custom Tuning Design System
+ * Design Movement: Industrial Performance / Motorsport Dark
+ * Core Principles: Black-dominant, red accent, sharp edges, data-forward
+ * Color Philosophy: PPEI black (#0a0a0a) + aggressive red (#dc2626) + white text + subtle zinc grays
+ * Layout Paradigm: Full-width dark panels with red accent borders and sharp corners
+ * Signature Elements: Red left-border accents, monospace data labels, diagonal separator lines
+ * Typography: Bebas Neue for headings, Rajdhani for subheadings, monospace for data
+ */
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -42,84 +51,108 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* PPEI Dark Theme — Primary (applied via .dark class on root) */
 :root {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-600);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --radius: 0.65rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.235 0.015 65);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.235 0.015 65);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.235 0.015 65);
-  --secondary: oklch(0.98 0.001 286.375);
-  --secondary-foreground: oklch(0.4 0.015 65);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.141 0.005 285.823);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.623 0.214 259.815);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.235 0.015 65);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
+  /* PPEI Red accent */
+  --primary: oklch(0.52 0.22 25);
+  --primary-foreground: oklch(0.98 0 0);
+  /* Dark zinc backgrounds */
+  --background: oklch(0.10 0.005 260);
+  --foreground: oklch(0.95 0.005 260);
+  --card: oklch(0.13 0.006 260);
+  --card-foreground: oklch(0.95 0.005 260);
+  --popover: oklch(0.13 0.006 260);
+  --popover-foreground: oklch(0.95 0.005 260);
+  --secondary: oklch(0.18 0.006 260);
+  --secondary-foreground: oklch(0.90 0.005 260);
+  --muted: oklch(0.20 0.006 260);
+  --muted-foreground: oklch(0.78 0.010 260);  /* raised to 0.78 for strong legibility */
+  --accent: oklch(0.52 0.22 25);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.52 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.25 0.008 260);
+  --input: oklch(0.20 0.008 260);
+  --ring: oklch(0.52 0.22 25);
+  --radius: 0.25rem;
+  /* Chart colors — performance palette */
+  --chart-1: oklch(0.75 0.18 25);
+  --chart-2: oklch(0.65 0.20 145);
+  --chart-3: oklch(0.70 0.18 200);
+  --chart-4: oklch(0.80 0.18 60);
+  --chart-5: oklch(0.70 0.20 300);
+  /* Sidebar */
+  --sidebar: oklch(0.10 0.005 260);
+  --sidebar-foreground: oklch(0.95 0.005 260);
+  --sidebar-primary: oklch(0.52 0.22 25);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.18 0.006 260);
+  --sidebar-accent-foreground: oklch(0.95 0.005 260);
+  --sidebar-border: oklch(0.25 0.008 260);
+  --sidebar-ring: oklch(0.52 0.22 25);
 }
 
+/* .dark mirrors :root since we default to dark */
 .dark {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-500);
-  --sidebar-primary-foreground: var(--color-blue-50);
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.85 0.005 65);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.85 0.005 65);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.85 0.005 65);
-  --secondary: oklch(0.24 0.006 286.033);
-  --secondary-foreground: oklch(0.7 0.005 65);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.488 0.243 264.376);
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.85 0.005 65);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.488 0.243 264.376);
+  --primary: oklch(0.52 0.22 25);
+  --primary-foreground: oklch(0.98 0 0);
+  --background: oklch(0.10 0.005 260);
+  --foreground: oklch(0.95 0.005 260);
+  --card: oklch(0.13 0.006 260);
+  --card-foreground: oklch(0.95 0.005 260);
+  --popover: oklch(0.13 0.006 260);
+  --popover-foreground: oklch(0.95 0.005 260);
+  --secondary: oklch(0.18 0.006 260);
+  --secondary-foreground: oklch(0.90 0.005 260);
+  --muted: oklch(0.20 0.006 260);
+  --muted-foreground: oklch(0.78 0.010 260);  /* raised to 0.78 for strong legibility */
+  --accent: oklch(0.52 0.22 25);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.52 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.25 0.008 260);
+  --input: oklch(0.20 0.008 260);
+  --ring: oklch(0.52 0.22 25);
+  --chart-1: oklch(0.75 0.18 25);
+  --chart-2: oklch(0.65 0.20 145);
+  --chart-3: oklch(0.70 0.18 200);
+  --chart-4: oklch(0.80 0.18 60);
+  --chart-5: oklch(0.70 0.20 300);
+  --sidebar: oklch(0.10 0.005 260);
+  --sidebar-foreground: oklch(0.95 0.005 260);
+  --sidebar-primary: oklch(0.52 0.22 25);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.18 0.006 260);
+  --sidebar-accent-foreground: oklch(0.95 0.005 260);
+  --sidebar-border: oklch(0.25 0.008 260);
+  --sidebar-ring: oklch(0.52 0.22 25);
 }
 
 @layer base {
+  /* Lock the viewport so nested scroll containers work correctly.
+   * Without height:100% on html/body/#root, flex children with overflow-y-auto
+   * cannot clamp themselves — the page just grows instead of scrolling. */
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+  #root {
+    height: 100%;
+    overflow: auto;
+  }
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Rajdhani', 'Segoe UI', sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
   }
+  /* Ensure small/muted text never drops below readable size */
+  .text-xs { font-size: 0.8rem !important; line-height: 1.5; }
+  .text-sm { font-size: 0.9rem !important; line-height: 1.5; }
+  .text-muted-foreground { color: var(--muted-foreground) !important; }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   [type="button"]:not(:disabled),
@@ -131,27 +164,18 @@
   input[type="radio"]:not(:disabled) {
     @apply cursor-pointer;
   }
+  h1, h2, h3, h4 {
+    font-family: 'Bebas Neue', 'Impact', 'Arial Black', sans-serif;
+    letter-spacing: 0.05em;
+  }
 }
 
 @layer components {
-  /**
-   * Custom container utility that centers content and adds responsive padding.
-   *
-   * This overrides Tailwind's default container behavior to:
-   * - Auto-center content (mx-auto)
-   * - Add responsive horizontal padding
-   * - Set max-width for large screens
-   *
-   * Usage: <div className="container">...</div>
-   *
-   * For custom widths, use max-w-* utilities directly:
-   * <div className="max-w-6xl mx-auto px-4">...</div>
-   */
   .container {
     width: 100%;
     margin-left: auto;
     margin-right: auto;
-    padding-left: 1rem; /* 16px - mobile padding */
+    padding-left: 1rem;
     padding-right: 1rem;
   }
 
@@ -162,16 +186,284 @@
 
   @media (min-width: 640px) {
     .container {
-      padding-left: 1.5rem; /* 24px - tablet padding */
+      padding-left: 1.5rem;
       padding-right: 1.5rem;
     }
   }
 
   @media (min-width: 1024px) {
     .container {
-      padding-left: 2rem; /* 32px - desktop padding */
+      padding-left: 2rem;
       padding-right: 2rem;
-      max-width: 1280px; /* Standard content width */
+      max-width: 1400px;
     }
+  }
+
+  /* PPEI Section Header — red left border accent */
+  .ppei-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-left: 1rem;
+    border-left: 4px solid oklch(0.52 0.22 25);
+    margin-bottom: 1rem;
+  }
+
+  /* PPEI Card — dark with subtle border */
+  .ppei-card {
+    background: oklch(0.13 0.006 260);
+    border: 1px solid oklch(0.25 0.008 260);
+    border-radius: 0.25rem;
+  }
+
+  /* PPEI Red button */
+  .ppei-btn-red {
+    background: oklch(0.52 0.22 25);
+    color: white;
+    font-family: 'Bebas Neue', 'Impact', sans-serif;
+    letter-spacing: 0.1em;
+    font-size: 1rem;
+    padding: 0.5rem 1.5rem;
+    border-radius: 0.25rem;
+    transition: background 0.15s;
+  }
+  .ppei-btn-red:hover {
+    background: oklch(0.45 0.22 25);
+  }
+
+  /* Upload drop zone glow on hover */
+  .ppei-dropzone {
+    border: 2px dashed oklch(0.35 0.008 260);
+    background: oklch(0.11 0.005 260);
+    transition: all 0.2s;
+  }
+  .ppei-dropzone:hover, .ppei-dropzone.active {
+    border-color: oklch(0.52 0.22 25);
+    background: oklch(0.13 0.010 25);
+    box-shadow: 0 0 30px oklch(0.52 0.22 25 / 0.15);
+  }
+
+  /* Data stat box */
+  .ppei-stat {
+    background: oklch(0.13 0.006 260);
+    border: 1px solid oklch(0.25 0.008 260);
+    border-top: 3px solid oklch(0.52 0.22 25);
+    padding: 1rem;
+    border-radius: 0.25rem;
+  }
+
+  /* Fault severity colors */
+  .ppei-fault-critical {
+    border-left: 4px solid oklch(0.52 0.22 25);
+  }
+  .ppei-fault-warning {
+    border-left: 4px solid oklch(0.75 0.18 60);
+  }
+  .ppei-fault-info {
+    border-left: 4px solid oklch(0.65 0.18 200);
+  }
+
+  /* Animated scan line for loading */
+  @keyframes ppei-scan {
+    0% { transform: translateY(-100%); opacity: 0.5; }
+    100% { transform: translateY(100vh); opacity: 0; }
+  }
+  .ppei-scan-line {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, oklch(0.52 0.22 25), transparent);
+    animation: ppei-scan 2s linear infinite;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* Red glow pulse for fault indicators */
+  @keyframes ppei-pulse-red {
+    0%, 100% { box-shadow: 0 0 0 0 oklch(0.52 0.22 25 / 0.4); }
+    50% { box-shadow: 0 0 0 8px oklch(0.52 0.22 25 / 0); }
+  }
+  .ppei-pulse-red {
+    animation: ppei-pulse-red 2s ease-in-out infinite;
+  }
+
+  /* Gradient text for PPEI branding */
+  .ppei-gradient-text {
+    background: linear-gradient(135deg, #ffffff 0%, #dc2626 50%, #ff6b35 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Entrance Animations ── */
+  @keyframes ppei-fade-up {
+    0% { opacity: 0; transform: translateY(20px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes ppei-fade-in {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+  @keyframes ppei-slide-right {
+    0% { opacity: 0; transform: translateX(-16px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes ppei-scale-in {
+    0% { opacity: 0; transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes ppei-counter-bar {
+    0% { width: 0%; }
+    100% { width: var(--bar-width, 100%); }
+  }
+  @keyframes ppei-logo-glow {
+    0%, 100% { filter: drop-shadow(0 0 4px oklch(0.52 0.22 25 / 0)); }
+    50% { filter: drop-shadow(0 0 12px oklch(0.52 0.22 25 / 0.5)); }
+  }
+  @keyframes ppei-accent-bar {
+    0% { background-position: 200% center; }
+    100% { background-position: -200% center; }
+  }
+  @keyframes ppei-border-flash {
+    0% { border-color: oklch(0.52 0.22 25); }
+    50% { border-color: oklch(0.75 0.18 40); }
+    100% { border-color: oklch(0.52 0.22 25); }
+  }
+
+  /* Apply entrance animations */
+  .ppei-anim-fade-up {
+    animation: ppei-fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .ppei-anim-fade-in {
+    animation: ppei-fade-in 0.4s ease both;
+  }
+  .ppei-anim-slide-right {
+    animation: ppei-slide-right 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .ppei-anim-scale-in {
+    animation: ppei-scale-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Stagger delays for sequential reveals */
+  .ppei-delay-100 { animation-delay: 0.1s; }
+  .ppei-delay-200 { animation-delay: 0.2s; }
+  .ppei-delay-300 { animation-delay: 0.3s; }
+  .ppei-delay-400 { animation-delay: 0.4s; }
+  .ppei-delay-500 { animation-delay: 0.5s; }
+  .ppei-delay-600 { animation-delay: 0.6s; }
+
+  /* Logo glow animation */
+  .ppei-logo-glow {
+    animation: ppei-logo-glow 3s ease-in-out infinite;
+  }
+
+  /* Animated rainbow accent bar */
+  .ppei-accent-animated {
+    background: linear-gradient(90deg,
+      oklch(0.52 0.22 25),
+      oklch(0.65 0.20 40),
+      oklch(0.70 0.18 60),
+      oklch(0.65 0.20 145),
+      oklch(0.70 0.18 200),
+      oklch(0.52 0.22 25)
+    );
+    background-size: 300% 100%;
+    animation: ppei-accent-bar 4s linear infinite;
+  }
+
+  /* ── Interactive Hover Effects ── */
+  .ppei-card-hover {
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .ppei-card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px oklch(0 0 0 / 0.4);
+    border-color: oklch(0.35 0.010 260);
+  }
+
+  .ppei-btn-hover {
+    transition: all 0.15s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .ppei-btn-hover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: oklch(1 0 0 / 0.08);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .ppei-btn-hover:hover::after {
+    opacity: 1;
+  }
+
+  /* Shake animation for invalid code */
+  @keyframes ppei-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+  .ppei-shake {
+    animation: ppei-shake 0.4s ease-in-out;
+  }
+
+  /* Glowing red border on focus/active states */
+  .ppei-input-focus:focus {
+    border-color: oklch(0.52 0.22 25) !important;
+    box-shadow: 0 0 0 2px oklch(0.52 0.22 25 / 0.2) !important;
+    outline: none;
+  }
+
+  /* Scan line on loading state */
+  .ppei-loading-scan {
+    position: relative;
+    overflow: hidden;
+  }
+  .ppei-loading-scan::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -100%;
+    right: -100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, oklch(0.52 0.22 25), transparent);
+    animation: ppei-scan 1.5s linear infinite;
+  }
+
+  /* Section reveal — used for dashboard sections */
+  .ppei-section-reveal {
+    animation: ppei-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Tachometer-style progress bar */
+  .ppei-progress-bar {
+    height: 3px;
+    background: oklch(0.20 0.008 260);
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .ppei-progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, oklch(0.52 0.22 25), oklch(0.75 0.18 40));
+    transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Fault indicator pulse — red for critical */
+  .ppei-fault-badge-critical {
+    animation: ppei-pulse-red 2s ease-in-out infinite;
+  }
+
+  /* Header logo hover */
+  .ppei-logo:hover {
+    filter: drop-shadow(0 0 12px oklch(0.52 0.22 25 / 0.6));
+    transition: filter 0.3s ease;
+  }
+  .ppei-logo {
+    transition: filter 0.3s ease;
   }
 }

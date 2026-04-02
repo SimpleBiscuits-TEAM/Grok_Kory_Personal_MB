@@ -3,10 +3,14 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import helmet from "helmet";
+import rateLimit, { type Options } from "express-rate-limit";
+import { ipKeyGenerator } from "express-rate-limit";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { knoxShieldMiddleware } from "../lib/knoxShieldMiddleware";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -30,12 +34,129 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // OAuth callback under /api/oauth/callback
+
+  // ── Security Headers (helmet) ──────────────────────────────────────────
+  // Sets Content-Security-Policy, Strict-Transport-Security, X-Frame-Options,
+  // X-Content-Type-Options, Referrer-Policy, and more.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "blob:", "https:"],
+          connectSrc: ["'self'", "https:", "wss:"],
+          mediaSrc: ["'self'", "blob:"],
+          workerSrc: ["'self'", "blob:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+        },
+      },
+      // Enable HSTS for HTTPS deployments
+      strictTransportSecurity: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: true,
+        preload: true,
+      },
+      // Prevent clickjacking
+      frameguard: { action: "deny" },
+      // Prevent MIME type sniffing
+      noSniff: true,
+      // Hide X-Powered-By
+      hidePoweredBy: true,
+      // Referrer policy
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+      // Cross-Origin policies
+      crossOriginEmbedderPolicy: false, // Disabled to allow loading external images
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    })
+  );
+
+  // ── Body Parser ────────────────────────────────────────────────────────
+  // JSON limit reduced from 100mb to 2mb. Large file uploads should use
+  // direct-to-S3 presigned URLs, not base64-encoded JSON bodies.
+  // The urlencoded limit stays at 10mb for form submissions with file data.
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // ── Canonical Domain Redirect ──────────────────────────────────────────
+  // ppei.ai → www.ppei.ai
+  app.use((req, res, next) => {
+    const host = req.hostname || req.headers.host?.split(':')[0] || '';
+    if (host === 'ppei.ai') {
+      const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+      return res.redirect(301, `${proto}://www.ppei.ai${req.originalUrl}`);
+    }
+    next();
+  });
+
+  // ── Global API Rate Limiting ───────────────────────────────────────────
+  // 300 requests per minute per IP across all API endpoints.
+  // Individual routers may have stricter per-user limits via secureFileAccess.
+  // OAuth callback is excluded to prevent login failures.
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 300,
+    standardHeaders: true, // Return rate limit info in RateLimit-* headers
+    legacyHeaders: false,
+    message: { error: "Too many requests. Please slow down." },
+    // Skip rate limiting in development, and always skip for OAuth callback
+    skip: (req) => {
+      if (process.env.NODE_ENV === "development") return true;
+      // Never rate-limit the OAuth callback — it's a one-shot redirect
+      if (req.path.startsWith("/oauth/callback")) return true;
+      return false;
+    },
+    // Use ipKeyGenerator helper for proper IPv6 subnet handling
+    keyGenerator: (req) => {
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+      return ipKeyGenerator(ip);
+    },
+  });
+  app.use("/api/", apiLimiter);
+
+  // ── LLM Route Rate Limiting (stricter) ─────────────────────────────────
+  // LLM-powered routes get a tighter limit to prevent credit abuse.
+  // 30 LLM requests per minute per IP.
+  const llmLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "AI request rate limit exceeded. Please wait a moment." },
+    skip: () => process.env.NODE_ENV === "development",
+    keyGenerator: (req) => {
+      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+        req.ip ||
+        req.socket.remoteAddress ||
+        "unknown";
+      return ipKeyGenerator(ip);
+    },
+  });
+  // Apply stricter limits to known LLM-heavy tRPC procedures
+  app.use("/api/trpc/diagnostic.chat", llmLimiter);
+  app.use("/api/trpc/diagnostic.quickLookup", llmLimiter);
+  app.use("/api/trpc/compare.analyze", llmLimiter);
+  app.use("/api/trpc/editor.knoxChat", llmLimiter);
+  app.use("/api/trpc/editor.simplifyMaps", llmLimiter);
+  app.use("/api/trpc/fleet.gooseChat", llmLimiter);
+
+  // ── Knox Shield Validation ─────────────────────────────────────────────
+  // Validates X-Knox-Shield and X-Knox-Timestamp headers from the client.
+  // Flags suspicious requests but does not block them (defense-in-depth).
+  app.use(knoxShieldMiddleware);
+
+  // ── OAuth ──────────────────────────────────────────────────────────────
   registerOAuthRoutes(app);
-  // tRPC API
+
+  // ── tRPC API ───────────────────────────────────────────────────────────
   app.use(
     "/api/trpc",
     createExpressMiddleware({
@@ -43,7 +164,8 @@ async function startServer() {
       createContext,
     })
   );
-  // development mode uses Vite, production mode uses static files
+
+  // ── Static / Vite ──────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
   } else {

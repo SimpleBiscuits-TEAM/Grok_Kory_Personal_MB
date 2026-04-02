@@ -167,6 +167,33 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // ── Security Hardening ──────────────────────────────────────────────
+    sourcemap: false,            // NEVER ship source maps to production
+    minify: 'esbuild',            // Use esbuild for fast, memory-efficient minification
+    // esbuild drop options for security hardening
+    target: 'es2020',
+    rollupOptions: {
+      output: {
+        // Randomize chunk names to make static analysis harder
+        chunkFileNames: 'assets/[hash].js',
+        entryFileNames: 'assets/[hash].js',
+        assetFileNames: 'assets/[hash].[ext]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          // Split large vendor libraries to keep chunks under deploy memory limits
+          if (id.includes('react-dom')) return 'v-react-dom';
+          if (id.includes('react/') || id.includes('react-is') || id.includes('scheduler')) return 'v-react';
+          if (id.includes('recharts') || id.includes('d3-')) return 'v-charts';
+          if (id.includes('@radix-ui')) return 'v-radix';
+          if (id.includes('lucide')) return 'v-icons';
+          if (id.includes('@trpc') || id.includes('@tanstack')) return 'v-trpc';
+          if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('dom-to-image')) return 'v-pdf';
+          if (id.includes('drizzle') || id.includes('mysql2')) return 'v-db';
+          if (id.includes('zod')) return 'v-zod';
+          if (id.includes('superjson') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge')) return 'v-util';
+        },
+      },
+    },
   },
   server: {
     host: true,
