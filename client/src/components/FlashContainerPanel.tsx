@@ -872,20 +872,31 @@ export default function FlashContainerPanel() {
               </div>
               <div className="space-y-2 text-xs">
                 {[
-                  { ok: !!analysis.ecuConfig, text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — manual CAN setup required' },
-                  { ok: analysis.valid, text: 'Container validated and CRC32 verified' },
-                  { ok: !!flashPlan && flashPlan.validationErrors.length === 0, text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
-                  { ok: pcanBridgeAvailable === true, text: checkingBridge ? 'Checking PCAN-USB bridge...' : pcanBridgeAvailable === true ? `PCAN-USB bridge detected${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'secure' : 'standard'})` : ''}` : 'PCAN-USB bridge — not detected (ensure pcan_bridge.py is running)' },
+                  { status: analysis.ecuConfig ? 'ok' : 'warn', text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — will use default CAN addresses' },
+                  { status: analysis.valid ? 'ok' : 'fail', text: 'Container validated and CRC32 verified' },
+                  { status: !flashPlan ? 'fail' : flashPlan.validationErrors.length > 0 ? 'fail' : 'ok', text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
+                  { status: pcanBridgeAvailable === true ? 'ok' : checkingBridge ? 'warn' : 'fail', text: checkingBridge ? 'Checking PCAN-USB bridge...' : pcanBridgeAvailable === true ? `PCAN-USB bridge detected${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'secure' : 'standard'})` : ''}` : 'PCAN-USB bridge — not detected (ensure pcan_bridge.py is running)' },
                 ].map((req, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    {req.ok ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
-                    <span className={req.ok ? 'text-zinc-300' : 'text-zinc-500'}>{req.text}</span>
+                    {req.status === 'ok' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : req.status === 'warn' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
+                    <span className={req.status === 'ok' ? 'text-zinc-300' : req.status === 'warn' ? 'text-amber-400/80' : 'text-zinc-500'}>{req.text}</span>
                   </div>
                 ))}
+                {flashPlan && flashPlan.warnings.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {flashPlan.warnings.map((w, i) => (
+                      <div key={i} className="flex items-center gap-2 pl-5">
+                        <Info className="w-3 h-3 text-amber-400/60" />
+                        <span className="text-amber-400/60 text-[10px]">{w}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => handleLaunch('pcan')}
                 disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
+                title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
                 className="mt-4 w-full py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Radio className="w-4 h-4 inline mr-2" />
@@ -941,6 +952,7 @@ export default function FlashContainerPanel() {
               <button
                 onClick={() => handleLaunch('simulator')}
                 disabled={!flashPlan || flashPlan.validationErrors.length > 0}
+                title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
                 className="w-full py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-sm hover:from-cyan-500 hover:to-blue-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Activity className="w-4 h-4 inline mr-2" />

@@ -132,3 +132,15 @@
 
 ## Bug Fix — PCAN Flash Detection
 - [x] Fix PCAN detection in flash system — use same PCANConnection.isBridgeAvailable() as datalogger/bridge
+
+## Bug Fix — PCAN Flash Error After Plan Generation
+- [x] Fix error in PCAN flash section after flash plan shows "1 blocks, 1.4 MB" — investigate launch flow and MissionControl integration
+
+## Bug Fix — Flash Plan Validation Errors Block Launch
+- [x] Fix generateFlashPlan producing validationErrors for valid containers (shows "1 blocks, 1.4 MB" with red X, disables Launch button)
+- [x] Changed seed/key check from blocking error to warning (seed/key embedded in container, extracted at flash time)
+- [x] Changed unknown ECU check from blocking error to warning (can still flash with default CAN addresses)
+- [x] Added warnings[] field to FlashPlan interface for non-blocking issues
+- [x] Updated FlashContainerPanel PCAN section with 3-state status (ok/warn/fail) instead of binary ok/fail
+- [x] Updated FlashMissionControl ValidationPanel to display warnings in amber
+- [x] Added 3 new tests + enhanced 1 existing test for warning behavior (57 flash tests total)

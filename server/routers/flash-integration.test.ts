@@ -172,6 +172,48 @@ describe('pcanFlashOrchestrator', () => {
       // Should still generate a plan (with default settings)
       expect(plan.ecuType).toBe('NONEXISTENT');
       expect(plan.commands.length).toBeGreaterThan(0);
+      // Unknown ECU is a warning, not an error — plan should still be valid
+      expect(plan.isValid).toBe(true);
+      expect(plan.validationErrors).toHaveLength(0);
+      expect(plan.warnings.length).toBeGreaterThan(0);
+      expect(plan.warnings.some(w => w.includes('not in database'))).toBe(true);
+    });
+
+    it('treats empty seed/key as warning, not error', () => {
+      const header = buildTestHeader();
+      header.seed = '';
+      header.key = '';
+      const plan = generateFlashPlan(header, 'E88', 'FULL_FLASH');
+      // Empty seed/key should NOT block flashing — they are embedded in container
+      expect(plan.isValid).toBe(true);
+      expect(plan.validationErrors).toHaveLength(0);
+      expect(plan.warnings.some(w => w.includes('Seed/key'))).toBe(true);
+    });
+
+    it('generates valid plan for E41 (L5P Duramax) with empty seed/key', () => {
+      const header = buildTestHeader();
+      header.ecu_type = 'E41';
+      header.seed = '';
+      header.key = '';
+      const plan = generateFlashPlan(header, 'E41', 'CALIBRATION');
+      expect(plan.isValid).toBe(true);
+      expect(plan.ecuName).toContain('MG1CS111');
+      expect(plan.validationErrors).toHaveLength(0);
+      // Should have seed/key warning but ECU should be found
+      expect(plan.warnings.some(w => w.includes('Seed/key'))).toBe(true);
+      expect(plan.warnings.some(w => w.includes('not in database'))).toBe(false);
+    });
+
+    it('plan with only warnings has isValid=true', () => {
+      const header = buildTestHeader();
+      header.seed = '';
+      header.key = '';
+      header.ecu_type = 'NONEXISTENT';
+      const plan = generateFlashPlan(header, 'NONEXISTENT', 'FULL_FLASH');
+      // Both seed/key and ECU are warnings — plan should still be valid
+      expect(plan.isValid).toBe(true);
+      expect(plan.validationErrors).toHaveLength(0);
+      expect(plan.warnings.length).toBe(2);
     });
   });
 

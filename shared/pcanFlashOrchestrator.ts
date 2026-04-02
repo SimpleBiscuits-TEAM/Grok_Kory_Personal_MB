@@ -45,6 +45,7 @@ export interface FlashPlan {
   fileId: string;
   isValid: boolean;
   validationErrors: string[];
+  warnings: string[];
   commands: FlashCommand[];
   totalBlocks: number;
   totalBytes: number;
@@ -104,10 +105,13 @@ export function generateFlashPlan(
 ): FlashPlan {
   const ecuConfig = getEcuConfig(ecuType);
   const errors: string[] = [];
+  const warnings: string[] = [];
 
-  if (!ecuConfig) errors.push(`Unknown ECU type: ${ecuType}`);
   if (!header.block_struct?.length) errors.push('No blocks found in container');
-  if (!header.seed || !header.key) errors.push('Missing seed/key in container');
+  // Seed/key may be empty in PPEI containers (extracted at flash time) — warn, don't block
+  if (!header.seed || !header.key) warnings.push('Seed/key not in header — will be extracted from container at flash time');
+  // Unknown ECU is a warning — we can still flash with default CAN addresses
+  if (!ecuConfig) warnings.push(`ECU type "${ecuType}" not in database — using default CAN addresses`);
 
   const txAddr = ecuConfig?.txAddr ?? 0x7E0;
   const rxAddr = ecuConfig?.rxAddr ?? 0x7E8;
@@ -242,6 +246,7 @@ export function generateFlashPlan(
     fileId: header.file_id || '',
     isValid: errors.length === 0,
     validationErrors: errors,
+    warnings,
     commands,
     totalBlocks: filteredBlocks.length,
     totalBytes,

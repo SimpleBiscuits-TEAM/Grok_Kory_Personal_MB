@@ -101,6 +101,11 @@ function ValidationPanel({ plan }: { plan: FlashPlan }) {
           {plan.validationErrors.map((e, i) => <div key={i}>⚠ {e}</div>)}
         </div>
       )}
+      {plan.warnings && plan.warnings.length > 0 && (
+        <div className="p-2 rounded border border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs font-mono">
+          {plan.warnings.map((w, i) => <div key={i}>ℹ {w}</div>)}
+        </div>
+      )}
     </div>
   );
 }
