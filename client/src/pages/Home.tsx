@@ -86,32 +86,60 @@ export default function Home() {
     setError(null);
     try {
       // Detect .wp8 files (Dynojet Power Vision datalogs)
+      // On the Home page, always generate a general health report (no redirect to Honda Talon Tuner)
       if (file.name.toLowerCase().endsWith('.wp8')) {
-        const { parseWP8 } = await import('@/lib/wp8Parser');
+        const { parseWP8, wp8ToCSV } = await import('@/lib/wp8Parser');
         const buffer = await file.arrayBuffer();
         const wp8Result = parseWP8(buffer);
-        if (wp8Result.vehicleType === 'HONDA_TALON') {
-          // Store WP8 data in sessionStorage for the Advanced page to pick up
-          // Float32Array doesn't serialize to JSON properly, so convert to regular arrays
-          const serializableRows = wp8Result.rows.slice(0, 2000).map(r => ({
-            timestamp: r.timestamp,
-            values: Array.from(r.values),
-          }));
-          sessionStorage.setItem('pendingWP8', JSON.stringify({
-            magic: wp8Result.magic,
-            partNumber: wp8Result.partNumber,
-            channels: wp8Result.channels,
-            totalRows: wp8Result.totalRows,
-            rawSize: wp8Result.rawSize,
-            vehicleType: wp8Result.vehicleType,
-            rows: serializableRows,
-          }));
-          setLoading(false);
-          setLocation('/advanced?tab=talon');
-          return;
+        // Convert WP8 data to CSV format and process through the standard pipeline
+        const csvContent = wp8ToCSV(wp8Result);
+        const rawData = parseCSV(csvContent);
+        const processed = processData(rawData);
+        const downsampled = downsampleData(processed, 2000);
+        const binned = createBinnedData(processed, 40);
+
+        setData(downsampled);
+        setBinnedData(binned);
+        setFileName(file.name);
+
+        const diagnosticReport = analyzeDiagnostics(downsampled);
+        setDiagnostics(diagnosticReport);
+
+        const reasoning = runReasoningEngine(downsampled, diagnosticReport);
+        setReasoningReport(reasoning);
+
+        const drag = analyzeDragRuns(processed);
+        setDragAnalysis(drag);
+
+        // Generate health report (general, no Honda Talon redirect)
+        const report = generateHealthReport(downsampled, undefined);
+        setHealthReport(report);
+
+        // Try VIN from filename
+        const detectedVin = extractVinFromFilename(file.name);
+        setVinFromFile(detectedVin);
+        if (detectedVin) {
+          decodeVinNhtsa(detectedVin).then(vehicleInfo => {
+            const reportWithVin = generateHealthReport(downsampled, vehicleInfo);
+            setHealthReport(reportWithVin);
+          });
         }
-        // Non-Honda-Talon WP8: fall through to error
-        throw new Error('WP8 file detected but not a Honda Talon datalog. Only Honda Talon .wp8 files are currently supported.');
+
+        // Cache datalog (fire-and-forget)
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1] || '';
+            if (base64) {
+              cacheDatalogMutation.mutate({ fileName: file.name, fileBase64: base64, sourcePage: 'analyzer' });
+            }
+          };
+          reader.readAsDataURL(file);
+        } catch { /* silent */ }
+
+        setLoading(false);
+        return;
       }
 
       // Use TextDecoder to handle both UTF-8 and Latin-1 encoded files

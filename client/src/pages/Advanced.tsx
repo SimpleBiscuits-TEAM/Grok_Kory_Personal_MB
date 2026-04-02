@@ -902,7 +902,7 @@ function VehiclePanel() {
 
 // ─── Analyzer Panel (Merged Normal Mode) ────────────────────────────────────
 
-function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void }) {
+function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult) => void }) {
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
@@ -983,7 +983,67 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
   }, [injectedCSV, lastInjectedId, processCSVContent, onInjectedConsumed]);
 
   const processFile = useCallback(async (file: File) => {
-    const content = await file.text();
+    // Handle .wp8 files (Dynojet Power Vision datalogs)
+    if (file.name.toLowerCase().endsWith('.wp8')) {
+      setLoading(true);
+      setError(null);
+      try {
+        const { parseWP8, wp8ToCSV } = await import('@/lib/wp8Parser');
+        const buffer = await file.arrayBuffer();
+        const wp8Result = parseWP8(buffer);
+
+        // If Honda Talon detected, switch to Talon tab
+        if (wp8Result.vehicleType === 'HONDA_TALON' && onWP8Detected) {
+          onWP8Detected(wp8Result);
+          // Cache datalog (fire-and-forget)
+          try {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = reader.result as string;
+              const base64 = dataUrl.split(',')[1] || '';
+              if (base64) cacheDatalogMutation.mutate({ fileName: file.name, fileBase64: base64, sourcePage: 'advanced-talon' });
+            };
+            reader.readAsDataURL(file);
+          } catch { /* silent */ }
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          setLoading(false);
+          return;
+        }
+
+        // Non-Talon WP8: convert to CSV and process through standard pipeline
+        const csvContent = wp8ToCSV(wp8Result);
+        await processCSVContent(csvContent, file.name);
+
+        // Cache datalog (fire-and-forget)
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1] || '';
+            if (base64) cacheDatalogMutation.mutate({ fileName: file.name, fileBase64: base64, sourcePage: 'advanced' });
+          };
+          reader.readAsDataURL(file);
+        } catch { /* silent */ }
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setLoading(false);
+        return;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to parse WP8 file');
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+    }
+
+    // Standard CSV processing — handle both UTF-8 and Latin-1 encoded files
+    // Banks iDash logs use Latin-1 degree symbols (°F) that fail with UTF-8
+    const buf = await file.arrayBuffer();
+    let content: string;
+    try {
+      content = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+    } catch {
+      content = new TextDecoder('latin1').decode(buf);
+    }
     await processCSVContent(content, file.name);
     // Cache datalog to S3 for dev/debug (fire-and-forget)
     try {
@@ -996,13 +1056,13 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
       reader.readAsDataURL(file);
     } catch { /* silent */ }
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [processCSVContent]);
+  }, [processCSVContent, onWP8Detected]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault(); setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.name.endsWith('.csv')) processFile(file);
-    else setError('Please drop a CSV file.');
+    if (file && (file.name.toLowerCase().endsWith('.csv') || file.name.toLowerCase().endsWith('.wp8'))) processFile(file);
+    else setError('Please drop a CSV or WP8 file.');
   }, [processFile]);
 
   const handleExportPdf = () => {
@@ -1056,17 +1116,17 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed }: { injectedCSV?: { cs
               <h3 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.06em', color: 'white', marginBottom: '0.4rem' }}>
                 {loading ? 'PROCESSING LOG...' : isDragOver ? 'DROP TO ANALYZE' : 'UPLOAD YOUR DATALOG'}
               </h3>
-              <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem' }}>Drag & drop your CSV file here, or click to browse</p>
-              <p style={{ fontFamily: sFont.mono, color: 'oklch(0.60 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>CURRENTLY ONLY CSV SUPPORTED</p>
+              <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem' }}>Drag & drop your CSV or WP8 file here, or click to browse</p>
+              <p style={{ fontFamily: sFont.mono, color: 'oklch(0.60 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>CSV & WP8 FORMATS SUPPORTED</p>
 
             </div>
-            <input ref={fileInputRef} type="file" accept="*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />
+            <input ref={fileInputRef} type="file" accept=".csv,.wp8,.WP8,*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }} disabled={loading} className="hidden" />
             <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} disabled={loading} style={{
               background: loading ? 'oklch(0.35 0.010 260)' : sColor.red, color: 'white', fontFamily: sFont.heading,
               fontSize: '1.1rem', letterSpacing: '0.1em', padding: '10px 32px', borderRadius: '3px', border: 'none',
               cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
             }}>
-              {loading ? <><Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />PROCESSING...</> : <><Upload style={{ width: 16, height: 16 }} />SELECT CSV FILE</>}
+              {loading ? <><Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} />PROCESSING...</> : <><Upload style={{ width: 16, height: 16 }} />SELECT FILE</>}
             </button>
           </div>
         </div>
@@ -1495,7 +1555,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         {/* Tab content */}
-        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} /></div>}
+        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8) => { setInjectedWP8(wp8); setActiveTab('talon'); }} /></div>}
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 

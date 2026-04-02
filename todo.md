@@ -3182,3 +3182,8 @@
 - [x] Investigated: mobile nav used wouter <Link> for all items including external links (Shop/Support)
 - [x] Desktop nav correctly used <a> with target="_blank" for external items, mobile did not
 - [x] Fixed mobile nav to check item.external and render <a> tags with target="_blank" for external links
+
+## WP8 File Handling in Both Analyzers
+- [x] Home page analyzer: accept .wp8 files and generate general health report (no Honda Talon Tuner redirect)
+- [x] Advanced analyzer: accept .wp8 files — Honda Talon detected → switch to Talon tab with parsed WP8 data; non-Talon → convert to CSV and process through standard analyzer pipeline
+- [x] Update file accept text/labels on both upload zones to reflect .wp8 support (CSV & WP8 FORMATS SUPPORTED)
