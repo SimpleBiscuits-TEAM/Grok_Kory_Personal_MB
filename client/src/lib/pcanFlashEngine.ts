@@ -39,8 +39,10 @@ export interface FlashEngineCallbacks {
   onStateUpdate: (state: SimulatorState) => void;
   /** Called when flash completes (success, failed, or aborted) */
   onComplete: (result: 'SUCCESS' | 'FAILED' | 'ABORTED') => void;
-  /** Called during KEY_CYCLE phase when user action is required */
-  onUserAction?: (message: string, waitMs: number) => Promise<void>;
+  /** Called during KEY_CYCLE phase when user action is required.
+   *  For KEY_OFF/KEY_ON: must resolve only after user confirms.
+   *  For WAIT_BOOT: auto-resolves after waitMs. */
+  onUserAction?: (action: { type: import('../../../shared/pcanFlashOrchestrator').UserActionType; prompt: string; autoConfirm: boolean }, waitMs: number) => Promise<void>;
 }
 
 export interface FlashEngineConfig {
@@ -530,16 +532,38 @@ export class PCANFlashEngine {
     this.emitState();
 
     // KEY_CYCLE commands that require user action (no CAN TX)
-    if (cmd.phase === 'KEY_CYCLE' && !cmd.canTx) {
+    if (cmd.userAction) {
+      const { type, prompt, autoConfirm } = cmd.userAction;
       this.log('info', cmd.phase, `⏳ ${cmd.label}`);
+      this.state.statusMessage = prompt;
+      this.emitState();
       
       if (this.callbacks.onUserAction) {
-        await this.callbacks.onUserAction(cmd.label, cmd.timeoutMs);
+        // The callback must block until user confirms (KEY_OFF/KEY_ON)
+        // or auto-resolve after timeout (WAIT_BOOT)
+        await this.callbacks.onUserAction(
+          { type, prompt, autoConfirm: autoConfirm ?? false },
+          cmd.timeoutMs
+        );
+      } else if (autoConfirm) {
+        // No callback provided, auto-wait for boot
+        await this.delay(cmd.timeoutMs);
       } else {
-        // Default: just wait the timeout
+        // No callback and requires user action — log warning and wait
+        this.log('warning', cmd.phase, `⚠️ User action required but no prompt handler: ${prompt}`);
         await this.delay(cmd.timeoutMs);
       }
       
+      this.log('success', cmd.phase, `✓ ${cmd.label} — confirmed`);
+      this.state.statusMessage = `${cmd.label} — done`;
+      this.emitState();
+      return;
+    }
+
+    // KEY_CYCLE commands without userAction but also no CAN TX (legacy fallback)
+    if (cmd.phase === 'KEY_CYCLE' && !cmd.canTx) {
+      this.log('info', cmd.phase, `⏳ ${cmd.label}`);
+      await this.delay(cmd.timeoutMs);
       this.log('success', cmd.phase, `✓ ${cmd.label}`);
       this.state.statusMessage = cmd.label;
       this.emitState();

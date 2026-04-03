@@ -18,6 +18,8 @@ export type FlashPhase =
   | 'PRE_FLASH' | 'BLOCK_TRANSFER' | 'POST_FLASH' | 'VERIFICATION'
   | 'KEY_CYCLE' | 'CLEANUP' | 'RECOVERY';
 
+export type UserActionType = 'KEY_OFF' | 'KEY_ON' | 'WAIT_BOOT';
+
 export interface FlashCommand {
   id: number;
   phase: FlashPhase;
@@ -27,6 +29,13 @@ export interface FlashCommand {
   expectedPositive?: string;
   timeoutMs: number;
   retries: number;
+  /** If set, flash engine pauses and prompts user for confirmation before proceeding */
+  userAction?: {
+    type: UserActionType;
+    prompt: string;
+    /** If true, auto-proceed after timeoutMs (used for WAIT_BOOT). If false, wait for user confirmation. */
+    autoConfirm?: boolean;
+  };
   blockData?: {
     blockId: number;
     blockType: 'OS' | 'CAL' | 'PATCH';
@@ -295,16 +304,31 @@ export function generateFlashPlan(
     canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
   });
   commands.push({
-    id: cmdId++, phase: 'KEY_CYCLE', label: 'Key Off — Turn ignition OFF (wait 10 seconds)',
-    timeoutMs: 12000, retries: 0,
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Key Off — Turn ignition OFF',
+    timeoutMs: 60000, retries: 0,
+    userAction: {
+      type: 'KEY_OFF',
+      prompt: 'Turn the ignition key to the OFF position now. Wait until all dashboard lights are completely off, then confirm.',
+      autoConfirm: false,
+    },
   });
   commands.push({
     id: cmdId++, phase: 'KEY_CYCLE', label: 'Key On — Turn ignition ON',
-    timeoutMs: 5000, retries: 0,
+    timeoutMs: 60000, retries: 0,
+    userAction: {
+      type: 'KEY_ON',
+      prompt: 'Turn the ignition key to the ON position (do NOT start the engine). Wait for dashboard lights to illuminate, then confirm.',
+      autoConfirm: false,
+    },
   });
   commands.push({
-    id: cmdId++, phase: 'KEY_CYCLE', label: 'Wait for ECU boot-up (5 seconds)',
-    timeoutMs: 6000, retries: 0,
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Waiting for ECU boot-up...',
+    timeoutMs: 8000, retries: 0,
+    userAction: {
+      type: 'WAIT_BOOT',
+      prompt: 'ECU is booting up with the new calibration. Please wait...',
+      autoConfirm: true,
+    },
   });
   commands.push({
     id: cmdId++, phase: 'KEY_CYCLE', label: 'Verify ECU communication after key cycle',

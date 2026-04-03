@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   type FlashPlan, type SimulatorState, type SimulatorLogEntry,
+  type UserActionType,
   createSimulatorState, advanceSimulator, getAllFunFacts,
   formatBytes, formatDuration,
 } from '../../../shared/pcanFlashOrchestrator';
@@ -125,18 +126,45 @@ function ValidationPanel({ plan }: { plan: FlashPlan }) {
 
 // ── Key Cycle Prompt ───────────────────────────────────────────────────────
 
-function KeyCyclePrompt({ message, countdown }: { message: string; countdown: number }) {
+interface KeyCyclePromptState {
+  type: UserActionType;
+  prompt: string;
+  autoConfirm: boolean;
+}
+
+function KeyCyclePrompt({ state, countdown, onConfirm }: {
+  state: KeyCyclePromptState;
+  countdown: number;
+  onConfirm: () => void;
+}) {
+  const isKeyAction = state.type === 'KEY_OFF' || state.type === 'KEY_ON';
+  const icon = state.type === 'KEY_OFF' ? '🔑 ⬇️' : state.type === 'KEY_ON' ? '🔑 ⬆️' : '⏳';
+  const title = state.type === 'KEY_OFF' ? 'TURN KEY OFF'
+    : state.type === 'KEY_ON' ? 'TURN KEY ON'
+    : 'WAITING FOR ECU BOOT';
+  const borderColor = isKeyAction ? 'border-amber-500' : 'border-cyan-500/50';
+  const bgColor = isKeyAction ? 'bg-amber-500/15' : 'bg-cyan-500/10';
+
   return (
-    <div className="p-4 rounded-lg border-2 border-yellow-500/50 bg-yellow-500/10 animate-pulse">
-      <div className="flex items-center gap-3 mb-2">
-        <Key className="h-6 w-6 text-yellow-400" />
-        <span className="font-mono text-sm font-bold text-yellow-300">KEY CYCLE REQUIRED</span>
+    <div className={`p-5 rounded-lg border-2 ${borderColor} ${bgColor} ${isKeyAction ? 'animate-pulse' : ''}`}>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-2xl">{icon}</span>
+        <span className="font-mono text-sm font-bold text-amber-300 tracking-wider">{title}</span>
       </div>
-      <p className="text-sm font-mono text-yellow-200 mb-2">{message}</p>
-      {countdown > 0 && (
-        <div className="flex items-center gap-2 text-xs font-mono text-yellow-400">
-          <Timer className="h-4 w-4" />
-          <span>Waiting: {Math.ceil(countdown / 1000)}s remaining</span>
+      <p className="text-sm font-mono text-zinc-200 mb-4 leading-relaxed">{state.prompt}</p>
+      {isKeyAction ? (
+        <Button
+          size="sm"
+          onClick={onConfirm}
+          className="w-full bg-amber-600 hover:bg-amber-500 text-white font-mono text-sm font-bold py-3 tracking-wide"
+        >
+          <CheckCircle2 className="h-4 w-4 mr-2" />
+          I HAVE {state.type === 'KEY_OFF' ? 'TURNED THE KEY OFF' : 'TURNED THE KEY ON'}
+        </Button>
+      ) : (
+        <div className="flex items-center gap-2 text-xs font-mono text-cyan-400">
+          <Timer className="h-4 w-4 animate-spin" />
+          <span>ECU booting... {Math.ceil(countdown / 1000)}s remaining</span>
         </div>
       )}
     </div>
@@ -155,8 +183,9 @@ export default function FlashMissionControl({
   const [sim, setSim] = useState<SimulatorState>(() => createSimulatorState(plan));
   const [showLog, setShowLog] = useState(true);
   const [funFactIdx, setFunFactIdx] = useState(0);
-  const [keyCycleMsg, setKeyCycleMsg] = useState<string | null>(null);
+  const [keyCycleState, setKeyCycleState] = useState<KeyCyclePromptState | null>(null);
   const [keyCycleCountdown, setKeyCycleCountdown] = useState(0);
+  const keyCycleResolveRef = useRef<(() => void) | null>(null);
   const [speedMultiplier, setSpeedMultiplier] = useState<SpeedMultiplier>(1);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pendingLogsRef = useRef<SimulatorLogEntry[]>([]);
@@ -265,24 +294,34 @@ export default function FlashMissionControl({
             });
           }
         },
-        onUserAction: async (message, waitMs) => {
-          setKeyCycleMsg(message);
+        onUserAction: async (action, waitMs) => {
+          setKeyCycleState(action);
           setKeyCycleCountdown(waitMs);
-          // Countdown timer
-          const interval = setInterval(() => {
-            setKeyCycleCountdown(prev => {
-              if (prev <= 1000) {
-                clearInterval(interval);
-                setKeyCycleMsg(null);
-                return 0;
-              }
-              return prev - 1000;
+
+          if (action.autoConfirm) {
+            // WAIT_BOOT: auto-countdown and resolve
+            const interval = setInterval(() => {
+              setKeyCycleCountdown(prev => {
+                if (prev <= 1000) {
+                  clearInterval(interval);
+                  setKeyCycleState(null);
+                  return 0;
+                }
+                return prev - 1000;
+              });
+            }, 1000);
+            await new Promise(resolve => setTimeout(resolve, waitMs));
+            clearInterval(interval);
+            setKeyCycleState(null);
+            setKeyCycleCountdown(0);
+          } else {
+            // KEY_OFF / KEY_ON: block until user clicks confirm
+            await new Promise<void>(resolve => {
+              keyCycleResolveRef.current = resolve;
             });
-          }, 1000);
-          await new Promise(resolve => setTimeout(resolve, waitMs));
-          clearInterval(interval);
-          setKeyCycleMsg(null);
-          setKeyCycleCountdown(0);
+            setKeyCycleState(null);
+            setKeyCycleCountdown(0);
+          }
         },
       };
 
@@ -477,7 +516,18 @@ export default function FlashMissionControl({
         </div>
 
         {/* Key Cycle Prompt */}
-        {keyCycleMsg && <KeyCyclePrompt message={keyCycleMsg} countdown={keyCycleCountdown} />}
+        {keyCycleState && (
+          <KeyCyclePrompt
+            state={keyCycleState}
+            countdown={keyCycleCountdown}
+            onConfirm={() => {
+              if (keyCycleResolveRef.current) {
+                keyCycleResolveRef.current();
+                keyCycleResolveRef.current = null;
+              }
+            }}
+          />
+        )}
 
         {/* Controls */}
         <div className="flex gap-2">

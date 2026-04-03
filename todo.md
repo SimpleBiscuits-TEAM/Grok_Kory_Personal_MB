@@ -319,3 +319,20 @@
 - [x] Key finding: 0xF195 returns NRC 0x31 — UDS DIDs partially work but GMLAN 0x1A DIDs need security access first
 - [x] Hypothesis confirmed: GMLAN 0x1A ReadDID needs security access FIRST — implemented session + seed/key before DID reads
 - [x] ECU scan needs security access before reading part numbers — scanner now does session + seed/key before DID reads
+
+## Key Cycle User Prompts
+- [x] Key cycle steps must pause and prompt user to physically turn key off/on — not auto-assume
+- [x] Add onUserPrompt callback to PCANFlashEngine for interactive prompts during flash
+- [x] Flash engine pauses execution at KEY_OFF/KEY_ON steps and waits for user confirmation
+- [x] Build key cycle prompt modal in FlashMissionControl UI (e.g., "Turn key OFF now" with Confirm button)
+- [x] Show clear instructions for each key cycle step (key off, wait, key on, wait for boot)
+- [x] Resume flash execution only after user confirms the action was performed
+
+## Bug Fix — Dry Run Log #5 (Apr 3, 2026)
+- [x] Key cycle steps auto-wait instead of prompting user — now shows modal with confirm button
+- [x] GMLAN DIDs 0x90 (VIN) and 0xC1 (CVN) still timeout — expected: no pri_key available without container file loaded
+- [x] Pre-check says "No pri_key available" — correct behavior, log message updated to guide user to load container
+- [x] DID 0xB0 responds with only 2 bytes (B0 11) — DID echo + 1 byte data, correct for hardware ID without security
+- [x] DID 0xA0 responds with 2 bytes (A0 00) — programming status 0x00 (normal mode), correct
+- [x] Verification phase 0x1A 0x90 timeouts — same root cause: no key sent, security access incomplete
+- [x] Clear DTCs (0x14 FF FF FF) times out — non-fatal in dry run, may need security access for GMLAN
