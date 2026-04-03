@@ -141,6 +141,7 @@ export class PCANConnection {
   private monitorCallback: ((frame: BusMonitorFrame) => void) | null = null;
   private monitorFrameHandler: ((event: MessageEvent) => void) | null = null;
   private udsResponseListener: ((msg: Record<string, unknown>) => void) | null = null;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: PCANConnectionConfig = {}) {
     this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
@@ -337,6 +338,8 @@ export class PCANConnection {
               this.emit('log', null, 
                 `Bridge connected: ${info.adapter} on ${info.channel} @ ${info.bitrate} bps (v${info.version})`
               );
+              // Start application-level heartbeat (backup for protocol-level ping/pong)
+              this.startHeartbeat();
               resolve();
               return;
             }
@@ -370,6 +373,7 @@ export class PCANConnection {
         };
 
         this.ws.onclose = () => {
+          this.stopHeartbeat();
           // If we were connected and logging, emit an error
           if (this.state === 'logging' || this.state === 'ready') {
             this.emit('error', null, 'Bridge connection lost. Reconnect to continue.');
@@ -1679,17 +1683,40 @@ export class PCANConnection {
   // ─── Disconnect ───────────────────────────────────────────────────────────
 
   /**
-   * Reconnect WebSocket for flash operations without full vehicle initialization.
-   * Unlike connect(), this only:
-   *   1. Closes the old WebSocket
-   *   2. Opens a new one
-   *   3. Resets UDS monitor state so listeners get re-attached
+   * Start application-level heartbeat ping every 15s.
+   * This supplements the WebSocket protocol-level ping/pong from the bridge (v2.1+).
+   * If the bridge doesn't respond within 10s, the ping is silently dropped.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ type: 'ping', id: `hb_${Date.now()}` }));
+        } catch {
+          // ignore — onclose will handle cleanup
+        }
+      }
+    }, 15_000);
+  }
+
+  /**
+   * Stop the application-level heartbeat.
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
+  /**
+   * Reconnect WebSocket only — no VIN read, no PID scan, no protocol switch.
    * 
    * This avoids the VIN read + PID scan that connect() does, which would
    * fail during a flash session (ECU is in programming mode).
    */
-  async reconnectForFlash(): Promise<boolean> {
-    // Clean up old WebSocket
+  async reconnectForFlash(): Promise<boolean> {    // Clean up old WebSocket
     if (this.ws) {
       try { this.ws.close(); } catch { /* ignore */ }
       this.ws = null;
@@ -1734,6 +1761,7 @@ export class PCANConnection {
   }
 
   async disconnect(): Promise<void> {
+    this.stopHeartbeat();
     this.loggingActive = false;
     if (this.monitorActive) {
       await this.stopBusMonitor();

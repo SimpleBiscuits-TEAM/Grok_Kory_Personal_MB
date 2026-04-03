@@ -546,3 +546,14 @@
 - [x] Simplify key computation: hardcoded AES from security profile → known lookup pairs → dummy key for unlocked ECUs
 - [x] Remove "no pri_key" log messages — replaced with "Seed_key.cs AES" messages
 - [x] Update ContainerVerify type to remove pri_key fields (removed from FlashContainerPanel verify section)
+
+## WebSocket Ping/Pong Heartbeat (Apr 3, 2026)
+- [x] Add ping_interval=20, ping_timeout=10 to pcan_bridge.py serve() calls (v2.1)
+- [x] Add client-side application-level heartbeat ping (15s interval) to PCANConnection
+- [x] Add heartbeat cleanup to disconnect() and onclose handler
+- [ ] Test that bridge stays connected during long idle periods (>60s)
+
+## hexToBytes Bug Fix (Apr 3, 2026)
+- [x] Fix hexToBytes regex stripping all '0' chars — was `/[\s,0x]/g` which removes individual 0 and x, now `/0x/gi` then `/[\s,]/g`
+- [x] This caused AES key for E41 (45AE6BA2CB81F5656B05072D74FF47E0) to lose four 0s → 14 bytes instead of 16
+- [x] Fix malformed JSDoc comment in pcanConnection.ts from heartbeat edit

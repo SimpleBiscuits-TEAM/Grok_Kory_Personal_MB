@@ -481,7 +481,7 @@ export function getSecuritySummary(ecuType: string): string {
  * Utility: convert hex string to Uint8Array
  */
 export function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.replace(/[\s,0x]/g, '');
+  const clean = hex.replace(/0x/gi, '').replace(/[\s,]/g, '');
   const bytes = new Uint8Array(clean.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
