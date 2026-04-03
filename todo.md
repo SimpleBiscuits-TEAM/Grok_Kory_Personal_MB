@@ -589,3 +589,11 @@
 - [x] Fix: DisableNormalCommunication is NOT the issue (only disables normal CAN traffic, not diagnostic responses)
 - [x] Fix: SHORTER delays needed — A5 01→A5 03 reduced from 6000ms to 1000ms, A5 03→USDT reduced from 2000ms to 500ms (match E88)
 - [x] Research: E88 reference shows USDT commands work after broadcast with short delays (500ms after A5 03)
+
+## Real Flash Attempt #6 — FAILED (Apr 3, 2026) — Log 04533083
+- [x] HUGE PROGRESS: Security access now works AFTER broadcast! Timing fix confirmed working.
+- [x] Root cause: RequestDownload (0x34) PriRC fails with NRC 0x22 (conditionsNotCorrect) — PriRC is E88-specific
+- [x] Fix: Made PriRC nonFatal — E41 skips it, per-block erase+RequestDownload handles everything
+- [x] Investigate: NRC 0x22 confirms PriRC is E88-specific; per-block erase (0x31) comes before per-block 0x34
+- [x] Investigate: E41 uses standard block-specific 0x34 format, not the E88 PriRC format
+- [x] Note: NRC 0x37 lockout timer handled correctly — 10s wait then seed received

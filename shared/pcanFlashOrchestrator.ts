@@ -333,10 +333,15 @@ export function generateFlashPlan(
   // Data: 34 00 00 0F FE = service 0x34, addressAndLengthFormatIdentifier=0x00,
   //       memoryAddress=0x000F, memorySize=0xFE (or interpreted as GM-specific init)
   if (isGMLAN) {
+    // GM PriRC: E88-specific initialization RequestDownload before block loop.
+    // NRC 0x22 (conditionsNotCorrect) on E41 — this command is E88-specific and
+    // not required for all GMLAN ECUs. Made nonFatal so the per-block erase +
+    // RequestDownload sequence handles everything for ECUs that don't support PriRC.
     commands.push({
       id: cmdId++, phase: 'PRE_FLASH', label: 'GM PriRC — Initial RequestDownload (0x34)',
       canTx: `${txHex} 05 34 00 00 0F FE`, expectedPositive: '74', timeoutMs: 5000, retries: 2,
       delayBeforeMs: 250,   // E88: post_delay=250ms
+      nonFatal: true,  // E88-specific; E41 returns NRC 0x22 — safe to skip
     });
   }
 
