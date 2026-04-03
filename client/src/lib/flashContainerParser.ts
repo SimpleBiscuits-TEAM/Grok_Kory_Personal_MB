@@ -68,6 +68,12 @@ export interface DevProgContainerHeader {
     canSpeed?: string;
     txAddr?: string;
     rxAddr?: string;
+    pri_key?: string[];
+    pri_request?: string[];
+    request?: string[];
+    key?: string[];
+    txprefix?: string[];
+    rxprefix?: string[];
   };
 }
 
@@ -207,6 +213,12 @@ function parseDevProgContainer(data: Uint8Array): DevProgContainerHeader | null 
         canSpeed: json.verify.canspeed,
         txAddr: json.verify.txadr,
         rxAddr: json.verify.rxadr,
+        pri_key: json.verify.pri_key,
+        pri_request: json.verify.pri_request,
+        request: json.verify.request,
+        key: json.verify.key,
+        txprefix: json.verify.txprefix,
+        rxprefix: json.verify.rxprefix,
       } : undefined,
     };
   } catch {
@@ -376,6 +388,18 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
       detail: needsUnlockBox
         ? `${ecuFamily} requires hardware unlock box (CMAC-based authentication)`
         : `${ecuFamily} uses ${secProfile?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
+    });
+
+    // Check if container has pri_key for AES security access
+    const hasPriKey = devProgHeader?.verify?.pri_key && devProgHeader.verify.pri_key.length >= 16;
+    checks.push({
+      id: 'pri_key', label: 'Security Key Material',
+      status: hasPriKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
+      detail: hasPriKey
+        ? `Container includes AES pri_key (${devProgHeader!.verify!.pri_key!.length} bytes) for seed/key computation`
+        : needsUnlockBox
+          ? 'Hardware unlock box handles security — no pri_key needed'
+          : 'No pri_key in container — security access will use dummy key (only works on unlocked ECUs)',
     });
 
     checks.push({

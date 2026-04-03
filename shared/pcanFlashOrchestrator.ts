@@ -268,6 +268,17 @@ export function generateFlashPlan(
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
       delayBeforeMs: 500,   // E88: post_delay=500ms
     });
+    // Step 9: Re-establish programming session on PHYSICAL address (0x7E0)
+    // After the broadcast sequence, the ECU is in programming mode but needs
+    // a direct session handshake before it will respond to USDT commands.
+    // E88 procedure: CAN_SEND_USDT (0x7E0, DATA=10 02) after broadcast sequence
+    // Without this, SECURITY_ACCESS seed request times out.
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Re-establish Programming Session (Physical)',
+      canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
+      expectedPositive: '50', timeoutMs: 5000, retries: 3,
+      delayBeforeMs: 500,  // Allow ECU to settle after ProgrammingMode Complete
+    });
   } else {
     // Standard UDS: simple session switch on physical address
     commands.push({

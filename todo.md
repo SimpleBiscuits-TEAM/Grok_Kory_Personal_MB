@@ -514,3 +514,9 @@
 - [x] Skip ECU Reset (0x11 0x01) for GMLAN in CLEANUP (NRC 0x11 serviceNotSupported, ReturnToNormal 0x20 already handles reset) — saves ~12s
 - [x] Skip ECU Reset (0x11 0x01) for GMLAN in KEY_CYCLE pre-reset (same reason) — saves ~12s
 - [x] Reduce PRE_CHECK UDS fallback DID scan when GMLAN seed was received (ECU is alive, no need to try UDS DIDs) — saves ~20s
+
+## Real Flash Attempt #1 — SECURITY_ACCESS Timeout (Apr 3, 2026)
+- [x] Fix SECURITY_ACCESS timeout after SESSION_OPEN broadcast — added physical DiagnosticSessionControl (0x10 0x02) on 0x7E0 after GMLAN broadcast sequence
+- [x] Add physical DiagnosticSessionControl (0x10 0x02) on 0x7E0 between SESSION_OPEN and SECURITY_ACCESS to re-establish direct session
+- [x] Fix pri_key extraction — DevProgContainerHeader.verify now includes pri_key/pri_request/request/key arrays, and containerFileHeader passes verify section to flash engine
+- [x] Consider adding delay after ProgrammingMode Complete (A5 03) before first USDT command — 500ms delayBeforeMs on physical session re-establishment
