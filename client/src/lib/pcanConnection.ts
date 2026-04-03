@@ -1678,6 +1678,61 @@ export class PCANConnection {
 
   // ─── Disconnect ───────────────────────────────────────────────────────────
 
+  /**
+   * Reconnect WebSocket for flash operations without full vehicle initialization.
+   * Unlike connect(), this only:
+   *   1. Closes the old WebSocket
+   *   2. Opens a new one
+   *   3. Resets UDS monitor state so listeners get re-attached
+   * 
+   * This avoids the VIN read + PID scan that connect() does, which would
+   * fail during a flash session (ECU is in programming mode).
+   */
+  async reconnectForFlash(): Promise<boolean> {
+    // Clean up old WebSocket
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* ignore */ }
+      this.ws = null;
+    }
+
+    // Reset UDS monitor state so sendUDSviaRawCAN re-attaches listeners
+    this.udsMonitorStarted = false;
+    this.monitorActive = false;
+    this.monitorCallback = null;
+    if (this.monitorFrameHandler) {
+      this.monitorFrameHandler = null;
+    }
+    this.udsResponseListener = null;
+
+    // Cancel pending requests
+    for (const [id, pending] of Array.from(this.pendingRequests.entries())) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Reconnecting'));
+    }
+    this.pendingRequests.clear();
+
+    // Try to open a new WebSocket (try last successful URL first)
+    const urlsToTry = this.bridgeUrl
+      ? [this.bridgeUrl, this.bridgeUrlSecure, this.bridgeUrlInsecure]
+      : [this.bridgeUrlSecure, this.bridgeUrlInsecure];
+    // Deduplicate
+    const uniqueUrls = [...new Set(urlsToTry)];
+
+    for (const url of uniqueUrls) {
+      this.bridgeUrl = url;
+      try {
+        await this.openWebSocket();
+        this.setState('ready');
+        return true;
+      } catch {
+        // Try next URL
+      }
+    }
+
+    this.setState('error');
+    return false;
+  }
+
   async disconnect(): Promise<void> {
     this.loggingActive = false;
     if (this.monitorActive) {

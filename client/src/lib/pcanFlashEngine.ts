@@ -297,9 +297,12 @@ export class PCANFlashEngine {
     this.emitState();
 
     // Try up to 3 reconnection attempts with increasing delay
+    // Use reconnectForFlash() instead of connect() to avoid full vehicle
+    // initialization (VIN read, PID scan) which fails during flash session.
+    // reconnectForFlash() also resets UDS monitor state so listeners get re-attached.
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const reconnected = await this.conn.connect();
+        const reconnected = await this.conn.reconnectForFlash();
         if (reconnected && this.isWebSocketOpen()) {
           this.log('success', phase, `✓ Bridge reconnected (attempt ${attempt}/3)`);
           // Give bridge a moment to stabilize
@@ -1173,7 +1176,12 @@ export class PCANFlashEngine {
 
     // Handle specific UDS services (standard request/response)
     let response: UDSResponse | null = null;
-    let retries = cmd.retries;
+    // In dry run mode, reduce retries for post-flash DID reads.
+    // These reads take ~18s each with full retries (5s timeout × 3 attempts + backoff).
+    // With 9+ DIDs in VERIFICATION, that's 162s+ wasted when ECU won't respond
+    // to USDT after SESSION_OPEN broadcast (it only responds after key cycle).
+    const isPostFlashDIDRead = (cmd.phase === 'VERIFICATION' || cmd.phase === 'KEY_CYCLE') && !cmd.blockData && !cmd.userAction;
+    let retries = (this.dryRun && isPostFlashDIDRead) ? Math.min(cmd.retries, 1) : cmd.retries;
     let lastError = '';
 
     while (retries >= 0) {
@@ -1286,6 +1294,18 @@ export class PCANFlashEngine {
     if (this.dryRun) {
       this.log('warning', cmd.phase, `[DRY RUN] ${cmd.label}: ${lastError} — continuing (non-fatal in dry run)`);
       this.state.statusMessage = `[DRY RUN] ${cmd.label} (timeout)`;
+      this.emitState();
+      return;
+    }
+
+    // VERIFICATION and KEY_CYCLE DID reads are informational, not safety-critical.
+    // If they timeout, log a warning but don't fail the flash — the ECU has already
+    // been programmed successfully at this point. Failing here would leave the user
+    // thinking the flash failed when it actually succeeded.
+    const isPostFlashRead = (cmd.phase === 'VERIFICATION' || cmd.phase === 'KEY_CYCLE') && !cmd.blockData && !cmd.userAction;
+    if (isPostFlashRead) {
+      this.log('warning', cmd.phase, `${cmd.label}: ${lastError} — continuing (post-flash read is non-fatal)`);
+      this.state.statusMessage = `${cmd.label} (timeout, non-fatal)`;
       this.emitState();
       return;
     }

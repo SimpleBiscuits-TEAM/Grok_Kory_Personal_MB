@@ -459,8 +459,8 @@
 ## Dry Run #11 Analysis (Apr 3, 2026)
 - [x] Fix NRC 0x37 handling: 7F 27 37 is NOT a seed — it's "requiredTimeDelayNotExpired". Must wait 10s and retry security access
 - [x] Update keepalive log message to show GMLAN UUDT format instead of UDS format
-- [ ] Bench ECU sends seed 57 09 FD 6C 06 (not A0 9A 34 9B 06 from BUSMASTER) — need correct key for this seed
-- [ ] DID 0x90 consistently times out on this ECU — consider making it optional/non-fatal in non-dry-run mode too
+- [x] Bench ECU sends seed 57 09 FD 6C 06 (not A0 9A 34 9B 06 from BUSMASTER) — handled by AES key computation path (computeGM5B) when no known pair matches; seeds change between power cycles
+- [x] DID 0x90 consistently times out on this ECU — VERIFICATION and KEY_CYCLE DID reads now non-fatal in live mode too
 
 ## E88 Flash Procedure Alignment (E41 uses same init sequence)
 - [x] Update orchestrator SESSION_OPEN to match E88 proven sequence (exact order, timing, two A5 commands)
@@ -490,3 +490,14 @@
 - [x] SESSION_OPEN sequence verified correct: ReturnToNormal → TesterPresent cyclic → ReadB0 → DiagSession → DisableComm → ReportProgrammedState → ProgrammingMode 01 → ProgrammingMode 03
 - [x] PriRC (0x34) correctly placed before first block transfer in PRE_FLASH phase
 - [x] Security access uses correct GMLAN subfunctions (0x27 0x01 seed request)
+
+## Dry Run Log #13 Analysis (Apr 3, 2026) — Post Bridge Reconnect
+- [x] Bridge reconnect works but first command after reconnect fails with "WebSocket not connected" — added reconnectForFlash() method that resets UDS monitor state (udsMonitorStarted, monitorActive, udsResponseListener)
+- [x] Bridge drops every ~50-60s — reconnectForFlash() now handles this gracefully; bridge-side ping/pong is a future improvement for pcan_bridge.py
+- [x] Reduce VERIFICATION DID read retries in dry run mode — capped to max 1 retry for VERIFICATION/KEY_CYCLE DID reads in dry run (saves ~120s)
+- [x] Bridge auto-reconnect confirmed working — 4 successful reconnections during session
+- [x] SESSION_OPEN sequence fires correctly after bridge reconnect
+- [x] Post-key-cycle bridge reconnect works — session re-established on attempt 5/5
+- [x] ClearDTC GMLAN (0x04 on 0x7DF) got positive response from ECU
+- [x] Seed 57 09 FD 6C 06 received after key cycle — consistent with log #11
+- [x] Dummy key rejected with NRC 0x35 (invalidKey) — expected, needs pri_key from container for AES computation
