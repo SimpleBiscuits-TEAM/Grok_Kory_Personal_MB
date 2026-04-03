@@ -292,18 +292,26 @@ export function generateFlashPlan(
   }
 
   // Phase 4: SECURITY_ACCESS
+  // For GMLAN ECUs: PRE_CHECK already performs session + security access on the physical
+  // address BEFORE the SESSION_OPEN broadcast. After the broadcast (especially
+  // DisableNormalCommunication 0x28 and ProgrammingMode A5 01/03), the ECU may stop
+  // responding to USDT commands on the physical address. Since security was already
+  // granted in PRE_CHECK, these commands are marked nonFatal for GMLAN so the flash
+  // engine can skip them and proceed directly to PRE_FLASH (RequestDownload 0x34).
   const seedLevel = ecuConfig?.seedLevel ?? 1;
   commands.push({
     id: cmdId++, phase: 'SECURITY_ACCESS', label: `Request Seed (Level ${seedLevel})`,
     canTx: `${txHex} 02 27 ${seedLevel.toString(16).padStart(2, '0')}`,
     canRx: `${rxHex} xx 67 ...`,
     expectedPositive: '67', timeoutMs: 5000, retries: 2,
+    nonFatal: isGMLAN,  // GMLAN: PRE_CHECK already granted security; post-broadcast seed may timeout
   });
   commands.push({
     id: cmdId++, phase: 'SECURITY_ACCESS', label: 'Send Key',
     canTx: `${txHex} xx 27 ${(seedLevel + 1).toString(16).padStart(2, '0')} ...`,
     canRx: `${rxHex} 02 67 ${(seedLevel + 1).toString(16).padStart(2, '0')}`,
     expectedPositive: '67', timeoutMs: 5000, retries: 1,
+    nonFatal: isGMLAN,  // GMLAN: PRE_CHECK already granted security; post-broadcast key may timeout
   });
 
   // Phase 5: PRE_FLASH (per-block erase + request download)

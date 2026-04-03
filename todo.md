@@ -566,3 +566,11 @@
 - [x] Physical session re-establishment (0x10 0x02 on 0x7E0) times out after SESSION_OPEN broadcast — added nonFatal flag
 - [x] Make physical session non-fatal — added nonFatal field to FlashCommand type and check in executeCommand
 - [x] In dry run, seed request succeeded AFTER bridge reconnect — now real flash will also proceed past physical session timeout
+
+## Real Flash Attempt #3 — FAILED (Apr 3, 2026) — Log 8c8c5b4a
+- [x] Root cause: DisableNormalCommunication (0x28) in SESSION_OPEN broadcast kills ALL USDT responses on 0x7E0
+- [x] PRE_CHECK seed succeeds at 23.6s (security GRANTED), but post-SESSION_OPEN seed fails at 62.7s (ECU silent)
+- [x] Fix: Skip SECURITY_ACCESS phase commands when security was already granted in PRE_CHECK
+- [x] Fix: Make SECURITY_ACCESS seed request non-fatal when PRE_CHECK already granted security
+- [x] Fix: Engine should use pre-check security state and skip redundant seed/key exchange after broadcast
+- [x] Consider: Remove DisableNormalCommunication (0x28) from broadcast or move it after security access — NOT needed, skip approach is cleaner

@@ -1369,6 +1369,28 @@ export class PCANFlashEngine {
     const isRequestSeed = (subFunction % 2) === 1;
 
     if (isRequestSeed) {
+      // ── GMLAN Optimization: Skip seed/key if PRE_CHECK already granted security ──
+      // PRE_CHECK performs session + security access on the physical address BEFORE
+      // the SESSION_OPEN broadcast. After the broadcast (DisableNormalCommunication,
+      // ProgrammingMode), the ECU may stop responding to USDT on the physical address.
+      // Since security was already granted, we can skip this redundant exchange.
+      if (this.lastSecurityAccessGranted && this.isGMLAN) {
+        this.log('success', cmd.phase,
+          '🔓 Security already granted in PRE_CHECK — skipping post-broadcast seed/key exchange');
+        this.log('info', cmd.phase,
+          'ℹ️ GMLAN ECUs may not respond to USDT after SESSION_OPEN broadcast (DisableNormalCommunication + ProgrammingMode). ' +
+          'PRE_CHECK security access is sufficient for flash operations.');
+        return {
+          service: UDS.SECURITY_ACCESS,
+          serviceName: 'SecurityAccess',
+          subFunction,
+          data: [subFunction],
+          positiveResponse: true,
+          isFlashRelated: true,
+          timestamp: Date.now(),
+        };
+      }
+
       // Step 1: Request seed from ECU (with NRC 0x37 lockout retry)
       // NRC 0x37 = requiredTimeDelayNotExpired — ECU has a security lockout timer
       // (typically 10 seconds). We wait and retry up to 3 times.
