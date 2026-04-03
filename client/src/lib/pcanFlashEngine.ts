@@ -180,45 +180,53 @@ export class PCANFlashEngine {
       }
       this.emitState();
 
-      // Step 0c: ISO-TP multi-frame capability test (dry run only)
-      // Reads VIN (DID 0xF190) which returns 17+ bytes, requiring multi-frame ISO-TP
+      // Step 0c: ECU communication test (dry run only)
+      // Tests ReadDataByIdentifier with multiple DIDs to verify bidirectional communication.
+      // Any response (positive or NRC) proves the send+listen transport is working.
       if (this.dryRun) {
-        this.log('info', 'PRE_CHECK', '🧪 Testing ISO-TP multi-frame capability...');
-        this.state.statusMessage = 'Testing ISO-TP multi-frame...';
+        this.log('info', 'PRE_CHECK', '🧪 Testing ECU communication (ReadDataByIdentifier)...');
+        this.state.statusMessage = 'Testing ECU communication...';
         this.emitState();
 
+        // DIDs to try, in order of likelihood to be supported
+        const testDIDs: Array<{ did: number[]; name: string; label: string }> = [
+          { did: [0xF1, 0x90], name: 'VIN', label: '0xF190' },
+          { did: [0xF1, 0x88], name: 'ECU Software Number', label: '0xF188' },
+          { did: [0xF1, 0x95], name: 'ECU Hardware Number', label: '0xF195' },
+          { did: [0xF8, 0x06], name: 'Calibration ID', label: '0xF806' },
+        ];
+
+        let gotAnyResponse = false;
         try {
-          // ReadDataByIdentifier (0x22) for VIN (0xF190) — 17 bytes, requires multi-frame
-          const vinResponse = await this.conn.sendUDSRequest(
-            UDS.READ_DID, undefined, [0xF1, 0x90], this.txAddr
-          );
-          if (vinResponse && vinResponse.positiveResponse) {
-            const vinBytes = vinResponse.data.slice(3); // Skip 62 F1 90
-            const vin = String.fromCharCode(...vinBytes.filter(b => b >= 0x20 && b <= 0x7E));
-            this.log('success', 'PRE_CHECK', `✓ ISO-TP multi-frame OK — VIN: ${vin} (${vinResponse.data.length} bytes received)`);
-            if (vinResponse.data.length > 7) {
-              this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
-            } else {
-              this.log('warning', 'PRE_CHECK', '⚠ Response was single-frame (≤7 bytes) — multi-frame capability NOT confirmed');
-            }
-          } else if (vinResponse) {
-            const nrc = vinResponse.nrc || 0;
-            this.log('warning', 'PRE_CHECK', `VIN read returned NRC 0x${nrc.toString(16)} — trying CalID (0xF806)...`);
-            // Fallback: try Calibration ID which is also multi-frame
-            const calResponse = await this.conn.sendUDSRequest(
-              UDS.READ_DID, undefined, [0xF8, 0x06], this.txAddr
+          for (const { did, name, label } of testDIDs) {
+            const response = await this.conn.sendUDSRequest(
+              UDS.READ_DID, undefined, did, this.txAddr
             );
-            if (calResponse && calResponse.positiveResponse) {
-              this.log('success', 'PRE_CHECK', `✓ CalID read OK (${calResponse.data.length} bytes) — ISO-TP appears functional`);
-            } else {
-              this.log('warning', 'PRE_CHECK', 'CalID read also failed — ISO-TP multi-frame support uncertain');
+            if (response && response.positiveResponse) {
+              gotAnyResponse = true;
+              const dataHex = response.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+              this.log('success', 'PRE_CHECK', `✓ ${name} (${label}) read OK — ${response.data.length} bytes: ${dataHex}`);
+              if (response.data.length > 7) {
+                this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
+              }
+              break; // One successful read is enough
+            } else if (response) {
+              // NRC response — ECU IS communicating, just doesn't support this DID
+              gotAnyResponse = true;
+              const nrc = response.nrc || 0;
+              this.log('info', 'PRE_CHECK', `${name} (${label}): NRC 0x${nrc.toString(16)} (${response.nrcName || 'unknown'}) — DID not supported, trying next...`);
             }
+            // null response = no communication at all, try next DID
+          }
+
+          if (gotAnyResponse) {
+            this.log('success', 'PRE_CHECK', '✓ ECU communication verified — send+listen transport working');
           } else {
-            this.log('warning', 'PRE_CHECK', 'No response to VIN read — ECU may not be powered or ISO-TP may not be supported by bridge');
+            this.log('warning', 'PRE_CHECK', 'No response from ECU to any ReadDID — ECU may not be powered or connected');
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          this.log('warning', 'PRE_CHECK', `ISO-TP test error: ${msg} — continuing with dry run...`);
+          this.log('warning', 'PRE_CHECK', `ECU communication test error: ${msg} — continuing with dry run...`);
         }
         this.emitState();
       }

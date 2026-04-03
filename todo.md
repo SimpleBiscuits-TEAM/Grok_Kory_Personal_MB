@@ -230,3 +230,15 @@
 - [x] Transport strategy now: 1) try native uds_request → 2) try raw CAN (can_send) with ISO-TP → 3) fall back to obd_request
 - [x] Wrapped setUDSSession and readUDSDID in try-catch since raw CAN transport throws on timeout instead of returning null
 - [ ] Test dry run again with real PCAN hardware after fix (requires physical bridge)
+
+## Bug Fix — Dry Run: can_send Times Out Waiting for CAN Response
+- [x] Investigate: raw CAN transport now used (error changed from "No response" to "Timeout waiting for CAN response") but bridge still times out
+- [x] Analyzed IntelliSpy capture during dry run: ECU IS responding to ALL commands on 0x7E8!
+- [x] DiagnosticSessionControl (0x10 0x03): POSITIVE response (0x50) — session switch works!
+- [x] ReadDataByIdentifier (0x22 F190): NRC 0x31 (Request Out Of Range) — VIN DID not supported on this ECU
+- [x] TesterPresent (0x3E 0x00): NRC 0x12 (Sub-Function Not Supported) — sub-function 0x00 not supported
+- [x] Root cause: bridge's can_send handler is fire-and-forget — sends CAN frame but doesn't relay ECU response back via WebSocket
+- [x] Fix: implemented send+listen approach — start bus monitor, set up temporary listener for response CAN ID, send frame via can_send, capture response from bus monitor stream
+- [x] Fix: can_send now fire-and-forget (no sendRequest), response captured via addEventListener on WebSocket for can_frame/bus_frame messages
+- [x] Fix ReadDID: ISO-TP test now tries multiple DIDs (VIN 0xF190, ECU SW# 0xF188, ECU HW# 0xF195, CalID 0xF806) and treats any response (even NRC) as proof of communication
+- [x] TesterPresent sub-function comes from flash plan — NRC 0x12 is ECU-specific, handled by retry logic (not a transport issue)

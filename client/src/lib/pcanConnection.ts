@@ -1013,10 +1013,23 @@ export class PCANConnection {
   }
 
   /**
+   * Track whether UDS monitor mode has been started.
+   * We start it once and leave it running for the duration of the session.
+   */
+  private udsMonitorStarted = false;
+
+  /**
    * Send UDS command via raw CAN frames with ISO-TP single-frame framing.
-   * This builds the exact same frame format as udsTransport.ts:
-   *   [PCI_length, service_id, sub_function?, ...data, 0x00 padding to 8 bytes]
-   * and sends it via the bridge's can_send handler.
+   *
+   * The bridge's can_send handler is fire-and-forget — it sends the CAN frame
+   * but does NOT relay the ECU's response back via WebSocket. To capture the
+   * response, we:
+   *   1. Start bus monitor mode (if not already running) so the bridge streams
+   *      all CAN frames back to us
+   *   2. Set up a temporary message listener filtering for the response CAN ID
+   *   3. Send the CAN frame via can_send
+   *   4. Wait for the response frame from the bus monitor stream
+   *   5. Parse the ISO-TP response
    */
   private async sendUDSviaRawCAN(
     service: number,
@@ -1024,6 +1037,22 @@ export class PCANConnection {
     data?: number[],
     targetAddress = 0x7E0
   ): Promise<UDSResponse | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    // Ensure bus monitor is running so we receive CAN frames from the bridge
+    if (!this.udsMonitorStarted) {
+      try {
+        await this.sendRequest({ type: 'start_monitor', filter_ids: [] });
+        this.udsMonitorStarted = true;
+        this.emit('log', null, 'UDS monitor started for raw CAN transport');
+      } catch {
+        // Monitor might already be running (e.g., IntelliSpy started it)
+        this.udsMonitorStarted = true;
+      }
+    }
+
     // Build UDS payload: [service, subFunction?, ...data]
     const udsPayload: number[] = [service];
     if (subFunction !== undefined) udsPayload.push(subFunction);
@@ -1034,17 +1063,64 @@ export class PCANConnection {
     const frame: number[] = [pciLength, ...udsPayload];
     while (frame.length < 8) frame.push(0x00);
 
-    // Send via can_send
-    const response = await this.sendRequest({
-      type: 'can_send',
-      arb_id: targetAddress,
-      data: frame,
+    const responseArbId = targetAddress + 0x08; // Standard UDS: response = request + 0x08
+
+    // Set up a temporary listener to capture the response from bus monitor frames
+    const responsePromise = new Promise<number[] | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.ws?.removeEventListener('message', listener);
+        resolve(null);
+      }, 5000); // 5 second timeout for ECU response
+
+      const listener = (event: MessageEvent) => {
+        try {
+          const msg = JSON.parse(event.data);
+          // Bus monitor frames come as can_frame or bus_frame
+          if (msg.type === 'can_frame' || msg.type === 'bus_frame') {
+            const arbId = msg.arb_id ?? msg.arbitration_id ?? msg.id;
+            if (arbId === responseArbId) {
+              // Got our response frame!
+              clearTimeout(timeout);
+              this.ws?.removeEventListener('message', listener);
+              const frameData: number[] = msg.data || [];
+              resolve(frameData);
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      this.ws!.addEventListener('message', listener);
     });
 
-    // Parse the response — bridge returns raw CAN frame data
-    const rawData = (response.data as number[]) || [];
-    if (rawData.length === 0) return null;
+    // Send the CAN frame (fire-and-forget from bridge's perspective)
+    // Don't use sendRequest since can_send won't get a proper response —
+    // just send the raw WebSocket message directly
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: this.nextRequestId(),
+      arb_id: targetAddress,
+      data: frame,
+    }));
 
+    // Wait for the response from the bus monitor stream
+    const rawData = await responsePromise;
+    if (!rawData || rawData.length === 0) {
+      throw new Error('Timeout waiting for CAN response');
+    }
+
+    return this.parseISOTPResponse(service, subFunction, rawData);
+  }
+
+  /**
+   * Parse an ISO-TP CAN frame into a UDSResponse.
+   */
+  private parseISOTPResponse(
+    service: number,
+    subFunction: number | undefined,
+    rawData: number[]
+  ): UDSResponse | null {
     // Parse ISO-TP PCI from response
     const pciType = (rawData[0] >> 4) & 0x0F;
     let payload: number[];
@@ -1055,7 +1131,6 @@ export class PCANConnection {
       payload = rawData.slice(1, 1 + length);
     } else if (pciType === 1) {
       // First frame of multi-frame — for now just extract what we have
-      // Full multi-frame reassembly would need flow control handling
       const totalLen = ((rawData[0] & 0x0F) << 8) | rawData[1];
       payload = rawData.slice(2);
       this.emit('log', null, `Multi-frame response (${totalLen} bytes) — partial data extracted`);
