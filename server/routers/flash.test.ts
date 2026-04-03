@@ -173,7 +173,7 @@ describe('flash router', () => {
         totalFileSize: 0x63000,
       });
       expect(result.ecuType).toBe('E41');
-      expect(result.requiresUnlockBox).toBe(true);
+      expect(result.requiresUnlockBox).toBe(false);
     });
   });
 
@@ -217,7 +217,7 @@ describe('flash router', () => {
         ecuType: 'E41',
       });
       expect(result.securityProfile).toBeDefined();
-      expect(result.securityProfile?.requiresUnlockBox).toBe(true);
+      expect(result.securityProfile?.requiresUnlockBox).toBe(false);
       expect(result.securityProfile?.algorithmType).toBe('GM_5B_AES');
     });
 

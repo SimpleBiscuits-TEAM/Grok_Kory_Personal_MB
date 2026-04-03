@@ -522,12 +522,19 @@
 - [x] Consider adding delay after ProgrammingMode Complete (A5 03) before first USDT command — 500ms delayBeforeMs on physical session re-establishment
 
 ## .cs Container pri_key Extraction (Apr 3, 2026)
-- [ ] pri_key is in the .cs container format, NOT in the DevProg JSON header — need to parse .cs section to extract pri_key
-- [ ] Update flashContainerParser to extract pri_key from .cs container and pass it through to the flash engine
+- [x] pri_key is in the .cs container format — .cs is a C# source file with GM_5B algorithm and AES keys for all ECUs. Keys hardcoded into seedKeyAlgorithms.ts
+- [x] Update flashContainerParser to extract pri_key from .cs container — not needed, AES keys hardcoded directly in security profiles
 
 ## Pri_key Location Investigation (Apr 3, 2026)
-- [ ] Investigate where pri_key is stored — user says it's in .cs container, not DevProg JSON. Double-check container format and parser.
+- [x] Investigate where pri_key is stored — .cs is a C# source file (Seed_key.cs) containing GM_5B algorithm and AES keys for all ECUs
 
 ## SESSION_OPEN Timing Adjustments (Apr 3, 2026)
 - [x] Increase delay before ProgrammingMode Complete (A5 03) from 500ms to 3000ms — ECU needs more time after A5 01
 - [x] Increase delay before physical session re-establishment (0x10 0x02) from 500ms to 1500ms — ECU needs settling time before seed request
+
+## Seed_key.cs Integration (Apr 3, 2026)
+- [x] Hardcode E41 AES key (45 AE 6B A2 CB 81 F5 65 6B 05 07 2D 74 FF 47 E0) into seedKeyAlgorithms.ts
+- [x] Hardcode all GM ECU AES keys from Seed_key.cs (E83, E78, E39, E46, E88/E90/E99, E92, E80, E98, T87)
+- [x] Add GM_2B algorithm parameters for ECUs that use DLL-based 2-byte seed/key (E83, E78, E39 — noted as GM_DUAL with aesKeyHex)
+- [x] Update flash engine to use hardcoded AES key from security profile as priority 1 in all 3 security access locations (SECURITY_ACCESS, PRE_CHECK, KEY_CYCLE)
+- [x] Verify computeGM5B in flash engine matches the C# ComputeSeed2Key algorithm exactly — same AES-128-ECB with salted seed

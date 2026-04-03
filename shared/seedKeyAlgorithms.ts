@@ -45,6 +45,8 @@ export interface EcuSecurityProfile {
   seedSubFunction?: number;
   /** UDS Security Access sub-function for key response */
   keySubFunction?: number;
+  /** AES-128 key for GM_5B computation (hex string, 32 chars = 16 bytes) */
+  aesKeyHex?: string;
   /** DLL algorithm ID for GM_2B (passed to SetSeedAndGetKey) */
   dllAlgoId?: number;
   /** Whether to reverse seed bytes before 2B computation */
@@ -60,10 +62,11 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
   'E41': {
     ecuType: 'E41', name: 'Bosch MG1CS111 (L5P Duramax)',
     manufacturer: 'GM', algorithmType: 'GM_5B_AES',
-    seedLength: 5, keyLength: 5, securityLevel: 'hardware_required',
-    protocol: 'GMLAN', requiresUnlockBox: true,
-    description: 'AES-128 ECB with hardware unlock box. 5-byte seed padded to 16 bytes (0xFF fill, seed at offset 0x0B-0x0F), encrypted with ECU-specific AES key, truncated to 5 bytes. Uses GMLAN protocol with seed level 1 (0x27 0x01 / 0x27 0x02), same as E88.',
+    seedLength: 5, keyLength: 5, securityLevel: 'standard',
+    protocol: 'GMLAN', requiresUnlockBox: false,
+    description: 'AES-128 ECB. 5-byte seed padded to 16 bytes (0xFF fill, seed at offset 0x0B-0x0F), encrypted with ECU-specific AES key, truncated to 5 bytes. Uses GMLAN protocol with seed level 1 (0x27 0x01 / 0x27 0x02).',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '45AE6BA2CB81F5656B05072D74FF47E0',
   },
   'E88': {
     ecuType: 'E88', name: 'GM-DELCO E88',
@@ -72,6 +75,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL-based for 2-byte seeds. GMLAN protocol with standard security access.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '324385D3A0704DA2926220B3F9CCE00A',
     dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
   },
   'E90': {
@@ -81,6 +85,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL-based for 2-byte seeds. Shares AES key with E88/E99.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '324385D3A0704DA2926220B3F9CCE00A',
     dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
   },
   'E99': {
@@ -90,6 +95,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: shares AES key with E88/E90. GMLAN protocol.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '324385D3A0704DA2926220B3F9CCE00A',
     dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
   },
   'E92': {
@@ -99,6 +105,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x401 for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '8F1D7E62A7D6CF4EA6071C3A32A420F0',
     dllAlgoId: 0x401, invertSeed2B: true, invertKey2B: true,
   },
   'E98': {
@@ -108,6 +115,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x42B for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '7DFB2444A24606193D2C679F0DD442AD',
     dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
   },
   'E80': {
@@ -117,6 +125,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x43D for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: 'E1CAF8B2A19060A5EA211F130AC2C215',
     dllAlgoId: 0x43D, invertSeed2B: true, invertKey2B: true,
   },
   'E83': {
@@ -126,6 +135,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x3DE for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '1FFA31259411A0E6F2CA9DC69814DB97',
     dllAlgoId: 0x3DE, invertSeed2B: true, invertKey2B: true,
   },
   'E78': {
@@ -135,6 +145,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x3DB for 2-byte seeds. Shares AES key with E83.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: '1FFA31259411A0E6F2CA9DC69814DB97',
     dllAlgoId: 0x3DB, invertSeed2B: true, invertKey2B: true,
   },
   'E86': {
@@ -169,9 +180,10 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     manufacturer: 'GM', algorithmType: 'GM_DUAL',
     seedLength: 5, keyLength: 5, securityLevel: 'standard',
     protocol: 'GMLAN', requiresUnlockBox: false,
-    description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x42B for 2-byte seeds.',
+    description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0xDB for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
-    dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
+    aesKeyHex: 'F456F416AADE191524518475134E010E',
+    dllAlgoId: 0xDB, invertSeed2B: true, invertKey2B: true,
   },
   'E46': {
     ecuType: 'E46', name: 'GM-DELCO E46',
@@ -180,6 +192,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL-based for 2-byte seeds.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: 'CBFE2A306953F8F932AAF7AC6828A5D7',
     dllAlgoId: 0x42B, invertSeed2B: true, invertKey2B: true,
   },
   'E45': {
@@ -199,6 +212,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: AES-128 ECB for 5-byte seeds, DLL algo 0x439 for 2-byte seeds. EFILive lock detection with alternate key computation.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: 'DF7F64D2DDDAC1A18F1B4D4A191610F9',
     dllAlgoId: 0x439, invertSeed2B: true, invertKey2B: true,
   },
   'T87A': {
@@ -208,6 +222,7 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     protocol: 'GMLAN', requiresUnlockBox: false,
     description: 'Dual-mode: shares security profile with T87.',
     seedSubFunction: 0x01, keySubFunction: 0x02,
+    aesKeyHex: 'DF7F64D2DDDAC1A18F1B4D4A191610F9',
     dllAlgoId: 0x439, invertSeed2B: true, invertKey2B: true,
   },
   'T76': {

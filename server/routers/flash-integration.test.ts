@@ -660,15 +660,15 @@ describe('flash router — pre-flight checklist', () => {
     expect(hwCheck?.status).toBe('warning');
   });
 
-  it('returns checklist with unlock box warning for E41', async () => {
+  it('returns checklist without unlock box warning for E41 (has hardcoded AES key)', async () => {
     const caller = appRouter.createCaller(createAuthContext());
     const result = await caller.flash.preFlightChecklist({
       ecuType: 'E41',
       connectionMode: 'simulator',
     });
+    // E41 no longer requires unlock box — we have the hardcoded AES key
     const unlockCheck = result.checks.find(c => c.id === 'unlock_box');
-    expect(unlockCheck).toBeDefined();
-    expect(unlockCheck?.status).toBe('warning');
+    expect(unlockCheck).toBeUndefined();
   });
 
   it('returns checklist with duplicate warning when file was previously flashed', async () => {
