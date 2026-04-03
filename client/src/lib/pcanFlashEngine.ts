@@ -1559,6 +1559,9 @@ export class PCANFlashEngine {
       } // end lookup vs compute
 
       // Step 3: Send key to ECU (sub-function + 1)
+      // E88 procedure specifies 1000ms post-delay after seed before key send.
+      // Add a small delay to let the ECU prepare for the key.
+      await this.delay(200);
       const keyResponse = await this.conn.sendUDSRequest(
         UDS.SECURITY_ACCESS, subFunction + 1, Array.from(keyBytes), this.txAddr
       );
@@ -1657,8 +1660,31 @@ export class PCANFlashEngine {
     if (rc34) {
       rc34Bytes = Array.from(hexToBytes(rc34));
       this.log('info', cmd.phase, `RequestDownload (0x34) from container rc34: ${rc34}`);
+    } else if (this.isGMLAN) {
+      // GMLAN RequestDownload format (from busmaster_analysis.md):
+      //   First block:  34 00 00 0F FE  (dataFormat=0x00, addrLenFormat=0x00, maxBlockLen=0x0FFE)
+      //   Subsequent:   34 10 0F FE     (dataFormat=0x10, maxBlockLen=0x0FFE)
+      // The address is NOT in the RequestDownload — it's implied from block order.
+      // The maxNumberOfBlockLength tells the ECU the chunk size.
+      const isFirstBlock = blockId === 0;
+      if (isFirstBlock) {
+        // First block: 34 00 00 {maxBlockLen high} {maxBlockLen low}
+        rc34Bytes = [
+          0x00, // dataFormatIdentifier (no compression/encryption)
+          0x00, // addressAndLengthFormatIdentifier (0 = no address/length fields)
+          (xferSize >> 8) & 0xFF, xferSize & 0xFF, // maxNumberOfBlockLength
+        ];
+      } else {
+        // Subsequent blocks: 34 10 {maxBlockLen high} {maxBlockLen low}
+        rc34Bytes = [
+          0x10, // dataFormatIdentifier (continue)
+          (xferSize >> 8) & 0xFF, xferSize & 0xFF, // maxNumberOfBlockLength
+        ];
+      }
+      this.log('info', cmd.phase,
+        `RequestDownload (0x34) GMLAN format: block=${blockId} first=${isFirstBlock} maxBlockLen=0x${xferSize.toString(16).toUpperCase()}`);
     } else {
-      // Construct RequestDownload: dataFormatIdentifier=0x00, addressAndLengthFormatIdentifier=0x44
+      // Standard UDS RequestDownload: dataFormatIdentifier=0x00, addressAndLengthFormatIdentifier=0x44
       // (4-byte address + 4-byte length), followed by start address and block length.
       const startAddrNum = parseInt(block.start_adresse || '0', 16);
       const blockLenNum = parseInt(block.block_length || '0', 16) || totalBytes;

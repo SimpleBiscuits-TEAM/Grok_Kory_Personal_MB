@@ -640,3 +640,12 @@
 - [x] Fix: sendUDSMultiFrame implements FF + FC wait + CF with STmin pacing (auto-routed when payload > 7 bytes)
 - [x] Note: PriRC got NRC 0x78 (ECU was erasing) — erase completed by time per-block 0x34 was sent
 - [x] Note: Bootloader polling worked again — seed at 52s (31s after A5 03)
+
+## Real Flash Attempt #11 — FAILED (Apr 3, 2026) — Log 10a615c8
+- [x] xferSize correctly resolved to 0xFFE (4094) — ECU database fix CONFIRMED WORKING
+- [x] Bug 1: Key send always times out — added 200ms delay before key send in handleSecurityAccess
+- [x] Bug 2: Added GMLAN-specific RequestDownload format (34 00 00 0F FE first block, 34 10 0F FE subsequent)
+- [x] Bug 3: Security key send now uses sendUDSRequest directly (not orchestrator canTx template)
+- [x] Fix: handleSecurityAccess already uses sendUDSRequest directly at line 1565 — the "xx" was in the orchestrator's Send Key command which is now synthetic
+- [x] Fix: Constructed RequestDownload for GMLAN now uses correct format (34 00 00 0F FE first, 34 10 0F FE subsequent)
+- [x] Fix: Container rc34 used when available, GMLAN fallback format when not
