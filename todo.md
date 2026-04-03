@@ -296,3 +296,26 @@
 - [x] Fix GMLAN DID timeouts during pre-check — added 1.5s settling delay after bridge connect + 200ms inter-command delay
 - [x] Fix seed/key computation — skip Send Key command when handleSecurityAccess already handled it (lastSecurityAccessGranted flag)
 - [x] Fix Clear DTCs timeout on physical address — GMLAN ECUs now use physical address for ClearDTC instead of functional 0x7DF
+
+## Ford & Cummins OEM-Specific DID Maps
+- [x] Research Ford DID documentation from Knox knowledge base, DevProg codebase, and project docs
+- [x] Research Cummins DID documentation from Knox knowledge base, DevProg codebase, and project docs
+- [x] Replace Ford UDS stub in ecuScanner.ts with OEM-specific Ford DID map (PCM 6.7L Powerstroke, TCM 6R140, etc.)
+- [x] Replace Cummins UDS stub in ecuScanner.ts with OEM-specific Cummins DID map (CM2350, CM2250, etc.)
+- [x] Add Ford-specific calibration part number reading (number of cals, DID structure)
+- [x] Add Cummins-specific calibration part number reading (number of cals, DID structure)
+- [x] Verify TypeScript compiles with 0 errors
+- [x] Test scanner logic for all three OEM paths (GM, Ford, Cummins)
+
+## Bug Fix — Dry Run Log #4 (Apr 2, 2026)
+- [x] Fix toString crash STILL happening on Send Key (line 93) and RequestDownload (line 105) — fixed NaN handling for 'xx' placeholder bytes
+- [x] Fix ALL GMLAN ReadDIDs timing out during pre-check — added security access (0x10 0x02 + 0x27 seed/key) before reading DIDs
+- [x] Fix GMLAN ReadDIDs timing out during VERIFICATION phase — security access in pre-check should persist through verification
+- [x] Fix seed/key not available in dry run mode — added getSecurityProfile fallback + pre-check security access with computeGM5B
+- [x] Fix GMLAN ProgrammingMode (0xA5 0x01) timeout — now uses 0x10 0x02 as primary, 0xA5 0x01 as fallback
+- [x] Key finding: ECU responds to 0x10 0x02 (DiagSessionControl Programming) with positive response — implemented
+- [x] Key finding: ECU responds to 0x27 0x01 with 5-byte seed (57 09 FD 6C 06) — implemented in pre-check
+- [x] Key finding: ECU responds to 0x20 (ReturnToNormalMode) — GMLAN cleanup works
+- [x] Key finding: 0xF195 returns NRC 0x31 — UDS DIDs partially work but GMLAN 0x1A DIDs need security access first
+- [x] Hypothesis confirmed: GMLAN 0x1A ReadDID needs security access FIRST — implemented session + seed/key before DID reads
+- [x] ECU scan needs security access before reading part numbers — scanner now does session + seed/key before DID reads

@@ -30,7 +30,7 @@ import {
   createSimulatorState, generateRecoveryPlan, formatBytes,
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader, getEcuConfig } from '../../../shared/ecuDatabase';
-import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
+import { computeGM5B, computeFord3B, getSecurityProfile } from '../../../shared/seedKeyAlgorithms';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -200,34 +200,88 @@ export class PCANFlashEngine {
       await this.delay(1500);
 
       // Step 0b: Set diagnostic session before flash commands.
-      // GMLAN ECUs use ProgrammingMode (0xA5) instead of DiagSessionControl (0x10).
+      // From SPS log analysis: GMLAN ECUs respond to 0x10 0x02 (programming session)
+      // even though they also support 0xA5 (ProgrammingMode). Use 0x10 0x02 as primary.
       if (this.isGMLAN) {
-        this.log('info', 'PRE_CHECK', 'Requesting GMLAN extended diagnostic mode (0xA5 0x01)...');
-        this.state.statusMessage = 'Requesting GMLAN diagnostic mode...';
+        this.log('info', 'PRE_CHECK', 'Switching to programming session (0x10 0x02)...');
+        this.state.statusMessage = 'Switching to programming session...';
         this.emitState();
         try {
-          // GMLAN ProgrammingMode: 0xA5 0x01 = requestProgrammingMode
-          const response = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
+          // Try standard DiagSessionControl programming session first (confirmed working from dry run)
+          const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
           if (response && response.positiveResponse) {
-            this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active');
+            this.log('success', 'PRE_CHECK', '✓ Programming session active (0x10 0x02)');
           } else if (response) {
             const nrc = response.nrc ?? 0;
             const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
-            this.log('info', 'PRE_CHECK', `GMLAN ProgrammingMode response: NRC 0x${nrc.toString(16)} (${nrcName}) — ECU is communicating`);
-          } else {
-            this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode: no response — trying standard UDS session...');
-            // Fallback to standard UDS session control
-            const sessionOk = await this.conn.setUDSSession('extended');
-            if (sessionOk) {
-              this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active (UDS fallback)');
+            this.log('info', 'PRE_CHECK', `Programming session response: NRC 0x${nrc.toString(16)} (${nrcName}) — trying GMLAN ProgrammingMode...`);
+            // Fallback to GMLAN ProgrammingMode (0xA5 0x01)
+            const gmResp = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
+            if (gmResp && gmResp.positiveResponse) {
+              this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active (0xA5 0x01)');
             } else {
-              this.log('warning', 'PRE_CHECK', 'Session switch failed — continuing anyway...');
+              this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode also failed — continuing...');
             }
+          } else {
+            this.log('warning', 'PRE_CHECK', 'Programming session: no response — continuing...');
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          this.log('warning', 'PRE_CHECK', `GMLAN ProgrammingMode error: ${msg} — continuing...`);
+          this.log('warning', 'PRE_CHECK', `Session switch error: ${msg} — continuing...`);
         }
+
+        // Step 0b2: Attempt security access — GMLAN ECUs require authenticated session
+        // before they respond to ReadDID (0x1A) commands
+        this.log('info', 'PRE_CHECK', 'Attempting security access for GMLAN DID reads...');
+        this.state.statusMessage = 'Requesting security access...';
+        this.emitState();
+        try {
+          await this.delay(200);
+          // Request seed (level 0x01 — confirmed working from dry run log)
+          const seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+          if (seedResp && seedResp.positiveResponse) {
+            // Extract seed bytes (strip sub-function echo if present)
+            let seedData = seedResp.data || [];
+            if (seedData.length > 0 && seedData[0] === 0x01) {
+              seedData = seedData.slice(1);
+            }
+            const seedBytes = new Uint8Array(seedData);
+            this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
+
+            // Try to compute key using container pri_key
+            const priKey = this.header.verify?.pri_key;
+            if (priKey && priKey.length >= 16 && seedBytes.length === 5) {
+              const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
+              const keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
+              this.log('info', 'PRE_CHECK', `Key computed (GM_5B_AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+
+              // Send key
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'PRE_CHECK', '🔓 Security access granted — GMLAN DIDs should now be readable');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'PRE_CHECK', `Security access denied: NRC 0x${nrc.toString(16)} — GMLAN DIDs may not respond`);
+              }
+            } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
+              this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU is already unlocked (HPTuners/aftermarket)');
+              this.lastSecurityAccessGranted = true;
+            } else {
+              this.log('warning', 'PRE_CHECK', `No pri_key available to compute key (seed: ${seedBytes.length} bytes, priKey: ${priKey ? priKey.length : 'none'}) — GMLAN DIDs may not respond`);
+            }
+          } else if (seedResp) {
+            const nrc = seedResp.nrc ?? 0;
+            this.log('info', 'PRE_CHECK', `Security seed request: NRC 0x${nrc.toString(16)} — ECU may not require security for DID reads`);
+          } else {
+            this.log('info', 'PRE_CHECK', 'Security seed request: no response — continuing without security access');
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log('warning', 'PRE_CHECK', `Security access error: ${msg} — continuing...`);
+        }
+        await this.delay(200);
       } else {
         this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
         this.state.statusMessage = 'Switching to extended diagnostic session...';
@@ -500,15 +554,38 @@ export class PCANFlashEngine {
 
     const txParts = cmd.canTx.split(' ');
     // txParts[0] = address (e.g., "0x7E0"), rest = data bytes
-    const dataBytes = txParts.slice(1).map(b => parseInt(b, 16));
+    // Handle 'xx' placeholder bytes (used in Send Key commands before key is computed)
+    const dataBytes = txParts.slice(1).map(b => {
+      const parsed = parseInt(b, 16);
+      return isNaN(parsed) ? 0 : parsed;
+    });
+    
+    // Check if this canTx has placeholder bytes (contains 'xx' or unparseable values)
+    const hasPlaceholders = txParts.slice(1).some(b => isNaN(parseInt(b, 16)));
     
     // First data byte is the length byte for single-frame, skip it for UDS
     // The actual UDS service ID starts after the length byte
     const pciLength = dataBytes[0]; // PCI length byte
-    const udsData = dataBytes.slice(1, 1 + pciLength);
-    const serviceId = udsData[0];
+    const udsData = pciLength > 0 ? dataBytes.slice(1, 1 + pciLength) : dataBytes.slice(1);
+    const serviceId = udsData[0] ?? 0;
     const subFunction = udsData.length > 1 ? udsData[1] : undefined;
     const additionalData = udsData.length > 2 ? udsData.slice(2) : undefined;
+    
+    // If canTx has placeholders (e.g., Send Key with 'xx' bytes),
+    // check if this is a security access send-key that was already handled
+    if (hasPlaceholders && serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined && (subFunction % 2) === 0) {
+      if (this.lastSecurityAccessGranted) {
+        this.log('info', cmd.phase, `\u2713 ${cmd.label} \u2014 already handled during seed request`);
+        this.state.statusMessage = cmd.label;
+        this.emitState();
+        return;
+      }
+      // If security wasn't granted and we have placeholder bytes, we can't send this command
+      if (this.dryRun) {
+        this.log('warning', cmd.phase, `[DRY RUN] ${cmd.label} \u2014 skipped (placeholder bytes, no key computed)`);
+        return;
+      }
+    }
 
     // Dry run: skip destructive services
     if (this.dryRun && PCANFlashEngine.DESTRUCTIVE_SERVICES.has(serviceId)) {
@@ -702,11 +779,44 @@ export class PCANFlashEngine {
           keyBytes = headerKey;
         }
       } else {
-        if (this.dryRun) {
-          this.log('warning', cmd.phase, '[DRY RUN] No seed/key algorithm or pre-computed key available — skipping key send');
-          return seedResponse; // Return seed response as "success" for dry run
+        // Fallback: try ECU_SECURITY_PROFILES to determine algorithm type
+        // This allows key computation even without a container file loaded
+        const ecuType = this.plan.ecuType || this.header.ecu_type || '';
+        const secProfile = getSecurityProfile(ecuType);
+        
+        if (secProfile && priKey && priKey.length > 0) {
+          // We have a security profile AND a pri_key — try matching by algorithm type
+          if (secProfile.algorithmType === 'GM_5B_AES' && seedBytes.length === 5) {
+            const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
+            keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
+            this.log('info', cmd.phase, `Key computed via profile fallback (GM_5B_AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+          } else if (secProfile.algorithmType === 'FORD_3B' && seedBytes.length === 3) {
+            const secretBytes = new Uint8Array(priKey.slice(0, 5).map(h => parseInt(h, 16)));
+            keyBytes = computeFord3B(seedBytes, secretBytes);
+            this.log('info', cmd.phase, `Key computed via profile fallback (Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+          } else {
+            this.log('warning', cmd.phase, `Security profile found (${secProfile.algorithmType}) but seed length (${seedBytes.length}) doesn't match expected`);
+            if (this.dryRun) {
+              this.log('warning', cmd.phase, '[DRY RUN] Skipping key send — algorithm mismatch');
+              return seedResponse;
+            }
+            throw new Error(`Seed length ${seedBytes.length} doesn't match algorithm ${secProfile.algorithmType}`);
+          }
+        } else if (secProfile && !priKey) {
+          // We have a profile but no key material at all
+          this.log('warning', cmd.phase, `Security profile: ${secProfile.algorithmType} (${secProfile.name}) — but no key material (pri_key) available`);
+          if (this.dryRun) {
+            this.log('warning', cmd.phase, '[DRY RUN] No pri_key available — skipping key send. Load a container file to enable security access.');
+            return seedResponse;
+          }
+          throw new Error(`No key material (pri_key) available for ${secProfile.algorithmType}. Load a container file with the correct key.`);
+        } else {
+          if (this.dryRun) {
+            this.log('warning', cmd.phase, '[DRY RUN] No seed/key algorithm or pre-computed key available — skipping key send');
+            return seedResponse;
+          }
+          throw new Error('No seed/key algorithm or pre-computed key available');
         }
-        throw new Error('No seed/key algorithm or pre-computed key available');
       }
 
       // Step 3: Send key to ECU (sub-function + 1)

@@ -72,7 +72,7 @@ export default function EcuScanPanel({
         await conn.connect();
       }
 
-      const scanner = new EcuScanner(conn);
+      const scanner = new EcuScanner(conn, containerHeader ?? undefined);
       scannerRef.current = scanner;
 
       const result = await scanner.scanVehicle((progress) => {
