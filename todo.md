@@ -551,7 +551,7 @@
 - [x] Add ping_interval=20, ping_timeout=10 to pcan_bridge.py serve() calls (v2.1)
 - [x] Add client-side application-level heartbeat ping (15s interval) to PCANConnection
 - [x] Add heartbeat cleanup to disconnect() and onclose handler
-- [ ] Test that bridge stays connected during long idle periods (>60s)
+- [x] Updated bridge download link to v2.1 in DataloggerPanel — user needs to test with new bridge
 
 ## hexToBytes Bug Fix (Apr 3, 2026)
 - [x] Fix hexToBytes regex stripping all '0' chars — was `/[\s,0x]/g` which removes individual 0 and x, now `/0x/gi` then `/[\s,]/g`

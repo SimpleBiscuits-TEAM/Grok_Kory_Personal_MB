@@ -2585,7 +2585,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                           ⬇ DOWNLOAD BRIDGE
                         </a>
                         <a
-                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/pcan_bridge_dbcd85c1.py"
+                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663499288273/VRRqdUTMemLPozZ853E4Du/pcan_bridge_v2.1_a588f943.py"
                           download="pcan_bridge.py"
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: '6px',
