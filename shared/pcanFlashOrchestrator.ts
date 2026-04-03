@@ -332,21 +332,13 @@ export function generateFlashPlan(
   // BEFORE the block loop begins. It prepares the ECU for the upcoming block transfers.
   // Data: 34 00 00 0F FE = service 0x34, addressAndLengthFormatIdentifier=0x00,
   //       memoryAddress=0x000F, memorySize=0xFE (or interpreted as GM-specific init)
-  if (isGMLAN) {
-    // GM PriRC: E88-specific initialization RequestDownload before block loop.
-    // NRC 0x22 (conditionsNotCorrect) on E41 — this command is E88-specific and
-    // not required for all GMLAN ECUs. Made nonFatal so the per-block erase +
-    // RequestDownload sequence handles everything for ECUs that don't support PriRC.
-    // TIMING FIX (log #8): Reduced timeout from 5000ms to 1000ms and retries from 2 to 0.
-    // With 3 retries × 5s, the PriRC burns 18s with TesterPresent keepalive PAUSED,
-    // causing the ECU's programming session to timeout before the per-block commands.
-    commands.push({
-      id: cmdId++, phase: 'PRE_FLASH', label: 'GM PriRC — Initial RequestDownload (0x34)',
-      canTx: `${txHex} 05 34 00 00 0F FE`, expectedPositive: '74', timeoutMs: 1000, retries: 0,
-      delayBeforeMs: 250,   // E88: post_delay=250ms
-      nonFatal: true,  // E88-specific; E41 returns NRC 0x22 — safe to skip
-    });
-  }
+  // GM PriRC REMOVED for GMLAN ECUs (log #12 fix):
+  // PriRC (34 00 00 0F FE) is E88-specific. On E41 it always fails (NRC 0x22 or timeout).
+  // The 5s timeout (sendUDSRequest default, ignoring cmd.timeoutMs) burns the ECU's
+  // programming session timer (P3 ~5s) with TesterPresent PAUSED. By the time the
+  // per-block RequestDownload fires, the ECU has dropped the session → NRC 0x22.
+  // The per-block RequestDownload in executeBlockTransfer handles everything correctly.
+  // If E88 support is needed later, add PriRC back with ecuType === 'E88' guard.
 
   let totalBytes = 0;
   for (const block of filteredBlocks) {

@@ -649,3 +649,13 @@
 - [x] Fix: handleSecurityAccess already uses sendUDSRequest directly at line 1565 — the "xx" was in the orchestrator's Send Key command which is now synthetic
 - [x] Fix: Constructed RequestDownload for GMLAN now uses correct format (34 00 00 0F FE first, 34 10 0F FE subsequent)
 - [x] Fix: Container rc34 used when available, GMLAN fallback format when not
+
+## Real Flash Attempt #12 — FAILED (Apr 3, 2026) — Log 12514b98
+- [x] MAJOR PROGRESS: Security access GRANTED twice (PRE_CHECK + post-broadcast). Key-send delay fix CONFIRMED WORKING.
+- [x] Root cause: PriRC 5s timeout burns the programming session timer — by the time per-block 0x34 fires (5.4s later), ECU dropped session
+- [x] Fix: Removed PriRC entirely for GMLAN ECUs — E88-specific, always fails/times out on E41
+- [x] Fix: PriRC removed entirely — no need for timeout reduction
+- [x] Fix: Keepalive resumes automatically after executeCommand returns — no PriRC gap means no session dropout
+- [x] Note: Zero seed (00 00 00 00 00) appeared once — ECU was already unlocked from PRE_CHECK, but key for zero seed got NRC 0x22
+- [x] Note: Key send still times out on first post-broadcast attempt (line 52) but succeeds on 3rd attempt (line 62)
+- [x] Added timeoutMs parameter to sendUDSRequest and sendUDSviaRawCAN (was hardcoded 5000ms)

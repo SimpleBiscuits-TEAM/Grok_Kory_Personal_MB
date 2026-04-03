@@ -976,7 +976,8 @@ export class PCANConnection {
     service: number,
     subFunction?: number,
     data?: number[],
-    targetAddress = 0x7E0
+    targetAddress = 0x7E0,
+    timeoutMs = 5000
   ): Promise<UDSResponse | null> {
     const svcHex = `0x${service.toString(16)}`;
     const subHex = subFunction !== undefined ? `0x${subFunction.toString(16)}` : 'none';
@@ -1026,7 +1027,7 @@ export class PCANConnection {
     if (this.udsRawCanSupported) {
       try {
         console.log(`[UDS] Trying raw CAN for svc=${svcHex}`);
-        return await this.sendUDSviaRawCAN(service, subFunction, data, targetAddress);
+        return await this.sendUDSviaRawCAN(service, subFunction, data, targetAddress, timeoutMs);
       } catch (err) {
         // If can_send itself errors (not timeout), bridge may not support it
         const msg = err instanceof Error ? err.message : String(err);
@@ -1065,7 +1066,8 @@ export class PCANConnection {
     service: number,
     subFunction?: number,
     data?: number[],
-    targetAddress = 0x7E0
+    targetAddress = 0x7E0,
+    timeoutMs = 5000
   ): Promise<UDSResponse | null> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
@@ -1164,7 +1166,7 @@ export class PCANConnection {
       const timeout = setTimeout(() => {
         this.udsResponseListener = null;
         resolve(null);
-      }, 5000);
+      }, timeoutMs);
 
       this.udsResponseListener = (msg: Record<string, unknown>) => {
         const msgType = msg.type as string;
