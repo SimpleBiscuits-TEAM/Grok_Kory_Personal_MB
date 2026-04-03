@@ -191,17 +191,56 @@ export function generateFlashPlan(
   });
 
   // Phase 3: SESSION_OPEN
-  // Both GMLAN and UDS use DiagnosticSessionControl 0x10 0x02 for programming session.
-  // For GMLAN, also send ProgrammingMode (0xA5 0x01) as the SPS log shows both are used.
-  commands.push({
-    id: cmdId++, phase: 'SESSION_OPEN', label: 'Open Programming Session (DiagnosticSessionControl)',
-    canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
-    expectedPositive: '50', timeoutMs: 5000, retries: 3,
-  });
+  // Proven BUSMASTER sequence: functional broadcast on 0x101 to prepare all ECUs,
+  // then physical session switch. This matches the VOP3 device and SPS tool behavior.
   if (isGMLAN) {
+    // Step 1: ReturnToNormal (functional broadcast — resets all ECUs to known state)
     commands.push({
-      id: cmdId++, phase: 'SESSION_OPEN', label: 'GMLAN ProgrammingMode Request (0xA5)',
-      canTx: `${txHex} 02 A5 01`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'ReturnToNormal — All ECUs (Functional 0x101)',
+      canTx: `0x101 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 2,
+    });
+    // Step 2: ReadDID 0xB0 (functional — read SW versions from all ECUs)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Read SW Version 0xB0 — All ECUs (Functional 0x101)',
+      canTx: `0x101 02 1A B0`, expectedPositive: '5A', timeoutMs: 3000, retries: 1,
+    });
+    // Step 3: DiagnosticSessionControl 0x02 (functional — put all ECUs in programming session)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Programming Session — All ECUs (Functional 0x101)',
+      canTx: `0x101 02 10 02`, expectedPositive: '50', timeoutMs: 5000, retries: 3,
+    });
+    // Step 4: DisableNormalCommunication (functional — silence the bus)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Disable Normal Communication (Functional 0x101)',
+      canTx: `0x101 01 28`, expectedPositive: '68', timeoutMs: 3000, retries: 2,
+    });
+    // Step 5: ReportProgrammedState (functional)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Report Programmed State (Functional 0x101)',
+      canTx: `0x101 01 A2`, expectedPositive: 'E2', timeoutMs: 3000, retries: 1,
+    });
+    // Step 6: ProgrammingMode Enable (functional)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Enable (Functional 0x101)',
+      canTx: `0x101 02 A5 01`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
+    });
+    // Step 7: ProgrammingMode Complete (functional)
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
+      canTx: `0x101 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
+    });
+    // Step 8: TesterPresent keepalive on functional (7 frames, ~500ms apart = ~3.5s)
+    // This is handled by the flash engine's keepalive mechanism, but we add a delay command
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'TesterPresent Keepalive Wait (3.5s)',
+      canTx: `0x101 01 3E`, expectedPositive: '7E', timeoutMs: 5000, retries: 1,
+    });
+  } else {
+    // Standard UDS: simple session switch on physical address
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Open Programming Session (DiagnosticSessionControl)',
+      canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
+      expectedPositive: '50', timeoutMs: 5000, retries: 3,
     });
   }
 
@@ -291,11 +330,31 @@ export function generateFlashPlan(
   });
 
   // Phase 8: VERIFICATION
+  // Proven BUSMASTER sequence: read all Cal IDs + VIN + unlock status after flash
   if (isGMLAN) {
-    // GMLAN: Use service 0x1A with 1-byte DID 0x90 (VIN)
+    // GMLAN: Full verification DID reads matching proven SPS/VOP3 sequence
     commands.push({
-      id: cmdId++, phase: 'VERIFICATION', label: 'Read ECU Identification (post-flash, GMLAN)',
+      id: cmdId++, phase: 'VERIFICATION', label: 'Read VIN (post-flash, GMLAN DID 0x90)',
       canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+    });
+    for (const did of ['C1', 'C2', 'C3', 'C4', 'C5', 'C6']) {
+      commands.push({
+        id: cmdId++, phase: 'VERIFICATION', label: `Read Cal ID ${did} (post-flash)`,
+        canTx: `${txHex} 02 1A ${did}`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+      });
+    }
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Read Unlock Status (DID 0xD0)',
+      canTx: `${txHex} 02 1A D0`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+    });
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Read Programming Counter (DID 0xCC)',
+      canTx: `${txHex} 02 1A CC`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+    });
+    // 0xAE 0x28 0x80 — Finalize/Reset command observed in BUSMASTER logs
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Finalize Programming (0xAE)',
+      canTx: `${txHex} 03 AE 28 80`, expectedPositive: 'EE', timeoutMs: 5000, retries: 1,
     });
   } else {
     // Standard UDS: Use service 0x22 with 2-byte DID 0xF190 (VIN)
@@ -372,10 +431,10 @@ export function generateFlashPlan(
   }
 
   if (isGMLAN) {
-    // GMLAN: Use ReturnToNormalMode (0x20) instead of DiagnosticSessionControl default (0x10 0x01)
+    // GMLAN: ReturnToNormal via functional broadcast (0x101) — matches proven BUSMASTER sequence
     commands.push({
-      id: cmdId++, phase: 'CLEANUP', label: 'Return to Normal Mode (GMLAN)',
-      canTx: `${txHex} 01 20`, expectedPositive: '60', timeoutMs: 5000, retries: 2,
+      id: cmdId++, phase: 'CLEANUP', label: 'Return to Normal Mode — All ECUs (Functional 0x101)',
+      canTx: `0x101 01 20`, expectedPositive: '60', timeoutMs: 5000, retries: 2,
     });
   } else {
     commands.push({

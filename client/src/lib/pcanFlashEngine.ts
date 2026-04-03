@@ -918,7 +918,9 @@ export class PCANFlashEngine {
     }
 
     const txParts = cmd.canTx.split(' ');
-    // txParts[0] = address (e.g., "0x7E0"), rest = data bytes
+    // txParts[0] = address (e.g., "0x7E0" or "0x101" for functional broadcast)
+    const cmdTxAddr = parseInt(txParts[0], 16) || this.txAddr;
+    const isFunctionalBroadcast = cmdTxAddr === 0x101 || cmdTxAddr === 0x7DF;
     // Handle 'xx' placeholder bytes (used in Send Key commands before key is computed)
     const dataBytes = txParts.slice(1).map(b => {
       const parsed = parseInt(b, 16);
@@ -988,6 +990,10 @@ export class PCANFlashEngine {
           // Standard UDS: use functional addressing (0x7DF) for broadcast
           const clearAddr = this.isGMLAN ? this.txAddr : 0x7DF;
           response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, clearAddr);
+        } else if (isFunctionalBroadcast) {
+          // Functional broadcast (0x101 or 0x7DF): send on broadcast address
+          // Accept any response — multiple ECUs may reply, we just need one positive
+          response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, cmdTxAddr);
         } else {
           response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
         }
@@ -1022,7 +1028,10 @@ export class PCANFlashEngine {
           const isTesterPresent = serviceId === UDS.TESTER_PRESENT;
           const isDiagSession = serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL;
           const isReadDID = serviceId === UDS.READ_DID || serviceId === UDS.READ_DID_GMLAN;
-          const isNonFatalNRC = isTesterPresent || isDiagSession || isReadDID || this.dryRun;
+          // Functional broadcast: NRC 0x12 (subFunctionNotSupported) or 0x11 (serviceNotSupported)
+          // is expected — some ECUs on the bus don't support the service. Treat as success.
+          const isBroadcastNRC = isFunctionalBroadcast && (nrc === 0x12 || nrc === 0x11 || nrc === 0x7E);
+          const isNonFatalNRC = isTesterPresent || isDiagSession || isReadDID || isBroadcastNRC || this.dryRun;
           
           if (isNonFatalNRC) {
             this.log('success', cmd.phase,

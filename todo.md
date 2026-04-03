@@ -439,5 +439,9 @@
 - [x] Parsed short flash log (truck ECU) — 6 blocks, cal-only flash, no key cycle
 - [x] Extracted exact proven command sequence: ReturnToNormal → ReadB0 → DiagSession → DisableComm → ProgrammedState → ProgrammingMode 01/03 → TesterPresent x7 → SecurityAccess → Transfer
 - [x] Identified bank files: STOCK, 30hp, 45hp, 80hp, 125hp, 145hp (~5.6 MB each)
-- [ ] Update orchestrator to match proven BUSMASTER command sequence (functional broadcast flow)
-- [ ] Train Knox on BUSMASTER log analysis and proven flash sequences
+- [x] Update orchestrator SESSION_OPEN: functional broadcast on 0x101 (ReturnToNormal, ReadB0, DiagSession, DisableComm, ProgrammedState, ProgrammingMode 01/03, TesterPresent x7)
+- [x] Update flash engine: parse canTx address from command (0x101 vs 0x7E0) for functional broadcast support
+- [x] Add functional broadcast NRC handling: NRC 0x12/0x11/0x7E on broadcast treated as success
+- [x] Update VERIFICATION: full GMLAN DID reads (0x90, C1-C6, D0, CC) + Finalize (0xAE 0x28 0x80)
+- [x] Update CLEANUP: ReturnToNormal via functional broadcast (0x101) for GMLAN
+- [x] Train Knox on BUSMASTER analysis: proven sequences, seed/key pairs, bank files, short vs full flash

@@ -1189,13 +1189,50 @@ const PCAN_FLASH_ENGINE_KNOWLEDGE = `
 1. IGNITION CHECK — confirm key on before any CAN communication
 2. BRIDGE CONNECT — establish WebSocket connection to PCAN bridge
 3. PRE_CHECK — TesterPresent, session switch, security access probe, read DIDs
-4. SESSION_OPEN — enter programming session (0x10 0x02 or 0xA5 0x01 for GMLAN)
-5. SECURITY_ACCESS — seed request (0x27 0x09) + key send (0x27 0x0A)
+4. SESSION_OPEN — functional broadcast: ReturnToNormal → ReadB0 → DiagSession 0x02 → DisableComm → ProgrammedState → ProgrammingMode 01 → ProgrammingMode 03 → TesterPresent x7 (all on 0x101)
+5. SECURITY_ACCESS — seed request (0x27 0x01) + key send (0x27 0x02) on physical (0x7E0)
 6. BLOCK_TRANSFER — RequestDownload (0x34) + TransferData (0x36) x N + TransferExit (0x37)
 7. KEY_CYCLE — KEY_OFF prompt → wait 5s → KEY_ON prompt → wait boot 10s → re-session → re-security
-8. VERIFICATION — read CalID, software numbers to verify flash success
-9. CLEANUP — ClearDTC (0x14) + ReturnToNormal (0x20)
+8. VERIFICATION — read CalID C1-C6, VIN (0x90), Unlock Status (0xD0), Prog Counter (0xCC), Finalize (0xAE 0x28 0x80)
+9. CLEANUP — ClearDTC (0x14) + ReturnToNormal (0x20) via functional broadcast (0x101)
 10. COMPLETE — stop keepalive, disconnect bridge
+
+### Proven BUSMASTER Flash Sequences (E41 L5P)
+Analyzed from 3 successful flash logs: stock full flash, mod full flash, and short (cal-only) flash.
+
+#### Seed/Key Pairs (Static — HPTuners/VOP Unlocked ECUs)
+- Bench ECU: Seed A0 9A 34 9B 06 → Key AF 72 2A 51 7E (HPTuners unlock)
+- Truck ECU: Seed CE DA F9 83 06 → Key 59 2E F4 0F 33 (VOP OBD voltage unlock)
+- Both seeds are STATIC (same value every request) because ECUs are unlocked
+- Unlocked ECUs still validate the key — dummy keys (0x00 x5) are rejected
+
+#### Functional Broadcast Sequence (0x101)
+The proven SPS/VOP3 sequence uses functional broadcast on CAN ID 0x101 (not 0x7DF) for session setup:
+1. ReturnToNormal (0x20) on 0x101 — reset all ECUs to normal mode
+2. ReadDID 0xB0 on 0x101 — broadcast SW version request
+3. DiagSession 0x02 on 0x101 — enter programming session (all ECUs)
+4. DisableNormalComm (0x28 0x03 0x03) on 0x101 — silence the bus
+5. ReportProgrammedState (0xA2 0x01) on 0x101 — check programming state
+6. ProgrammingMode 0x01 (0xA5 0x01) on 0x101 — enable programming
+7. ProgrammingMode 0x03 (0xA5 0x03) on 0x101 — complete programming mode
+8. TesterPresent x7 (0x3E 0x01) on 0x101 — ~500ms interval, 5s total keepalive burst
+
+#### Short Flash (Cal-Only) vs Full Flash
+- Short flash: 6 blocks, ~2 minutes, no key cycle needed
+- Full flash (stock): 6 blocks, ~4 minutes, key cycle required
+- Full flash (mod/unlock): 7 blocks (includes unlock OS), key cycle required
+- Short flash ends with 0xAE 0x28 0x80 (finalize) instead of key cycle
+
+#### Block Transfer Timing
+- Stock flash: 6 blocks, 2048-byte chunks, ~4 minutes total
+- Each TransferData (0x36) uses sequence counter (wraps at 0xFF)
+- RequestDownload (0x34) specifies memory address and length
+- TransferExit (0x37) after each block
+
+#### Bank Files (L5P Calibration Tunes)
+- 6 calibration files: STOCK, 30hp, 45hp, 80hp, 125hp, 145hp
+- Each ~5.6 MB (full calibration)
+- Short flash swaps only the calibration blocks, not OS/bootloader
 `;
 
 /**
