@@ -262,11 +262,11 @@ export function generateFlashPlan(
       delayBeforeMs: 1000,  // E88: post_delay=1000ms
     });
     // Step 8: ProgrammingMode Complete (functional)
-    // E88 procedure: post_delay=500ms
+    // ECU needs time to process A5 01 before receiving A5 03
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 500,   // E88: post_delay=500ms
+      delayBeforeMs: 3000,  // 3s wait after A5 01 — ECU needs time to enter programming mode
     });
     // Step 9: Re-establish programming session on PHYSICAL address (0x7E0)
     // After the broadcast sequence, the ECU is in programming mode but needs
@@ -277,7 +277,7 @@ export function generateFlashPlan(
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Re-establish Programming Session (Physical)',
       canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
       expectedPositive: '50', timeoutMs: 5000, retries: 3,
-      delayBeforeMs: 500,  // Allow ECU to settle after ProgrammingMode Complete
+      delayBeforeMs: 1500,  // 1.5s settle after ProgrammingMode Complete before USDT
     });
   } else {
     // Standard UDS: simple session switch on physical address

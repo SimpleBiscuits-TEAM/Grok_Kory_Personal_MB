@@ -520,3 +520,14 @@
 - [x] Add physical DiagnosticSessionControl (0x10 0x02) on 0x7E0 between SESSION_OPEN and SECURITY_ACCESS to re-establish direct session
 - [x] Fix pri_key extraction — DevProgContainerHeader.verify now includes pri_key/pri_request/request/key arrays, and containerFileHeader passes verify section to flash engine
 - [x] Consider adding delay after ProgrammingMode Complete (A5 03) before first USDT command — 500ms delayBeforeMs on physical session re-establishment
+
+## .cs Container pri_key Extraction (Apr 3, 2026)
+- [ ] pri_key is in the .cs container format, NOT in the DevProg JSON header — need to parse .cs section to extract pri_key
+- [ ] Update flashContainerParser to extract pri_key from .cs container and pass it through to the flash engine
+
+## Pri_key Location Investigation (Apr 3, 2026)
+- [ ] Investigate where pri_key is stored — user says it's in .cs container, not DevProg JSON. Double-check container format and parser.
+
+## SESSION_OPEN Timing Adjustments (Apr 3, 2026)
+- [x] Increase delay before ProgrammingMode Complete (A5 03) from 500ms to 3000ms — ECU needs more time after A5 01
+- [x] Increase delay before physical session re-establishment (0x10 0x02) from 500ms to 1500ms — ECU needs settling time before seed request
