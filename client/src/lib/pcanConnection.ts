@@ -1132,7 +1132,11 @@ export class PCANConnection {
     const frame: number[] = [pciLength, ...udsPayload];
     while (frame.length < 8) frame.push(0x00);
 
-    const responseArbId = targetAddress + 0x08; // Standard UDS: response = request + 0x08
+    // Response arbitration ID: physical = request + 0x08
+    // Functional addressing (0x7DF) gets responses from any ECU on its physical ID.
+    // For GM ECUs, responses come on 0x7E8 regardless of whether request was on 0x7E0 or 0x7DF.
+    const isFunctional = targetAddress === 0x7DF;
+    const responseArbId = isFunctional ? -1 : (targetAddress + 0x08);
 
     // Set up response capture via udsResponseListener.
     // The existing monitorFrameHandler (whether ours or IntelliSpy's) will call
@@ -1152,7 +1156,13 @@ export class PCANConnection {
         const arbId = typeof rawArbId === 'string'
           ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
           : Number(rawArbId);
-        if (arbId === responseArbId) {
+
+        // For functional addressing, accept any standard OBD-II response range (0x7E8-0x7EF)
+        const isMatch = isFunctional
+          ? (arbId >= 0x7E8 && arbId <= 0x7EF)
+          : (arbId === responseArbId);
+
+        if (isMatch) {
           clearTimeout(timeout);
           this.udsResponseListener = null;
           const frameData: number[] = (msg.data as number[]) || [];
@@ -1238,13 +1248,35 @@ export class PCANConnection {
       };
     }
 
-    // Unexpected response — return raw data
+    // Check if the response byte IS a valid positive response for a different
+    // service — this can happen when the bridge ACK arrives before the ECU
+    // response, or when GMLAN services have different response patterns.
+    // A positive response byte is always >= 0x40 and never 0x7F.
+    if (responseServiceId >= 0x40 && responseServiceId !== 0x7F) {
+      // This looks like a positive response for service (responseServiceId - 0x40)
+      const actualService = responseServiceId - 0x40;
+      console.log(`[UDS] parseISOTPResponse: got positive response 0x${responseServiceId.toString(16)} for service 0x${actualService.toString(16)} (expected 0x${service.toString(16)})`);
+      return {
+        service: actualService,
+        serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
+        subFunction,
+        data: payload.slice(1),
+        positiveResponse: true,
+        isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
+        timestamp: Date.now(),
+      };
+    }
+
+    // Unexpected response — return raw data with explicit nrc: undefined
+    console.log(`[UDS] parseISOTPResponse: unexpected response byte 0x${responseServiceId.toString(16)} for service 0x${service.toString(16)} — raw: [${payload.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`);
     return {
       service,
       serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
       subFunction,
       data: payload,
       positiveResponse: false,
+      nrc: undefined,
+      nrcName: 'unparseable response',
       isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
       timestamp: Date.now(),
     };

@@ -166,6 +166,7 @@ export function generateFlashPlan(
 
   const commands: FlashCommand[] = [];
   let cmdId = 0;
+  const isGMLAN = ecuConfig?.protocol === 'GMLAN';
 
   // Phase 1: PRE_CHECK
   commands.push({
@@ -181,10 +182,10 @@ export function generateFlashPlan(
   });
 
   // Phase 3: SESSION_OPEN
-  const sessionByte = ecuConfig?.protocol === 'GMLAN' ? '02' : '02';
+  // GMLAN and UDS both use DiagnosticSessionControl 0x10 0x02 for programming session
   commands.push({
     id: cmdId++, phase: 'SESSION_OPEN', label: 'Open Programming Session (DiagnosticSessionControl)',
-    canTx: `${txHex} 02 10 ${sessionByte}`, canRx: `${rxHex} 02 50 ${sessionByte}`,
+    canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
     expectedPositive: '50', timeoutMs: 5000, retries: 2,
   });
 
@@ -274,10 +275,19 @@ export function generateFlashPlan(
   });
 
   // Phase 8: VERIFICATION
-  commands.push({
-    id: cmdId++, phase: 'VERIFICATION', label: 'Read ECU Identification (post-flash)',
-    canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
-  });
+  if (isGMLAN) {
+    // GMLAN: Use service 0x1A with 1-byte DID 0x90 (VIN)
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Read ECU Identification (post-flash, GMLAN)',
+      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+    });
+  } else {
+    // Standard UDS: Use service 0x22 with 2-byte DID 0xF190 (VIN)
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Read ECU Identification (post-flash)',
+      canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
+    });
+  }
 
   // Phase 9: KEY_CYCLE — Required for ECU to accept new calibration
   commands.push({
@@ -301,20 +311,47 @@ export function generateFlashPlan(
     canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
     expectedPositive: '7E', timeoutMs: 5000, retries: 3,
   });
-  commands.push({
-    id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded)',
-    canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
-  });
+
+  if (isGMLAN) {
+    // GMLAN: Use service 0x1A with DID 0x90 to verify VIN/cal after key cycle
+    commands.push({
+      id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded, GMLAN)',
+      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+    });
+  } else {
+    commands.push({
+      id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded)',
+      canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
+    });
+  }
 
   // Phase 10: CLEANUP
-  commands.push({
-    id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Functional Address)',
-    canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
-  });
-  commands.push({
-    id: cmdId++, phase: 'CLEANUP', label: 'Return to Default Session',
-    canTx: `${txHex} 02 10 01`, expectedPositive: '50', timeoutMs: 3000, retries: 1,
-  });
+  // Clear DTCs: use physical addressing for GMLAN (functional 0x7DF often times out),
+  // use functional addressing for standard UDS
+  if (isGMLAN) {
+    commands.push({
+      id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Physical Address)',
+      canTx: `${txHex} 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
+    });
+  } else {
+    commands.push({
+      id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Functional Address)',
+      canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
+    });
+  }
+
+  if (isGMLAN) {
+    // GMLAN: Use ReturnToNormalMode (0x20) instead of DiagnosticSessionControl default (0x10 0x01)
+    commands.push({
+      id: cmdId++, phase: 'CLEANUP', label: 'Return to Normal Mode (GMLAN)',
+      canTx: `${txHex} 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 1,
+    });
+  } else {
+    commands.push({
+      id: cmdId++, phase: 'CLEANUP', label: 'Return to Default Session',
+      canTx: `${txHex} 02 10 01`, expectedPositive: '50', timeoutMs: 3000, retries: 1,
+    });
+  }
 
   // Realistic timing: ~4 KB/s for block transfers, phase-specific delays for commands
   const PHASE_EST: Record<string, number> = {

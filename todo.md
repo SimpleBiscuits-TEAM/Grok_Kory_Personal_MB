@@ -263,3 +263,15 @@
 - [x] Investigate Vite HMR not picking up pcanFlashEngine.ts changes
 - [x] Clear Vite cache and restart dev server
 - [x] Verify new code is being served by checking log format markers in browser console
+
+## Bug Fix — Live Dry Run Log Analysis (PCAN + E41 L5P)
+- [x] Fix 'Cannot read properties of undefined (toString)' crash in sendUDSRequest — happens during SecurityAccess Send Key and RequestDownload commands
+- [x] Fix GMLAN ReadDID response parsing — VIN (DID 0x90) returns only 5 bytes "90 31 47 54 31" which is the DID echo + partial data, not actual VIN; same 5 bytes returned for DID 0xA0 (clearly wrong)
+- [x] Fix NRC 0x0 (unknown) responses — TesterPresent, DiagSessionControl, SecurityAccess all show NRC 0x0 which means response parsing is not extracting the NRC code correctly from the CAN frame
+- [x] Fix GMLAN ReadDID 0xB0 returning NRC 0x12 — service 0x1A may need different framing (sub-function vs data parameter)
+- [x] Fix GMLAN ReadDID 0xC1 timeout — CVN read times out, may need extended timeout or different session
+- [x] Fix Verification phase — uses UDS ReadDID (0x22 0xF190) instead of GMLAN ReadDID (0x1A 0x90) for GM ECUs
+- [x] Fix post-flash Read Calibration ID — uses UDS 0x22 instead of GMLAN 0x1A for GM ECUs
+- [x] Fix Clear DTCs on functional address 0x7DF — times out, GM ECUs may need physical addressing or different service
+- [x] Fix ECU Reset (0x11 0x01) returning NRC 0x31 — may need GMLAN-specific reset command
+- [x] Fix extended session switch — returns false, should use GMLAN ProgrammingMode (0xA5) for GM ECUs instead of UDS DiagSessionControl (0x10 0x03)

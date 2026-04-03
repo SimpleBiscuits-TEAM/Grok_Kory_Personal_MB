@@ -320,18 +320,28 @@ export class PCANFlashEngine {
 
             if (response && response.positiveResponse) {
               gotAnyResponse = true;
-              const dataHex = response.data.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-              this.log('success', 'PRE_CHECK', `✓ GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}) — ${response.data.length} bytes: ${dataHex}`);
-              if (did === 0x90 && response.data.length >= 17) {
-                // Decode VIN from response
-                const vinBytes = response.data.slice(0, 17);
+              const respData = response.data || [];
+              const dataHex = respData.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+              this.log('success', 'PRE_CHECK', `✓ GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}) — ${respData.length} bytes: ${dataHex}`);
+
+              // GMLAN positive response for 0x1A: [DID_echo, ...data]
+              // The first byte is the DID echo, actual data starts at byte 1
+              const actualData = (respData.length > 0 && respData[0] === did) ? respData.slice(1) : respData;
+
+              if (did === 0x90 && actualData.length >= 17) {
+                // Decode VIN from response (after DID echo byte)
+                const vinBytes = actualData.slice(0, 17);
                 const vin = String.fromCharCode(...vinBytes);
                 this.log('success', 'PRE_CHECK', `✓ VIN decoded: ${vin}`);
                 this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
+              } else if (did === 0x90 && actualData.length > 0 && actualData.length < 17) {
+                // Partial VIN — single frame only captured first few bytes
+                const partialVin = String.fromCharCode(...actualData.filter(b => b >= 0x20 && b <= 0x7E));
+                this.log('info', 'PRE_CHECK', `Partial VIN: ${partialVin} (${actualData.length}/${17} bytes — bridge may not support multi-frame ISO-TP)`);
               }
             } else if (response) {
               gotAnyResponse = true;
-              const nrc = response.nrc || 0;
+              const nrc = response.nrc ?? 0;
               const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
               this.log('info', 'PRE_CHECK', `GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}): NRC 0x${nrc.toString(16)} (${nrcName}) — ECU responded`);
             }
@@ -496,15 +506,15 @@ export class PCANFlashEngine {
         }
 
         if (response && response.positiveResponse) {
-          const rxHex = response.data.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+          const rxHex = (response.data || []).map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
           this.log('can_rx', cmd.phase, `RX: 0x${this.rxAddr.toString(16).toUpperCase()} ${rxHex}`);
           this.log('success', cmd.phase, `✓ ${cmd.label}`);
           this.state.statusMessage = cmd.label;
           this.emitState();
           return;
         } else if (response) {
-          const nrc = response.nrc || 0;
-          const nrcName = NRC_NAMES[nrc] || 'unknown';
+          const nrc = response.nrc ?? 0;
+          const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
           
           // NRC 0x78 = requestCorrectlyReceivedResponsePending — wait and retry
           if (nrc === 0x78) {
@@ -592,11 +602,37 @@ export class PCANFlashEngine {
         UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
       );
 
-      if (!seedResponse || !seedResponse.positiveResponse) {
+      if (!seedResponse) {
         return seedResponse;
       }
 
-      const seedBytes = new Uint8Array(seedResponse.data);
+      // The seed response might be misclassified as negative if the parser
+      // didn't recognize the positive response byte. Check if we have data
+      // that looks like a seed (regardless of positiveResponse flag).
+      const seedData = seedResponse.data || [];
+      if (!seedResponse.positiveResponse && seedData.length === 0) {
+        // Genuinely no data — return the NRC response
+        return seedResponse;
+      }
+
+      // If response has data, extract seed bytes.
+      // For positive response: data = [subFunction, ...seedBytes] (subFunction echo)
+      // For GMLAN: data might just be the seed bytes directly
+      let rawSeedData = seedData;
+      if (seedResponse.positiveResponse && rawSeedData.length > 0 && rawSeedData[0] === subFunction) {
+        // Strip the sub-function echo byte
+        rawSeedData = rawSeedData.slice(1);
+      }
+
+      if (rawSeedData.length === 0) {
+        if (this.dryRun) {
+          this.log('warning', cmd.phase, '[DRY RUN] Seed response has no data — skipping key computation');
+          return seedResponse;
+        }
+        return seedResponse;
+      }
+
+      const seedBytes = new Uint8Array(rawSeedData);
       this.log('info', cmd.phase, `Seed received: ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
 
       // Step 2: Compute key from seed
