@@ -605,3 +605,15 @@
 - [x] In log #7, security was SKIPPED (PRE_CHECK granted), so PriRC hit only 700ms after A5 03 — ECU still rebooting
 - [x] Fix: Replaced GMLAN skip with bootloader readiness polling loop (12 probes × 5s = 60s budget)
 - [x] The seed request acts as a probe to wait for ECU reboot — NRC 0x37 lockout + retries provide the needed delay
+
+## Real Flash Attempt #8 — FAILED (Apr 3, 2026) — Log 4d32f3e4
+- [x] MAJOR PROGRESS: Bootloader polling worked perfectly! ECU responded after 5 probes (~51s)
+- [x] Security GRANTED at 101s (seed→key→granted on second attempt after key-send timeout)
+- [x] PriRC NRC 0x22 correctly skipped as nonFatal — GOOD
+- [x] Root cause: Per-block RequestDownload had 3 bugs: session timeout, xx placeholder, missing erase
+- [x] Fix A: Reduced PriRC timeout from 5000ms to 1000ms, retries from 2 to 0 (single attempt)
+- [x] Fix B: Removed broken per-block 0x34 from orchestrator (xx placeholder → serviceId=0). executeBlockTransfer handles it correctly using block.rc34 or constructed fallback
+- [x] Fix C: GMLAN blocks now always get erase command regardless of container erase field
+- [x] Fix: PriRC timeout=1000ms, retries=0 (single attempt, nonFatal)
+- [x] Fix: Erase always generated for GMLAN blocks (needsErase = isGMLAN || erase field check)
+- [x] Fix: executeBlockTransfer now constructs 0x34 from start_adresse/block_length when rc34 missing

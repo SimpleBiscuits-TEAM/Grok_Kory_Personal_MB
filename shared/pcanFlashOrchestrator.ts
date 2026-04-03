@@ -337,9 +337,12 @@ export function generateFlashPlan(
     // NRC 0x22 (conditionsNotCorrect) on E41 — this command is E88-specific and
     // not required for all GMLAN ECUs. Made nonFatal so the per-block erase +
     // RequestDownload sequence handles everything for ECUs that don't support PriRC.
+    // TIMING FIX (log #8): Reduced timeout from 5000ms to 1000ms and retries from 2 to 0.
+    // With 3 retries × 5s, the PriRC burns 18s with TesterPresent keepalive PAUSED,
+    // causing the ECU's programming session to timeout before the per-block commands.
     commands.push({
       id: cmdId++, phase: 'PRE_FLASH', label: 'GM PriRC — Initial RequestDownload (0x34)',
-      canTx: `${txHex} 05 34 00 00 0F FE`, expectedPositive: '74', timeoutMs: 5000, retries: 2,
+      canTx: `${txHex} 05 34 00 00 0F FE`, expectedPositive: '74', timeoutMs: 1000, retries: 0,
       delayBeforeMs: 250,   // E88: post_delay=250ms
       nonFatal: true,  // E88-specific; E41 returns NRC 0x22 — safe to skip
     });
@@ -355,8 +358,10 @@ export function generateFlashPlan(
       block.block_id, block.start_adresse || '0', blockType, ecuType, filteredBlocks.length,
     );
 
-    // Erase
-    if (block.erase !== '0' && block.erase !== undefined) {
+    // Erase — GMLAN ECUs always require erase before download.
+    // For non-GMLAN, respect the container's erase field.
+    const needsErase = isGMLAN || (block.erase !== '0' && block.erase !== undefined);
+    if (needsErase) {
       commands.push({
         id: cmdId++, phase: 'PRE_FLASH', label: `Erase — ${sectionName}`,
         canTx: `${txHex} 04 31 01 FF 00`,
@@ -364,12 +369,12 @@ export function generateFlashPlan(
       });
     }
 
-    // Request Download
-    commands.push({
-      id: cmdId++, phase: 'PRE_FLASH', label: `Request Download — ${sectionName}`,
-      canTx: `${txHex} xx 34 00 44 ${block.start_adresse || '00000000'} ${block.block_length || '00000000'}`,
-      expectedPositive: '74', timeoutMs: 5000, retries: 2,
-    });
+    // NOTE: Per-block RequestDownload (0x34) is NOT generated here as a separate command.
+    // The executeBlockTransfer() method in the flash engine handles RequestDownload
+    // using block.rc34 from the container header, which has the correct format.
+    // Previously, this generated a canTx with 'xx' placeholder for the PCI length byte,
+    // which the engine parsed as serviceId=0 (NaN→0), sending garbage to the ECU.
+    // See flash log #8 analysis for details.
 
     // Block Transfer
     commands.push({

@@ -1644,29 +1644,51 @@ export class PCANFlashEngine {
     this.log('info', cmd.phase, `Transfer size: 0x${xferSize.toString(16).toUpperCase()} (${xferSize} bytes), Start addr: ${startAddr}`);
 
     // Step 1: RequestDownload (0x34)
+    // Use block.rc34 from the container header if available (exact parameters from the
+    // flash tool that created the container). If rc34 is missing, construct the
+    // RequestDownload from start_adresse and block_length.
+    let rc34Bytes: number[];
     const rc34 = block.rc34;
     if (rc34) {
-      const rc34Bytes = hexToBytes(rc34);
-      this.log('can_tx', cmd.phase, `TX: RequestDownload (0x34) — ${rc34}`);
-      const dlResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, Array.from(rc34Bytes), this.txAddr);
-      
-      if (!dlResponse || !dlResponse.positiveResponse) {
-        const nrc = dlResponse?.nrc || 0;
-        // NRC 0x78 = responsePending — wait and retry (confirmed from SPS log: ECU sends 0x78 then 0x74)
-        if (nrc === 0x78) {
-          this.log('info', cmd.phase, 'NRC 0x78 — ECU processing RequestDownload, waiting...');
-          await this.delay(3000);
-          // Retry once
-          const retryResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, Array.from(rc34Bytes), this.txAddr);
-          if (!retryResponse || !retryResponse.positiveResponse) {
-            throw new Error(`RequestDownload failed after retry: NRC 0x${(retryResponse?.nrc || 0).toString(16)} (${NRC_NAMES[retryResponse?.nrc || 0] || 'unknown'})`);
-          }
-        } else {
-          throw new Error(`RequestDownload failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
-        }
-      }
-      this.log('can_rx', cmd.phase, `RX: RequestDownload accepted`);
+      rc34Bytes = Array.from(hexToBytes(rc34));
+      this.log('info', cmd.phase, `RequestDownload (0x34) from container rc34: ${rc34}`);
+    } else {
+      // Construct RequestDownload: dataFormatIdentifier=0x00, addressAndLengthFormatIdentifier=0x44
+      // (4-byte address + 4-byte length), followed by start address and block length.
+      const startAddrNum = parseInt(block.start_adresse || '0', 16);
+      const blockLenNum = parseInt(block.block_length || '0', 16) || totalBytes;
+      rc34Bytes = [
+        0x00, // dataFormatIdentifier (no compression/encryption)
+        0x44, // addressAndLengthFormatIdentifier (4-byte addr + 4-byte len)
+        (startAddrNum >> 24) & 0xFF, (startAddrNum >> 16) & 0xFF,
+        (startAddrNum >> 8) & 0xFF, startAddrNum & 0xFF,
+        (blockLenNum >> 24) & 0xFF, (blockLenNum >> 16) & 0xFF,
+        (blockLenNum >> 8) & 0xFF, blockLenNum & 0xFF,
+      ];
+      this.log('info', cmd.phase,
+        `RequestDownload (0x34) constructed: addr=0x${startAddrNum.toString(16).toUpperCase()} len=0x${blockLenNum.toString(16).toUpperCase()}`);
     }
+
+    this.log('can_tx', cmd.phase,
+      `TX: RequestDownload (0x34) — ${rc34Bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+    const dlResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);
+    
+    if (!dlResponse || !dlResponse.positiveResponse) {
+      const nrc = dlResponse?.nrc || 0;
+      // NRC 0x78 = responsePending — wait and retry (confirmed from SPS log: ECU sends 0x78 then 0x74)
+      if (nrc === 0x78) {
+        this.log('info', cmd.phase, 'NRC 0x78 — ECU processing RequestDownload, waiting...');
+        await this.delay(3000);
+        // Retry once
+        const retryResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);
+        if (!retryResponse || !retryResponse.positiveResponse) {
+          throw new Error(`RequestDownload failed after retry: NRC 0x${(retryResponse?.nrc || 0).toString(16)} (${NRC_NAMES[retryResponse?.nrc || 0] || 'unknown'})`);
+        }
+      } else {
+        throw new Error(`RequestDownload failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+      }
+    }
+    this.log('can_rx', cmd.phase, `RX: RequestDownload accepted`);
 
     // Step 2: TransferData (0x36) — send block data in chunks
     const blockData = new Uint8Array(this.containerData, blockOffset, Math.min(blockLength, this.containerData.byteLength - blockOffset));
