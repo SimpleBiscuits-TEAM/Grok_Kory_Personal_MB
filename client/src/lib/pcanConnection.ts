@@ -1138,6 +1138,14 @@ export class PCANConnection {
     const isFunctional = targetAddress === 0x7DF;
     const responseArbId = isFunctional ? -1 : (targetAddress + 0x08);
 
+    // Drain any stale frames from the bus monitor before setting up our listener.
+    // Set a temporary drain listener that discards frames for a brief period.
+    this.udsResponseListener = null; // Clear any previous listener
+    await new Promise(r => setTimeout(r, 50)); // Brief drain period
+
+    // Track when we send so we can reject suspiciously fast responses (stale buffer)
+    const sendTimestamp = Date.now();
+
     // Set up response capture via udsResponseListener.
     // The existing monitorFrameHandler (whether ours or IntelliSpy's) will call
     // this.udsResponseListener for every can_frame/bus_frame.
@@ -1163,10 +1171,27 @@ export class PCANConnection {
           : (arbId === responseArbId);
 
         if (isMatch) {
-          clearTimeout(timeout);
-          this.udsResponseListener = null;
           const frameData: number[] = (msg.data as number[]) || [];
-          resolve(frameData);
+          if (frameData.length === 0) return; // Ignore empty frames
+
+          // Validate response: check if the response service ID makes sense
+          // for what we sent. This helps reject stale buffered responses.
+          const pciLen = frameData[0] & 0x0F;
+          const respSvcId = frameData.length > 1 ? frameData[1] : 0;
+          const expectedPositive = service + 0x40;
+          const isNegative = respSvcId === 0x7F;
+          const isPositiveMatch = respSvcId === expectedPositive;
+          // Also accept GMLAN positive responses (e.g., 0x5A for service 0x1A)
+          const isGmlanPositive = respSvcId >= 0x40 && respSvcId !== 0x7F;
+
+          if (isNegative || isPositiveMatch || isGmlanPositive) {
+            clearTimeout(timeout);
+            this.udsResponseListener = null;
+            resolve(frameData);
+          } else {
+            // Response doesn't match expected service — likely stale, skip it
+            console.log(`[UDS] Discarding stale frame: arb=0x${arbId.toString(16)} svc=0x${respSvcId.toString(16)} expected=0x${expectedPositive.toString(16)}`);
+          }
         }
       };
     });

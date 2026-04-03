@@ -121,6 +121,7 @@ export class PCANFlashEngine {
   private aborted = false;
   private startTime = 0;
   private dryRun: boolean;
+  private lastSecurityAccessGranted = false;
 
   // ECU addressing from the plan's first command
   private txAddr: number;
@@ -192,21 +193,56 @@ export class PCANFlashEngine {
       }
       this.emitState();
 
-      // Step 0b: Set extended diagnostic session before flash commands
-      this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
-      this.state.statusMessage = 'Switching to extended diagnostic session...';
-      this.emitState();
+      // Step 0a.5: Allow ECU to settle after bridge connection.
+      // The CAN bus initialization can cause the ECU to temporarily reject
+      // requests. A brief delay ensures the ECU is ready.
+      this.log('info', 'PRE_CHECK', 'Waiting for ECU to settle after bridge connect...');
+      await this.delay(1500);
 
-      try {
-        const sessionOk = await this.conn.setUDSSession('extended');
-        if (!sessionOk) {
-          this.log('warning', 'PRE_CHECK', 'Extended session switch returned false — ECU may not support standard UDS session control. Continuing...');
-        } else {
-          this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
+      // Step 0b: Set diagnostic session before flash commands.
+      // GMLAN ECUs use ProgrammingMode (0xA5) instead of DiagSessionControl (0x10).
+      if (this.isGMLAN) {
+        this.log('info', 'PRE_CHECK', 'Requesting GMLAN extended diagnostic mode (0xA5 0x01)...');
+        this.state.statusMessage = 'Requesting GMLAN diagnostic mode...';
+        this.emitState();
+        try {
+          // GMLAN ProgrammingMode: 0xA5 0x01 = requestProgrammingMode
+          const response = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
+          if (response && response.positiveResponse) {
+            this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active');
+          } else if (response) {
+            const nrc = response.nrc ?? 0;
+            const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
+            this.log('info', 'PRE_CHECK', `GMLAN ProgrammingMode response: NRC 0x${nrc.toString(16)} (${nrcName}) — ECU is communicating`);
+          } else {
+            this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode: no response — trying standard UDS session...');
+            // Fallback to standard UDS session control
+            const sessionOk = await this.conn.setUDSSession('extended');
+            if (sessionOk) {
+              this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active (UDS fallback)');
+            } else {
+              this.log('warning', 'PRE_CHECK', 'Session switch failed — continuing anyway...');
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log('warning', 'PRE_CHECK', `GMLAN ProgrammingMode error: ${msg} — continuing...`);
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.log('warning', 'PRE_CHECK', `Extended session switch error: ${msg} — continuing with flash plan...`);
+      } else {
+        this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
+        this.state.statusMessage = 'Switching to extended diagnostic session...';
+        this.emitState();
+        try {
+          const sessionOk = await this.conn.setUDSSession('extended');
+          if (!sessionOk) {
+            this.log('warning', 'PRE_CHECK', 'Extended session switch returned false — ECU may not support standard UDS session control. Continuing...');
+          } else {
+            this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log('warning', 'PRE_CHECK', `Extended session switch error: ${msg} — continuing with flash plan...`);
+        }
       }
       this.emitState();
 
@@ -313,6 +349,8 @@ export class PCANFlashEngine {
         this.log('info', 'PRE_CHECK', '🔧 Using GMLAN ReadDataByIdentifier (0x1A) — GM protocol detected');
 
         for (const { did, name } of gmlanDIDs) {
+          // Inter-command delay to avoid flooding the ECU bus
+          await this.delay(200);
           try {
             const response = await this.conn.sendUDSRequest(
               UDS.READ_DID_GMLAN, did, undefined, this.txAddr
@@ -678,12 +716,48 @@ export class PCANFlashEngine {
 
       if (keyResponse && keyResponse.positiveResponse) {
         this.log('success', cmd.phase, '🔓 Security access granted');
+        this.lastSecurityAccessGranted = true;
+      } else {
+        this.lastSecurityAccessGranted = false;
       }
 
       return keyResponse;
     }
 
-    // If this is a send-key command directly (shouldn't happen with our plan structure)
+    // This is a send-key command (even sub-function). The seed handler above
+    // already sent the key when it processed the preceding seed request.
+    // Return a synthetic success to avoid sending a bare key-send with no data.
+    if (this.lastSecurityAccessGranted) {
+      this.log('info', cmd.phase, '✓ Send Key — already handled during seed request');
+      return {
+        service: UDS.SECURITY_ACCESS,
+        serviceName: 'SecurityAccess',
+        subFunction,
+        data: [subFunction],
+        positiveResponse: true,
+        isFlashRelated: true,
+        timestamp: Date.now(),
+      };
+    }
+
+    // If we get here, the seed handler didn't send the key (e.g., dry run with no key available).
+    // In dry run mode, return a synthetic response to avoid crashing.
+    if (this.dryRun) {
+      this.log('warning', cmd.phase, '[DRY RUN] Send Key skipped — no key was computed during seed phase');
+      return {
+        service: UDS.SECURITY_ACCESS,
+        serviceName: 'SecurityAccess',
+        subFunction,
+        data: [],
+        positiveResponse: false,
+        nrc: 0x35,
+        nrcName: 'invalidKey',
+        isFlashRelated: true,
+        timestamp: Date.now(),
+      };
+    }
+
+    // Live mode: try sending the key command (shouldn't normally reach here)
     return await this.conn.sendUDSRequest(UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr);
   }
 

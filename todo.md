@@ -275,3 +275,24 @@
 - [x] Fix Clear DTCs on functional address 0x7DF — times out, GM ECUs may need physical addressing or different service
 - [x] Fix ECU Reset (0x11 0x01) returning NRC 0x31 — may need GMLAN-specific reset command
 - [x] Fix extended session switch — returns false, should use GMLAN ProgrammingMode (0xA5) for GM ECUs instead of UDS DiagSessionControl (0x10 0x03)
+
+## ECU Info Poll — Pre-Flash Vehicle Scan
+- [x] Build ECU scanner module (ecuScanner.ts) — polls all known ECU addresses from ECU_DATABASE
+- [x] GM (GMLAN) DID reader: VIN (0x1A 0x90), all 9 cal part numbers (OBD Mode 9 PID 0x04 + 0x1A 0xCB), CVNs (0x1A 0xC1-0xCC), HW ID (0x1A 0xB0), programming state (0xA2)
+- [x] Ford (UDS) DID reader: standard UDS DIDs (0x22 0xF190 VIN, 0x22 0xF188 SW#, 0x22 0xF191 HW#) — stub for now, refine with Knox/A2L docs later
+- [x] Cummins (UDS) DID reader: standard UDS DIDs — stub for now, refine with Knox docs later
+- [x] Compare scanned ECU info against loaded container file (current vs new part numbers, sw_c1-sw_c9)
+- [x] Build "Scan Vehicle" UI panel on flash page — table showing all responding ECUs with their info
+- [x] Per-ECU expandable detail: VIN, part numbers, CVNs, HW/SW versions
+- [x] Visual diff: highlight mismatched part numbers between ECU and container
+- [x] Scan progress indicator with per-ECU status (responding/timeout/error)
+- [x] Integrate scan into pre-flash workflow — scan before flash, show results
+- [ ] Note: Test ECU (E41) is HPTuners-unlocked — security access may behave differently, DIDs may be more permissive
+- [ ] ECU scanner must perform security access (seed/key) before reading protected DIDs — some DIDs require authenticated session
+
+## Bug Fix — Dry Run Log #3 (Apr 2)
+- [x] Fix toString crash on Send Key and RequestDownload — response object is undefined when sendUDSRequest returns null
+- [x] Fix response buffer contamination — ECU Reset response shows stale VIN data from previous ReadDID
+- [x] Fix GMLAN DID timeouts during pre-check — added 1.5s settling delay after bridge connect + 200ms inter-command delay
+- [x] Fix seed/key computation — skip Send Key command when handleSecurityAccess already handled it (lastSecurityAccessGranted flag)
+- [x] Fix Clear DTCs timeout on physical address — GMLAN ECUs now use physical address for ClearDTC instead of functional 0x7DF

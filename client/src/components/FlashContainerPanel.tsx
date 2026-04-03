@@ -17,6 +17,7 @@ import { trpc } from '@/lib/trpc';
 import PreFlightChecklist from './PreFlightChecklist';
 import FlashMissionControl from './FlashMissionControl';
 import FlashDashboard from './FlashDashboard';
+import EcuScanPanel from './EcuScanPanel';
 import {
   type FlashPlan,
   generateFlashPlan, formatBytes,
@@ -33,7 +34,7 @@ import {
   Upload, FileCheck, Shield, Cpu, Zap, AlertTriangle,
   CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
   HardDrive, Binary, Wifi, Bluetooth, RotateCcw, Eye,
-  Database, Clock, Lock, Radio, Activity, BarChart3,
+  Database, Clock, Lock, Radio, Activity, BarChart3, Search,
 } from 'lucide-react';
 
 // ── Hex Viewer Sub-component ─────────────────────────────────────────────
@@ -203,7 +204,7 @@ export default function FlashContainerPanel() {
 
   // Check bridge when PCAN section becomes active
   useEffect(() => {
-    if (activeSection === 'pcan' && pcanBridgeAvailable === null) {
+    if ((activeSection === 'pcan' || activeSection === 'ecuscan') && pcanBridgeAvailable === null) {
       checkPcanBridge();
     }
   }, [activeSection, pcanBridgeAvailable, checkPcanBridge]);
@@ -421,6 +422,7 @@ export default function FlashContainerPanel() {
     { id: 'sequence', label: 'Flash Sequence', icon: Zap },
     { id: 'hex', label: 'Hex Viewer', icon: Binary },
     { id: 'upload', label: 'Upload to Flasher', icon: Wifi },
+    { id: 'ecuscan', label: 'ECU Scan', icon: Search },
     { id: 'pcan', label: 'PCAN Flash', icon: Radio },
     { id: 'simulator', label: 'Simulator', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
@@ -870,6 +872,16 @@ export default function FlashContainerPanel() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── ECU Scan Section ── */}
+        {activeSection === 'ecuscan' && (
+          <EcuScanPanel
+            pcanConnection={pcanConnectionRef.current}
+            containerHeader={containerFileHeader}
+            bridgeAvailable={pcanBridgeAvailable === true}
+            bridgeUrl={pcanBridgeUrl}
+          />
         )}
 
         {/* ── PCAN Flash Section ── */}
