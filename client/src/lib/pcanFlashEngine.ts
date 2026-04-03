@@ -1337,6 +1337,16 @@ export class PCANFlashEngine {
       return;
     }
 
+    // Commands marked as nonFatal in the orchestrator can timeout without killing the flash.
+    // Example: physical session re-establishment after GMLAN broadcast — the broadcast already
+    // put the ECU in programming mode, so the physical session is optional.
+    if (cmd.nonFatal) {
+      this.log('warning', cmd.phase, `${cmd.label}: ${lastError} — continuing (non-fatal command)`);
+      this.state.statusMessage = `${cmd.label} (timeout, non-fatal)`;
+      this.emitState();
+      return;
+    }
+
     // VERIFICATION and KEY_CYCLE DID reads are informational, not safety-critical.
     // If they timeout, log a warning but don't fail the flash — the ECU has already
     // been programmed successfully at this point. Failing here would leave the user

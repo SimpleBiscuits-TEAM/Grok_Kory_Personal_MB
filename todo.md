@@ -561,3 +561,8 @@
 ## Post-Broadcast Settling Time Increase (Apr 3, 2026)
 - [x] Increase delay after ProgrammingMode Complete (A5 03) from 3000ms to 6000ms
 - [x] Increase delay before physical session re-establishment (0x10 0x02) from 1500ms to 2000ms
+
+## Real Flash Attempt #2 — FAILED (Apr 3, 2026)
+- [x] Physical session re-establishment (0x10 0x02 on 0x7E0) times out after SESSION_OPEN broadcast — added nonFatal flag
+- [x] Make physical session non-fatal — added nonFatal field to FlashCommand type and check in executeCommand
+- [x] In dry run, seed request succeeded AFTER bridge reconnect — now real flash will also proceed past physical session timeout

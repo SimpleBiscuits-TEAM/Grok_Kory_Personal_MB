@@ -38,6 +38,8 @@ export interface FlashCommand {
     /** If true, auto-proceed after timeoutMs (used for WAIT_BOOT). If false, wait for user confirmation. */
     autoConfirm?: boolean;
   };
+  /** If true, timeout on this command is non-fatal — log warning and continue */
+  nonFatal?: boolean;
   blockData?: {
     blockId: number;
     blockType: 'OS' | 'CAL' | 'PATCH';
@@ -278,6 +280,7 @@ export function generateFlashPlan(
       canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
       expectedPositive: '50', timeoutMs: 5000, retries: 3,
       delayBeforeMs: 2000,  // 2s settle after ProgrammingMode Complete before USDT
+      nonFatal: true,  // Broadcast SESSION_OPEN already put ECU in programming mode; physical session is optional
     });
   } else {
     // Standard UDS: simple session switch on physical address
