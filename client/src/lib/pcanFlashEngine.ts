@@ -133,6 +133,10 @@ export class PCANFlashEngine {
   private isGMLAN: boolean;
   private ecuProtocol: string;
 
+  // TesterPresent keepalive — sends 0x3E 0x80 every 2s to maintain diagnostic session
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private keepaliveActive = false;
+
   /** Destructive UDS services that are skipped in dry run mode */
   private static readonly DESTRUCTIVE_SERVICES = new Set([
     0x31, // RoutineControl (EraseMemory)
@@ -165,6 +169,174 @@ export class PCANFlashEngine {
   /** Abort the flash — sets flag that will be checked between commands */
   abort(): void {
     this.aborted = true;
+    this.stopKeepalive();
+  }
+
+  // ── TesterPresent Keepalive ──────────────────────────────────────────────
+
+  /**
+   * Start sending TesterPresent (0x3E 0x80) every 2 seconds.
+   * The 0x80 sub-function means "suppressPositiveResponse" — the ECU won't
+   * reply, so this doesn't interfere with other command responses.
+   * This keeps the diagnostic session alive between commands.
+   */
+  private startKeepalive(): void {
+    if (this.keepaliveActive) return;
+    this.keepaliveActive = true;
+    this.log('info', this.state.currentPhase, '💓 TesterPresent keepalive started (0x3E 0x80 every 2s)');
+
+    this.keepaliveTimer = setInterval(() => {
+      if (!this.keepaliveActive || this.aborted) {
+        this.stopKeepalive();
+        return;
+      }
+      // Fire-and-forget: send TesterPresent with suppressPositiveResponse.
+      // We don't await the response because 0x80 means no response expected.
+      // Use raw CAN send to avoid interfering with pending UDS request/response pairs.
+      try {
+        const ws = (this.conn as any).ws as WebSocket | null;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const frame = [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00];
+          ws.send(JSON.stringify({
+            type: 'can_send',
+            id: `tp_keepalive_${Date.now()}`,
+            arb_id: this.txAddr,
+            data: frame,
+          }));
+        }
+      } catch {
+        // Keepalive failure is non-fatal — the next real command will detect connection issues
+      }
+    }, 2000);
+  }
+
+  /** Stop the TesterPresent keepalive timer */
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+    }
+    if (this.keepaliveActive) {
+      this.keepaliveActive = false;
+      this.log('info', this.state.currentPhase, '💓 TesterPresent keepalive stopped');
+    }
+  }
+
+  // ── Post-Key-Cycle Session Re-establishment ───────────────────────────────
+
+  /**
+   * Re-establish diagnostic session and security access after key cycle.
+   * The ECU reboots during key off/on, which drops all active sessions.
+   * This method:
+   *   1. Waits for ECU to stabilize after boot
+   *   2. Re-enters programming session (0x10 0x02 for GMLAN, 0x10 0x03 for UDS)
+   *   3. Re-attempts security access if pri_key is available
+   *   4. Restarts TesterPresent keepalive
+   */
+  private async reEstablishSession(): Promise<void> {
+    this.log('info', 'KEY_CYCLE', '🔄 Re-establishing diagnostic session after key cycle...');
+    this.state.statusMessage = 'Re-establishing ECU session after boot...';
+    this.emitState();
+
+    // Extra settling time — ECU needs time after boot before accepting diagnostic requests
+    await this.delay(2000);
+
+    // Step 1: Re-enter diagnostic session
+    const maxRetries = 5;
+    let sessionOk = false;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (this.isGMLAN) {
+          // Try programming session (0x10 0x02) — confirmed working from dry runs
+          const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
+          if (response && response.positiveResponse) {
+            this.log('success', 'KEY_CYCLE', `✓ Programming session re-established (attempt ${attempt}/${maxRetries})`);
+            sessionOk = true;
+            break;
+          } else if (response) {
+            const nrc = response.nrc ?? 0;
+            this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: NRC 0x${nrc.toString(16)} — ECU may still be booting...`);
+          } else {
+            this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: no response — ECU may still be booting...`);
+          }
+        } else {
+          // Standard UDS: extended session
+          const ok = await this.conn.setUDSSession('extended');
+          if (ok) {
+            this.log('success', 'KEY_CYCLE', `✓ Extended session re-established (attempt ${attempt}/${maxRetries})`);
+            sessionOk = true;
+            break;
+          } else {
+            this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: failed — ECU may still be booting...`);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: ${msg}`);
+      }
+
+      // Wait longer between retries — ECU boot can take several seconds
+      await this.delay(1500);
+    }
+
+    if (!sessionOk) {
+      this.log('warning', 'KEY_CYCLE', '⚠️ Could not re-establish session after key cycle — subsequent commands may timeout');
+    }
+
+    // Step 2: Re-attempt security access (GMLAN ECUs need this for DID reads)
+    if (this.isGMLAN && sessionOk) {
+      await this.delay(300);
+      try {
+        const seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+        if (seedResp && seedResp.positiveResponse) {
+          let seedData = seedResp.data || [];
+          if (seedData.length > 0 && seedData[0] === 0x01) {
+            seedData = seedData.slice(1);
+          }
+          const seedBytes = new Uint8Array(seedData);
+          this.log('info', 'KEY_CYCLE', `Seed received after boot: ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+
+          if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
+            this.log('success', 'KEY_CYCLE', '🔓 Zero seed — ECU still unlocked after key cycle');
+            this.lastSecurityAccessGranted = true;
+          } else {
+            const priKey = this.header.verify?.pri_key;
+            if (priKey && priKey.length >= 16 && seedBytes.length === 5) {
+              const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
+              const keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
+              this.log('info', 'KEY_CYCLE', `Key computed for post-boot security: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'KEY_CYCLE', '🔓 Security access re-granted after key cycle');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'KEY_CYCLE', `Security re-access denied: NRC 0x${nrc.toString(16)}`);
+                this.lastSecurityAccessGranted = false;
+              }
+            } else {
+              this.log('warning', 'KEY_CYCLE', 'No pri_key available for post-boot security access');
+              this.lastSecurityAccessGranted = false;
+            }
+          }
+        } else if (seedResp) {
+          const nrc = seedResp.nrc ?? 0;
+          this.log('info', 'KEY_CYCLE', `Post-boot seed request: NRC 0x${nrc.toString(16)} — security may not be required`);
+        } else {
+          this.log('info', 'KEY_CYCLE', 'Post-boot seed request: no response');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('warning', 'KEY_CYCLE', `Post-boot security access error: ${msg}`);
+      }
+    }
+
+    // Step 3: Restart keepalive now that session is re-established
+    this.startKeepalive();
+    this.log('info', 'KEY_CYCLE', '✓ Post-key-cycle session re-establishment complete');
   }
 
   /** Execute the full flash plan */
@@ -284,6 +456,9 @@ export class PCANFlashEngine {
           this.log('warning', 'PRE_CHECK', `Security access error: ${msg} — continuing...`);
         }
         await this.delay(200);
+
+        // Start TesterPresent keepalive after session + security are established
+        this.startKeepalive();
       } else {
         this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
         this.state.statusMessage = 'Switching to extended diagnostic session...';
@@ -299,8 +474,13 @@ export class PCANFlashEngine {
           const msg = err instanceof Error ? err.message : String(err);
           this.log('warning', 'PRE_CHECK', `Extended session switch error: ${msg} — continuing with flash plan...`);
         }
+        // Start TesterPresent keepalive after session is established
+        this.startKeepalive();
       }
       this.emitState();
+
+      // Step 0c.5: CAN bus termination guidance
+      this.log('info', 'PRE_CHECK', '⚡ CAN BUS TIP: Enable 120Ω termination on PCAN adapter for stable communication on bench setups. Without proper termination, ECU may respond intermittently.');
 
       // Step 0c: ECU communication test (dry run only)
       if (this.dryRun) {
@@ -339,6 +519,7 @@ export class PCANFlashEngine {
             await this.executeCommand(cmd);
           }
         } catch (err) {
+          this.stopKeepalive();
           const msg = err instanceof Error ? err.message : String(err);
           this.log('error', cmd.phase, `FAILED: ${cmd.label} — ${msg}`);
           this.state.result = 'FAILED';
@@ -351,6 +532,7 @@ export class PCANFlashEngine {
       }
 
       // All commands completed successfully
+      this.stopKeepalive();
       this.state.result = 'SUCCESS';
       this.state.progress = 100;
       this.state.statusMessage = this.dryRun ? 'Dry run completed — all non-destructive commands passed!' : 'Flash completed successfully!';
@@ -362,6 +544,7 @@ export class PCANFlashEngine {
       return 'SUCCESS';
 
     } catch (err) {
+      this.stopKeepalive();
       const msg = err instanceof Error ? err.message : String(err);
       this.log('error', this.state.currentPhase, `Unexpected error: ${msg}`);
       this.state.result = 'FAILED';
@@ -537,6 +720,11 @@ export class PCANFlashEngine {
       this.log('info', cmd.phase, `⏳ ${cmd.label}`);
       this.state.statusMessage = prompt;
       this.emitState();
+
+      // Stop keepalive during key off — ECU will power down
+      if (type === 'KEY_OFF') {
+        this.stopKeepalive();
+      }
       
       if (this.callbacks.onUserAction) {
         // The callback must block until user confirms (KEY_OFF/KEY_ON)
@@ -557,6 +745,14 @@ export class PCANFlashEngine {
       this.log('success', cmd.phase, `✓ ${cmd.label} — confirmed`);
       this.state.statusMessage = `${cmd.label} — done`;
       this.emitState();
+
+      // After WAIT_BOOT completes, re-establish diagnostic session and security access.
+      // The key cycle causes the ECU to reboot, dropping all sessions. We must
+      // re-enter programming session and re-authenticate before any further commands.
+      if (type === 'WAIT_BOOT') {
+        await this.reEstablishSession();
+      }
+
       return;
     }
 
@@ -713,7 +909,11 @@ export class PCANFlashEngine {
 
       retries--;
       if (retries >= 0) {
-        await this.delay(500);
+        // Progressive backoff: 1s, 1.5s, 2s, 2.5s... for bench setups with
+        // unstable power/termination. Gives ECU more time to recover.
+        const retryDelay = 1000 + (cmd.retries - retries - 1) * 500;
+        this.log('info', cmd.phase, `Waiting ${retryDelay}ms before retry ${cmd.retries - retries}/${cmd.retries}...`);
+        await this.delay(retryDelay);
       }
     }
 

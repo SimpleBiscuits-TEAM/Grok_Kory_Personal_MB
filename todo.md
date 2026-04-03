@@ -341,3 +341,24 @@
 - [x] KEY_OFF prompt: red/danger theme (border, bg, button, text)
 - [x] KEY_ON prompt: green/go theme (border, bg, button, text)
 - [x] WAIT_BOOT: keep cyan/neutral theme
+
+## Bug Fix — Dry Run Log #6 (Apr 3, 2026)
+- [ ] Programming session 0x10 0x02 returns NRC 0x12 at 6.8s but succeeds at 46.3s after retries — ECU needs more time or different approach
+- [ ] Pre-check seed received at 13.9s (57 09 FD 6C 06) but session commands seed times out at 51-62s — ECU may have dropped session
+- [ ] DID 0xC1 responds (C1 00 C1 A5 4A) but 0xB0, 0x90, 0xA0 all timeout — inconsistent DID availability
+- [ ] After key cycle, ALL commands timeout (0x1A 0x90, 0x14 ClearDTC, 0x20 ReturnToNormal) — ECU not responding after key cycle
+- [ ] Key cycle prompts working correctly — user confirmed key off at 83.4s and key on at 86.4s
+- [ ] ECU Reset 0x11 returns NRC 0x11 (serviceNotSupported) — expected for GMLAN, not fatal
+- [ ] Root cause analysis: ECU communication is intermittent — works briefly after connect, then drops
+
+## TesterPresent Keepalive & Retry Improvements
+- [x] Add background TesterPresent keepalive (0x3E 0x80 suppressPositiveResponse) every 2s to maintain diagnostic session
+- [x] Start keepalive after successful session switch, stop on cleanup/abort/key-off
+- [x] Increase inter-retry delay for bench setups — progressive backoff: 1s, 1.5s, 2s, 2.5s between retries
+- [x] Add post-key-cycle re-session: after WAIT_BOOT, re-enter programming session (0x10 0x02 for GMLAN, extended for UDS) with 5 retries and 1.5s backoff
+- [x] Re-attempt security access after key cycle if session was re-established — full seed/key exchange with computeGM5B
+- [x] Add CAN bus termination guidance log message (120Ω tip) during PRE_CHECK
+- [x] Increase post-key-cycle command retry counts: TesterPresent verify 3→5, ReadCalID 2→4, ClearDTC 2→3, ReturnToNormal 1→2
+- [x] Increase post-key-cycle command timeouts: 5000ms→8000ms for verify/read/clear commands
+- [x] Add GMLAN ProgrammingMode (0xA5 0x01) command to SESSION_OPEN phase for GM ECUs
+- [x] Keepalive uses raw CAN send (fire-and-forget) to avoid interfering with pending UDS request/response pairs

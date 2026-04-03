@@ -191,12 +191,19 @@ export function generateFlashPlan(
   });
 
   // Phase 3: SESSION_OPEN
-  // GMLAN and UDS both use DiagnosticSessionControl 0x10 0x02 for programming session
+  // Both GMLAN and UDS use DiagnosticSessionControl 0x10 0x02 for programming session.
+  // For GMLAN, also send ProgrammingMode (0xA5 0x01) as the SPS log shows both are used.
   commands.push({
     id: cmdId++, phase: 'SESSION_OPEN', label: 'Open Programming Session (DiagnosticSessionControl)',
     canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
-    expectedPositive: '50', timeoutMs: 5000, retries: 2,
+    expectedPositive: '50', timeoutMs: 5000, retries: 3,
   });
+  if (isGMLAN) {
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'GMLAN ProgrammingMode Request (0xA5)',
+      canTx: `${txHex} 02 A5 01`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
+    });
+  }
 
   // Phase 4: SECURITY_ACCESS
   const seedLevel = ecuConfig?.seedLevel ?? 1;
@@ -333,19 +340,19 @@ export function generateFlashPlan(
   commands.push({
     id: cmdId++, phase: 'KEY_CYCLE', label: 'Verify ECU communication after key cycle',
     canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
-    expectedPositive: '7E', timeoutMs: 5000, retries: 3,
+    expectedPositive: '7E', timeoutMs: 8000, retries: 5,
   });
 
   if (isGMLAN) {
     // GMLAN: Use service 0x1A with DID 0x90 to verify VIN/cal after key cycle
     commands.push({
       id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded, GMLAN)',
-      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 8000, retries: 4,
     });
   } else {
     commands.push({
       id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded)',
-      canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
+      canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 8000, retries: 4,
     });
   }
 
@@ -355,12 +362,12 @@ export function generateFlashPlan(
   if (isGMLAN) {
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Physical Address)',
-      canTx: `${txHex} 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
+      canTx: `${txHex} 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 8000, retries: 3,
     });
   } else {
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Functional Address)',
-      canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
+      canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 8000, retries: 3,
     });
   }
 
@@ -368,12 +375,12 @@ export function generateFlashPlan(
     // GMLAN: Use ReturnToNormalMode (0x20) instead of DiagnosticSessionControl default (0x10 0x01)
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'Return to Normal Mode (GMLAN)',
-      canTx: `${txHex} 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 1,
+      canTx: `${txHex} 01 20`, expectedPositive: '60', timeoutMs: 5000, retries: 2,
     });
   } else {
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'Return to Default Session',
-      canTx: `${txHex} 02 10 01`, expectedPositive: '50', timeoutMs: 3000, retries: 1,
+      canTx: `${txHex} 02 10 01`, expectedPositive: '50', timeoutMs: 5000, retries: 2,
     });
   }
 
