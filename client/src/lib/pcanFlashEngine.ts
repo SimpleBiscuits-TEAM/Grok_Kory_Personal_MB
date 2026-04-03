@@ -1347,6 +1347,25 @@ export class PCANFlashEngine {
       return;
     }
 
+    // ── GMLAN Safety Net: SECURITY_ACCESS timeout is never fatal ──
+    // After SESSION_OPEN broadcast (DisableNormalCommunication + ProgrammingMode),
+    // the ECU may stop responding to USDT on the physical address. This is expected
+    // GMLAN behavior. The ECU is already in programming mode from the broadcast,
+    // and security may have been granted in PRE_CHECK. Even if security wasn't
+    // granted in PRE_CHECK, the flash should attempt PRE_FLASH (RequestDownload)
+    // because the ECU may accept it in programming mode.
+    // This is a belt-and-suspenders check in case cmd.nonFatal wasn't set.
+    if (cmd.phase === 'SECURITY_ACCESS' && this.isGMLAN) {
+      this.log('warning', cmd.phase,
+        `${cmd.label}: ${lastError} — continuing (GMLAN: SECURITY_ACCESS is non-fatal after SESSION_OPEN broadcast)`);
+      this.log('info', cmd.phase,
+        'ℹ️ GMLAN ECUs may not respond to USDT after DisableNormalCommunication (0x28). ' +
+        'Proceeding to PRE_FLASH — RequestDownload (0x34) will confirm if ECU accepts programming.');
+      this.state.statusMessage = `${cmd.label} (timeout, GMLAN non-fatal)`;
+      this.emitState();
+      return;
+    }
+
     // VERIFICATION and KEY_CYCLE DID reads are informational, not safety-critical.
     // If they timeout, log a warning but don't fail the flash — the ECU has already
     // been programmed successfully at this point. Failing here would leave the user
@@ -1374,6 +1393,8 @@ export class PCANFlashEngine {
       // the SESSION_OPEN broadcast. After the broadcast (DisableNormalCommunication,
       // ProgrammingMode), the ECU may stop responding to USDT on the physical address.
       // Since security was already granted, we can skip this redundant exchange.
+      // NOTE: If PRE_CHECK security ALSO failed (intermittent ECU), this won't trigger,
+      // but the GMLAN safety net in executeCommand() will catch the timeout and continue.
       if (this.lastSecurityAccessGranted && this.isGMLAN) {
         this.log('success', cmd.phase,
           '🔓 Security already granted in PRE_CHECK — skipping post-broadcast seed/key exchange');

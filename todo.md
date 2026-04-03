@@ -574,3 +574,10 @@
 - [x] Fix: Make SECURITY_ACCESS seed request non-fatal when PRE_CHECK already granted security
 - [x] Fix: Engine should use pre-check security state and skip redundant seed/key exchange after broadcast
 - [x] Consider: Remove DisableNormalCommunication (0x28) from broadcast or move it after security access — NOT needed, skip approach is cleaner
+
+## Real Flash Attempt #4 — FAILED (Apr 3, 2026) — Log 538072b2
+- [x] Root cause: PRE_CHECK seed timed out (unlike #3 where it succeeded), so GMLAN skip didn't trigger
+- [x] Fix: SECURITY_ACCESS must be nonFatal unconditionally for GMLAN — not just when PRE_CHECK granted security
+- [x] Fix: Engine should proceed to PRE_FLASH even when SECURITY_ACCESS seed times out on GMLAN
+- [x] Investigate: Why did nonFatal flag not prevent the FAILED result? Likely ran before checkpoint deployed; added belt-and-suspenders GMLAN safety net in executeCommand
+- [x] Investigate: PRE_CHECK programming session took 3 attempts (NRC 0x12 twice) — intermittent ECU responsiveness (known bench behavior)

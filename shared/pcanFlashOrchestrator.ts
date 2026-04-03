@@ -292,12 +292,12 @@ export function generateFlashPlan(
   }
 
   // Phase 4: SECURITY_ACCESS
-  // For GMLAN ECUs: PRE_CHECK already performs session + security access on the physical
-  // address BEFORE the SESSION_OPEN broadcast. After the broadcast (especially
-  // DisableNormalCommunication 0x28 and ProgrammingMode A5 01/03), the ECU may stop
-  // responding to USDT commands on the physical address. Since security was already
-  // granted in PRE_CHECK, these commands are marked nonFatal for GMLAN so the flash
-  // engine can skip them and proceed directly to PRE_FLASH (RequestDownload 0x34).
+  // For GMLAN ECUs: After the SESSION_OPEN broadcast (DisableNormalCommunication 0x28
+  // + ProgrammingMode A5 01/03), the ECU may stop responding to USDT commands on the
+  // physical address. Security may have been granted in PRE_CHECK (before the broadcast),
+  // but even if PRE_CHECK security also failed (intermittent ECU responsiveness), the
+  // flash should proceed to PRE_FLASH. These commands are marked nonFatal for GMLAN.
+  // The flash engine also has a belt-and-suspenders GMLAN safety net in executeCommand().
   const seedLevel = ecuConfig?.seedLevel ?? 1;
   commands.push({
     id: cmdId++, phase: 'SECURITY_ACCESS', label: `Request Seed (Level ${seedLevel})`,
