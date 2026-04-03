@@ -386,6 +386,40 @@ function EcuCard({
             </div>
           )}
 
+          {/* Security Access Status */}
+          {ecu.securityAccessAttempted && (
+            <div className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded ${
+              ecu.securityAccessGranted
+                ? 'bg-green-500/10 border border-green-500/20'
+                : 'bg-amber-500/10 border border-amber-500/20'
+            }`}>
+              <Shield className={`w-3.5 h-3.5 ${
+                ecu.securityAccessGranted ? 'text-green-400' : 'text-amber-400'
+              }`} />
+              <span className={ecu.securityAccessGranted ? 'text-green-400' : 'text-amber-400'}>
+                {ecu.securityAccessGranted
+                  ? 'Security Access Granted — ECU unlocked'
+                  : 'Security Access Denied — requires key or hardware unlock'
+                }
+              </span>
+            </div>
+          )}
+
+          {/* Notes */}
+          {ecu.notes && ecu.notes.length > 0 && (
+            <div className="space-y-1">
+              <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                Notes
+              </h4>
+              {ecu.notes.map((note, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[10px] text-zinc-500">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500/60" />
+                  <span>{note}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Raw DID Responses (collapsible) */}
           {ecu.rawResponses.length > 0 && (
             <RawResponsesSection responses={ecu.rawResponses} />

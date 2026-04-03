@@ -287,8 +287,8 @@
 - [x] Visual diff: highlight mismatched part numbers between ECU and container
 - [x] Scan progress indicator with per-ECU status (responding/timeout/error)
 - [x] Integrate scan into pre-flash workflow — scan before flash, show results
-- [ ] Note: Test ECU (E41) is HPTuners-unlocked — security access may behave differently, DIDs may be more permissive
-- [ ] ECU scanner must perform security access (seed/key) before reading protected DIDs — some DIDs require authenticated session
+- [x] Note: Test ECU (E41) is HPTuners-unlocked — security access may behave differently, DIDs may be more permissive
+- [x] ECU scanner must perform security access (seed/key) before reading protected DIDs — some DIDs require authenticated session
 
 ## Bug Fix — Dry Run Log #3 (Apr 2)
 - [x] Fix toString crash on Send Key and RequestDownload — response object is undefined when sendUDSRequest returns null

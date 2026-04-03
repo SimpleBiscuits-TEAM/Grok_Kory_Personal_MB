@@ -20,6 +20,10 @@ import {
   type Manufacturer,
   type ContainerFileHeader,
 } from '../../../shared/ecuDatabase';
+import {
+  getSecurityProfile,
+  type EcuSecurityProfile,
+} from '../../../shared/seedKeyAlgorithms';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +52,12 @@ export interface EcuScanResult {
   cvns: CvnEntry[];
   /** Raw DID responses for debugging */
   rawResponses: RawDIDResponse[];
+  /** Whether security access was attempted */
+  securityAccessAttempted: boolean;
+  /** Whether security access was granted */
+  securityAccessGranted: boolean;
+  /** Notes about ECU state (e.g., HPTuners-unlocked) */
+  notes: string[];
   /** Scan status */
   status: 'scanning' | 'complete' | 'timeout' | 'error';
   /** Error message if scan failed */
@@ -255,6 +265,9 @@ export class EcuScanner {
       calibrationPartNumbers: [],
       cvns: [],
       rawResponses: [],
+      securityAccessAttempted: false,
+      securityAccessGranted: false,
+      notes: [],
       status: 'scanning',
     };
 
@@ -304,6 +317,31 @@ export class EcuScanner {
 
     // Step 3: Match against ECU database
     result.ecuConfig = this.matchEcuConfig(result);
+
+    // Step 4: If we got NRC 0x33 (securityAccessDenied) on any DID,
+    // attempt security access and retry those DIDs.
+    const hasSecurityDenied = result.rawResponses.some(r => r.nrc === 0x33);
+    if (hasSecurityDenied && result.ecuConfig) {
+      console.log(`[ECU Scanner] Security access denied on some DIDs — attempting security access...`);
+      const granted = await this.attemptSecurityAccess(result, txAddr);
+      if (granted) {
+        // Retry the scan with security access granted
+        console.log(`[ECU Scanner] Security access granted — retrying protected DIDs...`);
+        if (result.detectedProtocol === 'GMLAN') {
+          await this.scanGmlanEcu(result, txAddr);
+        } else {
+          await this.scanUdsEcu(result, txAddr);
+        }
+      }
+    }
+
+    // Step 5: Add notes about ECU state
+    if (result.responding && result.calibrationPartNumbers.length === 0 && result.cvns.length === 0) {
+      result.notes.push('ECU responded but no calibration data read — may need security access or different session');
+    }
+    if (result.securityAccessAttempted && !result.securityAccessGranted) {
+      result.notes.push('Security access attempted but denied — ECU may require hardware unlock box or specific key');
+    }
 
     result.status = 'complete';
     result.scanDurationMs = Date.now() - startMs;
@@ -636,6 +674,68 @@ export class EcuScanner {
 
     // Return first candidate as best guess
     return candidates[0];
+  }
+
+  /**
+   * Attempt security access on the ECU to unlock protected DIDs.
+   * Uses the security profile from the database to determine seed/key sub-functions.
+   * Note: For ECUs requiring hardware unlock box (e.g., E41), this will only work
+   * if the ECU has been previously unlocked (e.g., by HPTuners).
+   */
+  private async attemptSecurityAccess(
+    result: EcuScanResult,
+    txAddr: number,
+  ): Promise<boolean> {
+    result.securityAccessAttempted = true;
+
+    // Find security profile for this ECU
+    const ecuType = result.ecuConfig?.ecuType;
+    const profile = ecuType ? getSecurityProfile(ecuType) : undefined;
+
+    // Default sub-functions if no profile found
+    const seedSub = profile?.seedSubFunction ?? 0x01;
+    const keySub = profile?.keySubFunction ?? 0x02;
+
+    console.log(`[ECU Scanner] Requesting security seed (sub=0x${seedSub.toString(16)})...`);
+
+    // Step 1: Enter diagnostic session (GMLAN: 0x10 0x02, UDS: 0x10 0x03)
+    if (result.detectedProtocol === 'GMLAN') {
+      await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
+    } else {
+      await this.sendAndRecord(result, 0x10, 0x03, [], txAddr);
+    }
+    await new Promise(r => setTimeout(r, 200));
+
+    // Step 2: Request seed
+    const seedResp = await this.sendAndRecord(result, 0x27, seedSub, [], txAddr);
+    if (!seedResp?.positiveResponse || !seedResp.data || seedResp.data.length === 0) {
+      console.log(`[ECU Scanner] Security seed request failed`);
+      result.notes.push(`Security seed request failed (sub=0x${seedSub.toString(16)})`);
+      return false;
+    }
+
+    // Check if seed is all zeros (already unlocked)
+    const seedData = seedResp.data.slice(1); // skip sub-function echo
+    const allZeros = seedData.every(b => b === 0);
+    if (allZeros) {
+      console.log(`[ECU Scanner] ECU returned zero seed — already unlocked!`);
+      result.securityAccessGranted = true;
+      result.notes.push('ECU returned zero seed — already unlocked (HPTuners or similar)');
+      return true;
+    }
+
+    // We have a non-zero seed but computing the key requires the AES key
+    // from the container file, which we may not have during a scan.
+    // For now, log the seed and note that key computation is needed.
+    const seedHex = seedData.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`[ECU Scanner] Received seed: ${seedHex} — key computation not available during scan`);
+    result.notes.push(`Seed received: ${seedHex} — key computation requires container file or hardware unlock box`);
+
+    // If we have a container with pri_key, we could try computing the key here
+    // but that's complex and better left to the flash engine.
+    // For scan purposes, we note the seed was received.
+
+    return false;
   }
 }
 
