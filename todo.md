@@ -192,3 +192,14 @@
 - [x] Differentiates bridge disconnection vs ECU no-response — checks conn.getState() and attempts auto-reconnect if bridge drops
 - [x] Increased request timeout from 3s to 30s for flash operations (erase can take 10-30s)
 - [x] CAN addresses already correct for E41 (0x7E0/0x7E8) — extracted from flash plan commands
+
+## Bug Fix — Real Flash: Bridge Connects But ECU Still Not Responding
+- [x] Root cause: Bridge Python code likely doesn't handle 'uds_request' message type — only 'obd_request' is confirmed working (used by datalogger)
+- [x] Added auto-fallback in sendUDSRequest: tries native 'uds_request' first, on timeout/error switches to 'obd_request' transport
+- [x] sendUDSviaOBD wraps UDS service/subFunction/data in obd_request format (mode=service, pid=subFunction, data=payload)
+- [x] Handles both positive and negative (0x7F NRC) responses from OBD transport
+- [x] udsNativeSupported flag persists per connection — only one timeout penalty, then all calls use fast OBD path
+- [x] Verified A2L file: E41 uses XCP over CAN (0x7F0/0x7F1 at 1Mbps) for calibration/DAQ, but UDS (0x7E0/0x7E8) for flash
+- [x] All 57 flash integration tests pass
+- [ ] Needs live testing: verify TesterPresent gets ECU response via OBD transport fallback
+- [ ] Large payload handling (TransferData 4KB chunks) may need raw CAN fallback if OBD transport can't handle multi-frame ISO-TP

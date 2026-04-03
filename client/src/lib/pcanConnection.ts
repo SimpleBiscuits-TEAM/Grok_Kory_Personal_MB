@@ -948,34 +948,98 @@ export class PCANConnection {
    * Send a UDS service request.
    * Used for diagnostics, flash monitoring, and parameter read/write.
    */
+  /**
+   * Track whether bridge supports native uds_request type.
+   * Starts as true (optimistic), switches to false on first failure,
+   * then all subsequent calls use obd_request fallback.
+   */
+  private udsNativeSupported = true;
+
   async sendUDSRequest(
     service: number,
     subFunction?: number,
     data?: number[],
     targetAddress = 0x7E0
   ): Promise<UDSResponse | null> {
-    try {
-      const response = await this.sendRequest({
-        type: 'uds_request',
-        service,
-        sub_function: subFunction,
-        data: data || [],
-        target: targetAddress,
-      });
+    // Try native uds_request first (if bridge supports it)
+    if (this.udsNativeSupported) {
+      try {
+        const response = await this.sendRequest({
+          type: 'uds_request',
+          service,
+          sub_function: subFunction,
+          data: data || [],
+          target: targetAddress,
+        });
 
-      if (response.type === 'uds_response') {
-        const serviceInfo = UDS_SERVICES[service];
-        const isPositive = !response.nrc;
+        if (response.type === 'uds_response') {
+          return this.parseUDSResponse(service, subFunction, response);
+        }
+        if (response.type === 'error') {
+          // Bridge doesn't support uds_request — switch to fallback
+          this.udsNativeSupported = false;
+          this.emit('log', null, 'Bridge does not support native UDS — switching to OBD transport');
+        }
+      } catch {
+        // Timeout or error — try OBD fallback
+        this.udsNativeSupported = false;
+        this.emit('log', null, 'UDS native request timed out — switching to OBD transport');
+      }
+    }
+
+    // Fallback: send UDS via obd_request (mode = service, pid = subFunction)
+    // The bridge's OBD handler sends on 0x7E0 and listens on 0x7E8 with ISO-TP
+    return this.sendUDSviaOBD(service, subFunction, data, targetAddress);
+  }
+
+  private async sendUDSviaOBD(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress = 0x7E0
+  ): Promise<UDSResponse | null> {
+    try {
+      // Build the payload: [service, subFunction?, ...data]
+      const payload: number[] = [];
+      if (subFunction !== undefined) payload.push(subFunction);
+      if (data) payload.push(...data);
+
+      const response = await this.sendRequest({
+        type: 'obd_request',
+        mode: service,
+        pid: subFunction ?? 0x00,
+        data: payload,
+        target: targetAddress,
+      }) as unknown as BridgeOBDResponse;
+
+      // Parse the OBD response as a UDS response
+      // OBD response data contains the raw response bytes after the service+0x40 byte
+      if (response.data) {
+        const responseData = response.data;
+        // Check for negative response: first byte is 0x7F
+        if (responseData.length >= 2 && responseData[0] === 0x7F) {
+          const nrc = responseData.length >= 3 ? responseData[2] : 0;
+          return {
+            service,
+            serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+            subFunction,
+            data: responseData,
+            positiveResponse: false,
+            nrc,
+            nrcName: decodeNRC(nrc),
+            isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+            timestamp: Date.now(),
+          };
+        }
+
+        // Positive response
         return {
           service,
-          serviceName: serviceInfo?.name || `Service 0x${service.toString(16)}`,
+          serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
           subFunction,
-          did: (response.did as number) || undefined,
-          data: (response.data as number[]) || [],
-          positiveResponse: isPositive,
-          nrc: (response.nrc as number) || undefined,
-          nrcName: response.nrc ? decodeNRC(response.nrc as number) : undefined,
-          isFlashRelated: serviceInfo?.isFlashRelated || false,
+          data: responseData,
+          positiveResponse: true,
+          isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
           timestamp: Date.now(),
         };
       }
@@ -983,6 +1047,27 @@ export class PCANConnection {
     } catch {
       return null;
     }
+  }
+
+  private parseUDSResponse(
+    service: number,
+    subFunction: number | undefined,
+    response: BridgeMessage
+  ): UDSResponse {
+    const serviceInfo = UDS_SERVICES[service];
+    const isPositive = !response.nrc;
+    return {
+      service,
+      serviceName: serviceInfo?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      did: (response.did as number) || undefined,
+      data: (response.data as number[]) || [],
+      positiveResponse: isPositive,
+      nrc: (response.nrc as number) || undefined,
+      nrcName: response.nrc ? decodeNRC(response.nrc as number) : undefined,
+      isFlashRelated: serviceInfo?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
   }
 
   /**
