@@ -1700,6 +1700,34 @@ export class PCANFlashEngine {
         `RequestDownload (0x34) constructed: addr=0x${startAddrNum.toString(16).toUpperCase()} len=0x${blockLenNum.toString(16).toUpperCase()}`);
     }
 
+    // GMLAN: After bootloader reboot (A5 03), the bootloader starts in DEFAULT session.
+    // The broadcast sent 0x10 0x02 BEFORE A5 03, but the bootloader rebooted AFTER.
+    // Security access (0x27) works in default session, but RequestDownload (0x34) requires
+    // programming session. Send 0x10 0x02 on the physical address to put the bootloader
+    // into programming session before attempting RequestDownload.
+    if (this.isGMLAN) {
+      this.log('info', cmd.phase, 'Establishing programming session on bootloader (0x10 0x02)...');
+      try {
+        const sessResp = await this.conn.sendUDSRequest(
+          UDS.DIAGNOSTIC_SESSION_CONTROL, 0x02, undefined, this.txAddr
+        );
+        if (sessResp?.positiveResponse) {
+          this.log('success', cmd.phase, '✓ Programming session active on bootloader');
+        } else {
+          const sessNrc = sessResp?.nrc || 0;
+          // NRC 0x12 (subFunctionNotSupported) is OK — bootloader may already be in programming session
+          // NRC 0x22 (conditionsNotCorrect) is also OK — some bootloaders don't need explicit session
+          this.log('info', cmd.phase,
+            `Programming session response: NRC 0x${sessNrc.toString(16)} (${NRC_NAMES[sessNrc] || 'unknown'}) — continuing`);
+        }
+      } catch (sessErr) {
+        // Timeout is OK — bootloader may not respond to 0x10 but still accept 0x34
+        this.log('info', cmd.phase, 'Programming session timeout — bootloader may already be ready, continuing...');
+      }
+      // Small delay to let session settle
+      await this.delay(200);
+    }
+
     this.log('can_tx', cmd.phase,
       `TX: RequestDownload (0x34) — ${rc34Bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
     const dlResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);

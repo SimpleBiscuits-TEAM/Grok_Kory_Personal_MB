@@ -659,3 +659,13 @@
 - [x] Note: Zero seed (00 00 00 00 00) appeared once — ECU was already unlocked from PRE_CHECK, but key for zero seed got NRC 0x22
 - [x] Note: Key send still times out on first post-broadcast attempt (line 52) but succeeds on 3rd attempt (line 62)
 - [x] Added timeoutMs parameter to sendUDSRequest and sendUDSviaRawCAN (was hardcoded 5000ms)
+
+## Real Flash Attempt #13 — FAILED (Apr 3, 2026) — Log 388c5fc6
+- [x] Security GRANTED twice (PRE_CHECK + post-broadcast). Bootloader polling working (3 probes, 35s).
+- [x] Root cause: RequestDownload (34 00 00 0F FE) gets NRC 0x22 — ECU bootloader starts in DEFAULT session
+- [x] The broadcast sends 0x10 0x02 BEFORE A5 03, but bootloader reboots AFTER A5 03 — fresh session state
+- [x] Seed/key (0x27) works in default session, but RequestDownload (0x34) requires programming session
+- [x] Fix: Added 0x10 0x02 on physical address in executeBlockTransfer before RequestDownload for GMLAN
+- [x] Fix: Non-fatal — NRC 0x12/0x22/timeout all handled gracefully, continues to RequestDownload
+- [x] Note: Key-send delay fix still working — security granted on first key attempt (line 50)
+- [x] Note: GMLAN RequestDownload format (34 00 00 0F FE) matches BUSMASTER reference — format is correct
