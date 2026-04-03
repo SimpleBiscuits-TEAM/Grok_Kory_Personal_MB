@@ -180,11 +180,18 @@ export function generateFlashPlan(
   const isGMLAN = ecuConfig?.protocol === 'GMLAN';
 
   // Phase 1: PRE_CHECK
-  commands.push({
-    id: cmdId++, phase: 'PRE_CHECK', label: 'Verify ECU communication (TesterPresent)',
-    canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
-    expectedPositive: '7E', timeoutMs: 2000, retries: 3,
-  });
+  if (!isGMLAN) {
+    // Standard UDS: TesterPresent (0x3E 0x00) verifies ECU is alive
+    commands.push({
+      id: cmdId++, phase: 'PRE_CHECK', label: 'Verify ECU communication (TesterPresent)',
+      canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
+      expectedPositive: '7E', timeoutMs: 2000, retries: 3,
+    });
+  }
+  // GMLAN ECUs do NOT support USDT TesterPresent (0x3E 0x00) — they always
+  // return NRC 0x12 (subFunctionNotSupported). The correct keepalive is the
+  // UUDT broadcast (FE 01 3E on 0x101). ECU communication is verified via
+  // the seed request and DID reads in PRE_CHECK instead.
 
   // Phase 2: VOLTAGE_INIT
   commands.push({
@@ -405,10 +412,15 @@ export function generateFlashPlan(
   }
 
   // Phase 9: KEY_CYCLE — Required for ECU to accept new calibration
-  commands.push({
-    id: cmdId++, phase: 'KEY_CYCLE', label: 'ECU Reset before key cycle',
-    canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
-  });
+  if (!isGMLAN) {
+    // Standard UDS: ECU Reset (0x11 0x01) before key cycle
+    commands.push({
+      id: cmdId++, phase: 'KEY_CYCLE', label: 'ECU Reset before key cycle',
+      canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
+    });
+  }
+  // GMLAN E41: Service 0x11 returns NRC 0x11 (serviceNotSupported).
+  // The key cycle itself (ignition off/on) performs the reset.
   commands.push({
     id: cmdId++, phase: 'KEY_CYCLE', label: 'Key Off — Turn ignition OFF',
     timeoutMs: 60000, retries: 0,
@@ -436,11 +448,16 @@ export function generateFlashPlan(
       autoConfirm: true,
     },
   });
-  commands.push({
-    id: cmdId++, phase: 'KEY_CYCLE', label: 'Verify ECU communication after key cycle',
-    canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
-    expectedPositive: '7E', timeoutMs: 8000, retries: 5,
-  });
+  if (!isGMLAN) {
+    // Standard UDS: verify ECU is alive after key cycle via TesterPresent
+    commands.push({
+      id: cmdId++, phase: 'KEY_CYCLE', label: 'Verify ECU communication after key cycle',
+      canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
+      expectedPositive: '7E', timeoutMs: 8000, retries: 5,
+    });
+  }
+  // GMLAN: TesterPresent USDT is not supported (NRC 0x12). Post-key-cycle
+  // communication is verified by the session re-establishment in reEstablishSession().
 
   if (isGMLAN) {
     // GMLAN: Use service 0x1A with DID 0x90 to verify VIN/cal after key cycle
@@ -457,18 +474,23 @@ export function generateFlashPlan(
 
   // Phase 10: CLEANUP
   // E88 procedure post-flash: WAIT 250ms → ECU Reset (0x11 0x01) → ClearDTC (0x04) → ReturnToNormal
-  if (isGMLAN) {
-    // ECU Reset (USDT on physical address) — E88 procedure step 3100
+  // E88 procedure includes ECU Reset (0x11 0x01) in CLEANUP, but dry run logs
+  // #15-#16 confirmed E41 returns NRC 0x11 (serviceNotSupported) every time.
+  // ReturnToNormal (0x20 on 0x101) at the end of CLEANUP handles the reset.
+  // Keep the 250ms delay before ClearDTC to match E88 timing.
+  if (!isGMLAN) {
+    // Standard UDS: ECU Reset in CLEANUP
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'ECU Reset (0x11 0x01)',
       canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
-      delayBeforeMs: 250,   // E88: WAIT 250ms before ECU Reset
+      delayBeforeMs: 250,
     });
   }
   if (isGMLAN) {
     // GMLAN uses ClearDiagnosticInformation service 0x04 (not UDS 0x14)
     // E88 procedure: CAN_SEND_USDT (0x7DF, DATA=04, post_delay=1000ms)
     // Sent on UDS functional address 0x7DF (not GMLAN 0x101)
+    // 250ms delay before ClearDTC to maintain E88 timing (was after ECU Reset)
     commands.push({
       id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (GMLAN 0x04, Functional 0x7DF)',
       canTx: `0x7DF 01 04`, expectedPositive: '44', timeoutMs: 8000, retries: 3,
@@ -667,11 +689,16 @@ export function advanceSimulator(
     next.commandTickCount = ticksOnCommand + 1;
 
     if (ticksOnCommand === 0) {
-      // First tick: log the CAN TX
+      // First tick: log the CAN TX (or info if no CAN data)
       if (cmd.canTx) {
         next.log.push({
           timestamp: next.elapsedMs, phase: cmd.phase, type: 'can_tx',
           message: `TX: ${cmd.canTx}`,
+        });
+      } else {
+        next.log.push({
+          timestamp: next.elapsedMs, phase: cmd.phase, type: 'info',
+          message: `${cmd.label}`,
         });
       }
       next.statusMessage = `${cmd.label}...`;

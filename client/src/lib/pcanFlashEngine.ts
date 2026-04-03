@@ -132,6 +132,7 @@ export class PCANFlashEngine {
   private startTime = 0;
   private dryRun: boolean;
   private lastSecurityAccessGranted = false;
+  private seedReceivedInPreCheck = false;
 
   // ECU addressing from the plan's first command
   private txAddr: number;
@@ -646,6 +647,7 @@ export class PCANFlashEngine {
             }
             const seedBytes = new Uint8Array(seedData);
             this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
+            this.seedReceivedInPreCheck = true;
 
             // ── Check known seed→key lookup table first ──
             const PRECHECK_KNOWN_PAIRS: Array<{ seed: number[]; key: number[]; label: string }> = [
@@ -915,9 +917,18 @@ export class PCANFlashEngine {
         }
 
         // Also try UDS ReadDID as fallback — some GM ECUs support both protocols
-        if (!gotAnyResponse) {
-          this.log('info', 'PRE_CHECK', 'No GMLAN response — trying UDS ReadDID (0x22) as fallback...');
-          gotAnyResponse = await this.tryUDSReadDIDs();
+        // BUT skip if we already got a seed response in PRE_CHECK — the ECU is alive,
+        // it just doesn't respond to GMLAN DIDs without security unlock.
+        // Log #16 showed this fallback adding ~47s of wasted timeouts.
+        if (!gotAnyResponse && !this.lastSecurityAccessGranted) {
+          // Only try UDS fallback if we never got ANY response (not even a seed)
+          if (!this.seedReceivedInPreCheck) {
+            this.log('info', 'PRE_CHECK', 'No GMLAN response — trying UDS ReadDID (0x22) as fallback...');
+            gotAnyResponse = await this.tryUDSReadDIDs();
+          } else {
+            this.log('info', 'PRE_CHECK', 'No GMLAN DID response but seed was received — ECU is alive, skipping UDS fallback (DIDs likely need security unlock)');
+            gotAnyResponse = true; // seed response proves ECU is alive
+          }
         }
 
       } else {
@@ -926,7 +937,9 @@ export class PCANFlashEngine {
       }
 
       // Also test TesterPresent regardless of protocol
-      if (!gotAnyResponse) {
+      // Skip for GMLAN — USDT TesterPresent (0x3E 0x00) always returns NRC 0x12
+      // (subFunctionNotSupported). UUDT broadcast is the correct keepalive.
+      if (!gotAnyResponse && !this.isGMLAN) {
         this.log('info', 'PRE_CHECK', 'Trying TesterPresent (0x3E 0x00)...');
         try {
           const tpResponse = await this.conn.sendUDSRequest(

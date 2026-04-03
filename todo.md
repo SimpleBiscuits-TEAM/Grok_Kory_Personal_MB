@@ -508,3 +508,9 @@
 - [x] SESSION_OPEN timing verified identical between terminated and unterminated CAN
 - [x] TesterPresent (0x3E 0x00) confirmed unsupported on GMLAN E41 — NRC 0x12 is expected, UUDT broadcast is the correct keepalive
 - [x] DID 0xC1, 0x90, 0xA0 timeout even with termination — may require security unlock first
+
+## GMLAN Quick Optimizations (Apr 3, 2026)
+- [x] Remove USDT TesterPresent verify command for GMLAN ECUs (always times out, UUDT broadcast is the correct keepalive) — saves ~25s
+- [x] Skip ECU Reset (0x11 0x01) for GMLAN in CLEANUP (NRC 0x11 serviceNotSupported, ReturnToNormal 0x20 already handles reset) — saves ~12s
+- [x] Skip ECU Reset (0x11 0x01) for GMLAN in KEY_CYCLE pre-reset (same reason) — saves ~12s
+- [x] Reduce PRE_CHECK UDS fallback DID scan when GMLAN seed was received (ECU is alive, no need to try UDS DIDs) — saves ~20s
