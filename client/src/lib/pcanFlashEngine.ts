@@ -352,6 +352,18 @@ export class PCANFlashEngine {
     let sessionOk = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Check WebSocket before each attempt — bridge can drop during key-off period
+      // Log #14 showed attempts 2-5 all failing with "WebSocket not connected" because
+      // the bridge dropped during key-off and wasn't reconnected inside the loop.
+      if (!this.isWebSocketOpen()) {
+        this.log('info', 'KEY_CYCLE', `Session attempt ${attempt}: WebSocket down, reconnecting...`);
+        const ok = await this.reconnectBridge('KEY_CYCLE');
+        if (!ok && !this.dryRun) {
+          this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: bridge reconnect failed`);
+          await this.delay(1500);
+          continue;
+        }
+      }
       try {
         if (this.isGMLAN) {
           // Try programming session (0x10 0x02) — confirmed working from dry runs

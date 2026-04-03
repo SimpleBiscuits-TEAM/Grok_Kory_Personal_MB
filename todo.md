@@ -501,3 +501,10 @@
 - [x] ClearDTC GMLAN (0x04 on 0x7DF) got positive response from ECU
 - [x] Seed 57 09 FD 6C 06 received after key cycle — consistent with log #11
 - [x] Dummy key rejected with NRC 0x35 (invalidKey) — expected, needs pri_key from container for AES computation
+
+## Flash Log #14 Analysis (Apr 3, 2026) — 120 Ohm Isolated CAN
+- [x] 120 ohm termination enables ECU communication: seed request, DID 0xB0, programming session all respond
+- [x] Add reconnect check inside reEstablishSession retry loop — log #14 showed attempts 2-5 failing with "WebSocket not connected" because bridge dropped during key-off
+- [x] SESSION_OPEN timing verified identical between terminated and unterminated CAN
+- [x] TesterPresent (0x3E 0x00) confirmed unsupported on GMLAN E41 — NRC 0x12 is expected, UUDT broadcast is the correct keepalive
+- [x] DID 0xC1, 0x90, 0xA0 timeout even with termination — may require security unlock first
