@@ -1675,14 +1675,47 @@ export class PCANFlashEngine {
     
     if (!dlResponse || !dlResponse.positiveResponse) {
       const nrc = dlResponse?.nrc || 0;
-      // NRC 0x78 = responsePending — wait and retry (confirmed from SPS log: ECU sends 0x78 then 0x74)
+      // NRC 0x78 = responsePending — ECU is erasing flash internally.
+      // The erase can take 10-30s on first block. Poll until positive response or timeout.
+      // Confirmed from busmaster_analysis.md: "NRC 0x78 (ResponsePending) on first RequestDownload
+      // is normal — ECU is erasing flash"
       if (nrc === 0x78) {
-        this.log('info', cmd.phase, 'NRC 0x78 — ECU processing RequestDownload, waiting...');
-        await this.delay(3000);
-        // Retry once
-        const retryResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);
-        if (!retryResponse || !retryResponse.positiveResponse) {
-          throw new Error(`RequestDownload failed after retry: NRC 0x${(retryResponse?.nrc || 0).toString(16)} (${NRC_NAMES[retryResponse?.nrc || 0] || 'unknown'})`);
+        this.log('info', cmd.phase, 'NRC 0x78 — ECU erasing flash (ResponsePending). Polling for completion...');
+        const NRC78_POLL_INTERVAL = 2000; // 2s between polls
+        const NRC78_MAX_WAIT = 60000;     // 60s total budget for erase
+        const nrc78Start = Date.now();
+        let eraseComplete = false;
+        while (Date.now() - nrc78Start < NRC78_MAX_WAIT) {
+          await this.delay(NRC78_POLL_INTERVAL);
+          const elapsed = ((Date.now() - nrc78Start) / 1000).toFixed(0);
+          this.log('info', cmd.phase, `Waiting for erase completion... (${elapsed}s)`);
+          try {
+            // Re-send the same RequestDownload — ECU will respond 0x78 if still erasing, 0x74 when done
+            const pollResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);
+            if (pollResponse?.positiveResponse) {
+              this.log('success', cmd.phase, `Erase complete after ${elapsed}s — RequestDownload accepted`);
+              eraseComplete = true;
+              break;
+            }
+            const pollNrc = pollResponse?.nrc || 0;
+            if (pollNrc === 0x78) {
+              // Still erasing — continue polling
+              continue;
+            }
+            // Different NRC — fatal
+            throw new Error(`RequestDownload failed during erase poll: NRC 0x${pollNrc.toString(16)} (${NRC_NAMES[pollNrc] || 'unknown'})`);
+          } catch (pollErr) {
+            // Timeout during poll — ECU may still be erasing, continue
+            const msg = pollErr instanceof Error ? pollErr.message : String(pollErr);
+            if (msg.includes('Timeout')) {
+              this.log('info', cmd.phase, `Poll timeout (${elapsed}s) — ECU may still be erasing, continuing...`);
+              continue;
+            }
+            throw pollErr;
+          }
+        }
+        if (!eraseComplete) {
+          throw new Error(`RequestDownload erase timeout — ECU did not respond with positive after ${NRC78_MAX_WAIT / 1000}s`);
         }
       } else {
         throw new Error(`RequestDownload failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);

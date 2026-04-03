@@ -358,10 +358,13 @@ export function generateFlashPlan(
       block.block_id, block.start_adresse || '0', blockType, ecuType, filteredBlocks.length,
     );
 
-    // Erase — GMLAN ECUs always require erase before download.
-    // For non-GMLAN, respect the container's erase field.
-    const needsErase = isGMLAN || (block.erase !== '0' && block.erase !== undefined);
-    if (needsErase) {
+    // Erase handling:
+    // GMLAN ECUs (E41, E88, etc.): NO separate erase command (0x31). The erase is
+    // IMPLICIT in RequestDownload (0x34) — the ECU responds with NRC 0x78 (ResponsePending)
+    // while erasing internally, then 0x74 when ready. Service 0x31 returns NRC 0x11
+    // (serviceNotSupported) on E41. Confirmed by busmaster_analysis.md and shortflash_analysis.md.
+    // Non-GMLAN ECUs: respect the container's erase field.
+    if (!isGMLAN && block.erase !== '0' && block.erase !== undefined) {
       commands.push({
         id: cmdId++, phase: 'PRE_FLASH', label: `Erase — ${sectionName}`,
         canTx: `${txHex} 04 31 01 FF 00`,
@@ -401,9 +404,12 @@ export function generateFlashPlan(
   }
 
   // Phase 7: POST_FLASH
+  // GMLAN ECUs: Service 0x31 is not supported (NRC 0x11 on E41). Made nonFatal for GMLAN
+  // so the flash continues to VERIFICATION even if this command fails.
   commands.push({
     id: cmdId++, phase: 'POST_FLASH', label: 'Routine Control — Check Programming Dependencies',
     canTx: `${txHex} 04 31 01 FF 01`, expectedPositive: '71', timeoutMs: 10000, retries: 2,
+    nonFatal: isGMLAN,  // GMLAN: 0x31 not supported, safe to skip
   });
 
   // Phase 8: VERIFICATION

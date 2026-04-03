@@ -175,12 +175,12 @@ export const ECU_DATABASE: Record<string, EcuConfig> = {
   E41: {
     ecuType: 'E41', name: 'E41 (L5P Duramax)',
     oem: 'GM', controllerType: 'ecu', protocol: 'GMLAN',
-    xferSize: 0xFF8, canSpeed: 500, seedLevel: 0x01,
+    xferSize: 0xFFE, canSpeed: 500, seedLevel: 0x01,  // xferSize: 0xFFE confirmed by BUSMASTER (34 00 00 0F FE)
     txAddr: 0x7E0, rxAddr: 0x7E8, txPrefix: null, rxPrefix: null,
     saeSupported: true, saeReqAdd: null, fastMode: true,
     saeStdBitmasks: { vsb0: '0x087B0000', vsb20: '0x20032000', vsb40: '0x04800000', vsb60: '0x00000000' },
     patchNecessary: true, patchSequence: GM_PATCH_SEQUENCE, flashSequence: GM_FLASH_SEQUENCE,
-    usesTransferExit: false,
+    usesTransferExit: true,  // BUSMASTER analysis confirms TransferExit 0x37 after each block
   },
   E88: {
     ecuType: 'E88', name: 'GM-DELCO E88',

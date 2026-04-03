@@ -617,3 +617,15 @@
 - [x] Fix: PriRC timeout=1000ms, retries=0 (single attempt, nonFatal)
 - [x] Fix: Erase always generated for GMLAN blocks (needsErase = isGMLAN || erase field check)
 - [x] Fix: executeBlockTransfer now constructs 0x34 from start_adresse/block_length when rc34 missing
+
+## Real Flash Attempt #9 — FAILED (Apr 3, 2026) — Log 4fb2cd46
+- [x] Root cause: Erase command (0x31 01 FF 00) returns NRC 0x11 — E41 does NOT support service 0x31
+- [x] E41 erase is IMPLICIT in RequestDownload (0x34) — NRC 0x78 = ECU erasing internally (confirmed by busmaster_analysis.md)
+- [x] Fix: Removed forced erase (0x31) for GMLAN ECUs — only non-GMLAN ECUs get 0x31 now
+- [x] Fix: POST_FLASH Routine Control (0x31 01 FF 01) now nonFatal for GMLAN
+- [x] Fix: ECU database E41 usesTransferExit changed to true (BUSMASTER confirms 0x37 after each block)
+- [x] Fix: ECU database E41 xferSize changed to 0xFFE (matches BUSMASTER 34 00 00 0F FE)
+- [x] PriRC (34 00 00 0F FE) timed out — expected for E41 (E88-specific), correctly nonFatal
+- [x] Bootloader polling worked: 3 probes, ECU responded at ~58s, security GRANTED
+- [x] All fixes derived from internal documents (busmaster_analysis.md, shortflash_analysis.md, Knox)
+- [x] Improved NRC 0x78 handling — replaced single 3s retry with polling loop (2s interval, 60s budget)
