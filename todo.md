@@ -455,3 +455,28 @@
 - [x] Apply BUSMASTER-proven delays: 1000ms before major transitions, 50ms between rapid-fire commands
 - [x] All SESSION_OPEN broadcast commands use FE prefix (FE 01 20, FE 02 1A B0, FE 02 10 02, etc.)
 - [x] CLEANUP ReturnToNormal uses UUDT format (FE 01 20 on 0x101)
+
+## Dry Run #11 Analysis (Apr 3, 2026)
+- [x] Fix NRC 0x37 handling: 7F 27 37 is NOT a seed — it's "requiredTimeDelayNotExpired". Must wait 10s and retry security access
+- [x] Update keepalive log message to show GMLAN UUDT format instead of UDS format
+- [ ] Bench ECU sends seed 57 09 FD 6C 06 (not A0 9A 34 9B 06 from BUSMASTER) — need correct key for this seed
+- [ ] DID 0x90 consistently times out on this ECU — consider making it optional/non-fatal in non-dry-run mode too
+
+## E88 Flash Procedure Alignment (E41 uses same init sequence)
+- [x] Update orchestrator SESSION_OPEN to match E88 proven sequence (exact order, timing, two A5 commands)
+- [x] Start TesterPresent cyclic EARLY — right after ReturnToNormal, before other broadcast commands
+- [x] Add 0x34 PriRC (RequestDownload 3400000FFE) as USDT on 0x7E0 before first block transfer
+- [x] Fix ClearDTC to use service 0x04 on 0x7DF (GMLAN) instead of 0x14
+- [x] Handle NRC 0x37 (requiredTimeDelayNotExpired) with 10s wait and retry in security access
+- [x] Report Programmed State (A2) needs 2000ms post delay (longest in sequence)
+- [x] Fix isGmlan case sensitivity bug in startKeepalive (protocol is 'GMLAN', not 'gmlan')
+- [x] Fix E41 security profile: protocol GMLAN with seedSubFunction 0x01/keySubFunction 0x02 (was UDS 0x09/0x0A)
+- [x] Fix txAddr extraction: skip functional broadcast addresses (0x101, 0x7DF) to find physical address
+- [x] Add CLEAR_DTC_GMLAN (0x04) to UDS service constants
+- [x] Add ClearDTC GMLAN to non-fatal NRC handling (functional broadcast)
+- [x] Add ECU Reset (0x11 0x01) before ClearDTC in CLEANUP phase (E88 procedure)
+- [x] Add NRC 0x36 (exceededNumberOfAttempts) handling alongside 0x37 in all security access locations
+- [x] DisableNormalCommunication delay updated to 1000ms (was 50ms)
+- [x] ProgrammingMode Complete delay updated to 500ms (was 50ms)
+- [x] ReadDID 0xB0 delay updated to 250ms (was 1000ms)
+- [x] DiagnosticSessionControl delay updated to 250ms (was 50ms)

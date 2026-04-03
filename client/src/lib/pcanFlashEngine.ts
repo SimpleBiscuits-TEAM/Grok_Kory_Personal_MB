@@ -66,6 +66,8 @@ const UDS = {
   DIAGNOSTIC_SESSION_CONTROL: 0x10,
   ECU_RESET: 0x11,
   CLEAR_DTC: 0x14,
+  // GMLAN ClearDiagnosticInformation (GM-specific, uses service 0x04 instead of UDS 0x14)
+  CLEAR_DTC_GMLAN: 0x04,
   // GMLAN ReadDataByIdentifier (GM-specific, uses 1-byte DIDs like 0x90, 0xB0, 0xC1)
   READ_DID_GMLAN: 0x1A,
   RETURN_TO_NORMAL: 0x20,
@@ -110,6 +112,12 @@ const NRC_NAMES: Record<number, string> = {
   0x7E: 'subFunctionNotSupportedInActiveSession',
   0x7F: 'serviceNotSupportedInActiveSession',
 };
+
+// GMLAN positive response bytes (service ID + 0x40)
+// 0x44 = positive response to ClearDiagnosticInformation (0x04)
+// 0x60 = positive response to ReturnToNormal (0x20)
+// 0xE2 = positive response to ReportProgrammedState (0xA2)
+// 0xE5 = positive response to ProgrammingMode (0xA5)
 
 // ── Flash Engine Class ─────────────────────────────────────────────────────
 
@@ -157,7 +165,12 @@ export class PCANFlashEngine {
     this.state = createSimulatorState(config.plan);
 
     // Extract CAN addresses from the plan commands
-    const txCmd = config.plan.commands.find(c => c.canTx);
+    // Find the physical TX address (skip functional broadcast addresses 0x101, 0x7DF)
+    const txCmd = config.plan.commands.find(c => {
+      if (!c.canTx) return false;
+      const addr = parseInt(c.canTx.split(' ')[0], 16);
+      return addr !== 0x101 && addr !== 0x7DF; // Skip functional broadcast
+    });
     const rxCmd = config.plan.commands.find(c => c.canRx);
     this.txAddr = txCmd ? parseInt(txCmd.canTx!.split(' ')[0], 16) : 0x7E0;
     this.rxAddr = rxCmd ? parseInt(rxCmd.canRx!.split(' ')[0], 16) : 0x7E8;
@@ -193,7 +206,7 @@ export class PCANFlashEngine {
     if (this.keepaliveActive) return;
     this.keepaliveActive = true;
 
-    const isGmlan = this.ecuProtocol === 'gmlan';
+    const isGmlan = this.isGMLAN; // Use pre-computed flag (protocol is 'GMLAN', not 'gmlan')
     const intervalMs = isGmlan ? 500 : 2000;
     const formatDesc = isGmlan ? 'UUDT FE 01 3E on 0x101 every 500ms' : '0x3E 0x80 every 2s';
     this.log('info', this.state.currentPhase, `💓 TesterPresent keepalive started (${formatDesc})`);
@@ -323,7 +336,18 @@ export class PCANFlashEngine {
     if (this.isGMLAN && sessionOk) {
       await this.delay(1000);
       try {
-        const seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+        // Retry loop for NRC 0x37 (requiredTimeDelayNotExpired) — security lockout after boot
+        let seedResp: UDSResponse | null = null;
+        for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
+          seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+          if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
+            const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
+            this.log('warning', 'KEY_CYCLE', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout (retry ${lockoutRetry + 1}/3)`);
+            await this.delay(10000);
+            continue;
+          }
+          break;
+        }
         if (seedResp && seedResp.positiveResponse) {
           let seedData = seedResp.data || [];
           if (seedData.length > 0 && seedData[0] === 0x01) {
@@ -530,7 +554,18 @@ export class PCANFlashEngine {
         try {
           await this.delay(200);
           // Request seed (level 0x01 — confirmed working from dry run log)
-          const seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+          // Retry loop for NRC 0x37 (requiredTimeDelayNotExpired) — security lockout timer
+          let seedResp: UDSResponse | null = null;
+          for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
+            seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+            if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
+              const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
+              this.log('warning', 'PRE_CHECK', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout to expire (retry ${lockoutRetry + 1}/3)`);
+              await this.delay(10000);
+              continue;
+            }
+            break;
+          }
           if (seedResp && seedResp.positiveResponse) {
             // Extract seed bytes (strip sub-function echo if present)
             let seedData = seedResp.data || [];
@@ -613,8 +648,14 @@ export class PCANFlashEngine {
         }
         await this.delay(200);
 
-        // Start TesterPresent keepalive after session + security are established
-        this.startKeepalive();
+        // NOTE: For GMLAN, TesterPresent keepalive is now started EARLY by the
+        // TesterPresent UUDT command in SESSION_OPEN (per E88 procedure).
+        // The startKeepalive() call in executeCommand detects the FE 01 3E UUDT
+        // and starts the cyclic timer. No need to start it here.
+        // For safety, start it here only if it hasn't been started yet.
+        if (!this.keepaliveActive) {
+          this.startKeepalive();
+        }
       } else {
         this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
         this.state.statusMessage = 'Switching to extended diagnostic session...';
@@ -1014,6 +1055,19 @@ export class PCANFlashEngine {
     // UUDT messages (GMLAN functional broadcast): fire-and-forget, no response expected.
     // Send the raw CAN frame directly and return immediately.
     if (isUUDT) {
+      // Special handling: if this is a TesterPresent UUDT (FE 01 3E), start the
+      // cyclic keepalive timer. Per E88 procedure, TesterPresent cyclic starts
+      // EARLY in the SESSION_OPEN sequence (right after ReturnToNormal) and runs
+      // continuously throughout the entire flash operation.
+      const isTesterPresentUUDT = serviceId === UDS.TESTER_PRESENT;
+      if (isTesterPresentUUDT && !this.keepaliveActive) {
+        this.startKeepalive();
+        this.log('success', cmd.phase, `\u2713 ${cmd.label} — cyclic keepalive started (500ms interval)`);
+        this.state.statusMessage = cmd.label;
+        this.emitState();
+        return;
+      }
+
       try {
         const ws = (this.conn as any).ws as WebSocket | null;
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1053,11 +1107,11 @@ export class PCANFlashEngine {
 
         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
           response = await this.handleSecurityAccess(cmd, subFunction);
-        } else if (serviceId === UDS.CLEAR_DTC) {
-          // GMLAN: use physical addressing (functional 0x7DF times out on bench/GMLAN ECUs)
-          // Standard UDS: use functional addressing (0x7DF) for broadcast
-          const clearAddr = this.isGMLAN ? this.txAddr : 0x7DF;
-          response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, clearAddr);
+        } else if (serviceId === UDS.CLEAR_DTC || serviceId === UDS.CLEAR_DTC_GMLAN) {
+          // GMLAN: service 0x04 on functional 0x7DF (per E88 procedure)
+          // Standard UDS: service 0x14 on functional 0x7DF
+          // The orchestrator now sets the correct address in canTx
+          response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, cmdTxAddr);
         } else if (isFunctionalBroadcast) {
           // Functional broadcast (0x101 or 0x7DF): send on broadcast address
           // Accept any response — multiple ECUs may reply, we just need one positive
@@ -1096,10 +1150,13 @@ export class PCANFlashEngine {
           const isTesterPresent = serviceId === UDS.TESTER_PRESENT;
           const isDiagSession = serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL;
           const isReadDID = serviceId === UDS.READ_DID || serviceId === UDS.READ_DID_GMLAN;
+          const isClearDTC = serviceId === UDS.CLEAR_DTC || serviceId === UDS.CLEAR_DTC_GMLAN;
           // Functional broadcast: NRC 0x12 (subFunctionNotSupported) or 0x11 (serviceNotSupported)
           // is expected — some ECUs on the bus don't support the service. Treat as success.
           const isBroadcastNRC = isFunctionalBroadcast && (nrc === 0x12 || nrc === 0x11 || nrc === 0x7E);
-          const isNonFatalNRC = isTesterPresent || isDiagSession || isReadDID || isBroadcastNRC || this.dryRun;
+          // ClearDTC on functional broadcast: NRC is non-fatal (some ECUs may not support it)
+          const isClearDTCBroadcast = isClearDTC && isFunctionalBroadcast;
+          const isNonFatalNRC = isTesterPresent || isDiagSession || isReadDID || isBroadcastNRC || isClearDTCBroadcast || this.dryRun;
           
           if (isNonFatalNRC) {
             this.log('success', cmd.phase,
@@ -1169,10 +1226,41 @@ export class PCANFlashEngine {
     const isRequestSeed = (subFunction % 2) === 1;
 
     if (isRequestSeed) {
-      // Step 1: Request seed from ECU
-      const seedResponse = await this.conn.sendUDSRequest(
-        UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
-      );
+      // Step 1: Request seed from ECU (with NRC 0x37 lockout retry)
+      // NRC 0x37 = requiredTimeDelayNotExpired — ECU has a security lockout timer
+      // (typically 10 seconds). We wait and retry up to 3 times.
+      let seedResponse: UDSResponse | null = null;
+      const maxLockoutRetries = 3;
+      for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
+        seedResponse = await this.conn.sendUDSRequest(
+          UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
+        );
+
+        if (!seedResponse) break; // No response at all
+
+        // Check for NRC 0x37 (requiredTimeDelayNotExpired)
+        if (!seedResponse.positiveResponse && seedResponse.nrc === 0x37) {
+          if (lockoutAttempt < maxLockoutRetries) {
+            this.log('warning', cmd.phase,
+              `NRC 0x37 — Security lockout timer active. Waiting 10s before retry ${lockoutAttempt + 1}/${maxLockoutRetries}...`);
+            await this.delay(10000); // Wait 10 seconds for lockout to expire
+            continue;
+          } else {
+            this.log('error', cmd.phase, 'NRC 0x37 — Security lockout persists after 3 retries (30s total). ECU may need power cycle.');
+            return seedResponse;
+          }
+        }
+
+        // Check for NRC 0x36 (exceededNumberOfAttempts) — also a lockout condition
+        if (!seedResponse.positiveResponse && seedResponse.nrc === 0x36) {
+          this.log('warning', cmd.phase,
+            'NRC 0x36 — Exceeded number of security attempts. Waiting 10s...');
+          await this.delay(10000);
+          continue;
+        }
+
+        break; // Got a real response (positive or other NRC)
+      }
 
       if (!seedResponse) {
         return seedResponse;

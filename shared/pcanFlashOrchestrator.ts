@@ -196,57 +196,70 @@ export function generateFlashPlan(
   // Proven BUSMASTER sequence: functional broadcast on 0x101 to prepare all ECUs,
   // then physical session switch. This matches the VOP3 device and SPS tool behavior.
   if (isGMLAN) {
+    // ═══ E88/E41 Proven Flash Procedure (FlashprocedurE88_v1.4) ═══
+    // Exact sequence, timing, and UUDT format validated against working flash tool.
+    // All broadcast commands use UUDT format (FE prefix) on functional address 0x101.
+    // TesterPresent cyclic starts EARLY (step 2) and runs throughout.
+    // ECU does NOT respond to UUDT messages — fire-and-forget.
+
     // Step 1: ReturnToNormal (functional broadcast — resets all ECUs to known state)
-    // BUSMASTER timing: 1000ms gaps before major transitions, 50ms between rapid-fire commands
+    // E88 procedure: post_delay=1000ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ReturnToNormal — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 2,
     });
-    // Step 2: ReadDID 0xB0 (functional — read SW versions from all ECUs)
+    // Step 2: Start TesterPresent cyclic (UUDT FE 01 3E on 0x101, 500ms interval)
+    // E88 procedure: CAN_CYCLIC_MSG_UUDT starts HERE — right after ReturnToNormal,
+    // BEFORE the other broadcast commands. The flash engine handles the cyclic sending;
+    // this command signals the engine to start the keepalive timer.
+    // NOTE: This is a UUDT command — no response expected. The engine detects the FE
+    // prefix and starts the cyclic keepalive instead of waiting for a response.
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Start TesterPresent Cyclic (UUDT, 500ms)',
+      canTx: `0x101 FE 01 3E`, expectedPositive: '7E', timeoutMs: 3000, retries: 1,
+      delayBeforeMs: 1000,  // E88: post_delay=1000ms after ReturnToNormal
+    });
+    // Step 3: ReadDID 0xB0 (functional — read SW versions from all ECUs)
+    // E88 procedure: post_delay=250ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Read SW Version 0xB0 — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 02 1A B0`, expectedPositive: '5A', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 1000,  // BUSMASTER: 1002ms gap after ReturnToNormal
+      delayBeforeMs: 250,   // E88: post_delay=250ms
     });
-    // Step 3: DiagnosticSessionControl 0x02 (functional — put all ECUs in programming session)
+    // Step 4: DiagnosticSessionControl 0x02 (functional — put all ECUs in programming session)
+    // E88 procedure: post_delay=250ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Programming Session — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 02 10 02`, expectedPositive: '50', timeoutMs: 5000, retries: 3,
-      delayBeforeMs: 50,    // BUSMASTER: 52ms rapid-fire
+      delayBeforeMs: 250,   // E88: post_delay=250ms
     });
-    // Step 4: DisableNormalCommunication (functional — silence the bus)
+    // Step 5: DisableNormalCommunication (functional — silence the bus)
+    // E88 procedure: post_delay=1000ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Disable Normal Communication (Functional 0x101)',
       canTx: `0x101 FE 01 28`, expectedPositive: '68', timeoutMs: 3000, retries: 2,
-      delayBeforeMs: 50,    // BUSMASTER: 50ms rapid-fire
+      delayBeforeMs: 1000,  // E88: post_delay=1000ms
     });
-    // Step 5: ReportProgrammedState (functional)
+    // Step 6: ReportProgrammedState (functional)
+    // E88 procedure: post_delay=2000ms — LONGEST delay in the sequence
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Report Programmed State (Functional 0x101)',
       canTx: `0x101 FE 01 A2`, expectedPositive: 'E2', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 50,    // BUSMASTER: 51ms rapid-fire
+      delayBeforeMs: 2000,  // E88: post_delay=2000ms (longest in sequence)
     });
-    // Step 6: ProgrammingMode Enable (functional)
+    // Step 7: ProgrammingMode Enable (functional)
+    // E88 procedure: post_delay=1000ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Enable (Functional 0x101)',
       canTx: `0x101 FE 02 A5 01`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 1000,  // BUSMASTER: 1003ms gap before ProgrammingMode
+      delayBeforeMs: 1000,  // E88: post_delay=1000ms
     });
-    // Step 7: ProgrammingMode Complete (functional)
+    // Step 8: ProgrammingMode Complete (functional)
+    // E88 procedure: post_delay=500ms
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 50,    // BUSMASTER: 50ms after Enable
-    });
-    // Step 8: TesterPresent keepalive wait (GMLAN UUDT format: FE 01 3E on 0x101)
-    // The flash engine's keepalive sends these automatically at 500ms intervals.
-    // This command just adds the 1000ms delay before security access begins,
-    // matching the BUSMASTER timing (1000ms gap ProgrammingMode→first TesterPresent).
-    // The keepalive will run continuously alongside all subsequent commands.
-    commands.push({
-      id: cmdId++, phase: 'SESSION_OPEN', label: 'TesterPresent Keepalive Wait (3.5s)',
-      canTx: `0x101 FE 01 3E`, expectedPositive: '7E', timeoutMs: 5000, retries: 1,
-      delayBeforeMs: 1000,  // BUSMASTER: 1000ms gap after ProgrammingMode Complete
+      delayBeforeMs: 500,   // E88: post_delay=500ms
     });
   } else {
     // Standard UDS: simple session switch on physical address
@@ -284,6 +297,20 @@ export function generateFlashPlan(
   if (flashMode === 'CALIBRATION' && filteredBlocks.length === 0 && blocks.length > 0) {
     filteredBlocks = blocks;
     warnings.push('All blocks marked as OS — flashing entire container in calibration mode');
+  }
+
+  // ═══ GM PriRC: Initial RequestDownload (0x34) before first block ═══
+  // E88 procedure: CAN_SEND_USDT (0x7E0, 3400000FFE, with_response=1, timeout=250ms)
+  // This is a "custom GM PriRC" — a RequestDownload sent as USDT on physical address
+  // BEFORE the block loop begins. It prepares the ECU for the upcoming block transfers.
+  // Data: 34 00 00 0F FE = service 0x34, addressAndLengthFormatIdentifier=0x00,
+  //       memoryAddress=0x000F, memorySize=0xFE (or interpreted as GM-specific init)
+  if (isGMLAN) {
+    commands.push({
+      id: cmdId++, phase: 'PRE_FLASH', label: 'GM PriRC — Initial RequestDownload (0x34)',
+      canTx: `${txHex} 05 34 00 00 0F FE`, expectedPositive: '74', timeoutMs: 5000, retries: 2,
+      delayBeforeMs: 250,   // E88: post_delay=250ms
+    });
   }
 
   let totalBytes = 0;
@@ -429,12 +456,23 @@ export function generateFlashPlan(
   }
 
   // Phase 10: CLEANUP
-  // Clear DTCs: use physical addressing for GMLAN (functional 0x7DF often times out),
-  // use functional addressing for standard UDS
+  // E88 procedure post-flash: WAIT 250ms → ECU Reset (0x11 0x01) → ClearDTC (0x04) → ReturnToNormal
   if (isGMLAN) {
+    // ECU Reset (USDT on physical address) — E88 procedure step 3100
     commands.push({
-      id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Physical Address)',
-      canTx: `${txHex} 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 8000, retries: 3,
+      id: cmdId++, phase: 'CLEANUP', label: 'ECU Reset (0x11 0x01)',
+      canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
+      delayBeforeMs: 250,   // E88: WAIT 250ms before ECU Reset
+    });
+  }
+  if (isGMLAN) {
+    // GMLAN uses ClearDiagnosticInformation service 0x04 (not UDS 0x14)
+    // E88 procedure: CAN_SEND_USDT (0x7DF, DATA=04, post_delay=1000ms)
+    // Sent on UDS functional address 0x7DF (not GMLAN 0x101)
+    commands.push({
+      id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (GMLAN 0x04, Functional 0x7DF)',
+      canTx: `0x7DF 01 04`, expectedPositive: '44', timeoutMs: 8000, retries: 3,
+      delayBeforeMs: 1000,  // E88: post_delay=1000ms
     });
   } else {
     commands.push({

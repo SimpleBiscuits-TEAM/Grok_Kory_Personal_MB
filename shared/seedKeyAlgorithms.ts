@@ -61,9 +61,9 @@ export const ECU_SECURITY_PROFILES: Record<string, EcuSecurityProfile> = {
     ecuType: 'E41', name: 'Bosch MG1CS111 (L5P Duramax)',
     manufacturer: 'GM', algorithmType: 'GM_5B_AES',
     seedLength: 5, keyLength: 5, securityLevel: 'hardware_required',
-    protocol: 'UDS', requiresUnlockBox: true,
-    description: 'AES-128 ECB with hardware unlock box. 5-byte seed padded to 16 bytes (0xFF fill, seed at offset 0x0B-0x0F), encrypted with ECU-specific AES key, truncated to 5 bytes.',
-    seedSubFunction: 0x09, keySubFunction: 0x0A,
+    protocol: 'GMLAN', requiresUnlockBox: true,
+    description: 'AES-128 ECB with hardware unlock box. 5-byte seed padded to 16 bytes (0xFF fill, seed at offset 0x0B-0x0F), encrypted with ECU-specific AES key, truncated to 5 bytes. Uses GMLAN protocol with seed level 1 (0x27 0x01 / 0x27 0x02), same as E88.',
+    seedSubFunction: 0x01, keySubFunction: 0x02,
   },
   'E88': {
     ecuType: 'E88', name: 'GM-DELCO E88',

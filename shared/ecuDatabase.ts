@@ -38,7 +38,7 @@ export const FLASH_STEP_DESCRIPTIONS: Record<FlashStep, string> = {
   [FlashStep.ENABLE_TP_CYCLIC]: 'Enable cyclic TesterPresent (0x3E) to keep session alive',
   [FlashStep.DISABLE_TP_CYCLIC]: 'Disable cyclic TesterPresent',
   [FlashStep.ECU_RESET_UDS]: 'ECU Reset via UDS (ECUReset 0x11 0x01)',
-  [FlashStep.CLEAR_DTCS_FUNC_ADR]: 'Clear DTCs via functional addressing (ClearDiagnosticInformation 0x14)',
+  [FlashStep.CLEAR_DTCS_FUNC_ADR]: 'Clear DTCs via functional addressing (UDS: 0x14, GMLAN: 0x04 on 0x7DF)',
   [FlashStep.CLEAR_DTCS_PHYS_ADR]: 'Clear DTCs via physical addressing',
   [FlashStep.WAIT_250MS]: 'Wait 250ms delay between steps',
   [FlashStep.CUSTOM_GM_PRIRC]: 'Send GM-specific PriRC (priority routine control) commands',
