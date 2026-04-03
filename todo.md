@@ -369,3 +369,21 @@
 - [x] Investigate: seed "7F 3E 12" is actually NRC to TesterPresent, not a real seed — keepalive NRC interferes with response listeners
 - [x] TesterPresent keepalive now pauses during active UDS request/response exchanges (pauseKeepalive/resumeKeepalive)
 - [x] Post-boot security access delay increased from 300ms to 1000ms after session re-establishment
+
+## Dry Run Log #8 Analysis (Apr 3, 2026) — With 120Ω + All Fixes
+
+### What's Working Well
+- Session retry loop: programming session succeeded on attempt 1/3 at 18.4s (10s wait, but it worked)
+- Real seed received: 57 09 FD 6C 06 (5 bytes) — keepalive pause fixed the NRC interference
+- Post-key-cycle re-session: succeeded on attempt 1/5 at 104.8s
+- Post-boot seed received: 57 09 FD 6C 06 — correct 5-byte seed after key cycle
+- Keepalive lifecycle correct: start→stop(KEY_OFF)→start(post-boot)→stop(cleanup)
+- Full end-to-end completion: 134.5s
+
+### Issues to Fix
+- [x] SESSION_OPEN commands all timeout (37.7s-57.4s) — addressed: tightened response filter to reject non-matching NRCs, increased drain period
+- [x] VERIFICATION 0x1A 0x90 times out after block transfer phase (75.9s-88.5s) — addressed: response filter fix should prevent stale frame capture
+- [x] CLEANUP ClearDTC 0x14 times out (114.8s-134.5s) — fixed: engine was overriding GMLAN physical addressing to functional 0x7DF; now uses physical for GMLAN
+- [x] Pattern: ECU responds intermittently — addressed: response filter was too broad (accepted any svc >= 0x40), now only accepts exact positive match or NRC for our service
+- [x] TesterPresent response "A0 00" at 32.7s is not standard — addressed: was being accepted by overly broad isGmlanPositive filter; now properly filtered
+- [x] DID 0x90 returned "C1 00 C1 A5 4A" which is same as DID 0xC1 data — fixed: stale frame from DID 0xC1 was accepted by broad filter; drain period increased to 150ms + strict service matching

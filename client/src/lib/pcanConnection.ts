@@ -1140,8 +1140,10 @@ export class PCANConnection {
 
     // Drain any stale frames from the bus monitor before setting up our listener.
     // Set a temporary drain listener that discards frames for a brief period.
+    // Increased from 50ms to 150ms — dry run #8 showed DID 0x90 returning DID 0xC1 data,
+    // indicating stale frames from previous requests weren't fully drained.
     this.udsResponseListener = null; // Clear any previous listener
-    await new Promise(r => setTimeout(r, 50)); // Brief drain period
+    await new Promise(r => setTimeout(r, 150)); // Drain period for stale frames
 
     // Track when we send so we can reject suspiciously fast responses (stale buffer)
     const sendTimestamp = Date.now();
@@ -1181,16 +1183,23 @@ export class PCANConnection {
           const expectedPositive = service + 0x40;
           const isNegative = respSvcId === 0x7F;
           const isPositiveMatch = respSvcId === expectedPositive;
-          // Also accept GMLAN positive responses (e.g., 0x5A for service 0x1A)
-          const isGmlanPositive = respSvcId >= 0x40 && respSvcId !== 0x7F;
+          // For negative responses, also verify the rejected service matches what we sent.
+          // This prevents capturing NRC responses to other services (e.g., TesterPresent NRC
+          // being captured by a SecurityAccess listener).
+          const isNegativeForUs = isNegative && frameData.length > 2 && frameData[2] === service;
+          // Accept any negative response if we can't verify the service byte
+          const isNegativeUnknown = isNegative && (frameData.length <= 2);
 
-          if (isNegative || isPositiveMatch || isGmlanPositive) {
+          if (isPositiveMatch || isNegativeForUs || isNegativeUnknown) {
             clearTimeout(timeout);
             this.udsResponseListener = null;
             resolve(frameData);
           } else {
-            // Response doesn't match expected service — likely stale, skip it
-            console.log(`[UDS] Discarding stale frame: arb=0x${arbId.toString(16)} svc=0x${respSvcId.toString(16)} expected=0x${expectedPositive.toString(16)}`);
+            // Response doesn't match expected service — likely stale or from another service
+            const reason = isNegative
+              ? `NRC for svc=0x${(frameData[2] ?? 0).toString(16)}, we sent svc=0x${service.toString(16)}`
+              : `positive svc=0x${respSvcId.toString(16)}, expected=0x${expectedPositive.toString(16)}`;
+            console.log(`[UDS] Discarding non-matching frame: arb=0x${arbId.toString(16)} ${reason} data=[${frameData.map(b => b.toString(16)).join(',')}]`);
           }
         }
       };

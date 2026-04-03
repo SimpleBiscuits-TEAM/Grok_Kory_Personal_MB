@@ -878,8 +878,10 @@ export class PCANFlashEngine {
         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
           response = await this.handleSecurityAccess(cmd, subFunction);
         } else if (serviceId === UDS.CLEAR_DTC) {
-          // Clear DTC uses functional addressing (0x7DF)
-          response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, 0x7DF);
+          // GMLAN: use physical addressing (functional 0x7DF times out on bench/GMLAN ECUs)
+          // Standard UDS: use functional addressing (0x7DF) for broadcast
+          const clearAddr = this.isGMLAN ? this.txAddr : 0x7DF;
+          response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, clearAddr);
         } else {
           response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
         }
