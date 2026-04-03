@@ -137,29 +137,37 @@ function KeyCyclePrompt({ state, countdown, onConfirm }: {
   countdown: number;
   onConfirm: () => void;
 }) {
-  const isKeyAction = state.type === 'KEY_OFF' || state.type === 'KEY_ON';
-  const icon = state.type === 'KEY_OFF' ? '🔑 ⬇️' : state.type === 'KEY_ON' ? '🔑 ⬆️' : '⏳';
-  const title = state.type === 'KEY_OFF' ? 'TURN KEY OFF'
-    : state.type === 'KEY_ON' ? 'TURN KEY ON'
-    : 'WAITING FOR ECU BOOT';
-  const borderColor = isKeyAction ? 'border-amber-500' : 'border-cyan-500/50';
-  const bgColor = isKeyAction ? 'bg-amber-500/15' : 'bg-cyan-500/10';
+  const isKeyOff = state.type === 'KEY_OFF';
+  const isKeyOn = state.type === 'KEY_ON';
+  const isKeyAction = isKeyOff || isKeyOn;
+
+  // Distinct theming per action type
+  const theme = isKeyOff
+    ? { icon: '🔴', title: 'TURN KEY OFF', border: 'border-red-500', bg: 'bg-red-500/15',
+        titleColor: 'text-red-400', btn: 'bg-red-600 hover:bg-red-500',
+        confirmText: 'I HAVE TURNED THE KEY OFF' }
+    : isKeyOn
+    ? { icon: '🟢', title: 'TURN KEY ON', border: 'border-emerald-500', bg: 'bg-emerald-500/15',
+        titleColor: 'text-emerald-400', btn: 'bg-emerald-600 hover:bg-emerald-500',
+        confirmText: 'I HAVE TURNED THE KEY ON' }
+    : { icon: '⏳', title: 'WAITING FOR ECU BOOT', border: 'border-cyan-500/50', bg: 'bg-cyan-500/10',
+        titleColor: 'text-cyan-400', btn: '', confirmText: '' };
 
   return (
-    <div className={`p-5 rounded-lg border-2 ${borderColor} ${bgColor} ${isKeyAction ? 'animate-pulse' : ''}`}>
+    <div className={`p-5 rounded-lg border-2 ${theme.border} ${theme.bg} ${isKeyAction ? 'animate-pulse' : ''}`}>
       <div className="flex items-center gap-3 mb-3">
-        <span className="text-2xl">{icon}</span>
-        <span className="font-mono text-sm font-bold text-amber-300 tracking-wider">{title}</span>
+        <span className="text-2xl">{theme.icon}</span>
+        <span className={`font-mono text-sm font-bold ${theme.titleColor} tracking-wider`}>{theme.title}</span>
       </div>
       <p className="text-sm font-mono text-zinc-200 mb-4 leading-relaxed">{state.prompt}</p>
       {isKeyAction ? (
         <Button
           size="sm"
           onClick={onConfirm}
-          className="w-full bg-amber-600 hover:bg-amber-500 text-white font-mono text-sm font-bold py-3 tracking-wide"
+          className={`w-full ${theme.btn} text-white font-mono text-sm font-bold py-3 tracking-wide`}
         >
           <CheckCircle2 className="h-4 w-4 mr-2" />
-          I HAVE {state.type === 'KEY_OFF' ? 'TURNED THE KEY OFF' : 'TURNED THE KEY ON'}
+          {theme.confirmText}
         </Button>
       ) : (
         <div className="flex items-center gap-2 text-xs font-mono text-cyan-400">

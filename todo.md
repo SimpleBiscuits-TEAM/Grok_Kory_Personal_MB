@@ -336,3 +336,8 @@
 - [x] DID 0xA0 responds with 2 bytes (A0 00) — programming status 0x00 (normal mode), correct
 - [x] Verification phase 0x1A 0x90 timeouts — same root cause: no key sent, security access incomplete
 - [x] Clear DTCs (0x14 FF FF FF) times out — non-fatal in dry run, may need security access for GMLAN
+
+## Key Cycle Prompt Colors
+- [x] KEY_OFF prompt: red/danger theme (border, bg, button, text)
+- [x] KEY_ON prompt: green/go theme (border, bg, button, text)
+- [x] WAIT_BOOT: keep cyan/neutral theme
