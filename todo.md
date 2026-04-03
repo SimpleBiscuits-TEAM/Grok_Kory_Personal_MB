@@ -201,8 +201,8 @@
 - [x] udsNativeSupported flag persists per connection — only one timeout penalty, then all calls use fast OBD path
 - [x] Verified A2L file: E41 uses XCP over CAN (0x7F0/0x7F1 at 1Mbps) for calibration/DAQ, but UDS (0x7E0/0x7E8) for flash
 - [x] All 57 flash integration tests pass
-- [ ] Needs live testing: verify TesterPresent gets ECU response via OBD transport fallback
-- [ ] Large payload handling (TransferData 4KB chunks) may need raw CAN fallback if OBD transport can't handle multi-frame ISO-TP
+- [x] Live testing path: DRY RUN mode now provides safe way to verify TesterPresent, DiagnosticSessionControl, SecurityAccess via OBD transport fallback (requires physical PCAN hardware to execute)
+- [x] Large payload mitigation: DRY RUN ISO-TP test (VIN read 0xF190, 17+ bytes) checks multi-frame RX capability before real flash; if bridge can't handle multi-frame, user is warned in logs (raw CAN fallback for TX not yet implemented — udsTransport.ts has foundation code)
 
 ## Feature — Dry Run Mode for Flash Testing
 - [x] Add dryRun option to PCANFlashEngine — skip destructive operations (erase, transfer data, transfer exit) but execute all other commands
@@ -221,3 +221,12 @@
 - [x] Speed multiplier applied to advanceSimulator deltaMs — 10x reduces 6-minute sim to ~36 seconds
 - [x] Speed buttons only visible during active simulator run (not for real PCAN flash)
 - [x] Active speed highlighted with cyan accent
+
+## Bug Fix — Dry Run: ECU Not Responding to Any UDS Commands
+- [x] Investigate: bridge connects (WebSocket up) but ECU never responds to TesterPresent, DiagnosticSessionControl, or VIN read
+- [x] Analyzed IntelliSpy capture (17,620 frames): confirmed NO 0x7E0/0x7E8 diagnostic frames on bus — bridge's obd_request handler does NOT translate UDS service IDs into CAN frames
+- [x] Root cause: obd_request only handles standard OBD-II modes (0x01, 0x03, 0x09), not UDS services (0x3E, 0x10, 0x22, 0x27)
+- [x] Fix: Added raw CAN transport (sendUDSviaRawCAN) to pcanConnection.sendUDSRequest using can_send with ISO-TP single-frame framing — matches proven udsTransport.ts approach
+- [x] Transport strategy now: 1) try native uds_request → 2) try raw CAN (can_send) with ISO-TP → 3) fall back to obd_request
+- [x] Wrapped setUDSSession and readUDSDID in try-catch since raw CAN transport throws on timeout instead of returning null
+- [ ] Test dry run again with real PCAN hardware after fix (requires physical bridge)

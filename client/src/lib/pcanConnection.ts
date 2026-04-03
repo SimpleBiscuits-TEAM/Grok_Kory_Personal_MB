@@ -947,13 +947,19 @@ export class PCANConnection {
   /**
    * Send a UDS service request.
    * Used for diagnostics, flash monitoring, and parameter read/write.
-   */
-  /**
-   * Track whether bridge supports native uds_request type.
-   * Starts as true (optimistic), switches to false on first failure,
-   * then all subsequent calls use obd_request fallback.
+   *
+   * Transport strategy for UDS commands:
+   * 1. Try native uds_request (bridge may support it natively)
+   * 2. Try raw CAN (can_send) with ISO-TP single-frame framing
+   * 3. Fall back to obd_request (only works for standard OBD modes)
+   *
+   * The raw CAN approach matches udsTransport.ts which is proven to work.
+   * The bridge's obd_request handler does NOT translate non-OBD service IDs
+   * (0x3E, 0x10, 0x22, 0x27, etc.) into CAN frames — it only handles
+   * standard OBD-II modes (0x01, 0x03, 0x09).
    */
   private udsNativeSupported = true;
+  private udsRawCanSupported = true;
 
   async sendUDSRequest(
     service: number,
@@ -961,7 +967,7 @@ export class PCANConnection {
     data?: number[],
     targetAddress = 0x7E0
   ): Promise<UDSResponse | null> {
-    // Try native uds_request first (if bridge supports it)
+    // Strategy 1: Try native uds_request first (if bridge supports it)
     if (this.udsNativeSupported) {
       try {
         const response = await this.sendRequest({
@@ -976,20 +982,132 @@ export class PCANConnection {
           return this.parseUDSResponse(service, subFunction, response);
         }
         if (response.type === 'error') {
-          // Bridge doesn't support uds_request — switch to fallback
           this.udsNativeSupported = false;
-          this.emit('log', null, 'Bridge does not support native UDS — switching to OBD transport');
+          this.emit('log', null, 'Bridge does not support native UDS — switching to raw CAN transport');
         }
       } catch {
-        // Timeout or error — try OBD fallback
         this.udsNativeSupported = false;
-        this.emit('log', null, 'UDS native request timed out — switching to OBD transport');
+        this.emit('log', null, 'UDS native request timed out — switching to raw CAN transport');
       }
     }
 
-    // Fallback: send UDS via obd_request (mode = service, pid = subFunction)
-    // The bridge's OBD handler sends on 0x7E0 and listens on 0x7E8 with ISO-TP
+    // Strategy 2: Raw CAN with ISO-TP framing (proven approach from udsTransport.ts)
+    if (this.udsRawCanSupported) {
+      try {
+        return await this.sendUDSviaRawCAN(service, subFunction, data, targetAddress);
+      } catch (err) {
+        // If can_send itself errors (not timeout), bridge may not support it
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('unknown') || msg.includes('unsupported') || msg.includes('not supported')) {
+          this.udsRawCanSupported = false;
+          this.emit('log', null, 'Bridge does not support can_send — falling back to OBD transport');
+        } else {
+          // Timeout or no ECU response — this is expected, don't disable raw CAN
+          throw err;
+        }
+      }
+    }
+
+    // Strategy 3: Last resort — obd_request (only works for standard OBD modes)
     return this.sendUDSviaOBD(service, subFunction, data, targetAddress);
+  }
+
+  /**
+   * Send UDS command via raw CAN frames with ISO-TP single-frame framing.
+   * This builds the exact same frame format as udsTransport.ts:
+   *   [PCI_length, service_id, sub_function?, ...data, 0x00 padding to 8 bytes]
+   * and sends it via the bridge's can_send handler.
+   */
+  private async sendUDSviaRawCAN(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress = 0x7E0
+  ): Promise<UDSResponse | null> {
+    // Build UDS payload: [service, subFunction?, ...data]
+    const udsPayload: number[] = [service];
+    if (subFunction !== undefined) udsPayload.push(subFunction);
+    if (data) udsPayload.push(...data);
+
+    // Build ISO-TP single frame: [PCI_length, ...udsPayload, 0x00 padding]
+    const pciLength = udsPayload.length;
+    const frame: number[] = [pciLength, ...udsPayload];
+    while (frame.length < 8) frame.push(0x00);
+
+    // Send via can_send
+    const response = await this.sendRequest({
+      type: 'can_send',
+      arb_id: targetAddress,
+      data: frame,
+    });
+
+    // Parse the response — bridge returns raw CAN frame data
+    const rawData = (response.data as number[]) || [];
+    if (rawData.length === 0) return null;
+
+    // Parse ISO-TP PCI from response
+    const pciType = (rawData[0] >> 4) & 0x0F;
+    let payload: number[];
+
+    if (pciType === 0) {
+      // Single frame: PCI low nibble = length
+      const length = rawData[0] & 0x0F;
+      payload = rawData.slice(1, 1 + length);
+    } else if (pciType === 1) {
+      // First frame of multi-frame — for now just extract what we have
+      // Full multi-frame reassembly would need flow control handling
+      const totalLen = ((rawData[0] & 0x0F) << 8) | rawData[1];
+      payload = rawData.slice(2);
+      this.emit('log', null, `Multi-frame response (${totalLen} bytes) — partial data extracted`);
+    } else {
+      // Unknown PCI type — use raw data after first byte
+      payload = rawData.slice(1);
+    }
+
+    if (payload.length === 0) return null;
+
+    const responseServiceId = payload[0];
+
+    // Negative response: 0x7F
+    if (responseServiceId === 0x7F) {
+      const rejectedService = payload.length > 1 ? payload[1] : service;
+      const nrc = payload.length > 2 ? payload[2] : 0;
+      return {
+        service: rejectedService,
+        serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
+        subFunction,
+        data: payload,
+        positiveResponse: false,
+        nrc,
+        nrcName: decodeNRC(nrc),
+        isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
+        timestamp: Date.now(),
+      };
+    }
+
+    // Positive response: service + 0x40
+    if (responseServiceId === service + 0x40) {
+      return {
+        service,
+        serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+        subFunction,
+        data: payload.slice(1), // Everything after the response service ID
+        positiveResponse: true,
+        isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+        timestamp: Date.now(),
+      };
+    }
+
+    // Unexpected response — return raw data
+    return {
+      service,
+      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      data: payload,
+      positiveResponse: false,
+      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
   }
 
   private async sendUDSviaOBD(
@@ -1074,7 +1192,11 @@ export class PCANConnection {
    * Read a UDS DID (Data Identifier) — ReadDataByIdentifier (0x22)
    */
   async readUDSDID(did: number, targetAddress = 0x7E0): Promise<UDSResponse | null> {
-    return this.sendUDSRequest(0x22, undefined, [(did >> 8) & 0xFF, did & 0xFF], targetAddress);
+    try {
+      return await this.sendUDSRequest(0x22, undefined, [(did >> 8) & 0xFF, did & 0xFF], targetAddress);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1082,8 +1204,12 @@ export class PCANConnection {
    */
   async setUDSSession(sessionType: 'default' | 'programming' | 'extended'): Promise<boolean> {
     const sessionMap = { default: 0x01, programming: 0x02, extended: 0x03 };
-    const response = await this.sendUDSRequest(0x10, sessionMap[sessionType]);
-    return response?.positiveResponse || false;
+    try {
+      const response = await this.sendUDSRequest(0x10, sessionMap[sessionType]);
+      return response?.positiveResponse || false;
+    } catch {
+      return false;
+    }
   }
 
   // ─── Bus Monitor (IntelliSpy) ────────────────────────────────────────────
