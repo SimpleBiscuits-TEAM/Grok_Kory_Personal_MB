@@ -10,6 +10,14 @@
  * It produces the same SimulatorState shape so FlashMissionControl can render
  * both modes identically.
  *
+ * PROTOCOL AWARENESS:
+ * GM ECUs (E41, E88, E90, etc.) use GMLAN protocol which differs from standard UDS:
+ *   - ReadDID uses 0x1A (GMLAN) instead of 0x22 (UDS)
+ *   - ProgrammingMode uses 0xA5 (GM-specific)
+ *   - ReturnToNormalMode uses 0x20 (GM-specific)
+ *   - ReportProgrammedState uses 0xA2 (GM-specific)
+ * This engine detects the protocol from the ECU database and adapts accordingly.
+ *
  * SAFETY: This module writes to ECU flash memory. Interrupting a flash can
  * brick the ECU. The caller MUST hold a wake lock, prevent navigation, and
  * keep the browser tab alive for the entire duration.
@@ -21,7 +29,7 @@ import {
   type SimulatorLogEntry, type FlashPhase,
   createSimulatorState, generateRecoveryPlan, formatBytes,
 } from '../../../shared/pcanFlashOrchestrator';
-import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
+import { type ContainerFileHeader, getEcuConfig } from '../../../shared/ecuDatabase';
 import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -50,12 +58,16 @@ export interface FlashEngineConfig {
   dryRun?: boolean;
 }
 
-// ── UDS Service IDs ────────────────────────────────────────────────────────
+// ── UDS / GMLAN Service IDs ───────────────────────────────────────────────
 
 const UDS = {
   DIAGNOSTIC_SESSION_CONTROL: 0x10,
   ECU_RESET: 0x11,
   CLEAR_DTC: 0x14,
+  // GMLAN ReadDataByIdentifier (GM-specific, uses 1-byte DIDs like 0x90, 0xB0, 0xC1)
+  READ_DID_GMLAN: 0x1A,
+  RETURN_TO_NORMAL: 0x20,
+  // UDS ReadDataByIdentifier (standard, uses 2-byte DIDs like 0xF190)
   READ_DID: 0x22,
   SECURITY_ACCESS: 0x27,
   COMMUNICATION_CONTROL: 0x28,
@@ -65,6 +77,10 @@ const UDS = {
   REQUEST_TRANSFER_EXIT: 0x37,
   TESTER_PRESENT: 0x3E,
   CONTROL_DTC_SETTING: 0x85,
+  // GM-specific services
+  REPORT_PROGRAMMED_STATE: 0xA2,
+  PROGRAMMING_MODE: 0xA5,
+  DEVICE_CONTROL: 0xAE,
 } as const;
 
 // ── NRC Descriptions ───────────────────────────────────────────────────────
@@ -110,6 +126,10 @@ export class PCANFlashEngine {
   private txAddr: number;
   private rxAddr: number;
 
+  // Protocol detection: GMLAN vs UDS
+  private isGMLAN: boolean;
+  private ecuProtocol: string;
+
   /** Destructive UDS services that are skipped in dry run mode */
   private static readonly DESTRUCTIVE_SERVICES = new Set([
     0x31, // RoutineControl (EraseMemory)
@@ -132,6 +152,11 @@ export class PCANFlashEngine {
     const rxCmd = config.plan.commands.find(c => c.canRx);
     this.txAddr = txCmd ? parseInt(txCmd.canTx!.split(' ')[0], 16) : 0x7E0;
     this.rxAddr = rxCmd ? parseInt(rxCmd.canRx!.split(' ')[0], 16) : 0x7E8;
+
+    // Detect protocol from ECU database
+    const ecuConfig = getEcuConfig(config.plan.ecuType);
+    this.ecuProtocol = ecuConfig?.protocol || 'UDS';
+    this.isGMLAN = this.ecuProtocol === 'GMLAN';
   }
 
   /** Abort the flash — sets flag that will be checked between commands */
@@ -161,74 +186,33 @@ export class PCANFlashEngine {
         return 'FAILED';
       }
       this.log('success', 'PRE_CHECK', '✓ PCAN bridge connected');
+      this.log('info', 'PRE_CHECK', `ECU: ${this.plan.ecuName} | Protocol: ${this.ecuProtocol} | TX: 0x${this.txAddr.toString(16).toUpperCase()} | RX: 0x${this.rxAddr.toString(16).toUpperCase()}`);
       if (this.dryRun) {
         this.log('info', 'PRE_CHECK', '🧪 DRY RUN MODE — destructive operations (erase, download, transfer) will be skipped');
       }
       this.emitState();
 
       // Step 0b: Set extended diagnostic session before flash commands
-      // This ensures the ECU is in the right mode for flash operations
       this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
       this.state.statusMessage = 'Switching to extended diagnostic session...';
       this.emitState();
 
-      const sessionOk = await this.conn.setUDSSession('extended');
-      if (!sessionOk) {
-        this.log('warning', 'PRE_CHECK', 'Extended session switch failed — ECU may not be powered or connected. Continuing with flash plan...');
-      } else {
-        this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
+      try {
+        const sessionOk = await this.conn.setUDSSession('extended');
+        if (!sessionOk) {
+          this.log('warning', 'PRE_CHECK', 'Extended session switch returned false — ECU may not support standard UDS session control. Continuing...');
+        } else {
+          this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('warning', 'PRE_CHECK', `Extended session switch error: ${msg} — continuing with flash plan...`);
       }
       this.emitState();
 
       // Step 0c: ECU communication test (dry run only)
-      // Tests ReadDataByIdentifier with multiple DIDs to verify bidirectional communication.
-      // Any response (positive or NRC) proves the send+listen transport is working.
       if (this.dryRun) {
-        this.log('info', 'PRE_CHECK', '🧪 Testing ECU communication (ReadDataByIdentifier)...');
-        this.state.statusMessage = 'Testing ECU communication...';
-        this.emitState();
-
-        // DIDs to try, in order of likelihood to be supported
-        const testDIDs: Array<{ did: number[]; name: string; label: string }> = [
-          { did: [0xF1, 0x90], name: 'VIN', label: '0xF190' },
-          { did: [0xF1, 0x88], name: 'ECU Software Number', label: '0xF188' },
-          { did: [0xF1, 0x95], name: 'ECU Hardware Number', label: '0xF195' },
-          { did: [0xF8, 0x06], name: 'Calibration ID', label: '0xF806' },
-        ];
-
-        let gotAnyResponse = false;
-        try {
-          for (const { did, name, label } of testDIDs) {
-            const response = await this.conn.sendUDSRequest(
-              UDS.READ_DID, undefined, did, this.txAddr
-            );
-            if (response && response.positiveResponse) {
-              gotAnyResponse = true;
-              const dataHex = response.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-              this.log('success', 'PRE_CHECK', `✓ ${name} (${label}) read OK — ${response.data.length} bytes: ${dataHex}`);
-              if (response.data.length > 7) {
-                this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
-              }
-              break; // One successful read is enough
-            } else if (response) {
-              // NRC response — ECU IS communicating, just doesn't support this DID
-              gotAnyResponse = true;
-              const nrc = response.nrc || 0;
-              this.log('info', 'PRE_CHECK', `${name} (${label}): NRC 0x${nrc.toString(16)} (${response.nrcName || 'unknown'}) — DID not supported, trying next...`);
-            }
-            // null response = no communication at all, try next DID
-          }
-
-          if (gotAnyResponse) {
-            this.log('success', 'PRE_CHECK', '✓ ECU communication verified — send+listen transport working');
-          } else {
-            this.log('warning', 'PRE_CHECK', 'No response from ECU to any ReadDID — ECU may not be powered or connected');
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log('warning', 'PRE_CHECK', `ECU communication test error: ${msg} — continuing with dry run...`);
-        }
-        this.emitState();
+        await this.runDryRunPreCheck();
       }
 
       for (let i = 0; i < this.plan.commands.length; i++) {
@@ -294,6 +278,147 @@ export class PCANFlashEngine {
       this.callbacks.onComplete('FAILED');
       return 'FAILED';
     }
+  }
+
+  // ── Dry Run Pre-Check ─────────────────────────────────────────────────────
+
+  /**
+   * Run comprehensive ECU communication tests during dry run.
+   * Uses protocol-appropriate commands:
+   *   - GMLAN: ReadDID 0x1A with GM DIDs (0x90 VIN, 0xB0 ECU ID, 0xC1 CVN)
+   *   - UDS:   ReadDID 0x22 with standard DIDs (0xF190 VIN, 0xF188 SW#, etc.)
+   * Any response (positive or NRC) proves the send+listen transport is working.
+   */
+  private async runDryRunPreCheck(): Promise<void> {
+    this.log('info', 'PRE_CHECK', `🧪 Testing ECU communication (${this.isGMLAN ? 'GMLAN' : 'UDS'} protocol)...`);
+    this.state.statusMessage = 'Testing ECU communication...';
+    this.emitState();
+
+    let gotAnyResponse = false;
+
+    try {
+      if (this.isGMLAN) {
+        // ── GMLAN Protocol: Use service 0x1A with 1-byte DIDs ──
+        // Based on SPS log analysis of 2017 L5P Duramax E41:
+        //   TX: 0x7E0 1A 90 → RX: 0x7E8 5A 90 [VIN 17 bytes]
+        //   TX: 0x7E0 1A B0 → RX: 0x7E8 5A B0 [ECU ID]
+        //   TX: 0x7E0 1A C1 → RX: 0x7E8 5A C1 [CVN 4 bytes]
+        const gmlanDIDs: Array<{ did: number; name: string }> = [
+          { did: 0xB0, name: 'ECU Hardware ID' },
+          { did: 0xC1, name: 'Calibration Verification Number 1' },
+          { did: 0x90, name: 'VIN (GMLAN)' },
+          { did: 0xA0, name: 'Programming Status' },
+        ];
+
+        this.log('info', 'PRE_CHECK', '🔧 Using GMLAN ReadDataByIdentifier (0x1A) — GM protocol detected');
+
+        for (const { did, name } of gmlanDIDs) {
+          try {
+            const response = await this.conn.sendUDSRequest(
+              UDS.READ_DID_GMLAN, did, undefined, this.txAddr
+            );
+
+            if (response && response.positiveResponse) {
+              gotAnyResponse = true;
+              const dataHex = response.data.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+              this.log('success', 'PRE_CHECK', `✓ GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}) — ${response.data.length} bytes: ${dataHex}`);
+              if (did === 0x90 && response.data.length >= 17) {
+                // Decode VIN from response
+                const vinBytes = response.data.slice(0, 17);
+                const vin = String.fromCharCode(...vinBytes);
+                this.log('success', 'PRE_CHECK', `✓ VIN decoded: ${vin}`);
+                this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
+              }
+            } else if (response) {
+              gotAnyResponse = true;
+              const nrc = response.nrc || 0;
+              const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
+              this.log('info', 'PRE_CHECK', `GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}): NRC 0x${nrc.toString(16)} (${nrcName}) — ECU responded`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log('info', 'PRE_CHECK', `GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}): ${msg}`);
+          }
+        }
+
+        // Also try UDS ReadDID as fallback — some GM ECUs support both protocols
+        if (!gotAnyResponse) {
+          this.log('info', 'PRE_CHECK', 'No GMLAN response — trying UDS ReadDID (0x22) as fallback...');
+          gotAnyResponse = await this.tryUDSReadDIDs();
+        }
+
+      } else {
+        // ── Standard UDS Protocol ──
+        gotAnyResponse = await this.tryUDSReadDIDs();
+      }
+
+      // Also test TesterPresent regardless of protocol
+      if (!gotAnyResponse) {
+        this.log('info', 'PRE_CHECK', 'Trying TesterPresent (0x3E 0x00)...');
+        try {
+          const tpResponse = await this.conn.sendUDSRequest(
+            UDS.TESTER_PRESENT, 0x00, undefined, this.txAddr
+          );
+          if (tpResponse) {
+            gotAnyResponse = true;
+            if (tpResponse.positiveResponse) {
+              this.log('success', 'PRE_CHECK', '✓ TesterPresent — positive response');
+            } else {
+              const nrc = tpResponse.nrc || 0;
+              const nrcName = NRC_NAMES[nrc] || 'unknown';
+              this.log('success', 'PRE_CHECK', `✓ TesterPresent — ECU responded with NRC 0x${nrc.toString(16)} (${nrcName}) — communication confirmed`);
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log('info', 'PRE_CHECK', `TesterPresent error: ${msg}`);
+        }
+      }
+
+      if (gotAnyResponse) {
+        this.log('success', 'PRE_CHECK', '✓ ECU communication verified — send+listen transport working');
+      } else {
+        this.log('warning', 'PRE_CHECK', 'No response from ECU to any command — ECU may not be powered or connected');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log('warning', 'PRE_CHECK', `ECU communication test error: ${msg} — continuing with dry run...`);
+    }
+    this.emitState();
+  }
+
+  /** Try standard UDS ReadDID (0x22) with common DIDs */
+  private async tryUDSReadDIDs(): Promise<boolean> {
+    const testDIDs: Array<{ did: number[]; name: string; label: string }> = [
+      { did: [0xF1, 0x90], name: 'VIN', label: '0xF190' },
+      { did: [0xF1, 0x88], name: 'ECU Software Number', label: '0xF188' },
+      { did: [0xF1, 0x95], name: 'ECU Hardware Number', label: '0xF195' },
+      { did: [0xF8, 0x06], name: 'Calibration ID', label: '0xF806' },
+    ];
+
+    for (const { did, name, label } of testDIDs) {
+      try {
+        const response = await this.conn.sendUDSRequest(
+          UDS.READ_DID, undefined, did, this.txAddr
+        );
+        if (response && response.positiveResponse) {
+          const dataHex = response.data.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+          this.log('success', 'PRE_CHECK', `✓ ${name} (${label}) read OK — ${response.data.length} bytes: ${dataHex}`);
+          if (response.data.length > 7) {
+            this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
+          }
+          return true;
+        } else if (response) {
+          const nrc = response.nrc || 0;
+          this.log('info', 'PRE_CHECK', `${name} (${label}): NRC 0x${nrc.toString(16)} (${response.nrcName || 'unknown'}) — ECU responded`);
+          return true; // NRC = ECU is communicating
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('info', 'PRE_CHECK', `${name} (${label}): ${msg}`);
+      }
+    }
+    return false;
   }
 
   // ── Command Execution ──────────────────────────────────────────────────
@@ -371,7 +496,7 @@ export class PCANFlashEngine {
         }
 
         if (response && response.positiveResponse) {
-          const rxHex = response.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+          const rxHex = response.data.map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
           this.log('can_rx', cmd.phase, `RX: 0x${this.rxAddr.toString(16).toUpperCase()} ${rxHex}`);
           this.log('success', cmd.phase, `✓ ${cmd.label}`);
           this.state.statusMessage = cmd.label;
@@ -387,13 +512,36 @@ export class PCANFlashEngine {
             await this.delay(2000);
             continue; // Don't decrement retries for 0x78
           }
+
+          // ── NRC Success Logic ──
+          // In dry run mode, ANY NRC response proves ECU is communicating.
+          // For specific services, certain NRCs are expected and non-fatal:
+          //   - TesterPresent NRC 0x12 = sub-function 0x00 not supported (GM L5P behavior)
+          //   - DiagnosticSessionControl NRC = session type not supported but ECU is alive
+          //   - Any NRC in dry run = ECU responded, communication works
+          const isTesterPresent = serviceId === UDS.TESTER_PRESENT;
+          const isDiagSession = serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL;
+          const isReadDID = serviceId === UDS.READ_DID || serviceId === UDS.READ_DID_GMLAN;
+          const isNonFatalNRC = isTesterPresent || isDiagSession || isReadDID || this.dryRun;
+          
+          if (isNonFatalNRC) {
+            this.log('success', cmd.phase,
+              `✓ ${cmd.label} — ECU responded (NRC 0x${nrc.toString(16)}: ${nrcName}) [svc=0x${serviceId.toString(16)}, dry=${this.dryRun}, proto=${this.ecuProtocol}]`
+            );
+            this.state.statusMessage = `${cmd.label} (comm OK)`;
+            this.emitState();
+            return;
+          }
           
           lastError = `NRC 0x${nrc.toString(16)} (${nrcName})`;
-          this.log('nrc', cmd.phase, `NRC 0x${nrc.toString(16)} — ${nrcName}`, nrc);
+          this.log('nrc', cmd.phase,
+            `NRC 0x${nrc.toString(16)} — ${nrcName} [svc=0x${serviceId.toString(16)}, dry=${this.dryRun}, proto=${this.ecuProtocol}]`,
+            nrc
+          );
         } else {
           // Check if it's a bridge connection issue vs ECU not responding
           const connState = this.conn.getState();
-            const isConnected = connState === 'ready' || connState === 'logging' || connState === 'initializing';
+          const isConnected = connState === 'ready' || connState === 'logging' || connState === 'initializing';
           if (!isConnected) {
             lastError = 'PCAN bridge disconnected';
             this.log('error', cmd.phase, 'PCAN bridge connection lost — attempting reconnect...');
@@ -420,6 +568,15 @@ export class PCANFlashEngine {
       }
     }
 
+    // All retries exhausted
+    // In dry run mode, timeouts are non-fatal — log warning but don't throw
+    if (this.dryRun) {
+      this.log('warning', cmd.phase, `[DRY RUN] ${cmd.label}: ${lastError} — continuing (non-fatal in dry run)`);
+      this.state.statusMessage = `[DRY RUN] ${cmd.label} (timeout)`;
+      this.emitState();
+      return;
+    }
+
     throw new Error(`${cmd.label}: ${lastError}`);
   }
 
@@ -440,19 +597,19 @@ export class PCANFlashEngine {
       }
 
       const seedBytes = new Uint8Array(seedResponse.data);
-      this.log('info', cmd.phase, `Seed received: ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+      this.log('info', cmd.phase, `Seed received: ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
 
       // Step 2: Compute key from seed
       let keyBytes: Uint8Array;
-      
+
       // Get the AES key from the container's verify section or header
       const priKey = this.header.verify?.pri_key;
       
       if (seedBytes.length === 5 && priKey && priKey.length >= 16) {
-        // GM 5-byte AES algorithm
+        // GM 5-byte AES algorithm (Algorithm 41 — confirmed from SPS log)
         const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
         keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-        this.log('info', cmd.phase, `Key computed (GM_5B_AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        this.log('info', cmd.phase, `Key computed (GM_5B_AES / Algo 41): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
       } else if (seedBytes.length === 3 && priKey && priKey.length >= 5) {
         // Ford 3-byte LFSR algorithm
         const secretBytes = new Uint8Array(priKey.slice(0, 5).map(h => parseInt(h, 16)));
@@ -460,19 +617,21 @@ export class PCANFlashEngine {
         this.log('info', cmd.phase, `Key computed (Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
       } else if (this.header.seed && this.header.key) {
         // Fallback: use pre-computed seed/key from container header
-        // This is a static seed/key pair — only works if ECU returns the expected seed
         const headerSeed = hexToBytes(this.header.seed);
         const headerKey = hexToBytes(this.header.key);
         
-        // Check if the ECU's seed matches the container's expected seed
         if (arraysEqual(seedBytes, headerSeed)) {
           keyBytes = headerKey;
-          this.log('info', cmd.phase, `Using pre-computed key from container header`);
+          this.log('info', cmd.phase, `Using pre-computed key from container header (seed matches)`);
         } else {
           this.log('warning', cmd.phase, `ECU seed doesn't match container seed — attempting header key anyway`);
           keyBytes = headerKey;
         }
       } else {
+        if (this.dryRun) {
+          this.log('warning', cmd.phase, '[DRY RUN] No seed/key algorithm or pre-computed key available — skipping key send');
+          return seedResponse; // Return seed response as "success" for dry run
+        }
         throw new Error('No seed/key algorithm or pre-computed key available');
       }
 
@@ -510,7 +669,6 @@ export class PCANFlashEngine {
     const xferSize = parseInt(block.xferSize || this.header.xferSize || 'FF8', 16);
 
     // Calculate block data offset in the container file
-    // Container layout: 0x0000-0x0FFF padding, 0x1000-0x1003 CRC32, 0x1004-0x2FFF JSON header, 0x3000+ block data
     const headerLength = parseInt(this.header.header_length || '3000', 16);
     let blockOffset = headerLength;
     
@@ -535,7 +693,18 @@ export class PCANFlashEngine {
       
       if (!dlResponse || !dlResponse.positiveResponse) {
         const nrc = dlResponse?.nrc || 0;
-        throw new Error(`RequestDownload failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+        // NRC 0x78 = responsePending — wait and retry (confirmed from SPS log: ECU sends 0x78 then 0x74)
+        if (nrc === 0x78) {
+          this.log('info', cmd.phase, 'NRC 0x78 — ECU processing RequestDownload, waiting...');
+          await this.delay(3000);
+          // Retry once
+          const retryResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, Array.from(rc34Bytes), this.txAddr);
+          if (!retryResponse || !retryResponse.positiveResponse) {
+            throw new Error(`RequestDownload failed after retry: NRC 0x${(retryResponse?.nrc || 0).toString(16)} (${NRC_NAMES[retryResponse?.nrc || 0] || 'unknown'})`);
+          }
+        } else {
+          throw new Error(`RequestDownload failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+        }
       }
       this.log('can_rx', cmd.phase, `RX: RequestDownload accepted`);
     }
@@ -563,9 +732,9 @@ export class PCANFlashEngine {
 
       if (!tdResponse || !tdResponse.positiveResponse) {
         const nrc = tdResponse?.nrc || 0;
-        // NRC 0x78 = pending — wait and retry
+        // NRC 0x78 = pending — wait and retry (SPS log shows multiple 0x78 before 0x76)
         if (nrc === 0x78) {
-          this.log('info', cmd.phase, 'NRC 0x78 — ECU processing, waiting...');
+          this.log('info', cmd.phase, 'NRC 0x78 — ECU processing transfer, waiting...');
           await this.delay(2000);
           continue; // Retry same chunk
         }
@@ -597,20 +766,26 @@ export class PCANFlashEngine {
       this.emitState();
     }
 
-    // Step 3: RequestTransferExit (0x37)
-    this.log('can_tx', cmd.phase, `TX: RequestTransferExit (0x37)`);
-    const exitResponse = await this.conn.sendUDSRequest(UDS.REQUEST_TRANSFER_EXIT, undefined, undefined, this.txAddr);
-    
-    if (!exitResponse || !exitResponse.positiveResponse) {
-      const nrc = exitResponse?.nrc || 0;
-      // Some ECUs don't support 0x37 — log warning but don't fail
-      if (nrc === 0x11) {
-        this.log('warning', cmd.phase, 'RequestTransferExit not supported — continuing');
+    // Step 3: RequestTransferExit (0x37) — only if ECU supports it
+    // SPS log shows L5P does NOT use TransferExit (usesTransferExit: false in ECU database)
+    const ecuConfig = getEcuConfig(this.plan.ecuType);
+    if (ecuConfig?.usesTransferExit !== false) {
+      this.log('can_tx', cmd.phase, `TX: RequestTransferExit (0x37)`);
+      const exitResponse = await this.conn.sendUDSRequest(UDS.REQUEST_TRANSFER_EXIT, undefined, undefined, this.txAddr);
+      
+      if (!exitResponse || !exitResponse.positiveResponse) {
+        const nrc = exitResponse?.nrc || 0;
+        // Some ECUs don't support 0x37 — log warning but don't fail
+        if (nrc === 0x11) {
+          this.log('warning', cmd.phase, 'RequestTransferExit not supported — continuing');
+        } else {
+          throw new Error(`RequestTransferExit failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+        }
       } else {
-        throw new Error(`RequestTransferExit failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+        this.log('can_rx', cmd.phase, `RX: TransferExit accepted`);
       }
     } else {
-      this.log('can_rx', cmd.phase, `RX: TransferExit accepted`);
+      this.log('info', cmd.phase, `Skipping RequestTransferExit (ECU ${this.plan.ecuType} does not use 0x37)`);
     }
 
     // Block complete

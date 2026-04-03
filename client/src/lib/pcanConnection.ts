@@ -140,6 +140,7 @@ export class PCANConnection {
   private monitorActive = false;
   private monitorCallback: ((frame: BusMonitorFrame) => void) | null = null;
   private monitorFrameHandler: ((event: MessageEvent) => void) | null = null;
+  private udsResponseListener: ((msg: Record<string, unknown>) => void) | null = null;
 
   constructor(config: PCANConnectionConfig = {}) {
     this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
@@ -351,6 +352,12 @@ export class PCANConnection {
               } else {
                 pending.resolve(msg);
               }
+            }
+
+            // Route ALL messages to UDS response listener (for sendUDSviaRawCAN)
+            // The listener itself filters for can_frame/bus_frame with matching arb_id
+            if (this.udsResponseListener) {
+              this.udsResponseListener(msg as Record<string, unknown>);
             }
           } catch {
             // ignore parse errors
@@ -967,6 +974,10 @@ export class PCANConnection {
     data?: number[],
     targetAddress = 0x7E0
   ): Promise<UDSResponse | null> {
+    const svcHex = `0x${service.toString(16)}`;
+    const subHex = subFunction !== undefined ? `0x${subFunction.toString(16)}` : 'none';
+    console.log(`[UDS] sendUDSRequest svc=${svcHex} sub=${subHex} addr=0x${targetAddress.toString(16)} native=${this.udsNativeSupported} rawCan=${this.udsRawCanSupported}`);
+
     // Strategy 1: Try native uds_request first (if bridge supports it)
     if (this.udsNativeSupported) {
       try {
@@ -978,29 +989,46 @@ export class PCANConnection {
           target: targetAddress,
         });
 
+        console.log(`[UDS] uds_request response type=${response.type}`, JSON.stringify(response).slice(0, 200));
+
         if (response.type === 'uds_response') {
+          console.log(`[UDS] ✓ Native UDS worked for svc=${svcHex}`);
           return this.parseUDSResponse(service, subFunction, response);
         }
         if (response.type === 'error') {
           this.udsNativeSupported = false;
-          this.emit('log', null, 'Bridge does not support native UDS — switching to raw CAN transport');
+          console.log(`[UDS] Native UDS returned error — disabling`);
+        } else {
+          // Unexpected response type — might be obd_response or something else
+          // Try to parse it anyway
+          console.log(`[UDS] Native UDS returned unexpected type=${response.type} — trying to parse`);
+          // Check if the response has data that looks like a UDS response
+          const respData = response.data as number[] | undefined;
+          if (respData && respData.length > 0) {
+            console.log(`[UDS] Response has data: [${respData.map(b => typeof b === 'number' ? b.toString(16).padStart(2, '0') : b).join(' ')}]`);
+            // Parse as raw UDS response
+            return this.parseISOTPResponse(service, subFunction, respData);
+          }
+          this.udsNativeSupported = false;
+          console.log(`[UDS] No usable data in response — disabling native UDS`);
         }
-      } catch {
+      } catch (err) {
         this.udsNativeSupported = false;
-        this.emit('log', null, 'UDS native request timed out — switching to raw CAN transport');
+        console.log(`[UDS] uds_request threw: ${err instanceof Error ? err.message : err}`);
       }
     }
 
     // Strategy 2: Raw CAN with ISO-TP framing (proven approach from udsTransport.ts)
     if (this.udsRawCanSupported) {
       try {
+        console.log(`[UDS] Trying raw CAN for svc=${svcHex}`);
         return await this.sendUDSviaRawCAN(service, subFunction, data, targetAddress);
       } catch (err) {
         // If can_send itself errors (not timeout), bridge may not support it
         const msg = err instanceof Error ? err.message : String(err);
+        console.log(`[UDS] Raw CAN threw: ${msg}`);
         if (msg.includes('unknown') || msg.includes('unsupported') || msg.includes('not supported')) {
           this.udsRawCanSupported = false;
-          this.emit('log', null, 'Bridge does not support can_send — falling back to OBD transport');
         } else {
           // Timeout or no ECU response — this is expected, don't disable raw CAN
           throw err;
@@ -1009,6 +1037,7 @@ export class PCANConnection {
     }
 
     // Strategy 3: Last resort — obd_request (only works for standard OBD modes)
+    console.log(`[UDS] Falling back to OBD transport for svc=${svcHex}`);
     return this.sendUDSviaOBD(service, subFunction, data, targetAddress);
   }
 
@@ -1023,13 +1052,10 @@ export class PCANConnection {
    *
    * The bridge's can_send handler is fire-and-forget — it sends the CAN frame
    * but does NOT relay the ECU's response back via WebSocket. To capture the
-   * response, we:
-   *   1. Start bus monitor mode (if not already running) so the bridge streams
-   *      all CAN frames back to us
-   *   2. Set up a temporary message listener filtering for the response CAN ID
-   *   3. Send the CAN frame via can_send
-   *   4. Wait for the response frame from the bus monitor stream
-   *   5. Parse the ISO-TP response
+   * response, we intercept the bus monitor's frame callback (which is PROVEN
+   * to receive can_frame messages) and filter for the response CAN ID.
+   *
+   * If no bus monitor is running, we start one with our own handler.
    */
   private async sendUDSviaRawCAN(
     service: number,
@@ -1041,17 +1067,60 @@ export class PCANConnection {
       throw new Error('WebSocket not connected');
     }
 
-    // Ensure bus monitor is running so we receive CAN frames from the bridge
-    if (!this.udsMonitorStarted) {
+    // Ensure bus monitor is running so we can capture ECU responses.
+    // The key insight: the bus monitor's addEventListener handler IS proven
+    // to receive can_frame messages. We need to inject our udsResponseListener
+    // into that same handler.
+    if (!this.monitorActive) {
+      // No monitor running — start one with a handler that routes to udsResponseListener
+      this.monitorActive = true;
+      this.monitorCallback = () => {}; // no-op
+
+      // Replace or create the frame handler to include UDS routing
+      if (this.monitorFrameHandler) {
+        this.ws.removeEventListener('message', this.monitorFrameHandler);
+      }
+      this.monitorFrameHandler = (event: MessageEvent) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if ((msg.type === 'can_frame' || msg.type === 'bus_frame') && this.monitorActive) {
+            if (this.udsResponseListener) {
+              this.udsResponseListener(msg);
+            }
+          }
+        } catch { /* ignore */ }
+      };
+      this.ws.addEventListener('message', this.monitorFrameHandler);
+
+      // Tell bridge to start streaming
       try {
         await this.sendRequest({ type: 'start_monitor', filter_ids: [] });
-        this.udsMonitorStarted = true;
-        this.emit('log', null, 'UDS monitor started for raw CAN transport');
+        await new Promise(r => setTimeout(r, 100));
       } catch {
-        // Monitor might already be running (e.g., IntelliSpy started it)
-        this.udsMonitorStarted = true;
+        // Monitor might already be running on bridge side
+      }
+    } else {
+      // Monitor IS already running (IntelliSpy started it).
+      // The existing monitorFrameHandler doesn't know about udsResponseListener.
+      // Wrap it: save the old handler, replace with one that also routes to UDS.
+      const oldHandler = this.monitorFrameHandler;
+      if (oldHandler && !this.udsMonitorStarted) {
+        this.ws.removeEventListener('message', oldHandler);
+        this.monitorFrameHandler = (event: MessageEvent) => {
+          // Call original handler first (for IntelliSpy)
+          oldHandler(event);
+          // Also route to UDS response listener
+          try {
+            const msg = JSON.parse(event.data);
+            if ((msg.type === 'can_frame' || msg.type === 'bus_frame') && this.udsResponseListener) {
+              this.udsResponseListener(msg);
+            }
+          } catch { /* ignore */ }
+        };
+        this.ws.addEventListener('message', this.monitorFrameHandler);
       }
     }
+    this.udsMonitorStarted = true;
 
     // Build UDS payload: [service, subFunction?, ...data]
     const udsPayload: number[] = [service];
@@ -1065,38 +1134,34 @@ export class PCANConnection {
 
     const responseArbId = targetAddress + 0x08; // Standard UDS: response = request + 0x08
 
-    // Set up a temporary listener to capture the response from bus monitor frames
+    // Set up response capture via udsResponseListener.
+    // The existing monitorFrameHandler (whether ours or IntelliSpy's) will call
+    // this.udsResponseListener for every can_frame/bus_frame.
     const responsePromise = new Promise<number[] | null>((resolve) => {
       const timeout = setTimeout(() => {
-        this.ws?.removeEventListener('message', listener);
+        this.udsResponseListener = null;
         resolve(null);
-      }, 5000); // 5 second timeout for ECU response
+      }, 5000);
 
-      const listener = (event: MessageEvent) => {
-        try {
-          const msg = JSON.parse(event.data);
-          // Bus monitor frames come as can_frame or bus_frame
-          if (msg.type === 'can_frame' || msg.type === 'bus_frame') {
-            const arbId = msg.arb_id ?? msg.arbitration_id ?? msg.id;
-            if (arbId === responseArbId) {
-              // Got our response frame!
-              clearTimeout(timeout);
-              this.ws?.removeEventListener('message', listener);
-              const frameData: number[] = msg.data || [];
-              resolve(frameData);
-            }
-          }
-        } catch {
-          // ignore parse errors
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        // Only process CAN frame messages
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+        
+        const rawArbId = msg.arb_id ?? msg.arbitration_id;
+        const arbId = typeof rawArbId === 'string'
+          ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
+          : Number(rawArbId);
+        if (arbId === responseArbId) {
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          const frameData: number[] = (msg.data as number[]) || [];
+          resolve(frameData);
         }
       };
-
-      this.ws!.addEventListener('message', listener);
     });
 
-    // Send the CAN frame (fire-and-forget from bridge's perspective)
-    // Don't use sendRequest since can_send won't get a proper response —
-    // just send the raw WebSocket message directly
+    // Send the CAN frame fire-and-forget
     this.ws.send(JSON.stringify({
       type: 'can_send',
       id: this.nextRequestId(),
@@ -1104,7 +1169,7 @@ export class PCANConnection {
       data: frame,
     }));
 
-    // Wait for the response from the bus monitor stream
+    // Wait for the response
     const rawData = await responsePromise;
     if (!rawData || rawData.length === 0) {
       throw new Error('Timeout waiting for CAN response');

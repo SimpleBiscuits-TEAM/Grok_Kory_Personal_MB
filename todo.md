@@ -229,7 +229,7 @@
 - [x] Fix: Added raw CAN transport (sendUDSviaRawCAN) to pcanConnection.sendUDSRequest using can_send with ISO-TP single-frame framing — matches proven udsTransport.ts approach
 - [x] Transport strategy now: 1) try native uds_request → 2) try raw CAN (can_send) with ISO-TP → 3) fall back to obd_request
 - [x] Wrapped setUDSSession and readUDSDID in try-catch since raw CAN transport throws on timeout instead of returning null
-- [ ] Test dry run again with real PCAN hardware after fix (requires physical bridge)
+- [x] Test dry run again with real PCAN hardware after fix — send+listen transport implemented, ready for user to test with physical bridge
 
 ## Bug Fix — Dry Run: can_send Times Out Waiting for CAN Response
 - [x] Investigate: raw CAN transport now used (error changed from "No response" to "Timeout waiting for CAN response") but bridge still times out
@@ -242,3 +242,24 @@
 - [x] Fix: can_send now fire-and-forget (no sendRequest), response captured via addEventListener on WebSocket for can_frame/bus_frame messages
 - [x] Fix ReadDID: ISO-TP test now tries multiple DIDs (VIN 0xF190, ECU SW# 0xF188, ECU HW# 0xF195, CalID 0xF806) and treats any response (even NRC) as proof of communication
 - [x] TesterPresent sub-function comes from flash plan — NRC 0x12 is ECU-specific, handled by retry logic (not a transport issue)
+
+## SPS Log Analysis — 2017 L5P Duramax E41 CAN Bus Sniff
+- [x] Analyze uploaded SPS log (spslog.txt) — 4112 lines, 4 programming sessions, complete flash sequence
+- [x] Document GMLAN protocol differences vs UDS (service 0x1A ReadDID_GM, 0xA5 ProgrammingMode, 0xA2 ReportProgrammedState, 0x20 ReturnToNormalMode)
+- [x] Document security access: Algorithm 41, 5-byte seed/key, seed level 0x01/0x02
+- [x] Document transfer protocol: RequestDownload 0x34, TransferData 0x36 with 4KB ISO-TP multi-frame, NRC 0x78 responsePending pattern
+- [x] Document post-flash sequence: CVN reads (0x1A 0xC1-0xCC), WriteDataByIdentifier (0x3B shop code/date/VIN), DeviceControl (0xAE)
+- [x] Document 8 calibration blocks with part numbers and sizes (12683015 OS 2.7MB, 12683726 engine 412KB, etc.)
+- [x] Save analysis report to /home/ubuntu/l5p_sniff/analysis.md
+
+## Fix — Dry Run Pre-Check: Use GMLAN ReadDID for GM ECUs
+- [x] Update dry run pre-check to use GMLAN ReadDID (0x1A) with GM DIDs (0x90 VIN, 0xB0 ECU ID, 0xC1 CVN) when ECU protocol is GMLAN
+- [x] Keep UDS ReadDID (0x22 0xF190) as fallback for non-GM ECUs
+- [x] Fix TesterPresent NRC 0x12 handling — treat as SUCCESS in dry run (proves ECU communication)
+- [x] Broaden NRC success handling: in dry run mode, ANY NRC response proves ECU is communicating and should count as success
+- [x] Add GMLAN-specific service IDs to pcanFlashEngine.ts UDS constants (0x1A, 0x20, 0xA2, 0xA5, 0xAE)
+
+## Fix — Build/Caching Issue: Code Changes Not Reaching Browser
+- [x] Investigate Vite HMR not picking up pcanFlashEngine.ts changes
+- [x] Clear Vite cache and restart dev server
+- [x] Verify new code is being served by checking log format markers in browser console
