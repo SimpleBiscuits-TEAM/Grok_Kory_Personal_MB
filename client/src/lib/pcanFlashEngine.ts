@@ -1700,33 +1700,22 @@ export class PCANFlashEngine {
         `RequestDownload (0x34) constructed: addr=0x${startAddrNum.toString(16).toUpperCase()} len=0x${blockLenNum.toString(16).toUpperCase()}`);
     }
 
-    // GMLAN: After bootloader reboot (A5 03), the bootloader starts in DEFAULT session.
-    // The broadcast sent 0x10 0x02 BEFORE A5 03, but the bootloader rebooted AFTER.
-    // Security access (0x27) works in default session, but RequestDownload (0x34) requires
-    // programming session. Send 0x10 0x02 on the physical address to put the bootloader
-    // into programming session before attempting RequestDownload.
-    if (this.isGMLAN) {
-      this.log('info', cmd.phase, 'Establishing programming session on bootloader (0x10 0x02)...');
-      try {
-        const sessResp = await this.conn.sendUDSRequest(
-          UDS.DIAGNOSTIC_SESSION_CONTROL, 0x02, undefined, this.txAddr
-        );
-        if (sessResp?.positiveResponse) {
-          this.log('success', cmd.phase, '✓ Programming session active on bootloader');
-        } else {
-          const sessNrc = sessResp?.nrc || 0;
-          // NRC 0x12 (subFunctionNotSupported) is OK — bootloader may already be in programming session
-          // NRC 0x22 (conditionsNotCorrect) is also OK — some bootloaders don't need explicit session
-          this.log('info', cmd.phase,
-            `Programming session response: NRC 0x${sessNrc.toString(16)} (${NRC_NAMES[sessNrc] || 'unknown'}) — continuing`);
-        }
-      } catch (sessErr) {
-        // Timeout is OK — bootloader may not respond to 0x10 but still accept 0x34
-        this.log('info', cmd.phase, 'Programming session timeout — bootloader may already be ready, continuing...');
-      }
-      // Small delay to let session settle
-      await this.delay(200);
-    }
+    // GMLAN: After bootloader reboot (A5 03), the bootloader comes up in a state that
+    // accepts security access (0x27) and then RequestDownload (0x34) directly.
+    // The broadcast already sent programming session via UUDT (FE 02 10 02 on 0x101)
+    // BEFORE the A5 03 reboot. The bootloader does NOT need a separate physical 0x10 0x02.
+    //
+    // CRITICAL: Sending 0x10 0x02 AFTER security access INVALIDATES the security grant.
+    // In standard UDS, changing sessions resets security access state. This was confirmed
+    // in flash log #14 (daac7370): 0x10 0x02 accepted, but RequestDownload returned NRC 0x22
+    // because the session change reset the security unlock.
+    //
+    // Reference sequence (from BUSMASTER/gmlan_timing.md):
+    //   Key accepted → 206ms → RequestDownload 34 00 00 0F FE
+    // No 0x10 0x02 between key and RequestDownload.
+    //
+    // DevProg GM_FLASH_SEQUENCE: OPENPS_GMLAN → REQUEST_SEED → SEND_KEY → PRIRC → FLASH_BLOCKS
+    // Session is opened BEFORE security, never after.
 
     this.log('can_tx', cmd.phase,
       `TX: RequestDownload (0x34) — ${rc34Bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);

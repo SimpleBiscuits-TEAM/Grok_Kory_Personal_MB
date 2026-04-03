@@ -669,3 +669,12 @@
 - [x] Fix: Non-fatal — NRC 0x12/0x22/timeout all handled gracefully, continues to RequestDownload
 - [x] Note: Key-send delay fix still working — security granted on first key attempt (line 50)
 - [x] Note: GMLAN RequestDownload format (34 00 00 0F FE) matches BUSMASTER reference — format is correct
+
+## Real Flash Attempt #14 — FAILED (Apr 3, 2026) — Log daac7370
+- [x] Programming session fix WORKED (0x10 0x02 accepted at 119.5s) — bootloader in programming session
+- [x] RequestDownload STILL returns NRC 0x22 (conditionsNotCorrect) at 119.7s
+- [x] Bootloader took 12 probes + 1 retry to respond (seed at 119.0s, ~77s after A5 03)
+- [x] Bridge WebSocket disconnected during bootloader polling (reconnected on attempt 1/3)
+- [x] ROOT CAUSE: 0x10 0x02 sent AFTER security access invalidates security grant — session change resets security state
+- [x] FIX: Removed physical 0x10 0x02 from executeBlockTransfer() — broadcast already handles session, BUSMASTER reference shows no session change between key and RequestDownload
+- [x] TypeScript compiles with 0 errors, 4 pre-existing test failures (geofence/shareToken) unrelated to flash engine
