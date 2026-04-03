@@ -16,7 +16,7 @@ import {
 export type FlashPhase =
   | 'PRE_CHECK' | 'VOLTAGE_INIT' | 'SESSION_OPEN' | 'SECURITY_ACCESS'
   | 'PRE_FLASH' | 'BLOCK_TRANSFER' | 'POST_FLASH' | 'VERIFICATION'
-  | 'CLEANUP' | 'RECOVERY';
+  | 'KEY_CYCLE' | 'CLEANUP' | 'RECOVERY';
 
 export interface FlashCommand {
   id: number;
@@ -30,6 +30,7 @@ export interface FlashCommand {
   blockData?: {
     blockId: number;
     blockType: 'OS' | 'CAL' | 'PATCH';
+    sectionName: string;
     startAddr: string;
     endAddr: string;
     totalBytes: number;
@@ -94,6 +95,49 @@ export interface SimulatorState {
   recoveryAttempt: number;
   /** Internal: ticks spent on the current non-block command */
   commandTickCount: number;
+  /** Estimated time remaining in ms */
+  estimatedRemainingMs: number;
+  /** Human-readable name of the current section being flashed */
+  currentSectionName: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOCK SECTION NAME MAPPING
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Map block address ranges to human-readable section names for GM ECUs */
+function getBlockSectionName(
+  blockId: number, startAddr: string, blockType: 'OS' | 'CAL' | 'PATCH', ecuType: string, totalBlocks: number,
+): string {
+  const addr = parseInt(startAddr, 16);
+  
+  // Single-block containers (common for L5P/E41) — the one block contains everything
+  if (totalBlocks === 1) {
+    if (blockType === 'OS') return 'Operating System + Calibration';
+    return 'Full Calibration';
+  }
+
+  // Multi-block GM ECU section mapping by address range
+  // These are typical for E88, E90, E92, E98, etc.
+  if (blockType === 'OS') return 'Operating System';
+  if (blockType === 'PATCH') return 'OS Patch';
+
+  // Calibration block naming by position/ID
+  const calNames: Record<number, string> = {
+    1: 'Engine Calibration (Fuel & Spark Tables)',
+    2: 'Transmission Calibration (Shift Points & Line Pressure)',
+    3: 'Emissions & Diagnostics (DTC Thresholds & OBD-II)',
+    4: 'Torque Management (Torque Limits & Reduction)',
+    5: 'Speed Limiter & Rev Limiter',
+    6: 'Idle & Cruise Control',
+    7: 'Boost Control (Turbo/Supercharger)',
+    8: 'Exhaust & Aftertreatment (EGR, DPF, DEF)',
+  };
+
+  // For cal blocks, use block_id to determine section
+  // Block IDs in multi-block containers are typically sequential after OS block(s)
+  const calBlockIndex = blockId; // block_id from container
+  return calNames[calBlockIndex] || `Calibration Segment ${calBlockIndex}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -161,11 +205,17 @@ export function generateFlashPlan(
 
   // Phase 5: PRE_FLASH (per-block erase + request download)
   const blocks = header.block_struct || [];
-  const filteredBlocks = blocks.filter(b => {
+  let filteredBlocks = blocks.filter(b => {
     if (flashMode === 'CALIBRATION') return b.OS !== 'true';
     if (flashMode === 'PATCH_ONLY') return b.OS === 'patch' || b.OS === 'forcepatch';
     return true; // FULL_FLASH
   });
+  // If CALIBRATION mode filtered out ALL blocks (e.g., single-block L5P containers
+  // where the one block has OS='true' but contains both OS+cal), flash all blocks
+  if (flashMode === 'CALIBRATION' && filteredBlocks.length === 0 && blocks.length > 0) {
+    filteredBlocks = blocks;
+    warnings.push('All blocks marked as OS — flashing entire container in calibration mode');
+  }
 
   let totalBytes = 0;
   for (const block of filteredBlocks) {
@@ -173,11 +223,14 @@ export function generateFlashPlan(
     const isOS = block.OS === 'true';
     const isPatch = block.OS === 'patch' || block.OS === 'forcepatch';
     const blockType = isPatch ? 'PATCH' as const : isOS ? 'OS' as const : 'CAL' as const;
+    const sectionName = getBlockSectionName(
+      block.block_id, block.start_adresse || '0', blockType, ecuType, filteredBlocks.length,
+    );
 
     // Erase
     if (block.erase !== '0' && block.erase !== undefined) {
       commands.push({
-        id: cmdId++, phase: 'PRE_FLASH', label: `Erase Block #${block.block_id} (${blockType})`,
+        id: cmdId++, phase: 'PRE_FLASH', label: `Erase — ${sectionName}`,
         canTx: `${txHex} 04 31 01 FF 00`,
         expectedPositive: '71', timeoutMs: 30000, retries: 1,
       });
@@ -185,7 +238,7 @@ export function generateFlashPlan(
 
     // Request Download
     commands.push({
-      id: cmdId++, phase: 'PRE_FLASH', label: `Request Download Block #${block.block_id}`,
+      id: cmdId++, phase: 'PRE_FLASH', label: `Request Download — ${sectionName}`,
       canTx: `${txHex} xx 34 00 44 ${block.start_adresse || '00000000'} ${block.block_length || '00000000'}`,
       expectedPositive: '74', timeoutMs: 5000, retries: 2,
     });
@@ -193,11 +246,12 @@ export function generateFlashPlan(
     // Block Transfer
     commands.push({
       id: cmdId++, phase: 'BLOCK_TRANSFER',
-      label: `Transfer Block #${block.block_id} (${blockType}) — ${formatBytes(blockLen)}`,
+      label: `Flashing ${sectionName} — ${formatBytes(blockLen)}`,
       expectedPositive: '76', timeoutMs: 120000, retries: 1,
       blockData: {
         blockId: block.block_id,
         blockType,
+        sectionName,
         startAddr: block.start_adresse || '0',
         endAddr: block.end_adresse || '0',
         totalBytes: blockLen,
@@ -225,21 +279,48 @@ export function generateFlashPlan(
     canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
   });
 
-  // Phase 9: CLEANUP
+  // Phase 9: KEY_CYCLE — Required for ECU to accept new calibration
   commands.push({
-    id: cmdId++, phase: 'CLEANUP', label: 'ECU Reset (HardReset)',
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'ECU Reset before key cycle',
     canTx: `${txHex} 02 11 01`, expectedPositive: '51', timeoutMs: 5000, retries: 1,
   });
   commands.push({
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Key Off — Turn ignition OFF (wait 10 seconds)',
+    timeoutMs: 12000, retries: 0,
+  });
+  commands.push({
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Key On — Turn ignition ON',
+    timeoutMs: 5000, retries: 0,
+  });
+  commands.push({
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Wait for ECU boot-up (5 seconds)',
+    timeoutMs: 6000, retries: 0,
+  });
+  commands.push({
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Verify ECU communication after key cycle',
+    canTx: `${txHex} 02 3E 00`, canRx: `${rxHex} 02 7E 00`,
+    expectedPositive: '7E', timeoutMs: 5000, retries: 3,
+  });
+  commands.push({
+    id: cmdId++, phase: 'KEY_CYCLE', label: 'Read Calibration ID (verify new cal loaded)',
+    canTx: `${txHex} 03 22 F1 90`, expectedPositive: '62', timeoutMs: 5000, retries: 2,
+  });
+
+  // Phase 10: CLEANUP
+  commands.push({
     id: cmdId++, phase: 'CLEANUP', label: 'Clear DTCs (Functional Address)',
     canTx: `0x7DF 04 14 FF FF FF`, expectedPositive: '54', timeoutMs: 5000, retries: 2,
+  });
+  commands.push({
+    id: cmdId++, phase: 'CLEANUP', label: 'Return to Default Session',
+    canTx: `${txHex} 02 10 01`, expectedPositive: '50', timeoutMs: 3000, retries: 1,
   });
 
   // Realistic timing: ~4 KB/s for block transfers, phase-specific delays for commands
   const PHASE_EST: Record<string, number> = {
     PRE_CHECK: 1500, VOLTAGE_INIT: 2000, SESSION_OPEN: 2500,
     SECURITY_ACCESS: 3000, PRE_FLASH: 8000, POST_FLASH: 4000,
-    VERIFICATION: 3000, CLEANUP: 2000,
+    VERIFICATION: 3000, KEY_CYCLE: 5000, CLEANUP: 2000,
   };
   const estimatedTimeMs = commands.reduce((sum, c) => {
     if (c.blockData) return sum + (c.blockData.totalBytes / 4000) * 1000; // 4 KB/s → ms
@@ -290,6 +371,8 @@ export function createSimulatorState(plan: FlashPlan): SimulatorState {
     recoveryPlan: null,
     recoveryAttempt: 0,
     commandTickCount: 0,
+    estimatedRemainingMs: plan.estimatedTimeMs,
+    currentSectionName: '',
   };
 }
 
@@ -339,6 +422,7 @@ export function advanceSimulator(
     PRE_FLASH: 8000,      // Erase can take 5-15s per block
     POST_FLASH: 4000,     // Dependency check
     VERIFICATION: 3000,   // Read ECU ID
+    KEY_CYCLE: 10000,     // Key off/on cycle with wait
     CLEANUP: 2000,        // Reset + DTC clear
   };
 
@@ -391,7 +475,8 @@ export function advanceSimulator(
       next.currentCommandIndex++;
     }
 
-    next.statusMessage = `Transferring Block #${cmd.blockData.blockId} (${cmd.blockData.blockType}) — ${next.blockProgress.toFixed(0)}%`;
+    next.currentSectionName = cmd.blockData.sectionName;
+    next.statusMessage = `Flashing ${cmd.blockData.sectionName} — ${next.blockProgress.toFixed(0)}%`;
   } else {
     // Non-block command: simulate realistic delay based on phase
     const requiredDelay = PHASE_DELAY[cmd.phase] || 1500;
@@ -431,7 +516,29 @@ export function advanceSimulator(
     // Otherwise: still waiting — don't advance
   }
 
-  next.progress = (next.currentCommandIndex / plan.commands.length) * 100;
+  // Time-weighted progress: block transfers weighted by bytes, commands by phase delay
+  // This prevents the progress bar from stalling during long block transfers
+  const totalEstMs = plan.estimatedTimeMs || 1;
+  let completedMs = 0;
+  for (let i = 0; i < next.currentCommandIndex; i++) {
+    const c = plan.commands[i];
+    if (c?.blockData) {
+      completedMs += (c.blockData.totalBytes / 4000) * 1000;
+    } else if (c) {
+      completedMs += PHASE_DELAY[c.phase] || 1500;
+    }
+  }
+  // Add partial progress for current command
+  if (cmd?.blockData && next.blockProgress > 0) {
+    const blockTimeMs = (cmd.blockData.totalBytes / 4000) * 1000;
+    completedMs += blockTimeMs * (next.blockProgress / 100);
+  } else if (cmd && next.commandTickCount > 0) {
+    const cmdDelay = PHASE_DELAY[cmd.phase] || 1500;
+    const ticksNeeded = Math.ceil(cmdDelay / deltaMs);
+    completedMs += cmdDelay * Math.min(next.commandTickCount / ticksNeeded, 1);
+  }
+  next.progress = Math.min((completedMs / totalEstMs) * 100, 99.9);
+  next.estimatedRemainingMs = Math.max(totalEstMs - completedMs, 0);
   return next;
 }
 

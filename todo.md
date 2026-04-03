@@ -159,3 +159,29 @@
 - [x] Verify ECU names against strategy docs / A2L references — all GM-Delco ECUs use PPEI strategy names (E41, E88, E90, etc.), Bosch/Ford/Cummins use part numbers
 - [x] Updated estimated time calculation to match realistic timing
 - [x] Log area expands to h-72 on completion and shows ALL entries (not just last 100)
+
+## Bug Fix — Flash Simulator Progress, Countdown, Section Names, Cal Blocks
+- [x] Progress bar stuck at 50% — fixed to time-weighted progress (block transfers weighted by bytes, commands by phase delay)
+- [x] Add countdown timer showing estimated time remaining until flash complete (estimatedRemainingMs field)
+- [x] Show human-readable section names during flash ("Operating System + Calibration", "Engine Calibration", etc.) via getBlockSectionName()
+- [x] Only OS block was flashed — fixed cal block filtering: if ALL blocks are OS (single-block containers like L5P), flash them all
+- [x] Add key cycle routines to post-flash sequence (ECU reset, key off 10s, key on, boot wait 5s, verify, read cal ID)
+- [x] Add beforeunload warning to prevent accidental tab close during active flash
+- [x] Add Wake Lock API to prevent screen/computer sleep during flash
+- [x] Flash execution is client-side (runs in browser) — continues without internet once page is loaded
+- [x] Track last successful block index via currentBlock in SimulatorState (resume capability is partial — state not persisted to storage yet)
+
+## Feature — Real PCAN Bridge Flash (not simulation)
+- [x] Built pcanFlashEngine.ts — real CAN bus flash execution via PCANConnection WebSocket bridge
+- [x] Sends actual UDS commands (TesterPresent 0x3E, DiagnosticSessionControl 0x10, SecurityAccess 0x27, RequestDownload 0x34, TransferData 0x36, TransferExit 0x37, ECUReset 0x11, ClearDTC 0x14, CommunicationControl 0x28, ControlDTCSetting 0x85)
+- [x] Handles real ECU responses with NRC description table (common codes: 0x10-0x78 mapped, with fallback for unmapped codes)
+- [x] Implements real seed/key exchange — GM_5B_AES (Web Crypto API) and Ford_3B_LFSR algorithms, with fallback to container header pre-computed key
+- [x] Transfers actual file data blocks from container ArrayBuffer with proper chunking by xferSize and block sequence counter
+- [x] Real-time progress tracking based on actual bytes transferred
+- [x] FlashMissionControl wired to use PCANFlashEngine when connectionMode='pcan', simulator when 'simulator' (code path implemented, requires live PCAN bridge for end-to-end testing)
+- [x] LIVE badge and safety warnings displayed during real flash
+- [x] Emergency abort button for real flash (calls engine.abort())
+- [x] Pause button hidden during real flash (cannot pause real CAN bus communication)
+- [x] Key cycle user prompts with countdown timer during KEY_CYCLE phase (UI scaffolded, triggers when engine reaches KEY_CYCLE commands)
+- [x] PCANConnection instance created when bridge is detected, passed to MissionControl (connection established on flash start via engine)
+- [x] Container ArrayBuffer and header passed to MissionControl for real flash data access

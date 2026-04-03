@@ -170,6 +170,7 @@ export default function FlashContainerPanel() {
   const [pcanBridgeAvailable, setPcanBridgeAvailable] = useState<boolean | null>(null);
   const [pcanBridgeUrl, setPcanBridgeUrl] = useState<string | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
+  const pcanConnectionRef = useRef<PCANConnection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const createSession = trpc.flash.createSession.useMutation();
@@ -182,7 +183,15 @@ export default function FlashContainerPanel() {
     try {
       const result = await PCANConnection.isBridgeAvailable();
       setPcanBridgeAvailable(result.available);
-      setPcanBridgeUrl(result.available ? result.url : null);
+      if (result.available && result.url) {
+        setPcanBridgeUrl(result.url);
+        // Pre-create connection instance for real flash
+        if (!pcanConnectionRef.current) {
+          pcanConnectionRef.current = new PCANConnection({ bridgeUrl: result.url });
+        }
+      } else {
+        setPcanBridgeUrl(null);
+      }
     } catch {
       setPcanBridgeAvailable(false);
       setPcanBridgeUrl(null);
@@ -425,6 +434,9 @@ export default function FlashContainerPanel() {
           sessionUuid={sessionUuid}
           onComplete={handleFlashComplete}
           onBack={() => { setMissionControlMode(null); setSessionUuid(''); }}
+          pcanConnection={missionControlMode === 'pcan' ? pcanConnectionRef.current : null}
+          containerData={rawData ? rawData.buffer as ArrayBuffer : null}
+          containerHeader={containerFileHeader}
         />
       </div>
     );

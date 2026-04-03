@@ -1,6 +1,7 @@
 /**
  * FlashMissionControl — Full-screen flash execution UI with real-time
- * simulation, animated progress, CAN bus log stream, and server session recording.
+ * simulation OR real PCAN flash, animated progress, CAN bus log stream,
+ * countdown timer, section names, and server session recording.
  */
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { trpc } from '@/lib/trpc';
@@ -11,12 +12,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Play, Pause, Square, AlertTriangle, CheckCircle2, XCircle,
   Radio, ArrowLeft, RotateCcw, ChevronDown, ChevronUp, Download, FileText,
+  Timer, Cpu, Key,
 } from 'lucide-react';
 import {
   type FlashPlan, type SimulatorState, type SimulatorLogEntry,
   createSimulatorState, advanceSimulator, getAllFunFacts,
   formatBytes, formatDuration,
 } from '../../../shared/pcanFlashOrchestrator';
+import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
+import { PCANFlashEngine, type FlashEngineCallbacks } from '../lib/pcanFlashEngine';
+import { type PCANConnection } from '../lib/pcanConnection';
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +31,12 @@ interface FlashMissionControlProps {
   sessionUuid: string;
   onComplete: (result: 'SUCCESS' | 'FAILED' | 'ABORTED') => void;
   onBack: () => void;
+  /** Required for real PCAN flash mode */
+  pcanConnection?: PCANConnection | null;
+  /** Raw container file data — required for real PCAN flash */
+  containerData?: ArrayBuffer | null;
+  /** Parsed container header — required for real PCAN flash */
+  containerHeader?: ContainerFileHeader | null;
 }
 
 // ── Phase colors ───────────────────────────────────────────────────────────
@@ -35,7 +46,7 @@ const PHASE_COLORS: Record<string, string> = {
   SESSION_OPEN: 'text-indigo-400', SECURITY_ACCESS: 'text-amber-400',
   PRE_FLASH: 'text-orange-400', BLOCK_TRANSFER: 'text-emerald-400',
   POST_FLASH: 'text-teal-400', VERIFICATION: 'text-green-400',
-  CLEANUP: 'text-zinc-400', RECOVERY: 'text-red-400',
+  KEY_CYCLE: 'text-yellow-400', CLEANUP: 'text-zinc-400', RECOVERY: 'text-red-400',
 };
 
 const LOG_TYPE_COLORS: Record<string, string> = {
@@ -110,25 +121,86 @@ function ValidationPanel({ plan }: { plan: FlashPlan }) {
   );
 }
 
+// ── Key Cycle Prompt ───────────────────────────────────────────────────────
+
+function KeyCyclePrompt({ message, countdown }: { message: string; countdown: number }) {
+  return (
+    <div className="p-4 rounded-lg border-2 border-yellow-500/50 bg-yellow-500/10 animate-pulse">
+      <div className="flex items-center gap-3 mb-2">
+        <Key className="h-6 w-6 text-yellow-400" />
+        <span className="font-mono text-sm font-bold text-yellow-300">KEY CYCLE REQUIRED</span>
+      </div>
+      <p className="text-sm font-mono text-yellow-200 mb-2">{message}</p>
+      {countdown > 0 && (
+        <div className="flex items-center gap-2 text-xs font-mono text-yellow-400">
+          <Timer className="h-4 w-4" />
+          <span>Waiting: {Math.ceil(countdown / 1000)}s remaining</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function FlashMissionControl({
   plan, connectionMode, sessionUuid, onComplete, onBack,
+  pcanConnection, containerData, containerHeader,
 }: FlashMissionControlProps) {
   const [sim, setSim] = useState<SimulatorState>(() => createSimulatorState(plan));
   const [showLog, setShowLog] = useState(true);
   const [funFactIdx, setFunFactIdx] = useState(0);
+  const [keyCycleMsg, setKeyCycleMsg] = useState<string | null>(null);
+  const [keyCycleCountdown, setKeyCycleCountdown] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pendingLogsRef = useRef<SimulatorLogEntry[]>([]);
   const lastFlushRef = useRef(0);
   const startTimeRef = useRef<number | null>(null);
   const completedRef = useRef(false);
+  const flashEngineRef = useRef<PCANFlashEngine | null>(null);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
+  const isRealFlash = connectionMode === 'pcan';
 
   const updateSession = trpc.flash.updateSession.useMutation();
   const appendLogs = trpc.flash.appendLogs.useMutation();
   const completeSession = trpc.flash.completeSession.useMutation();
+
+  // ── Safety: beforeunload warning during flash ──────────────────────────
+  useEffect(() => {
+    if (!sim.isRunning || sim.result) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Flash in progress! Closing this page may brick the ECU. Are you sure?';
+      return e.returnValue;
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [sim.isRunning, sim.result]);
+
+  // ── Safety: wake lock to prevent sleep during flash ────────────────────
+  useEffect(() => {
+    if (!sim.isRunning || sim.result) {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+      return;
+    }
+    const acquireWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        }
+      } catch {
+        // Wake lock not supported or denied — continue anyway
+      }
+    };
+    acquireWakeLock();
+    return () => {
+      wakeLockRef.current?.release().catch(() => {});
+      wakeLockRef.current = null;
+    };
+  }, [sim.isRunning, sim.result]);
 
   const flushLogs = useCallback(() => {
     if (pendingLogsRef.current.length === 0) return;
@@ -146,17 +218,92 @@ export default function FlashMissionControl({
     });
   }, [sessionUuid, appendLogs]);
 
+  // ── Server session sync for real flash ─────────────────────────────────
+  const syncToServer = useCallback((state: SimulatorState) => {
+    const newLogs = state.log.slice(pendingLogsRef.current.length > 0 ? 0 : sim.log.length);
+    if (newLogs.length > 0) pendingLogsRef.current.push(...newLogs);
+    const now = Date.now();
+    if (now - lastFlushRef.current > 2000 && pendingLogsRef.current.length > 0) {
+      lastFlushRef.current = now;
+      flushLogs();
+    }
+    if (Math.floor(state.progress / 5) > Math.floor(sim.progress / 5)) {
+      updateSession.mutate({ uuid: sessionUuid, progress: Math.round(state.progress) });
+    }
+  }, [sessionUuid, sim.log.length, sim.progress, flushLogs, updateSession]);
+
+  // ── Start flash (simulator or real) ────────────────────────────────────
   const handleStart = useCallback(() => {
     startTimeRef.current = Date.now();
-    setSim(prev => ({ ...prev, isRunning: true }));
     updateSession.mutate({ uuid: sessionUuid, status: 'running', progress: 0 });
-  }, [sessionUuid, updateSession]);
+
+    if (isRealFlash && pcanConnection && containerData && containerHeader) {
+      // Real PCAN flash
+      const callbacks: FlashEngineCallbacks = {
+        onStateUpdate: (newState) => {
+          setSim(newState);
+          syncToServer(newState);
+        },
+        onComplete: (result) => {
+          if (!completedRef.current) {
+            completedRef.current = true;
+            flushLogs();
+            const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
+            completeSession.mutate({
+              uuid: sessionUuid,
+              status: result === 'SUCCESS' ? 'success' : result === 'ABORTED' ? 'aborted' : 'failed',
+              progress: result === 'SUCCESS' ? 100 : Math.round(sim.progress),
+              durationMs: duration,
+              errorMessage: result === 'FAILED' ? sim.statusMessage : undefined,
+            });
+          }
+        },
+        onUserAction: async (message, waitMs) => {
+          setKeyCycleMsg(message);
+          setKeyCycleCountdown(waitMs);
+          // Countdown timer
+          const interval = setInterval(() => {
+            setKeyCycleCountdown(prev => {
+              if (prev <= 1000) {
+                clearInterval(interval);
+                setKeyCycleMsg(null);
+                return 0;
+              }
+              return prev - 1000;
+            });
+          }, 1000);
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          clearInterval(interval);
+          setKeyCycleMsg(null);
+          setKeyCycleCountdown(0);
+        },
+      };
+
+      const engine = new PCANFlashEngine({
+        connection: pcanConnection,
+        plan,
+        containerData,
+        header: containerHeader,
+        callbacks,
+      });
+      flashEngineRef.current = engine;
+      setSim(prev => ({ ...prev, isRunning: true }));
+      engine.execute(); // Fire and forget — callbacks handle state updates
+    } else {
+      // Simulator mode
+      setSim(prev => ({ ...prev, isRunning: true }));
+    }
+  }, [sessionUuid, updateSession, isRealFlash, pcanConnection, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage]);
 
   const handlePause = useCallback(() => {
     setSim(prev => ({ ...prev, isPaused: !prev.isPaused }));
   }, []);
 
   const handleAbort = useCallback(() => {
+    // Abort real flash engine if running
+    if (flashEngineRef.current) {
+      flashEngineRef.current.abort();
+    }
     setSim(prev => {
       const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
       flushLogs();
@@ -171,8 +318,9 @@ export default function FlashMissionControl({
     });
   }, [sessionUuid, flushLogs, completeSession]);
 
-  // Simulation tick
+  // ── Simulator tick (only for simulator mode) ───────────────────────────
   useEffect(() => {
+    if (isRealFlash) return; // Real flash uses engine callbacks, not tick
     if (!sim.isRunning || sim.isPaused || sim.result) return;
     const interval = setInterval(() => {
       setSim(prev => {
@@ -203,7 +351,7 @@ export default function FlashMissionControl({
       });
     }, 100);
     return () => clearInterval(interval);
-  }, [sim.isRunning, sim.isPaused, sim.result, plan, sessionUuid, flushLogs, updateSession, completeSession]);
+  }, [isRealFlash, sim.isRunning, sim.isPaused, sim.result, plan, sessionUuid, flushLogs, updateSession, completeSession]);
 
   // Fun fact rotation
   useEffect(() => {
@@ -215,7 +363,7 @@ export default function FlashMissionControl({
   // Auto-scroll log
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [sim.log.length]);
 
-  // Auto-expand log when flash completes so user can review
+  // Auto-expand log when flash completes
   useEffect(() => {
     if (sim.result && !showLog) setShowLog(true);
   }, [sim.result]);
@@ -229,7 +377,7 @@ export default function FlashMissionControl({
       return `[${ts}s] ${phase} ${type} ${e.message}`;
     });
     const header = [
-      `=== FLASH SESSION LOG ===${''} `,
+      `=== FLASH SESSION LOG ===`,
       `ECU: ${plan.ecuName}`,
       `Mode: ${plan.flashMode}`,
       `Connection: ${connectionMode}`,
@@ -265,9 +413,14 @@ export default function FlashMissionControl({
               <h3 className="font-mono text-sm font-bold tracking-wider text-zinc-100 flex items-center gap-2">
                 <Radio className={`h-4 w-4 ${sim.isRunning && !sim.result ? 'text-red-500 animate-pulse' : 'text-zinc-600'}`} />
                 MISSION CONTROL
+                {isRealFlash && (
+                  <Badge variant="outline" className="text-[10px] border-red-500/50 text-red-400 ml-1">
+                    LIVE
+                  </Badge>
+                )}
               </h3>
-              <p className="text-xs text-zinc-500 font-mono">
-                {connectionMode.toUpperCase()} — {plan.ecuName} — {plan.flashMode.replace('_', ' ')}
+              <p className="text-xs text-zinc-500">
+                {connectionMode === 'pcan' ? 'Real PCAN Bridge Flash' : 'Simulator Mode'} — {plan.ecuName}
               </p>
             </div>
           </div>
@@ -285,32 +438,55 @@ export default function FlashMissionControl({
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className={PHASE_COLORS[sim.currentPhase] || 'text-zinc-400'}>
-              {sim.currentPhase.replace('_', ' ')}
+              {sim.currentPhase.replace(/_/g, ' ')}
+              {sim.currentSectionName && ` — ${sim.currentSectionName}`}
             </span>
-            <span className="text-zinc-500">{sim.progress.toFixed(1)}% — {formatDuration(sim.elapsedMs)}</span>
+            <span className="text-zinc-500">{sim.progress.toFixed(1)}%</span>
           </div>
           <Progress value={sim.progress} className="h-2 bg-zinc-800" />
           <div className="flex justify-between text-[10px] font-mono text-zinc-600">
             <span>Block {sim.currentBlock}/{sim.totalBlocks}</span>
             <span>{formatBytes(sim.transferredBytes)} / {formatBytes(sim.totalBytes)}</span>
           </div>
+          {/* Countdown timer and elapsed time */}
+          <div className="flex justify-between text-[10px] font-mono">
+            <span className="text-zinc-500 flex items-center gap-1">
+              <Timer className="h-3 w-3" />
+              Elapsed: {formatDuration(sim.elapsedMs)}
+            </span>
+            {sim.isRunning && !sim.result && sim.estimatedRemainingMs > 0 && (
+              <span className="text-cyan-500 flex items-center gap-1">
+                <Timer className="h-3 w-3" />
+                Remaining: ~{formatDuration(sim.estimatedRemainingMs)}
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Key Cycle Prompt */}
+        {keyCycleMsg && <KeyCyclePrompt message={keyCycleMsg} countdown={keyCycleCountdown} />}
 
         {/* Controls */}
         <div className="flex gap-2">
           {!sim.isRunning && !sim.result && (
             <Button size="sm" onClick={handleStart} className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs">
-              <Play className="h-3 w-3 mr-1" /> START FLASH
+              <Play className="h-3 w-3 mr-1" /> {isRealFlash ? 'START REAL FLASH' : 'START FLASH'}
             </Button>
           )}
           {sim.isRunning && !sim.result && (
             <>
-              <Button size="sm" variant="outline" onClick={handlePause} className="font-mono text-xs border-zinc-700">
-                {sim.isPaused ? <Play className="h-3 w-3 mr-1" /> : <Pause className="h-3 w-3 mr-1" />}
-                {sim.isPaused ? 'RESUME' : 'PAUSE'}
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleAbort} className="font-mono text-xs border-red-800 text-red-400 hover:bg-red-900/30">
-                <Square className="h-3 w-3 mr-1" /> ABORT
+              {!isRealFlash && (
+                <Button size="sm" variant="outline" onClick={handlePause} className="font-mono text-xs border-zinc-700">
+                  {sim.isPaused ? <Play className="h-3 w-3 mr-1" /> : <Pause className="h-3 w-3 mr-1" />}
+                  {sim.isPaused ? 'RESUME' : 'PAUSE'}
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={handleAbort}
+                className={`font-mono text-xs ${isRealFlash
+                  ? 'border-red-600 text-red-300 hover:bg-red-900/50 font-bold'
+                  : 'border-red-800 text-red-400 hover:bg-red-900/30'}`}
+              >
+                <Square className="h-3 w-3 mr-1" /> {isRealFlash ? '⚠ EMERGENCY ABORT' : 'ABORT'}
               </Button>
             </>
           )}
@@ -328,6 +504,14 @@ export default function FlashMissionControl({
             </>
           )}
         </div>
+
+        {/* Safety warning for real flash */}
+        {isRealFlash && sim.isRunning && !sim.result && (
+          <div className="p-2 rounded border border-red-500/30 bg-red-500/5 text-red-400 text-[10px] font-mono flex items-center gap-2">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            <span>LIVE FLASH — Do NOT close this tab, disconnect power, or turn off the vehicle during flash.</span>
+          </div>
+        )}
 
         {/* Validation panel (pre-start) */}
         {!sim.isRunning && !sim.result && <ValidationPanel plan={plan} />}
@@ -350,13 +534,21 @@ export default function FlashMissionControl({
               {sim.result === 'SUCCESS' ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> :
                sim.result === 'FAILED' ? <XCircle className="h-5 w-5 text-red-400" /> :
                <AlertTriangle className="h-5 w-5 text-amber-400" />}
-              <span className="font-mono text-sm font-bold text-zinc-200">FLASH {sim.result}</span>
+              <span className="font-mono text-sm font-bold text-zinc-200">
+                {isRealFlash ? 'ECU' : 'SIMULATED'} FLASH {sim.result}
+              </span>
             </div>
             <p className="text-xs font-mono text-zinc-400">{sim.statusMessage}</p>
             <div className="flex gap-4 mt-2 text-xs font-mono text-zinc-500">
               <span>Duration: {formatDuration(sim.elapsedMs)}</span>
               <span>Transferred: {formatBytes(sim.transferredBytes)}</span>
             </div>
+            {sim.result === 'SUCCESS' && isRealFlash && (
+              <div className="mt-2 p-2 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400">
+                <Cpu className="h-3 w-3 inline mr-1" />
+                ECU has been flashed successfully. Verify operation by starting the vehicle and checking for DTCs.
+              </div>
+            )}
             {sim.recoveryPlan && (
               <div className="mt-3 p-2 rounded bg-zinc-800/50 border border-zinc-700">
                 <div className="text-xs font-mono text-amber-400 mb-1 flex items-center gap-1">
