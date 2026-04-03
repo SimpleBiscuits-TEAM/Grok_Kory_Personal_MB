@@ -597,3 +597,11 @@
 - [x] Investigate: NRC 0x22 confirms PriRC is E88-specific; per-block erase (0x31) comes before per-block 0x34
 - [x] Investigate: E41 uses standard block-specific 0x34 format, not the E88 PriRC format
 - [x] Note: NRC 0x37 lockout timer handled correctly — 10s wait then seed received
+
+## Real Flash Attempt #7 — FAILED (Apr 3, 2026) — Log 5531bbfd
+- [x] PriRC correctly skipped as nonFatal — GOOD
+- [x] Root cause: ECU needs 30-50s to reboot after A5 03 ProgrammingMode Complete
+- [x] In log #6, the real security access attempt (with NRC 0x37 + 10s wait) gave ECU ~48s to reboot — it responded at 68s
+- [x] In log #7, security was SKIPPED (PRE_CHECK granted), so PriRC hit only 700ms after A5 03 — ECU still rebooting
+- [x] Fix: Replaced GMLAN skip with bootloader readiness polling loop (12 probes × 5s = 60s budget)
+- [x] The seed request acts as a probe to wait for ECU reboot — NRC 0x37 lockout + retries provide the needed delay

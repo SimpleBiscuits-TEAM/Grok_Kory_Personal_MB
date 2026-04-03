@@ -1388,67 +1388,93 @@ export class PCANFlashEngine {
     const isRequestSeed = (subFunction % 2) === 1;
 
     if (isRequestSeed) {
-      // ── GMLAN Optimization: Skip seed/key if PRE_CHECK already granted security ──
-      // PRE_CHECK performs session + security access on the physical address BEFORE
-      // the SESSION_OPEN broadcast. After the broadcast (DisableNormalCommunication,
-      // ProgrammingMode), the ECU may stop responding to USDT on the physical address.
-      // Since security was already granted, we can skip this redundant exchange.
-      // NOTE: If PRE_CHECK security ALSO failed (intermittent ECU), this won't trigger,
-      // but the GMLAN safety net in executeCommand() will catch the timeout and continue.
-      if (this.lastSecurityAccessGranted && this.isGMLAN) {
-        this.log('success', cmd.phase,
-          '🔓 Security already granted in PRE_CHECK — skipping post-broadcast seed/key exchange');
-        this.log('info', cmd.phase,
-          'ℹ️ GMLAN ECUs may not respond to USDT after SESSION_OPEN broadcast (DisableNormalCommunication + ProgrammingMode). ' +
-          'PRE_CHECK security access is sufficient for flash operations.');
-        return {
-          service: UDS.SECURITY_ACCESS,
-          serviceName: 'SecurityAccess',
-          subFunction,
-          data: [subFunction],
-          positiveResponse: true,
-          isFlashRelated: true,
-          timestamp: Date.now(),
-        };
-      }
+      // ── GMLAN Bootloader Readiness Polling ──
+      // After SESSION_OPEN broadcast (A5 01 → A5 03 ProgrammingMode), the ECU
+      // reboots into its bootloader. This reboot takes 30-60 seconds. During this
+      // time the ECU is completely silent on USDT.
+      //
+      // The seed request serves as a PROBE to detect when the ECU is ready.
+      // We ALWAYS do a real seed request (never skip), even if PRE_CHECK granted
+      // security, because:
+      //   1. The ECU reboots after A5 03 and loses its previous session/security state
+      //   2. The seed request is the only way to confirm the bootloader is ready
+      //   3. Skipping it causes all subsequent USDT commands to timeout (log #7)
+      //
+      // Expected flow:
+      //   - Seed request → timeout (ECU rebooting) → retry after 5s → timeout → ...
+      //   - Eventually: NRC 0x37 (lockout from PRE_CHECK attempts) → wait 10s → seed
+      //   - Or: positive seed response directly
+      //
+      // Total polling budget: ~90s (enough for 30-60s reboot + 10s lockout + margin)
 
-      // Step 1: Request seed from ECU (with NRC 0x37 lockout retry)
-      // NRC 0x37 = requiredTimeDelayNotExpired — ECU has a security lockout timer
-      // (typically 10 seconds). We wait and retry up to 3 times.
+      const isPostBroadcast = cmd.phase === 'SECURITY_ACCESS'; // vs PRE_CHECK
+      const maxPollAttempts = (this.isGMLAN && isPostBroadcast) ? 12 : 1; // 12 × 5s = 60s polling + lockout retries
+      const pollIntervalMs = 5000; // 5s between polls during bootloader wait
+
       let seedResponse: UDSResponse | null = null;
       const maxLockoutRetries = 3;
-      for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
-        seedResponse = await this.conn.sendUDSRequest(
-          UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
-        );
 
-        if (!seedResponse) break; // No response at all
-
-        // Check for NRC 0x37 (requiredTimeDelayNotExpired)
-        if (!seedResponse.positiveResponse && seedResponse.nrc === 0x37) {
-          if (lockoutAttempt < maxLockoutRetries) {
-            this.log('warning', cmd.phase,
-              `NRC 0x37 — Security lockout timer active. Waiting 10s before retry ${lockoutAttempt + 1}/${maxLockoutRetries}...`);
-            await this.delay(10000); // Wait 10 seconds for lockout to expire
-            continue;
-          } else {
-            this.log('error', cmd.phase, 'NRC 0x37 — Security lockout persists after 3 retries (30s total). ECU may need power cycle.');
-            return seedResponse;
+      for (let pollAttempt = 0; pollAttempt < maxPollAttempts; pollAttempt++) {
+        // Inner loop: handle NRC 0x37 lockout retries for each poll attempt
+        for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
+          try {
+            seedResponse = await this.conn.sendUDSRequest(
+              UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
+            );
+          } catch (err) {
+            // Timeout or transport error — ECU not ready yet
+            seedResponse = null;
           }
-        }
 
-        // Check for NRC 0x36 (exceededNumberOfAttempts) — also a lockout condition
-        if (!seedResponse.positiveResponse && seedResponse.nrc === 0x36) {
-          this.log('warning', cmd.phase,
-            'NRC 0x36 — Exceeded number of security attempts. Waiting 10s...');
-          await this.delay(10000);
-          continue;
-        }
+          if (!seedResponse) {
+            // No response — ECU is still rebooting
+            if (this.isGMLAN && isPostBroadcast && pollAttempt < maxPollAttempts - 1) {
+              this.log('info', cmd.phase,
+                `⏳ ECU bootloader not ready yet (attempt ${pollAttempt + 1}/${maxPollAttempts}). ` +
+                `Waiting ${pollIntervalMs / 1000}s before next probe...`);
+              await this.delay(pollIntervalMs);
+              break; // Break inner lockout loop, continue outer poll loop
+            }
+            break; // Not GMLAN or last attempt — give up
+          }
 
-        break; // Got a real response (positive or other NRC)
-      }
+          // Got a response! ECU is alive.
+
+          // Check for NRC 0x37 (requiredTimeDelayNotExpired)
+          if (!seedResponse.positiveResponse && seedResponse.nrc === 0x37) {
+            if (lockoutAttempt < maxLockoutRetries) {
+              this.log('warning', cmd.phase,
+                `NRC 0x37 — Security lockout timer active. Waiting 10s before retry ${lockoutAttempt + 1}/${maxLockoutRetries}...`);
+              await this.delay(10000); // Wait 10 seconds for lockout to expire
+              continue;
+            } else {
+              this.log('error', cmd.phase, 'NRC 0x37 — Security lockout persists after 3 retries (30s total). ECU may need power cycle.');
+              return seedResponse;
+            }
+          }
+
+          // Check for NRC 0x36 (exceededNumberOfAttempts) — also a lockout condition
+          if (!seedResponse.positiveResponse && seedResponse.nrc === 0x36) {
+            this.log('warning', cmd.phase,
+              'NRC 0x36 — Exceeded number of security attempts. Waiting 10s...');
+            await this.delay(10000);
+            continue;
+          }
+
+          break; // Got a real response (positive or other NRC) — exit inner lockout loop
+        } // end inner lockout loop
+
+        // If we got a real response (not null), exit the outer poll loop too
+        if (seedResponse) break;
+      } // end outer poll loop
 
       if (!seedResponse) {
+        // All poll attempts exhausted — ECU never responded
+        if (this.isGMLAN && isPostBroadcast) {
+          this.log('warning', cmd.phase,
+            `⚠️ ECU bootloader did not respond after ${maxPollAttempts} probe attempts (~${maxPollAttempts * pollIntervalMs / 1000}s). ` +
+            'ECU may need more time or a power cycle.');
+        }
         return seedResponse;
       }
 
