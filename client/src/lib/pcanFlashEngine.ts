@@ -136,6 +136,7 @@ export class PCANFlashEngine {
   // TesterPresent keepalive — sends 0x3E 0x80 every 2s to maintain diagnostic session
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private keepaliveActive = false;
+  private keepalivePaused = false; // Paused during active UDS request/response
 
   /** Destructive UDS services that are skipped in dry run mode */
   private static readonly DESTRUCTIVE_SERVICES = new Set([
@@ -190,6 +191,13 @@ export class PCANFlashEngine {
         this.stopKeepalive();
         return;
       }
+      // Skip sending if paused (during active UDS request/response).
+      // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12) even though
+      // suppressPositiveResponse is set. These NRC frames can be captured
+      // by the UDS response listener and misinterpreted as responses to
+      // other pending requests (e.g., security access seed).
+      if (this.keepalivePaused) return;
+
       // Fire-and-forget: send TesterPresent with suppressPositiveResponse.
       // We don't await the response because 0x80 means no response expected.
       // Use raw CAN send to avoid interfering with pending UDS request/response pairs.
@@ -208,6 +216,20 @@ export class PCANFlashEngine {
         // Keepalive failure is non-fatal — the next real command will detect connection issues
       }
     }, 2000);
+  }
+
+  /**
+   * Pause keepalive during active UDS request/response exchanges.
+   * Some ECUs respond to TesterPresent with NRC even when suppressPositiveResponse
+   * is set. These NRC frames can interfere with pending UDS response listeners.
+   */
+  private pauseKeepalive(): void {
+    this.keepalivePaused = true;
+  }
+
+  /** Resume keepalive after UDS exchange completes */
+  private resumeKeepalive(): void {
+    this.keepalivePaused = false;
   }
 
   /** Stop the TesterPresent keepalive timer */
@@ -285,8 +307,10 @@ export class PCANFlashEngine {
     }
 
     // Step 2: Re-attempt security access (GMLAN ECUs need this for DID reads)
+    // Increased delay from 300ms to 1000ms — dry run #7 showed security access
+    // timing out immediately after session re-establishment
     if (this.isGMLAN && sessionOk) {
-      await this.delay(300);
+      await this.delay(1000);
       try {
         const seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
         if (seedResp && seedResp.positiveResponse) {
@@ -368,40 +392,55 @@ export class PCANFlashEngine {
       this.emitState();
 
       // Step 0a.5: Allow ECU to settle after bridge connection.
-      // The CAN bus initialization can cause the ECU to temporarily reject
-      // requests. A brief delay ensures the ECU is ready.
+      // Increased from 1.5s to 3s — dry run #7 showed session/security both
+      // timeout on first attempt when ECU hasn't fully initialized after CAN bus start.
       this.log('info', 'PRE_CHECK', 'Waiting for ECU to settle after bridge connect...');
-      await this.delay(1500);
+      await this.delay(3000);
 
       // Step 0b: Set diagnostic session before flash commands.
       // From SPS log analysis: GMLAN ECUs respond to 0x10 0x02 (programming session)
       // even though they also support 0xA5 (ProgrammingMode). Use 0x10 0x02 as primary.
+      // Retry up to 3 times with 1.5s backoff — ECU may need multiple attempts after cold start.
       if (this.isGMLAN) {
         this.log('info', 'PRE_CHECK', 'Switching to programming session (0x10 0x02)...');
         this.state.statusMessage = 'Switching to programming session...';
         this.emitState();
-        try {
-          // Try standard DiagSessionControl programming session first (confirmed working from dry run)
-          const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
-          if (response && response.positiveResponse) {
-            this.log('success', 'PRE_CHECK', '✓ Programming session active (0x10 0x02)');
-          } else if (response) {
-            const nrc = response.nrc ?? 0;
-            const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
-            this.log('info', 'PRE_CHECK', `Programming session response: NRC 0x${nrc.toString(16)} (${nrcName}) — trying GMLAN ProgrammingMode...`);
-            // Fallback to GMLAN ProgrammingMode (0xA5 0x01)
-            const gmResp = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
-            if (gmResp && gmResp.positiveResponse) {
-              this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active (0xA5 0x01)');
+
+        let sessionEstablished = false;
+        for (let sessionAttempt = 1; sessionAttempt <= 3 && !sessionEstablished; sessionAttempt++) {
+          try {
+            const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
+            if (response && response.positiveResponse) {
+              this.log('success', 'PRE_CHECK', `✓ Programming session active (0x10 0x02) — attempt ${sessionAttempt}/3`);
+              sessionEstablished = true;
+            } else if (response) {
+              const nrc = response.nrc ?? 0;
+              const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
+              this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: NRC 0x${nrc.toString(16)} (${nrcName})`);
+              // On last attempt, try GMLAN ProgrammingMode as fallback
+              if (sessionAttempt === 3) {
+                this.log('info', 'PRE_CHECK', 'Trying GMLAN ProgrammingMode (0xA5 0x01) as fallback...');
+                const gmResp = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
+                if (gmResp && gmResp.positiveResponse) {
+                  this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active (0xA5 0x01)');
+                  sessionEstablished = true;
+                } else {
+                  this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode also failed — continuing...');
+                }
+              }
             } else {
-              this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode also failed — continuing...');
+              this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: no response`);
             }
-          } else {
-            this.log('warning', 'PRE_CHECK', 'Programming session: no response — continuing...');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: ${msg}`);
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log('warning', 'PRE_CHECK', `Session switch error: ${msg} — continuing...`);
+          if (!sessionEstablished && sessionAttempt < 3) {
+            await this.delay(1500);
+          }
+        }
+        if (!sessionEstablished) {
+          this.log('warning', 'PRE_CHECK', 'Could not establish programming session after 3 attempts — continuing (ECU may respond to individual commands)');
         }
 
         // Step 0b2: Attempt security access — GMLAN ECUs require authenticated session
@@ -831,6 +870,11 @@ export class PCANFlashEngine {
 
     while (retries >= 0) {
       try {
+        // Pause keepalive during UDS exchange to prevent NRC interference.
+        // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12), and these
+        // frames can be captured by the response listener for this command.
+        this.pauseKeepalive();
+
         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
           response = await this.handleSecurityAccess(cmd, subFunction);
         } else if (serviceId === UDS.CLEAR_DTC) {
@@ -839,6 +883,9 @@ export class PCANFlashEngine {
         } else {
           response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
         }
+
+        // Resume keepalive after response received
+        this.resumeKeepalive();
 
         if (response && response.positiveResponse) {
           const rxHex = (response.data || []).map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
@@ -903,6 +950,7 @@ export class PCANFlashEngine {
           }
         }
       } catch (err) {
+        this.resumeKeepalive(); // Ensure keepalive resumes even on error
         lastError = err instanceof Error ? err.message : String(err);
         this.log('warning', cmd.phase, `Error: ${lastError} — retrying...`);
       }

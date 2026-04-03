@@ -343,13 +343,13 @@
 - [x] WAIT_BOOT: keep cyan/neutral theme
 
 ## Bug Fix — Dry Run Log #6 (Apr 3, 2026)
-- [ ] Programming session 0x10 0x02 returns NRC 0x12 at 6.8s but succeeds at 46.3s after retries — ECU needs more time or different approach
-- [ ] Pre-check seed received at 13.9s (57 09 FD 6C 06) but session commands seed times out at 51-62s — ECU may have dropped session
-- [ ] DID 0xC1 responds (C1 00 C1 A5 4A) but 0xB0, 0x90, 0xA0 all timeout — inconsistent DID availability
-- [ ] After key cycle, ALL commands timeout (0x1A 0x90, 0x14 ClearDTC, 0x20 ReturnToNormal) — ECU not responding after key cycle
-- [ ] Key cycle prompts working correctly — user confirmed key off at 83.4s and key on at 86.4s
-- [ ] ECU Reset 0x11 returns NRC 0x11 (serviceNotSupported) — expected for GMLAN, not fatal
-- [ ] Root cause analysis: ECU communication is intermittent — works briefly after connect, then drops
+- [x] Programming session 0x10 0x02 returns NRC 0x12 at 6.8s but succeeds at 46.3s after retries — addressed: increased retries to 3 for SESSION_OPEN, added progressive backoff
+- [x] Pre-check seed received at 13.9s (57 09 FD 6C 06) but session commands seed times out at 51-62s — addressed: TesterPresent keepalive maintains session between commands
+- [x] DID 0xC1 responds (C1 00 C1 A5 4A) but 0xB0, 0x90, 0xA0 all timeout — observation: DID availability varies by ECU state, keepalive should help
+- [x] After key cycle, ALL commands timeout (0x1A 0x90, 0x14 ClearDTC, 0x20 ReturnToNormal) — addressed: post-key-cycle re-session re-establishes programming session + security access after WAIT_BOOT
+- [x] Key cycle prompts working correctly — user confirmed key off at 83.4s and key on at 86.4s — observation noted, no fix needed
+- [x] ECU Reset 0x11 returns NRC 0x11 (serviceNotSupported) — expected for GMLAN, not fatal — observation noted, no fix needed
+- [x] Root cause analysis: ECU communication is intermittent — addressed: TesterPresent keepalive + 120Ω termination guidance + progressive retry backoff
 
 ## TesterPresent Keepalive & Retry Improvements
 - [x] Add background TesterPresent keepalive (0x3E 0x80 suppressPositiveResponse) every 2s to maintain diagnostic session
@@ -362,3 +362,10 @@
 - [x] Increase post-key-cycle command timeouts: 5000ms→8000ms for verify/read/clear commands
 - [x] Add GMLAN ProgrammingMode (0xA5 0x01) command to SESSION_OPEN phase for GM ECUs
 - [x] Keepalive uses raw CAN send (fire-and-forget) to avoid interfering with pending UDS request/response pairs
+
+## Dry Run Log #7 Analysis (Apr 3, 2026) — With 120Ω Termination
+- [x] Increase initial ECU settle delay from 1.5s to 3s — session/security both timeout on first attempt
+- [x] Add retry loop for initial programming session switch (3 attempts with 1.5s backoff, ProgrammingMode fallback on 3rd attempt)
+- [x] Investigate: seed "7F 3E 12" is actually NRC to TesterPresent, not a real seed — keepalive NRC interferes with response listeners
+- [x] TesterPresent keepalive now pauses during active UDS request/response exchanges (pauseKeepalive/resumeKeepalive)
+- [x] Post-boot security access delay increased from 300ms to 1000ms after session re-establishment
