@@ -133,7 +133,8 @@ export class PCANFlashEngine {
   private isGMLAN: boolean;
   private ecuProtocol: string;
 
-  // TesterPresent keepalive — sends 0x3E 0x80 every 2s to maintain diagnostic session
+  // TesterPresent keepalive — GMLAN uses UUDT format (FE 01 3E on 0x101 every 500ms)
+  // UDS uses standard 0x3E 0x80 on physical address every 2s
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private keepaliveActive = false;
   private keepalivePaused = false; // Paused during active UDS request/response
@@ -176,15 +177,26 @@ export class PCANFlashEngine {
   // ── TesterPresent Keepalive ──────────────────────────────────────────────
 
   /**
-   * Start sending TesterPresent (0x3E 0x80) every 2 seconds.
-   * The 0x80 sub-function means "suppressPositiveResponse" — the ECU won't
-   * reply, so this doesn't interfere with other command responses.
-   * This keeps the diagnostic session alive between commands.
+   * Start sending TesterPresent keepalive.
+   * 
+   * GMLAN: Uses UUDT format (FE 01 3E) on functional address 0x101 every 500ms.
+   *   - FE = UUDT (Unsolicited Unacknowledged Diagnostic Transfer) message type
+   *   - 01 = single byte payload length
+   *   - 3E = TesterPresent service
+   *   - ECU does NOT respond to UUDT messages (fire-and-forget)
+   *   - Proven from BUSMASTER logs: 427 frames at ~500ms interval throughout flash
+   *
+   * UDS: Uses standard 0x3E 0x80 on physical address every 2s.
+   *   - 0x80 = suppressPositiveResponse sub-function
    */
   private startKeepalive(): void {
     if (this.keepaliveActive) return;
     this.keepaliveActive = true;
-    this.log('info', this.state.currentPhase, '💓 TesterPresent keepalive started (0x3E 0x80 every 2s)');
+
+    const isGmlan = this.ecuProtocol === 'gmlan';
+    const intervalMs = isGmlan ? 500 : 2000;
+    const formatDesc = isGmlan ? 'UUDT FE 01 3E on 0x101 every 500ms' : '0x3E 0x80 every 2s';
+    this.log('info', this.state.currentPhase, `💓 TesterPresent keepalive started (${formatDesc})`);
 
     this.keepaliveTimer = setInterval(() => {
       if (!this.keepaliveActive || this.aborted) {
@@ -192,30 +204,29 @@ export class PCANFlashEngine {
         return;
       }
       // Skip sending if paused (during active UDS request/response).
-      // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12) even though
-      // suppressPositiveResponse is set. These NRC frames can be captured
-      // by the UDS response listener and misinterpreted as responses to
-      // other pending requests (e.g., security access seed).
       if (this.keepalivePaused) return;
 
-      // Fire-and-forget: send TesterPresent with suppressPositiveResponse.
-      // We don't await the response because 0x80 means no response expected.
-      // Use raw CAN send to avoid interfering with pending UDS request/response pairs.
+      // Fire-and-forget: send TesterPresent.
+      // GMLAN: UUDT on 0x101 (functional broadcast, no response expected)
+      // UDS: 0x3E 0x80 on physical address (suppressPositiveResponse)
       try {
         const ws = (this.conn as any).ws as WebSocket | null;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          const frame = [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00];
+          const frame = isGmlan
+            ? [0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00]  // GMLAN UUDT format
+            : [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00]; // UDS standard
+          const arbId = isGmlan ? 0x101 : this.txAddr;  // GMLAN: functional broadcast
           ws.send(JSON.stringify({
             type: 'can_send',
             id: `tp_keepalive_${Date.now()}`,
-            arb_id: this.txAddr,
+            arb_id: arbId,
             data: frame,
           }));
         }
       } catch {
         // Keepalive failure is non-fatal — the next real command will detect connection issues
       }
-    }, 2000);
+    }, intervalMs);
   }
 
   /**
@@ -922,21 +933,45 @@ export class PCANFlashEngine {
     const cmdTxAddr = parseInt(txParts[0], 16) || this.txAddr;
     const isFunctionalBroadcast = cmdTxAddr === 0x101 || cmdTxAddr === 0x7DF;
     // Handle 'xx' placeholder bytes (used in Send Key commands before key is computed)
-    const dataBytes = txParts.slice(1).map(b => {
+    let rawDataParts = txParts.slice(1);
+    
+    // GMLAN UUDT detection: if first byte is FE, this is a UUDT message.
+    // UUDT format: FE <length> <service> [<sub-function>] [padding]
+    // FE = Unsolicited Unacknowledged Diagnostic Transfer — ECU does NOT respond.
+    const isUUDT = rawDataParts[0]?.toUpperCase() === 'FE';
+    
+    // For UUDT messages, the frame is already in the correct format (FE len svc ...)
+    // We still need to extract the service ID for logging and routing.
+    // For standard UDS, the frame is: PCI_length svc sub ...
+    const dataBytes = rawDataParts.map(b => {
       const parsed = parseInt(b, 16);
       return isNaN(parsed) ? 0 : parsed;
     });
     
     // Check if this canTx has placeholder bytes (contains 'xx' or unparseable values)
-    const hasPlaceholders = txParts.slice(1).some(b => isNaN(parseInt(b, 16)));
+    const hasPlaceholders = rawDataParts.some(b => isNaN(parseInt(b, 16)));
     
-    // First data byte is the length byte for single-frame, skip it for UDS
-    // The actual UDS service ID starts after the length byte
-    const pciLength = dataBytes[0]; // PCI length byte
-    const udsData = pciLength > 0 ? dataBytes.slice(1, 1 + pciLength) : dataBytes.slice(1);
-    const serviceId = udsData[0] ?? 0;
-    const subFunction = udsData.length > 1 ? udsData[1] : undefined;
-    const additionalData = udsData.length > 2 ? udsData.slice(2) : undefined;
+    // Parse UDS service from the frame:
+    // UUDT: FE <len> <service> [sub] — skip FE, then len byte, then service
+    // Standard: <PCI_len> <service> [sub] — skip PCI, then service
+    let serviceId: number;
+    let subFunction: number | undefined;
+    let additionalData: number[] | undefined;
+    
+    if (isUUDT) {
+      // UUDT: dataBytes = [0xFE, length, service, sub?, ...]
+      const uudtLen = dataBytes[1] ?? 0;
+      serviceId = dataBytes[2] ?? 0;
+      subFunction = uudtLen > 1 ? dataBytes[3] : undefined;
+      additionalData = uudtLen > 2 ? dataBytes.slice(4, 2 + uudtLen) : undefined;
+    } else {
+      // Standard UDS: dataBytes = [PCI_length, service, sub?, ...]
+      const pciLength = dataBytes[0]; // PCI length byte
+      const udsData = pciLength > 0 ? dataBytes.slice(1, 1 + pciLength) : dataBytes.slice(1);
+      serviceId = udsData[0] ?? 0;
+      subFunction = udsData.length > 1 ? udsData[1] : undefined;
+      additionalData = udsData.length > 2 ? udsData.slice(2) : undefined;
+    }
     
     // If canTx has placeholders (e.g., Send Key with 'xx' bytes),
     // check if this is a security access send-key that was already handled
@@ -968,10 +1003,43 @@ export class PCANFlashEngine {
       return;
     }
 
+    // Apply inter-command delay if specified (extracted from BUSMASTER timing analysis)
+    if (cmd.delayBeforeMs && cmd.delayBeforeMs > 0) {
+      await this.delay(cmd.delayBeforeMs);
+    }
+
     // Log the TX
     this.log('can_tx', cmd.phase, `TX: ${cmd.canTx}`);
 
-    // Handle specific UDS services
+    // UUDT messages (GMLAN functional broadcast): fire-and-forget, no response expected.
+    // Send the raw CAN frame directly and return immediately.
+    if (isUUDT) {
+      try {
+        const ws = (this.conn as any).ws as WebSocket | null;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          // Build 8-byte CAN frame with padding
+          const frame = [...dataBytes];
+          while (frame.length < 8) frame.push(0x00);
+          ws.send(JSON.stringify({
+            type: 'can_send',
+            id: `uudt_${Date.now()}`,
+            arb_id: cmdTxAddr,
+            data: frame.slice(0, 8),
+          }));
+          this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT — no response expected)`);
+        } else {
+          this.log('warning', cmd.phase, `${cmd.label} — WebSocket not open, skipping UUDT`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('warning', cmd.phase, `UUDT send error: ${msg} — continuing...`);
+      }
+      this.state.statusMessage = cmd.label;
+      this.emitState();
+      return;
+    }
+
+    // Handle specific UDS services (standard request/response)
     let response: UDSResponse | null = null;
     let retries = cmd.retries;
     let lastError = '';

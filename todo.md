@@ -445,3 +445,13 @@
 - [x] Update VERIFICATION: full GMLAN DID reads (0x90, C1-C6, D0, CC) + Finalize (0xAE 0x28 0x80)
 - [x] Update CLEANUP: ReturnToNormal via functional broadcast (0x101) for GMLAN
 - [x] Train Knox on BUSMASTER analysis: proven sequences, seed/key pairs, bank files, short vs full flash
+
+## GMLAN TesterPresent Fix & Inter-Command Timing (Apr 3, 2026)
+- [x] Fix GMLAN TesterPresent: uses UUDT format (FE 01 3E) on functional address 0x101, NOT UDS 3E 80
+- [x] GMLAN TesterPresent is fire-and-forget — UUDT handler sends raw CAN frame, no response expected
+- [x] Fix keepalive to use GMLAN UUDT format (500ms interval) when protocol is GMLAN, UDS format (2000ms) otherwise
+- [x] Extract inter-command timing from BUSMASTER logs — saved to gmlan_timing.md
+- [x] Add delayBeforeMs field to FlashCommand type for inter-command delays
+- [x] Apply BUSMASTER-proven delays: 1000ms before major transitions, 50ms between rapid-fire commands
+- [x] All SESSION_OPEN broadcast commands use FE prefix (FE 01 20, FE 02 1A B0, FE 02 10 02, etc.)
+- [x] CLEANUP ReturnToNormal uses UUDT format (FE 01 20 on 0x101)
