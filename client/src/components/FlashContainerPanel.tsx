@@ -187,7 +187,7 @@ export default function FlashContainerPanel() {
         setPcanBridgeUrl(result.url);
         // Pre-create connection instance for real flash
         if (!pcanConnectionRef.current) {
-          pcanConnectionRef.current = new PCANConnection({ bridgeUrl: result.url });
+          pcanConnectionRef.current = new PCANConnection({ bridgeUrl: result.url, requestTimeout: 30000 });
         }
       } else {
         setPcanBridgeUrl(null);

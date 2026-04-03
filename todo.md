@@ -185,3 +185,10 @@
 - [x] Key cycle user prompts with countdown timer during KEY_CYCLE phase (UI scaffolded, triggers when engine reaches KEY_CYCLE commands)
 - [x] PCANConnection instance created when bridge is detected, passed to MissionControl (connection established on flash start via engine)
 - [x] Container ArrayBuffer and header passed to MissionControl for real flash data access
+
+## Bug Fix — Real Flash: ECU Not Responding to TesterPresent
+- [x] Root cause: Flash engine was calling sendUDSRequest without first calling conn.connect() — WebSocket was not open, so all requests returned null ("WebSocket not connected") which was misreported as "No response from ECU"
+- [x] Flash engine now calls conn.connect() at start of execute() and switches to extended diagnostic session before flash commands
+- [x] Differentiates bridge disconnection vs ECU no-response — checks conn.getState() and attempts auto-reconnect if bridge drops
+- [x] Increased request timeout from 3s to 30s for flash operations (erase can take 10-30s)
+- [x] CAN addresses already correct for E41 (0x7E0/0x7E8) — extracted from flash plan commands

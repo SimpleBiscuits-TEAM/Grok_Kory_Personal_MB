@@ -134,6 +134,37 @@ export class PCANFlashEngine {
     this.emitState();
 
     try {
+      // Step 0: Ensure bridge connection is established
+      this.log('info', 'PRE_CHECK', 'Connecting to PCAN bridge...');
+      this.state.statusMessage = 'Connecting to PCAN bridge...';
+      this.emitState();
+
+      const connected = await this.conn.connect();
+      if (!connected) {
+        this.log('error', 'PRE_CHECK', 'FAILED: Could not connect to PCAN bridge — ensure bridge script is running (python pcan_bridge.py)');
+        this.state.result = 'FAILED';
+        this.state.statusMessage = 'Could not connect to PCAN bridge';
+        this.emitState();
+        this.callbacks.onComplete('FAILED');
+        return 'FAILED';
+      }
+      this.log('success', 'PRE_CHECK', '✓ PCAN bridge connected');
+      this.emitState();
+
+      // Step 0b: Set extended diagnostic session before flash commands
+      // This ensures the ECU is in the right mode for flash operations
+      this.log('info', 'PRE_CHECK', 'Switching to extended diagnostic session...');
+      this.state.statusMessage = 'Switching to extended diagnostic session...';
+      this.emitState();
+
+      const sessionOk = await this.conn.setUDSSession('extended');
+      if (!sessionOk) {
+        this.log('warning', 'PRE_CHECK', 'Extended session switch failed — ECU may not be powered or connected. Continuing with flash plan...');
+      } else {
+        this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
+      }
+      this.emitState();
+
       for (let i = 0; i < this.plan.commands.length; i++) {
         if (this.aborted) {
           this.log('warning', this.state.currentPhase, 'Flash aborted by user');
@@ -269,8 +300,23 @@ export class PCANFlashEngine {
           lastError = `NRC 0x${nrc.toString(16)} (${nrcName})`;
           this.log('nrc', cmd.phase, `NRC 0x${nrc.toString(16)} — ${nrcName}`, nrc);
         } else {
-          lastError = 'No response from ECU';
-          this.log('warning', cmd.phase, 'No response from ECU — retrying...');
+          // Check if it's a bridge connection issue vs ECU not responding
+          const connState = this.conn.getState();
+            const isConnected = connState === 'ready' || connState === 'logging' || connState === 'initializing';
+          if (!isConnected) {
+            lastError = 'PCAN bridge disconnected';
+            this.log('error', cmd.phase, 'PCAN bridge connection lost — attempting reconnect...');
+            // Try to reconnect
+            const reconnected = await this.conn.connect();
+            if (reconnected) {
+              this.log('success', cmd.phase, '✓ Bridge reconnected — retrying command...');
+            } else {
+              this.log('error', cmd.phase, 'Bridge reconnect failed');
+            }
+          } else {
+            lastError = 'No response from ECU';
+            this.log('warning', cmd.phase, 'No response from ECU — retrying...');
+          }
         }
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
