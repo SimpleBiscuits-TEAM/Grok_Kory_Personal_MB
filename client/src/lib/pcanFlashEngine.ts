@@ -325,6 +325,30 @@ export class PCANFlashEngine {
             this.log('success', 'KEY_CYCLE', '🔓 Zero seed — ECU still unlocked after key cycle');
             this.lastSecurityAccessGranted = true;
           } else {
+            // ── Check known seed→key lookup table first ──
+            const KEYCYCLE_KNOWN_PAIRS: Array<{ seed: number[]; key: number[]; label: string }> = [
+              { seed: [0xA0, 0x9A, 0x34, 0x9B, 0x06], key: [0xAF, 0x72, 0x2A, 0x51, 0x7E], label: 'Bench ECU (HPTuners unlocked)' },
+              { seed: [0xCE, 0xDA, 0xF9, 0x83, 0x06], key: [0x59, 0x2E, 0xF4, 0x0F, 0x33], label: 'Truck ECU (VOP/PPEI unlocked)' },
+            ];
+            const kcKnown = KEYCYCLE_KNOWN_PAIRS.find(p =>
+              p.seed.length === seedBytes.length && p.seed.every((b, i) => b === seedBytes[i])
+            );
+
+            if (kcKnown) {
+              const keyBytes = new Uint8Array(kcKnown.key);
+              this.log('info', 'KEY_CYCLE', `Known seed matched: ${kcKnown.label}`);
+              this.log('info', 'KEY_CYCLE', `Key from lookup: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'KEY_CYCLE', '🔓 Security re-granted (lookup key)');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'KEY_CYCLE', `Lookup key rejected after boot: NRC 0x${nrc.toString(16)}`);
+                this.lastSecurityAccessGranted = false;
+              }
+            } else {
             const priKey = this.header.verify?.pri_key;
             if (priKey && priKey.length >= 16 && seedBytes.length === 5) {
               const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
@@ -342,8 +366,8 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else if (seedBytes.length === 5) {
-              // No pri_key — ECU may be unlocked, try dummy key
-              this.log('info', 'KEY_CYCLE', `No pri_key — sending dummy key for unlocked ECU`);
+              // No pri_key and no known pair — try dummy key
+              this.log('info', 'KEY_CYCLE', `Unknown seed, no pri_key — sending dummy key`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
@@ -359,6 +383,7 @@ export class PCANFlashEngine {
               this.log('warning', 'KEY_CYCLE', 'No pri_key available for post-boot security access');
               this.lastSecurityAccessGranted = false;
             }
+            } // end known pair else
           }
         } else if (seedResp) {
           const nrc = seedResp.nrc ?? 0;
@@ -504,6 +529,30 @@ export class PCANFlashEngine {
             const seedBytes = new Uint8Array(seedData);
             this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
 
+            // ── Check known seed→key lookup table first ──
+            const PRECHECK_KNOWN_PAIRS: Array<{ seed: number[]; key: number[]; label: string }> = [
+              { seed: [0xA0, 0x9A, 0x34, 0x9B, 0x06], key: [0xAF, 0x72, 0x2A, 0x51, 0x7E], label: 'Bench ECU (HPTuners unlocked)' },
+              { seed: [0xCE, 0xDA, 0xF9, 0x83, 0x06], key: [0x59, 0x2E, 0xF4, 0x0F, 0x33], label: 'Truck ECU (VOP/PPEI unlocked)' },
+            ];
+            const preKnown = PRECHECK_KNOWN_PAIRS.find(p =>
+              p.seed.length === seedBytes.length && p.seed.every((b, i) => b === seedBytes[i])
+            );
+
+            if (preKnown) {
+              // Known seed — use lookup key
+              const keyBytes = new Uint8Array(preKnown.key);
+              this.log('info', 'PRE_CHECK', `Known seed matched: ${preKnown.label}`);
+              this.log('info', 'PRE_CHECK', `Key from lookup: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'PRE_CHECK', '🔓 Security access granted (lookup key)');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'PRE_CHECK', `Lookup key rejected: NRC 0x${nrc.toString(16)}`);
+              }
+            } else {
             // Try to compute key using container pri_key
             const priKey = this.header.verify?.pri_key;
             if (priKey && priKey.length >= 16 && seedBytes.length === 5) {
@@ -525,8 +574,8 @@ export class PCANFlashEngine {
               this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU is already unlocked (HPTuners/aftermarket)');
               this.lastSecurityAccessGranted = true;
             } else if (seedBytes.length === 5) {
-              // No pri_key — ECU may be unlocked (HPTuners/aftermarket), try dummy key
-              this.log('info', 'PRE_CHECK', `No pri_key available — sending dummy key for unlocked ECU (seed: ${seedBytes.length} bytes)`);
+              // No pri_key and no known pair — try dummy key
+              this.log('info', 'PRE_CHECK', `Unknown seed, no pri_key — sending dummy key for unlocked ECU`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
@@ -540,6 +589,7 @@ export class PCANFlashEngine {
             } else {
               this.log('warning', 'PRE_CHECK', `No pri_key available to compute key (seed: ${seedBytes.length} bytes, priKey: ${priKey ? priKey.length : 'none'}) — GMLAN DIDs may not respond`);
             }
+            } // end known pair else
           } else if (seedResp) {
             const nrc = seedResp.nrc ?? 0;
             this.log('info', 'PRE_CHECK', `Security seed request: NRC 0x${nrc.toString(16)} — ECU may not require security for DID reads`);
@@ -1083,6 +1133,22 @@ export class PCANFlashEngine {
       // Step 2: Compute key from seed
       let keyBytes: Uint8Array;
 
+      // ── Known seed→key lookup table (unlocked ECUs with static seeds) ──
+      const KNOWN_SEED_KEY_PAIRS: Array<{ seed: number[]; key: number[]; label: string }> = [
+        { seed: [0xA0, 0x9A, 0x34, 0x9B, 0x06], key: [0xAF, 0x72, 0x2A, 0x51, 0x7E], label: 'Bench ECU (HPTuners unlocked)' },
+        { seed: [0xCE, 0xDA, 0xF9, 0x83, 0x06], key: [0x59, 0x2E, 0xF4, 0x0F, 0x33], label: 'Truck ECU (VOP/PPEI unlocked)' },
+      ];
+
+      const knownPair = KNOWN_SEED_KEY_PAIRS.find(p =>
+        p.seed.length === seedBytes.length && p.seed.every((b, i) => b === seedBytes[i])
+      );
+
+      if (knownPair) {
+        keyBytes = new Uint8Array(knownPair.key);
+        this.log('info', cmd.phase, `Known seed matched: ${knownPair.label}`);
+        this.log('info', cmd.phase, `Key from lookup table: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+      } else {
+
       // Get the AES key from the container's verify section or header
       const priKey = this.header.verify?.pri_key;
       
@@ -1144,7 +1210,8 @@ export class PCANFlashEngine {
           }
           throw new Error(`No seed/key algorithm available for ${seedBytes.length}-byte seed. Load a container file with the correct key.`);
         }
-      }
+      } // end else (no known pair)
+      } // end lookup vs compute
 
       // Step 3: Send key to ECU (sub-function + 1)
       const keyResponse = await this.conn.sendUDSRequest(

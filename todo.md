@@ -423,3 +423,21 @@
 - [x] Train Knox on CAN bus termination guidance (120 ohm)
 - [x] Train Knox on GMLAN ProgrammingMode (0xA5) command
 - [x] Added PCAN_FLASH_ENGINE_KNOWLEDGE section to knoxKnowledgeServer.ts (70+ lines of operational knowledge)
+
+## Seed-to-Key Lookup Table (Apr 3, 2026)
+- [x] Add known seed→key lookup table to main SECURITY_ACCESS handler (executeCommand)
+- [x] Add known seed→key lookup table to PRE_CHECK security access
+- [x] Add known seed→key lookup table to KEY_CYCLE reEstablishSession security access
+- [x] Bench ECU pair: seed A0 9A 34 9B 06 → key AF 72 2A 51 7E (HPTuners unlocked)
+- [x] Truck ECU pair: seed CE DA F9 83 06 → key 59 2E F4 0F 33 (VOP/PPEI unlocked)
+- [x] Lookup checked first, before AES computation or dummy key fallback
+- [x] All 3 locations compile clean (0 TypeScript errors), 1377 tests passing (3 pre-existing failures unrelated)
+
+## BUSMASTER Log Analysis (Apr 3, 2026)
+- [x] Parsed stock flash log (bench ECU) — 6 blocks, full flash sequence extracted
+- [x] Parsed mod flash log (bench ECU) — 7 blocks, unlock OS + calibration sequence
+- [x] Parsed short flash log (truck ECU) — 6 blocks, cal-only flash, no key cycle
+- [x] Extracted exact proven command sequence: ReturnToNormal → ReadB0 → DiagSession → DisableComm → ProgrammedState → ProgrammingMode 01/03 → TesterPresent x7 → SecurityAccess → Transfer
+- [x] Identified bank files: STOCK, 30hp, 45hp, 80hp, 125hp, 145hp (~5.6 MB each)
+- [ ] Update orchestrator to match proven BUSMASTER command sequence (functional broadcast flow)
+- [ ] Train Knox on BUSMASTER log analysis and proven flash sequences
