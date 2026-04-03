@@ -399,3 +399,27 @@
 - [x] HPTuners-unlocked E41 ECUs accept any key — security access should succeed with dummy key
 - [x] Applied in all 3 security access locations: PRE_CHECK, KEY_CYCLE reEstablishSession, and main SECURITY_ACCESS
 - [x] Log clearly distinguishes: "dummy key for unlocked ECU" vs "pri_key computed key" vs "zero seed already unlocked"
+
+## Patent Application Document (Apr 3, 2026)
+- [x] Draft patent specification: title, abstract, background of invention, summary
+- [x] Draft detailed description of V-OP software platform (closed-loop agentic system)
+- [x] Draft detailed description of VOP 3.0 hardware device (ESP32-S3, CAN, multi-protocol)
+- [x] Draft detailed description of token-based device-to-platform authentication
+- [x] Draft theory of operation for the closed-loop neural network learning system
+- [x] Draft 4 independent claims (method, apparatus, module, system) + 11 dependent claims
+- [x] Draft independent and dependent claims for hardware apparatus
+- [x] Draft independent and dependent claims for combined system
+- [x] Generate 5 patent-style technical diagrams (FIG. 1-5)
+- [x] Compile final document — 34 pages PDF (PPEI_Patent_Application_VOP_2026.pdf)
+
+## Knox Training — Session Data (Apr 3, 2026)
+- [x] Train Knox on TesterPresent keepalive lifecycle (start/pause/resume/stop)
+- [x] Train Knox on post-key-cycle re-session procedure
+- [x] Train Knox on progressive retry backoff strategy
+- [x] Train Knox on UDS response filter tightening (strict service matching)
+- [x] Train Knox on ClearDTC physical vs functional addressing for GMLAN
+- [x] Train Knox on unlocked ECU dummy key approach
+- [x] Train Knox on dry run log analysis patterns (runs #7-#10)
+- [x] Train Knox on CAN bus termination guidance (120 ohm)
+- [x] Train Knox on GMLAN ProgrammingMode (0xA5) command
+- [x] Added PCAN_FLASH_ENGINE_KNOWLEDGE section to knoxKnowledgeServer.ts (70+ lines of operational knowledge)

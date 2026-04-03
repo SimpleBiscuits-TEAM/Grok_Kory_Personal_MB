@@ -1125,11 +1125,85 @@ Uses the 'cryptography' Python package with identical HKDF and AES-GCM parameter
 `;
 
 /**
+ * PCAN Flash Engine — Operational Knowledge from Bench Testing (April 2026)
+ * Learned from 10+ dry run iterations on HPTuners-unlocked E41 (L5P Duramax, Bosch MG1CS111)
+ */
+const PCAN_FLASH_ENGINE_KNOWLEDGE = `
+## PCAN Flash Engine — Operational Knowledge
+
+### TesterPresent Keepalive (0x3E 0x80)
+- MUST send TesterPresent (0x3E with suppressPositiveResponse 0x80) every 2 seconds to maintain diagnostic session
+- Use raw CAN send (fire-and-forget) — do NOT wait for response, as NRC responses to keepalive can interfere with other UDS exchanges
+- MUST pause keepalive during active UDS request/response exchanges to prevent NRC 0x12 (subFunctionNotSupported) from being captured as a response to the actual command
+- Resume keepalive after each UDS exchange completes (success or failure)
+- Stop keepalive during KEY_OFF (ECU powers down), restart after WAIT_BOOT + session re-establishment
+- The "seed" 7F 3E 12 is NOT a real seed — it's an NRC response to TesterPresent that was incorrectly captured by an overly broad response filter
+
+### UDS Response Filtering for GMLAN
+- GMLAN positive responses have service byte = (request_service + 0x40)
+- Response filter MUST match the exact expected positive response service byte, not just any byte >= 0x40
+- Stale frames from previous DID reads (e.g., DID 0xC1 response) can be captured as responses to later commands (e.g., DID 0x90) if the filter is too broad
+- Drain period between commands: 150ms minimum to clear stale CAN frames from the bus
+- NRC responses (0x7F) must also be filtered to match the service byte of the sent command
+
+### E41 / L5P / MG1CS111 Specific Behavior
+- ECU responds intermittently on bench setups — approximately 50% of first attempts timeout, but retries succeed
+- Programming session (0x10 0x02): often returns NRC 0x12 on first attempt, succeeds on retry
+- DID 0x1A 0x90 (ReadECUIdentification): consistently times out on this ECU — may not be supported or requires security access
+- DID 0xC1: responds with 5 bytes (C1 00 C1 A5 4A) — this is the CalID
+- DID 0xA0: responds with 2 bytes (A0 00) — minimal data
+- ClearDTC (0x14): MUST use physical addressing (0x7E0) for GMLAN, NOT functional addressing (0x7DF) — functional times out
+- ECU Reset (0x11): returns NRC 0x11 (serviceNotSupported) — expected for GMLAN, not fatal
+- Security access seed: consistently 5 bytes (e.g., 57 09 FD 6C 06) — uses GM Algorithm 41 (AES-128)
+- HPTuners-unlocked ECUs still require a valid key — dummy key (0x00 x5) is rejected (timeout, not NRC)
+- The AES-128 key is stored in the ECU's HSM/OTP area, not in firmware or container files
+
+### Post-Key-Cycle Recovery
+- After WAIT_BOOT completes, MUST wait 2 seconds for ECU to stabilize before attempting session switch
+- Re-enter programming session with 5 retries and 1.5s backoff
+- On 3rd attempt, try GMLAN ProgrammingMode (0xA5 0x01) as fallback before standard 0x10 0x02
+- After session re-established, wait 1 second before attempting security access
+- Full seed/key exchange must be repeated after key cycle
+
+### Retry Strategy
+- Progressive backoff: 1.0s → 1.5s → 2.0s → 2.5s between retries (not flat delays)
+- Initial ECU settle delay: 3 seconds after bridge connect before first command
+- Session switch retry: 3 attempts with 1.5s backoff for initial connect
+- Post-key-cycle commands: 8s timeout with 3-5 retries
+
+### CAN Bus Hardware Notes
+- 120Ω termination resistor is REQUIRED for bench setups — without it, communication is unreliable
+- Bench ECU communication is inherently less stable than in-vehicle due to lack of other bus participants
+- Signal integrity issues (wiring length, connector quality, ground reference) cause intermittent timeouts
+- ECU power supply voltage dips can cause brief communication dropouts
+
+### Container File Format
+- PPEI containers for E41 do NOT include a verify section with pri_key
+- The AES key for E41 security access is NOT embedded in container files
+- Container header is JSON at offset 0x1004, preceded by a 4-byte header length
+- Header contains: CanAdr, CrtlType, xferSize, file_size, block_count, block_struct, ecu_type, hardware_number, sw_c1-c6
+- The PPEI Converter (V832) builds E41 containers without security key material
+- Other ECU types (e.g., Ford AT6R140) DO include verify sections with pri_key in their containers
+
+### Flash State Machine Phases
+1. IGNITION CHECK — confirm key on before any CAN communication
+2. BRIDGE CONNECT — establish WebSocket connection to PCAN bridge
+3. PRE_CHECK — TesterPresent, session switch, security access probe, read DIDs
+4. SESSION_OPEN — enter programming session (0x10 0x02 or 0xA5 0x01 for GMLAN)
+5. SECURITY_ACCESS — seed request (0x27 0x09) + key send (0x27 0x0A)
+6. BLOCK_TRANSFER — RequestDownload (0x34) + TransferData (0x36) x N + TransferExit (0x37)
+7. KEY_CYCLE — KEY_OFF prompt → wait 5s → KEY_ON prompt → wait boot 10s → re-session → re-security
+8. VERIFICATION — read CalID, software numbers to verify flash success
+9. CLEANUP — ClearDTC (0x14) + ReturnToNormal (0x20)
+10. COMPLETE — stop keepalive, disconnect bridge
+`;
+
+/**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE;
 }
 
 /**
