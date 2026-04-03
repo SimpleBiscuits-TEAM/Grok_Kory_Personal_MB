@@ -480,3 +480,13 @@
 - [x] ProgrammingMode Complete delay updated to 500ms (was 50ms)
 - [x] ReadDID 0xB0 delay updated to 250ms (was 1000ms)
 - [x] DiagnosticSessionControl delay updated to 250ms (was 50ms)
+
+## Dry Run Log #12 Analysis (Apr 3, 2026) — Post E88 Alignment
+- [x] Fix WebSocket disconnect at ~88s — bridge drops connection during PRE_CHECK retries, all subsequent commands fail with "WebSocket not connected"
+- [x] Fix bridge auto-reconnect — engine should detect WebSocket drop and attempt reconnection before continuing
+- [x] Fix SESSION_OPEN timing: commands fire correctly (FE 01 20, FE 01 3E, FE 02 1A B0, etc.) but all show "WebSocket not open, skipping UUDT" because bridge already disconnected
+- [x] Fix post-key-cycle bridge reconnect — after KEY_ON, engine should reconnect WebSocket before re-establishing session
+- [x] CLEANUP commands verified correct: ECU Reset (0x11 0x01) → ClearDTC GMLAN (0x04 on 0x7DF) → ReturnToNormal (FE 01 20 on 0x101) — sequence matches E88 procedure
+- [x] SESSION_OPEN sequence verified correct: ReturnToNormal → TesterPresent cyclic → ReadB0 → DiagSession → DisableComm → ReportProgrammedState → ProgrammingMode 01 → ProgrammingMode 03
+- [x] PriRC (0x34) correctly placed before first block transfer in PRE_FLASH phase
+- [x] Security access uses correct GMLAN subfunctions (0x27 0x01 seed request)

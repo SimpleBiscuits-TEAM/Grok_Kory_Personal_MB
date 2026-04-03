@@ -268,6 +268,56 @@ export class PCANFlashEngine {
     }
   }
 
+  // ── Bridge Reconnection ──────────────────────────────────────────────────
+
+  /**
+   * Check if the WebSocket connection to the bridge is still open.
+   * Uses direct WebSocket readyState check (more reliable than PCANConnection.getState()
+   * which may lag behind actual socket state).
+   */
+  private isWebSocketOpen(): boolean {
+    const ws = (this.conn as any).ws as WebSocket | null;
+    return ws !== null && ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Attempt to reconnect the PCAN bridge if the WebSocket has dropped.
+   * This is critical because:
+   *   - Bridge may timeout during long PRE_CHECK sequences
+   *   - Key cycle (ignition off/on) can cause bridge to lose connection
+   *   - Network interruptions can drop the WebSocket
+   * 
+   * Returns true if bridge is connected (was already open or reconnected successfully).
+   */
+  private async reconnectBridge(phase: FlashPhase): Promise<boolean> {
+    if (this.isWebSocketOpen()) return true;
+
+    this.log('warning', phase, '🔌 Bridge WebSocket disconnected — attempting reconnect...');
+    this.state.statusMessage = 'Reconnecting to PCAN bridge...';
+    this.emitState();
+
+    // Try up to 3 reconnection attempts with increasing delay
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const reconnected = await this.conn.connect();
+        if (reconnected && this.isWebSocketOpen()) {
+          this.log('success', phase, `✓ Bridge reconnected (attempt ${attempt}/3)`);
+          // Give bridge a moment to stabilize
+          await this.delay(500);
+          return true;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log('warning', phase, `Reconnect attempt ${attempt}/3 failed: ${msg}`);
+      }
+      // Wait before next attempt (1s, 2s, 3s)
+      await this.delay(attempt * 1000);
+    }
+
+    this.log('error', phase, '❌ Bridge reconnection failed after 3 attempts');
+    return false;
+  }
+
   // ── Post-Key-Cycle Session Re-establishment ───────────────────────────────
 
   /**
@@ -283,6 +333,13 @@ export class PCANFlashEngine {
     this.log('info', 'KEY_CYCLE', '🔄 Re-establishing diagnostic session after key cycle...');
     this.state.statusMessage = 'Re-establishing ECU session after boot...';
     this.emitState();
+
+    // Bridge may have dropped during key cycle — reconnect before attempting session
+    const bridgeOk = await this.reconnectBridge('KEY_CYCLE');
+    if (!bridgeOk && !this.dryRun) {
+      this.log('error', 'KEY_CYCLE', 'Cannot re-establish session — bridge not connected');
+      return;
+    }
 
     // Extra settling time — ECU needs time after boot before accepting diagnostic requests
     await this.delay(2000);
@@ -684,6 +741,23 @@ export class PCANFlashEngine {
         await this.runDryRunPreCheck();
       }
 
+      // Step 0d: Ensure bridge is still connected before entering command loop.
+      // The PRE_CHECK phase can take 60-90s (DID reads, retries, dry run checks),
+      // and the bridge WebSocket may timeout during this period.
+      // If it dropped, reconnect now before SESSION_OPEN commands fire.
+      if (!this.isWebSocketOpen()) {
+        this.log('warning', 'PRE_CHECK', 'Bridge WebSocket dropped during pre-check — reconnecting before command loop...');
+        const bridgeOk = await this.reconnectBridge('PRE_CHECK');
+        if (!bridgeOk && !this.dryRun) {
+          this.log('error', 'PRE_CHECK', 'FAILED: Bridge reconnection failed — cannot proceed with flash');
+          this.state.result = 'FAILED';
+          this.state.statusMessage = 'Bridge disconnected and could not reconnect';
+          this.emitState();
+          this.callbacks.onComplete('FAILED');
+          return 'FAILED';
+        }
+      }
+
       for (let i = 0; i < this.plan.commands.length; i++) {
         if (this.aborted) {
           this.log('warning', this.state.currentPhase, 'Flash aborted by user');
@@ -1069,6 +1143,10 @@ export class PCANFlashEngine {
       }
 
       try {
+        // Check WebSocket and attempt reconnect if needed
+        if (!this.isWebSocketOpen()) {
+          await this.reconnectBridge(cmd.phase);
+        }
         const ws = (this.conn as any).ws as WebSocket | null;
         if (ws && ws.readyState === WebSocket.OPEN) {
           // Build 8-byte CAN frame with padding
@@ -1080,9 +1158,9 @@ export class PCANFlashEngine {
             arb_id: cmdTxAddr,
             data: frame.slice(0, 8),
           }));
-          this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT — no response expected)`);
+          this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT \u2014 no response expected)`);
         } else {
-          this.log('warning', cmd.phase, `${cmd.label} — WebSocket not open, skipping UUDT`);
+          this.log('warning', cmd.phase, `${cmd.label} \u2014 WebSocket not open, skipping UUDT`);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1173,28 +1251,24 @@ export class PCANFlashEngine {
             nrc
           );
         } else {
-          // Check if it's a bridge connection issue vs ECU not responding
-          const connState = this.conn.getState();
-          const isConnected = connState === 'ready' || connState === 'logging' || connState === 'initializing';
-          if (!isConnected) {
+          // Check if it's a bridge connection issue vs ECU not responding.
+          // Use direct WebSocket check (more reliable than getState() which may lag).
+          if (!this.isWebSocketOpen()) {
             lastError = 'PCAN bridge disconnected';
-            this.log('error', cmd.phase, 'PCAN bridge connection lost — attempting reconnect...');
-            // Try to reconnect
-            const reconnected = await this.conn.connect();
-            if (reconnected) {
-              this.log('success', cmd.phase, '✓ Bridge reconnected — retrying command...');
-            } else {
-              this.log('error', cmd.phase, 'Bridge reconnect failed');
-            }
+            await this.reconnectBridge(cmd.phase);
           } else {
             lastError = 'No response from ECU';
-            this.log('warning', cmd.phase, 'No response from ECU — retrying...');
+            this.log('warning', cmd.phase, 'No response from ECU \u2014 retrying...');
           }
         }
       } catch (err) {
         this.resumeKeepalive(); // Ensure keepalive resumes even on error
         lastError = err instanceof Error ? err.message : String(err);
-        this.log('warning', cmd.phase, `Error: ${lastError} — retrying...`);
+        this.log('warning', cmd.phase, `Error: ${lastError} \u2014 retrying...`);
+        // If the error is WebSocket-related, try to reconnect
+        if (lastError.includes('WebSocket') || lastError.includes('not connected')) {
+          await this.reconnectBridge(cmd.phase);
+        }
       }
 
       retries--;
