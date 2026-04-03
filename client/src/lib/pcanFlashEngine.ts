@@ -46,6 +46,8 @@ export interface FlashEngineConfig {
   header: ContainerFileHeader;
   /** Callbacks for progress reporting */
   callbacks: FlashEngineCallbacks;
+  /** Dry run mode — executes non-destructive commands only, skips erase/transfer/write */
+  dryRun?: boolean;
 }
 
 // ── UDS Service IDs ────────────────────────────────────────────────────────
@@ -102,10 +104,19 @@ export class PCANFlashEngine {
   private state: SimulatorState;
   private aborted = false;
   private startTime = 0;
+  private dryRun: boolean;
 
   // ECU addressing from the plan's first command
   private txAddr: number;
   private rxAddr: number;
+
+  /** Destructive UDS services that are skipped in dry run mode */
+  private static readonly DESTRUCTIVE_SERVICES = new Set([
+    0x31, // RoutineControl (EraseMemory)
+    0x34, // RequestDownload
+    0x36, // TransferData
+    0x37, // RequestTransferExit
+  ]);
 
   constructor(config: FlashEngineConfig) {
     this.conn = config.connection;
@@ -113,6 +124,7 @@ export class PCANFlashEngine {
     this.containerData = config.containerData;
     this.header = config.header;
     this.callbacks = config.callbacks;
+    this.dryRun = config.dryRun ?? false;
     this.state = createSimulatorState(config.plan);
 
     // Extract CAN addresses from the plan commands
@@ -149,6 +161,9 @@ export class PCANFlashEngine {
         return 'FAILED';
       }
       this.log('success', 'PRE_CHECK', '✓ PCAN bridge connected');
+      if (this.dryRun) {
+        this.log('info', 'PRE_CHECK', '🧪 DRY RUN MODE — destructive operations (erase, download, transfer) will be skipped');
+      }
       this.emitState();
 
       // Step 0b: Set extended diagnostic session before flash commands
@@ -164,6 +179,49 @@ export class PCANFlashEngine {
         this.log('success', 'PRE_CHECK', '✓ Extended diagnostic session active');
       }
       this.emitState();
+
+      // Step 0c: ISO-TP multi-frame capability test (dry run only)
+      // Reads VIN (DID 0xF190) which returns 17+ bytes, requiring multi-frame ISO-TP
+      if (this.dryRun) {
+        this.log('info', 'PRE_CHECK', '🧪 Testing ISO-TP multi-frame capability...');
+        this.state.statusMessage = 'Testing ISO-TP multi-frame...';
+        this.emitState();
+
+        try {
+          // ReadDataByIdentifier (0x22) for VIN (0xF190) — 17 bytes, requires multi-frame
+          const vinResponse = await this.conn.sendUDSRequest(
+            UDS.READ_DID, undefined, [0xF1, 0x90], this.txAddr
+          );
+          if (vinResponse && vinResponse.positiveResponse) {
+            const vinBytes = vinResponse.data.slice(3); // Skip 62 F1 90
+            const vin = String.fromCharCode(...vinBytes.filter(b => b >= 0x20 && b <= 0x7E));
+            this.log('success', 'PRE_CHECK', `✓ ISO-TP multi-frame OK — VIN: ${vin} (${vinResponse.data.length} bytes received)`);
+            if (vinResponse.data.length > 7) {
+              this.log('success', 'PRE_CHECK', '✓ Multi-frame response confirmed (>7 bytes) — bridge supports ISO-TP segmentation');
+            } else {
+              this.log('warning', 'PRE_CHECK', '⚠ Response was single-frame (≤7 bytes) — multi-frame capability NOT confirmed');
+            }
+          } else if (vinResponse) {
+            const nrc = vinResponse.nrc || 0;
+            this.log('warning', 'PRE_CHECK', `VIN read returned NRC 0x${nrc.toString(16)} — trying CalID (0xF806)...`);
+            // Fallback: try Calibration ID which is also multi-frame
+            const calResponse = await this.conn.sendUDSRequest(
+              UDS.READ_DID, undefined, [0xF8, 0x06], this.txAddr
+            );
+            if (calResponse && calResponse.positiveResponse) {
+              this.log('success', 'PRE_CHECK', `✓ CalID read OK (${calResponse.data.length} bytes) — ISO-TP appears functional`);
+            } else {
+              this.log('warning', 'PRE_CHECK', 'CalID read also failed — ISO-TP multi-frame support uncertain');
+            }
+          } else {
+            this.log('warning', 'PRE_CHECK', 'No response to VIN read — ECU may not be powered or ISO-TP may not be supported by bridge');
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.log('warning', 'PRE_CHECK', `ISO-TP test error: ${msg} — continuing with dry run...`);
+        }
+        this.emitState();
+      }
 
       for (let i = 0; i < this.plan.commands.length; i++) {
         if (this.aborted) {
@@ -183,7 +241,16 @@ export class PCANFlashEngine {
 
         try {
           if (cmd.blockData) {
-            await this.executeBlockTransfer(cmd);
+            if (this.dryRun) {
+              // Skip block transfers in dry run
+              const { sectionName, totalBytes } = cmd.blockData;
+              this.log('info', cmd.phase, `[DRY RUN] Skipping block transfer: ${sectionName} (${formatBytes(totalBytes)}) — would write ${formatBytes(totalBytes)} to ECU flash`);
+              this.state.currentBlock++;
+              this.state.statusMessage = `[DRY RUN] Skipped ${sectionName}`;
+              this.emitState();
+            } else {
+              await this.executeBlockTransfer(cmd);
+            }
           } else {
             await this.executeCommand(cmd);
           }
@@ -202,8 +269,10 @@ export class PCANFlashEngine {
       // All commands completed successfully
       this.state.result = 'SUCCESS';
       this.state.progress = 100;
-      this.state.statusMessage = 'Flash completed successfully!';
-      this.log('success', 'CLEANUP', '✅ All commands executed successfully — ECU flash complete');
+      this.state.statusMessage = this.dryRun ? 'Dry run completed — all non-destructive commands passed!' : 'Flash completed successfully!';
+      this.log('success', 'CLEANUP', this.dryRun
+        ? '✅ DRY RUN COMPLETE — ECU communication verified, seed/key exchange tested, no data written'
+        : '✅ All commands executed successfully — ECU flash complete');
       this.emitState();
       this.callbacks.onComplete('SUCCESS');
       return 'SUCCESS';
@@ -259,6 +328,20 @@ export class PCANFlashEngine {
     const serviceId = udsData[0];
     const subFunction = udsData.length > 1 ? udsData[1] : undefined;
     const additionalData = udsData.length > 2 ? udsData.slice(2) : undefined;
+
+    // Dry run: skip destructive services
+    if (this.dryRun && PCANFlashEngine.DESTRUCTIVE_SERVICES.has(serviceId)) {
+      const svcName = {
+        0x31: 'RoutineControl (EraseMemory)',
+        0x34: 'RequestDownload',
+        0x36: 'TransferData',
+        0x37: 'RequestTransferExit',
+      }[serviceId] || `Service 0x${serviceId.toString(16)}`;
+      this.log('info', cmd.phase, `[DRY RUN] Skipping ${svcName} — ${cmd.label}`);
+      this.state.statusMessage = `[DRY RUN] Skipped ${svcName}`;
+      this.emitState();
+      return;
+    }
 
     // Log the TX
     this.log('can_tx', cmd.phase, `TX: ${cmd.canTx}`);

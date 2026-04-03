@@ -165,6 +165,7 @@ export default function FlashContainerPanel() {
   const [missionControlMode, setMissionControlMode] = useState<'simulator' | 'pcan' | null>(null);
   const [showPreFlight, setShowPreFlight] = useState(false);
   const [pendingMode, setPendingMode] = useState<'simulator' | 'pcan' | null>(null);
+  const [dryRunMode, setDryRunMode] = useState(false);
   const [fileHash, setFileHash] = useState<string>('');
   const [sessionUuid, setSessionUuid] = useState<string>('');
   const [pcanBridgeAvailable, setPcanBridgeAvailable] = useState<boolean | null>(null);
@@ -255,8 +256,9 @@ export default function FlashContainerPanel() {
   }, []);
 
   // Handle launch (PCAN or Simulator)
-  const handleLaunch = useCallback((mode: 'simulator' | 'pcan') => {
+  const handleLaunch = useCallback((mode: 'simulator' | 'pcan', isDryRun = false) => {
     setPendingMode(mode);
+    setDryRunMode(isDryRun);
     setShowPreFlight(true);
   }, []);
 
@@ -433,10 +435,11 @@ export default function FlashContainerPanel() {
           connectionMode={missionControlMode}
           sessionUuid={sessionUuid}
           onComplete={handleFlashComplete}
-          onBack={() => { setMissionControlMode(null); setSessionUuid(''); }}
+          onBack={() => { setMissionControlMode(null); setSessionUuid(''); setDryRunMode(false); }}
           pcanConnection={missionControlMode === 'pcan' ? pcanConnectionRef.current : null}
           containerData={rawData ? rawData.buffer as ArrayBuffer : null}
           containerHeader={containerFileHeader}
+          dryRun={dryRunMode}
         />
       </div>
     );
@@ -905,15 +908,25 @@ export default function FlashContainerPanel() {
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => handleLaunch('pcan')}
-                disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
-                title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
-                className="mt-4 w-full py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Radio className="w-4 h-4 inline mr-2" />
-                Launch PCAN Flash
-              </button>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => handleLaunch('pcan', true)}
+                  disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
+                  title="Test the full command sequence without writing to ECU flash"
+                  className="flex-1 py-3 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-sm hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  🧪 Dry Run
+                </button>
+                <button
+                  onClick={() => handleLaunch('pcan', false)}
+                  disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
+                  title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
+                  className="flex-1 py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Radio className="w-4 h-4 inline mr-2" />
+                  Launch Flash
+                </button>
+              </div>
               {pcanBridgeAvailable === false && (
                 <button
                   onClick={checkPcanBridge}

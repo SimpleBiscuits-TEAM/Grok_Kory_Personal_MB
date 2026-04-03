@@ -37,6 +37,8 @@ interface FlashMissionControlProps {
   containerData?: ArrayBuffer | null;
   /** Parsed container header — required for real PCAN flash */
   containerHeader?: ContainerFileHeader | null;
+  /** Dry run mode — skips destructive commands (erase/transfer/write) */
+  dryRun?: boolean;
 }
 
 // ── Phase colors ───────────────────────────────────────────────────────────
@@ -143,15 +145,19 @@ function KeyCyclePrompt({ message, countdown }: { message: string; countdown: nu
 
 // ── Main component ─────────────────────────────────────────────────────────
 
+const SPEED_OPTIONS = [1, 2, 5, 10] as const;
+type SpeedMultiplier = typeof SPEED_OPTIONS[number];
+
 export default function FlashMissionControl({
   plan, connectionMode, sessionUuid, onComplete, onBack,
-  pcanConnection, containerData, containerHeader,
+  pcanConnection, containerData, containerHeader, dryRun = false,
 }: FlashMissionControlProps) {
   const [sim, setSim] = useState<SimulatorState>(() => createSimulatorState(plan));
   const [showLog, setShowLog] = useState(true);
   const [funFactIdx, setFunFactIdx] = useState(0);
   const [keyCycleMsg, setKeyCycleMsg] = useState<string | null>(null);
   const [keyCycleCountdown, setKeyCycleCountdown] = useState(0);
+  const [speedMultiplier, setSpeedMultiplier] = useState<SpeedMultiplier>(1);
   const logEndRef = useRef<HTMLDivElement>(null);
   const pendingLogsRef = useRef<SimulatorLogEntry[]>([]);
   const lastFlushRef = useRef(0);
@@ -162,6 +168,7 @@ export default function FlashMissionControl({
 
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
   const isRealFlash = connectionMode === 'pcan';
+  const isDryRun = dryRun && isRealFlash;
 
   const updateSession = trpc.flash.updateSession.useMutation();
   const appendLogs = trpc.flash.appendLogs.useMutation();
@@ -285,6 +292,7 @@ export default function FlashMissionControl({
         containerData,
         header: containerHeader,
         callbacks,
+        dryRun,
       });
       flashEngineRef.current = engine;
       setSim(prev => ({ ...prev, isRunning: true }));
@@ -324,7 +332,7 @@ export default function FlashMissionControl({
     if (!sim.isRunning || sim.isPaused || sim.result) return;
     const interval = setInterval(() => {
       setSim(prev => {
-        const next = advanceSimulator(prev, plan, 100);
+        const next = advanceSimulator(prev, plan, 100 * speedMultiplier);
         const newLogs = next.log.slice(prev.log.length);
         if (newLogs.length > 0) pendingLogsRef.current.push(...newLogs);
         const now = Date.now();
@@ -351,7 +359,7 @@ export default function FlashMissionControl({
       });
     }, 100);
     return () => clearInterval(interval);
-  }, [isRealFlash, sim.isRunning, sim.isPaused, sim.result, plan, sessionUuid, flushLogs, updateSession, completeSession]);
+  }, [isRealFlash, sim.isRunning, sim.isPaused, sim.result, plan, sessionUuid, flushLogs, updateSession, completeSession, speedMultiplier]);
 
   // Fun fact rotation
   useEffect(() => {
@@ -413,14 +421,19 @@ export default function FlashMissionControl({
               <h3 className="font-mono text-sm font-bold tracking-wider text-zinc-100 flex items-center gap-2">
                 <Radio className={`h-4 w-4 ${sim.isRunning && !sim.result ? 'text-red-500 animate-pulse' : 'text-zinc-600'}`} />
                 MISSION CONTROL
-                {isRealFlash && (
+                {isDryRun && (
+                  <Badge variant="outline" className="text-[10px] border-yellow-500/50 text-yellow-400 ml-1 animate-pulse">
+                    🧪 DRY RUN
+                  </Badge>
+                )}
+                {isRealFlash && !isDryRun && (
                   <Badge variant="outline" className="text-[10px] border-red-500/50 text-red-400 ml-1">
                     LIVE
                   </Badge>
                 )}
               </h3>
               <p className="text-xs text-zinc-500">
-                {connectionMode === 'pcan' ? 'Real PCAN Bridge Flash' : 'Simulator Mode'} — {plan.ecuName}
+                {isDryRun ? 'DRY RUN — Non-destructive test' : connectionMode === 'pcan' ? 'Real PCAN Bridge Flash' : 'Simulator Mode'} — {plan.ecuName}
               </p>
             </div>
           </div>
@@ -469,8 +482,10 @@ export default function FlashMissionControl({
         {/* Controls */}
         <div className="flex gap-2">
           {!sim.isRunning && !sim.result && (
-            <Button size="sm" onClick={handleStart} className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs">
-              <Play className="h-3 w-3 mr-1" /> {isRealFlash ? 'START REAL FLASH' : 'START FLASH'}
+            <Button size="sm" onClick={handleStart} className={`text-white font-mono text-xs ${
+              isDryRun ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-emerald-600 hover:bg-emerald-500'
+            }`}>
+              <Play className="h-3 w-3 mr-1" /> {isDryRun ? 'START DRY RUN' : isRealFlash ? 'START REAL FLASH' : 'START FLASH'}
             </Button>
           )}
           {sim.isRunning && !sim.result && (
@@ -505,8 +520,28 @@ export default function FlashMissionControl({
           )}
         </div>
 
+        {/* Simulator speed multiplier */}
+        {!isRealFlash && sim.isRunning && !sim.result && (
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="text-zinc-500">Speed:</span>
+            {SPEED_OPTIONS.map(s => (
+              <button
+                key={s}
+                onClick={() => setSpeedMultiplier(s)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                  speedMultiplier === s
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                    : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
+                }`}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Safety warning for real flash */}
-        {isRealFlash && sim.isRunning && !sim.result && (
+        {isRealFlash && !isDryRun && sim.isRunning && !sim.result && (
           <div className="p-2 rounded border border-red-500/30 bg-red-500/5 text-red-400 text-[10px] font-mono flex items-center gap-2">
             <AlertTriangle className="h-3 w-3 shrink-0" />
             <span>LIVE FLASH — Do NOT close this tab, disconnect power, or turn off the vehicle during flash.</span>
@@ -535,7 +570,7 @@ export default function FlashMissionControl({
                sim.result === 'FAILED' ? <XCircle className="h-5 w-5 text-red-400" /> :
                <AlertTriangle className="h-5 w-5 text-amber-400" />}
               <span className="font-mono text-sm font-bold text-zinc-200">
-                {isRealFlash ? 'ECU' : 'SIMULATED'} FLASH {sim.result}
+                {isDryRun ? 'DRY RUN' : isRealFlash ? 'ECU' : 'SIMULATED'} FLASH {sim.result}
               </span>
             </div>
             <p className="text-xs font-mono text-zinc-400">{sim.statusMessage}</p>
@@ -543,7 +578,14 @@ export default function FlashMissionControl({
               <span>Duration: {formatDuration(sim.elapsedMs)}</span>
               <span>Transferred: {formatBytes(sim.transferredBytes)}</span>
             </div>
-            {sim.result === 'SUCCESS' && isRealFlash && (
+            {sim.result === 'SUCCESS' && isDryRun && (
+              <div className="mt-2 p-2 rounded bg-yellow-500/10 border border-yellow-500/20 text-xs font-mono text-yellow-400">
+                <Cpu className="h-3 w-3 inline mr-1" />
+                Dry run passed — ECU communication verified, seed/key exchange tested. No data was written to ECU flash.
+                You can now proceed with a real flash if all checks passed.
+              </div>
+            )}
+            {sim.result === 'SUCCESS' && isRealFlash && !isDryRun && (
               <div className="mt-2 p-2 rounded bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400">
                 <Cpu className="h-3 w-3 inline mr-1" />
                 ECU has been flashed successfully. Verify operation by starting the vehicle and checking for DTCs.

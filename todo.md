@@ -203,3 +203,21 @@
 - [x] All 57 flash integration tests pass
 - [ ] Needs live testing: verify TesterPresent gets ECU response via OBD transport fallback
 - [ ] Large payload handling (TransferData 4KB chunks) may need raw CAN fallback if OBD transport can't handle multi-frame ISO-TP
+
+## Feature — Dry Run Mode for Flash Testing
+- [x] Add dryRun option to PCANFlashEngine — skip destructive operations (erase, transfer data, transfer exit) but execute all other commands
+- [x] Add DRY RUN button next to Launch button in FlashContainerPanel PCAN section
+- [x] Show DRY RUN badge in FlashMissionControl during dry run (yellow pulsing 🧪 DRY RUN badge)
+- [x] Log skipped commands clearly in the flash log (e.g., "[DRY RUN] Skipping RoutineControl (EraseMemory)")
+- [x] Dry run validates: bridge connection, extended session, TesterPresent, SecurityAccess seed/key exchange — all non-destructive
+- [x] ISO-TP multi-frame capability test during dry run — reads VIN (0xF190, 17+ bytes) to verify bridge handles multi-frame responses, falls back to CalID (0xF806)
+- [x] Destructive services skipped via static set: RoutineControl (0x31), RequestDownload (0x34), TransferData (0x36), RequestTransferExit (0x37)
+- [x] Block transfers entirely skipped in dry run with size/section logging
+- [x] Dry run completion message: "Dry run passed — ECU communication verified, seed/key exchange tested. No data was written to ECU flash."
+- [x] DRY RUN start button uses yellow gradient, result banner uses yellow theme
+
+## Feature — Simulator Speed Multiplier
+- [x] Add speed multiplier buttons (1x/2x/5x/10x) to FlashMissionControl during simulator runs
+- [x] Speed multiplier applied to advanceSimulator deltaMs — 10x reduces 6-minute sim to ~36 seconds
+- [x] Speed buttons only visible during active simulator run (not for real PCAN flash)
+- [x] Active speed highlighted with cyan accent
