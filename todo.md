@@ -393,3 +393,9 @@
 - [x] Prompt should appear for both dry run and real flash (different wording for each)
 - [x] Use amber/warning theme with 🔑 icon — distinct from mid-cycle KEY_ON (green)
 - [x] Block execution until user confirms ignition is ON — button: "IGNITION IS ON — START"
+
+## Unlocked ECU Support (Apr 3, 2026)
+- [x] When no pri_key is available and ECU sends a 5-byte seed, send dummy key (0x00 x5) instead of skipping
+- [x] HPTuners-unlocked E41 ECUs accept any key — security access should succeed with dummy key
+- [x] Applied in all 3 security access locations: PRE_CHECK, KEY_CYCLE reEstablishSession, and main SECURITY_ACCESS
+- [x] Log clearly distinguishes: "dummy key for unlocked ECU" vs "pri_key computed key" vs "zero seed already unlocked"

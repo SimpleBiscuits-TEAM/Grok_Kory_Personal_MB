@@ -341,6 +341,20 @@ export class PCANFlashEngine {
                 this.log('warning', 'KEY_CYCLE', `Security re-access denied: NRC 0x${nrc.toString(16)}`);
                 this.lastSecurityAccessGranted = false;
               }
+            } else if (seedBytes.length === 5) {
+              // No pri_key — ECU may be unlocked, try dummy key
+              this.log('info', 'KEY_CYCLE', `No pri_key — sending dummy key for unlocked ECU`);
+              const dummyKey = new Uint8Array(5).fill(0x00);
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'KEY_CYCLE', '🔓 Security re-granted with dummy key — ECU is unlocked');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'KEY_CYCLE', `Dummy key rejected after boot: NRC 0x${nrc.toString(16)}`);
+                this.lastSecurityAccessGranted = false;
+              }
             } else {
               this.log('warning', 'KEY_CYCLE', 'No pri_key available for post-boot security access');
               this.lastSecurityAccessGranted = false;
@@ -510,6 +524,19 @@ export class PCANFlashEngine {
             } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
               this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU is already unlocked (HPTuners/aftermarket)');
               this.lastSecurityAccessGranted = true;
+            } else if (seedBytes.length === 5) {
+              // No pri_key — ECU may be unlocked (HPTuners/aftermarket), try dummy key
+              this.log('info', 'PRE_CHECK', `No pri_key available — sending dummy key for unlocked ECU (seed: ${seedBytes.length} bytes)`);
+              const dummyKey = new Uint8Array(5).fill(0x00);
+              await this.delay(100);
+              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
+              if (keyResp && keyResp.positiveResponse) {
+                this.log('success', 'PRE_CHECK', '🔓 Security access granted with dummy key — ECU is unlocked');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const nrc = keyResp?.nrc ?? 0;
+                this.log('warning', 'PRE_CHECK', `Dummy key rejected: NRC 0x${nrc.toString(16)} — ECU requires real key (pri_key needed in container)`);
+              }
             } else {
               this.log('warning', 'PRE_CHECK', `No pri_key available to compute key (seed: ${seedBytes.length} bytes, priKey: ${priKey ? priKey.length : 'none'}) — GMLAN DIDs may not respond`);
             }
@@ -1105,20 +1132,17 @@ export class PCANFlashEngine {
             }
             throw new Error(`Seed length ${seedBytes.length} doesn't match algorithm ${secProfile.algorithmType}`);
           }
-        } else if (secProfile && !priKey) {
-          // We have a profile but no key material at all
-          this.log('warning', cmd.phase, `Security profile: ${secProfile.algorithmType} (${secProfile.name}) — but no key material (pri_key) available`);
-          if (this.dryRun) {
-            this.log('warning', cmd.phase, '[DRY RUN] No pri_key available — skipping key send. Load a container file to enable security access.');
-            return seedResponse;
-          }
-          throw new Error(`No key material (pri_key) available for ${secProfile.algorithmType}. Load a container file with the correct key.`);
+        } else if (seedBytes.length === 5) {
+          // No pri_key but 5-byte seed — ECU may be unlocked (HPTuners/aftermarket)
+          this.log('info', cmd.phase, `No pri_key available — attempting dummy key for unlocked ECU`);
+          keyBytes = new Uint8Array(5).fill(0x00);
         } else {
+          // Non-5-byte seed with no key material — cannot proceed
           if (this.dryRun) {
-            this.log('warning', cmd.phase, '[DRY RUN] No seed/key algorithm or pre-computed key available — skipping key send');
+            this.log('warning', cmd.phase, `[DRY RUN] No seed/key algorithm available for ${seedBytes.length}-byte seed — skipping key send`);
             return seedResponse;
           }
-          throw new Error('No seed/key algorithm or pre-computed key available');
+          throw new Error(`No seed/key algorithm available for ${seedBytes.length}-byte seed. Load a container file with the correct key.`);
         }
       }
 
