@@ -557,3 +557,7 @@
 - [x] Fix hexToBytes regex stripping all '0' chars — was `/[\s,0x]/g` which removes individual 0 and x, now `/0x/gi` then `/[\s,]/g`
 - [x] This caused AES key for E41 (45AE6BA2CB81F5656B05072D74FF47E0) to lose four 0s → 14 bytes instead of 16
 - [x] Fix malformed JSDoc comment in pcanConnection.ts from heartbeat edit
+
+## Post-Broadcast Settling Time Increase (Apr 3, 2026)
+- [x] Increase delay after ProgrammingMode Complete (A5 03) from 3000ms to 6000ms
+- [x] Increase delay before physical session re-establishment (0x10 0x02) from 1500ms to 2000ms
