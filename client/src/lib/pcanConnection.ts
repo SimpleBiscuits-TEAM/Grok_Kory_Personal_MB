@@ -1131,6 +1131,11 @@ export class PCANConnection {
     if (subFunction !== undefined) udsPayload.push(subFunction);
     if (data) udsPayload.push(...data);
 
+    // Route to multi-frame if payload exceeds single-frame capacity (7 bytes)
+    if (udsPayload.length > 7) {
+      return this.sendUDSMultiFrame(service, subFunction, udsPayload, targetAddress);
+    }
+
     // Build ISO-TP single frame: [PCI_length, ...udsPayload, 0x00 padding]
     const pciLength = udsPayload.length;
     const frame: number[] = [pciLength, ...udsPayload];
@@ -1318,6 +1323,234 @@ export class PCANConnection {
       isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
       timestamp: Date.now(),
     };
+  }
+
+  /**
+   * Send a UDS command using ISO-TP multi-frame transport.
+   * Used when the UDS payload exceeds 7 bytes (single-frame limit).
+   *
+   * ISO-TP multi-frame protocol:
+   * 1. Send First Frame (FF): announces total payload length, contains first 6 bytes
+   * 2. Wait for Flow Control (FC) from ECU: [0x30, BlockSize, STmin]
+   * 3. Send Consecutive Frames (CF): remaining data in 7-byte chunks
+   * 4. Wait for ECU response (positive or negative)
+   *
+   * BUSMASTER analysis confirms ECU flow control: 30 00 F1
+   *   - BlockSize=0 (unlimited), STmin=0xF1 (241μs)
+   */
+  private async sendUDSMultiFrame(
+    service: number,
+    subFunction: number | undefined,
+    udsPayload: number[],
+    targetAddress: number
+  ): Promise<UDSResponse | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const totalLength = udsPayload.length;
+    const responseArbId = targetAddress + 0x08;
+
+    console.log(`[UDS-MF] Multi-frame TX: svc=0x${service.toString(16)} total=${totalLength} bytes on 0x${targetAddress.toString(16)}`);
+
+    // Drain stale frames
+    this.udsResponseListener = null;
+    await new Promise(r => setTimeout(r, 150));
+
+    // Step 1: Build and send First Frame (FF)
+    // FF format: [0x1H, 0xLL, data0..data5] where 0x1HLL = total length
+    const firstFrame: number[] = [
+      0x10 | ((totalLength >> 8) & 0x0F),
+      totalLength & 0xFF,
+      ...udsPayload.slice(0, 6),
+    ];
+    while (firstFrame.length < 8) firstFrame.push(0x00);
+
+    // Step 2: Set up Flow Control listener BEFORE sending FF
+    const fcPromise = new Promise<{ blockSize: number; stMin: number } | null>((resolve) => {
+      const fcTimeout = setTimeout(() => {
+        this.udsResponseListener = null;
+        console.log('[UDS-MF] Flow Control timeout — no FC received');
+        resolve(null);
+      }, 5000);
+
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+        const rawArbId = msg.arb_id ?? msg.arbitration_id;
+        const arbId = typeof rawArbId === 'string'
+          ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
+          : Number(rawArbId);
+
+        if (arbId === responseArbId) {
+          const frameData: number[] = (msg.data as number[]) || [];
+          if (frameData.length === 0) return;
+
+          const pciType = (frameData[0] >> 4) & 0x0F;
+
+          if (pciType === 3) {
+            // Flow Control frame: [0x30, BlockSize, STmin, ...]
+            const blockSize = frameData[1] || 0;
+            const stMin = frameData[2] || 0;
+            console.log(`[UDS-MF] FC received: BS=${blockSize} STmin=0x${stMin.toString(16)} (${stMin > 0x80 ? ((stMin - 0xF0) * 100) + 'μs' : stMin + 'ms'})`);
+            clearTimeout(fcTimeout);
+            this.udsResponseListener = null;
+            resolve({ blockSize, stMin });
+          } else if (pciType === 0) {
+            // Single frame response (could be NRC) — handle it
+            const respSvc = frameData[1];
+            if (respSvc === 0x7F) {
+              // Negative response before FC
+              clearTimeout(fcTimeout);
+              this.udsResponseListener = null;
+              resolve(null);
+            }
+          }
+        }
+      };
+    });
+
+    // Send First Frame
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: this.nextRequestId(),
+      arb_id: targetAddress,
+      data: firstFrame,
+    }));
+    console.log(`[UDS-MF] FF sent: [${firstFrame.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`);
+
+    // Wait for Flow Control
+    const fc = await fcPromise;
+    if (!fc) {
+      console.log('[UDS-MF] No Flow Control — checking if ECU sent a response instead');
+      // Try to read a response (ECU may have responded with NRC immediately)
+      throw new Error('No Flow Control received from ECU after First Frame');
+    }
+
+    // Step 3: Send Consecutive Frames (CF)
+    // Calculate inter-frame delay from STmin
+    // 0x00-0x7F = 0-127ms, 0xF1-0xF9 = 100-900μs
+    let stMinMs = 0;
+    if (fc.stMin <= 0x7F) {
+      stMinMs = fc.stMin;
+    } else if (fc.stMin >= 0xF1 && fc.stMin <= 0xF9) {
+      stMinMs = 1; // Sub-millisecond — use 1ms minimum (JS can't do μs accurately)
+    }
+    // Minimum 1ms to avoid flooding the CAN bus
+    stMinMs = Math.max(stMinMs, 1);
+
+    let offset = 6; // First 6 bytes already sent in FF
+    let seqNum = 1;
+    let framesSentSinceFC = 0;
+
+    while (offset < udsPayload.length) {
+      // Check BlockSize — if non-zero, wait for another FC after sending BS frames
+      if (fc.blockSize > 0 && framesSentSinceFC >= fc.blockSize) {
+        // Wait for next FC
+        const nextFcPromise = new Promise<boolean>((resolve) => {
+          const fcTimeout = setTimeout(() => {
+            this.udsResponseListener = null;
+            resolve(false);
+          }, 5000);
+
+          this.udsResponseListener = (msg: Record<string, unknown>) => {
+            const msgType = msg.type as string;
+            if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+            const rawArbId = msg.arb_id ?? msg.arbitration_id;
+            const arbId = typeof rawArbId === 'string'
+              ? parseInt(rawArbId as string, 16)
+              : Number(rawArbId);
+            if (arbId === responseArbId) {
+              const frameData: number[] = (msg.data as number[]) || [];
+              if (frameData.length > 0 && ((frameData[0] >> 4) & 0x0F) === 3) {
+                clearTimeout(fcTimeout);
+                this.udsResponseListener = null;
+                resolve(true);
+              }
+            }
+          };
+        });
+        const gotFC = await nextFcPromise;
+        if (!gotFC) throw new Error('Flow Control timeout during consecutive frames');
+        framesSentSinceFC = 0;
+      }
+
+      const chunk = udsPayload.slice(offset, offset + 7);
+      const cf: number[] = [0x20 | (seqNum & 0x0F), ...chunk];
+      while (cf.length < 8) cf.push(0x00);
+
+      // Fire-and-forget for consecutive frames
+      this.ws.send(JSON.stringify({
+        type: 'can_send',
+        id: this.nextRequestId(),
+        arb_id: targetAddress,
+        data: cf,
+      }));
+
+      offset += 7;
+      seqNum++;
+      framesSentSinceFC++;
+
+      // Inter-frame delay
+      if (stMinMs > 0 && offset < udsPayload.length) {
+        await new Promise(r => setTimeout(r, stMinMs));
+      }
+    }
+
+    console.log(`[UDS-MF] All ${seqNum} frames sent (${totalLength} bytes). Waiting for response...`);
+
+    // Step 4: Wait for ECU response (positive or negative)
+    const responsePromise = new Promise<number[] | null>((resolve) => {
+      const respTimeout = setTimeout(() => {
+        this.udsResponseListener = null;
+        resolve(null);
+      }, 10000); // 10s timeout for response after multi-frame send
+
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+        const rawArbId = msg.arb_id ?? msg.arbitration_id;
+        const arbId = typeof rawArbId === 'string'
+          ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
+          : Number(rawArbId);
+
+        if (arbId === responseArbId) {
+          const frameData: number[] = (msg.data as number[]) || [];
+          if (frameData.length === 0) return;
+
+          const pciType = (frameData[0] >> 4) & 0x0F;
+
+          // Accept single-frame responses (positive or negative)
+          if (pciType === 0) {
+            const respSvc = frameData.length > 1 ? frameData[1] : 0;
+            const expectedPositive = service + 0x40;
+            const isNegativeForUs = respSvc === 0x7F && frameData.length > 2 && frameData[2] === service;
+            const isPositiveMatch = respSvc === expectedPositive;
+
+            if (isPositiveMatch || isNegativeForUs) {
+              clearTimeout(respTimeout);
+              this.udsResponseListener = null;
+              resolve(frameData);
+            }
+          }
+          // Also accept first-frame responses (for multi-frame positive responses)
+          if (pciType === 1) {
+            clearTimeout(respTimeout);
+            this.udsResponseListener = null;
+            resolve(frameData);
+          }
+        }
+      };
+    });
+
+    const rawData = await responsePromise;
+    if (!rawData || rawData.length === 0) {
+      throw new Error('Timeout waiting for CAN response after multi-frame send');
+    }
+
+    return this.parseISOTPResponse(service, subFunction, rawData);
   }
 
   private async sendUDSviaOBD(

@@ -629,3 +629,14 @@
 - [x] Bootloader polling worked: 3 probes, ECU responded at ~58s, security GRANTED
 - [x] All fixes derived from internal documents (busmaster_analysis.md, shortflash_analysis.md, Knox)
 - [x] Improved NRC 0x78 handling — replaced single 3s retry with polling loop (2s interval, 60s budget)
+
+## Real Flash Attempt #10 — FAILED (Apr 3, 2026) — Log 73b202dc
+- [x] MAJOR PROGRESS: RequestDownload ACCEPTED by ECU! First time reaching block transfer.
+- [x] Bug 1: xferSize = 0x0 — container had '0' (truthy string), ECU database never consulted. Fixed: ECU db primary, container override only if >0
+- [x] Bug 2: Container rc34 may not reach engine — server strips protocol fields from block metadata. Fallback construction works as backup
+- [x] Bug 3: TransferData needs ISO-TP multi-frame — added sendUDSMultiFrame to pcanConnection.ts
+- [x] Fix: xferSize now resolved as: containerXfer > 0 ? containerXfer : ecuDbXfer > 0 ? ecuDbXfer : 0xFF8
+- [x] Fix: Server strips rc34 from block metadata — engine uses container header directly or constructs fallback
+- [x] Fix: sendUDSMultiFrame implements FF + FC wait + CF with STmin pacing (auto-routed when payload > 7 bytes)
+- [x] Note: PriRC got NRC 0x78 (ECU was erasing) — erase completed by time per-block 0x34 was sent
+- [x] Note: Bootloader polling worked again — seed at 52s (31s after A5 03)

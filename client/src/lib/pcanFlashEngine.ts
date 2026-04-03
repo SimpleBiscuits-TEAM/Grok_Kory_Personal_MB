@@ -1624,8 +1624,13 @@ export class PCANFlashEngine {
     const block = this.header.block_struct.find(b => b.block_id === blockId);
     if (!block) throw new Error(`Block #${blockId} not found in container`);
 
-    // Get transfer size from block or header
-    const xferSize = parseInt(block.xferSize || this.header.xferSize || 'FF8', 16);
+    // Get transfer size: ECU database is authoritative, container can override if non-zero.
+    // Container may have xferSize: '0' (truthy string → parseInt = 0), so we validate.
+    const containerXfer = parseInt(block.xferSize || this.header.xferSize || '0', 16);
+    const ecuDbXferConfig = getEcuConfig(this.plan.ecuType);
+    const ecuDbXfer = ecuDbXferConfig?.xferSize ?? 0;
+    const xferSize = containerXfer > 0 ? containerXfer : (ecuDbXfer > 0 ? ecuDbXfer : 0xFF8);
+    this.log('info', cmd.phase, `Transfer size: 0x${xferSize.toString(16)} (${xferSize} bytes) [container=${containerXfer}, ecuDb=${ecuDbXfer}]`);
 
     // Calculate block data offset in the container file
     const headerLength = parseInt(this.header.header_length || '3000', 16);
@@ -1781,7 +1786,7 @@ export class PCANFlashEngine {
     }
 
     // Step 3: RequestTransferExit (0x37) — only if ECU supports it
-    // SPS log shows L5P does NOT use TransferExit (usesTransferExit: false in ECU database)
+    // BUSMASTER analysis confirms L5P DOES use TransferExit (usesTransferExit: true in ECU database)
     const ecuConfig = getEcuConfig(this.plan.ecuType);
     if (ecuConfig?.usesTransferExit !== false) {
       this.log('can_tx', cmd.phase, `TX: RequestTransferExit (0x37)`);
