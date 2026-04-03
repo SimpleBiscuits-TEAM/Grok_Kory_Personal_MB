@@ -264,24 +264,21 @@ export function generateFlashPlan(
       delayBeforeMs: 1000,  // E88: post_delay=1000ms
     });
     // Step 8: ProgrammingMode Complete (functional)
-    // ECU needs time to process A5 01 before receiving A5 03
+    // E88 procedure: A5 01 post_delay=1000ms, A5 03 post_delay=500ms
+    // CRITICAL TIMING: The ECU has a short window after A5 03 where it accepts
+    // USDT commands. Using delays longer than the E88 reference causes the ECU
+    // to become unresponsive. Match E88 timing exactly.
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 6000,  // 6s wait after A5 01 — ECU needs significant time to enter programming mode
+      delayBeforeMs: 1000,  // E88: post_delay=1000ms after A5 01 (was 6000ms — caused USDT blackout)
     });
-    // Step 9: Re-establish programming session on PHYSICAL address (0x7E0)
-    // After the broadcast sequence, the ECU is in programming mode but needs
-    // a direct session handshake before it will respond to USDT commands.
-    // E88 procedure: CAN_SEND_USDT (0x7E0, DATA=10 02) after broadcast sequence
-    // Without this, SECURITY_ACCESS seed request times out.
-    commands.push({
-      id: cmdId++, phase: 'SESSION_OPEN', label: 'Re-establish Programming Session (Physical)',
-      canTx: `${txHex} 02 10 02`, canRx: `${rxHex} 02 50 02`,
-      expectedPositive: '50', timeoutMs: 5000, retries: 3,
-      delayBeforeMs: 2000,  // 2s settle after ProgrammingMode Complete before USDT
-      nonFatal: true,  // Broadcast SESSION_OPEN already put ECU in programming mode; physical session is optional
-    });
+    // NOTE: Physical session re-establishment (0x10 0x02 on 0x7E0) was REMOVED.
+    // The E88 reference procedure does NOT send a physical session between the
+    // broadcast and security access/RequestDownload. The broadcast ProgrammingSession
+    // (step 4: FE 02 10 02 on 0x101) already establishes the session for all ECUs.
+    // Sending an additional physical session wastes time in the critical window
+    // after A5 03 and may confuse the ECU.
   } else {
     // Standard UDS: simple session switch on physical address
     commands.push({
@@ -305,6 +302,7 @@ export function generateFlashPlan(
     canRx: `${rxHex} xx 67 ...`,
     expectedPositive: '67', timeoutMs: 5000, retries: 2,
     nonFatal: isGMLAN,  // GMLAN: PRE_CHECK already granted security; post-broadcast seed may timeout
+    delayBeforeMs: isGMLAN ? 500 : undefined,  // E88: 500ms after A5 03 before first USDT command
   });
   commands.push({
     id: cmdId++, phase: 'SECURITY_ACCESS', label: 'Send Key',

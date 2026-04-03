@@ -581,3 +581,11 @@
 - [x] Fix: Engine should proceed to PRE_FLASH even when SECURITY_ACCESS seed times out on GMLAN
 - [x] Investigate: Why did nonFatal flag not prevent the FAILED result? Likely ran before checkpoint deployed; added belt-and-suspenders GMLAN safety net in executeCommand
 - [x] Investigate: PRE_CHECK programming session took 3 attempts (NRC 0x12 twice) — intermittent ECU responsiveness (known bench behavior)
+
+## Real Flash Attempt #5 — FAILED (Apr 3, 2026) — Log 6e9121e4
+- [x] SECURITY_ACCESS skip worked correctly (PRE_CHECK security granted → skipped post-broadcast seed/key)
+- [x] Root cause: ECU completely silent on USDT after SESSION_OPEN broadcast — timing mismatch vs E88 reference
+- [x] Physical session (0x10 0x02) also timed out — REMOVED (not in E88 procedure, wastes critical timing window)
+- [x] Fix: DisableNormalCommunication is NOT the issue (only disables normal CAN traffic, not diagnostic responses)
+- [x] Fix: SHORTER delays needed — A5 01→A5 03 reduced from 6000ms to 1000ms, A5 03→USDT reduced from 2000ms to 500ms (match E88)
+- [x] Research: E88 reference shows USDT commands work after broadcast with short delays (500ms after A5 03)
