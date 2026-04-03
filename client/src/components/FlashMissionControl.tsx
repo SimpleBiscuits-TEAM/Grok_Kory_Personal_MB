@@ -139,13 +139,18 @@ function KeyCyclePrompt({ state, countdown, onConfirm }: {
 }) {
   const isKeyOff = state.type === 'KEY_OFF';
   const isKeyOn = state.type === 'KEY_ON';
-  const isKeyAction = isKeyOff || isKeyOn;
+  const isKeyOnStart = state.type === 'KEY_ON_START';
+  const isKeyAction = isKeyOff || isKeyOn || isKeyOnStart;
 
   // Distinct theming per action type
   const theme = isKeyOff
     ? { icon: '🔴', title: 'TURN KEY OFF', border: 'border-red-500', bg: 'bg-red-500/15',
         titleColor: 'text-red-400', btn: 'bg-red-600 hover:bg-red-500',
         confirmText: 'I HAVE TURNED THE KEY OFF' }
+    : isKeyOnStart
+    ? { icon: '🔑', title: 'IGNITION CHECK', border: 'border-amber-500', bg: 'bg-amber-500/15',
+        titleColor: 'text-amber-400', btn: 'bg-amber-600 hover:bg-amber-500',
+        confirmText: 'IGNITION IS ON — START' }
     : isKeyOn
     ? { icon: '🟢', title: 'TURN KEY ON', border: 'border-emerald-500', bg: 'bg-emerald-500/15',
         titleColor: 'text-emerald-400', btn: 'bg-emerald-600 hover:bg-emerald-500',

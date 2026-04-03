@@ -387,3 +387,9 @@
 - [x] Pattern: ECU responds intermittently — addressed: response filter was too broad (accepted any svc >= 0x40), now only accepts exact positive match or NRC for our service
 - [x] TesterPresent response "A0 00" at 32.7s is not standard — addressed: was being accepted by overly broad isGmlanPositive filter; now properly filtered
 - [x] DID 0x90 returned "C1 00 C1 A5 4A" which is same as DID 0xC1 data — fixed: stale frame from DID 0xC1 was accepted by broad filter; drain period increased to 150ms + strict service matching
+
+## Key On Alert Before Flash Start
+- [x] Add Key On confirmation prompt at the very start of execute() before bridge connect
+- [x] Prompt should appear for both dry run and real flash (different wording for each)
+- [x] Use amber/warning theme with 🔑 icon — distinct from mid-cycle KEY_ON (green)
+- [x] Block execution until user confirms ignition is ON — button: "IGNITION IS ON — START"

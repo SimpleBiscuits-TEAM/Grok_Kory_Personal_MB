@@ -18,7 +18,7 @@ export type FlashPhase =
   | 'PRE_FLASH' | 'BLOCK_TRANSFER' | 'POST_FLASH' | 'VERIFICATION'
   | 'KEY_CYCLE' | 'CLEANUP' | 'RECOVERY';
 
-export type UserActionType = 'KEY_OFF' | 'KEY_ON' | 'WAIT_BOOT';
+export type UserActionType = 'KEY_OFF' | 'KEY_ON' | 'KEY_ON_START' | 'WAIT_BOOT';
 
 export interface FlashCommand {
   id: number;

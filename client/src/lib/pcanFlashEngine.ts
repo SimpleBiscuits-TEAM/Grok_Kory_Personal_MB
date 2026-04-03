@@ -370,6 +370,35 @@ export class PCANFlashEngine {
     this.emitState();
 
     try {
+      // Step -1: Confirm ignition is ON before starting any CAN communication.
+      // ECU must be powered for the bridge to detect it on the bus.
+      this.log('info', 'PRE_CHECK', '🔑 Confirm ignition is ON before starting...');
+      this.state.statusMessage = 'Confirm ignition is ON';
+      this.state.currentPhase = 'PRE_CHECK';
+      this.emitState();
+
+      if (this.callbacks.onUserAction) {
+        await this.callbacks.onUserAction(
+          {
+            type: 'KEY_ON_START',
+            prompt: this.dryRun
+              ? 'Turn ignition ON (key on / engine off) before starting DRY RUN. ECU must be powered for CAN communication.'
+              : '⚠️ Turn ignition ON (key on / engine off) before starting FLASH. ECU must be powered. Do NOT start engine.',
+            autoConfirm: false,
+          },
+          0 // No timeout — wait indefinitely for user confirmation
+        );
+      }
+      this.log('success', 'PRE_CHECK', '✓ Ignition ON confirmed — proceeding');
+
+      if (this.aborted) {
+        this.state.result = 'ABORTED';
+        this.state.isRunning = false;
+        this.emitState();
+        this.callbacks.onComplete('ABORTED');
+        return 'ABORTED';
+      }
+
       // Step 0: Ensure bridge connection is established
       this.log('info', 'PRE_CHECK', 'Connecting to PCAN bridge...');
       this.state.statusMessage = 'Connecting to PCAN bridge...';
