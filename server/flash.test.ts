@@ -71,10 +71,11 @@ describe('seedKeyAlgorithms', () => {
       expect(ECU_SECURITY_PROFILES['CM2450B']).toBeDefined();
     });
 
-    it('marks E41 as requiring unlock box', () => {
+    it('marks E41 as NOT requiring unlock box (has Seed_key.cs AES key)', () => {
       const e41 = ECU_SECURITY_PROFILES['E41'];
-      expect(e41.requiresUnlockBox).toBe(true);
-      expect(e41.securityLevel).toBe('hardware_required');
+      expect(e41.requiresUnlockBox).toBe(false);
+      expect(e41.aesKeyHex).toBeDefined();
+      expect(e41.aesKeyHex!.length).toBe(32);
     });
 
     it('marks standard GM ECUs as not requiring unlock box', () => {
@@ -113,7 +114,7 @@ describe('seedKeyAlgorithms', () => {
     it('returns formatted summary for known ECU', () => {
       const summary = getSecuritySummary('E41');
       expect(summary).toContain('GM');
-      expect(summary).toContain('Hardware unlock box REQUIRED');
+      expect(summary).toContain('GM_5B_AES');
     });
 
     it('returns error message for unknown ECU', () => {

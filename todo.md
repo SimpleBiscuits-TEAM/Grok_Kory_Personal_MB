@@ -538,3 +538,11 @@
 - [x] Add GM_2B algorithm parameters for ECUs that use DLL-based 2-byte seed/key (E83, E78, E39 — noted as GM_DUAL with aesKeyHex)
 - [x] Update flash engine to use hardcoded AES key from security profile as priority 1 in all 3 security access locations (SECURITY_ACCESS, PRE_CHECK, KEY_CYCLE)
 - [x] Verify computeGM5B in flash engine matches the C# ComputeSeed2Key algorithm exactly — same AES-128-ECB with salted seed
+
+## Remove pri_key — Use Seed_key.cs Only (Apr 3, 2026)
+- [x] Remove ALL pri_key references from flash engine (SECURITY_ACCESS, PRE_CHECK, KEY_CYCLE)
+- [x] Remove pri_key from container parser (DevProgContainerHeader, FlashContainerPanel)
+- [x] Remove pri_key readiness check from flashContainerParser
+- [x] Simplify key computation: hardcoded AES from security profile → known lookup pairs → dummy key for unlocked ECUs
+- [x] Remove "no pri_key" log messages — replaced with "Seed_key.cs AES" messages
+- [x] Update ContainerVerify type to remove pri_key fields (removed from FlashContainerPanel verify section)

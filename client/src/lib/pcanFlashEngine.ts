@@ -330,7 +330,7 @@ export class PCANFlashEngine {
    * This method:
    *   1. Waits for ECU to stabilize after boot
    *   2. Re-enters programming session (0x10 0x02 for GMLAN, 0x10 0x03 for UDS)
-   *   3. Re-attempts security access if pri_key is available
+   *   3. Re-attempts security access using Seed_key.cs AES key
    *   4. Restarts TesterPresent keepalive
    */
   private async reEstablishSession(): Promise<void> {
@@ -457,10 +457,9 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else {
-            // Try hardcoded AES key from security profile first, then container pri_key
+            // Key computation: Seed_key.cs hardcoded AES keys ONLY
             const kcEcuType = this.plan.ecuType || this.header.ecu_type || '';
             const kcSecProfile = getSecurityProfile(kcEcuType);
-            const kcPriKey = this.header.verify?.pri_key;
             let kcKeyBytes: Uint8Array | null = null;
             let kcKeySource = '';
 
@@ -468,11 +467,7 @@ export class PCANFlashEngine {
                 (kcSecProfile.algorithmType === 'GM_5B_AES' || kcSecProfile.algorithmType === 'GM_DUAL')) {
               const aesKeyBytes = skHexToBytes(kcSecProfile.aesKeyHex);
               kcKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              kcKeySource = `${kcSecProfile.ecuType} hardcoded AES`;
-            } else if (kcPriKey && kcPriKey.length >= 16 && seedBytes.length === 5) {
-              const aesKeyBytes = new Uint8Array(kcPriKey.map(h => parseInt(h, 16)));
-              kcKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              kcKeySource = 'container pri_key';
+              kcKeySource = `${kcSecProfile.ecuType} Seed_key.cs AES`;
             }
 
             if (kcKeyBytes) {
@@ -488,7 +483,7 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else if (seedBytes.length === 5) {
-              this.log('info', 'KEY_CYCLE', `No AES key available — sending dummy key`);
+              this.log('info', 'KEY_CYCLE', `No Seed_key.cs entry for ${kcEcuType} — sending dummy key`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
@@ -501,7 +496,7 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else {
-              this.log('warning', 'KEY_CYCLE', 'No key material available for post-boot security access');
+              this.log('warning', 'KEY_CYCLE', `No Seed_key.cs entry for ${kcEcuType} — cannot compute key for post-boot security`);
               this.lastSecurityAccessGranted = false;
             }
             } // end known pair else
@@ -686,10 +681,9 @@ export class PCANFlashEngine {
                 this.log('warning', 'PRE_CHECK', `Lookup key rejected: NRC 0x${nrc.toString(16)}`);
               }
             } else {
-            // Try hardcoded AES key from security profile first, then container pri_key
+            // Key computation: Seed_key.cs hardcoded AES keys ONLY
             const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
             const preSecProfile = getSecurityProfile(preEcuType);
-            const prePriKey = this.header.verify?.pri_key;
             let preKeyBytes: Uint8Array | null = null;
             let preKeySource = '';
 
@@ -697,11 +691,7 @@ export class PCANFlashEngine {
                 (preSecProfile.algorithmType === 'GM_5B_AES' || preSecProfile.algorithmType === 'GM_DUAL')) {
               const aesKeyBytes = skHexToBytes(preSecProfile.aesKeyHex);
               preKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              preKeySource = `${preSecProfile.ecuType} hardcoded AES`;
-            } else if (prePriKey && prePriKey.length >= 16 && seedBytes.length === 5) {
-              const aesKeyBytes = new Uint8Array(prePriKey.map(h => parseInt(h, 16)));
-              preKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              preKeySource = 'container pri_key';
+              preKeySource = `${preSecProfile.ecuType} Seed_key.cs AES`;
             }
 
             if (preKeyBytes) {
@@ -719,7 +709,7 @@ export class PCANFlashEngine {
               this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU is already unlocked (HPTuners/aftermarket)');
               this.lastSecurityAccessGranted = true;
             } else if (seedBytes.length === 5) {
-              this.log('info', 'PRE_CHECK', `No AES key available — sending dummy key for unlocked ECU`);
+              this.log('warning', 'PRE_CHECK', `No Seed_key.cs entry for ${preEcuType} — sending dummy key for unlocked ECU`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
@@ -728,10 +718,10 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = true;
               } else {
                 const nrc = keyResp?.nrc ?? 0;
-                this.log('warning', 'PRE_CHECK', `Dummy key rejected: NRC 0x${nrc.toString(16)} — ECU requires real key`);
+                this.log('warning', 'PRE_CHECK', `Dummy key rejected: NRC 0x${nrc.toString(16)} — ECU requires real key (check Seed_key.cs)`);
               }
             } else {
-              this.log('warning', 'PRE_CHECK', `No key material available for ${seedBytes.length}-byte seed — GMLAN DIDs may not respond`);
+              this.log('warning', 'PRE_CHECK', `No Seed_key.cs entry for ${preEcuType} (${seedBytes.length}-byte seed) — GMLAN DIDs may not respond`);
             }
             } // end known pair else
           } else if (seedResp) {
@@ -1457,58 +1447,35 @@ export class PCANFlashEngine {
         this.log('info', cmd.phase, `Key from lookup table: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
       } else {
 
-      // ── Key computation priority:
-      // 1. Hardcoded AES key from ECU_SECURITY_PROFILES (most reliable)
-      // 2. Container pri_key (from .ctz verify section)
-      // 3. Pre-computed seed/key from container header
-      // 4. Dummy key for unlocked ECUs
+      // ── Key computation: Seed_key.cs hardcoded AES keys ONLY ──
       const ecuType = this.plan.ecuType || this.header.ecu_type || '';
       const secProfile = getSecurityProfile(ecuType);
-      const priKey = this.header.verify?.pri_key;
 
       if (secProfile?.aesKeyHex && seedBytes.length === 5 &&
           (secProfile.algorithmType === 'GM_5B_AES' || secProfile.algorithmType === 'GM_DUAL')) {
-        // Priority 1: Hardcoded AES key from security profile database
+        // Compute key using hardcoded AES key from Seed_key.cs
         const aesKeyBytes = skHexToBytes(secProfile.aesKeyHex);
         keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-        this.log('info', cmd.phase, `🔑 Key computed (${secProfile.ecuType} hardcoded AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-      } else if (seedBytes.length === 5 && priKey && priKey.length >= 16) {
-        // Priority 2: Container pri_key for GM 5-byte AES
-        const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
-        keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-        this.log('info', cmd.phase, `Key computed (container pri_key GM_5B_AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-      } else if (seedBytes.length === 3 && priKey && priKey.length >= 5) {
-        // Priority 2b: Container pri_key for Ford 3-byte LFSR
-        const secretBytes = new Uint8Array(priKey.slice(0, 5).map(h => parseInt(h, 16)));
+        this.log('info', cmd.phase, `🔑 Key computed (${secProfile.ecuType} Seed_key.cs AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+      } else if (secProfile?.algorithmType === 'FORD_3B' && seedBytes.length === 3 && secProfile.aesKeyHex) {
+        // Ford 3-byte LFSR from security profile
+        const secretBytes = skHexToBytes(secProfile.aesKeyHex);
         keyBytes = computeFord3B(seedBytes, secretBytes);
-        this.log('info', cmd.phase, `Key computed (container pri_key Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-      } else if (this.header.seed && this.header.key) {
-        // Priority 3: Pre-computed seed/key from container header
-        const headerSeed = hexToBytes(this.header.seed);
-        const headerKey = hexToBytes(this.header.key);
-        
-        if (arraysEqual(seedBytes, headerSeed)) {
-          keyBytes = headerKey;
-          this.log('info', cmd.phase, `Using pre-computed key from container header (seed matches)`);
-        } else {
-          this.log('warning', cmd.phase, `ECU seed doesn't match container seed — attempting header key anyway`);
-          keyBytes = headerKey;
-        }
+        this.log('info', cmd.phase, `🔑 Key computed (${secProfile.ecuType} Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
       } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
         // Zero seed — ECU is already unlocked
         this.log('success', cmd.phase, '🔓 Zero seed — ECU is already unlocked');
         keyBytes = new Uint8Array(5).fill(0x00);
       } else if (seedBytes.length === 5) {
-        // No key material — try dummy key for unlocked ECUs
-        this.log('info', cmd.phase, `No AES key available — attempting dummy key for unlocked ECU`);
+        // No hardcoded key for this ECU — try dummy key for unlocked ECUs
+        this.log('warning', cmd.phase, `No Seed_key.cs entry for ${ecuType} — trying dummy key (unlocked ECU only)`);
         keyBytes = new Uint8Array(5).fill(0x00);
       } else {
-        // Non-5-byte seed with no key material — cannot proceed
         if (this.dryRun) {
-          this.log('warning', cmd.phase, `[DRY RUN] No seed/key algorithm available for ${seedBytes.length}-byte seed — skipping key send`);
+          this.log('warning', cmd.phase, `[DRY RUN] No Seed_key.cs entry for ${ecuType} (${seedBytes.length}-byte seed) — skipping`);
           return seedResponse;
         }
-        throw new Error(`No seed/key algorithm available for ${seedBytes.length}-byte seed. Load a container file with the correct key.`);
+        throw new Error(`No Seed_key.cs entry for ${ecuType}. Cannot compute key for ${seedBytes.length}-byte seed.`);
       }
       } // end lookup vs compute
 

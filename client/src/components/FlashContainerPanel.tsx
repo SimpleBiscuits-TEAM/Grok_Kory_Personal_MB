@@ -225,16 +225,12 @@ export default function FlashContainerPanel() {
         xferSize: dp.xferSize.toString(16), ForceOS: dp.forceOS ? 'true' : 'false',
         block_struct: dp.blocks, ecu_type: dp.ecuType,
         hardware_number: dp.hardwareNumber,
-        // Pass verify section with pri_key for security access AES computation
+        // Pass verify section for CAN address info (key computation uses Seed_key.cs, not container)
         verify: dp.verify ? {
           controller_type: dp.verify.controllerType,
           canspeed: dp.verify.canSpeed,
           txadr: dp.verify.txAddr,
           rxadr: dp.verify.rxAddr,
-          pri_key: dp.verify.pri_key,
-          pri_request: dp.verify.pri_request,
-          request: dp.verify.request,
-          key: dp.verify.key,
           txprefix: dp.verify.txprefix,
           rxprefix: dp.verify.rxprefix,
         } : undefined,

@@ -390,20 +390,16 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
         : `${ecuFamily} uses ${secProfile?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
     });
 
-    // Check if AES key is available (hardcoded in profile OR from container)
-    const hasPriKey = devProgHeader?.verify?.pri_key && devProgHeader.verify.pri_key.length >= 16;
+    // Check if AES key is available from Seed_key.cs hardcoded profiles
     const hasHardcodedKey = secProfile?.aesKeyHex && secProfile.aesKeyHex.length === 32;
-    const hasAnyKey = hasHardcodedKey || hasPriKey;
     checks.push({
-      id: 'pri_key', label: 'Security Key Material',
-      status: hasAnyKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
+      id: 'seed_key', label: 'Security Key (Seed_key.cs)',
+      status: hasHardcodedKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
       detail: hasHardcodedKey
-        ? `✅ AES key available (hardcoded for ${ecuFamily}) — seed/key computation ready`
-        : hasPriKey
-          ? `Container includes AES pri_key (${devProgHeader!.verify!.pri_key!.length} bytes) for seed/key computation`
-          : needsUnlockBox
-            ? 'Hardware unlock box handles security — no pri_key needed'
-            : 'No AES key available — security access will use dummy key (only works on unlocked ECUs)',
+        ? `✅ AES key available (Seed_key.cs — ${ecuFamily}) — seed/key computation ready`
+        : needsUnlockBox
+          ? 'Hardware unlock box handles security'
+          : `No Seed_key.cs entry for ${ecuFamily} — will use dummy key (only works on unlocked ECUs)`,
     });
 
     checks.push({
