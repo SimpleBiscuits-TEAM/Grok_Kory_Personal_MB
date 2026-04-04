@@ -1201,7 +1201,17 @@ export class PCANConnection {
           // Accept any negative response if we can't verify the service byte
           const isNegativeUnknown = isNegative && (frameData.length <= 2);
 
-          if (isPositiveMatch || isNegativeForUs || isNegativeUnknown) {
+          if (isPositiveMatch) {
+            clearTimeout(timeout);
+            this.udsResponseListener = null;
+            resolve(frameData);
+          } else if (isNegativeForUs || isNegativeUnknown) {
+            // Check for NRC 0x78 (responsePending) — ECU is processing, keep waiting
+            const nrc = frameData.length > 3 ? frameData[3] : 0;
+            if (nrc === 0x78) {
+              console.log(`[UDS] NRC 0x78 (responsePending) — ECU processing, waiting for real response...`);
+              return; // Keep listener active, don't resolve
+            }
             clearTimeout(timeout);
             this.udsResponseListener = null;
             resolve(frameData);
@@ -1503,11 +1513,16 @@ export class PCANConnection {
     console.log(`[UDS-MF] All ${seqNum} frames sent (${totalLength} bytes). Waiting for response...`);
 
     // Step 4: Wait for ECU response (positive or negative)
+    // BUSMASTER analysis: After TransferData, ECU sends NRC 0x78 (responsePending = writing to flash)
+    // followed by 0x76 (positive). NRC 0x78 is NOT an error — it means "data received, writing."
+    // We must keep listening past NRC 0x78 until we get the actual positive/negative response.
+    // First chunk after erase can take ~22s; normal chunks take ~20ms.
+    const MF_RESPONSE_TIMEOUT = 30000; // 30s to handle first-chunk-after-erase scenario
     const responsePromise = new Promise<number[] | null>((resolve) => {
       const respTimeout = setTimeout(() => {
         this.udsResponseListener = null;
         resolve(null);
-      }, 10000); // 10s timeout for response after multi-frame send
+      }, MF_RESPONSE_TIMEOUT);
 
       this.udsResponseListener = (msg: Record<string, unknown>) => {
         const msgType = msg.type as string;
@@ -1531,7 +1546,20 @@ export class PCANConnection {
             const isNegativeForUs = respSvc === 0x7F && frameData.length > 2 && frameData[2] === service;
             const isPositiveMatch = respSvc === expectedPositive;
 
-            if (isPositiveMatch || isNegativeForUs) {
+            if (isPositiveMatch) {
+              clearTimeout(respTimeout);
+              this.udsResponseListener = null;
+              resolve(frameData);
+            } else if (isNegativeForUs) {
+              // Check if this is NRC 0x78 (responsePending)
+              const nrc = frameData.length > 3 ? frameData[3] : 0;
+              if (nrc === 0x78) {
+                // NRC 0x78 = ECU received data, writing to flash. Keep waiting for 0x76.
+                // Do NOT resolve — the ECU will send the real response shortly.
+                console.log(`[UDS-MF] NRC 0x78 (responsePending) — ECU writing, waiting for positive response...`);
+                return; // Keep listener active
+              }
+              // Other NRC — resolve as negative
               clearTimeout(respTimeout);
               this.udsResponseListener = null;
               resolve(frameData);

@@ -180,7 +180,7 @@ export const ECU_DATABASE: Record<string, EcuConfig> = {
     saeSupported: true, saeReqAdd: null, fastMode: true,
     saeStdBitmasks: { vsb0: '0x087B0000', vsb20: '0x20032000', vsb40: '0x04800000', vsb60: '0x00000000' },
     patchNecessary: true, patchSequence: GM_PATCH_SEQUENCE, flashSequence: GM_FLASH_SEQUENCE,
-    usesTransferExit: true,  // BUSMASTER analysis confirms TransferExit 0x37 after each block
+    usesTransferExit: false, // BUSMASTER raw log: ZERO 0x37 commands in 504,189 frames of successful flash
   },
   E88: {
     ecuType: 'E88', name: 'GM-DELCO E88',

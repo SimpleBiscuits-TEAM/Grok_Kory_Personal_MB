@@ -1724,21 +1724,26 @@ export class PCANFlashEngine {
     if (!dlResponse || !dlResponse.positiveResponse) {
       const nrc = dlResponse?.nrc || 0;
       // NRC 0x78 = responsePending — ECU is erasing flash internally.
-      // The erase can take 10-30s on first block. Poll until positive response or timeout.
-      // Confirmed from busmaster_analysis.md: "NRC 0x78 (ResponsePending) on first RequestDownload
-      // is normal — ECU is erasing flash"
+      // BUSMASTER analysis: NRC 0x78 on first RequestDownload (34 00 00 0F FE) is normal.
+      // The ECU sends 0x74 (positive) automatically after erase completes (31ms in BUSMASTER).
+      // The sendUDSviaRawCAN listener now handles NRC 0x78 by continuing to wait for the
+      // real positive response. However, if we got here, the listener already timed out.
+      // Wait passively and then re-send the RequestDownload.
       if (nrc === 0x78) {
-        this.log('info', cmd.phase, 'NRC 0x78 — ECU erasing flash (ResponsePending). Polling for completion...');
-        const NRC78_POLL_INTERVAL = 2000; // 2s between polls
-        const NRC78_MAX_WAIT = 60000;     // 60s total budget for erase
+        this.log('info', cmd.phase, 'NRC 0x78 — ECU erasing flash (ResponsePending). Waiting for positive response...');
+        // BUSMASTER: erase took only 31ms. But our bridge may have timed out before
+        // the 0x74 arrived. Wait a bit and re-send the RequestDownload.
+        const NRC78_MAX_WAIT = 60000; // 60s total budget
         const nrc78Start = Date.now();
         let eraseComplete = false;
-        while (Date.now() - nrc78Start < NRC78_MAX_WAIT) {
-          await this.delay(NRC78_POLL_INTERVAL);
+        // Try re-sending RequestDownload a few times with increasing delays
+        const retryDelays = [500, 1000, 2000, 5000, 10000, 15000];
+        for (const delay of retryDelays) {
+          if (Date.now() - nrc78Start > NRC78_MAX_WAIT) break;
+          await this.delay(delay);
           const elapsed = ((Date.now() - nrc78Start) / 1000).toFixed(0);
-          this.log('info', cmd.phase, `Waiting for erase completion... (${elapsed}s)`);
+          this.log('info', cmd.phase, `Retrying RequestDownload after erase... (${elapsed}s)`);
           try {
-            // Re-send the same RequestDownload — ECU will respond 0x78 if still erasing, 0x74 when done
             const pollResponse = await this.conn.sendUDSRequest(UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr);
             if (pollResponse?.positiveResponse) {
               this.log('success', cmd.phase, `Erase complete after ${elapsed}s — RequestDownload accepted`);
@@ -1747,13 +1752,11 @@ export class PCANFlashEngine {
             }
             const pollNrc = pollResponse?.nrc || 0;
             if (pollNrc === 0x78) {
-              // Still erasing — continue polling
+              // Still erasing — continue with next retry
               continue;
             }
-            // Different NRC — fatal
-            throw new Error(`RequestDownload failed during erase poll: NRC 0x${pollNrc.toString(16)} (${NRC_NAMES[pollNrc] || 'unknown'})`);
+            throw new Error(`RequestDownload failed during erase: NRC 0x${pollNrc.toString(16)} (${NRC_NAMES[pollNrc] || 'unknown'})`);
           } catch (pollErr) {
-            // Timeout during poll — ECU may still be erasing, continue
             const msg = pollErr instanceof Error ? pollErr.message : String(pollErr);
             if (msg.includes('Timeout')) {
               this.log('info', cmd.phase, `Poll timeout (${elapsed}s) — ECU may still be erasing, continuing...`);
@@ -1772,9 +1775,11 @@ export class PCANFlashEngine {
     this.log('can_rx', cmd.phase, `RX: RequestDownload accepted`);
 
     // Step 2: TransferData (0x36) — send block data in chunks
+    // BUSMASTER analysis: sequence number is always 0x00 for ALL chunks (not incrementing).
+    // This is a block sequence identifier, not a counter.
     const blockData = new Uint8Array(this.containerData, blockOffset, Math.min(blockLength, this.containerData.byteLength - blockOffset));
     let bytesSent = 0;
-    let sequenceCounter = 1; // Block sequence counter starts at 1
+    const sequenceNumber = 0x00; // Always 0x00 per BUSMASTER reference
 
     while (bytesSent < blockData.length) {
       if (this.aborted) throw new Error('Aborted by user');
@@ -1782,29 +1787,25 @@ export class PCANFlashEngine {
       const chunkSize = Math.min(xferSize, blockData.length - bytesSent);
       const chunk = blockData.slice(bytesSent, bytesSent + chunkSize);
 
-      // Build TransferData payload: [sequenceCounter, ...data]
+      // Build TransferData payload: [sequenceNumber, ...data]
+      // BUSMASTER: FF byte 4 is always 0x00 for all 860 chunks
       const payload = new Uint8Array(1 + chunk.length);
-      payload[0] = sequenceCounter & 0xFF;
+      payload[0] = sequenceNumber;
       payload.set(chunk, 1);
 
-      // Send via UDS
+      // Send via UDS — sendUDSMultiFrame now handles NRC 0x78 internally:
+      // it keeps listening past NRC 0x78 (responsePending = ECU writing to flash)
+      // until the real 0x76 positive response arrives.
       const tdResponse = await this.conn.sendUDSRequest(
         UDS.TRANSFER_DATA, undefined, Array.from(payload), this.txAddr
       );
 
       if (!tdResponse || !tdResponse.positiveResponse) {
         const nrc = tdResponse?.nrc || 0;
-        // NRC 0x78 = pending — wait and retry (SPS log shows multiple 0x78 before 0x76)
-        if (nrc === 0x78) {
-          this.log('info', cmd.phase, 'NRC 0x78 — ECU processing transfer, waiting...');
-          await this.delay(2000);
-          continue; // Retry same chunk
-        }
-        throw new Error(`TransferData failed at seq ${sequenceCounter}: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
+        throw new Error(`TransferData failed at byte ${bytesSent}: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
       }
 
       bytesSent += chunkSize;
-      sequenceCounter = (sequenceCounter + 1) & 0xFF; // Wrap at 255
 
       // Update progress
       this.state.blockProgress = (bytesSent / blockData.length) * 100;
@@ -1819,7 +1820,7 @@ export class PCANFlashEngine {
       const currPct = Math.floor((bytesSent / blockData.length) * 10);
       if (currPct > prevPct) {
         this.log('can_tx', cmd.phase,
-          `TX: 0x${this.txAddr.toString(16).toUpperCase()} 36 ${(sequenceCounter - 1 & 0xFF).toString(16).padStart(2, '0').toUpperCase()} [${chunkSize} bytes] → ${sectionName} (${(this.state.blockProgress).toFixed(0)}%)`,
+          `TX: 0x${this.txAddr.toString(16).toUpperCase()} 36 00 [${chunkSize} bytes] → ${sectionName} (${(this.state.blockProgress).toFixed(0)}%)`,
           blockId
         );
       }
@@ -1828,27 +1829,9 @@ export class PCANFlashEngine {
       this.emitState();
     }
 
-    // Step 3: RequestTransferExit (0x37) — only if ECU supports it
-    // BUSMASTER analysis confirms L5P DOES use TransferExit (usesTransferExit: true in ECU database)
-    const ecuConfig = getEcuConfig(this.plan.ecuType);
-    if (ecuConfig?.usesTransferExit !== false) {
-      this.log('can_tx', cmd.phase, `TX: RequestTransferExit (0x37)`);
-      const exitResponse = await this.conn.sendUDSRequest(UDS.REQUEST_TRANSFER_EXIT, undefined, undefined, this.txAddr);
-      
-      if (!exitResponse || !exitResponse.positiveResponse) {
-        const nrc = exitResponse?.nrc || 0;
-        // Some ECUs don't support 0x37 — log warning but don't fail
-        if (nrc === 0x11) {
-          this.log('warning', cmd.phase, 'RequestTransferExit not supported — continuing');
-        } else {
-          throw new Error(`RequestTransferExit failed: NRC 0x${nrc.toString(16)} (${NRC_NAMES[nrc] || 'unknown'})`);
-        }
-      } else {
-        this.log('can_rx', cmd.phase, `RX: TransferExit accepted`);
-      }
-    } else {
-      this.log('info', cmd.phase, `Skipping RequestTransferExit (ECU ${this.plan.ecuType} does not use 0x37)`);
-    }
+    // BUSMASTER analysis: NO TransferExit (0x37) in the entire successful flash.
+    // Zero 0x37 commands across all 504,189 CAN frames. Do NOT send TransferExit.
+    // The next RequestDownload (0x34) for the following block implicitly closes this block.
 
     // Block complete
     this.state.currentBlock++;

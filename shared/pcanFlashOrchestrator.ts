@@ -388,11 +388,15 @@ export function generateFlashPlan(
     });
     totalBytes += blockLen;
 
-    // Transfer Exit
-    commands.push({
-      id: cmdId++, phase: 'BLOCK_TRANSFER', label: `Transfer Exit Block #${block.block_id}`,
-      canTx: `${txHex} 01 37`, expectedPositive: '77', timeoutMs: 5000, retries: 1,
-    });
+    // BUSMASTER analysis: NO TransferExit (0x37) in the entire successful E41 flash.
+    // Zero 0x37 commands across 504,189 CAN frames. The next RequestDownload implicitly
+    // closes the current block. Only add TransferExit for non-GMLAN ECUs.
+    if (!isGMLAN) {
+      commands.push({
+        id: cmdId++, phase: 'BLOCK_TRANSFER', label: `Transfer Exit Block #${block.block_id}`,
+        canTx: `${txHex} 01 37`, expectedPositive: '77', timeoutMs: 5000, retries: 1,
+      });
+    }
   }
 
   // Phase 7: POST_FLASH
@@ -405,12 +409,33 @@ export function generateFlashPlan(
   });
 
   // Phase 8: VERIFICATION
-  // Proven BUSMASTER sequence: read all Cal IDs + VIN + unlock status after flash
+  // BUSMASTER raw log post-flash sequence (exact order):
+  //   1. ReturnToNormal broadcast (FE 01 20) — 1.4s after last TD response
+  //   2. DeviceControl 0xAE 0x28 0x80 — 50ms after RTN (NO ECU response expected)
+  //   3. TesterPresent keepalive for ~12s
+  //   4. ReadDID 0x90 (VIN)
+  //   5. ReadDID 0xC1-C6 (Cal IDs)
+  //   6. ReadDID 0xD0 (Unlock Status)
+  //   7. ReadDID 0xCC (CRC)
+  //   8. ClearDTC on 0x7DF (functional)
   if (isGMLAN) {
-    // GMLAN: Full verification DID reads matching proven SPS/VOP3 sequence
+    // Step 1: ReturnToNormal broadcast — BUSMASTER: sent 1.4s after last TD response
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'ReturnToNormal — Exit Programming (0x101)',
+      canTx: `0x101 FE 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 1,
+      nonFatal: true, // UUDT broadcast — no response expected
+    });
+    // Step 2: Finalize/Reset command — MUST come BEFORE DID reads
+    // BUSMASTER: sent 50ms after ReturnToNormal, ECU does NOT respond for ~12s
+    commands.push({
+      id: cmdId++, phase: 'VERIFICATION', label: 'Finalize Programming (0xAE 0x28 0x80)',
+      canTx: `${txHex} 03 AE 28 80`, expectedPositive: 'EE', timeoutMs: 15000, retries: 1,
+      nonFatal: true, // ECU does not respond — BUSMASTER shows 12s silence after this
+    });
+    // Step 3-7: Verification DID reads (after ~12s wait for ECU to reboot)
     commands.push({
       id: cmdId++, phase: 'VERIFICATION', label: 'Read VIN (post-flash, GMLAN DID 0x90)',
-      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
+      canTx: `${txHex} 02 1A 90`, expectedPositive: '5A', timeoutMs: 15000, retries: 3,
     });
     for (const did of ['C1', 'C2', 'C3', 'C4', 'C5', 'C6']) {
       commands.push({
@@ -426,10 +451,11 @@ export function generateFlashPlan(
       id: cmdId++, phase: 'VERIFICATION', label: 'Read Programming Counter (DID 0xCC)',
       canTx: `${txHex} 02 1A CC`, expectedPositive: '5A', timeoutMs: 5000, retries: 2,
     });
-    // 0xAE 0x28 0x80 — Finalize/Reset command observed in BUSMASTER logs
+    // Step 8: ClearDTC on functional address 0x7DF
     commands.push({
-      id: cmdId++, phase: 'VERIFICATION', label: 'Finalize Programming (0xAE)',
-      canTx: `${txHex} 03 AE 28 80`, expectedPositive: 'EE', timeoutMs: 5000, retries: 1,
+      id: cmdId++, phase: 'VERIFICATION', label: 'Clear DTCs (functional broadcast)',
+      canTx: `0x7DF 01 04`, expectedPositive: '44', timeoutMs: 5000, retries: 2,
+      nonFatal: true, // Non-critical — DTCs can be cleared later
     });
   } else {
     // Standard UDS: Use service 0x22 with 2-byte DID 0xF190 (VIN)

@@ -678,3 +678,27 @@
 - [x] ROOT CAUSE: 0x10 0x02 sent AFTER security access invalidates security grant — session change resets security state
 - [x] FIX: Removed physical 0x10 0x02 from executeBlockTransfer() — broadcast already handles session, BUSMASTER reference shows no session change between key and RequestDownload
 - [x] TypeScript compiles with 0 errors, 4 pre-existing test failures (geofence/shareToken) unrelated to flash engine
+
+## Raw BUSMASTER Log Analysis — 18 L5P Stock Flash Success (Apr 4, 2026)
+- [x] Parse full 504,189-line BUSMASTER CAN log from successful E41 stock flash
+- [x] Extract exact protocol sequence: 10 phases, 7 blocks, 860 TransferData chunks
+- [x] Extract exact timing between all protocol phases (4.0s A5→seed, 206ms key→RD, 22s first TD)
+- [x] Extract Flow Control parameters: STmin=0xF1 (100µs), BlockSize=0x00 (unlimited)
+- [x] Extract TransferData framing: FF 10 0F FF 36 00 + 6 data bytes, then 585 CFs per chunk
+- [x] Extract post-flash sequence: RTN broadcast → AE 28 80 → 12s wait → DID reads → ClearDTC
+- [x] Discover NO TransferExit (0x37) in entire 504K frames — removed from engine + ECU database
+- [x] Discover sequence counter always 0x00 for all chunks — fixed from incrementing to constant
+- [x] Discover NRC 0x78 on TD = "writing, wait for 0x76" — fixed listener to keep waiting
+- [x] Write comprehensive analysis document (docs/busmaster-raw-log-analysis.md)
+- [x] Compare BUSMASTER sequence to flash engine and identify 5 critical discrepancies
+- [x] Implement all fixes:
+  - [x] pcanConnection.ts: NRC 0x78 passthrough in both sendUDSviaRawCAN and sendUDSMultiFrame
+  - [x] pcanConnection.ts: Response timeout 10s → 30s for first-chunk-after-erase
+  - [x] pcanFlashEngine.ts: Sequence counter 1→0x00 (constant)
+  - [x] pcanFlashEngine.ts: Remove TransferExit (0x37) for GMLAN
+  - [x] pcanFlashEngine.ts: Fix NRC 0x78 erase handling (passive wait + retry)
+  - [x] pcanFlashOrchestrator.ts: Remove TransferExit for GMLAN ECUs
+  - [x] pcanFlashOrchestrator.ts: Add ReturnToNormal + reorder AE 28 80 before DID reads
+  - [x] pcanFlashOrchestrator.ts: Add ClearDTC on 0x7DF after verification
+  - [x] ecuDatabase.ts: E41 usesTransferExit = false
+- [x] TypeScript compiles with 0 errors, 1377/1380 tests pass (3 pre-existing failures unrelated)
