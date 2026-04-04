@@ -16,7 +16,9 @@ import {
   Loader2, CloudSun, Thermometer, Wind, Droplets, Mountain,
   Gauge, Activity, MapPin, Truck, BarChart3, Clock, Radio,
   Calculator, ChevronDown, ChevronUp, Signal, Database,
+  MessageCircle, Video, Send, Zap, Eye, Users,
 } from 'lucide-react';
+import { Streamdown } from 'streamdown';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 
@@ -39,7 +41,7 @@ const sColor = {
   purple: 'oklch(0.65 0.18 300)',
 };
 
-type WeatherTab = 'live' | 'reports' | 'calculator' | 'network';
+type WeatherTab = 'live' | 'reports' | 'calculator' | 'network' | 'laura' | 'streams';
 
 // ── SAE Calculator Component ──
 function SaeCalculator() {
@@ -366,6 +368,530 @@ function getTimeAgo(date: Date): string {
   return `${days}d ago`;
 }
 
+// ── Laura Chat Component ──
+function LauraChat() {
+  const { isAuthenticated } = useAuth();
+  const [message, setMessage] = useState('');
+  const [conversation, setConversation] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [isThinking, setIsThinking] = useState(false);
+
+  const chatMut = trpc.laura.chat.useMutation({
+    onSuccess: (data) => {
+      setConversation(prev => [...prev, { role: 'assistant', content: data.reply as string }]);
+      setIsThinking(false);
+    },
+    onError: (err) => {
+      toast.error(err.message);
+      setIsThinking(false);
+    },
+  });
+
+  const handleSend = () => {
+    if (!message.trim() || isThinking) return;
+    const userMsg = message.trim();
+    setMessage('');
+    setConversation(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsThinking(true);
+    chatMut.mutate({
+      message: userMsg,
+      conversationHistory: conversation,
+    });
+  };
+
+  const quickPrompts = [
+    'What\'s the SAE correction factor mean for my dyno pull?',
+    'What conditions are ideal for making max power?',
+    'How does density altitude affect my turbodiesel?',
+    'What should I look for when storm chasing?',
+    'Explain the VOP weather network to me',
+  ];
+
+  return (
+    <div>
+      {/* Laura intro card */}
+      <div style={{
+        background: 'linear-gradient(135deg, oklch(0.14 0.025 210) 0%, oklch(0.11 0.015 260) 100%)',
+        border: `1px solid ${sColor.border}`,
+        borderLeft: `4px solid oklch(0.72 0.20 210)`,
+        borderRadius: '3px',
+        padding: '1.5rem',
+        marginBottom: '1.5rem',
+      }}>
+        <div className="flex items-center gap-3 mb-2">
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%',
+            background: 'linear-gradient(135deg, oklch(0.55 0.20 210), oklch(0.45 0.18 260))',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '1.2rem', fontWeight: 700, color: 'white',
+            fontFamily: sFont.heading,
+          }}>L</div>
+          <div>
+            <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+              LAURA — PPEI WEATHER AI
+            </h3>
+            <p style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.cyan, letterSpacing: '0.08em', margin: 0 }}>
+              ATMOSPHERIC SCIENCE • STORM ANALYSIS • SAE CORRECTIONS • VOP NETWORK DATA
+            </p>
+          </div>
+        </div>
+        <p style={{ fontFamily: sFont.body, fontSize: '0.88rem', color: sColor.textDim, lineHeight: 1.7, margin: 0 }}>
+          Laura is trained on historical weather patterns, atmospheric science, storm chasing best practices, and real-time VOP sensor data.
+          Ask her about conditions, SAE corrections, density altitude, storm setups, or how weather affects your vehicle's performance.
+        </p>
+      </div>
+
+      {/* Quick prompts */}
+      {conversation.length === 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {quickPrompts.map((prompt, i) => (
+            <button
+              key={i}
+              onClick={() => { setMessage(prompt); }}
+              style={{
+                background: 'oklch(0.12 0.008 260)',
+                border: `1px solid ${sColor.border}`,
+                color: sColor.textDim,
+                padding: '6px 12px',
+                borderRadius: '3px',
+                fontFamily: sFont.body,
+                fontSize: '0.78rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+              onMouseOver={e => { (e.target as HTMLElement).style.borderColor = sColor.cyan; (e.target as HTMLElement).style.color = 'white'; }}
+              onMouseOut={e => { (e.target as HTMLElement).style.borderColor = sColor.border; (e.target as HTMLElement).style.color = sColor.textDim; }}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Chat messages */}
+      <div style={{
+        background: sColor.cardBg,
+        border: `1px solid ${sColor.border}`,
+        borderRadius: '3px',
+        minHeight: '300px',
+        maxHeight: '500px',
+        overflowY: 'auto',
+        padding: '1rem',
+        marginBottom: '1rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+      }}>
+        {conversation.length === 0 && !isThinking && (
+          <div style={{ textAlign: 'center', padding: '3rem 1rem', color: sColor.textDim }}>
+            <MessageCircle className="h-12 w-12 mx-auto mb-3" style={{ opacity: 0.3 }} />
+            <p style={{ fontFamily: sFont.body, fontSize: '0.9rem' }}>Ask Laura anything about weather, atmospheric conditions, or vehicle performance.</p>
+          </div>
+        )}
+
+        {conversation.map((msg, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+          }}>
+            <div style={{
+              maxWidth: '80%',
+              background: msg.role === 'user'
+                ? 'oklch(0.20 0.025 210)'
+                : 'oklch(0.10 0.005 260)',
+              border: `1px solid ${msg.role === 'user' ? 'oklch(0.30 0.03 210)' : sColor.border}`,
+              borderRadius: '6px',
+              padding: '10px 14px',
+            }}>
+              {msg.role === 'assistant' && (
+                <div className="flex items-center gap-2 mb-1">
+                  <div style={{
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: 'linear-gradient(135deg, oklch(0.55 0.20 210), oklch(0.45 0.18 260))',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.55rem', fontWeight: 700, color: 'white', fontFamily: sFont.heading,
+                  }}>L</div>
+                  <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.cyan, letterSpacing: '0.08em' }}>LAURA</span>
+                </div>
+              )}
+              <div style={{
+                fontFamily: sFont.body,
+                fontSize: '0.88rem',
+                color: 'white',
+                lineHeight: 1.7,
+              }}>
+                {msg.role === 'assistant' ? (
+                  <Streamdown>{msg.content}</Streamdown>
+                ) : msg.content}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {isThinking && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0' }}>
+            <div style={{
+              width: 18, height: 18, borderRadius: '50%',
+              background: 'linear-gradient(135deg, oklch(0.55 0.20 210), oklch(0.45 0.18 260))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.55rem', fontWeight: 700, color: 'white', fontFamily: sFont.heading,
+            }}>L</div>
+            <Loader2 className="h-4 w-4 animate-spin" style={{ color: sColor.cyan }} />
+            <span style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim }}>Laura is analyzing...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      {isAuthenticated ? (
+        <div className="flex items-center gap-2">
+          <Input
+            value={message}
+            onChange={e => setMessage(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder="Ask Laura about weather, SAE corrections, storm chasing..."
+            style={{
+              background: 'oklch(0.08 0.004 260)',
+              border: `1px solid ${sColor.border}`,
+              color: 'white',
+              fontFamily: sFont.body,
+              fontSize: '0.88rem',
+              flex: 1,
+            }}
+          />
+          <Button
+            onClick={handleSend}
+            disabled={!message.trim() || isThinking}
+            className="ppei-btn-red"
+            style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <div style={{
+          background: 'oklch(0.12 0.008 260)',
+          border: `1px solid ${sColor.border}`,
+          borderRadius: '3px',
+          padding: '1rem',
+          textAlign: 'center',
+        }}>
+          <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.85rem' }}>
+            Sign in to chat with Laura.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Live Streams Panel ──
+function LiveStreamsPanel() {
+  const { isAuthenticated } = useAuth();
+  const [showStartForm, setShowStartForm] = useState(false);
+  const [streamForm, setStreamForm] = useState({
+    title: '',
+    description: '',
+    latitude: '',
+    longitude: '',
+    externalStreamUrl: '',
+  });
+
+  const liveStreamsQuery = trpc.streaming.getLiveStreams.useQuery(
+    {},
+    { refetchInterval: 15000 }
+  );
+
+  const startStreamMut = trpc.streaming.startStream.useMutation({
+    onSuccess: () => {
+      toast.success('Live stream started! Your vehicle is now broadcasting weather data.');
+      setShowStartForm(false);
+      liveStreamsQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const streams = liveStreamsQuery.data ?? [];
+
+  const handleStartStream = () => {
+    const lat = parseFloat(streamForm.latitude);
+    const lng = parseFloat(streamForm.longitude);
+    if (!streamForm.title.trim() || isNaN(lat) || isNaN(lng)) {
+      toast.error('Title, latitude, and longitude are required.');
+      return;
+    }
+    startStreamMut.mutate({
+      title: streamForm.title.trim(),
+      description: streamForm.description.trim() || undefined,
+      externalStreamUrl: streamForm.externalStreamUrl.trim() || undefined,
+    });
+  };
+
+  return (
+    <div>
+      {/* Storm Chaser intro */}
+      <div style={{
+        background: 'linear-gradient(135deg, oklch(0.14 0.020 25) 0%, oklch(0.11 0.010 260) 100%)',
+        border: `1px solid ${sColor.border}`,
+        borderLeft: `4px solid ${sColor.red}`,
+        borderRadius: '3px',
+        padding: '1.5rem',
+        marginBottom: '1.5rem',
+      }}>
+        <div className="flex items-center gap-3 mb-2">
+          <Zap className="h-7 w-7" style={{ color: sColor.amber }} />
+          <h3 style={{ fontFamily: sFont.heading, fontSize: '1.3rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
+            STORM CHASER LIVE STREAMS
+          </h3>
+        </div>
+        <p style={{ fontFamily: sFont.body, fontSize: '0.88rem', color: sColor.textDim, lineHeight: 1.7, margin: '0 0 8px 0' }}>
+          Storm chasers and weather streamers can broadcast live vehicle telemetry alongside atmospheric data.
+          Your VOP-equipped vehicle becomes a mobile weather station — streaming real-time throttle position, engine load, RPM,
+          boost pressure, and atmospheric conditions while chasing storms.
+        </p>
+        <p style={{ fontFamily: sFont.mono, fontSize: '0.72rem', color: sColor.amber, letterSpacing: '0.04em' }}>
+          FEATURED USE CASE: Weather streamers like Ryan Hall Y'All can integrate VOP data into their live broadcasts,
+          showing viewers exactly what the chase vehicle is doing — throttle, load, RPM — while the vehicle simultaneously
+          reports atmospheric conditions from the field.
+        </p>
+      </div>
+
+      {/* Start Stream button / form */}
+      {isAuthenticated && !showStartForm && (
+        <Button
+          onClick={() => setShowStartForm(true)}
+          className="ppei-btn-red mb-4"
+          style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}
+        >
+          <Video className="h-4 w-4 mr-2" /> START LIVE STREAM
+        </Button>
+      )}
+
+      {showStartForm && (
+        <div style={{
+          background: sColor.cardBg,
+          border: `1px solid ${sColor.border}`,
+          borderLeft: `4px solid ${sColor.green}`,
+          borderRadius: '3px',
+          padding: '1.5rem',
+          marginBottom: '1.5rem',
+        }}>
+          <h3 style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'white', margin: '0 0 12px 0' }}>
+            START LIVE WEATHER STREAM
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <div>
+              <label style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, letterSpacing: '0.08em', display: 'block', marginBottom: '3px' }}>
+                STREAM TITLE *
+              </label>
+              <Input
+                placeholder="Storm Chase - Central OK"
+                value={streamForm.title}
+                onChange={e => setStreamForm(prev => ({ ...prev, title: e.target.value }))}
+                style={{ background: 'oklch(0.08 0.004 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.body }}
+              />
+            </div>
+            <div>
+              <label style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, letterSpacing: '0.08em', display: 'block', marginBottom: '3px' }}>
+                EXTERNAL STREAM URL (YouTube/Twitch)
+              </label>
+              <Input
+                placeholder="https://youtube.com/live/..."
+                value={streamForm.externalStreamUrl}
+                onChange={e => setStreamForm(prev => ({ ...prev, externalStreamUrl: e.target.value }))}
+                style={{ background: 'oklch(0.08 0.004 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.body }}
+              />
+            </div>
+            <div>
+              <label style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, letterSpacing: '0.08em', display: 'block', marginBottom: '3px' }}>
+                LATITUDE *
+              </label>
+              <Input
+                type="number" step="any" placeholder="35.4676"
+                value={streamForm.latitude}
+                onChange={e => setStreamForm(prev => ({ ...prev, latitude: e.target.value }))}
+                style={{ background: 'oklch(0.08 0.004 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.mono }}
+              />
+            </div>
+            <div>
+              <label style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, letterSpacing: '0.08em', display: 'block', marginBottom: '3px' }}>
+                LONGITUDE *
+              </label>
+              <Input
+                type="number" step="any" placeholder="-97.5164"
+                value={streamForm.longitude}
+                onChange={e => setStreamForm(prev => ({ ...prev, longitude: e.target.value }))}
+                style={{ background: 'oklch(0.08 0.004 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.mono }}
+              />
+            </div>
+          </div>
+          <div className="mb-4">
+            <label style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, letterSpacing: '0.08em', display: 'block', marginBottom: '3px' }}>
+              DESCRIPTION
+            </label>
+            <Input
+              placeholder="Chasing supercell near Moore, OK. L5P with VOP reporting live conditions."
+              value={streamForm.description}
+              onChange={e => setStreamForm(prev => ({ ...prev, description: e.target.value }))}
+              style={{ background: 'oklch(0.08 0.004 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.body }}
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleStartStream}
+              disabled={startStreamMut.isPending}
+              className="ppei-btn-red"
+              style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}
+            >
+              {startStreamMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Video className="h-4 w-4 mr-2" />}
+              GO LIVE
+            </Button>
+            <Button
+              onClick={() => setShowStartForm(false)}
+              variant="outline"
+              style={{ fontFamily: sFont.heading, letterSpacing: '0.08em', color: sColor.textDim }}
+            >
+              CANCEL
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Active Streams */}
+      <div style={{
+        background: sColor.cardBg,
+        border: `1px solid ${sColor.border}`,
+        borderRadius: '3px',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '12px 14px',
+          borderBottom: `1px solid ${sColor.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <div className="flex items-center gap-2">
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: streams.length > 0 ? sColor.red : sColor.textDim,
+              animation: streams.length > 0 ? 'pulse 2s infinite' : 'none',
+            }} />
+            <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white', margin: 0 }}>
+              ACTIVE STREAMS
+            </h3>
+          </div>
+          <Badge variant="outline" style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: streams.length > 0 ? sColor.green : sColor.textDim }}>
+            {streams.length} LIVE
+          </Badge>
+        </div>
+
+        {liveStreamsQuery.isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin" style={{ color: sColor.cyan }} />
+          </div>
+        ) : streams.length === 0 ? (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <Video className="h-12 w-12 mx-auto mb-3" style={{ color: sColor.textDim, opacity: 0.3 }} />
+            <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', marginBottom: '4px' }}>
+              No active streams right now.
+            </p>
+            <p style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.7rem' }}>
+              Start a stream to broadcast your vehicle's weather data live.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y" style={{ borderColor: 'oklch(0.18 0.005 260)' }}>
+            {streams.map((stream: any) => (
+              <div key={stream.id} style={{ padding: '14px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '6px',
+                  background: 'linear-gradient(135deg, oklch(0.20 0.03 25), oklch(0.15 0.02 260))',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Video className="h-5 w-5" style={{ color: sColor.red }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span style={{ fontFamily: sFont.heading, fontSize: '0.95rem', color: 'white', letterSpacing: '0.04em' }}>
+                      {stream.title}
+                    </span>
+                    <div style={{
+                      width: 6, height: 6, borderRadius: '50%',
+                      background: sColor.red,
+                      animation: 'pulse 2s infinite',
+                    }} />
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.red, letterSpacing: '0.06em' }}>LIVE</span>
+                  </div>
+                  {stream.description && (
+                    <p style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.textDim, margin: '0 0 4px 0' }}>
+                      {stream.description}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-4" style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim }}>
+                    <span className="flex items-center gap-1">
+                      <MapPin className="h-3 w-3" />
+                      {parseFloat(stream.latitude).toFixed(2)}°N, {Math.abs(parseFloat(stream.longitude)).toFixed(2)}°W
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Eye className="h-3 w-3" />
+                      {stream.viewerCount ?? 0} viewers
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Started {getTimeAgo(new Date(stream.startedAt))}
+                    </span>
+                  </div>
+                </div>
+                {stream.externalStreamUrl && (
+                  <a
+                    href={stream.externalStreamUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      background: sColor.red,
+                      color: 'white',
+                      padding: '6px 14px',
+                      borderRadius: '3px',
+                      fontFamily: sFont.heading,
+                      fontSize: '0.7rem',
+                      letterSpacing: '0.08em',
+                      textDecoration: 'none',
+                      flexShrink: 0,
+                    }}
+                  >
+                    WATCH
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Telemetry info */}
+      <div style={{
+        background: 'oklch(0.12 0.008 260)',
+        border: `1px solid ${sColor.border}`,
+        borderLeft: `4px solid ${sColor.amber}`,
+        borderRadius: '3px',
+        padding: '1.25rem',
+        marginTop: '1.5rem',
+      }}>
+        <h4 style={{ fontFamily: sFont.heading, fontSize: '1rem', color: 'white', margin: '0 0 8px 0' }}>
+          VEHICLE TELEMETRY IN STREAMS
+        </h4>
+        <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.7, margin: 0 }}>
+          When streaming, your VOP device reports vehicle telemetry alongside atmospheric data:
+          <strong style={{ color: 'white' }}> Throttle Position, Engine Load, RPM, Boost Pressure, Intake Air Temp, Barometric Pressure, Vehicle Speed, and GPS coordinates.</strong>
+          {' '}Weather streamers can overlay this data on their broadcasts, giving viewers a complete picture of both the storm and the chase vehicle.
+          Future integration with streaming platforms will allow automatic OBS/Streamlabs overlay generation.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Weather Component ──
 export function WeatherContent() {
   return <WeatherPage embedded />;
@@ -390,6 +916,8 @@ export default function WeatherPage({ embedded = false }: { embedded?: boolean }
     { id: 'live', label: 'LIVE CONDITIONS', icon: CloudSun },
     { id: 'reports', label: 'REPORT FEED', icon: Activity },
     { id: 'calculator', label: 'SAE CALCULATOR', icon: Calculator },
+    { id: 'laura', label: 'ASK LAURA', icon: MessageCircle },
+    { id: 'streams', label: 'LIVE STREAMS', icon: Video },
     { id: 'network', label: 'NETWORK', icon: Signal },
   ];
 
@@ -686,6 +1214,20 @@ export default function WeatherPage({ embedded = false }: { embedded?: boolean }
         {activeTab === 'calculator' && (
           <div className="ppei-anim-fade-up">
             <SaeCalculator />
+          </div>
+        )}
+
+        {/* ── ASK LAURA ── */}
+        {activeTab === 'laura' && (
+          <div className="ppei-anim-fade-up">
+            <LauraChat />
+          </div>
+        )}
+
+        {/* ── LIVE STREAMS ── */}
+        {activeTab === 'streams' && (
+          <div className="ppei-anim-fade-up">
+            <LiveStreamsPanel />
           </div>
         )}
 

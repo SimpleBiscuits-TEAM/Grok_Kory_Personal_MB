@@ -32,6 +32,9 @@ import { geofenceRouter } from "./routers/geofence";
 import { flashRouter } from "./routers/flash";
 import { weatherRouter } from "./routers/weather";
 import { dynoRouter } from "./routers/dyno";
+import { cloudRouter } from "./routers/cloud";
+import { streamingRouter } from "./routers/streaming";
+import { lauraRouter } from "./routers/laura";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -259,6 +262,15 @@ export const appRouter = router({
 
   // Dyno Competition System (SAE-corrected)
   dyno: dynoRouter,
+
+  // Vehicle Cloud Network (crowd-sourced analytics)
+  cloud: cloudRouter,
+
+  // Live Weather Streams & Storm Chaser Telemetry
+  streaming: streamingRouter,
+
+  // Laura — Weather AI Agent
+  laura: lauraRouter,
 
   // Feedback / Error Reports
   feedback: router({

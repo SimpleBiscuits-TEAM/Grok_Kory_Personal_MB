@@ -1741,3 +1741,247 @@ export const dynoCompetitions = mysqlTable("dyno_competitions", {
 });
 export type DynoCompetition = typeof dynoCompetitions.$inferSelect;
 export type InsertDynoCompetition = typeof dynoCompetitions.$inferInsert;
+
+// ── Cloud Network — Crowd-Sourced Vehicle Analytics ─────────────────────────
+/**
+ * Cloud network enrollment. Users opt-in their vehicles to contribute
+ * anonymized data (MPG, health, performance) to the crowd-sourced network.
+ * Data is aggregated by vehicle type so owners and fleets can see real-world
+ * averages instead of relying on forums or manufacturer specs.
+ */
+export const cloudEnrollments = mysqlTable("cloud_enrollments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the vehicle owner */
+  userId: int("userId").notNull(),
+  /** Vehicle identification */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vin: varchar("vin", { length: 17 }),
+  /** Vehicle classification for grouping */
+  vehicleYear: int("vehicleYear"),
+  vehicleMake: varchar("vehicleMake", { length: 64 }),
+  vehicleModel: varchar("vehicleModel", { length: 64 }),
+  vehicleEngine: varchar("vehicleEngine", { length: 64 }), // e.g., "6.6L Duramax L5P", "5.3L Vortec"
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // "stock", "bolt-on", "built", "deleted", "tuned"
+  /** Normalized vehicle type key for aggregation (e.g., "2020_chevrolet_silverado_l5p") */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Optional fleet link */
+  fleetOrgId: int("fleetOrgId"), // FK to fleet_orgs.id — null for individual owners
+  /** Enrollment status */
+  isActive: boolean("isActive").default(true).notNull(),
+  /** What data the user consents to share */
+  shareMpg: boolean("shareMpg").default(true).notNull(),
+  shareHealth: boolean("shareHealth").default(true).notNull(),
+  sharePerformance: boolean("sharePerformance").default(true).notNull(),
+  shareDtcs: boolean("shareDtcs").default(true).notNull(),
+  /** Region for geographic aggregation */
+  region: varchar("region", { length: 64 }), // "US-South", "US-Midwest", etc.
+  state: varchar("state", { length: 2 }),
+  /** Timestamps */
+  enrolledAt: timestamp("enrolledAt").defaultNow().notNull(),
+  unenrolledAt: timestamp("unenrolledAt"),
+  lastReportAt: timestamp("lastReportAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CloudEnrollment = typeof cloudEnrollments.$inferSelect;
+export type InsertCloudEnrollment = typeof cloudEnrollments.$inferInsert;
+
+/**
+ * Periodic vehicle data snapshots submitted by enrolled vehicles.
+ * Each snapshot captures a moment-in-time reading from the vehicle's sensors.
+ * All data is anonymized — no PII, just vehicle type + metrics.
+ */
+export const cloudVehicleSnapshots = mysqlTable("cloud_vehicle_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to cloud_enrollments.id */
+  enrollmentId: int("enrollmentId").notNull(),
+  /** Denormalized vehicle type key for fast aggregation */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Fleet org ID (null for individual) */
+  fleetOrgId: int("fleetOrgId"),
+  /** Fuel economy */
+  avgMpg: decimal("avgMpg", { precision: 6, scale: 2 }),
+  instantMpg: decimal("instantMpg", { precision: 6, scale: 2 }),
+  totalMiles: decimal("totalMiles", { precision: 10, scale: 1 }),
+  totalGallons: decimal("totalGallons", { precision: 10, scale: 2 }),
+  /** Engine health metrics */
+  coolantTempF: decimal("coolantTempF", { precision: 6, scale: 1 }),
+  oilTempF: decimal("oilTempF", { precision: 6, scale: 1 }),
+  oilPressurePsi: decimal("oilPressurePsi", { precision: 6, scale: 1 }),
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  batteryVoltage: decimal("batteryVoltage", { precision: 5, scale: 2 }),
+  /** Performance metrics */
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 1 }),
+  egtF: decimal("egtF", { precision: 7, scale: 1 }), // exhaust gas temp
+  fuelRailPsi: decimal("fuelRailPsi", { precision: 8, scale: 1 }),
+  airflowGps: decimal("airflowGps", { precision: 7, scale: 2 }), // MAF g/s
+  /** Health score (0-100, computed from diagnostics) */
+  healthScore: int("healthScore"),
+  /** Active DTC count */
+  activeDtcCount: int("activeDtcCount").default(0),
+  /** Common DTCs (JSON array of codes, no PII) */
+  activeDtcs: text("activeDtcs"), // JSON: ["P0300", "P0171"]
+  /** Odometer reading */
+  odometerMiles: int("odometerMiles"),
+  /** Atmospheric conditions at time of snapshot */
+  ambientTempF: decimal("ambientTempF", { precision: 6, scale: 1 }),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  altitudeFt: int("altitudeFt"),
+  /** Snapshot timestamp */
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CloudVehicleSnapshot = typeof cloudVehicleSnapshots.$inferSelect;
+export type InsertCloudVehicleSnapshot = typeof cloudVehicleSnapshots.$inferInsert;
+
+/**
+ * Pre-computed fleet aggregates by vehicle type.
+ * Updated periodically from cloud_vehicle_snapshots.
+ * Provides the "real-world averages" that users and fleets compare against.
+ */
+export const cloudFleetAggregates = mysqlTable("cloud_fleet_aggregates", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Vehicle type key for grouping (e.g., "2020_chevrolet_silverado_l5p") */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Human-readable vehicle type label */
+  vehicleTypeLabel: varchar("vehicleTypeLabel", { length: 255 }).notNull(),
+  /** Period for this aggregate (e.g., "2026-Q1", "all-time", "last-30d") */
+  period: varchar("period", { length: 32 }).default("all-time").notNull(),
+  /** Fleet vs individual breakdown */
+  isFleetOnly: boolean("isFleetOnly").default(false).notNull(), // true = fleet vehicles only
+  /** Fuel economy averages */
+  avgMpg: decimal("avgMpg", { precision: 6, scale: 2 }),
+  minMpg: decimal("minMpg", { precision: 6, scale: 2 }),
+  maxMpg: decimal("maxMpg", { precision: 6, scale: 2 }),
+  medianMpg: decimal("medianMpg", { precision: 6, scale: 2 }),
+  /** Health averages */
+  avgHealthScore: decimal("avgHealthScore", { precision: 5, scale: 1 }),
+  avgCoolantTempF: decimal("avgCoolantTempF", { precision: 6, scale: 1 }),
+  avgOilTempF: decimal("avgOilTempF", { precision: 6, scale: 1 }),
+  avgTransTemp: decimal("avgTransTemp", { precision: 6, scale: 1 }),
+  avgBatteryVoltage: decimal("avgBatteryVoltage", { precision: 5, scale: 2 }),
+  /** Performance averages */
+  avgBoostPsi: decimal("avgBoostPsi", { precision: 6, scale: 1 }),
+  avgEgtF: decimal("avgEgtF", { precision: 7, scale: 1 }),
+  /** DTC statistics */
+  avgDtcCount: decimal("avgDtcCount", { precision: 5, scale: 2 }),
+  topDtcs: text("topDtcs"), // JSON: [{ code: "P0300", count: 42, pct: 12.5 }]
+  /** Mileage statistics */
+  avgOdometerMiles: int("avgOdometerMiles"),
+  minOdometerMiles: int("minOdometerMiles"),
+  maxOdometerMiles: int("maxOdometerMiles"),
+  /** Network size */
+  vehicleCount: int("vehicleCount").default(0).notNull(),
+  snapshotCount: int("snapshotCount").default(0).notNull(),
+  fleetVehicleCount: int("fleetVehicleCount").default(0).notNull(),
+  individualVehicleCount: int("individualVehicleCount").default(0).notNull(),
+  /** Last computed */
+  computedAt: timestamp("computedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CloudFleetAggregate = typeof cloudFleetAggregates.$inferSelect;
+export type InsertCloudFleetAggregate = typeof cloudFleetAggregates.$inferInsert;
+
+
+// ─── Live Weather Streams (Storm Chaser / Weather Streamer Telemetry) ────────
+
+export const liveWeatherStreams = mysqlTable("live_weather_streams", {
+  id: int("id").autoincrement().primaryKey(),
+  /** User who owns this stream */
+  userId: int("userId").notNull(),
+  /** Stream key for authentication */
+  streamKey: varchar("streamKey", { length: 64 }).notNull().unique(),
+  /** Display name for the stream (e.g. "Ryan Hall Y'all - Oklahoma Chase") */
+  title: varchar("title", { length: 256 }).notNull(),
+  /** Stream description / mission */
+  description: text("description"),
+  /** Vehicle type (e.g. "2018 L5P Duramax") */
+  vehicleType: varchar("vehicleType", { length: 128 }),
+  /** Vehicle identifier / callsign */
+  callsign: varchar("callsign", { length: 64 }),
+  /** Stream status */
+  status: mysqlEnum("status", ["live", "paused", "ended"]).default("live").notNull(),
+  /** Current latitude */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  /** Current longitude */
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  /** Current heading (degrees) */
+  heading: decimal("heading", { precision: 5, scale: 1 }),
+  /** Current speed (mph) */
+  speedMph: decimal("speedMph", { precision: 6, scale: 1 }),
+  /** Latest atmospheric: temperature (°F) */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }),
+  /** Latest atmospheric: barometric pressure (inHg) */
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  /** Latest atmospheric: humidity (%) */
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  /** Latest atmospheric: wind speed (mph) */
+  windSpeedMph: decimal("windSpeedMph", { precision: 6, scale: 1 }),
+  /** Latest atmospheric: wind direction (degrees) */
+  windDirection: decimal("windDirection", { precision: 5, scale: 1 }),
+  /** Latest vehicle: engine RPM */
+  engineRpm: int("engineRpm"),
+  /** Latest vehicle: throttle position (%) */
+  throttlePct: decimal("throttlePct", { precision: 5, scale: 2 }),
+  /** Latest vehicle: engine load (%) */
+  engineLoadPct: decimal("engineLoadPct", { precision: 5, scale: 2 }),
+  /** Latest vehicle: boost pressure (psi) */
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 2 }),
+  /** Latest vehicle: transmission temp (°F) */
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: coolant temp (°F) */
+  coolantTemp: decimal("coolantTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: intake air temp (°F) */
+  intakeAirTemp: decimal("intakeAirTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: fuel rate (gal/hr) */
+  fuelRateGph: decimal("fuelRateGph", { precision: 6, scale: 2 }),
+  /** Viewer count */
+  viewerCount: int("viewerCount").default(0).notNull(),
+  /** Total data points received */
+  totalDataPoints: int("totalDataPoints").default(0).notNull(),
+  /** External stream URL (YouTube, Twitch, etc.) for video embed */
+  externalStreamUrl: varchar("externalStreamUrl", { length: 512 }),
+  /** OBS overlay embed URL (generated) */
+  overlayUrl: varchar("overlayUrl", { length: 512 }),
+  /** Tags for categorization (JSON array: ["storm-chase", "tornado", "hurricane"]) */
+  tags: json("tags"),
+  /** Stream started at */
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  /** Stream ended at */
+  endedAt: timestamp("endedAt"),
+  /** Last telemetry update */
+  lastUpdateAt: timestamp("lastUpdateAt").defaultNow().onUpdateNow().notNull(),
+});
+export type LiveWeatherStream = typeof liveWeatherStreams.$inferSelect;
+export type InsertLiveWeatherStream = typeof liveWeatherStreams.$inferInsert;
+
+export const streamTelemetryPoints = mysqlTable("stream_telemetry_points", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Parent stream */
+  streamId: int("streamId").notNull(),
+  /** GPS coordinates */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  heading: decimal("heading", { precision: 5, scale: 1 }),
+  speedMph: decimal("speedMph", { precision: 6, scale: 1 }),
+  /** Atmospheric data */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  windSpeedMph: decimal("windSpeedMph", { precision: 6, scale: 1 }),
+  windDirection: decimal("windDirection", { precision: 5, scale: 1 }),
+  /** Vehicle telemetry */
+  engineRpm: int("engineRpm"),
+  throttlePct: decimal("throttlePct", { precision: 5, scale: 2 }),
+  engineLoadPct: decimal("engineLoadPct", { precision: 5, scale: 2 }),
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 2 }),
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  coolantTemp: decimal("coolantTemp", { precision: 6, scale: 1 }),
+  intakeAirTemp: decimal("intakeAirTemp", { precision: 6, scale: 1 }),
+  fuelRateGph: decimal("fuelRateGph", { precision: 6, scale: 2 }),
+  /** Timestamp of this data point */
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+});
+export type StreamTelemetryPoint = typeof streamTelemetryPoints.$inferSelect;
+export type InsertStreamTelemetryPoint = typeof streamTelemetryPoints.$inferInsert;

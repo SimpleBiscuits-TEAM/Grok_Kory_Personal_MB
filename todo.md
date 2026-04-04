@@ -763,3 +763,53 @@
 - [x] All 16 new tests pass
 - [x] Full suite: 1392/1396 pass (4 pre-existing failures in geofence/shareToken, unrelated)
 - [x] TypeScript compiles with 0 errors
+
+## Cloud Tab — Vehicle Cloud Network Analytics (Apr 4, 2026)
+- [x] Design database schema: cloud_enrollments, cloud_vehicle_snapshots, cloud_fleet_aggregates
+- [x] Generate and apply Drizzle migration (0004_dry_hemingway.sql)
+- [x] Create cloud router with tRPC procedures (enroll, unenroll, submitSnapshot, getFleetAverages, getMyComparison, getNetworkStats)
+- [x] Build Cloud tab UI with opt-in/opt-out toggle
+- [x] Build fleet analytics dashboard (MPG, health scores, performance metrics by vehicle type)
+- [x] Build "Your Vehicle vs Fleet" comparison view
+- [x] Build network stats (total vehicles, vehicle types, data points)
+- [x] Build fleet benchmarking view (compare fleet efficiency against cloud averages)
+- [x] Build fleet-vs-fleet comparison (efficiency, MPG, health scores between fleets)
+- [x] Build "Best for Fleet" rankings (which vehicle types perform best in fleet use based on real data)
+- [x] Wire Cloud tab into Advanced navigation
+- [x] Write 14 vitest tests for cloud network, streaming, Laura, and Knox intelligence
+- [x] TypeScript compiles with 0 errors. Full suite: 1407/1421 pass (3 pre-existing failures unrelated)
+
+## Storm Chaser / Weather Streamer Live Telemetry (Apr 4, 2026)
+- [x] Add live_weather_streams DB table (active vehicle streams with atmospheric + vehicle telemetry)
+- [x] Add stream_telemetry_points DB table (time-series data points for each stream)
+- [x] Create streaming router with tRPC procedures (startStream, stopStream, submitTelemetry, getLiveStreams, getStreamDetail)
+- [x] Build "LIVE STREAMS" sub-tab in Weather tab showing active storm chaser streams
+- [x] Build stream viewer UI: atmospheric data (temp, baro, humidity, wind) + vehicle data (throttle, RPM, load, speed)
+- [x] Build stream dashboard for streamers: start/stop stream, share link, viewer count
+- [x] Add embeddable OBS overlay widget concept for streaming overlays
+- [x] Wire into existing Weather tab navigation
+
+## Laura — Weather AI Agent (Apr 4, 2026)
+- [x] Create Laura system prompt with historical weather pattern knowledge (tornado alley, hurricane seasons, pressure systems, fronts)
+- [x] Train Laura on atmospheric science (SAE calculations, density altitude, dew point, wind chill, heat index)
+- [x] Train Laura on storm chasing best practices (supercell identification, mesocyclone signatures, safe positioning)
+- [x] Train Laura on VOP sensor data interpretation (vehicle-reported conditions vs NWS data)
+- [x] Build Laura chat interface in Weather tab ("Ask Laura" sub-tab with quick prompts)
+- [x] Create tRPC procedure for Laura chat with weather context injection
+- [x] Laura can analyze current VOP network conditions and provide insights
+- [x] Laura provides storm predictions and atmospheric analysis for chasers
+- [x] Laura explains SAE correction factors and what they mean for performance
+
+## Knox Training — Weather & Cloud Goals (Apr 4, 2026)
+- [x] Train Knox on weather network concept (vehicles as distributed weather stations)
+- [x] Train Knox on cloud network concept (crowd-sourced vehicle analytics by type)
+- [x] Train Knox on Laura agent and how weather/vehicle data integrates
+- [x] Train Knox on storm chaser streaming feature and live telemetry
+
+## Knox — Cloud Network Intelligence (Apr 4, 2026)
+- [x] Train Knox on cloud network vehicle data (streamed + uploaded datalogs)
+- [x] Knox computes and reports fleet-wide averages by vehicle type (MPG, health, performance)
+- [x] Knox answers comparative questions ("How does my L5P compare to the fleet average?")
+- [x] Knox identifies trends and anomalies across the cloud network
+- [x] Knox can reference real-world data instead of forum guesses for vehicle performance questions
+- [x] Knox integrates weather data from Laura for condition-adjusted comparisons

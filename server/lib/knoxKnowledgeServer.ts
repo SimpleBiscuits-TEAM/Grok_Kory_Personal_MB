@@ -1235,12 +1235,67 @@ The proven SPS/VOP3 sequence uses functional broadcast on CAN ID 0x101 (not 0x7D
 - Short flash swaps only the calibration blocks, not OS/bootloader
 `;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLOUD NETWORK & WEATHER INTELLIGENCE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLOUD_NETWORK_KNOWLEDGE = `
+## V-OP Cloud Network Intelligence
+
+Knox manages the V-OP Cloud Network — a crowd-sourced vehicle analytics platform where VOP-connected vehicles
+contribute anonymized performance data and receive real-world fleet averages in return.
+
+### Cloud Network Overview
+- **Opt-in system**: Users choose to join the cloud network per-vehicle
+- **Same-type averaging**: Data is aggregated by vehicle type (year, make, model, engine, tune level)
+- **Real-world analytics**: No forum guesswork — actual data from the VOP sensor network
+- **Privacy-first**: All data is anonymized; no personally identifiable information is shared
+
+### Data Points Collected & Averaged
+- **Fuel Economy**: Average MPG, city/highway split, MPG by driving mode
+- **Engine Health**: Coolant temp averages, oil pressure trends, boost pressure profiles
+- **Performance**: 0-60 times, quarter mile data, peak HP/TQ readings
+- **Emissions**: DPF soot load averages, regen frequency, DEF consumption rates
+- **Transmission**: Shift quality scores, TCC slip averages, fluid temp trends
+- **Reliability**: DTC frequency by code, common failure patterns, mileage at failure
+
+### Fleet Benchmarking
+- Fleet operators can compare their entire fleet against cloud averages
+- Fleet-vs-fleet efficiency comparison (MPG, maintenance costs, uptime)
+- "Best for Fleet" rankings: which vehicle types perform best in fleet use based on real data
+- Helps fleet managers make purchasing decisions based on actual performance, not manufacturer specs
+
+### Knox's Role in Cloud Network
+- Knox ingests all vehicle data flowing in (streamed live or uploaded datalogs)
+- Computes fleet-wide averages by vehicle type, tune level, and operating conditions
+- Answers questions like "What's the average MPG for a stock L5P?" with real data
+- Identifies outliers: "Your truck is getting 15% worse fuel economy than similar L5Ps — here's why"
+- Provides trend analysis: "L5P fuel economy drops 8% on average above 7000ft altitude"
+- Cross-references cloud data with diagnostic findings for better troubleshooting
+
+### Weather Integration (Laura AI)
+- Laura is the PPEI Weather AI Agent — sister to Knox
+- Trained on historical weather patterns, atmospheric science, storm chasing
+- VOP-equipped vehicles act as mobile weather stations, reporting:
+  * Temperature, humidity, barometric pressure, altitude
+  * GPS coordinates for geographic mapping
+- SAE J1349 correction factor calculation using real atmospheric data from the VOP network
+- Storm chaser streaming: live vehicle telemetry + atmospheric data for weather broadcasters
+- Dyno competitions use averaged area weather conditions for fair SAE corrections
+
+### Knox + Laura Collaboration
+- Knox provides vehicle performance context; Laura provides atmospheric context
+- Together they answer: "How does today's weather affect my dyno numbers?"
+- Knox can factor weather data into diagnostic analysis: "Your low boost may be altitude-related"
+- Cloud network weather data feeds into Laura's predictions and Knox's performance analysis
+`;
+
 /**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE;
 }
 
 /**

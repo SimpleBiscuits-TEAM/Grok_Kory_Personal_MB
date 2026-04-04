@@ -19,7 +19,7 @@ import {
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
   Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin,
-  CloudSun, Trophy
+  CloudSun, Trophy, Cloud
 } from 'lucide-react';
 import { getLoginUrl } from '@/const';
 import { useLocation } from 'wouter';
@@ -85,6 +85,7 @@ const TasksPanel = React.lazy(() => import('@/pages/Tasks').then(m => ({ default
 const FleetPanel = React.lazy(() => import('@/pages/Fleet').then(m => ({ default: m.FleetContent })));
 const CompetitionPanel = React.lazy(() => import('@/pages/Competition').then(m => ({ default: m.CompetitionContent })));
 const WeatherPanel = React.lazy(() => import('@/pages/Weather').then(m => ({ default: m.WeatherContent })));
+const CloudPanel = React.lazy(() => import('@/pages/Cloud').then(m => ({ default: m.CloudContent })));
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 const STORAGE_KEY = 'ppei_advanced_unlocked';
@@ -1441,7 +1442,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'diagnostic' | 'pitch' | 'tasks';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1454,6 +1455,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'weather' as TabId, label: 'WEATHER', icon: <CloudSun style={{ width: 16, height: 16, color: 'oklch(0.72 0.16 210)' }} /> },
   { id: 'competition' as TabId, label: 'COMPETITION', icon: <Trophy style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
+  { id: 'cloud' as TabId, label: 'CLOUD', icon: <Cloud style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
 ];
@@ -1732,6 +1734,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
         {activeTab === ('competition' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><CompetitionPanel /></React.Suspense></div>}
         {activeTab === ('weather' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><WeatherPanel /></React.Suspense></div>}
+        {activeTab === ('cloud' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><CloudPanel /></React.Suspense></div>}
       </main>
 
       {/* Voice Command Button */}

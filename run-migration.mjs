@@ -1,7 +1,7 @@
 import fs from 'fs';
 import mysql from 'mysql2/promise';
 
-const sql = fs.readFileSync('drizzle/0003_unusual_thanos.sql', 'utf8');
+const sql = fs.readFileSync('drizzle/0005_workable_mockingbird.sql', 'utf8');
 const statements = sql.split('--> statement-breakpoint').map(s => s.trim()).filter(Boolean);
 
 async function run() {
