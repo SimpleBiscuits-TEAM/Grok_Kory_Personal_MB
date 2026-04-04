@@ -1550,3 +1550,194 @@ export const fileFingerprints = mysqlTable("file_fingerprints", {
 });
 export type FileFingerprint = typeof fileFingerprints.$inferSelect;
 export type InsertFileFingerprint = typeof fileFingerprints.$inferInsert;
+
+// ── Weather Reports (Vehicle-Reported Atmospheric Data) ─────────────────────
+/**
+ * Individual weather reports from vehicles with VOP plugged in.
+ * Vehicles calculate atmospheric conditions from onboard sensors:
+ * - IAT (Intake Air Temperature) → ambient temperature
+ * - MAP/BARO (Manifold/Barometric Pressure) → barometric pressure
+ * - Calculated humidity from intake conditions
+ * - GPS coordinates for location
+ */
+export const weatherReports = mysqlTable("weather_reports", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — vehicle owner who submitted the report */
+  userId: int("userId"),
+  /** Vehicle identifier (VIN or fleet tag) */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vehicleName: varchar("vehicleName", { length: 128 }),
+  /** GPS coordinates */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  /** City/region (reverse geocoded or user-provided) */
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  country: varchar("country", { length: 64 }),
+  /** Atmospheric measurements from vehicle sensors */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }).notNull(), // Fahrenheit
+  temperatureC: decimal("temperatureC", { precision: 6, scale: 2 }).notNull(), // Celsius
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }).notNull(), // inches of mercury
+  baroPressureKpa: decimal("baroPressureKpa", { precision: 7, scale: 2 }).notNull(), // kilopascals
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }), // relative humidity %
+  altitudeFt: decimal("altitudeFt", { precision: 8, scale: 1 }), // feet above sea level
+  /** Derived values */
+  dewPointF: decimal("dewPointF", { precision: 6, scale: 2 }), // dew point Fahrenheit
+  densityAltitudeFt: decimal("densityAltitudeFt", { precision: 8, scale: 1 }), // density altitude
+  airDensityLbFt3: decimal("airDensityLbFt3", { precision: 8, scale: 6 }), // lb/ft³
+  /** SAE J1349 correction factor computed from these conditions */
+  saeCorrectionFactor: decimal("saeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** Sensor source info */
+  sensorSource: mysqlEnum("sensorSource", ["obd2", "j1939", "kline", "manual"]).default("obd2"),
+  /** Data quality score (0-100) based on sensor consistency */
+  qualityScore: int("qualityScore").default(100),
+  /** Timestamp of the actual measurement (may differ from createdAt) */
+  measuredAt: timestamp("measuredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WeatherReport = typeof weatherReports.$inferSelect;
+export type InsertWeatherReport = typeof weatherReports.$inferInsert;
+
+// ── Weather Stations (Aggregated Area Conditions) ───────────────────────────
+/**
+ * Virtual weather stations — aggregated atmospheric conditions from multiple
+ * vehicle reports within a geographic area. Updated periodically.
+ * These provide the "actual weather" for a region based on real vehicle data.
+ */
+export const weatherStations = mysqlTable("weather_stations", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Station name (auto-generated from location) */
+  name: varchar("name", { length: 128 }).notNull(),
+  /** Center coordinates of the aggregation area */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  /** Aggregation radius in miles */
+  radiusMiles: decimal("radiusMiles", { precision: 6, scale: 2 }).default("25").notNull(),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  country: varchar("country", { length: 64 }),
+  /** Aggregated atmospheric conditions (averaged from vehicle reports) */
+  avgTemperatureF: decimal("avgTemperatureF", { precision: 6, scale: 2 }),
+  avgBaroPressureInHg: decimal("avgBaroPressureInHg", { precision: 6, scale: 3 }),
+  avgHumidityPct: decimal("avgHumidityPct", { precision: 5, scale: 2 }),
+  avgAltitudeFt: decimal("avgAltitudeFt", { precision: 8, scale: 1 }),
+  avgDensityAltitudeFt: decimal("avgDensityAltitudeFt", { precision: 8, scale: 1 }),
+  avgAirDensityLbFt3: decimal("avgAirDensityLbFt3", { precision: 8, scale: 6 }),
+  avgSaeCorrectionFactor: decimal("avgSaeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** Number of vehicle reports in this aggregation window */
+  reportCount: int("reportCount").default(0).notNull(),
+  /** Number of unique vehicles contributing */
+  vehicleCount: int("vehicleCount").default(0).notNull(),
+  /** Time window for aggregation */
+  windowStartAt: timestamp("windowStartAt"),
+  windowEndAt: timestamp("windowEndAt"),
+  /** Last time this station was recalculated */
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WeatherStation = typeof weatherStations.$inferSelect;
+export type InsertWeatherStation = typeof weatherStations.$inferInsert;
+
+// ── Dyno Sessions (Competition Dyno Runs with SAE Corrections) ──────────────
+/**
+ * Individual dyno runs with full atmospheric data and SAE correction factors.
+ * Links to weather data so corrections are based on ACTUAL conditions,
+ * not guessed standard values. This enables fair dyno competitions.
+ */
+export const dynoSessions = mysqlTable("dyno_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** Vehicle info */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vehicleName: varchar("vehicleName", { length: 128 }),
+  vehicleYear: int("vehicleYear"),
+  vehicleMake: varchar("vehicleMake", { length: 64 }),
+  vehicleModel: varchar("vehicleModel", { length: 64 }),
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // e.g., "stock", "bolt-on", "built", "open"
+  /** Dyno results — observed (uncorrected) */
+  peakHpObserved: decimal("peakHpObserved", { precision: 7, scale: 2 }),
+  peakTqObserved: decimal("peakTqObserved", { precision: 7, scale: 2 }),
+  peakHpRpm: int("peakHpRpm"),
+  peakTqRpm: int("peakTqRpm"),
+  /** Dyno results — SAE corrected */
+  peakHpCorrected: decimal("peakHpCorrected", { precision: 7, scale: 2 }),
+  peakTqCorrected: decimal("peakTqCorrected", { precision: 7, scale: 2 }),
+  /** SAE correction factor used (from real weather data) */
+  saeCorrectionFactor: decimal("saeCorrectionFactor", { precision: 6, scale: 4 }).notNull(),
+  /** Atmospheric conditions at time of run (from weather system) */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }).notNull(),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }).notNull(),
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  densityAltitudeFt: decimal("densityAltitudeFt", { precision: 8, scale: 1 }),
+  airDensityLbFt3: decimal("airDensityLbFt3", { precision: 8, scale: 6 }),
+  /** FK to weather_reports.id — the specific weather report used for correction */
+  weatherReportId: int("weatherReportId"),
+  /** FK to weather_stations.id — the station area used */
+  weatherStationId: int("weatherStationId"),
+  /** Location of the dyno run */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  facilityName: varchar("facilityName", { length: 128 }), // dyno shop name
+  /** Dyno type */
+  dynoType: mysqlEnum("dynoType", ["chassis", "engine", "hub"]).default("chassis"),
+  dynoBrand: varchar("dynoBrand", { length: 64 }), // e.g., "DynoJet", "Mustang", "Mainline"
+  /** FK to dyno_competitions.id — if this run is part of a competition */
+  competitionId: int("competitionId"),
+  /** Run metadata */
+  runNumber: int("runNumber").default(1),
+  notes: text("notes"),
+  /** S3 URL for dyno sheet image/PDF */
+  dynoSheetUrl: text("dynoSheetUrl"),
+  /** Full HP/TQ curve data as JSON array of {rpm, hp, tq} */
+  curveData: json("curveData"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type DynoSession = typeof dynoSessions.$inferSelect;
+export type InsertDynoSession = typeof dynoSessions.$inferInsert;
+
+// ── Dyno Competitions (Events with Weather-Linked Conditions) ───────────────
+/**
+ * Competition events where multiple vehicles compete on the dyno.
+ * Each competition is linked to real atmospheric conditions from the weather system,
+ * ensuring all participants are corrected with the SAME actual conditions.
+ * No more guessing the correction factor — we KNOW the conditions.
+ */
+export const dynoCompetitions = mysqlTable("dyno_competitions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Competition details */
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  /** Location */
+  facilityName: varchar("facilityName", { length: 128 }),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  /** Competition rules */
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // e.g., "stock", "bolt-on", "built", "open"
+  dynoType: mysqlEnum("dynoType", ["chassis", "engine", "hub"]).default("chassis"),
+  maxParticipants: int("maxParticipants"),
+  /** Atmospheric conditions for this competition (from weather system) */
+  avgTemperatureF: decimal("avgTemperatureF", { precision: 6, scale: 2 }),
+  avgBaroPressureInHg: decimal("avgBaroPressureInHg", { precision: 6, scale: 3 }),
+  avgHumidityPct: decimal("avgHumidityPct", { precision: 5, scale: 2 }),
+  avgSaeCorrectionFactor: decimal("avgSaeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** FK to weather_stations.id — the station providing conditions */
+  weatherStationId: int("weatherStationId"),
+  /** Status */
+  status: mysqlEnum("status", ["upcoming", "active", "completed", "cancelled"]).default("upcoming").notNull(),
+  /** Organizer */
+  createdBy: int("createdBy").notNull(), // FK to users.id
+  /** Schedule */
+  startDate: timestamp("startDate"),
+  endDate: timestamp("endDate"),
+  /** Stats */
+  participantCount: int("participantCount").default(0).notNull(),
+  runCount: int("runCount").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type DynoCompetition = typeof dynoCompetitions.$inferSelect;
+export type InsertDynoCompetition = typeof dynoCompetitions.$inferInsert;

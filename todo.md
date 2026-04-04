@@ -736,3 +736,30 @@
 - [x] FIX 4: Never pause keepalive during seed probes (UUDT 0x101 vs USDT 0x7E0 = no interference)
 - [x] FIX 5: Clean up stale resume/pause comments in handleSecurityAccess and executeCommand
 - [x] TypeScript: 0 errors. Tests: 1377/1380 pass (3 pre-existing failures unrelated)
+
+## Weather Tab — Vehicle-Reported Atmospheric Data (Apr 4, 2026)
+- [x] Create weather_reports DB table (vehicle sensor data: temp, humidity, barometric pressure, altitude, lat/lng, timestamp)
+- [x] Create weather_stations DB table (aggregated area conditions from multiple vehicle reports)
+- [x] Create DB helpers for weather data CRUD and area aggregation
+- [x] Create tRPC procedures for submitting weather reports and querying conditions
+- [x] Build Weather tab UI with SAE calculator, live conditions, report feed, network stats
+- [x] Build vehicle report feed showing recent sensor submissions
+- [x] Build area condition aggregation (average conditions within geographic radius)
+
+## Competition Tab — Rename Drag + Add Dyno (Apr 4, 2026)
+- [x] Rename "Drag" tab to "Competition" tab in navigation
+- [x] Move existing Drag Racing feature under Competition as sub-tab
+- [x] Create dyno_sessions DB table (dyno run data with SAE correction factors)
+- [x] Create dyno_competitions DB table (competition events with weather-linked conditions)
+- [x] Create tRPC procedures for dyno sessions and competitions
+- [x] Build Dyno sub-feature UI under Competition tab (submit run, leaderboard, my runs, competitions)
+- [x] Implement SAE J1349 correction factor calculation using real weather data
+- [x] Link dyno corrections to vehicle-reported weather (no guessing)
+- [x] Build competition comparison view (compare runs across different atmospheric conditions)
+
+## Tests for Weather & Competition (Apr 4, 2026)
+- [x] Write 8 vitest tests for weather (SAE CF calculation, reports, network stats, area conditions)
+- [x] Write 8 vitest tests for dyno (leaderboard, competitions, submitRun with CF, myRuns auth)
+- [x] All 16 new tests pass
+- [x] Full suite: 1392/1396 pass (4 pre-existing failures in geofence/shareToken, unrelated)
+- [x] TypeScript compiles with 0 errors

@@ -30,6 +30,8 @@ import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { geofenceRouter } from "./routers/geofence";
 import { flashRouter } from "./routers/flash";
+import { weatherRouter } from "./routers/weather";
+import { dynoRouter } from "./routers/dyno";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -251,6 +253,12 @@ export const appRouter = router({
 
   // Flash Container Management & VOP 3.0 Upload Pipeline
   flash: flashRouter,
+
+  // Vehicle-Reported Weather Network
+  weather: weatherRouter,
+
+  // Dyno Competition System (SAE-corrected)
+  dyno: dynoRouter,
 
   // Feedback / Error Reports
   feedback: router({
