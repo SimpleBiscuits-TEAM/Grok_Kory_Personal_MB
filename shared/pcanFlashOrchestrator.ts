@@ -202,83 +202,72 @@ export function generateFlashPlan(
   });
 
   // Phase 3: SESSION_OPEN
-  // Proven BUSMASTER sequence: functional broadcast on 0x101 to prepare all ECUs,
-  // then physical session switch. This matches the VOP3 device and SPS tool behavior.
+  // ═══ BUSMASTER-PROVEN E41 Flash Broadcast Sequence ═══
+  // Timing and order extracted from raw BUSMASTER CAN log of successful 18 L5P stock flash.
+  // All broadcast commands use UUDT format (FE prefix) on functional address 0x101.
+  // ECU does NOT respond to UUDT messages — fire-and-forget.
+  // TesterPresent keepalive starts AFTER A5 03 (during bootloader wait), NOT during broadcast.
   if (isGMLAN) {
-    // ═══ E88/E41 Proven Flash Procedure (FlashprocedurE88_v1.4) ═══
-    // Exact sequence, timing, and UUDT format validated against working flash tool.
-    // All broadcast commands use UUDT format (FE prefix) on functional address 0x101.
-    // TesterPresent cyclic starts EARLY (step 2) and runs throughout.
-    // ECU does NOT respond to UUDT messages — fire-and-forget.
-
     // Step 1: ReturnToNormal (functional broadcast — resets all ECUs to known state)
-    // E88 procedure: post_delay=1000ms
+    // BUSMASTER: first command at 0.29s
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ReturnToNormal — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 01 20`, expectedPositive: '60', timeoutMs: 3000, retries: 2,
     });
-    // Step 2: Start TesterPresent cyclic (UUDT FE 01 3E on 0x101, 500ms interval)
-    // E88 procedure: CAN_CYCLIC_MSG_UUDT starts HERE — right after ReturnToNormal,
-    // BEFORE the other broadcast commands. The flash engine handles the cyclic sending;
-    // this command signals the engine to start the keepalive timer.
-    // NOTE: This is a UUDT command — no response expected. The engine detects the FE
-    // prefix and starts the cyclic keepalive instead of waiting for a response.
-    commands.push({
-      id: cmdId++, phase: 'SESSION_OPEN', label: 'Start TesterPresent Cyclic (UUDT, 500ms)',
-      canTx: `0x101 FE 01 3E`, expectedPositive: '7E', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 1000,  // E88: post_delay=1000ms after ReturnToNormal
-    });
-    // Step 3: ReadDID 0xB0 (functional — read SW versions from all ECUs)
-    // E88 procedure: post_delay=250ms
+    // Step 2: ReadDID 0xB0 (functional — read SW versions from all ECUs)
+    // BUSMASTER: 1000ms after ReturnToNormal
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Read SW Version 0xB0 — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 02 1A B0`, expectedPositive: '5A', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 250,   // E88: post_delay=250ms
+      delayBeforeMs: 1000,  // BUSMASTER: 1000ms after RTN
     });
-    // Step 4: DiagnosticSessionControl 0x02 (functional — put all ECUs in programming session)
-    // E88 procedure: post_delay=250ms
+    // Step 3: DiagnosticSessionControl 0x02 (functional — put all ECUs in programming session)
+    // BUSMASTER: 60ms after ReadDID B0
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Programming Session — All ECUs (Functional 0x101)',
       canTx: `0x101 FE 02 10 02`, expectedPositive: '50', timeoutMs: 5000, retries: 3,
-      delayBeforeMs: 250,   // E88: post_delay=250ms
+      delayBeforeMs: 60,    // BUSMASTER: 60ms after ReadDID
     });
-    // Step 5: DisableNormalCommunication (functional — silence the bus)
-    // E88 procedure: post_delay=1000ms
+    // Step 4: DisableNormalCommunication (functional — silence the bus)
+    // BUSMASTER: 50ms after DiagSessionControl
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Disable Normal Communication (Functional 0x101)',
       canTx: `0x101 FE 01 28`, expectedPositive: '68', timeoutMs: 3000, retries: 2,
-      delayBeforeMs: 1000,  // E88: post_delay=1000ms
+      delayBeforeMs: 50,    // BUSMASTER: 50ms after DiagSession
     });
-    // Step 6: ReportProgrammedState (functional)
-    // E88 procedure: post_delay=2000ms — LONGEST delay in the sequence
+    // Step 5: ReportProgrammedState (functional)
+    // BUSMASTER: 50ms after DisableNormalComm
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Report Programmed State (Functional 0x101)',
       canTx: `0x101 FE 01 A2`, expectedPositive: 'E2', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 2000,  // E88: post_delay=2000ms (longest in sequence)
+      delayBeforeMs: 50,    // BUSMASTER: 50ms after DisableComm
     });
-    // Step 7: ProgrammingMode Enable (functional)
-    // E88 procedure: post_delay=1000ms
+    // Step 6: ProgrammingMode Enable (functional)
+    // BUSMASTER: 1000ms after ReportProgrammedState
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Enable (Functional 0x101)',
       canTx: `0x101 FE 02 A5 01`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 1000,  // E88: post_delay=1000ms
+      delayBeforeMs: 1000,  // BUSMASTER: 1000ms after ReportState
     });
-    // Step 8: ProgrammingMode Complete (functional)
-    // E88 procedure: A5 01 post_delay=1000ms, A5 03 post_delay=500ms
-    // CRITICAL TIMING: The ECU has a short window after A5 03 where it accepts
-    // USDT commands. Using delays longer than the E88 reference causes the ECU
-    // to become unresponsive. Match E88 timing exactly.
+    // Step 7: ProgrammingMode Complete (functional) — ECU REBOOTS INTO BOOTLOADER
+    // BUSMASTER: 50ms after A5 01
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 50,  // BUSMASTER: A5 01 → A5 03 gap is exactly 50ms (was 1000ms)
+      delayBeforeMs: 50,    // BUSMASTER: 50ms after A5 01
     });
-    // NOTE: Physical session re-establishment (0x10 0x02 on 0x7E0) was REMOVED.
-    // The E88 reference procedure does NOT send a physical session between the
-    // broadcast and security access/RequestDownload. The broadcast ProgrammingSession
-    // (step 4: FE 02 10 02 on 0x101) already establishes the session for all ECUs.
-    // Sending an additional physical session wastes time in the critical window
-    // after A5 03 and may confuse the ECU.
+    // Step 8: Start TesterPresent cyclic AFTER A5 03 (during bootloader wait)
+    // BUSMASTER: keepalive starts immediately after A5 03, runs every ~500ms
+    // for 4.0s before the first seed request. 7 keepalive frames during this window.
+    // The flash engine detects the FE prefix and starts the cyclic keepalive timer.
+    commands.push({
+      id: cmdId++, phase: 'SESSION_OPEN', label: 'Start TesterPresent Cyclic (UUDT, 500ms)',
+      canTx: `0x101 FE 01 3E`, expectedPositive: '7E', timeoutMs: 3000, retries: 1,
+      delayBeforeMs: 50,    // Start immediately after A5 03
+    });
+    // NOTE: No physical session (0x10 0x02 on 0x7E0) between broadcast and security.
+    // The broadcast ProgrammingSession (step 3: FE 02 10 02 on 0x101) already
+    // establishes the session for all ECUs. BUSMASTER confirms no physical session.
   } else {
     // Standard UDS: simple session switch on physical address
     commands.push({

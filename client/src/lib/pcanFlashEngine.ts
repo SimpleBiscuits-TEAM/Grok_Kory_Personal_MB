@@ -581,167 +581,105 @@ export class PCANFlashEngine {
       this.log('info', 'PRE_CHECK', 'Waiting for ECU to settle after bridge connect...');
       await this.delay(3000);
 
-      // Step 0b: Set diagnostic session before flash commands.
-      // From SPS log analysis: GMLAN ECUs respond to 0x10 0x02 (programming session)
-      // even though they also support 0xA5 (ProgrammingMode). Use 0x10 0x02 as primary.
-      // Retry up to 3 times with 1.5s backoff — ECU may need multiple attempts after cold start.
+      // Step 0b: GMLAN PRE_CHECK physical commands
+      // CRITICAL FIX (log #15/#16 analysis): For GMLAN ECUs in FULL_FLASH mode,
+      // skip ALL physical commands (session, security) before the broadcast.
+      // BUSMASTER reference: ZERO physical commands before the broadcast sequence.
+      // Sending physical 0x10 0x02 and 0x27 0x01 before the broadcast wastes ~29s
+      // and may confuse the ECU or trigger security lockout timers.
+      // Physical session/security are ONLY useful for dry-run DID reads.
       if (this.isGMLAN) {
-        this.log('info', 'PRE_CHECK', 'Switching to programming session (0x10 0x02)...');
-        this.state.statusMessage = 'Switching to programming session...';
-        this.emitState();
+        if (this.dryRun) {
+          // DRY RUN: Attempt physical session + security for DID reads
+          this.log('info', 'PRE_CHECK', '[DRY RUN] Attempting physical session/security for DID reads...');
+          this.state.statusMessage = 'Switching to programming session...';
+          this.emitState();
 
-        let sessionEstablished = false;
-        for (let sessionAttempt = 1; sessionAttempt <= 3 && !sessionEstablished; sessionAttempt++) {
+          let sessionEstablished = false;
+          for (let sessionAttempt = 1; sessionAttempt <= 3 && !sessionEstablished; sessionAttempt++) {
+            try {
+              const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
+              if (response && response.positiveResponse) {
+                this.log('success', 'PRE_CHECK', `✓ Programming session active (0x10 0x02) — attempt ${sessionAttempt}/3`);
+                sessionEstablished = true;
+              } else if (response) {
+                const nrc = response.nrc ?? 0;
+                const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
+                this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: NRC 0x${nrc.toString(16)} (${nrcName})`);
+              } else {
+                this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: no response`);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: ${msg}`);
+            }
+            if (!sessionEstablished && sessionAttempt < 3) {
+              await this.delay(1500);
+            }
+          }
+
+          // Attempt security access for DID reads (dry run only)
+          this.log('info', 'PRE_CHECK', 'Attempting security access for GMLAN DID reads...');
+          this.state.statusMessage = 'Requesting security access...';
+          this.emitState();
           try {
-            const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
-            if (response && response.positiveResponse) {
-              this.log('success', 'PRE_CHECK', `✓ Programming session active (0x10 0x02) — attempt ${sessionAttempt}/3`);
-              sessionEstablished = true;
-            } else if (response) {
-              const nrc = response.nrc ?? 0;
-              const nrcName = NRC_NAMES[nrc] || response.nrcName || 'unknown';
-              this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: NRC 0x${nrc.toString(16)} (${nrcName})`);
-              // On last attempt, try GMLAN ProgrammingMode as fallback
-              if (sessionAttempt === 3) {
-                this.log('info', 'PRE_CHECK', 'Trying GMLAN ProgrammingMode (0xA5 0x01) as fallback...');
-                const gmResp = await this.conn.sendUDSRequest(0xA5, 0x01, undefined, this.txAddr);
-                if (gmResp && gmResp.positiveResponse) {
-                  this.log('success', 'PRE_CHECK', '✓ GMLAN ProgrammingMode active (0xA5 0x01)');
-                  sessionEstablished = true;
-                } else {
-                  this.log('warning', 'PRE_CHECK', 'GMLAN ProgrammingMode also failed — continuing...');
+            await this.delay(200);
+            let seedResp: UDSResponse | null = null;
+            for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
+              seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+              if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
+                const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
+                this.log('warning', 'PRE_CHECK', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout to expire (retry ${lockoutRetry + 1}/3)`);
+                await this.delay(10000);
+                continue;
+              }
+              break;
+            }
+            if (seedResp && seedResp.positiveResponse) {
+              let seedData = seedResp.data || [];
+              if (seedData.length > 0 && seedData[0] === 0x01) seedData = seedData.slice(1);
+              const seedBytes = new Uint8Array(seedData);
+              this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
+              this.seedReceivedInPreCheck = true;
+
+              // Compute and send key
+              const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
+              const preSecProfile = getSecurityProfile(preEcuType);
+              let preKeyBytes: Uint8Array | null = null;
+              if (preSecProfile?.aesKeyHex && seedBytes.length === 5 &&
+                  (preSecProfile.algorithmType === 'GM_5B_AES' || preSecProfile.algorithmType === 'GM_DUAL')) {
+                const aesKeyBytes = skHexToBytes(preSecProfile.aesKeyHex);
+                preKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
+              }
+              if (preKeyBytes) {
+                await this.delay(100);
+                const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(preKeyBytes), this.txAddr);
+                if (keyResp && keyResp.positiveResponse) {
+                  this.log('success', 'PRE_CHECK', '🔓 Security access granted');
+                  this.lastSecurityAccessGranted = true;
                 }
               }
-            } else {
-              this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: no response`);
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            this.log('info', 'PRE_CHECK', `Programming session attempt ${sessionAttempt}/3: ${msg}`);
+            this.log('warning', 'PRE_CHECK', `Security access error: ${msg} — continuing...`);
           }
-          if (!sessionEstablished && sessionAttempt < 3) {
-            await this.delay(1500);
-          }
-        }
-        if (!sessionEstablished) {
-          this.log('warning', 'PRE_CHECK', 'Could not establish programming session after 3 attempts — continuing (ECU may respond to individual commands)');
-        }
-
-        // Step 0b2: Attempt security access — GMLAN ECUs require authenticated session
-        // before they respond to ReadDID (0x1A) commands
-        this.log('info', 'PRE_CHECK', 'Attempting security access for GMLAN DID reads...');
-        this.state.statusMessage = 'Requesting security access...';
-        this.emitState();
-        try {
           await this.delay(200);
-          // Request seed (level 0x01 — confirmed working from dry run log)
-          // Retry loop for NRC 0x37 (requiredTimeDelayNotExpired) — security lockout timer
-          let seedResp: UDSResponse | null = null;
-          for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
-            seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
-            if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
-              const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
-              this.log('warning', 'PRE_CHECK', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout to expire (retry ${lockoutRetry + 1}/3)`);
-              await this.delay(10000);
-              continue;
-            }
-            break;
-          }
-          if (seedResp && seedResp.positiveResponse) {
-            // Extract seed bytes (strip sub-function echo if present)
-            let seedData = seedResp.data || [];
-            if (seedData.length > 0 && seedData[0] === 0x01) {
-              seedData = seedData.slice(1);
-            }
-            const seedBytes = new Uint8Array(seedData);
-            this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
-            this.seedReceivedInPreCheck = true;
-
-            // ── Check known seed→key lookup table first ──
-            const PRECHECK_KNOWN_PAIRS: Array<{ seed: number[]; key: number[]; label: string }> = [
-              { seed: [0xA0, 0x9A, 0x34, 0x9B, 0x06], key: [0xAF, 0x72, 0x2A, 0x51, 0x7E], label: 'Bench ECU (HPTuners unlocked)' },
-              { seed: [0xCE, 0xDA, 0xF9, 0x83, 0x06], key: [0x59, 0x2E, 0xF4, 0x0F, 0x33], label: 'Truck ECU (VOP/PPEI unlocked)' },
-            ];
-            const preKnown = PRECHECK_KNOWN_PAIRS.find(p =>
-              p.seed.length === seedBytes.length && p.seed.every((b, i) => b === seedBytes[i])
-            );
-
-            if (preKnown) {
-              // Known seed — use lookup key
-              const keyBytes = new Uint8Array(preKnown.key);
-              this.log('info', 'PRE_CHECK', `Known seed matched: ${preKnown.label}`);
-              this.log('info', 'PRE_CHECK', `Key from lookup: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-              await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
-              if (keyResp && keyResp.positiveResponse) {
-                this.log('success', 'PRE_CHECK', '🔓 Security access granted (lookup key)');
-                this.lastSecurityAccessGranted = true;
-              } else {
-                const nrc = keyResp?.nrc ?? 0;
-                this.log('warning', 'PRE_CHECK', `Lookup key rejected: NRC 0x${nrc.toString(16)}`);
-              }
-            } else {
-            // Key computation: Seed_key.cs hardcoded AES keys ONLY
-            const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
-            const preSecProfile = getSecurityProfile(preEcuType);
-            let preKeyBytes: Uint8Array | null = null;
-            let preKeySource = '';
-
-            if (preSecProfile?.aesKeyHex && seedBytes.length === 5 &&
-                (preSecProfile.algorithmType === 'GM_5B_AES' || preSecProfile.algorithmType === 'GM_DUAL')) {
-              const aesKeyBytes = skHexToBytes(preSecProfile.aesKeyHex);
-              preKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              preKeySource = `${preSecProfile.ecuType} Seed_key.cs AES`;
-            }
-
-            if (preKeyBytes) {
-              this.log('info', 'PRE_CHECK', `🔑 Key computed (${preKeySource}): ${Array.from(preKeyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-              await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(preKeyBytes), this.txAddr);
-              if (keyResp && keyResp.positiveResponse) {
-                this.log('success', 'PRE_CHECK', '🔓 Security access granted — GMLAN DIDs should now be readable');
-                this.lastSecurityAccessGranted = true;
-              } else {
-                const nrc = keyResp?.nrc ?? 0;
-                this.log('warning', 'PRE_CHECK', `Security access denied: NRC 0x${nrc.toString(16)} — GMLAN DIDs may not respond`);
-              }
-            } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
-              this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU is already unlocked (HPTuners/aftermarket)');
-              this.lastSecurityAccessGranted = true;
-            } else if (seedBytes.length === 5) {
-              this.log('warning', 'PRE_CHECK', `No Seed_key.cs entry for ${preEcuType} — sending dummy key for unlocked ECU`);
-              const dummyKey = new Uint8Array(5).fill(0x00);
-              await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
-              if (keyResp && keyResp.positiveResponse) {
-                this.log('success', 'PRE_CHECK', '🔓 Security access granted with dummy key — ECU is unlocked');
-                this.lastSecurityAccessGranted = true;
-              } else {
-                const nrc = keyResp?.nrc ?? 0;
-                this.log('warning', 'PRE_CHECK', `Dummy key rejected: NRC 0x${nrc.toString(16)} — ECU requires real key (check Seed_key.cs)`);
-              }
-            } else {
-              this.log('warning', 'PRE_CHECK', `No Seed_key.cs entry for ${preEcuType} (${seedBytes.length}-byte seed) — GMLAN DIDs may not respond`);
-            }
-            } // end known pair else
-          } else if (seedResp) {
-            const nrc = seedResp.nrc ?? 0;
-            this.log('info', 'PRE_CHECK', `Security seed request: NRC 0x${nrc.toString(16)} — ECU may not require security for DID reads`);
-          } else {
-            this.log('info', 'PRE_CHECK', 'Security seed request: no response — continuing without security access');
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.log('warning', 'PRE_CHECK', `Security access error: ${msg} — continuing...`);
+        } else {
+          // LIVE FLASH: Skip ALL physical commands before broadcast.
+          // BUSMASTER reference: zero physical commands before the broadcast sequence.
+          // The broadcast handles session (0x10 0x02) and the post-broadcast
+          // SECURITY_ACCESS phase handles seed/key after the bootloader boots.
+          this.log('info', 'PRE_CHECK', '⚡ GMLAN live flash: skipping physical session/security (BUSMASTER: no physical commands before broadcast)');
+          this.log('info', 'PRE_CHECK', 'Session will be established via broadcast (FE 02 10 02 on 0x101)');
+          this.log('info', 'PRE_CHECK', 'Security will be handled post-broadcast in SECURITY_ACCESS phase');
         }
-        await this.delay(200);
 
-        // NOTE: For GMLAN, TesterPresent keepalive is now started EARLY by the
-        // TesterPresent UUDT command in SESSION_OPEN (per E88 procedure).
+        // NOTE: For GMLAN, TesterPresent keepalive is now started by the
+        // TesterPresent UUDT command in SESSION_OPEN (after A5 03).
         // The startKeepalive() call in executeCommand detects the FE 01 3E UUDT
-        // and starts the cyclic timer. No need to start it here.
-        // For safety, start it here only if it hasn't been started yet.
-        if (!this.keepaliveActive) {
+        // and starts the cyclic timer. Do NOT start it here.
+        if (!this.keepaliveActive && this.dryRun) {
           this.startKeepalive();
         }
       } else {
@@ -1228,12 +1166,12 @@ export class PCANFlashEngine {
         // Pause keepalive during UDS exchange to prevent NRC interference.
         // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12), and these
         // frames can be captured by the response listener for this command.
-        // EXCEPTION: Security access manages its own keepalive internally
-        // because the bootloader polling phase REQUIRES keepalive to run.
-        if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
-          // handleSecurityAccess manages pauseKeepalive/resumeKeepalive internally
-          // to keep keepalive running during bootloader polling but paused during
-          // actual seed/key exchange.
+        // EXCEPTION: Security access does NOT pause keepalive at all.
+         // BUSMASTER reference: keepalive (UUDT 0x101) runs continuously during
+         // the entire seed/key exchange (USDT 0x7E0). Different CAN IDs, no interference.
+         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
+           // handleSecurityAccess keeps keepalive running throughout.
+           // The bootloader REQUIRES continuous keepalive to stay responsive.
           response = await this.handleSecurityAccess(cmd, subFunction);
         } else {
           // For all non-security commands, pause keepalive during the exchange
@@ -1429,14 +1367,16 @@ export class PCANFlashEngine {
         // CRITICAL: Resume keepalive DURING bootloader polling.
         // BUSMASTER reference: TesterPresent (FE 01 3E on 0x101) runs continuously
         // during the bootloader wait — 7 keepalive frames in the 4.0s window.
-        // The bootloader may REQUIRE these keepalives to initialize properly.
-        // Only pause keepalive for the brief moment of the actual UDS exchange.
-        this.resumeKeepalive();
+        // BUSMASTER FIX: Keepalive runs continuously — no pause/resume needed.
+        // The bootloader REQUIRES continuous keepalive on UUDT 0x101 to stay responsive.
+        // Seed probes on USDT 0x7E0 use a different CAN ID and don't interfere.
 
         // Inner loop: handle NRC 0x37 lockout retries for each poll attempt
         for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
-          // Pause keepalive only for the actual seed request to prevent NRC interference
-          this.pauseKeepalive();
+          // BUSMASTER FIX: Do NOT pause keepalive during seed probes.
+          // Keepalive is on UUDT 0x101 (broadcast), seed request is on USDT 0x7E0 (physical).
+          // They use different CAN IDs and don't interfere with each other.
+          // BUSMASTER shows keepalive running continuously during the entire seed/key exchange.
           try {
             seedResponse = await this.conn.sendUDSRequest(
               UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
@@ -1445,8 +1385,6 @@ export class PCANFlashEngine {
             // Timeout or transport error — ECU not ready yet
             seedResponse = null;
           }
-          // Resume keepalive immediately after the request completes
-          this.resumeKeepalive();
 
           if (!seedResponse) {
             // No response — ECU is still rebooting

@@ -717,3 +717,22 @@
 - [x] FIX: Seed request delay changed from 500ms to 4000ms (matching BUSMASTER)
 - [x] FIX: Poll interval reduced from 5s to 3s (bootloader should be ready on first attempt)
 - [x] TypeScript: 0 errors. Tests: 1377/1380 pass (3 pre-existing failures unrelated)
+
+## Real Flash Attempt #16 — FAILED (Apr 4, 2026) — Log 3249a087 — DEEP DIVE
+- [x] DEEP DIVE: ECU bootloader unresponsive for 2nd consecutive attempt (36 probes × 3 rounds = 4m43s silence)
+- [x] A5 01 → A5 03 timing fix confirmed working (50ms gap at line 40-41)
+- [x] 4.0s delay after A5 03 confirmed working (seed at 48.9s, A5 03 at 44.9s = 4.0s)
+- [x] PRE_CHECK: ECU still silent to programming session and security access (lines 18-23)
+- [x] Bridge disconnected TWICE (lines 56, 85) — same pattern as previous failures
+- [x] Probe timing inconsistency: 1-7 are ~8s apart (5s timeout + 3s wait), 8-11 are ~3s (instant timeout)
+- [x] Compared ALL 16 logs: working (#10-14) vs broken (#15-16)
+- [x] ROOT CAUSE 1: PRE_CHECK sends 4 physical commands (session+security) before broadcast — BUSMASTER sends ZERO
+- [x] ROOT CAUSE 2: Broadcast timing 2.5x too slow (5.56s vs 2.21s) — wrong E88 delays
+- [x] ROOT CAUSE 3: TesterPresent starts DURING broadcast, should start AFTER A5 03
+- [x] ROOT CAUSE 4: Keepalive pauses during seed probes — BUSMASTER never pauses
+- [x] FIX 1: Skip ALL physical commands in PRE_CHECK for GMLAN live flash (dry-run keeps them)
+- [x] FIX 2: Match BUSMASTER broadcast timing exactly (1000, 60, 50, 50, 1000, 50ms)
+- [x] FIX 3: Move TesterPresent to AFTER A5 03 in broadcast sequence
+- [x] FIX 4: Never pause keepalive during seed probes (UUDT 0x101 vs USDT 0x7E0 = no interference)
+- [x] FIX 5: Clean up stale resume/pause comments in handleSecurityAccess and executeCommand
+- [x] TypeScript: 0 errors. Tests: 1377/1380 pass (3 pre-existing failures unrelated)
