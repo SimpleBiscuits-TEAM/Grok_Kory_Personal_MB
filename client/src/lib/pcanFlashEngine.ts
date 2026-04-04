@@ -1228,21 +1228,28 @@ export class PCANFlashEngine {
         // Pause keepalive during UDS exchange to prevent NRC interference.
         // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12), and these
         // frames can be captured by the response listener for this command.
-        this.pauseKeepalive();
-
+        // EXCEPTION: Security access manages its own keepalive internally
+        // because the bootloader polling phase REQUIRES keepalive to run.
         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
+          // handleSecurityAccess manages pauseKeepalive/resumeKeepalive internally
+          // to keep keepalive running during bootloader polling but paused during
+          // actual seed/key exchange.
           response = await this.handleSecurityAccess(cmd, subFunction);
-        } else if (serviceId === UDS.CLEAR_DTC || serviceId === UDS.CLEAR_DTC_GMLAN) {
-          // GMLAN: service 0x04 on functional 0x7DF (per E88 procedure)
-          // Standard UDS: service 0x14 on functional 0x7DF
-          // The orchestrator now sets the correct address in canTx
-          response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, cmdTxAddr);
-        } else if (isFunctionalBroadcast) {
-          // Functional broadcast (0x101 or 0x7DF): send on broadcast address
-          // Accept any response — multiple ECUs may reply, we just need one positive
-          response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, cmdTxAddr);
         } else {
-          response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
+          // For all non-security commands, pause keepalive during the exchange
+          this.pauseKeepalive();
+          if (serviceId === UDS.CLEAR_DTC || serviceId === UDS.CLEAR_DTC_GMLAN) {
+            // GMLAN: service 0x04 on functional 0x7DF (per E88 procedure)
+            // Standard UDS: service 0x14 on functional 0x7DF
+            // The orchestrator now sets the correct address in canTx
+            response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, cmdTxAddr);
+          } else if (isFunctionalBroadcast) {
+            // Functional broadcast (0x101 or 0x7DF): send on broadcast address
+            // Accept any response — multiple ECUs may reply, we just need one positive
+            response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, cmdTxAddr);
+          } else {
+            response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
+          }
         }
 
         // Resume keepalive after response received
@@ -1408,15 +1415,28 @@ export class PCANFlashEngine {
       // Total polling budget: ~90s (enough for 30-60s reboot + 10s lockout + margin)
 
       const isPostBroadcast = cmd.phase === 'SECURITY_ACCESS'; // vs PRE_CHECK
-      const maxPollAttempts = (this.isGMLAN && isPostBroadcast) ? 12 : 1; // 12 × 5s = 60s polling + lockout retries
-      const pollIntervalMs = 5000; // 5s between polls during bootloader wait
+      // BUSMASTER reference: bootloader is ready in 4.0s after A5 03.
+      // The orchestrator now adds a 4.0s delayBeforeMs before the seed request,
+      // so the bootloader should be ready on the FIRST attempt.
+      // Keep polling as fallback (12 attempts × 3s = 36s) in case of slower boot.
+      const maxPollAttempts = (this.isGMLAN && isPostBroadcast) ? 12 : 1;
+      const pollIntervalMs = 3000; // 3s between polls (was 5s — bootloader should already be ready)
 
       let seedResponse: UDSResponse | null = null;
       const maxLockoutRetries = 3;
 
       for (let pollAttempt = 0; pollAttempt < maxPollAttempts; pollAttempt++) {
+        // CRITICAL: Resume keepalive DURING bootloader polling.
+        // BUSMASTER reference: TesterPresent (FE 01 3E on 0x101) runs continuously
+        // during the bootloader wait — 7 keepalive frames in the 4.0s window.
+        // The bootloader may REQUIRE these keepalives to initialize properly.
+        // Only pause keepalive for the brief moment of the actual UDS exchange.
+        this.resumeKeepalive();
+
         // Inner loop: handle NRC 0x37 lockout retries for each poll attempt
         for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
+          // Pause keepalive only for the actual seed request to prevent NRC interference
+          this.pauseKeepalive();
           try {
             seedResponse = await this.conn.sendUDSRequest(
               UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
@@ -1425,6 +1445,8 @@ export class PCANFlashEngine {
             // Timeout or transport error — ECU not ready yet
             seedResponse = null;
           }
+          // Resume keepalive immediately after the request completes
+          this.resumeKeepalive();
 
           if (!seedResponse) {
             // No response — ECU is still rebooting

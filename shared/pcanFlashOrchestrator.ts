@@ -271,7 +271,7 @@ export function generateFlashPlan(
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'ProgrammingMode Complete (Functional 0x101)',
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
-      delayBeforeMs: 1000,  // E88: post_delay=1000ms after A5 01 (was 6000ms — caused USDT blackout)
+      delayBeforeMs: 50,  // BUSMASTER: A5 01 → A5 03 gap is exactly 50ms (was 1000ms)
     });
     // NOTE: Physical session re-establishment (0x10 0x02 on 0x7E0) was REMOVED.
     // The E88 reference procedure does NOT send a physical session between the
@@ -302,7 +302,7 @@ export function generateFlashPlan(
     canRx: `${rxHex} xx 67 ...`,
     expectedPositive: '67', timeoutMs: 5000, retries: 2,
     nonFatal: isGMLAN,  // GMLAN: PRE_CHECK already granted security; post-broadcast seed may timeout
-    delayBeforeMs: isGMLAN ? 500 : undefined,  // E88: 500ms after A5 03 before first USDT command
+    delayBeforeMs: isGMLAN ? 4000 : undefined,  // BUSMASTER: 4.0s fixed delay after A5 03 with keepalive running (7 TP frames)
   });
   commands.push({
     id: cmdId++, phase: 'SECURITY_ACCESS', label: 'Send Key',

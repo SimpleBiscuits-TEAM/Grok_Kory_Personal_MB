@@ -702,3 +702,18 @@
   - [x] pcanFlashOrchestrator.ts: Add ClearDTC on 0x7DF after verification
   - [x] ecuDatabase.ts: E41 usesTransferExit = false
 - [x] TypeScript compiles with 0 errors, 1377/1380 tests pass (3 pre-existing failures unrelated)
+
+## Real Flash Attempt #15 — FAILED (Apr 4, 2026) — Log 76bb2759
+- [x] ECU bootloader NEVER responded — 36 probe attempts across 3 rounds (6+ minutes of total silence)
+- [x] PRE_CHECK: programming session and security access both timed out (ECU silent before broadcast)
+- [x] SESSION_OPEN: all UUDT broadcasts sent correctly (RTN, TP, 1A B0, 10 02, 28, A2, A5 01, A5 03)
+- [x] SECURITY_ACCESS: 0x27 01 seed request timed out on all 36 probes (12×3 rounds)
+- [x] BLOCK_TRANSFER: RequestDownload 34 00 00 0F FE timed out (no seed/key = no security)
+- [x] ROOT CAUSE 1: Keepalive PAUSED during entire handleSecurityAccess (6+ min). BUSMASTER shows 7 keepalives during 4s boot window
+- [x] ROOT CAUSE 2: A5 01 → A5 03 delay was 1000ms, BUSMASTER shows 50ms
+- [x] ROOT CAUSE 3: Seed request started 500ms after A5 03, BUSMASTER shows 4000ms fixed delay
+- [x] FIX: Keepalive now runs during bootloader polling, only paused for actual seed/key exchange
+- [x] FIX: A5 01 → A5 03 delay changed from 1000ms to 50ms
+- [x] FIX: Seed request delay changed from 500ms to 4000ms (matching BUSMASTER)
+- [x] FIX: Poll interval reduced from 5s to 3s (bootloader should be ready on first attempt)
+- [x] TypeScript: 0 errors. Tests: 1377/1380 pass (3 pre-existing failures unrelated)
