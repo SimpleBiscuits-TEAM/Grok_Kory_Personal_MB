@@ -37,6 +37,7 @@ import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
 import { PCANConnection } from '@/lib/pcanConnection';
+import KnoxConfidenceDashboard from '@/components/KnoxConfidenceDashboard';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -487,7 +488,7 @@ export default function IntelliSpy() {
   const knoxMutation = trpc.intellispy.analyzeFrames.useMutation();
 
   // Knox conversational chat state
-  const [knoxChatMessages, setKnoxChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [knoxChatMessages, setKnoxChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; knoxMeta?: { pipeline?: string; confidence?: string; agreement?: string; durationMs?: number; agentDetails?: Record<string, unknown> } }>>([]);
   const [knoxChatInput, setKnoxChatInput] = useState('');
   const [knoxChatOpen, setKnoxChatOpen] = useState(false);
   const knoxChatMutation = trpc.intellispy.knoxChat.useMutation();
@@ -989,7 +990,17 @@ export default function IntelliSpy() {
         busContext,
         history: newMessages.slice(-20),
       });
-      setKnoxChatMessages(prev => [...prev, { role: 'assistant', content: result.reply }]);
+      setKnoxChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: result.reply,
+        knoxMeta: {
+          pipeline: result.pipeline,
+          confidence: result.confidence,
+          agreement: result.agreement,
+          durationMs: result.durationMs,
+          agentDetails: result.agentDetails as Record<string, unknown> | undefined,
+        },
+      }]);
     } catch (err) {
       setKnoxChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` }]);
     }
@@ -1689,16 +1700,21 @@ export default function IntelliSpy() {
                       )}
                       {knoxChatMessages.map((msg, i) => (
                         <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                            msg.role === 'user'
-                              ? 'bg-red-900/30 border border-red-800/30 text-zinc-200'
-                              : 'bg-zinc-950/70 border border-zinc-800/30 text-zinc-300'
-                          }`}>
-                            {msg.role === 'assistant' ? (
-                              <div className="prose prose-invert prose-xs max-w-none">
-                                <Streamdown>{msg.content}</Streamdown>
-                              </div>
-                            ) : msg.content}
+                          <div className={`max-w-[85%] ${msg.role === 'user' ? '' : 'space-y-0'}`}>
+                            <div className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                              msg.role === 'user'
+                                ? 'bg-red-900/30 border border-red-800/30 text-zinc-200'
+                                : 'bg-zinc-950/70 border border-zinc-800/30 text-zinc-300'
+                            }`}>
+                              {msg.role === 'assistant' ? (
+                                <div className="prose prose-invert prose-xs max-w-none">
+                                  <Streamdown>{msg.content}</Streamdown>
+                                </div>
+                              ) : msg.content}
+                            </div>
+                            {msg.role === 'assistant' && msg.knoxMeta && (
+                              <KnoxConfidenceDashboard metadata={msg.knoxMeta as any} />
+                            )}
                           </div>
                         </div>
                       ))}

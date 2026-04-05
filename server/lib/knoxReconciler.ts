@@ -309,7 +309,7 @@ ${delta.answer}
 **Internal evidence found:** ${delta.evidence.length > 0 ? delta.evidence.join(' | ') : 'None'}
 **Confirms these claims:** ${delta.confirmed.length > 0 ? delta.confirmed.join(' | ') : 'None'}
 **Contradicts these claims:** ${delta.contradicted.length > 0 ? delta.contradicted.join(' | ') : 'None'}
-**Related past cases:** ${delta.relatedCases.length > 0 ? delta.relatedCases.map(c => `[${c.type} #${c.id}] ${c.summary} (${c.relevance})`).join(' | ') : 'None'}
+**Related past cases:** ${delta.relatedCases.length > 0 ? delta.relatedCases.map(function(c) { return '[' + c.type + ' #' + c.id + '] ' + c.summary + ' (' + c.relevance + ')'; }).join(' | ') : 'None'}
 **Gaps in our records:** ${delta.gaps.length > 0 ? delta.gaps.join(' | ') : 'None'}
 
 ## Your Reconciliation Rules
@@ -341,7 +341,7 @@ You're Knox — confident, direct, technically deep, but with warmth. You've bee
 
 ## Context
 Domain: ${domain}
-${ecuFamily ? `ECU Family: ${ecuFamily}` : ''}
+${ecuFamily ? 'ECU Family: ' + ecuFamily : ''}
 
 ## The Original Question
 ${question}

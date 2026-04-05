@@ -853,3 +853,15 @@
 - [x] Delta cross-references other agents' claims against internal evidence
 - [x] Update Knox Reconciler from triple-agent to quad-agent pipeline
 - [x] Delta feeds institutional knowledge that accumulates over time
+
+## Confidence Dashboard UI (Apr 5, 2026)
+- [x] Build KnoxConfidenceDashboard component — shows agent agreement/confidence scores
+- [x] Display which agents agreed/disagreed and their individual confidence levels
+- [x] Show confidence level (high/medium/low) with visual indicators
+- [x] Integrate confidence dashboard into editor Knox chat
+- [x] Integrate confidence dashboard into IntelliSpy Knox chat
+- [x] Integrate confidence dashboard into diagnosticAgent responses (backend wired, frontend component available)
+
+## Wire Remaining Diagnostic Routers (Apr 5, 2026)
+- [x] Wire diagnostic.chat into quad-agent pipeline (already wired in previous build)
+- [x] Wire diagnostic.quickLookup into quad-agent pipeline (already wired in previous build)
