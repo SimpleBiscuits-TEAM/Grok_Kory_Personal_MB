@@ -2,6 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 /* ─── PID Database for auto-population ─── */
 interface DiagnosticPID {
@@ -388,7 +389,7 @@ export const diagnosticAgentRouter = router({
       vehicleYear: z.number().optional(),
       vehicleEngine: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { complaint, vehicleYear, vehicleEngine } = input;
 
       // Step 1: Keyword-based category matching
@@ -438,45 +439,30 @@ export const diagnosticAgentRouter = router({
       const primaryCategory = categories[0];
       const testCondition = TEST_CONDITIONS[primaryCategory] || TEST_CONDITIONS.performance_general;
 
-      // Step 4: Generate Knox's explanation via LLM
+      // Step 4: Generate Knox's explanation via triple-agent pipeline
       let knoxExplanation = '';
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      const pidList = recommendedPids.map(p =>
+        `- ${p.name} (${p.shortName}) [${p.service === 0x22 ? 'Mode 22' : 'Mode 01'} 0x${p.pid.toString(16).toUpperCase()}] — ${p.unit}`
+      ).join('\n');
+
+      const vehicleCtx = vehicleYear && vehicleEngine
+        ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
+        : 'Vehicle: Duramax diesel (year unknown)';
+
       try {
-        const knowledgeBase = getFullKnoxKnowledge();
-        const pidList = recommendedPids.map(p =>
-          `- ${p.name} (${p.shortName}) [${p.service === 0x22 ? 'Mode 22' : 'Mode 01'} 0x${p.pid.toString(16).toUpperCase()}] — ${p.unit}`
-        ).join('\n');
+        const knoxResult = await queryKnox({
+          question: `Customer complaint: "${complaint}"
 
-        const vehicleContext = vehicleYear && vehicleEngine
-          ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
-          : 'Vehicle: Duramax diesel (year unknown)';
-
-        const result = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content: `You are Knox, the PPEI V-OP AI Diagnostic Agent. You are an expert diesel engine diagnostician.
-${vehicleContext}
-
-You have access to this knowledge base:
-${knowledgeBase.substring(0, 6000)}
-
-The customer described their problem and you've selected these diagnostic PIDs:
-${pidList}
-
-Test conditions: ${testCondition.title}
-
-Respond with a brief, confident diagnostic explanation:
-1. What you think might be causing the problem (2-3 sentences)
-2. Why you selected these specific PIDs (1-2 sentences)
-3. What you'll be looking for in the data (2-3 key indicators)
-
-Keep it conversational but technical. Use the customer's language. Do NOT use markdown headers.`
-            },
-            { role: "user", content: complaint }
-          ],
+Selected diagnostic PIDs:\n${pidList}\n\nTest conditions: ${testCondition.title}\n\nProvide a brief, confident diagnostic explanation: what might be causing the problem, why these PIDs were selected, and what to look for in the data.`,
+          accessLevel: effectiveLevel,
+          domain: 'diagnostics',
+          vehicleContext: vehicleCtx,
+          moduleContext: `Diagnostic categories: ${categories.join(', ')}`,
         });
-        const rawContent = result.choices?.[0]?.message?.content;
-        knoxExplanation = typeof rawContent === 'string' ? rawContent : '';
+        knoxExplanation = knoxResult.answer;
       } catch {
         knoxExplanation = `Based on your description, I've identified ${categories.length} diagnostic area${categories.length > 1 ? 's' : ''} to investigate. I've selected ${recommendedPids.length} PIDs that will give us the data we need. Let me set up the datalogger for you.`;
       }
@@ -515,13 +501,14 @@ Keep it conversational but technical. Use the customer's language. Do NOT use ma
       vehicleYear: z.number().optional(),
       vehicleEngine: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { complaint, availablePids, dataSummary, vehicleYear, vehicleEngine } = input;
 
-      const knowledgeBase = getFullKnoxKnowledge();
       const vehicleContext = vehicleYear && vehicleEngine
         ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
         : 'Vehicle: Duramax diesel (year unknown)';
+      const userAccessLevel2 = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel2: AccessLevel = userAccessLevel2 >= 3 ? 3 : userAccessLevel2 >= 2 ? 2 : 1;
 
       // Determine what PIDs are missing
       const matchedCategories = matchComplaintToCategories(complaint);
@@ -538,14 +525,26 @@ Keep it conversational but technical. Use the customer's language. Do NOT use ma
         return !nameMatch;
       });
 
-      // Ask Knox to analyze with what we have
+      // Ask Knox to analyze with what we have — triple-agent pipeline with vehicle-specific data
       let analysis = '';
       try {
-        const result = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content: `You are Knox, the PPEI V-OP AI Diagnostic Agent. Expert diesel diagnostician.
+        const knoxResult2 = await queryKnox({
+          question: `Customer complaint: "${complaint}"\n\nAvailable PIDs in this datalog: ${availablePids.join(', ')}\n\nData summary:\n${dataSummary}\n\n${missingPids.length > 0 ? `Missing PIDs that would help: ${missingPids.map(p => p.name).join(', ')}` : 'All recommended PIDs are present.'}\n\nAnalyze this datalog: what does the data tell you, what's your diagnosis, confidence level, and what would increase confidence.`,
+          accessLevel: effectiveLevel2,
+          domain: 'diagnostics',
+          vehicleContext,
+          moduleContext: `Uploaded datalog with ${availablePids.length} PIDs. Vehicle-specific data for validation.`,
+        });
+        analysis = knoxResult2.answer;
+      } catch (err) {
+        // Fallback to direct LLM
+        try {
+          const knowledgeBase = getFullKnoxKnowledge();
+          const result = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: `You are Knox, the PPEI V-OP AI Diagnostic Agent. Expert diesel diagnostician.
 ${vehicleContext}
 
 Knowledge base:
@@ -568,14 +567,15 @@ Provide your diagnostic analysis:
 4. If PIDs are missing, explain what each missing PID would tell us
 
 Be specific, reference actual values, and explain your reasoning like a master technician would.`
-            },
-            { role: "user", content: `Here's the datalog summary:\n${dataSummary}` }
-          ],
-        });
-        const rawAnalysis = result.choices?.[0]?.message?.content;
-        analysis = typeof rawAnalysis === 'string' ? rawAnalysis : 'Analysis unavailable.';
-      } catch (err) {
-        analysis = 'Knox analysis temporarily unavailable. Please try again.';
+              },
+              { role: "user", content: `Here's the datalog summary:\n${dataSummary}` }
+            ],
+          });
+          const rawAnalysis = result.choices?.[0]?.message?.content;
+          analysis = typeof rawAnalysis === 'string' ? rawAnalysis : 'Analysis unavailable.';
+        } catch {
+          analysis = 'Knox analysis temporarily unavailable. Please try again.';
+        }
       }
 
       return {

@@ -13,6 +13,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut, storageGet } from "../storage";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 import { getKnoxFileContextForLLM, getDb } from "../db";
 import { getKnoxFiles, getKnoxFileById, getKnoxPlatformSummary, getKnoxCollectionSummary } from "../db";
 import { knoxFiles } from "../../drizzle/schema";
@@ -37,7 +38,35 @@ export const editorRouter = router({
           .optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // ── Triple-Agent Pipeline ──────────────────────────────────────────
+      // Route through Knox Reconciler with Alpha (data), Beta (spec), Gamma (skeptic)
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      try {
+        const knoxResult = await queryKnox({
+          question: input.message,
+          accessLevel: effectiveLevel,
+          domain: 'editor',
+          loadedA2LContent: input.context?.slice(0, 30000),
+          moduleContext: input.context?.slice(0, 5000),
+          history: input.history,
+        });
+
+        return {
+          reply: knoxResult.answer,
+          pipeline: knoxResult.pipeline,
+          confidence: knoxResult.confidence,
+          agreement: knoxResult.agreement,
+          agentDetails: knoxResult.agentDetails,
+          durationMs: knoxResult.durationMs,
+        };
+      } catch (pipelineErr: any) {
+        console.warn('[Knox] Pipeline failed, falling back to direct LLM:', pipelineErr.message);
+      }
+
+      // ── Fallback: Direct LLM (original behavior) ──────────────────────
       const systemPrompt = `You are Knox (Knowledge Network for Optimized Execution), an expert ECU calibration engineer and AI assistant with a personality.
 Your name is Knox — Knowledge Network for Optimized Execution. Introduce your full name on first meeting. After that, just go by "Knox" unless someone specifically asks what it stands for.
 

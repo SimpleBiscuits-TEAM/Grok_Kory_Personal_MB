@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 /**
  * Compare Router — LLM-powered datalog comparison analysis.
@@ -67,8 +68,27 @@ export const compareRouter = router({
         userContext: z.string().max(2000).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { comparisonContext, userContext } = input;
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      const question = userContext
+        ? `Comparison analysis — user says: "${userContext}"\n\nDoes the data support the expected outcome?`
+        : `Analyze this datalog comparison and identify key differences, implications, and concerns.`;
+
+      // Try quad-agent pipeline first
+      try {
+        const knoxResult = await queryKnox({
+          question,
+          accessLevel: effectiveLevel,
+          domain: 'diagnostics',
+          moduleContext: comparisonContext.slice(0, 20000),
+        });
+        return { analysis: knoxResult.answer, usage: null, pipeline: knoxResult.pipeline, confidence: knoxResult.confidence };
+      } catch {
+        // Fallback
+      }
 
       const userMessage = userContext
         ? `Here is the comparison data:\n\n${comparisonContext}\n\nThe user described the following changes between tests:\n"${userContext}"\n\nPlease analyze the comparison and evaluate whether the data supports the expected outcome of those changes.`

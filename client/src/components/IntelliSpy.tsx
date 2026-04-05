@@ -486,6 +486,13 @@ export default function IntelliSpy() {
   // Knox tRPC mutation
   const knoxMutation = trpc.intellispy.analyzeFrames.useMutation();
 
+  // Knox conversational chat state
+  const [knoxChatMessages, setKnoxChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [knoxChatInput, setKnoxChatInput] = useState('');
+  const [knoxChatOpen, setKnoxChatOpen] = useState(false);
+  const knoxChatMutation = trpc.intellispy.knoxChat.useMutation();
+  const knoxChatScrollRef = useRef<HTMLDivElement>(null);
+
   // ECU Communication Loss Detection
   const [ecuLostReason, setEcuLostReason] = useState<string | null>(null);
   const lastFrameTimeRef = useRef<number>(Date.now());
@@ -942,6 +949,54 @@ export default function IntelliSpy() {
       setKnoxAnalysis(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [arbIdStats, selectedFramesForKnox, activeProtocol, flashProgress, knoxQuestion, knoxMutation]);
+
+  // Knox conversational chat handler
+  const sendKnoxChat = useCallback(async () => {
+    const msg = knoxChatInput.trim();
+    if (!msg || knoxChatMutation.isPending) return;
+
+    const newMessages = [...knoxChatMessages, { role: 'user' as const, content: msg }];
+    setKnoxChatMessages(newMessages);
+    setKnoxChatInput('');
+
+    // Build live bus context
+    const liveFrames = Array.from(arbIdStats.values()).slice(0, 50).map(stat => ({
+      arbIdHex: formatArbId(stat.arbId),
+      moduleName: stat.moduleName || 'Unknown',
+      dataHex: formatHexData(stat.lastData),
+      count: stat.count,
+      rateHz: stat.rateHz,
+    }));
+
+    const busContext = `${arbIdStats.size} unique arb IDs, ${frameCountRef.current} total frames captured. ${flashProgress.stage !== 'idle' ? `Flash in progress: ${flashProgress.stage}` : 'No flash active.'}`;
+
+    try {
+      const result = await knoxChatMutation.mutateAsync({
+        message: msg,
+        liveFrames: Array.from(arbIdStats.values()).slice(0, 100).map(stat => ({
+          arbId: stat.arbId,
+          arbIdHex: formatArbId(stat.arbId),
+          data: stat.lastData,
+          dataHex: formatHexData(stat.lastData),
+          dlc: stat.lastData.length,
+          isExtended: false,
+          moduleName: stat.moduleName,
+          moduleAcronym: stat.moduleAcronym,
+          count: stat.count,
+          rateHz: stat.rateHz,
+        })),
+        protocol: activeProtocol,
+        busContext,
+        history: newMessages.slice(-20),
+      });
+      setKnoxChatMessages(prev => [...prev, { role: 'assistant', content: result.reply }]);
+    } catch (err) {
+      setKnoxChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` }]);
+    }
+
+    // Auto-scroll
+    setTimeout(() => knoxChatScrollRef.current?.scrollTo({ top: knoxChatScrollRef.current.scrollHeight, behavior: 'smooth' }), 100);
+  }, [knoxChatInput, knoxChatMessages, knoxChatMutation, arbIdStats, activeProtocol, flashProgress, frameCountRef]);
 
   const toggleFrameForKnox = useCallback((arbId: number) => {
     setSelectedFramesForKnox(prev => {
@@ -1591,6 +1646,99 @@ export default function IntelliSpy() {
                   <div className="flex items-center justify-center py-8 gap-3">
                     <Loader2 className="w-5 h-5 text-red-500 animate-spin" />
                     <span className="text-sm text-zinc-400">Knox is analyzing {arbIdStats.size} arbitration IDs...</span>
+                  </div>
+                )}
+              </Card>
+
+              {/* Knox Conversational Chat */}
+              <Card className="bg-zinc-900/50 border-zinc-800/50">
+                <button
+                  onClick={() => setKnoxChatOpen(!knoxChatOpen)}
+                  className="w-full flex items-center gap-3 p-4 hover:bg-zinc-800/20 transition-colors"
+                >
+                  <Send className="w-5 h-5 text-red-500" />
+                  <div className="flex-1 text-left">
+                    <h3 className="font-['Bebas_Neue',sans-serif] text-lg tracking-wider text-red-400">
+                      CHAT WITH KNOX
+                    </h3>
+                    <p className="text-xs text-zinc-500">
+                      Have a conversation about what's happening on the bus. Knox sees your live frames.
+                    </p>
+                  </div>
+                  {knoxChatMessages.length > 0 && (
+                    <Badge variant="outline" className="border-red-800 text-red-400 text-[10px]">
+                      {knoxChatMessages.length} msgs
+                    </Badge>
+                  )}
+                  {knoxChatOpen ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+                </button>
+
+                {knoxChatOpen && (
+                  <div className="border-t border-zinc-800/50">
+                    {/* Chat messages */}
+                    <div
+                      ref={knoxChatScrollRef}
+                      className="max-h-[400px] overflow-y-auto p-4 space-y-3"
+                    >
+                      {knoxChatMessages.length === 0 && (
+                        <div className="text-center py-8">
+                          <Brain className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+                          <p className="text-xs text-zinc-600">Ask Knox anything about the CAN bus activity.</p>
+                          <p className="text-xs text-zinc-700 mt-1">Knox has live access to your captured frames and can reason across data, specs, and real-world experience.</p>
+                        </div>
+                      )}
+                      {knoxChatMessages.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                            msg.role === 'user'
+                              ? 'bg-red-900/30 border border-red-800/30 text-zinc-200'
+                              : 'bg-zinc-950/70 border border-zinc-800/30 text-zinc-300'
+                          }`}>
+                            {msg.role === 'assistant' ? (
+                              <div className="prose prose-invert prose-xs max-w-none">
+                                <Streamdown>{msg.content}</Streamdown>
+                              </div>
+                            ) : msg.content}
+                          </div>
+                        </div>
+                      ))}
+                      {knoxChatMutation.isPending && (
+                        <div className="flex justify-start">
+                          <div className="bg-zinc-950/70 border border-zinc-800/30 rounded-lg px-3 py-2 flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 text-red-500 animate-spin" />
+                            <span className="text-xs text-zinc-500">Knox is thinking...</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Chat input */}
+                    <div className="flex gap-2 p-3 border-t border-zinc-800/30">
+                      <Input
+                        value={knoxChatInput}
+                        onChange={e => setKnoxChatInput(e.target.value)}
+                        placeholder="Ask Knox about the bus..."
+                        className="flex-1 text-xs bg-zinc-950/50 border-zinc-800 text-zinc-300 font-['Share_Tech_Mono',monospace] h-8"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendKnoxChat();
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={sendKnoxChat}
+                        disabled={knoxChatMutation.isPending || !knoxChatInput.trim()}
+                        className="bg-red-900/50 border border-red-700 text-red-400 hover:bg-red-800/50 h-8 px-3"
+                      >
+                        {knoxChatMutation.isPending ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Send className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 )}
               </Card>

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 /**
  * Build a system prompt that includes relevant knowledge base context
@@ -61,13 +62,37 @@ export const diagnosticRouter = router({
         a2lContext: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { messages, knowledgeContext, a2lContext } = input;
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
 
-      // Build the system message with injected context
+      // Get the last user message for the pipeline
+      const userMessages = messages.filter(m => m.role === 'user');
+      const lastUserMsg = userMessages[userMessages.length - 1]?.content || 'Diagnose this issue.';
+      const historyMsgs = messages.filter(m => m.role !== 'system').slice(0, -1).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+      // Try triple-agent pipeline first
+      try {
+        const knoxResult = await queryKnox({
+          question: lastUserMsg,
+          accessLevel: effectiveLevel,
+          domain: 'diagnostics',
+          moduleContext: [knowledgeContext, a2lContext].filter(Boolean).join('\n').slice(0, 10000),
+          history: historyMsgs,
+        });
+        return {
+          response: knoxResult.answer,
+          usage: null,
+          pipeline: knoxResult.pipeline,
+          confidence: knoxResult.confidence,
+        };
+      } catch (pipelineErr) {
+        console.warn('[Diagnostic Chat] Pipeline failed, falling back:', pipelineErr);
+      }
+
+      // Fallback to direct LLM
       const systemPrompt = buildSystemPrompt(knowledgeContext, a2lContext);
-
-      // Prepare messages for the LLM - always start with system prompt
       const llmMessages = [
         { role: "system" as const, content: systemPrompt },
         ...messages
@@ -111,8 +136,26 @@ export const diagnosticRouter = router({
         knowledgeContext: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { query, knowledgeContext } = input;
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      // Try triple-agent pipeline first
+      try {
+        const knoxResult = await queryKnox({
+          question: query,
+          accessLevel: effectiveLevel,
+          domain: 'diagnostics',
+          moduleContext: knowledgeContext?.slice(0, 5000),
+        });
+        return {
+          response: knoxResult.answer,
+          pipeline: knoxResult.pipeline,
+        };
+      } catch {
+        // Fallback
+      }
 
       const systemPrompt = [
         `You are PPEI AI Diagnostic Assistant. Answer the following diagnostic query concisely.`,

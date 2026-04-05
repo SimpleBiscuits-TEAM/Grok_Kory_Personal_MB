@@ -22,6 +22,7 @@ import {
   users,
 } from "../../drizzle/schema";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -684,23 +685,42 @@ export const castingRouter = router({
         messages.push({ role: "user", content: "[BROADCAST EVENT]: Provide live commentary on the current dyno pull." });
       }
 
+      // Try quad-agent pipeline for richer commentary
+      let commentary: string;
       try {
-        const response = await invokeLLM({ messages });
-        const rawContent = response.choices?.[0]?.message?.content;
-        const commentary: string = typeof rawContent === 'string' ? rawContent : (rawContent ? JSON.stringify(rawContent) : "Let's keep this energy going!");
-        
-        // Save Knox's message to chat
+        const dynoContext = latestDyno
+          ? `Live dyno data: HP=${(latestDyno as any).hp || 'N/A'}, TQ=${(latestDyno as any).torque || 'N/A'}, RPM=${(latestDyno as any).rpm || 'N/A'}, Boost=${(latestDyno as any).boost || 'N/A'}`
+          : 'No dyno data yet';
+        const chatContext = recentChat.reverse().map(c => `[${c.username}]: ${c.message}`).join('\n');
+        const knoxResult = await queryKnox({
+          question: input.context || 'Provide live commentary on the current dyno pull.',
+          accessLevel: 3 as AccessLevel,
+          domain: 'casting',
+          moduleContext: `Session: ${session.title}\n${dynoContext}\nRecent chat:\n${chatContext}`.slice(0, 5000),
+        });
+        commentary = knoxResult.answer;
+      } catch {
+        // Fallback to direct LLM
+        try {
+          const response = await invokeLLM({ messages });
+          const rawContent = response.choices?.[0]?.message?.content;
+          commentary = typeof rawContent === 'string' ? rawContent : (rawContent ? JSON.stringify(rawContent) : "Let's keep this energy going!");
+        } catch {
+          commentary = "KNOX is warming up... stand by!";
+        }
+      }
+
+      // Save Knox's message to chat
+      try {
         await db.insert(castChat).values({
           sessionId: input.sessionId,
           username: "KNOX",
           message: commentary,
           type: "ai_host",
         });
+      } catch {}
 
-        return { commentary, success: true };
-      } catch (err) {
-        return { commentary: "KNOX is warming up... stand by!", success: false };
-      }
+      return { commentary, success: true };
     }),
 
   // ═══════════════════════════════════════════════════════════════════════════

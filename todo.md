@@ -813,3 +813,43 @@
 - [x] Knox identifies trends and anomalies across the cloud network
 - [x] Knox can reference real-world data instead of forum guesses for vehicle performance questions
 - [x] Knox integrates weather data from Laura for condition-adjusted comparisons
+
+
+## Knox Dual-Agent Architecture (Alpha + Beta + Reconciler)
+- [x] Build Agent Alpha (Data Agent) — A2L/binary reasoning server module
+- [x] Build Agent Beta (Spec Agent) — protocol/documentation reasoning server module
+- [x] Build Agent Gamma (Skeptic Agent) — real-world/forum knowledge that pokes holes
+- [x] Build Knox Reconciler — quad-agent orchestration with confidence scoring
+- [x] Wire quad-agent pipeline into editor.knoxChat
+- [x] Wire quad-agent pipeline into diagnosticAgent
+- [x] Wire quad-agent pipeline into intellispy analyzer
+- [x] Wire quad-agent pipeline into casting knoxCommentary
+- [x] Wire quad-agent pipeline into drag racing AI
+- [x] Wire quad-agent pipeline into fleet gooseChat
+- [x] Wire debug analyzeAndClassify — kept as direct LLM (structured JSON classification, not advisory)
+- [x] Write tests for quad-agent pipeline (9 tests: access levels, orchestration, Monica, domains, vehicle context, confidence)
+
+## Monica Consumer AI + Access Level Gating
+- [x] Build Monica filter layer — consumer-facing AI that translates Knox to plain language
+- [x] Monica rules: no engineering names, no A2L refs, no hex addresses, no map names, no protocol details
+- [x] Level 1 access: Pitch + IntelliSpy + Datalogger only, Monica as AI
+- [x] Level 2 access: Knox with documentation data, no engineering internals
+- [x] Level 3 access: Full force Knox — Alpha, Beta, Gamma, Delta, Reconciler, raw engineering data
+- [x] Wire access level gating into all routers
+
+## Vehicle-Specific Data Validation Pipeline
+- [x] When data is uploaded to advanced analyzer, feed vehicle-specific data (PIDs, DTCs, datalogs) into Alpha for evidence-based reasoning
+- [x] Beta validates diagnostic conclusions against protocol specs for that specific vehicle's data
+- [x] Gamma challenges with real-world pattern matching against the uploaded data
+- [x] Knox reconciles with per-vehicle evidence, not just general knowledge
+
+## IntelliSpy Knox Chat
+- [x] Add Knox chat box to IntelliSpy (conversational, not just one-shot analysis)
+- [x] IntelliSpy chat feeds live CAN frame context into Knox pipeline
+- [x] Wire IntelliSpy chat through quad-agent pipeline with access level gating
+
+## Agent Delta (The Archivist)
+- [x] Build Agent Delta — searches Knox file library, past flash logs, customer cases, internal PPEI documents
+- [x] Delta cross-references other agents' claims against internal evidence
+- [x] Update Knox Reconciler from triple-agent to quad-agent pipeline
+- [x] Delta feeds institutional knowledge that accumulates over time

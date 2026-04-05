@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 import { getDb } from "../db";
 import { eq, and, desc, asc, sql } from "drizzle-orm";
 import {
@@ -162,16 +163,31 @@ export const dragRouter = router({
     .input(z.object({
       runData: z.string(), // JSON stringified run data
     }))
-    .mutation(async ({ input }) => {
-      const response = await invokeLLM({
-        messages: [
-          { role: "system", content: buildDragAiPrompt() },
-          { role: "user", content: `Analyze this drag run and provide a detailed race report with tips for improvement:\n\n${input.runData}` },
-        ],
-      });
-      return {
-        report: response.choices?.[0]?.message?.content || "Analysis unavailable",
-      };
+    .mutation(async ({ input, ctx }) => {
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      // Try quad-agent pipeline
+      try {
+        const knoxResult = await queryKnox({
+          question: `Analyze this drag run and provide a detailed race report with tips for improvement:\n\n${input.runData}`,
+          accessLevel: effectiveLevel,
+          domain: 'drag',
+          moduleContext: input.runData.slice(0, 10000),
+        });
+        return { report: knoxResult.answer, pipeline: knoxResult.pipeline, confidence: knoxResult.confidence };
+      } catch {
+        // Fallback to direct LLM
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: buildDragAiPrompt() },
+            { role: "user", content: `Analyze this drag run and provide a detailed race report with tips for improvement:\n\n${input.runData}` },
+          ],
+        });
+        return {
+          report: response.choices?.[0]?.message?.content || "Analysis unavailable",
+        };
+      }
     }),
 
   // ── Challenges ─────────────────────────────────────────────────────────
