@@ -172,7 +172,29 @@ function formatAsciiData(data: number[]): string {
   return data.map(b => (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '.').join('');
 }
 
+function decodeGlobalBAddress(arbId: number): { target: number; source: number } | null {
+  // 29-bit UDS addressing pattern commonly used on Global B:
+  // 0x18DAxxYY where xx/yy are tester/ECU addresses.
+  if ((arbId & 0x1FFF0000) !== 0x18DA0000) return null;
+  const target = (arbId >> 8) & 0xFF;
+  const source = arbId & 0xFF;
+  return { target, source };
+}
+
 function identifyModule(arbId: number): { name: string; acronym: string } | null {
+  const globalB = decodeGlobalBAddress(arbId);
+  if (globalB) {
+    const targetHex = globalB.target.toString(16).toUpperCase().padStart(2, '0');
+    const sourceHex = globalB.source.toString(16).toUpperCase().padStart(2, '0');
+    if (globalB.source === 0xF1) {
+      return { name: `Global B UDS Request (Tester F1 -> ECU ${targetHex})`, acronym: `GB_REQ_${targetHex}` };
+    }
+    if (globalB.target === 0xF1) {
+      return { name: `Global B UDS Response (ECU ${sourceHex} -> Tester F1)`, acronym: `GB_RSP_${sourceHex}` };
+    }
+    return { name: `Global B UDS Traffic (${sourceHex} -> ${targetHex})`, acronym: 'GB_UDS' };
+  }
+
   // Direct lookup
   const module = lookupModule(arbId);
   if (module) return { name: module.name, acronym: module.acronym };
@@ -193,6 +215,12 @@ function identifyModule(arbId: number): { name: string; acronym: string } | null
 }
 
 function detectDirection(arbId: number): 'request' | 'response' | 'broadcast' {
+  const globalB = decodeGlobalBAddress(arbId);
+  if (globalB) {
+    if (globalB.source === 0xF1) return 'request';
+    if (globalB.target === 0xF1) return 'response';
+    return 'broadcast';
+  }
   if (arbId === 0x7DF) return 'broadcast';
   if (isRequestId(arbId)) return 'request';
   if (isResponseId(arbId)) return 'response';

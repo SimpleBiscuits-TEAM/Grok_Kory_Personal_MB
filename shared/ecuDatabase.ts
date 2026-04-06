@@ -99,6 +99,11 @@ export interface EcuConfig {
   flashSequence: FlashStep[];
   /** Whether TransferExit (0x37) is used after block transfer */
   usesTransferExit: boolean;
+  /**
+   * When false, SECURITY_ACCESS timeouts on GMLAN are fatal (no "continue without unlock").
+   * Default / omitted: true (legacy behavior: allow flash to proceed after broadcast).
+   */
+  gmlanSecurityAccessTimeoutNonFatal?: boolean;
 }
 
 // ── Standard Flash Sequences ───────────────────────────────────────────────

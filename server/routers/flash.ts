@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { router, protectedProcedure, publicProcedure } from '../_core/trpc';
 import { storagePut } from '../storage';
 import { ECU_DATABASE, getEcuConfig, CONTAINER_LAYOUT, type EcuConfig } from '../../shared/ecuDatabase';
-import { getSecurityProfile, type EcuSecurityProfile } from '../../shared/seedKeyAlgorithms';
+import type { EcuSecurityProfile } from '../../shared/seedKeyAlgorithms';
+import { computeFord3B, computeGM5B, hexToBytes, bytesToHex } from '../../shared/seedKeyAlgorithms';
+import { getSecurityProfile } from '../seedKeyService';
 import * as flashDb from '../flashDb';
 import { notifyOwner } from '../_core/notification';
 import crypto from 'crypto';
@@ -104,6 +106,40 @@ export const flashRouter = router({
   // ═══════════════════════════════════════════════════════════════════════
   // CONTAINER VALIDATION & TRANSFER (existing)
   // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Compute security key from ECU seed using server-held key material.
+   * Browser flash flow calls this so AES secrets are not shipped in the client bundle.
+   */
+  computeSecurityKey: publicProcedure
+    .input(z.object({
+      ecuType: z.string().max(32),
+      seedHex: z.string().max(512),
+    }))
+    .mutation(async ({ input }) => {
+      let seedBytes: Uint8Array;
+      try {
+        seedBytes = hexToBytes(input.seedHex.replace(/\s+/g, ''));
+      } catch {
+        return { ok: false as const, error: 'Invalid seed hex' };
+      }
+      const profile = getSecurityProfile(input.ecuType);
+      if (!profile) return { ok: false as const, error: 'Unknown ECU type' };
+
+      if (
+        seedBytes.length === 5 &&
+        (profile.algorithmType === 'GM_5B_AES' || profile.algorithmType === 'GM_DUAL') &&
+        profile.aesKeyHex
+      ) {
+        const key = await computeGM5B(seedBytes, hexToBytes(profile.aesKeyHex));
+        return { ok: true as const, keyHex: bytesToHex(key, '').replace(/\s/g, '').toLowerCase() };
+      }
+      if (seedBytes.length === 3 && profile.algorithmType === 'FORD_3B' && profile.aesKeyHex) {
+        const key = computeFord3B(seedBytes, hexToBytes(profile.aesKeyHex));
+        return { ok: true as const, keyHex: bytesToHex(key, '').replace(/\s/g, '').toLowerCase() };
+      }
+      return { ok: false as const, error: 'No key material for this ECU/seed combination' };
+    }),
 
   validate: publicProcedure
     .input(z.object({

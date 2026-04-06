@@ -25,6 +25,9 @@ const ADMIN_OPEN_IDS = new Set([
   'nWh2tQUgLAjdSidvActMnF', // Erik Fontenot (yahoo.com)
   'firEtjYyGRNJ9ENvVTrCq3', // Carmen Savant
 ]);
+const ADMIN_EMAILS = new Set([
+  'kory@ppei.com',
+]);
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -61,7 +64,9 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = user.lastSignedIn;
     }
 
-    // Auto-promote: owner → super_admin, known employees → admin
+    const normalizedEmail = (user.email ?? "").trim().toLowerCase();
+
+    // Auto-promote: owner → super_admin, known employees/emails → admin
     if (user.openId === OWNER_OPEN_ID || user.openId === ENV.ownerOpenId) {
       values.role = 'super_admin';
       updateSet.role = 'super_admin';
@@ -69,7 +74,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.advancedAccess = 'approved';
       values.accessLevel = 3;
       updateSet.accessLevel = 3;
-    } else if (ADMIN_OPEN_IDS.has(user.openId)) {
+    } else if (ADMIN_OPEN_IDS.has(user.openId) || ADMIN_EMAILS.has(normalizedEmail)) {
       values.role = 'admin';
       updateSet.role = 'admin';
       values.advancedAccess = 'approved';

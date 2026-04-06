@@ -30,7 +30,8 @@ import {
   createSimulatorState, generateRecoveryPlan, formatBytes,
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader, getEcuConfig } from '../../../shared/ecuDatabase';
-import { computeGM5B, computeFord3B, getSecurityProfile, hexToBytes as skHexToBytes } from '../../../shared/seedKeyAlgorithms';
+import { hexToBytes } from '../../../shared/seedKeyAlgorithms';
+import { inferProtocolFromVerify, parseHexCanId } from '../../../shared/flashVerify';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,11 @@ export interface FlashEngineConfig {
   callbacks: FlashEngineCallbacks;
   /** Dry run mode — executes non-destructive commands only, skips erase/transfer/write */
   dryRun?: boolean;
+  /**
+   * Resolve security key bytes from seed (typically `trpc.flash.computeSecurityKey`).
+   * When omitted, the engine uses the default tRPC client (same origin as the app).
+   */
+  computeSecurityKey?: (input: { ecuType: string; seed: Uint8Array }) => Promise<Uint8Array | null>;
 }
 
 // ── UDS / GMLAN Service IDs ───────────────────────────────────────────────
@@ -133,6 +139,9 @@ export class PCANFlashEngine {
   private dryRun: boolean;
   private lastSecurityAccessGranted = false;
   private seedReceivedInPreCheck = false;
+  private computeSecurityKeyFn?: (input: { ecuType: string; seed: Uint8Array }) => Promise<Uint8Array | null>;
+  /** When false, GMLAN SECURITY_ACCESS timeout fails the flash (stricter than legacy). */
+  private gmlanSecurityTimeoutNonFatal: boolean;
 
   // ECU addressing from the plan's first command
   private txAddr: number;
@@ -163,6 +172,7 @@ export class PCANFlashEngine {
     this.header = config.header;
     this.callbacks = config.callbacks;
     this.dryRun = config.dryRun ?? false;
+    this.computeSecurityKeyFn = config.computeSecurityKey;
     this.state = createSimulatorState(config.plan);
 
     // Extract CAN addresses from the plan commands
@@ -178,14 +188,38 @@ export class PCANFlashEngine {
 
     // Detect protocol from ECU database
     const ecuConfig = getEcuConfig(config.plan.ecuType);
+    this.gmlanSecurityTimeoutNonFatal = ecuConfig?.gmlanSecurityAccessTimeoutNonFatal !== false;
     this.ecuProtocol = ecuConfig?.protocol || 'UDS';
     this.isGMLAN = this.ecuProtocol === 'GMLAN';
+
+    // Prefer container verify metadata when available. This keeps flash behavior
+    // aligned with source container/tooling definitions instead of generic defaults.
+    const verify = config.header.verify;
+    const verifyTx = parseHexCanId(verify?.txadr);
+    const verifyRx = parseHexCanId(verify?.rxadr);
+    const verifyProtocol = inferProtocolFromVerify(verify?.j1939, verifyTx, verifyRx);
+
+    if (verifyTx !== null) this.txAddr = verifyTx;
+    if (verifyRx !== null) this.rxAddr = verifyRx;
+    if (verifyProtocol) {
+      this.ecuProtocol = verifyProtocol;
+      this.isGMLAN = verifyProtocol === 'GMLAN';
+    }
   }
 
   /** Abort the flash — sets flag that will be checked between commands */
   abort(): void {
     this.aborted = true;
     this.stopKeepalive();
+  }
+
+  /** Security key bytes via injected callback or default tRPC `flash.computeSecurityKey` (server-held material). */
+  private async computeKeyBytesFromServer(ecuType: string, seedBytes: Uint8Array): Promise<Uint8Array | null> {
+    if (this.computeSecurityKeyFn) {
+      return this.computeSecurityKeyFn({ ecuType, seed: seedBytes });
+    }
+    const { computeSecurityKeyRemote } = await import('./computeSecurityKeyClient');
+    return computeSecurityKeyRemote(ecuType, seedBytes);
   }
 
   // ── TesterPresent Keepalive ──────────────────────────────────────────────
@@ -330,7 +364,7 @@ export class PCANFlashEngine {
    * This method:
    *   1. Waits for ECU to stabilize after boot
    *   2. Re-enters programming session (0x10 0x02 for GMLAN, 0x10 0x03 for UDS)
-   *   3. Re-attempts security access using Seed_key.cs AES key
+   *   3. Re-attempts security access using server-derived key (flash.computeSecurityKey)
    *   4. Restarts TesterPresent keepalive
    */
   private async reEstablishSession(): Promise<void> {
@@ -457,21 +491,11 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else {
-            // Key computation: Seed_key.cs hardcoded AES keys ONLY
             const kcEcuType = this.plan.ecuType || this.header.ecu_type || '';
-            const kcSecProfile = getSecurityProfile(kcEcuType);
-            let kcKeyBytes: Uint8Array | null = null;
-            let kcKeySource = '';
-
-            if (kcSecProfile?.aesKeyHex && seedBytes.length === 5 &&
-                (kcSecProfile.algorithmType === 'GM_5B_AES' || kcSecProfile.algorithmType === 'GM_DUAL')) {
-              const aesKeyBytes = skHexToBytes(kcSecProfile.aesKeyHex);
-              kcKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              kcKeySource = `${kcSecProfile.ecuType} Seed_key.cs AES`;
-            }
+            const kcKeyBytes = await this.computeKeyBytesFromServer(kcEcuType, seedBytes);
 
             if (kcKeyBytes) {
-              this.log('info', 'KEY_CYCLE', `🔑 Key computed (${kcKeySource}): ${Array.from(kcKeyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+              this.log('info', 'KEY_CYCLE', `🔑 Key from server: ${Array.from(kcKeyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(kcKeyBytes), this.txAddr);
               if (keyResp && keyResp.positiveResponse) {
@@ -483,7 +507,7 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else if (seedBytes.length === 5) {
-              this.log('info', 'KEY_CYCLE', `No Seed_key.cs entry for ${kcEcuType} — sending dummy key`);
+              this.log('info', 'KEY_CYCLE', `No server key for ${kcEcuType} — sending dummy key`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
               const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
@@ -496,7 +520,7 @@ export class PCANFlashEngine {
                 this.lastSecurityAccessGranted = false;
               }
             } else {
-              this.log('warning', 'KEY_CYCLE', `No Seed_key.cs entry for ${kcEcuType} — cannot compute key for post-boot security`);
+              this.log('warning', 'KEY_CYCLE', `No server key for ${kcEcuType} — cannot compute key for post-boot security`);
               this.lastSecurityAccessGranted = false;
             }
             } // end known pair else
@@ -642,15 +666,8 @@ export class PCANFlashEngine {
               this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
               this.seedReceivedInPreCheck = true;
 
-              // Compute and send key
               const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
-              const preSecProfile = getSecurityProfile(preEcuType);
-              let preKeyBytes: Uint8Array | null = null;
-              if (preSecProfile?.aesKeyHex && seedBytes.length === 5 &&
-                  (preSecProfile.algorithmType === 'GM_5B_AES' || preSecProfile.algorithmType === 'GM_DUAL')) {
-                const aesKeyBytes = skHexToBytes(preSecProfile.aesKeyHex);
-                preKeyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-              }
+              const preKeyBytes = await this.computeKeyBytesFromServer(preEcuType, seedBytes);
               if (preKeyBytes) {
                 await this.delay(100);
                 const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(preKeyBytes), this.txAddr);
@@ -1292,19 +1309,19 @@ export class PCANFlashEngine {
       return;
     }
 
-    // ── GMLAN Safety Net: SECURITY_ACCESS timeout is never fatal ──
-    // After SESSION_OPEN broadcast (DisableNormalCommunication + ProgrammingMode),
-    // the ECU may stop responding to USDT on the physical address. This is expected
-    // GMLAN behavior. The ECU is already in programming mode from the broadcast,
-    // and security may have been granted in PRE_CHECK. Even if security wasn't
-    // granted in PRE_CHECK, the flash should attempt PRE_FLASH (RequestDownload)
-    // because the ECU may accept it in programming mode.
-    // This is a belt-and-suspenders check in case cmd.nonFatal wasn't set.
+    // ── GMLAN Safety Net: SECURITY_ACCESS timeout is usually non-fatal ──
     if (cmd.phase === 'SECURITY_ACCESS' && this.isGMLAN) {
+      if (!this.gmlanSecurityTimeoutNonFatal) {
+        this.log('error', cmd.phase,
+          `${cmd.label}: ${lastError} — SECURITY_ACCESS required (ECU profile: strict GMLAN). Flash aborted.`);
+        throw new Error(`${cmd.label}: ${lastError}`);
+      }
       this.log('warning', cmd.phase,
         `${cmd.label}: ${lastError} — continuing (GMLAN: SECURITY_ACCESS is non-fatal after SESSION_OPEN broadcast)`);
+      this.log('warning', cmd.phase,
+        'Proceeding without confirmed unlock — RequestDownload (0x34) may still fail if the ECU is locked.');
       this.log('info', cmd.phase,
-        'ℹ️ GMLAN ECUs may not respond to USDT after DisableNormalCommunication (0x28). ' +
+        'GMLAN ECUs may not respond to USDT after DisableNormalCommunication (0x28). ' +
         'Proceeding to PRE_FLASH — RequestDownload (0x34) will confirm if ECU accepts programming.');
       this.state.statusMessage = `${cmd.label} (timeout, GMLAN non-fatal)`;
       this.emitState();
@@ -1485,37 +1502,24 @@ export class PCANFlashEngine {
         this.log('info', cmd.phase, `Known seed matched: ${knownPair.label}`);
         this.log('info', cmd.phase, `Key from lookup table: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
       } else {
-
-      // ── Key computation: Seed_key.cs hardcoded AES keys ONLY ──
-      const ecuType = this.plan.ecuType || this.header.ecu_type || '';
-      const secProfile = getSecurityProfile(ecuType);
-
-      if (secProfile?.aesKeyHex && seedBytes.length === 5 &&
-          (secProfile.algorithmType === 'GM_5B_AES' || secProfile.algorithmType === 'GM_DUAL')) {
-        // Compute key using hardcoded AES key from Seed_key.cs
-        const aesKeyBytes = skHexToBytes(secProfile.aesKeyHex);
-        keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
-        this.log('info', cmd.phase, `🔑 Key computed (${secProfile.ecuType} Seed_key.cs AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-      } else if (secProfile?.algorithmType === 'FORD_3B' && seedBytes.length === 3 && secProfile.aesKeyHex) {
-        // Ford 3-byte LFSR from security profile
-        const secretBytes = skHexToBytes(secProfile.aesKeyHex);
-        keyBytes = computeFord3B(seedBytes, secretBytes);
-        this.log('info', cmd.phase, `🔑 Key computed (${secProfile.ecuType} Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-      } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
-        // Zero seed — ECU is already unlocked
-        this.log('success', cmd.phase, '🔓 Zero seed — ECU is already unlocked');
-        keyBytes = new Uint8Array(5).fill(0x00);
-      } else if (seedBytes.length === 5) {
-        // No hardcoded key for this ECU — try dummy key for unlocked ECUs
-        this.log('warning', cmd.phase, `No Seed_key.cs entry for ${ecuType} — trying dummy key (unlocked ECU only)`);
-        keyBytes = new Uint8Array(5).fill(0x00);
-      } else {
-        if (this.dryRun) {
-          this.log('warning', cmd.phase, `[DRY RUN] No Seed_key.cs entry for ${ecuType} (${seedBytes.length}-byte seed) — skipping`);
-          return seedResponse;
+        const ecuType = this.plan.ecuType || this.header.ecu_type || '';
+        const keyFromServer = await this.computeKeyBytesFromServer(ecuType, seedBytes);
+        if (keyFromServer) {
+          keyBytes = keyFromServer;
+          this.log('info', cmd.phase, `🔑 Key from server (${ecuType}): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
+          this.log('success', cmd.phase, '🔓 Zero seed — ECU is already unlocked');
+          keyBytes = new Uint8Array(5).fill(0x00);
+        } else if (seedBytes.length === 5) {
+          this.log('warning', cmd.phase, `No server key for ${ecuType} — trying dummy key (unlocked ECU only)`);
+          keyBytes = new Uint8Array(5).fill(0x00);
+        } else {
+          if (this.dryRun) {
+            this.log('warning', cmd.phase, `[DRY RUN] No key for ${ecuType} (${seedBytes.length}-byte seed) — skipping`);
+            return seedResponse;
+          }
+          throw new Error(`Cannot compute key for ${ecuType} (${seedBytes.length}-byte seed).`);
         }
-        throw new Error(`No Seed_key.cs entry for ${ecuType}. Cannot compute key for ${seedBytes.length}-byte seed.`);
-      }
       } // end lookup vs compute
 
       // Step 3: Send key to ECU (sub-function + 1)
@@ -1861,16 +1865,6 @@ export class PCANFlashEngine {
 
 // ── Utility Functions ──────────────────────────────────────────────────────
 
-function hexToBytes(hex: string): Uint8Array {
-  // Handle various hex formats: "AABBCC", "AA BB CC", "0xAA 0xBB"
-  const clean = hex.replace(/0x/gi, '').replace(/\s+/g, '');
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
-
 function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -1878,3 +1872,4 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   }
   return true;
 }
+

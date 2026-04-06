@@ -27,12 +27,8 @@ import {
   type Manufacturer,
   type ContainerFileHeader,
 } from '../../../shared/ecuDatabase';
-import {
-  getSecurityProfile,
-  computeGM5B,
-  computeFord3B,
-  type EcuSecurityProfile,
-} from '../../../shared/seedKeyAlgorithms';
+import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
+import { getSecurityProfileMeta, type EcuSecurityProfileMeta } from '../../../shared/seedKeyMeta';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -850,10 +846,10 @@ export class EcuScanner {
 
     // Find security profile for this ECU
     // Try matching by ECU config first, then by CAN address
-    let profile: EcuSecurityProfile | undefined;
+    let profile: EcuSecurityProfileMeta | undefined;
     const ecuConfig = result.ecuConfig || this.matchEcuConfig(result);
     if (ecuConfig) {
-      profile = getSecurityProfile(ecuConfig.ecuType);
+      profile = getSecurityProfileMeta(ecuConfig.ecuType);
     }
 
     // Determine seed sub-functions to try

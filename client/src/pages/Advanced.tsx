@@ -10,8 +10,6 @@
  */
 
 import React, { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
-import { SignInBanner } from '@/components/SignInPrompt';
-import { Link } from 'wouter';
 import {
   Search, Lock, ArrowLeft, Database, BookOpen,
   Hash, Terminal, ChevronDown, ChevronRight, X, Zap,
@@ -21,7 +19,6 @@ import {
   Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin,
   CloudSun, Trophy, Cloud
 } from 'lucide-react';
-import { getLoginUrl } from '@/const';
 import { useLocation } from 'wouter';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
@@ -88,7 +85,6 @@ const WeatherPanel = React.lazy(() => import('@/pages/Weather').then(m => ({ def
 const CloudPanel = React.lazy(() => import('@/pages/Cloud').then(m => ({ default: m.CloudContent })));
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-const STORAGE_KEY = 'ppei_advanced_unlocked';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 
@@ -100,155 +96,6 @@ const sColor = {
   yellow: 'oklch(0.75 0.18 60)', text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.68 0.010 260)',
   textMuted: 'oklch(0.58 0.008 260)',
 };
-
-// ─── V-OP Pro Access Gate ────────────────────────────────────────────────────
-
-/**
- * AccessGate — KingKong access code gate for V-OP Pro
- * Enter the correct code to unlock the Advanced section.
- * Once unlocked, persists in localStorage until cleared.
- */
-const ADVANCED_CODE = 'KINGKONG';
-
-function AccessGate({ onUnlock }: { onUnlock: () => void }) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState(false);
-  const [shake, setShake] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  const handleSubmit = () => {
-    if (code.toUpperCase() === ADVANCED_CODE) {
-      // No localStorage persistence — require code every session
-      onUnlock();
-    } else {
-      setError(true);
-      setShake(true);
-      setAttempts(prev => prev + 1);
-      setTimeout(() => setShake(false), 500);
-      setTimeout(() => setError(false), 2000);
-    }
-  };
-
-  const funnyMessages = [
-    "Wrong code. The ECU is judging you right now.",
-    "Nope. Even your mom's minivan has better security than your guesses.",
-    "Access denied. Try turning the key off and back on... oh wait, wrong tool.",
-    "That ain't it chief. The turbo just spooled down in disappointment.",
-    "Incorrect. The injectors are crying.",
-    "Wrong again. At this rate, you'll need a flash tool just to unlock the door.",
-    "Still no. Your ECU called — it wants a competent operator.",
-    "Denied. Even the DPF has more flow than your password game.",
-  ];
-
-  return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
-      <div className="ppei-anim-scale-in" style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        textAlign: 'center', padding: '2rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
-      }}>
-        {/* Big lock icon with glow */}
-        <div style={{
-          width: '80px', height: '80px', borderRadius: '50%',
-          background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
-        }}>
-          <Lock style={{ width: 36, height: 36, color: sColor.red }} />
-        </div>
-
-        <h2 style={{
-          fontFamily: sFont.heading, fontSize: '2rem', letterSpacing: '0.12em',
-          color: 'white', marginBottom: '0.5rem',
-        }}>
-          V-OP PRO
-        </h2>
-
-        <p style={{
-          fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim,
-          maxWidth: '400px', marginBottom: '0.5rem',
-        }}>
-          This area is restricted. Enter the access code to proceed.
-        </p>
-
-        <p style={{
-          fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)',
-          maxWidth: '400px', marginBottom: '2rem', fontStyle: 'italic',
-        }}>
-          "I asked my ECU for the password. It said 'knock knock.' I said 'who's there?' It threw a P0300."
-        </p>
-
-        <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
-          <div style={{
-            display: 'flex', gap: '8px', marginBottom: '12px',
-          }}>
-            <input
-              ref={inputRef}
-              type="password"
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              placeholder="Enter access code..."
-              style={{
-                flex: 1, padding: '12px 16px',
-                fontFamily: sFont.mono, fontSize: '1rem', letterSpacing: '0.15em',
-                background: sColor.bgDark,
-                border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
-                borderRadius: '3px', color: 'white', outline: 'none',
-                textAlign: 'center', textTransform: 'uppercase',
-                transition: 'border-color 0.2s',
-              }}
-            />
-            <button
-              onClick={handleSubmit}
-              style={{
-                padding: '12px 20px',
-                background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
-                borderRadius: '3px', color: sColor.red,
-                fontFamily: sFont.heading, fontSize: '0.9rem', letterSpacing: '0.08em',
-                cursor: 'pointer', transition: 'all 0.15s',
-              }}
-            >
-              UNLOCK
-            </button>
-          </div>
-
-          {error && attempts > 0 && (
-            <p style={{
-              fontFamily: sFont.body, fontSize: '0.8rem',
-              color: sColor.red, marginTop: '8px',
-              animation: 'fadeIn 0.3s ease',
-            }}>
-              {funnyMessages[(attempts - 1) % funnyMessages.length]}
-            </p>
-          )}
-        </div>
-
-        {attempts >= 3 && (
-          <p style={{
-            fontFamily: sFont.mono, fontSize: '0.7rem',
-            color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
-          }}>
-            Hint: Think big. Think primate. Think chest-pounding dominance.
-          </p>
-        )}
-
-        <div style={{ marginTop: '2rem' }}>
-          <Link href="/" style={{ textDecoration: 'none' }}>
-            <span style={{
-              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-              color: sColor.textMuted, cursor: 'pointer',
-            }}>
-              ← BACK TO V-OP LITE
-            </span>
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Category Config ────────────────────────────────────────────────────────
 
@@ -1549,7 +1396,6 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="min-h-screen" style={{ background: sColor.bg, color: sColor.text }}>
-      <SignInBanner />
       {/* Shared PPEI Header */}
       <PpeiHeader />
 
@@ -1874,9 +1720,5 @@ function TasksGate() {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
-  const [unlocked, setUnlocked] = useState(false);
-  const handleLock = () => { setUnlocked(false); };
-
-  if (!unlocked) return <AccessGate onUnlock={() => setUnlocked(true)} />;
-  return <AdvancedDashboard onLock={handleLock} />;
+  return <AdvancedDashboard onLock={() => {}} />;
 }

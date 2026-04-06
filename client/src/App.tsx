@@ -7,8 +7,6 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
 import { Redirect } from "wouter";
-import AuthGate from "./components/AuthGate";
-
 // Lazy-load all heavy pages for code splitting
 const Home = lazy(() => import("./pages/Home"));
 const Advanced = lazy(() => import("./pages/Advanced"));
@@ -93,10 +91,8 @@ function App() {
       >
         <TooltipProvider>
           <Toaster />
-          <AuthGate>
-            <Router />
-            <DebugReportButton />
-          </AuthGate>
+          <Router />
+          <DebugReportButton />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

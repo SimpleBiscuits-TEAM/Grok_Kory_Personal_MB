@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>VOP E41 Flash Engine - Complete Code Review</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">VOP E41 Flash Engine - Complete Code Review</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#vop-e41-flash-engine---complete-code-review"
+id="toc-vop-e41-flash-engine---complete-code-review">VOP E41 Flash
+Engine - Complete Code Review</a>
+<ul>
+<li><a href="#table-of-contents" id="toc-table-of-contents">Table of
+Contents</a></li>
+<li><a href="#ecu-configuration" id="toc-ecu-configuration">1. ECU
+Configuration</a>
+<ul>
+<li><a href="#key-facts" id="toc-key-facts">Key facts</a></li>
+</ul></li>
+<li><a href="#flash-plan-generation" id="toc-flash-plan-generation">2.
+Flash Plan Generation</a>
+<ul>
+<li><a href="#generated-command-sequence-e41-full_flash"
+id="toc-generated-command-sequence-e41-full_flash">Generated Command
+Sequence (E41 FULL_FLASH)</a></li>
+<li><a href="#critical-notes-from-orchestrator"
+id="toc-critical-notes-from-orchestrator">Critical notes from
+orchestrator</a></li>
+</ul></li>
+<li><a href="#pre_check-phase-flash-engine"
+id="toc-pre_check-phase-flash-engine">3. PRE_CHECK Phase (Flash
+Engine)</a>
+<ul>
+<li><a href="#what-happens-in-order" id="toc-what-happens-in-order">What
+happens in order</a></li>
+</ul></li>
+<li><a href="#session_open-phase-broadcast-sequence"
+id="toc-session_open-phase-broadcast-sequence">4. SESSION_OPEN Phase
+(Broadcast Sequence)</a>
+<ul>
+<li><a href="#uudt-execution-path" id="toc-uudt-execution-path">UUDT
+execution path</a></li>
+<li><a href="#exact-can-frames-sent-with-timing"
+id="toc-exact-can-frames-sent-with-timing">Exact CAN frames sent (with
+timing)</a></li>
+</ul></li>
+<li><a href="#security_access-phase" id="toc-security_access-phase">5.
+SECURITY_ACCESS Phase</a>
+<ul>
+<li><a href="#bootloader-polling-loop"
+id="toc-bootloader-polling-loop">Bootloader polling loop</a></li>
+<li><a href="#seedkey-computation" id="toc-seedkey-computation">Seed/key
+computation</a></li>
+<li><a href="#if-security-times-out-nonfatal-for-gmlan"
+id="toc-if-security-times-out-nonfatal-for-gmlan">If security times out
+(nonFatal for GMLAN)</a></li>
+</ul></li>
+<li><a href="#block_transfer-phase" id="toc-block_transfer-phase">6.
+BLOCK_TRANSFER Phase</a>
+<ul>
+<li><a href="#per-block-sequence" id="toc-per-block-sequence">Per-block
+sequence</a></li>
+</ul></li>
+<li><a href="#post_flash-verification-cleanup"
+id="toc-post_flash-verification-cleanup">7. POST_FLASH / VERIFICATION /
+CLEANUP</a>
+<ul>
+<li><a href="#post_flash" id="toc-post_flash">POST_FLASH</a></li>
+<li><a href="#verification-gmlan"
+id="toc-verification-gmlan">VERIFICATION (GMLAN)</a></li>
+<li><a href="#key_cycle" id="toc-key_cycle">KEY_CYCLE</a></li>
+<li><a href="#cleanup" id="toc-cleanup">CLEANUP</a></li>
+</ul></li>
+<li><a href="#transport-layer---single-frame"
+id="toc-transport-layer---single-frame">8. Transport Layer - Single
+Frame</a></li>
+<li><a href="#transport-layer---multi-frame-iso-tp"
+id="toc-transport-layer---multi-frame-iso-tp">9. Transport Layer -
+Multi-Frame (ISO-TP)</a></li>
+<li><a href="#seedkey-algorithm---aes-128-ecb"
+id="toc-seedkey-algorithm---aes-128-ecb">10. Seed/Key Algorithm -
+AES-128 ECB</a>
+<ul>
+<li><a href="#known-seedkey-pairs-hardcoded-lookup"
+id="toc-known-seedkey-pairs-hardcoded-lookup">Known seed/key pairs
+(hardcoded lookup)</a></li>
+</ul></li>
+<li><a href="#testerpresent-keepalive"
+id="toc-testerpresent-keepalive">11. TesterPresent Keepalive</a></li>
+<li><a href="#bridge-reconnection" id="toc-bridge-reconnection">12.
+Bridge Reconnection</a></li>
+<li><a href="#summary-of-current-failure-point"
+id="toc-summary-of-current-failure-point">13. Summary of Current Failure
+Point</a>
+<ul>
+<li><a href="#what-the-code-does-at-the-failure-point"
+id="toc-what-the-code-does-at-the-failure-point">What the code does at
+the failure point</a></li>
+<li><a href="#the-question" id="toc-the-question">The question</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="vop-e41-flash-engine---complete-code-review">VOP E41 Flash
+Engine - Complete Code Review</h1>
+<p><strong>Document Purpose:</strong> Full walkthrough of every line of
+code that executes during a live E41 flash, organized by execution
+order. This is the code that will run on attempt #17.</p>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol type="1">
+<li>ECU Configuration (Static Data)</li>
+<li>Flash Plan Generation (Orchestrator)</li>
+<li>Flash Engine Execution - PRE_CHECK</li>
+<li>Flash Engine Execution - SESSION_OPEN (Broadcast)</li>
+<li>Flash Engine Execution - SECURITY_ACCESS</li>
+<li>Flash Engine Execution - BLOCK_TRANSFER</li>
+<li>POST_FLASH / VERIFICATION / CLEANUP</li>
+<li>Transport Layer - sendUDSviaRawCAN (Single Frame)</li>
+<li>Transport Layer - sendUDSMultiFrame (ISO-TP)</li>
+<li>Seed/Key Algorithm - AES-128 ECB</li>
+<li>TesterPresent Keepalive</li>
+<li>Bridge Reconnection</li>
+<li>Summary of Current Failure Point</li>
+</ol>
+<hr />
+<h2 id="ecu-configuration">1. ECU Configuration</h2>
+<p><strong>File:</strong> <code>shared/ecuDatabase.ts</code> - E41
+entry</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>E41<span class="op">:</span> {</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  ecuType<span class="op">:</span> <span class="st">&#39;E41&#39;</span><span class="op">,</span> name<span class="op">:</span> <span class="st">&#39;E41 (L5P Duramax)&#39;</span><span class="op">,</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  oem<span class="op">:</span> <span class="st">&#39;GM&#39;</span><span class="op">,</span> controllerType<span class="op">:</span> <span class="st">&#39;ecu&#39;</span><span class="op">,</span> protocol<span class="op">:</span> <span class="st">&#39;GMLAN&#39;</span><span class="op">,</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  xferSize<span class="op">:</span> <span class="bn">0xFFE</span><span class="op">,</span>        <span class="co">// Max block length per BUSMASTER (34 00 00 0F FE)</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  canSpeed<span class="op">:</span> <span class="dv">500</span><span class="op">,</span>           <span class="co">// 500 kbps</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  seedLevel<span class="op">:</span> <span class="bn">0x01</span><span class="op">,</span>         <span class="co">// Security access level 1 (0x27 0x01)</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>  txAddr<span class="op">:</span> <span class="bn">0x7E0</span><span class="op">,</span>           <span class="co">// Physical request address</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  rxAddr<span class="op">:</span> <span class="bn">0x7E8</span><span class="op">,</span>           <span class="co">// Physical response address</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  txPrefix<span class="op">:</span> <span class="dt">null</span><span class="op">,</span> rxPrefix<span class="op">:</span> <span class="dt">null</span><span class="op">,</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>  saeSupported<span class="op">:</span> <span class="kw">true</span><span class="op">,</span> saeReqAdd<span class="op">:</span> <span class="dt">null</span><span class="op">,</span> fastMode<span class="op">:</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  patchNecessary<span class="op">:</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>  flashSequence<span class="op">:</span> GM_FLASH_SEQUENCE<span class="op">,</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>  usesTransferExit<span class="op">:</span> <span class="kw">false</span><span class="op">,</span> <span class="co">// ZERO 0x37 commands in 504,189 BUSMASTER frames</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>}<span class="op">,</span></span></code></pre></div>
+<p><strong>File:</strong> <code>shared/seedKeyAlgorithms.ts</code> - E41
+security profile</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="st">&#39;E41&#39;</span><span class="op">:</span> {</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  ecuType<span class="op">:</span> <span class="st">&#39;E41&#39;</span><span class="op">,</span> name<span class="op">:</span> <span class="st">&#39;Bosch MG1CS111 (L5P Duramax)&#39;</span><span class="op">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  manufacturer<span class="op">:</span> <span class="st">&#39;GM&#39;</span><span class="op">,</span> algorithmType<span class="op">:</span> <span class="st">&#39;GM_5B_AES&#39;</span><span class="op">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  seedLength<span class="op">:</span> <span class="dv">5</span><span class="op">,</span> keyLength<span class="op">:</span> <span class="dv">5</span><span class="op">,</span> securityLevel<span class="op">:</span> <span class="st">&#39;standard&#39;</span><span class="op">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  protocol<span class="op">:</span> <span class="st">&#39;GMLAN&#39;</span><span class="op">,</span> requiresUnlockBox<span class="op">:</span> <span class="kw">false</span><span class="op">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  seedSubFunction<span class="op">:</span> <span class="bn">0x01</span><span class="op">,</span> keySubFunction<span class="op">:</span> <span class="bn">0x02</span><span class="op">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  aesKeyHex<span class="op">:</span> <span class="st">&#39;45AE6BA2CB81F5656B05072D74FF47E0&#39;</span><span class="op">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>}<span class="op">,</span></span></code></pre></div>
+<h3 id="key-facts">Key facts</h3>
+<ul>
+<li>Protocol: GMLAN (not standard UDS)</li>
+<li>Transfer size: <code>0xFFE</code> (4094 bytes per chunk)</li>
+<li>Security: AES-128-ECB, 5-byte seed -&gt; 5-byte key</li>
+<li>AES key: <code>45AE6BA2CB81F5656B05072D74FF47E0</code></li>
+<li>No TransferExit (<code>0x37</code>) - confirmed by BUSMASTER</li>
+<li>CAN addresses: <code>TX=0x7E0</code>, <code>RX=0x7E8</code></li>
+</ul>
+<hr />
+<h2 id="flash-plan-generation">2. Flash Plan Generation</h2>
+<p><strong>File:</strong> <code>shared/pcanFlashOrchestrator.ts</code> -
+<code>generateFlashPlan()</code></p>
+<p>The orchestrator generates the command list. For E41 GMLAN, the exact
+command sequence is:</p>
+<h3 id="generated-command-sequence-e41-full_flash">Generated Command
+Sequence (E41 FULL_FLASH)</h3>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 21%" />
+<col style="width: 15%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>#</th>
+<th>Phase</th>
+<th>Command</th>
+<th>CAN TX</th>
+<th style="text-align: right;">Delay Before</th>
+<th>nonFatal</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>0</td>
+<td>VOLTAGE_INIT</td>
+<td>Set relay board</td>
+<td>(no CAN)</td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>1</td>
+<td>SESSION_OPEN</td>
+<td>ReturnToNormal</td>
+<td><code>0x101 FE 01 20</code></td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>2</td>
+<td>SESSION_OPEN</td>
+<td>ReadDID 0xB0</td>
+<td><code>0x101 FE 02 1A B0</code></td>
+<td style="text-align: right;">1000ms</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>3</td>
+<td>SESSION_OPEN</td>
+<td>Programming Session</td>
+<td><code>0x101 FE 02 10 02</code></td>
+<td style="text-align: right;">60ms</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>4</td>
+<td>SESSION_OPEN</td>
+<td>DisableNormalComm</td>
+<td><code>0x101 FE 01 28</code></td>
+<td style="text-align: right;">50ms</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>5</td>
+<td>SESSION_OPEN</td>
+<td>ReportProgrammedState</td>
+<td><code>0x101 FE 01 A2</code></td>
+<td style="text-align: right;">50ms</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>6</td>
+<td>SESSION_OPEN</td>
+<td>ProgrammingMode Enable</td>
+<td><code>0x101 FE 02 A5 01</code></td>
+<td style="text-align: right;">1000ms</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>7</td>
+<td>SESSION_OPEN</td>
+<td>ProgrammingMode Complete</td>
+<td><code>0x101 FE 02 A5 03</code></td>
+<td style="text-align: right;">50ms</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>8</td>
+<td>SESSION_OPEN</td>
+<td>Start TesterPresent</td>
+<td><code>0x101 FE 01 3E</code></td>
+<td style="text-align: right;">50ms</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>9</td>
+<td>SECURITY_ACCESS</td>
+<td>Request Seed (Level 1)</td>
+<td><code>0x7E0 02 27 01</code></td>
+<td style="text-align: right;"><strong>4000ms</strong></td>
+<td><strong>YES</strong></td>
+</tr>
+<tr class="odd">
+<td>10</td>
+<td>SECURITY_ACCESS</td>
+<td>Send Key</td>
+<td><code>0x7E0 xx 27 02 ...</code></td>
+<td style="text-align: right;">-</td>
+<td><strong>YES</strong></td>
+</tr>
+<tr class="even">
+<td>11+</td>
+<td>BLOCK_TRANSFER</td>
+<td>Flash blocks</td>
+<td>(per block)</td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>-</td>
+<td>POST_FLASH</td>
+<td>Routine Control 0xFF01</td>
+<td><code>0x7E0 04 31 01 FF 01</code></td>
+<td style="text-align: right;">-</td>
+<td><strong>YES</strong></td>
+</tr>
+<tr class="even">
+<td>-</td>
+<td>VERIFICATION</td>
+<td>ReturnToNormal</td>
+<td><code>0x101 FE 01 20</code></td>
+<td style="text-align: right;">-</td>
+<td>YES</td>
+</tr>
+<tr class="odd">
+<td>-</td>
+<td>VERIFICATION</td>
+<td>Finalize (AE 28 80)</td>
+<td><code>0x7E0 03 AE 28 80</code></td>
+<td style="text-align: right;">-</td>
+<td>YES</td>
+</tr>
+<tr class="even">
+<td>-</td>
+<td>VERIFICATION</td>
+<td>Read VIN, Cal IDs, etc.</td>
+<td><code>0x7E0 02 1A xx</code></td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>-</td>
+<td>VERIFICATION</td>
+<td>ClearDTC</td>
+<td><code>0x7DF 01 04</code></td>
+<td style="text-align: right;">-</td>
+<td>YES</td>
+</tr>
+<tr class="even">
+<td>-</td>
+<td>KEY_CYCLE</td>
+<td>Key Off / Key On / Wait</td>
+<td>(user action)</td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+<tr class="odd">
+<td>-</td>
+<td>CLEANUP</td>
+<td>ClearDTC (GMLAN)</td>
+<td><code>0x7DF 01 04</code></td>
+<td style="text-align: right;">1000ms</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td>-</td>
+<td>CLEANUP</td>
+<td>ReturnToNormal</td>
+<td><code>0x101 FE 01 20</code></td>
+<td style="text-align: right;">-</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h3 id="critical-notes-from-orchestrator">Critical notes from
+orchestrator</h3>
+<ul>
+<li>All <code>SESSION_OPEN</code> commands are UUDT (prefix
+<code>FE</code>) on functional address <code>0x101</code> -
+fire-and-forget, no response expected.</li>
+<li>No PRE_CHECK physical commands for GMLAN live flash (BUSMASTER shows
+zero before broadcast).</li>
+<li>No PriRC (removed - E88-specific, always fails on E41).</li>
+<li>No separate erase command (<code>0x31</code>) - erase is implicit in
+RequestDownload (NRC <code>0x78</code>).</li>
+<li>No TransferExit (<code>0x37</code>) - next RequestDownload
+implicitly closes block.</li>
+<li>Security access has 4000ms delay before first seed request
+(BUSMASTER: 4.0s after <code>A5 03</code>).</li>
+<li>Security access is nonFatal for GMLAN.</li>
+</ul>
+<hr />
+<h2 id="pre_check-phase-flash-engine">3. PRE_CHECK Phase (Flash
+Engine)</h2>
+<p><strong>File:</strong> <code>client/src/lib/pcanFlashEngine.ts</code>
+- <code>execute()</code> method, lines 522-728</p>
+<h3 id="what-happens-in-order">What happens in order</h3>
+<pre class="text"><code>1. Prompt user: &quot;Turn ignition ON (key on / engine off)&quot;
+   -&gt; Waits for user confirmation (no timeout)
+
+2. Connect to PCAN bridge via WebSocket
+   -&gt; conn.connect() - tries wss://localhost:8766 then ws://localhost:8765
+   -&gt; Full vehicle initialization (VIN read, PID scan)
+
+3. Wait 3000ms for ECU to settle after bridge connect
+
+4. GMLAN LIVE FLASH: Skip ALL physical commands
+   -&gt; No 0x10 0x02 (programming session) on 0x7E0
+   -&gt; No 0x27 0x01 (seed request) on 0x7E0
+   -&gt; Log: &quot;GMLAN live flash: skipping physical session/security&quot;
+   -&gt; TesterPresent keepalive NOT started here (started by SESSION_OPEN cmd #8)
+
+5. CAN bus termination tip logged
+
+6. Check bridge still connected before command loop
+   -&gt; If dropped during pre-check, attempt reconnect (3 attempts)</code></pre>
+<p><strong>Key decision:</strong> For live flash, PRE_CHECK does
+<strong>nothing</strong> to the ECU. No physical commands. This matches
+BUSMASTER, which shows zero physical commands before the broadcast.</p>
+<hr />
+<h2 id="session_open-phase-broadcast-sequence">4. SESSION_OPEN Phase
+(Broadcast Sequence)</h2>
+<p><strong>File:</strong> <code>pcanFlashEngine.ts</code> -
+<code>executeCommand()</code> method</p>
+<p>Each <code>SESSION_OPEN</code> command is a UUDT message. The engine
+detects UUDT by checking if the first data byte is
+<code>0xFE</code>.</p>
+<h3 id="uudt-execution-path">UUDT execution path</h3>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Detection: first byte is FE</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> isUUDT <span class="op">=</span> rawDataParts[<span class="dv">0</span>]<span class="op">?.</span><span class="fu">toUpperCase</span>() <span class="op">===</span> <span class="st">&#39;FE&#39;</span><span class="op">;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co">// If TesterPresent UUDT (FE 01 3E) and keepalive not yet active:</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Start cyclic keepalive timer (500ms interval on 0x101)</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Return immediately (don&#39;t send this frame - timer handles it)</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="co">// For all other UUDT messages:</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Build 8-byte CAN frame with 0x00 padding</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Send via WebSocket: { type: &#39;can_send&#39;, arb_id: 0x101, data: [...] }</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Fire-and-forget - no response listener</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="co">//   -&gt; Apply delayBeforeMs if specified</span></span></code></pre></div>
+<h3 id="exact-can-frames-sent-with-timing">Exact CAN frames sent (with
+timing)</h3>
+<pre class="text"><code>T+0ms:     0x101 [FE 01 20 00 00 00 00 00]  &lt;- ReturnToNormal
+T+1000ms:  0x101 [FE 02 1A B0 00 00 00 00]  &lt;- ReadDID 0xB0
+T+1060ms:  0x101 [FE 02 10 02 00 00 00 00]  &lt;- Programming Session
+T+1110ms:  0x101 [FE 01 28 00 00 00 00 00]  &lt;- DisableNormalComm
+T+1160ms:  0x101 [FE 01 A2 00 00 00 00 00]  &lt;- ReportProgrammedState
+T+2160ms:  0x101 [FE 02 A5 01 00 00 00 00]  &lt;- ProgrammingMode Enable
+T+2210ms:  0x101 [FE 02 A5 03 00 00 00 00]  &lt;- ProgrammingMode Complete &lt;- ECU REBOOTS
+T+2260ms:  Keepalive timer starts (FE 01 3E on 0x101 every 500ms)</code></pre>
+<p><strong>Total broadcast window:</strong> ~2.26 seconds (BUSMASTER
+reference: 2.21s)</p>
+<p>After <code>A5 03</code>, the ECU reboots into its bootloader. The
+keepalive timer fires every 500ms during the 4000ms wait before the seed
+request.</p>
+<hr />
+<h2 id="security_access-phase">5. SECURITY_ACCESS Phase</h2>
+<p><strong>File:</strong> <code>pcanFlashEngine.ts</code> -
+<code>handleSecurityAccess()</code> method, lines 1331-1574</p>
+<h3 id="bootloader-polling-loop">Bootloader polling loop</h3>
+<pre class="text"><code>The orchestrator sets delayBeforeMs: 4000 on the seed request command.
+This 4s delay runs BEFORE the seed request, with keepalive active.
+
+Then the polling loop begins:
+  maxPollAttempts = 12 (for GMLAN post-broadcast)
+  pollIntervalMs = 3000
+
+  For each poll attempt (0..11):
+    For each lockout retry (0..3):
+      -&gt; Send: 0x7E0 [02 27 01 00 00 00 00 00]  (Request Seed Level 1)
+      -&gt; Wait up to 5000ms for response on 0x7E8
+
+      If no response:
+        -&gt; &quot;ECU bootloader not ready yet&quot;
+        -&gt; Wait 3000ms, try next poll attempt
+
+      If NRC 0x37 (requiredTimeDelayNotExpired):
+        -&gt; Wait 10000ms for lockout to expire
+        -&gt; Retry lockout (up to 3 times)
+
+      If NRC 0x36 (exceededNumberOfAttempts):
+        -&gt; Wait 10000ms
+        -&gt; Retry
+
+      If positive response:
+        -&gt; Extract 5-byte seed
+        -&gt; Break out of both loops
+
+  Total polling budget: ~36s (12 x 3s) + 4s initial delay = ~40s</code></pre>
+<p><strong>CRITICAL:</strong> Keepalive is <strong>not paused</strong>
+during seed probes. BUSMASTER shows keepalive on UUDT <code>0x101</code>
+running continuously during seed/key exchange on USDT
+<code>0x7E0</code>. Different CAN IDs, no interference.</p>
+<h3 id="seedkey-computation">Seed/key computation</h3>
+<pre class="text"><code>1. Check known seed-&gt;key lookup table:
+   - Bench ECU: seed [A0 9A 34 9B 06] -&gt; key [AF 72 2A 51 7E]
+   - Truck ECU: seed [CE DA F9 83 06] -&gt; key [59 2E F4 0F 33]
+
+2. If not in lookup table, compute via AES-128-ECB:
+   - Get security profile for E41
+   - AES key: 45AE6BA2CB81F5656B05072D74FF47E0
+   - Build 16-byte buffer: [FF FF FF FF FF FF FF FF FF FF FF seed[0..4]]
+   - AES-128-ECB encrypt (via Web Crypto API: AES-CBC with zero IV)
+   - Take first 5 bytes of ciphertext as key
+
+3. If seed is all zeros: ECU already unlocked (zero key)
+
+4. Wait 200ms after seed received
+
+5. Send key: 0x7E0 [xx 27 02 key[0..4]]
+   -&gt; Wait for positive response (0x67 0x02)</code></pre>
+<h3 id="if-security-times-out-nonfatal-for-gmlan">If security times out
+(nonFatal for GMLAN)</h3>
+<pre class="text"><code>The engine has a belt-and-suspenders safety net:
+  - cmd.nonFatal is set by orchestrator -&gt; log warning, continue
+  - Separate GMLAN safety net in executeCommand() -&gt; also continues
+  - Proceeds to BLOCK_TRANSFER regardless</code></pre>
+<hr />
+<h2 id="block_transfer-phase">6. BLOCK_TRANSFER Phase</h2>
+<p><strong>File:</strong> <code>pcanFlashEngine.ts</code> -
+<code>executeBlockTransfer()</code> method, lines 1578-1804</p>
+<h3 id="per-block-sequence">Per-block sequence</h3>
+<pre class="text"><code>For each block in the container:
+
+  1. RESOLVE TRANSFER SIZE
+     containerXfer = parseInt(block.xferSize, 16)  // from container header
+     ecuDbXfer = 0xFFE                              // from ECU database
+     xferSize = containerXfer &gt; 0 ? containerXfer : ecuDbXfer
+     // Result: 0xFFE (4094 bytes) for E41
+
+  2. CALCULATE BLOCK DATA OFFSET
+     headerLength = parseInt(header.header_length, 16)  // typically 0x3000
+     blockOffset = headerLength + sum(previous block lengths)
+
+  3. REQUEST DOWNLOAD (0x34)
+     If block has rc34 in container header:
+       -&gt; Use exact bytes from container
+     Else if GMLAN:
+       First block:  [0x00, 0x00, 0x0F, 0xFE]  -&gt; 34 00 00 0F FE
+       Other blocks: [0x10, 0x0F, 0xFE]         -&gt; 34 10 0F FE
+
+     Send via sendUDSRequest(0x34, undefined, rc34Bytes, 0x7E0)
+
+     If NRC 0x78 (responsePending = ECU erasing flash):
+       -&gt; Retry loop with delays: 500ms, 1s, 2s, 5s, 10s, 15s
+       -&gt; Total budget: 60s
+       -&gt; Each retry re-sends the full RequestDownload
+       -&gt; Wait for positive 0x74 response
+
+     If other NRC: throw error (fatal)
+
+  4. TRANSFER DATA (0x36) - chunk loop
+     sequenceNumber = 0x00  // ALWAYS 0x00 per BUSMASTER (not incrementing)
+
+     While bytesSent &lt; blockData.length:
+       chunkSize = min(xferSize, remaining)  // up to 4094 bytes
+       payload = [0x00, ...chunk]            // [seqNum, data...]
+
+       -&gt; sendUDSRequest(0x36, undefined, payload, 0x7E0)
+       -&gt; This routes to sendUDSMultiFrame (payload &gt; 7 bytes)
+       -&gt; Wait for positive 0x76 response
+       -&gt; NRC 0x78 handled by multi-frame listener (keeps waiting for 0x76)
+
+       If NRC other than 0x78: throw error
+
+       Update progress every ~10%
+
+  5. NO TRANSFER EXIT
+     // BUSMASTER: zero 0x37 in 504,189 frames
+     // Next RequestDownload implicitly closes this block</code></pre>
+<hr />
+<h2 id="post_flash-verification-cleanup">7. POST_FLASH / VERIFICATION /
+CLEANUP</h2>
+<h3 id="post_flash">POST_FLASH</h3>
+<pre class="text"><code>-&gt; Send: 0x7E0 [04 31 01 FF 01]  (RoutineControl - Check Dependencies)
+-&gt; nonFatal for GMLAN (0x31 returns NRC 0x11 on E41)</code></pre>
+<h3 id="verification-gmlan">VERIFICATION (GMLAN)</h3>
+<pre class="text"><code>1. 0x101 [FE 01 20]        &lt;- ReturnToNormal broadcast (nonFatal)
+2. 0x7E0 [03 AE 28 80]     &lt;- Finalize Programming (nonFatal, ECU silent ~12s)
+3. 0x7E0 [02 1A 90]        &lt;- Read VIN
+4. 0x7E0 [02 1A C1..C6]    &lt;- Read Cal IDs (6 reads)
+5. 0x7E0 [02 1A D0]        &lt;- Read Unlock Status
+6. 0x7E0 [02 1A CC]        &lt;- Read Programming Counter
+7. 0x7DF [01 04]           &lt;- ClearDTC functional (nonFatal)</code></pre>
+<h3 id="key_cycle">KEY_CYCLE</h3>
+<pre class="text"><code>1. Prompt: &quot;Turn ignition OFF&quot; -&gt; wait for user
+2. Prompt: &quot;Turn ignition ON&quot; -&gt; wait for user
+3. Auto-wait 8s for ECU boot
+4. reEstablishSession():
+   -&gt; Reconnect bridge if needed
+   -&gt; Wait 2s for ECU to settle
+   -&gt; Send 0x10 0x02 (programming session) - up to 5 retries
+   -&gt; Send 0x27 0x01 (seed request) - with lockout handling
+   -&gt; Compute and send key
+   -&gt; Restart keepalive
+5. Read VIN (0x1A 0x90) to verify new cal loaded</code></pre>
+<h3 id="cleanup">CLEANUP</h3>
+<pre class="text"><code>1. 0x7DF [01 04]           &lt;- ClearDTC GMLAN (1000ms delay before)
+2. 0x101 [FE 01 20]        &lt;- ReturnToNormal broadcast
+3. Stop keepalive</code></pre>
+<hr />
+<h2 id="transport-layer---single-frame">8. Transport Layer - Single
+Frame</h2>
+<p><strong>File:</strong> <code>client/src/lib/pcanConnection.ts</code>
+- <code>sendUDSviaRawCAN()</code></p>
+<pre class="text"><code>For payloads &lt;= 7 bytes (seed request, session control, DID reads):
+
+1. Ensure bus monitor is running (for response capture)
+2. Build ISO-TP single frame:
+   frame = [PCI_length, service, sub?, data..., 0x00 padding]
+   Example: [02, 27, 01, 00, 00, 00, 00, 00]  &lt;- Request Seed
+
+3. Drain stale frames: clear listener, wait 150ms
+
+4. Set up response listener:
+   -&gt; Filter for arb_id = targetAddress + 0x08 (0x7E8)
+   -&gt; For functional (0x7DF): accept 0x7E8-0x7EF
+   -&gt; Validate response service ID matches expected positive (service + 0x40)
+   -&gt; For negative (0x7F): verify rejected service matches what we sent
+   -&gt; NRC 0x78: keep listener active (don&#39;t resolve)
+   -&gt; Timeout: 5000ms default
+
+5. Send frame: { type: &#39;can_send&#39;, arb_id: targetAddress, data: frame }
+
+6. Wait for response promise
+
+7. Parse ISO-TP response:
+   -&gt; PCI type 0 (single frame): extract payload
+   -&gt; PCI type 1 (first frame): extract partial
+   -&gt; Check for 0x7F (negative) or service+0x40 (positive)</code></pre>
+<hr />
+<h2 id="transport-layer---multi-frame-iso-tp">9. Transport Layer -
+Multi-Frame (ISO-TP)</h2>
+<p><strong>File:</strong> <code>pcanConnection.ts</code> -
+<code>sendUDSMultiFrame()</code></p>
+<pre class="text"><code>For payloads &gt; 7 bytes (TransferData chunks of 4094 bytes):
+
+1. Drain stale frames (150ms)
+
+2. Build First Frame (FF):
+   [0x10 | (totalLen &gt;&gt; 8), totalLen &amp; 0xFF, data[0..5]]
+   Example for 4095 bytes: [10 FF, 36, 00, d0, d1, d2, d3]
+
+3. Set up Flow Control listener BEFORE sending FF
+   -&gt; Wait for FC frame: [0x30, BlockSize, STmin, ...]
+   -&gt; Timeout: 5000ms
+   -&gt; BUSMASTER reference: ECU sends 30 00 F1 (BS=0 unlimited, STmin=241us)
+
+4. Send First Frame via can_send
+
+5. Wait for Flow Control
+   -&gt; If no FC: throw error
+
+6. Calculate inter-frame delay from STmin:
+   0xF1 = 241us -&gt; use 1ms minimum (JS can&#39;t do us)
+
+7. Send Consecutive Frames (CF):
+   For each 7-byte chunk of remaining data:
+     cf = [0x20 | (seqNum &amp; 0x0F), data[0..6]]
+     Send via can_send (fire-and-forget)
+     seqNum++ (wraps at 0x0F)
+     Wait stMinMs between frames
+
+     If BlockSize &gt; 0 and frames sent &gt;= BlockSize:
+       Wait for next FC (5s timeout)
+
+8. Wait for ECU response (30s timeout for first-chunk-after-erase):
+   -&gt; Filter for positive (0x76) or negative (0x7F)
+   -&gt; NRC 0x78: keep waiting (ECU writing to flash)
+   -&gt; Accept single-frame (PCI type 0) or first-frame (PCI type 1) responses</code></pre>
+<hr />
+<h2 id="seedkey-algorithm---aes-128-ecb">10. Seed/Key Algorithm -
+AES-128 ECB</h2>
+<p><strong>File:</strong> <code>shared/seedKeyAlgorithms.ts</code> -
+<code>computeGM5B()</code></p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">function</span> <span class="fu">computeGM5B</span>(seed<span class="op">:</span> <span class="bu">Uint8Array</span><span class="op">,</span> aesKey<span class="op">:</span> <span class="bu">Uint8Array</span>)<span class="op">:</span> <span class="bu">Promise</span><span class="op">&lt;</span><span class="bu">Uint8Array</span><span class="op">&gt;</span> {</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="co">// seed = 5 bytes from ECU</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="co">// aesKey = 45AE6BA2CB81F5656B05072D74FF47E0 (16 bytes)</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Step 1: Build salted seed (16 bytes)</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> saltedSeed <span class="op">=</span> <span class="kw">new</span> <span class="bu">Uint8Array</span>(<span class="dv">16</span>)<span class="op">;</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  saltedSeed<span class="op">.</span><span class="fu">fill</span>(<span class="bn">0xFF</span>)<span class="op">;</span>           <span class="co">// Fill with 0xFF</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>  saltedSeed[<span class="bn">0x0B</span>] <span class="op">=</span> seed[<span class="dv">0</span>]<span class="op">;</span>     <span class="co">// Place seed at offset 11-15</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>  saltedSeed[<span class="bn">0x0C</span>] <span class="op">=</span> seed[<span class="dv">1</span>]<span class="op">;</span></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>  saltedSeed[<span class="bn">0x0D</span>] <span class="op">=</span> seed[<span class="dv">2</span>]<span class="op">;</span></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>  saltedSeed[<span class="bn">0x0E</span>] <span class="op">=</span> seed[<span class="dv">3</span>]<span class="op">;</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>  saltedSeed[<span class="bn">0x0F</span>] <span class="op">=</span> seed[<span class="dv">4</span>]<span class="op">;</span></span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Result: [FF FF FF FF FF FF FF FF FF FF FF s0 s1 s2 s3 s4]</span></span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Step 2: AES-128 ECB encrypt</span></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Web Crypto doesn&#39;t support ECB directly</span></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>  <span class="co">// AES-CBC with zero IV on a single 16-byte block = ECB</span></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> cryptoKey <span class="op">=</span> <span class="cf">await</span> crypto<span class="op">.</span><span class="at">subtle</span><span class="op">.</span><span class="fu">importKey</span>(</span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>    <span class="st">&#39;raw&#39;</span><span class="op">,</span> aesKey<span class="op">,</span> { name<span class="op">:</span> <span class="st">&#39;AES-CBC&#39;</span> }<span class="op">,</span> <span class="kw">false</span><span class="op">,</span> [<span class="st">&#39;encrypt&#39;</span>]</span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>  )<span class="op">;</span></span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> iv <span class="op">=</span> <span class="kw">new</span> <span class="bu">Uint8Array</span>(<span class="dv">16</span>)<span class="op">;</span> <span class="co">// zero IV</span></span>
+<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> encrypted <span class="op">=</span> <span class="cf">await</span> crypto<span class="op">.</span><span class="at">subtle</span><span class="op">.</span><span class="fu">encrypt</span>(</span>
+<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>    { name<span class="op">:</span> <span class="st">&#39;AES-CBC&#39;</span><span class="op">,</span> iv }<span class="op">,</span> cryptoKey<span class="op">,</span> saltedSeed</span>
+<span id="cb16-24"><a href="#cb16-24" aria-hidden="true" tabindex="-1"></a>  )<span class="op">;</span></span>
+<span id="cb16-25"><a href="#cb16-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-26"><a href="#cb16-26" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Step 3: Return first 5 bytes of ciphertext</span></span>
+<span id="cb16-27"><a href="#cb16-27" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> <span class="kw">new</span> <span class="bu">Uint8Array</span>(encrypted)<span class="op">.</span><span class="fu">slice</span>(<span class="dv">0</span><span class="op">,</span> <span class="dv">5</span>)<span class="op">;</span></span>
+<span id="cb16-28"><a href="#cb16-28" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<h3 id="known-seedkey-pairs-hardcoded-lookup">Known seed/key pairs
+(hardcoded lookup)</h3>
+<table>
+<thead>
+<tr class="header">
+<th>ECU</th>
+<th>Seed</th>
+<th>Key</th>
+<th>Label</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Bench</td>
+<td><code>A0 9A 34 9B 06</code></td>
+<td><code>AF 72 2A 51 7E</code></td>
+<td>HPTuners unlocked</td>
+</tr>
+<tr class="even">
+<td>Truck</td>
+<td><code>CE DA F9 83 06</code></td>
+<td><code>59 2E F4 0F 33</code></td>
+<td>VOP/PPEI unlocked</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="testerpresent-keepalive">11. TesterPresent Keepalive</h2>
+<p><strong>File:</strong> <code>pcanFlashEngine.ts</code> -
+<code>startKeepalive()</code> / keepalive timer</p>
+<pre class="text"><code>GMLAN keepalive:
+  Interval: 500ms
+  CAN ID: 0x101 (functional broadcast)
+  Frame: [FE 01 3E 00 00 00 00 00]  &lt;- UUDT TesterPresent
+
+  Fire-and-forget via WebSocket:
+    { type: &#39;can_send&#39;, arb_id: 0x101, data: [0xFE, 0x01, 0x3E, 0, 0, 0, 0, 0] }
+
+  Started: When TesterPresent UUDT command is encountered in SESSION_OPEN (after A5 03)
+  Paused: During non-security UDS exchanges (pauseKeepalive/resumeKeepalive)
+  NOT paused: During security access (seed probes use 0x7E0, keepalive uses 0x101)
+  Stopped: On abort, on key-off, on flash complete</code></pre>
+<hr />
+<h2 id="bridge-reconnection">12. Bridge Reconnection</h2>
+<p><strong>File:</strong> <code>pcanFlashEngine.ts</code> -
+<code>reconnectBridge()</code> and <code>pcanConnection.ts</code> -
+<code>reconnectForFlash()</code></p>
+<pre class="text"><code>Bridge drops every ~50s (observed in logs).
+
+reconnectBridge():
+  1. Check WebSocket readyState
+  2. If closed: attempt reconnect (3 tries, 1s/2s/3s delays)
+  3. Uses reconnectForFlash() instead of connect():
+     -&gt; Closes old WebSocket
+     -&gt; Resets UDS monitor state (udsMonitorStarted, monitorActive, listeners)
+     -&gt; Cancels pending requests
+     -&gt; Opens new WebSocket (tries last successful URL first)
+     -&gt; Does NOT run full vehicle initialization (VIN/PID scan)
+     -&gt; Sets state to &#39;ready&#39;
+  4. Wait 500ms for bridge to stabilize</code></pre>
+<hr />
+<h2 id="summary-of-current-failure-point">13. Summary of Current Failure
+Point</h2>
+<p><strong>Attempt #16 result:</strong> Bootloader completely silent
+after 36 seed request probes (~230s total).</p>
+<h3 id="what-the-code-does-at-the-failure-point">What the code does at
+the failure point</h3>
+<ol type="1">
+<li>Broadcast sequence completes in ~2.26s.</li>
+<li>Keepalive starts after <code>A5 03</code>.</li>
+<li><code>4000ms</code> delay before first seed request.</li>
+<li>Seed request sent: <code>0x7E0 [02 27 01 00 00 00 00 00]</code></li>
+<li>No response on <code>0x7E8</code> within <code>5000ms</code>.</li>
+<li>Retry every <code>3000ms</code>, 12 attempts.</li>
+<li>All 12 attempts timeout -&gt;
+<code>ECU bootloader did not respond</code>.</li>
+<li><code>nonFatal</code> -&gt; engine continues to
+<code>BLOCK_TRANSFER</code>.</li>
+<li>RequestDownload also times out -&gt; flash fails.</li>
+</ol>
+<h3 id="the-question">The question</h3>
+<p>Why does the bootloader not respond to seed requests after the
+broadcast puts it in programming mode?</p>
+</body>
+</html>

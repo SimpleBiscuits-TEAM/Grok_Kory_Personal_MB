@@ -21,6 +21,7 @@ import {
   formatBytes, formatDuration,
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
+import { hexToBytes } from '../../../shared/seedKeyAlgorithms';
 import { PCANFlashEngine, type FlashEngineCallbacks } from '../lib/pcanFlashEngine';
 import { type PCANConnection } from '../lib/pcanConnection';
 
@@ -215,6 +216,7 @@ export default function FlashMissionControl({
   const updateSession = trpc.flash.updateSession.useMutation();
   const appendLogs = trpc.flash.appendLogs.useMutation();
   const completeSession = trpc.flash.completeSession.useMutation();
+  const computeSecurityKeyMutation = trpc.flash.computeSecurityKey.useMutation();
 
   // ── Safety: beforeunload warning during flash ──────────────────────────
   useEffect(() => {
@@ -345,6 +347,16 @@ export default function FlashMissionControl({
         header: containerHeader,
         callbacks,
         dryRun,
+        computeSecurityKey: async ({ ecuType, seed }) => {
+          const seedHex = Array.from(seed)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+          const r = await computeSecurityKeyMutation.mutateAsync({ ecuType, seedHex });
+          if (r.ok && "keyHex" in r && r.keyHex) {
+            return hexToBytes(r.keyHex);
+          }
+          return null;
+        },
       });
       flashEngineRef.current = engine;
       setSim(prev => ({ ...prev, isRunning: true }));
@@ -353,7 +365,7 @@ export default function FlashMissionControl({
       // Simulator mode
       setSim(prev => ({ ...prev, isRunning: true }));
     }
-  }, [sessionUuid, updateSession, isRealFlash, pcanConnection, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage]);
+  }, [sessionUuid, updateSession, isRealFlash, pcanConnection, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
 
   const handlePause = useCallback(() => {
     setSim(prev => ({ ...prev, isPaused: !prev.isPaused }));

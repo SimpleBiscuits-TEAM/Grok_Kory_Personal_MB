@@ -7,7 +7,8 @@ import type { TrpcContext } from '../_core/context';
 import {
   ECU_DATABASE, getEcuConfig, CONTAINER_LAYOUT, FLASH_STEP_DESCRIPTIONS, FlashStep,
 } from '../../shared/ecuDatabase';
-import { getSecurityProfile, ECU_SECURITY_PROFILES } from '../../shared/seedKeyAlgorithms';
+import { ECU_SECURITY_PROFILES } from '../seedKeyProfiles';
+import { getSecurityProfile } from '../seedKeyService';
 
 // ── Mock storage for upload tests ─────────────────────────────────────────
 

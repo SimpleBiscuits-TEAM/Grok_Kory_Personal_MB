@@ -6,7 +6,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { useAuth } from '@/_core/hooks/useAuth';
-import { getLoginUrl } from '@/const';
+import { GUEST_OPEN_ID } from '@shared/guestUser';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { APP_VERSION } from '@/lib/version';
 
@@ -70,6 +70,7 @@ export default function PpeiHeader() {
   }, [showUserMenu]);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isGuest = user?.openId === GUEST_OPEN_ID;
   const visibleItems = navItems.filter(item => {
     if (item.admin && !isAdmin) return false;
     if (item.auth && !isAuthenticated) return false;
@@ -257,8 +258,8 @@ export default function PpeiHeader() {
             }}>{APP_VERSION}</span>
             {isAuthenticated && <NotificationBell />}
 
-            {/* User menu or Sign In */}
-            {isAuthenticated ? (
+            {/* User menu */}
+            {isAuthenticated && (
               <div ref={menuRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
@@ -337,7 +338,8 @@ export default function PpeiHeader() {
                       )}
                     </div>
 
-                    {/* Logout button */}
+                    {/* Logout — hidden for local guest session */}
+                    {!isGuest && (
                     <button
                       onClick={handleLogout}
                       style={{
@@ -366,31 +368,10 @@ export default function PpeiHeader() {
                       </svg>
                       SIGN OUT
                     </button>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <a
-                href={getLoginUrl()}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '5px 14px',
-                  background: `${sColor.red}1f`,
-                  border: `1px solid ${sColor.red}4d`,
-                  borderRadius: '2px',
-                  fontFamily: sFont.heading,
-                  fontSize: '0.78rem',
-                  letterSpacing: '0.08em',
-                  color: sColor.red,
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                SIGN IN
-              </a>
             )}
           </div>
         </div>

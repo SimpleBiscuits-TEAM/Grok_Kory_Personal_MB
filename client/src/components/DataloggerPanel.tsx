@@ -837,6 +837,34 @@ export interface DataloggerPanelProps {
 }
 
 export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
+  const isDefaultQuickSelection = (pids: Set<number>) => (
+    pids.size === 5 &&
+    pids.has(0x0C) &&
+    pids.has(0x0D) &&
+    pids.has(0x05) &&
+    pids.has(0x04) &&
+    pids.has(0x11)
+  );
+
+  const isE42DuramaxVehicle = (info: VehicleInfo | null) => {
+    if (!info?.year || info.year < 2024) return false;
+    const make = (info.make || '').toLowerCase();
+    const model = (info.model || '').toLowerCase();
+    const engine = (info.engineType || '').toLowerCase();
+    return (
+      info.manufacturer === 'gm' &&
+      info.fuelType === 'diesel' &&
+      (
+        engine.includes('duramax') ||
+        engine.includes('l5p') ||
+        model.includes('2500') ||
+        model.includes('3500') ||
+        make.includes('chevrolet') ||
+        make.includes('gmc')
+      )
+    );
+  };
+
   // Connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo | null>(null);
@@ -850,6 +878,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // PID selection
   const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
+  const autoAppliedE42PresetRef = useRef(false);
 
   // Handle PIDs injected from Knox Diagnostic Agent
   useEffect(() => {
@@ -928,6 +957,26 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const addLog = useCallback((msg: string) => {
     setConsoleLogs(prev => [...prev.slice(-200), msg]);
   }, []);
+
+  // Auto-apply a known-good E42 preset once per connection so 2024+ Duramax
+  // sessions start with directed-addressing-safe Mode 22 channels.
+  // (Must run after addLog is defined — not above with other effects.)
+  useEffect(() => {
+    if (!isE42DuramaxVehicle(vehicleInfo)) return;
+    if (autoAppliedE42PresetRef.current) return;
+
+    const e42Preset = getPresetsForVehicle('gm', 'diesel').find((p) =>
+      p.name.toLowerCase().includes('2024-2026 l5p banks idash full')
+    );
+    if (!e42Preset) return;
+
+    setSelectedPids((prev) => {
+      if (!isDefaultQuickSelection(prev)) return prev;
+      autoAppliedE42PresetRef.current = true;
+      addLog(`Auto-applied E42 preset: ${e42Preset.name}`);
+      return new Set(e42Preset.pids);
+    });
+  }, [vehicleInfo, addLog]);
 
   const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
 
@@ -1030,6 +1079,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       connectionRef.current = null;
     }
     setVehicleInfo(null);
+    autoAppliedE42PresetRef.current = false;
     setSupportedPids(null);
     addLog('Disconnected');
   }, [isLogging, addLog]);

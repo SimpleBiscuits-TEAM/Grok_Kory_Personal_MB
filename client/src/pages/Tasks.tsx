@@ -6,7 +6,6 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
-import { getLoginUrl } from '@/const';
 import PpeiHeader from '@/components/PpeiHeader';
 import { useTaskStore } from '@/hooks/useTaskStore';
 import { StatsBar } from '@/components/StatsBar';
@@ -26,7 +25,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, PanelLeftOpen, PanelLeftClose, ShieldAlert, LogIn, Lock } from 'lucide-react';
+import { RotateCcw, PanelLeftOpen, PanelLeftClose, ShieldAlert } from 'lucide-react';
 
 const STORAGE_KEY = 'ppei_tasks_unlocked';
 
@@ -53,7 +52,7 @@ function isPpeiEmail(email: string | null | undefined): boolean {
 
 /** Access Gate — requires sign-in with @ppei email */
 function TasksAccessGate() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, loading } = useAuth();
   const [emailInput, setEmailInput] = useState('');
   const [error, setError] = useState('');
 
@@ -77,71 +76,6 @@ function TasksAccessGate() {
             animation: 'spin 0.8s linear infinite',
           }} />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      </div>
-    );
-  }
-
-  // Not signed in
-  if (!isAuthenticated || !user) {
-    return (
-      <div style={{ minHeight: '100vh', background: sColor.bg }}>
-        <PpeiHeader />
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: 'calc(100vh - 120px)',
-          padding: '2rem',
-        }}>
-          <div style={{
-            maxWidth: '420px',
-            width: '100%',
-            textAlign: 'center',
-            padding: '3rem 2rem',
-            border: `1px solid ${sColor.border}`,
-            background: 'oklch(0.10 0.004 260)',
-          }}>
-            <Lock style={{ width: 48, height: 48, color: sColor.red, margin: '0 auto 1.5rem' }} />
-            <h2 style={{
-              fontFamily: sFont.heading,
-              fontSize: '1.8rem',
-              letterSpacing: '0.08em',
-              color: 'white',
-              margin: '0 0 0.5rem 0',
-            }}>PPEI TASKS</h2>
-            <p style={{
-              fontFamily: sFont.body,
-              fontSize: '0.9rem',
-              color: sColor.textDim,
-              margin: '0 0 2rem 0',
-              lineHeight: 1.6,
-            }}>
-              Sign in with your PPEI account to access the QA Task Tracker.
-              Only @ppei team members can view this section.
-            </p>
-            <a
-              href={getLoginUrl()}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px 28px',
-                background: sColor.red,
-                color: 'white',
-                fontFamily: sFont.heading,
-                fontSize: '1rem',
-                letterSpacing: '0.08em',
-                textDecoration: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                transition: 'opacity 0.15s',
-              }}
-            >
-              <LogIn style={{ width: 18, height: 18 }} />
-              SIGN IN
-            </a>
-          </div>
         </div>
       </div>
     );

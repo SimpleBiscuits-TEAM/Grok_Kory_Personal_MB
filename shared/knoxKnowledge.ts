@@ -290,6 +290,104 @@ BusMaster is an open-source alternative to Vehicle Spy:
 - **Node Simulation**: Simulate CAN nodes with C-like scripting.
 - **Logging**: Log to various formats (ASC, BLF, CSV) for offline analysis.
 
+## CAN Bus Engineering Playbook (Practical)
+
+### Frame Structure and Decoding Rules
+- **Classic CAN frame**: Arbitration ID + DLC + up to 8 data bytes
+- **CAN-FD frame**: Arbitration ID + DLC + up to 64 data bytes
+- **Arbitration**: Lower ID wins bus access (dominant bits override recessive bits)
+- **DLC nuance**: In CAN-FD, DLC values 9-15 map to payload sizes >8 (not linear 1:1)
+- **Endianness**:
+  - Little-endian (Intel): increasing bit significance across increasing byte index
+  - Big-endian (Motorola): bit ordering traverses differently across bytes
+- **Signed vs unsigned**: Always apply signed interpretation before scaling when signal is defined as signed
+- **Scaling formula**: physical = raw * factor + offset
+
+### Bit Timing and Network Health
+- Typical passenger vehicle CAN rates: **125k / 250k / 500k / 1M**
+- Typical heavy-duty/J1939 rate: **250k** (some 500k deployments exist)
+- CAN-FD often uses arbitration at 500k and faster data phase (2M+)
+- Health indicators:
+  - rising error counters (TEC/REC)
+  - frequent error/passive/bus-off events
+  - abrupt bus load spikes
+  - periodic frame jitter outside expected tolerance
+- Bench setup must include proper termination (typically **120 ohm each end**)
+
+### UDS over CAN (ISO-TP) Essentials
+- **Single frame**: payload fits in one frame
+- **Multi-frame**:
+  - First Frame (FF): total length announced
+  - Consecutive Frames (CF): segmented payload chunks
+  - Flow Control (FC): receiver pacing (block size + separation time)
+- Timeouts and response pending:
+  - \`0x78\` means ECU still processing
+  - support retries with session-aware timing
+- Never mix broad response filters with unrelated periodic traffic; stale frames can be mis-associated
+
+### J1939 Essentials
+- 29-bit IDs contain priority, PGN, source address
+- PGN identifies parameter group, SPNs are contained fields/signals
+- Multi-packet transfers use TP.CM/TP.DT
+- For diagnostics:
+  - DM1 active DTC broadcast is critical
+  - monitor address-claim behavior in multi-ECU networks
+
+### Reverse Engineering Workflow (Field-Proven)
+1. Capture ignition-on baseline
+2. Change exactly one input (switch, pedal, gear, actuator)
+3. Diff captures and identify changed IDs/bytes
+4. Correlate raw values with known physical values
+5. Validate with replay/transmit in a controlled environment
+6. Document with confidence and constraints
+
+### Safety and Write-Path Guardrails
+- Do not issue write/control commands without:
+  - valid session state
+  - explicit authorization/security level
+  - known rollback/recovery path
+- Treat body control actions and powertrain actions differently in risk scoring
+- For flash/programming-adjacent operations:
+  - enforce keepalive discipline
+  - verify power stability
+  - isolate noisy background traffic where possible
+
+## V-OP API Usage for CAN/Diagnostics (Project-Specific)
+
+These are the API usage patterns Knox should explain to users/devs in this project.
+
+### Core transport pattern
+- Frontend calls tRPC procedures via \`/api/trpc\`
+- Backend routes in \`server/routers/*.ts\` execute protocol logic and return structured results
+- Auth and role context is injected by \`server/_core/context.ts\`
+
+### Relevant API domains
+- \`diagnostic.*\`:
+  - AI diagnostic reasoning using datalog/protocol context
+  - use for DTC/PID/Mode6/UDS interpretation and troubleshooting guidance
+- \`intellispy.*\`:
+  - CAN/vehicle protocol observation and tooling workflows
+  - use for frame analysis, protocol exploration, and live data tooling
+- \`flash.*\`:
+  - container validation and transfer preparation
+  - use for programming pipeline checks and flash metadata interpretation
+- \`weather.*\`:
+  - atmospheric inputs used for SAE correction in dyno/perf contexts
+  - relevant when interpreting performance deltas under changing conditions
+
+### API troubleshooting checklist for CAN-related features
+1. Confirm auth/access level allows the requested module
+2. Confirm protocol context (CAN/UDS/J1939/K-line) is explicit in request
+3. Confirm expected ECU/module addressing assumptions
+4. Validate timeout/retry behavior vs ECU response profile
+5. Verify response parsing (endianness/scaling/sign) before concluding hardware fault
+6. Attach evidence: frame snippets, DTCs, session state, and what has already been tried
+
+### Latency guidance
+- Keep requests focused: send only relevant context and recent history
+- Prefer targeted lookups for quick checks, full reasoning only when needed
+- Cache repeated lookups where safe to reduce response time
+
 ### AlphaOBD (Stellantis/FCA Specialist)
 AlphaOBD is the go-to tool for Chrysler/Dodge/RAM/Jeep diagnostics:
 - **Proxy Alignment**: Syncs all modules to BCM master configuration after module replacement. Critical for RAM trucks after BCM swap.

@@ -18,7 +18,7 @@ interface LoginDialogProps {
   onClose?: () => void;
 }
 
-/** @deprecated Use AuthGate instead. Kept for backward compatibility. */
+/** @deprecated Legacy dialog — prefer in-app flows. */
 export function ManusDialog(props: LoginDialogProps) {
   return <LoginDialog {...props} />;
 }

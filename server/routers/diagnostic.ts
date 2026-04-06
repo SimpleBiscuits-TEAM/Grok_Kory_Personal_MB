@@ -2,6 +2,8 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
+import { buildRelevantContextPack, normalizeCacheKey, trimHistory } from "../lib/llmContext";
+import { classifyIntent } from "../lib/llmIntent";
 
 /**
  * Build a system prompt that includes relevant knowledge base context
@@ -48,6 +50,18 @@ const messageSchema = z.object({
   content: z.string(),
 });
 
+const QUICK_LOOKUP_TTL_MS = 2 * 60 * 1000;
+const quickLookupCache = new Map<string, { response: string; expiresAt: number; pipeline?: string }>();
+
+function withEvidenceFooter(response: string, citations: string[]): string {
+  if (!citations.length) return response;
+  const trimmed = response.trim();
+  const footerLines = citations.slice(0, 3).map((c) => `- ${c}`);
+  const footer = `\n\n**Evidence Tags**\n${footerLines.join("\n")}`;
+  if (/evidence tags/i.test(trimmed)) return trimmed;
+  return `${trimmed}${footer}`;
+}
+
 export const diagnosticRouter = router({
   /**
    * Chat with the PPEI AI Diagnostic Assistant.
@@ -70,33 +84,48 @@ export const diagnosticRouter = router({
       // Get the last user message for the pipeline
       const userMessages = messages.filter(m => m.role === 'user');
       const lastUserMsg = userMessages[userMessages.length - 1]?.content || 'Diagnose this issue.';
-      const historyMsgs = messages.filter(m => m.role !== 'system').slice(0, -1).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      const intent = classifyIntent(lastUserMsg);
+      const historyMsgs = trimHistory(
+        messages
+          .filter(m => m.role !== 'system')
+          .slice(0, -1)
+          .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        { maxTurns: 10, maxChars: 5500 }
+      );
+      const contextPack = buildRelevantContextPack({
+        question: lastUserMsg,
+        sources: [knowledgeContext, a2lContext],
+        maxChars: 6000,
+      });
 
       // Try triple-agent pipeline first
       try {
         const knoxResult = await queryKnox({
           question: lastUserMsg,
           accessLevel: effectiveLevel,
-          domain: 'diagnostics',
-          moduleContext: [knowledgeContext, a2lContext].filter(Boolean).join('\n').slice(0, 10000),
+          domain: intent.domain,
+          moduleContext: contextPack.context,
           history: historyMsgs,
         });
+        const response = withEvidenceFooter(knoxResult.answer, contextPack.citations);
         return {
-          response: knoxResult.answer,
+          response,
           usage: null,
           pipeline: knoxResult.pipeline,
           confidence: knoxResult.confidence,
+          intent: intent.label,
         };
       } catch (pipelineErr) {
         console.warn('[Diagnostic Chat] Pipeline failed, falling back:', pipelineErr);
       }
 
       // Fallback to direct LLM
-      const systemPrompt = buildSystemPrompt(knowledgeContext, a2lContext);
+      const systemPrompt = buildSystemPrompt(contextPack.context || knowledgeContext, a2lContext);
       const llmMessages = [
         { role: "system" as const, content: systemPrompt },
         ...messages
           .filter((m) => m.role !== "system")
+          .slice(-10)
           .map((m) => ({
             role: m.role as "user" | "assistant",
             content: m.content,
@@ -114,8 +143,9 @@ export const diagnosticRouter = router({
         }
 
         return {
-          response: content,
+          response: withEvidenceFooter(content, contextPack.citations),
           usage: result.usage,
+          intent: intent.label,
         };
       } catch (error) {
         console.error("[Diagnostic Chat] LLM error:", error);
@@ -140,18 +170,41 @@ export const diagnosticRouter = router({
       const { query, knowledgeContext } = input;
       const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
       const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+      const intent = classifyIntent(query);
+      const contextPack = buildRelevantContextPack({
+        question: query,
+        sources: [knowledgeContext],
+        maxChars: 3500,
+      });
+      const cacheKey = normalizeCacheKey([String(effectiveLevel), intent.domain, query, contextPack.context]);
+      const now = Date.now();
+      const cached = quickLookupCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return {
+          response: cached.response,
+          pipeline: cached.pipeline ?? 'cache',
+          intent: intent.label,
+        };
+      }
 
       // Try triple-agent pipeline first
       try {
         const knoxResult = await queryKnox({
           question: query,
           accessLevel: effectiveLevel,
-          domain: 'diagnostics',
-          moduleContext: knowledgeContext?.slice(0, 5000),
+          domain: intent.domain,
+          moduleContext: contextPack.context,
+        });
+        const response = withEvidenceFooter(knoxResult.answer, contextPack.citations);
+        quickLookupCache.set(cacheKey, {
+          response,
+          pipeline: knoxResult.pipeline,
+          expiresAt: now + QUICK_LOOKUP_TTL_MS,
         });
         return {
-          response: knoxResult.answer,
+          response,
           pipeline: knoxResult.pipeline,
+          intent: intent.label,
         };
       } catch {
         // Fallback
@@ -160,8 +213,9 @@ export const diagnosticRouter = router({
       const systemPrompt = [
         `You are PPEI AI Diagnostic Assistant. Answer the following diagnostic query concisely.`,
         `Use markdown formatting. Include relevant PIDs, DTCs, thresholds, or formulas.`,
-        knowledgeContext
-          ? `\n--- REFERENCE DATA ---\n${knowledgeContext}`
+        `If evidence is incomplete, explicitly list what data is missing.`,
+        contextPack.context
+          ? `\n--- REFERENCE DATA ---\n${contextPack.context}`
           : "",
       ].join("\n");
 
@@ -174,8 +228,17 @@ export const diagnosticRouter = router({
         });
 
         const content = result.choices?.[0]?.message?.content;
+        const baseResponse =
+          typeof content === "string" ? content : "No response generated.";
+        const response = withEvidenceFooter(baseResponse, contextPack.citations);
+        quickLookupCache.set(cacheKey, {
+          response,
+          pipeline: 'llm_fallback',
+          expiresAt: now + QUICK_LOOKUP_TTL_MS,
+        });
         return {
-          response: typeof content === "string" ? content : "No response generated.",
+          response,
+          intent: intent.label,
         };
       } catch (error) {
         console.error("[Quick Lookup] LLM error:", error);

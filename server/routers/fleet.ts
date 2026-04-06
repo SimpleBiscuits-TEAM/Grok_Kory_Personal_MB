@@ -2,6 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { invokeLLM, type Message, type Role } from "../_core/llm";
 import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
+import { buildRelevantContext, trimHistory } from "../lib/llmContext";
 import { getDb } from "../db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import {
@@ -61,6 +62,15 @@ export const fleetRouter = router({
       const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
 
       const lastUserMsg = input.messages.filter(m => m.role === 'user').pop()?.content || '';
+      const trimmedHistory = trimHistory(
+        input.messages.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        { maxTurns: 8, maxChars: 4500 }
+      );
+      const fleetContext = buildRelevantContext({
+        question: lastUserMsg,
+        sources: [`Fleet management context. Org ID: ${input.orgId || 'none'}`],
+        maxChars: 1200,
+      });
 
       // Try quad-agent pipeline
       try {
@@ -68,8 +78,8 @@ export const fleetRouter = router({
           question: lastUserMsg,
           accessLevel: effectiveLevel,
           domain: 'fleet',
-          history: input.messages.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-          moduleContext: `Fleet management context. Org ID: ${input.orgId || 'none'}`,
+          history: trimmedHistory,
+          moduleContext: fleetContext,
         });
         return { content: knoxResult.answer, pipeline: knoxResult.pipeline, confidence: knoxResult.confidence };
       } catch {

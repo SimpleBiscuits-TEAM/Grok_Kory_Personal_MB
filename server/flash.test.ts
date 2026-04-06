@@ -3,15 +3,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  ECU_SECURITY_PROFILES,
-  getSecurityProfile,
-  getSecuritySummary,
   computeGM5B,
   computeFord3B,
   hexToBytes,
   bytesToHex,
   type SeedKeyAlgorithmType,
 } from '../shared/seedKeyAlgorithms';
+import { ECU_SECURITY_PROFILES } from './seedKeyProfiles';
+import { getSecurityProfile, getSecuritySummary } from './seedKeyService';
 import {
   ECU_DATABASE,
   getEcuConfig,

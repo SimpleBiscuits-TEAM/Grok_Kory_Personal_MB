@@ -7,7 +7,6 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -282,9 +281,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen" style={{ background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
-      <SignInModal />
-      <SignInBanner />
-
       {/* ── PPEI Header (shared across all pages) ── */}
       <PpeiHeader />
 

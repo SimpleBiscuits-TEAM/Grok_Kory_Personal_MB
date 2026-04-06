@@ -94,6 +94,20 @@ export const ALL_PROTOCOLS: Record<SupportedProtocol, {
  */
 export function detectSupportedProtocols(vehicleInfo?: VehicleInfo): ProtocolCapability[] {
   const capabilities: ProtocolCapability[] = [];
+  const normalizedMake = (vehicleInfo?.make || '').toLowerCase();
+  const normalizedModel = (vehicleInfo?.model || '').toLowerCase();
+  const normalizedEngine = (vehicleInfo?.engineType || '').toLowerCase();
+  const isE42Duramax = !!(
+    vehicleInfo?.year &&
+    vehicleInfo.year >= 2024 &&
+    (normalizedMake.includes('chevrolet') || normalizedMake.includes('gmc') || normalizedMake.includes('gm')) &&
+    (
+      normalizedEngine.includes('duramax') ||
+      normalizedEngine.includes('l5p') ||
+      normalizedModel.includes('2500') ||
+      normalizedModel.includes('3500')
+    )
+  );
 
   // OBD-II (Universal, all vehicles post-1996)
   capabilities.push({
@@ -121,9 +135,11 @@ export function detectSupportedProtocols(vehicleInfo?: VehicleInfo): ProtocolCap
   capabilities.push({
     protocol: 'uds',
     supported: true,
-    confidence: isModern ? 95 : 60,
+    confidence: isE42Duramax ? 99 : (isModern ? 95 : 60),
     reason: isModern
-      ? 'UDS is supported on virtually all modern vehicles (2008+)'
+      ? (isE42Duramax
+        ? '2024+ Duramax E42 (Global B) uses UDS with directed addressing as the primary diagnostics path'
+        : 'UDS is supported on virtually all modern vehicles (2008+)')
       : 'UDS may be available on older vehicles with CAN bus',
     baudRate: 500000,
     features: [
@@ -148,9 +164,11 @@ export function detectSupportedProtocols(vehicleInfo?: VehicleInfo): ProtocolCap
   capabilities.push({
     protocol: 'canfd',
     supported: true,
-    confidence: isCandFdLikely ? 80 : 30,
+    confidence: isE42Duramax ? 92 : (isCandFdLikely ? 80 : 30),
     reason: isCandFdLikely
-      ? `${vehicleInfo?.year || ''} model likely supports CAN FD`
+      ? (isE42Duramax
+        ? '2024+ Global B platforms commonly coexist with CAN FD segments; keep CAN FD as a high-confidence secondary option'
+        : `${vehicleInfo?.year || ''} model likely supports CAN FD`)
       : 'CAN FD is available on 2020+ vehicles. Requires PCAN-USB FD or PCAN-USB Pro.',
     baudRate: 500000,
     features: [
