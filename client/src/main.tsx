@@ -34,6 +34,22 @@ if (import.meta.env.PROD) {
 }
 // ── End Knox Shield ────────────────────────────────────────────────────────
 
+// Optional Umami analytics — only load when both env vars are set (avoids broken HTML placeholders when unset).
+const analyticsEndpoint = import.meta.env.VITE_ANALYTICS_ENDPOINT;
+const analyticsWebsiteId = import.meta.env.VITE_ANALYTICS_WEBSITE_ID;
+if (
+  typeof analyticsEndpoint === "string" &&
+  analyticsEndpoint.length > 0 &&
+  typeof analyticsWebsiteId === "string" &&
+  analyticsWebsiteId.length > 0
+) {
+  const script = document.createElement("script");
+  script.defer = true;
+  script.src = `${analyticsEndpoint.replace(/\/$/, "")}/umami`;
+  script.setAttribute("data-website-id", analyticsWebsiteId);
+  document.body.appendChild(script);
+}
+
 const queryClient = new QueryClient();
 
 queryClient.getQueryCache().subscribe(event => {
