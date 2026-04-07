@@ -1179,6 +1179,8 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 /**
  * Compare scanned ECU calibration data against a loaded container file.
+ * Container slots `sw_c1`..`sw_c9` on `ContainerFileHeader` must be set — historically manual;
+ * FlashContainerPanel now maps DevProg/PPEI header data + Tune Deploy analyze into these fields.
  */
 export function compareWithContainer(
   scanResult: EcuScanResult,
