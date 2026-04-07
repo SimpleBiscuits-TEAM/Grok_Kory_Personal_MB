@@ -74,6 +74,15 @@ export default function PpeiHeader() {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isGuest = user?.openId === GUEST_OPEN_ID;
   const oauthLoginUrl = getLoginUrl();
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || oauthLoginUrl) return;
+    console.info(
+      "[V-OP] Sign-in: add VITE_APP_ID to the .env file next to package.json, then restart `pnpm dev`. " +
+        "(GitHub device login in the terminal is only for `git push`, not this app.)"
+    );
+  }, [oauthLoginUrl]);
+
   const visibleItems = navItems.filter(item => {
     if (item.admin && !isAdmin) return false;
     if (item.auth && !isAuthenticated) return false;
@@ -261,61 +270,47 @@ export default function PpeiHeader() {
             }}>{APP_VERSION}</span>
             {isAuthenticated && <NotificationBell />}
 
-            {/* Guest: server always returns synthetic user — show sign-in, not a dead-end avatar menu */}
-            {!isAuthenticated &&
-              (oauthLoginUrl ? (
-                <a
-                  href={oauthLoginUrl}
-                  className="ppei-btn-hover"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 14px',
-                    borderRadius: '3px',
-                    border: `1px solid ${sColor.red}`,
-                    background: `${sColor.red}18`,
-                    fontFamily: sFont.heading,
-                    fontSize: '0.78rem',
-                    letterSpacing: '0.08em',
-                    color: sColor.red,
-                    textDecoration: 'none',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  SIGN IN
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  className="ppei-btn-hover"
-                  title="OAuth env vars are not set for this dev server"
-                  onClick={() => {
-                    toast.error('Sign-in needs your Manus app id', {
-                      description:
-                        'Set VITE_APP_ID in the project .env (same value Manus shows for your WebDev app). Portal defaults to https://portal.manus.im and the server defaults OAUTH to https://api.manus.im. Add JWT_SECRET for session cookies.',
-                      duration: 14000,
-                    });
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '6px 14px',
-                    borderRadius: '3px',
-                    border: `1px solid oklch(0.35 0.02 260)`,
-                    background: 'oklch(0.14 0.006 260)',
-                    fontFamily: sFont.heading,
-                    fontSize: '0.78rem',
-                    letterSpacing: '0.08em',
-                    color: sColor.textMuted,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  SIGN IN
-                </button>
-              ))}
+            {/* Guest: use assign() so OAuth always does a full navigation (reliable vs SPA + <a>). */}
+            {!isAuthenticated && (
+              <button
+                type="button"
+                className="ppei-btn-hover"
+                title={
+                  oauthLoginUrl
+                    ? "Open Manus sign-in in this window"
+                    : "VITE_APP_ID missing — see toast or browser console (F12)"
+                }
+                onClick={() => {
+                  if (oauthLoginUrl) {
+                    window.location.assign(oauthLoginUrl);
+                    return;
+                  }
+                  toast.error("App sign-in is not wired yet on this machine", {
+                    description:
+                      "Create a file named .env in the same folder as package.json (project root). Add: VITE_APP_ID=your-id-from-Manus and JWT_SECRET=any-long-random-string. Save, stop the dev server (Ctrl+C), run pnpm dev again. " +
+                      "If your terminal shows github.com/login/device — that is only for Git pushes, not V-OP.",
+                    duration: 16000,
+                  });
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 14px',
+                  borderRadius: '3px',
+                  border: `1px solid ${oauthLoginUrl ? sColor.red : "oklch(0.35 0.02 260)"}`,
+                  background: oauthLoginUrl ? `${sColor.red}18` : "oklch(0.14 0.006 260)",
+                  fontFamily: sFont.heading,
+                  fontSize: '0.78rem',
+                  letterSpacing: '0.08em',
+                  color: oauthLoginUrl ? sColor.red : sColor.textMuted,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                SIGN IN
+              </button>
+            )}
 
             {/* User menu */}
             {isAuthenticated && (
