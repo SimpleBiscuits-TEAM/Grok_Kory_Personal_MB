@@ -3,6 +3,7 @@
  * 
  * Features:
  * - WebSerial connection to ELM327-compatible adapters (OBDLink EX, MX+, SX, STN2xx)
+ * - Raw CAN via local bridge: PCAN-USB or V-OP Can2USB (same WebSocket bridge)
  * - Standard Mode 01 + GM Mode 22 extended PIDs (diesel-specific)
  * - PID selection with built-in and user-customizable preset groups
  * - Real-time gauge display with live values
@@ -836,6 +837,9 @@ export interface DataloggerPanelProps {
   injectedPids?: { pid: number; service: number; name: string; shortName: string }[];
 }
 
+/** ELM327 via WebSerial, or raw CAN via local WebSocket bridge (PCAN-USB / V-OP Can2USB). */
+export type DataloggerAdapterType = 'elm327' | 'pcan' | 'can2usb';
+
 export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
   const isDefaultQuickSelection = (pids: Set<number>) => (
     pids.size === 5 &&
@@ -872,7 +876,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [detectedFuelType, setDetectedFuelType] = useState<FuelType>('any');
   const [supportedPids, setSupportedPids] = useState<Set<number> | null>(null);
   const connectionRef = useRef<OBDConnection | PCANConnection | null>(null);
-  const [adapterType, setAdapterType] = useState<'elm327' | 'pcan'>('elm327');
+  const [adapterType, setAdapterType] = useState<DataloggerAdapterType>('elm327');
+  const isBridgeAdapter = adapterType === 'pcan' || adapterType === 'can2usb';
+  /** Human label for bridge-mode setup copy and logs */
+  const bridgeUiLabel = adapterType === 'can2usb' ? 'V-OP Can2USB' : 'PCAN-USB';
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
 
@@ -1006,12 +1013,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const handleConnect = useCallback(async () => {
     let conn: OBDConnection | PCANConnection;
 
-    if (adapterType === 'pcan') {
-      // PCAN-USB via WebSocket bridge — use detected URL or auto-detect
+    if (isBridgeAdapter) {
+      // Raw CAN via WebSocket bridge (PCAN-USB or V-OP Can2USB) — same protocol
       conn = new PCANConnection(
         detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {}
       );
-      addLog('Connecting via PCAN-USB bridge...');
+      addLog(`Connecting via ${bridgeUiLabel} bridge...`);
     } else {
       // ELM327 via WebSerial
       conn = new OBDConnection({
@@ -1066,9 +1073,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
       const extCount = extPids.length;
       const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
-      addLog(`Connected via ${adapterType === 'pcan' ? 'PCAN-USB bridge' : 'ELM327 WebSerial'}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
+      addLog(`Connected via ${isBridgeAdapter ? `${bridgeUiLabel} bridge` : 'ELM327 WebSerial'}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
-  }, [addLog, adapterType]);
+  }, [addLog, adapterType, detectedBridgeUrl, isBridgeAdapter, bridgeUiLabel]);
 
   const handleDisconnect = useCallback(async () => {
     if (isLogging) {
@@ -1607,16 +1614,17 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>ADAPTER:</span>
             <select
               value={adapterType}
-              onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan')}
+              onChange={e => setAdapterType(e.target.value as DataloggerAdapterType)}
               disabled={connectionState !== 'disconnected' && connectionState !== 'error'}
               style={{
                 fontFamily: sFont.mono, fontSize: '0.7rem', padding: '2px 6px',
                 background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`,
-                borderRadius: '2px', color: adapterType === 'pcan' ? sColor.orange : sColor.text,
+                borderRadius: '2px', color: isBridgeAdapter ? sColor.orange : sColor.text,
               }}
             >
               <option value="elm327">ELM327 (WebSerial)</option>
               <option value="pcan">PCAN-USB (Bridge)</option>
+              <option value="can2usb">V-OP Can2USB (Bridge)</option>
             </select>
           </div>
 
@@ -2474,14 +2482,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               </div>
 
               {/* Adapter Mode Tabs */}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0', marginBottom: '20px', maxWidth: '440px', margin: '0 auto 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '20px', maxWidth: '720px', margin: '0 auto 20px', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setAdapterType('elm327')}
                   style={{
-                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
-                    borderRadius: '3px 0 0 3px', cursor: 'pointer',
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
                     background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
-                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
                     color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
                   }}
                 >
@@ -2491,14 +2499,27 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 <button
                   onClick={() => setAdapterType('pcan')}
                   style={{
-                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
-                    borderRadius: '0 3px 3px 0', cursor: 'pointer',
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
                     background: adapterType === 'pcan' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.28 0.005 260)',
-                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
                     color: adapterType === 'pcan' ? sColor.orange : sColor.textDim,
                   }}
                 >
                   <div>PCAN-USB</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
+                </button>
+                <button
+                  onClick={() => setAdapterType('can2usb')}
+                  style={{
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'can2usb' ? sColor.orange : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
+                    background: adapterType === 'can2usb' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.28 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+                    color: adapterType === 'can2usb' ? sColor.orange : sColor.textDim,
+                  }}
+                >
+                  <div>V-OP Can2USB</div>
                   <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
                 </button>
               </div>
@@ -2539,16 +2560,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     <br />{'•'} Try unplugging and re-plugging the USB cable
                     <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
                     <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
-                    <br />{'•'} <strong style={{ color: sColor.orange }}>Have a PCAN-USB?</strong> Switch to the PCAN-USB tab above to use the bridge mode
+                    <br />{'•'} <strong style={{ color: sColor.orange }}>Have PCAN-USB or V-OP Can2USB?</strong> Switch to the bridge tab above (PCAN-USB or V-OP Can2USB)
                   </div>
                 </>
               )}
 
-              {/* PCAN-USB Mode Instructions */}
-              {adapterType === 'pcan' && (
+              {/* PCAN-USB / V-OP Can2USB — same WebSocket bridge */}
+              {isBridgeAdapter && (
                 <>
                   <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto' }}>
-                    The PCAN-USB connects through a <strong style={{ color: sColor.orange }}>local Python bridge</strong> that translates raw CAN frames to OBD-II. You need to run the bridge script on your computer first.
+                    Your <strong style={{ color: sColor.text }}>{bridgeUiLabel}</strong> connects through the same <strong style={{ color: sColor.orange }}>local Python bridge</strong> as PCAN-USB mode — it translates raw CAN frames to OBD-II. Run the VOP Bridge (or <code style={{ fontSize: '0.8em' }}>pcan_bridge.py</code>) on your computer first.
                   </div>
 
                   {/* Bridge Status */}
@@ -2662,7 +2683,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>2</div>
                         <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
-                          <strong>Plug in</strong> your PCAN-USB adapter and double-click the VOP Bridge shortcut
+                          <strong>Plug in</strong> your {bridgeUiLabel} adapter and double-click the VOP Bridge shortcut
                           <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>Bridge starts automatically if you enabled auto-start during install</div>
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
@@ -2677,10 +2698,19 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 55 / 0.2)', border: '1px solid oklch(0.25 0.08 55)', borderRadius: '3px' }}>
                         <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.orange, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED ADAPTERS</div>
-                        <div>PCAN-USB</div>
-                        <div>PCAN-USB FD</div>
-                        <div>PCAN-USB Pro</div>
-                        <div>Any python-can adapter</div>
+                        {adapterType === 'can2usb' ? (
+                          <>
+                            <div>V-OP Can2USB</div>
+                            <div style={{ fontSize: '0.62rem', color: sColor.textMuted, marginTop: '4px' }}>Configure the bridge for your device (python-can). Same WebSocket protocol as PCAN-USB mode.</div>
+                          </>
+                        ) : (
+                          <>
+                            <div>PCAN-USB</div>
+                            <div>PCAN-USB FD</div>
+                            <div>PCAN-USB Pro</div>
+                            <div>Any python-can adapter</div>
+                          </>
+                        )}
                       </div>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
                         <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>WHAT'S INCLUDED</div>
@@ -2701,7 +2731,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                       <div style={{ padding: '10px 12px', marginTop: '6px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
                         <div style={{ color: sColor.textMuted, marginBottom: '4px' }}># 1. Install dependencies (one-time)</div>
                         <div style={{ color: sColor.green }}>pip install python-can websockets</div>
-                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in PCAN-USB, then run the bridge</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in USB-CAN adapter, then run the bridge</div>
                         <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
                         <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
                       </div>
