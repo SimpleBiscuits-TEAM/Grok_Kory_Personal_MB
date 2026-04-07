@@ -12,6 +12,7 @@
 export type DetectedFormat =
   | 'PPEI_CONTAINER'     // PPEI .bin with JSON header at 0x1004
   | 'DEVPROG_V2'         // DevProg V2 MAUI container
+  | 'GM_RAW_BINARY'      // GM raw flash binary (0xAA55 header, part number at 0x20)
   | 'RAW_BINARY'         // Raw binary (no container)
   | 'INTEL_HEX'          // Intel HEX format
   | 'S_RECORD'           // Motorola S-Record
@@ -62,6 +63,29 @@ export function detectFileFormat(data: Uint8Array): FormatDetectionResult {
     }
   } catch {
     // Not a JSON header
+  }
+
+  // Check for GM raw flash binary: 0xAA55 header magic with 8-digit part number at offset 0x20
+  if (data.length >= 0x30 && data[0] === 0xAA && data[1] === 0x55) {
+    // Verify there's an ASCII part number at offset 0x20 (GM convention)
+    const pnSlice = data.slice(0x20, 0x28);
+    const pnStr = new TextDecoder('ascii', { fatal: false }).decode(pnSlice);
+    const isGmPn = /^\d{8}$/.test(pnStr);
+    if (isGmPn) {
+      return {
+        format: 'GM_RAW_BINARY',
+        confidence: 0.85,
+        details: `GM raw flash binary — OS/cal PN ${pnStr} at 0x20, 0xAA55 header`,
+        hasCrc: false,
+      };
+    }
+    // 0xAA55 header without recognizable PN — still likely GM raw
+    return {
+      format: 'GM_RAW_BINARY',
+      confidence: 0.7,
+      details: 'GM raw flash binary — 0xAA55 header magic detected',
+      hasCrc: false,
+    };
   }
 
   // Check for padding pattern (0xFF or 0x00 in first 0x1000 bytes)

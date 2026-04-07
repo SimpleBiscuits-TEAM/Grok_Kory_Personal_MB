@@ -21,10 +21,12 @@ function parseDevProgHeader(headerBytes: Uint8Array): Record<string, unknown> | 
   }
 }
 
-function detectContainerFormat(data: Uint8Array): "PPEI" | "DEVPROG" | "UNKNOWN" {
+function detectContainerFormat(data: Uint8Array): "PPEI" | "DEVPROG" | "GM_RAW" | "UNKNOWN" {
+  // PPEI IPF magic: 0x49 0x50 0x46 ("IPF")
   if (data.length >= 3 && data[0] === 0x49 && data[1] === 0x50 && data[2] === 0x46) {
     return "PPEI";
   }
+  // DevProg V2: JSON header at HEADER_OFFSET
   if (data.length >= CONTAINER_LAYOUT.HEADER_OFFSET + 100) {
     const headerSlice = data.slice(
       CONTAINER_LAYOUT.HEADER_OFFSET,
@@ -34,6 +36,10 @@ function detectContainerFormat(data: Uint8Array): "PPEI" | "DEVPROG" | "UNKNOWN"
     if (parsed && typeof parsed === "object" && ("ecu_type" in parsed || "block_count" in parsed)) {
       return "DEVPROG";
     }
+  }
+  // GM raw flash binary: 0xAA55 header magic
+  if (data.length >= 0x30 && data[0] === 0xAA && data[1] === 0x55) {
+    return "GM_RAW";
   }
   return "UNKNOWN";
 }
@@ -134,6 +140,38 @@ function extractPartNumbersFromText(text: string): string[] {
 }
 
 /**
+ * Extract 8-digit GM part numbers from the filename.
+ * Pattern: E41_STOCK_12709844_12688366_12688360_12688384_12712835_12712823.BIN
+ * First PN is the OS, rest are calibration part numbers.
+ */
+function extractPartNumbersFromFilename(fileName: string): { osNumber: string | null; partNumbers: string[] } {
+  const matches = [...fileName.matchAll(/(\d{8})/g)].map(m => m[1]!);
+  if (matches.length === 0) return { osNumber: null, partNumbers: [] };
+  // First 8-digit number is the OS/main calibration PN
+  const osNumber = matches[0]!;
+  return { osNumber, partNumbers: matches };
+}
+
+/**
+ * Extract ECU type hint from filename prefix (e.g. "E41" from "E41_STOCK_...")
+ */
+function extractEcuTypeFromFilename(fileName: string): string | null {
+  // Match common GM ECU prefixes at the start of the filename
+  const m = fileName.match(/^(E\d{1,3}|T\d{1,3}|P\d{1,3}|CV\d+|L5P|LM2|LZ0|MG1[A-Z0-9]*)/i);
+  return m ? m[1]!.toUpperCase() : null;
+}
+
+/**
+ * Extract the 8-digit OS/part number at offset 0x20 from a GM raw binary.
+ */
+function extractGmRawOsFromBinary(data: Uint8Array): string | null {
+  if (data.length < 0x28) return null;
+  const pnSlice = data.slice(0x20, 0x28);
+  const pnStr = new TextDecoder("ascii", { fatal: false }).decode(pnSlice);
+  return /^\d{8}$/.test(pnStr) ? pnStr : null;
+}
+
+/**
  * Parse binary buffer and return structured metadata for storage & UI.
  */
 export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string): TuneDeployParsedMetadata {
@@ -168,13 +206,43 @@ export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string):
     ecuType = ecuField || null;
   }
 
+  // GM raw flash binary: extract OS from binary offset 0x20 and part numbers from filename
+  if (format === "GM_RAW") {
+    const binaryOs = extractGmRawOsFromBinary(data);
+    const filenameParts = extractPartNumbersFromFilename(originalFileName);
+    const filenameEcu = extractEcuTypeFromFilename(originalFileName);
+
+    // OS number: prefer binary offset 0x20, fallback to first filename PN
+    headerOsHint = binaryOs || filenameParts.osNumber;
+
+    // ECU type from filename (e.g. E41)
+    if (filenameEcu && !ecuType) {
+      ecuType = filenameEcu;
+    }
+  }
+
   const ecuConfig = ecuType ? getEcuConfig(ecuType) : undefined;
 
   const { osNumber } = extractBinaryMetadata(buffer);
-  const osVersion = osNumber || headerOsHint;
+  let osVersion = osNumber || headerOsHint;
 
   const ascii = extractAsciiStrings(buffer);
   let calibrationPartNumbers = extractPartNumbersFromText(ascii);
+
+  // For GM raw binaries, merge filename part numbers into the list
+  if (format === "GM_RAW") {
+    const filenameParts = extractPartNumbersFromFilename(originalFileName);
+    if (filenameParts.partNumbers.length > 0) {
+      calibrationPartNumbers = uniqueStrings([...filenameParts.partNumbers, ...calibrationPartNumbers]);
+    }
+    // Ensure the OS from binary offset 0x20 is in the list
+    const binaryOs = extractGmRawOsFromBinary(data);
+    if (binaryOs) {
+      calibrationPartNumbers = uniqueStrings([binaryOs, ...calibrationPartNumbers]);
+      if (!osVersion) osVersion = binaryOs;
+    }
+  }
+
   if (headerOsHint && /^\d+$/.test(headerOsHint) && headerOsHint.length >= 8) {
     calibrationPartNumbers = uniqueStrings([headerOsHint, ...calibrationPartNumbers]);
   }

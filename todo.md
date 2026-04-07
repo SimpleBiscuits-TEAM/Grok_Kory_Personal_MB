@@ -884,3 +884,7 @@
 
 ## Flash Container — Tune Deploy
 - [x] Update FlashContainerPanel to show "Tune Deploy" in the flasher section
+
+## Tune Deploy — E41 Stock BIN File Support
+- [x] Fix parser to recognize E41 stock calibration BIN files (currently rejected as "Unknown layout")
+- [x] Extract part numbers from filename pattern (E41_STOCK_12709844_12688366_...)

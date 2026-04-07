@@ -8,7 +8,7 @@ import {
   type TuneFileStructureFamily,
 } from "./tuneFileStructureFamilies";
 
-export const tuneDeployContainerFormatSchema = z.enum(["PPEI", "DEVPROG", "RAW", "UNKNOWN"]);
+export const tuneDeployContainerFormatSchema = z.enum(["PPEI", "DEVPROG", "GM_RAW", "RAW", "UNKNOWN"]);
 
 export const tuneFileStructureFamilySchema = z.enum(
   TUNE_FILE_STRUCTURE_FAMILIES as unknown as [TuneFileStructureFamily, ...TuneFileStructureFamily[]]

@@ -21,6 +21,7 @@ import { nanoid } from "nanoid";
 import {
   TUNE_FILE_STRUCTURE_FAMILY_LABEL,
   isVopFlashContainerFamily,
+  isAcceptedForTuneDeployLibrary,
 } from "../shared/tuneFileStructureFamilies";
 import { tuneDeployParsedMetadataSchema } from "../shared/tuneDeploySchemas";
 import {
@@ -174,7 +175,8 @@ export function registerTuneDeployRoutes(app: Express): void {
       const acceptedForLibrary =
         meta.containerFormat === "PPEI" ||
         meta.containerFormat === "DEVPROG" ||
-        isVopFlashContainerFamily(meta.fileStructureFamily);
+        meta.containerFormat === "GM_RAW" ||
+        isAcceptedForTuneDeployLibrary(meta.fileStructureFamily);
       if (!acceptedForLibrary) {
         const label = TUNE_FILE_STRUCTURE_FAMILY_LABEL[meta.fileStructureFamily];
         res.status(422).json({
@@ -198,31 +200,35 @@ export function registerTuneDeployRoutes(app: Express): void {
         return;
       }
 
-      const crcStrict = verifyStandardContainerSlotCrc32(u8Final);
-      if (!crcStrict.ok) {
-        res.status(422).json({
-          ok: false,
-          code: "container_too_small",
-          error: crcStrict.message,
-        });
-        return;
-      }
-      if (!crcStrict.match) {
-        res.status(422).json({
-          ok: false,
-          code: "crc32_mismatch",
-          error:
-            "CRC32 at offset 0x1000 does not match file contents. Enable “Apply CRC32 fix on upload” or correct the file before importing.",
-          containerCrc32: {
-            applicable: true,
-            match: false,
-            storedHex: crcStrict.storedHex,
-            computedHex: crcStrict.computedHex,
-            message: crcStrict.message,
-            fixApplied: crc32FixApplied,
-          },
-        });
-        return;
+      // CRC32 and DevProg checks only apply to V-OP container families, not GM raw binaries
+      const needsContainerCrcCheck = isVopFlashContainerFamily(meta.fileStructureFamily);
+      if (needsContainerCrcCheck) {
+        const crcStrict = verifyStandardContainerSlotCrc32(u8Final);
+        if (!crcStrict.ok) {
+          res.status(422).json({
+            ok: false,
+            code: "container_too_small",
+            error: crcStrict.message,
+          });
+          return;
+        }
+        if (!crcStrict.match) {
+          res.status(422).json({
+            ok: false,
+            code: "crc32_mismatch",
+            error:
+              "CRC32 at offset 0x1000 does not match file contents. Enable \u201cApply CRC32 fix on upload\u201d or correct the file before importing.",
+            containerCrc32: {
+              applicable: true,
+              match: false,
+              storedHex: crcStrict.storedHex,
+              computedHex: crcStrict.computedHex,
+              message: crcStrict.message,
+              fixApplied: crc32FixApplied,
+            },
+          });
+          return;
+        }
       }
 
       // DevProg JSON header / padding — do not run on IPF-style PPEI (no JSON at 0x1004).

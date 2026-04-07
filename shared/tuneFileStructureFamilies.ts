@@ -27,6 +27,8 @@ export const TUNE_FILE_STRUCTURE_FAMILIES = [
   "EFI_LIVE_EFILIVE",
   /** Known third-party tuner dump not yet split into its own enum. */
   "OTHER_TUNER_TOOL",
+  /** GM raw flash binary — 0xAA55 header, part numbers in binary, no V-OP container wrapper. */
+  "GM_RAW_BINARY",
   /** Could not classify beyond heuristics. */
   "UNKNOWN",
 ] as const;
@@ -43,6 +45,7 @@ export const TUNE_FILE_STRUCTURE_FAMILY_LABEL: Record<TuneFileStructureFamily, s
   HP_TUNERS_HPT: "HP Tuners–style (.hpt / VCM — heuristic)",
   EFI_LIVE_EFILIVE: "EFI Live–style (heuristic)",
   OTHER_TUNER_TOOL: "Other tuner tool format",
+  GM_RAW_BINARY: "GM raw flash binary (0xAA55)",
   UNKNOWN: "Unknown layout",
 };
 
@@ -52,7 +55,7 @@ export const TUNE_FILE_STRUCTURE_FAMILY_LABEL: Record<TuneFileStructureFamily, s
  */
 export function inferTuneFileStructureFamily(
   data: Uint8Array,
-  containerLayout: "PPEI" | "DEVPROG" | "UNKNOWN",
+  containerLayout: "PPEI" | "DEVPROG" | "GM_RAW" | "UNKNOWN",
   fileName: string
 ): { family: TuneFileStructureFamily; notes: string[] } {
   const notes: string[] = [];
@@ -60,6 +63,10 @@ export function inferTuneFileStructureFamily(
 
   if (containerLayout === "DEVPROG") return { family: "VOP_DEVPROG_V2", notes };
   if (containerLayout === "PPEI") return { family: "VOP_PPEI_IPF", notes };
+  if (containerLayout === "GM_RAW") {
+    notes.push("GM raw flash binary detected (0xAA55 header). Part numbers extracted from binary content and filename.");
+    return { family: "GM_RAW_BINARY", notes };
+  }
 
   if (low.endsWith(".hpt")) {
     notes.push(
@@ -88,7 +95,13 @@ export function inferTuneFileStructureFamily(
     );
     return { family: "VOP_DEVPROG_V2", notes };
   }
-  if (det.format === "RAW_BINARY") {
+  if (det.format === 'GM_RAW_BINARY' as string) {
+    notes.push(
+      "GM raw flash binary detected (0xAA55 header). Part numbers extracted from binary content and filename."
+    );
+    return { family: "GM_RAW_BINARY", notes };
+  }
+  if (det.format === 'RAW_BINARY') {
     return { family: "RAW_BINARY", notes };
   }
 
@@ -101,4 +114,9 @@ export function inferTuneFileStructureFamily(
 /** True when Tune Deploy **strict upload** (0x1000 CRC + DevProg JSON checks) is meaningful. */
 export function isVopFlashContainerFamily(family: TuneFileStructureFamily): boolean {
   return family === "VOP_DEVPROG_V2" || family === "VOP_PPEI_IPF";
+}
+
+/** True when the file is a recognized format that can be ingested into the Tune Deploy library. */
+export function isAcceptedForTuneDeployLibrary(family: TuneFileStructureFamily): boolean {
+  return family === "VOP_DEVPROG_V2" || family === "VOP_PPEI_IPF" || family === "GM_RAW_BINARY";
 }
