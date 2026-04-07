@@ -171,6 +171,8 @@ function ReadinessChecklist({ checks }: { checks: FlashContainerAnalysis['readin
 export default function FlashContainerPanel() {
   const { user } = useAuth();
   const signedInForTuneDeploy = Boolean(user && user.openId !== GUEST_OPEN_ID);
+  /** Dev server allows analyze without OAuth; library/upload still needs real sign-in. */
+  const canRunTuneDeployAnalyze = signedInForTuneDeploy || import.meta.env.DEV;
 
   /** Tune Deploy = calibration library / R2 pipeline; Container = existing flash flow */
   const [flashWorkspace, setFlashWorkspace] = useState<'container' | 'tuneDeploy'>('container');
@@ -183,6 +185,7 @@ export default function FlashContainerPanel() {
   const [activeSection, setActiveSection] = useState<string>('overview');
   const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'ready' | 'uploading' | 'done'>('idle');
   const [missionControlMode, setMissionControlMode] = useState<'simulator' | 'pcan' | null>(null);
   const [showPreFlight, setShowPreFlight] = useState(false);
@@ -235,7 +238,7 @@ export default function FlashContainerPanel() {
    * Feeds sw_c1..9 / file_id so ECU Scan compare + cloud transfer matching work without hand-typed cal IDs.
    */
   useEffect(() => {
-    if (!rawData || !signedInForTuneDeploy || !fileName) {
+    if (!rawData || !canRunTuneDeployAnalyze || !fileName) {
       setAutoIdentifiedMeta(null);
       return;
     }
@@ -262,7 +265,7 @@ export default function FlashContainerPanel() {
     };
     void run();
     return () => ac.abort();
-  }, [rawData, signedInForTuneDeploy, fileName]);
+  }, [rawData, canRunTuneDeployAnalyze, fileName]);
 
   // ContainerFileHeader for flash plan, ECU scan (`compareWithContainer`), and WiFi/BLE transfer prep
   const containerFileHeader = useMemo((): EcuContainerFileHeader | null => {
@@ -329,7 +332,7 @@ export default function FlashContainerPanel() {
 
   // Compute file hash on upload
   const computeFileHash = useCallback(async (data: Uint8Array): Promise<string> => {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data.slice());
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
   }, []);
 
@@ -369,6 +372,7 @@ export default function FlashContainerPanel() {
 
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true);
+    setFileError(null);
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
@@ -391,19 +395,23 @@ export default function FlashContainerPanel() {
           totalSize: bytes.length,
           readinessChecks: [{
             id: 'format', label: 'Container Format',
-            status: 'fail', detail: 'Not a recognized PPEI container format. Expected IPF magic header.',
+            status: 'fail', detail: 'Not a V-OP / PPEI / DevProg flash container. EFI Live, HP Tuners, and raw cal segments use a different on-disk layout — export or convert to a PPEI IPF or DevProg V2 .bin for this tool.',
           }],
           securityInfo: { seedKeyAlgorithm: 'UNKNOWN', requiresUnlockBox: false, protocol: 'UNKNOWN', seedLevel: 0, canTxAddr: 0, canRxAddr: 0 },
-          flashSequence: [], errors: ['Unrecognized file format'],
+          flashSequence: [], errors: ['Unrecognized file format — not a V-OP container envelope'],
         });
         setUploadStatus('idle');
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error('Failed to parse container:', err);
+      setFileError(msg);
+      setRawData(null);
+      setAnalysis(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [computeFileHash]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -461,6 +469,7 @@ export default function FlashContainerPanel() {
     setAnalysis(null);
     setRawData(null);
     setAutoIdentifiedMeta(null);
+    setFileError(null);
     setFileName('');
     setFlashTypeOverride(null);
     setUploadStatus('idle');
@@ -512,6 +521,11 @@ export default function FlashContainerPanel() {
               <p className="text-zinc-300 font-medium">Drop ECU binary here</p>
               <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
               <p className="text-zinc-600 text-xs mt-4">.bin, .hex, .cal — PPEI container format</p>
+              {fileError && (
+                <p className="text-red-400 text-xs mt-4 max-w-md text-center px-2">
+                  Error: {fileError}
+                </p>
+              )}
             </>
           )}
           <input
@@ -594,6 +608,13 @@ export default function FlashContainerPanel() {
   return (
     <div className="h-full flex flex-col">
       {workspaceToggle}
+      {analysis.errors.length > 0 && (
+        <div className="mb-3 p-3 rounded-lg bg-red-950/50 border border-red-500/35 text-xs text-red-100/95 space-y-1">
+          {analysis.errors.map((e) => (
+            <div key={e}>{e}</div>
+          ))}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -718,10 +739,10 @@ export default function FlashContainerPanel() {
                     {' fills any gaps + OS hint for empty '}
                     <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">file_id</code>.
                   </p>
-                  {!signedInForTuneDeploy && (
+                  {!canRunTuneDeployAnalyze && (
                     <p className="text-amber-200/90">Sign in to run automatic binary analysis on this upload.</p>
                   )}
-                  {signedInForTuneDeploy && autoIdentifiedMeta && (
+                  {canRunTuneDeployAnalyze && autoIdentifiedMeta && (
                     <p className="text-zinc-400">
                       Auto-ID: {autoIdentifiedMeta.calibrationPartNumbers.length} calibration token(s) detected
                       {autoIdentifiedMeta.osVersion ? ` · OS hint ${autoIdentifiedMeta.osVersion}` : ''}.

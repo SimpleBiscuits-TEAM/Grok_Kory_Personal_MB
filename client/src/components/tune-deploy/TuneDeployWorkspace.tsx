@@ -84,6 +84,8 @@ function formatBytes(n: number) {
 export default function TuneDeployWorkspace() {
   const { user } = useAuth();
   const signedIn = Boolean(user && user.openId !== GUEST_OPEN_ID);
+  /** Local `pnpm dev`: analyze + drop queue work without OAuth (server mirrors this). Library list/upload stay signed-in only. */
+  const canAnalyze = signedIn || import.meta.env.DEV;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [search, setSearch] = useState("");
@@ -116,7 +118,7 @@ export default function TuneDeployWorkspace() {
 
   const runAnalyze = useCallback(
     async (item: QueueItem) => {
-      if (!signedIn) return;
+      if (!canAnalyze) return;
       updateItem(item.localId, { status: "analyzing", error: undefined });
       try {
         const res = await fetch("/api/tune-deploy/analyze", {
@@ -156,7 +158,7 @@ export default function TuneDeployWorkspace() {
         });
       }
     },
-    [signedIn, updateItem]
+    [canAnalyze, updateItem]
   );
 
   const enqueueFiles = useCallback(
@@ -265,10 +267,17 @@ export default function TuneDeployWorkspace() {
           One vehicle line can use several file structures (V-OP vs EFI Live vs HP Tuners vs Intel HEX, etc.). Analysis labels the inferred layout; library upload remains limited to V-OP DevProg V2 and PPEI IPF until other validators are added.
         </span>
       </div>
-      {!signedIn && (
+      {!signedIn && import.meta.env.PROD && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
           Sign in with your PPEI account to analyze binaries, upload to the team library, and use future
           vehicle-matched tune suggestions.
+        </div>
+      )}
+      {!signedIn && import.meta.env.DEV && (
+        <div className="rounded-xl border border-cyan-500/25 bg-cyan-950/40 px-4 py-3 text-sm text-cyan-100/90">
+          <span className="font-medium text-cyan-200">Local preview:</span> you can drag or pick files to analyze
+          without signing in. Adding to the team library and loading the calibration list still require a PPEI session
+          (same as Manus when you are logged in).
         </div>
       )}
 
@@ -298,12 +307,12 @@ export default function TuneDeployWorkspace() {
             }}
             onDrop={(e) => {
               e.preventDefault();
-              if (!signedIn) return;
+              if (!canAnalyze) return;
               enqueueFiles(e.dataTransfer.files);
             }}
-            onClick={() => signedIn && fileRef.current?.click()}
+            onClick={() => canAnalyze && fileRef.current?.click()}
             className={`relative min-h-[160px] rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-colors ${
-              signedIn
+              canAnalyze
                 ? "border-zinc-700 hover:border-red-500/50 hover:bg-red-500/5 cursor-pointer"
                 : "border-zinc-800 opacity-50 cursor-not-allowed"
             }`}
@@ -321,7 +330,7 @@ export default function TuneDeployWorkspace() {
               accept=".bin,.cal,.hex,.hpt,.BIN,.CAL,.HEX,.HPT"
               onChange={(e) => {
                 const f = e.target.files;
-                if (f?.length) enqueueFiles(f);
+                if (f?.length && canAnalyze) enqueueFiles(f);
                 e.target.value = "";
               }}
             />

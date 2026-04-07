@@ -6,6 +6,8 @@
  * Upload with header `X-Tune-Deploy-Fix-Crc: 1` to rewrite CRC at 0x1000 when it was wrong.
  * Rejects 422: unrecognized_container (incl. EFI Live / .hpt / HEX layouts until supported), container_too_small,
  * crc32_mismatch, container_validation_failed (DevProg).
+ * Development: POST /analyze allows no session (local preview); upload always requires real user. Set
+ * TUNE_DEPLOY_REQUIRE_AUTH_FOR_ANALYZE=1 to force auth for analyze in dev.
  * In a Next.js App Router deployment, move these handlers to:
  *   app/api/tune-deploy/analyze/route.ts
  *   app/api/tune-deploy/upload/route.ts
@@ -30,7 +32,10 @@ import {
 import { buildTuneDeployObjectKey, parseTuneDeployBinary } from "./lib/tuneDeployParser";
 import { insertTuneDeployCalibration } from "./tuneDeployDb";
 import { storagePut } from "./storage";
+import { LOCAL_GUEST_USER } from "./_core/guestUser";
 import { sdk } from "./_core/sdk";
+import { GUEST_OPEN_ID } from "../shared/guestUser";
+import type { User } from "../drizzle/schema";
 
 const MAX_BYTES = 35 * 1024 * 1024;
 
@@ -47,10 +52,26 @@ function safeFileName(header: string | undefined): string {
   }
 }
 
-async function requireUser(req: Request, res: Response) {
+/**
+ * Upload / library ingest always needs a real session.
+ * Analyze-only: in `NODE_ENV=development`, allow unauthenticated parse + CRC preview (matches local Cursor preview
+ * without OAuth). Set `TUNE_DEPLOY_REQUIRE_AUTH_FOR_ANALYZE=1` to force sign-in for analyze in dev.
+ */
+async function requireTuneDeployUser(
+  req: Request,
+  res: Response,
+  kind: "analyze" | "upload"
+): Promise<User | null> {
   try {
     return await sdk.authenticateRequest(req);
   } catch {
+    const devAnalyzeOk =
+      kind === "analyze" &&
+      process.env.NODE_ENV === "development" &&
+      process.env.TUNE_DEPLOY_REQUIRE_AUTH_FOR_ANALYZE !== "1";
+    if (devAnalyzeOk) {
+      return LOCAL_GUEST_USER;
+    }
     res.status(401).json({ ok: false, error: "Sign in required for Tune Deploy." });
     return null;
   }
@@ -63,8 +84,7 @@ export function registerTuneDeployRoutes(app: Express): void {
   });
 
   app.post("/api/tune-deploy/analyze", rawParser, async (req: Request, res: Response) => {
-    const user = await requireUser(req, res);
-    if (!user) return;
+    if (!(await requireTuneDeployUser(req, res, "analyze"))) return;
 
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length === 0) {
@@ -107,8 +127,15 @@ export function registerTuneDeployRoutes(app: Express): void {
   });
 
   app.post("/api/tune-deploy/upload", rawParser, async (req: Request, res: Response) => {
-    const user = await requireUser(req, res);
+    const user = await requireTuneDeployUser(req, res, "upload");
     if (!user) return;
+    if (user.openId === GUEST_OPEN_ID) {
+      res.status(401).json({
+        ok: false,
+        error: "Sign in required to upload calibrations to the team library.",
+      });
+      return;
+    }
 
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length === 0) {

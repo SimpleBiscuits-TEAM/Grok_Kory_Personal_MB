@@ -145,27 +145,38 @@ function detectEcuFamily(ecuTypeField: string, sourceFilePath: string, vehicleTy
 
 function buildFlashSequenceStrings(config: EcuConfig, isFullFlash: boolean): string[] {
   const steps: string[] = [];
-  if (config.patchNecessary && isFullFlash) {
+  const mainSeq = config.flashSequence;
+  if (!Array.isArray(mainSeq) || mainSeq.length === 0) {
+    return steps;
+  }
+  if (config.patchNecessary && isFullFlash && Array.isArray(config.patchSequence)) {
     steps.push('── PATCH SEQUENCE (OS Update) ──');
     for (const step of config.patchSequence) {
       steps.push(`${step} — ${FLASH_STEP_DESCRIPTIONS[step] ?? 'Unknown step'}`);
     }
     steps.push('── MAIN FLASH SEQUENCE ──');
   }
-  for (const step of config.flashSequence) {
+  for (const step of mainSeq) {
     steps.push(`${step} — ${FLASH_STEP_DESCRIPTIONS[step] ?? 'Unknown step'}`);
   }
   return steps;
 }
 
+/**
+ * DevProg JSON lives at 0x1004. A lone `{` byte is a common false positive on raw EFI/cal images — require
+ * recognizable JSON keys before treating the file as a V-OP container.
+ */
 function isDevProgContainer(data: Uint8Array): boolean {
-  if (data.length < CONTAINER_LAYOUT.HEADER_OFFSET + 100) return false;
+  if (data.length < CONTAINER_LAYOUT.HEADER_OFFSET + 120) return false;
   const headerStart = CONTAINER_LAYOUT.HEADER_OFFSET;
-  for (let i = headerStart; i < headerStart + 16; i++) {
-    if (data[i] === 0x7B) return true;
-    if (data[i] !== 0x00 && data[i] !== 0x20) break;
+  const slice = data.slice(headerStart, headerStart + 512);
+  let start = 0;
+  while (start < slice.length && (slice[start] === 0x20 || slice[start] === 0x09 || slice[start] === 0x0a || slice[start] === 0x0d)) {
+    start++;
   }
-  return false;
+  if (slice[start] !== 0x7b) return false;
+  const head = new TextDecoder("utf-8", { fatal: false }).decode(slice.subarray(start, Math.min(slice.length, 400)));
+  return /"(ecu_type|block_count|file_id|block_struct|hardware_number)"/.test(head);
 }
 
 function parseDevProgContainer(data: Uint8Array): DevProgContainerHeader | null {
@@ -229,6 +240,38 @@ function parseDevProgContainer(data: Uint8Array): DevProgContainerHeader | null 
 // ── Main Parser ────────────────────────────────────────────────────────────
 
 export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
+  try {
+    return parsePpeiContainerInner(data);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const bytes = new Uint8Array(data);
+    return {
+      valid: false,
+      containerFormat: "UNKNOWN",
+      header: null,
+      devProgHeader: null,
+      ecuFamily: "UNKNOWN",
+      ecuConfig: null,
+      flashType: "unknown",
+      dataOffset: 0,
+      dataSize: 0,
+      totalSize: bytes.length,
+      readinessChecks: [],
+      securityInfo: {
+        seedKeyAlgorithm: "UNKNOWN",
+        requiresUnlockBox: false,
+        protocol: "UNKNOWN",
+        seedLevel: 0,
+        canTxAddr: 0,
+        canRxAddr: 0,
+      },
+      flashSequence: [],
+      errors: [`Container parse failed: ${msg}`],
+    };
+  }
+}
+
+function parsePpeiContainerInner(data: ArrayBuffer): FlashContainerAnalysis {
   const bytes = new Uint8Array(data);
   const errors: string[] = [];
   const checks: FlashReadinessCheck[] = [];
@@ -451,10 +494,11 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
         : 'Uncompressed — raw block data',
     });
 
-    const osBlocks = devProgHeader.blocks.filter(
+    const blockList = Array.isArray(devProgHeader.blocks) ? devProgHeader.blocks : [];
+    const osBlocks = blockList.filter(
       b => b.OS === 'true' || b.OS === 'patch' || b.OS === 'forcepatch'
     );
-    const calBlocks = devProgHeader.blocks.filter(b => !b.OS || b.OS === 'false');
+    const calBlocks = blockList.filter(b => !b.OS || b.OS === 'false');
     checks.push({
       id: 'block_structure', label: 'Block Structure', status: 'pass',
       detail: `${devProgHeader.blockCount} total blocks: ${osBlocks.length} OS, ${calBlocks.length} calibration, boot=${devProgHeader.blockBoot}, erase=${devProgHeader.blockErase}`,
