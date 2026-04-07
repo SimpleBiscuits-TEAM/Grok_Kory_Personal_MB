@@ -126,7 +126,7 @@ function TasksAccessGate() {
               color: 'oklch(0.50 0.010 260)',
               margin: '0 0 1.5rem 0',
             }}>
-              Signed in as: {user.email || user.name || 'Unknown'}
+              Signed in as: {user?.email || user?.name || 'Unknown'}
             </p>
           </div>
         </div>
