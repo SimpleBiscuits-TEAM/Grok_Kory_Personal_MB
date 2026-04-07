@@ -875,3 +875,9 @@
 - [x] Fix "No commits found" on published site — switch from local git log to GitHub API with auth token
 - [x] Store GitHub token as environment secret via webdev_request_secrets
 - [x] Verify commits load on both dev and published site
+
+## Restore LLM Chatbot Agents
+- [ ] Investigate what chatbot/agent components exist in GitHub but are missing from Manus
+- [ ] Pull latest changes from GitHub repo (simplebiscuits/Good-Gravy-2)
+- [ ] Restore missing chatbot/agent files and routes
+- [ ] Verify chatbots render and function correctly
