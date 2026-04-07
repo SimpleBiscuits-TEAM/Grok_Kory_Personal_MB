@@ -957,6 +957,8 @@ The system supports these ECU families with full CAN configuration:
 | ME17CA1 | BRP ME17CA1 | 0x7A0 | 0x7A8 | 0x03 | 500 |
 | MG1CA007 | Polaris MG1CA007 | 0x7A0 | 0x7A8 | 0x03 | 500 |
 
+**MG1CA920 (OBD / BuDS vs A2L):** Real **VIN relearn / UDS** traces for X3-style vehicles often use **0x7E0 / 0x7E8** with **SecurityAccess $27 01** (multi-frame **32-byte** seed) and **$27 02** key—the table above is **XCP/calibration-oriented** addressing. The in-repo BRP A2L **test_files/1E1101953.a2l** (MDG1C MG1CA920A, version **1E1101953**) includes **calibration constants** for **UDS-on-CAN** naming **0x7E0** / **0x7E8**, which matches those OBD captures. That A2L does **not** embed the **UDS** long seed/key formula (it is calibration/XCP focused).
+
 ### Seed/Key Algorithm Details
 
 #### GM 5-Byte AES (E88/E90/E92/E98/T87)
@@ -986,6 +988,11 @@ The system supports these ECU families with full CAN configuration:
 - 2-byte seed, 2-byte key
 - Lookup table with 8x4 matrix (cucakeysB)
 - Seed bits select matrix indices → multiply → shift
+
+#### CAN-am/BRP MG1CA920 long seed (BuDS / OBD)
+- **32-byte** seed, **32-byte** key over **UDS $27 01 / $27 02** (ISO-TP multi-frame; NRC **0x78** possible)
+- Used for **VIN write** path on captured **2023 X3** BuDS sessions; algorithm is **not** in **1E1101953.a2l**
+- Until implemented server-side or in-app, operators may supply the key from BuDS or another approved tool
 
 #### Polaris 16-bit
 - 2-byte seed, 2-byte key

@@ -29,6 +29,8 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+# Windows default new-document name (avoid accidental commits)
+New Text Document.txt
 
 # Logs
 logs
@@ -100,6 +102,7 @@ jspm_packages/
 # Temporary folders
 tmp/
 temp/
+.canam_sniff_temp/
 
 # Database
 *.db

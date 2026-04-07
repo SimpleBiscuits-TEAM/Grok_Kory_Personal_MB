@@ -153,6 +153,22 @@ These PIDs are available via Mode $22 WITHOUT security access:
 - 0x2300-0x2303: Humidity sensor data (for SAE-corrected power)
 - 0x208A: Extended Range MAP (high-boost reading)
 
+## Knox operator guide — Seed/key documentation (where & what)
+
+**When the user asks where seed/key docs live, or mentions an uploaded .cs file, answer with this map.** There is **no separate nested git repository** for OEM seed keys; everything below is in the **main V-OP / Good Gravy monorepo**.
+
+| Path | What it is |
+|------|------------|
+| **docs/Seed_key.cs** | **Intended location** for the original C# reference (ComputeSeed2Key, SetSeedAndGetKey, etc.). If the user “uploaded” the .cs file but Knox cannot find it, it was **never added to the repo** or lives outside the workspace — tell them to place or commit **docs/Seed_key.cs** (or **vendor/seedkey/Seed_key.cs**) and re-index. |
+| **docs/seedkey-cs-extraction.md** | **Markdown extraction** from that C# source: **GM_5B** AES-128-ECB key table, **GM_2B** dllsecurity.dll algorithm IDs and invert flags. **Scope:** GM-focused; **no** Dodge/Stellantis/FCA section; **no** BRP MG1 **32-byte** UDS $27 recipe. |
+| **server/seedKeyProfiles.ts** | **Implemented** server profiles with secrets: **GM** (Delco / GMLAN), **Allison**, **Ford** (3-byte LFSR + Ford long), **Cummins** (CM2350/2450). Runtime twin of tooling + Seed_key.cs where applicable. |
+| **shared/seedKeyMeta.ts** | Same ECU list **without** AES hex — safe for browser bundles. |
+| **shared/seedKeyAlgorithms.ts** | Algorithm type enums and descriptions (GM_5B_AES, FORD_3B, CUMMINS, CANAM, etc.). |
+| **server/seedKeyService.ts** | Server entry for getSecurityProfile / key computation against seedKeyProfiles. |
+| **client/src/lib/udsReference.ts** | Client helpers: **Can-Am / BRP** 16-bit computeCanamKey, BRP dash, Polaris, Ford MG1-style, Cummins-style — used by wizards and reference UI. |
+
+**OEM coverage (honest):** **GM**, **Ford**, and **Cummins** (RAM HD diesel) are in **seedKeyProfiles**. **Dodge / RAM gas / Stellantis** are **not** in the Seed_key.cs extraction or seedKeyProfiles. **Can-Am** long **BuDS** $27 01/02 **32-byte** path is **not** in the .cs doc — only **16-bit** BRP logic is in udsReference; see CAN-am DESS / VIN sections elsewhere in this knowledge base.
+
 ## Security Access Knowledge
 
 ### Security Access Overview
@@ -174,16 +190,29 @@ Use the Knox API to perform security access computations — secrets are never e
 
 ### VIN Change Sequence (UDS)
 1. $10 03 — Extended Diagnostic Session
-2. $27 03 — SecurityAccess Request Seed (16-bit)
-3. Compute key using CAN-am algorithm
-4. $27 04 + key — SecurityAccess Send Key
-5. $2E F190 + VIN bytes — WriteDataByIdentifier (VIN)
-6. $11 01 — ECUReset
-7. Re-learn DESS keys after VIN change
+2. SecurityAccess for VIN write (ECU-dependent):
+   - **BRP Bosch MG1CA920 (BuDS capture, 2023 X3):** $27 01 request seed → ECU may answer with **ISO-TP multi-frame** positive response **$67 01** and a **32-byte** seed (NRC **$78** response pending can appear first). Tester sends flow control **$30 00 00**. Key is sent as **$27 02** with **32-byte** payload (multi-frame TX). Success: **$67 02**.
+   - **Legacy / other BRP stacks:** $27 03 — Request Seed (16-bit), compute key with CAN-am **cuakeyA/cucakeysB** table, $27 04 + 2-byte key.
+3. $2E F190 + VIN bytes — WriteDataByIdentifier (VIN), often multi-frame for 17 ASCII bytes
+4. $11 01 — ECUReset
+5. Re-learn DESS keys after VIN change
+
+**IDs:** Primary ECM UDS **0x7E0** / **0x7E8** (11-bit, 500 kbit/s). Some captures also show parallel traffic on **0x7B3** / **0x7BB** for the same DIDs—select the ECU your tool is addressing.
+
+### BRP MG1CA920 A2L (uploaded / in-repo)
+- **Path:** test_files/1E1101953.a2l (also referenced for BRP/MG1C in server/routers/editor.ts).
+- **Project:** ASAP2 **MDG1C** "MG1CA920A", **VERSION** 1E1101953, **EPK** 37/1/MG1CA920/268/MDG1C//1E1101953///.
+- **Role:** Bosch/BRP **calibration** database (XCPplus, measurements, characteristics). It is **not** an ODX/ODX-F diagnostic job file for BuDS.
+- **UDS relevance:** Contains **calibration parameters** naming **UDS-on-CAN** RX/TX IDs, including **0x7E0** / **0x7E8** application paths (Can_UDS_ON_CAN_*_0x7E0_APPL*, *0x7E8*), which **aligns with** real **OBD / BuDS** ECM addressing on X3-style vehicles—not the older summary table that only listed **0x7A0** / **0x7A8** for some BRP ECUs.
+- **Limits:** The file’s **A2ML** schema mentions **XCP** GET_SEED / UNLOCK and SEED_AND_KEY_EXTERNAL_FUNCTION, but the **instantiated** module **PROTOCOL_LAYER** here **does not** enable those optional commands—so it **does not** ship the **UDS $27 01/02** thirty-two-byte key algorithm used in the VIN relearn capture. **hpt_hexmodX_v910.dll** in the same A2L is **hex post-processing**, not diagnostic seed/key.
+
+**“Firmware 3.0” disambiguation:** (1) **VOP 3.0** ESP32 code in-repo (firmware/flash_encryption/) only documents **device flash encryption**; example comments mention a DSL step CAN_REQUEST_SEED(0x7E0, 0x27, 0x01) but **no** parser or seed→key math ships in this tree. (2) **MG1 A2L** strings like MG1CA920C0268_3.0.0 are **Damos/package version** labels for computation blocks, **not** extractable UDS-27 crypto.
+
+**Note:** The 32-byte MG1 **UDS** seed/key transform is **not** defined in that A2L; Good Gravy may require a pasted key from BuDS or a separate implementation. Do not commit raw security keys from customer logs into the repo.
 
 ### DESS Key Learn Sequence (UDS)
 1. $10 03 — Extended Diagnostic Session
-2. $27 03/04 — SecurityAccess
+2. $27 — SecurityAccess (level per routine / ECU; may be $27 01/02 or $27 03/04)
 3. Place DESS key on RF post
 4. $31 01 xxxx — RoutineControl Start (key learn)
 5. Wait for completion
@@ -502,7 +531,7 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - **MED17.8.5** (pre-2020): Bosch gasoline ECU, standard UDS, well-documented security
 - **MG1CA920** (2020+): Newer Bosch platform with Tricore TC38x, tighter security
 - **Post-2022.5 MG1CA920**: HSM (Hardware Security Module) locked — flash read/write blocked by HP Tuners and bFlash
-- **VIN write ($2E F190)**: Uses dealer-level security (Level 3), separate from flash-level security. Should still work on locked ECUs.
+- **VIN write ($2E F190)**: Requires security access first; on MG1CA920 with BuDS this is typically **$27 01/02** (long seed/key), not only “level 3” in the 16-bit sense.
 - **Flash unlock**: Requires breaking Tricore HSM boot trust chain — different from VIN/coding security
 
 ### CAN-am CAN Bus Architecture

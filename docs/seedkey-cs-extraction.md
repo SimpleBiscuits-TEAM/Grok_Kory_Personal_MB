@@ -1,5 +1,7 @@
 # Seed_key.cs Algorithm Extraction
 
+> **Repo location:** Knox and operators should treat **docs/seedkey-cs-extraction.md** as the checked-in summary of the C# reference. The original **Seed_key.cs** should live at **docs/Seed_key.cs** if you add it to the tree (it is not required for the app to build). See **shared/knoxKnowledge.ts** section *Knox operator guide — Seed/key documentation* for the full path map.
+
 ## GM_5B (AES-128-ECB) ECUs
 
 All use `ComputeSeed2Key`: 5-byte seed → pad with 0xFF to 16 bytes (seed at offset 0x0B-0x0F) → AES-128-ECB encrypt → take first 5 bytes.

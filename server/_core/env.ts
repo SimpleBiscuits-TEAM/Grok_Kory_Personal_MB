@@ -7,4 +7,6 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  /** Optional override for chat model (OpenAI: gpt-4o-mini, Forge/Manus: often gemini-2.5-flash). */
+  llmModel: process.env.LLM_MODEL ?? "",
 };

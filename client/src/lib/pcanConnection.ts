@@ -989,7 +989,7 @@ export class PCANConnection {
         const response = await this.sendRequest({
           type: 'uds_request',
           service,
-          sub_function: subFunction,
+          sub: subFunction,
           data: data || [],
           target: targetAddress,
         });
