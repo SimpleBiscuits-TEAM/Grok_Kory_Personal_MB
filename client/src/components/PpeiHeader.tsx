@@ -9,6 +9,8 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { GUEST_OPEN_ID } from '@shared/guestUser';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { APP_VERSION } from '@/lib/version';
+import { getLoginUrl } from '@/const';
+import { toast } from 'sonner';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -71,6 +73,7 @@ export default function PpeiHeader() {
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isGuest = user?.openId === GUEST_OPEN_ID;
+  const oauthLoginUrl = getLoginUrl();
   const visibleItems = navItems.filter(item => {
     if (item.admin && !isAdmin) return false;
     if (item.auth && !isAuthenticated) return false;
@@ -257,6 +260,62 @@ export default function PpeiHeader() {
               userSelect: 'none',
             }}>{APP_VERSION}</span>
             {isAuthenticated && <NotificationBell />}
+
+            {/* Guest: server always returns synthetic user — show sign-in, not a dead-end avatar menu */}
+            {!isAuthenticated &&
+              (oauthLoginUrl ? (
+                <a
+                  href={oauthLoginUrl}
+                  className="ppei-btn-hover"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    borderRadius: '3px',
+                    border: `1px solid ${sColor.red}`,
+                    background: `${sColor.red}18`,
+                    fontFamily: sFont.heading,
+                    fontSize: '0.78rem',
+                    letterSpacing: '0.08em',
+                    color: sColor.red,
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  SIGN IN
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  className="ppei-btn-hover"
+                  title="OAuth env vars are not set for this dev server"
+                  onClick={() => {
+                    toast.error('Sign-in needs your Manus app id', {
+                      description:
+                        'Set VITE_APP_ID in the project .env (same value Manus shows for your WebDev app). Portal defaults to https://portal.manus.im and the server defaults OAUTH to https://api.manus.im. Add JWT_SECRET for session cookies.',
+                      duration: 14000,
+                    });
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    borderRadius: '3px',
+                    border: `1px solid oklch(0.35 0.02 260)`,
+                    background: 'oklch(0.14 0.006 260)',
+                    fontFamily: sFont.heading,
+                    fontSize: '0.78rem',
+                    letterSpacing: '0.08em',
+                    color: sColor.textMuted,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  SIGN IN
+                </button>
+              ))}
 
             {/* User menu */}
             {isAuthenticated && (

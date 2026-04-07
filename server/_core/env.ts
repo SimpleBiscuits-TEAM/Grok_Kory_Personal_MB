@@ -1,8 +1,12 @@
+import { MANUS_WEBDEV_OAUTH_API_DEFAULT } from "@shared/manusWebDevDefaults";
+
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
-  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
+  /** Manus WebDev default `https://api.manus.im` when unset (matches hosted template). */
+  oAuthServerUrl:
+    process.env.OAUTH_SERVER_URL?.trim() || MANUS_WEBDEV_OAUTH_API_DEFAULT,
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
