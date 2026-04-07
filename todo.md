@@ -881,3 +881,6 @@
 - [ ] Pull latest changes from GitHub repo (simplebiscuits/Good-Gravy-2)
 - [ ] Restore missing chatbot/agent files and routes
 - [ ] Verify chatbots render and function correctly
+
+## Flash Container — Tune Deploy
+- [x] Update FlashContainerPanel to show "Tune Deploy" in the flasher section

@@ -47,7 +47,7 @@ export function mergeDetectedCalibrationIntoHeader(
     const cur = out[key];
     const filled = cur != null && String(cur).trim() !== "";
     if (filled) continue;
-    (out as Record<string, string>)[key] = extras[ei]!;
+    (out as unknown as Record<string, string>)[key] = extras[ei]!;
     ei++;
   }
   const fid = out.file_id?.trim();

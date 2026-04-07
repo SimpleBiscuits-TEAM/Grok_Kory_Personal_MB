@@ -499,7 +499,7 @@ export default function TuneDeployWorkspace() {
             </div>
           )}
           {listQuery.isError && (
-            <p className="text-xs text-red-400 py-4">{(listQuery.error as Error).message}</p>
+            <p className="text-xs text-red-400 py-4">{(listQuery.error as unknown as Error).message}</p>
           )}
 
           <div className="flex-1 min-h-[280px] max-h-[420px] overflow-y-auto space-y-4 pr-1">
