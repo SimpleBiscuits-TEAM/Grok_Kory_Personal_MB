@@ -4,6 +4,13 @@
  */
 import { Buffer } from "node:buffer";
 import { CONTAINER_LAYOUT, getEcuConfig } from "../../shared/ecuDatabase";
+import {
+  extractEcuTypePrefixFromTuneFileName,
+  extractGmFilenameOsAndPartNumbers,
+  hasGmRawHeaderMagic,
+  readGmOsAsciiAtOffset0x20,
+  shouldInferGmRawFromFilename,
+} from "../../shared/gmTuneBinaryHeuristics";
 import { inferTuneFileStructureFamily } from "../../shared/tuneFileStructureFamilies";
 import type { TuneDeployParsedMetadata } from "../../shared/tuneDeploySchemas";
 import { extractOSNumber, extractBinaryMetadata } from "./osNumberExtractor";
@@ -37,8 +44,7 @@ function detectContainerFormat(data: Uint8Array): "PPEI" | "DEVPROG" | "GM_RAW" 
       return "DEVPROG";
     }
   }
-  // GM raw flash binary: 0xAA55 header magic
-  if (data.length >= 0x30 && data[0] === 0xAA && data[1] === 0x55) {
+  if (data.length >= 0x30 && hasGmRawHeaderMagic(data)) {
     return "GM_RAW";
   }
   return "UNKNOWN";
@@ -140,44 +146,16 @@ function extractPartNumbersFromText(text: string): string[] {
 }
 
 /**
- * Extract 8-digit GM part numbers from the filename.
- * Pattern: E41_STOCK_12709844_12688366_12688360_12688384_12712835_12712823.BIN
- * First PN is the OS, rest are calibration part numbers.
- */
-function extractPartNumbersFromFilename(fileName: string): { osNumber: string | null; partNumbers: string[] } {
-  const matches = [...fileName.matchAll(/(\d{8})/g)].map(m => m[1]!);
-  if (matches.length === 0) return { osNumber: null, partNumbers: [] };
-  // First 8-digit number is the OS/main calibration PN
-  const osNumber = matches[0]!;
-  return { osNumber, partNumbers: matches };
-}
-
-/**
- * Extract ECU type hint from filename prefix (e.g. "E41" from "E41_STOCK_...")
- */
-function extractEcuTypeFromFilename(fileName: string): string | null {
-  // Match common GM ECU prefixes at the start of the filename
-  const m = fileName.match(/^(E\d{1,3}|T\d{1,3}|P\d{1,3}|CV\d+|L5P|LM2|LZ0|MG1[A-Z0-9]*)/i);
-  return m ? m[1]!.toUpperCase() : null;
-}
-
-/**
- * Extract the 8-digit OS/part number at offset 0x20 from a GM raw binary.
- */
-function extractGmRawOsFromBinary(data: Uint8Array): string | null {
-  if (data.length < 0x28) return null;
-  const pnSlice = data.slice(0x20, 0x28);
-  const pnStr = new TextDecoder("ascii", { fatal: false }).decode(pnSlice);
-  return /^\d{8}$/.test(pnStr) ? pnStr : null;
-}
-
-/**
  * Parse binary buffer and return structured metadata for storage & UI.
  */
 export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string): TuneDeployParsedMetadata {
   const warnings: string[] = [];
   const data = new Uint8Array(buffer);
-  const format = detectContainerFormat(data);
+  const hasGmRawMagic = hasGmRawHeaderMagic(data);
+  let format = detectContainerFormat(data);
+  if (format === "UNKNOWN" && shouldInferGmRawFromFilename(originalFileName, buffer.length)) {
+    format = "GM_RAW";
+  }
 
   let ecuType: string | null = null;
   let ecuHardwareId: string | null = null;
@@ -208,9 +186,9 @@ export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string):
 
   // GM raw flash binary: extract OS from binary offset 0x20 and part numbers from filename
   if (format === "GM_RAW") {
-    const binaryOs = extractGmRawOsFromBinary(data);
-    const filenameParts = extractPartNumbersFromFilename(originalFileName);
-    const filenameEcu = extractEcuTypeFromFilename(originalFileName);
+    const binaryOs = readGmOsAsciiAtOffset0x20(data);
+    const filenameParts = extractGmFilenameOsAndPartNumbers(originalFileName);
+    const filenameEcu = extractEcuTypePrefixFromTuneFileName(originalFileName);
 
     // OS number: prefer binary offset 0x20, fallback to first filename PN
     headerOsHint = binaryOs || filenameParts.osNumber;
@@ -235,12 +213,12 @@ export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string):
 
   // For GM raw binaries, merge filename part numbers into the list
   if (format === "GM_RAW") {
-    const filenameParts = extractPartNumbersFromFilename(originalFileName);
+    const filenameParts = extractGmFilenameOsAndPartNumbers(originalFileName);
     if (filenameParts.partNumbers.length > 0) {
       calibrationPartNumbers = uniqueStrings([...filenameParts.partNumbers, ...calibrationPartNumbers]);
     }
     // Ensure the OS from binary offset 0x20 is in the list
-    const binaryOs = extractGmRawOsFromBinary(data);
+    const binaryOs = readGmOsAsciiAtOffset0x20(data);
     if (binaryOs) {
       calibrationPartNumbers = uniqueStrings([binaryOs, ...calibrationPartNumbers]);
       if (!osVersion) osVersion = binaryOs;
@@ -252,6 +230,12 @@ export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string):
   }
 
   const inferred = inferVehicleFromEcu(ecuType || ecuConfig?.ecuType);
+
+  if (format === "GM_RAW" && !hasGmRawMagic) {
+    warnings.push(
+      "GM raw inferred from filename and GM 8-digit part numbers (file does not start with 0xAA55). Common for some EFI Live / third-party exports; verify before flash."
+    );
+  }
 
   if (format === "UNKNOWN") {
     warnings.push(

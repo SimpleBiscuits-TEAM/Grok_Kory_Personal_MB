@@ -97,4 +97,14 @@ describe("parseTuneDeployBinary — GM raw binary support", () => {
     const meta = parseTuneDeployBinary(buf, "test.bin");
     expect(meta.containerFormat).toBe("PPEI");
   });
+
+  it("infers GM_RAW from E41_STOCK filename when 0xAA55 header is absent (EFI Live–style export)", () => {
+    const buf = Buffer.alloc(0x5000, 0x42);
+    const fileName = "E41_STOCK_12709844_12688366_12688360_12688384_12712835_12712823.BIN";
+    const meta = parseTuneDeployBinary(buf, fileName);
+    expect(meta.containerFormat).toBe("GM_RAW");
+    expect(meta.fileStructureFamily).toBe("GM_RAW_BINARY");
+    expect(meta.osVersion).toBe("12709844");
+    expect(meta.warnings.some((w) => w.includes("does not start with 0xAA55"))).toBe(true);
+  });
 });

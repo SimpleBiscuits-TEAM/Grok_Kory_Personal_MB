@@ -382,8 +382,8 @@ export default function FlashContainerPanel() {
       // Compute file hash
       computeFileHash(bytes).then(h => setFileHash(h));
 
-      if (isPpeiContainer(buffer)) {
-        const result = parsePpeiContainer(buffer);
+      if (isPpeiContainer(buffer, file.name)) {
+        const result = parsePpeiContainer(buffer, file.name);
         setAnalysis(result);
         setFlashTypeOverride(null);
         setUploadStatus('ready');

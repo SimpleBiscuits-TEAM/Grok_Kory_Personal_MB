@@ -174,7 +174,7 @@ export function registerTuneDeployRoutes(app: Express): void {
         res.status(422).json({
           ok: false,
           code: "unrecognized_container",
-          error: `Not a V-OP DevProg or PPEI IPF container suitable for this library path. Detected layout: ${label} (${meta.fileStructureFamily}). EFI Live, HP Tuners (.hpt), Intel HEX, and other toolchains use different structures and are not ingested yet.`,
+          error: `Not a supported calibration for this library path. Detected layout: ${label} (${meta.fileStructureFamily}). Ingest V-OP DevProg/PPEI, GM raw (0xAA55 or E##_STOCK_… names with multiple 8-digit GM IDs), or use Intel HEX / other layouts elsewhere.`,
           detectedFileStructureFamily: meta.fileStructureFamily,
           detectedFileStructureLabel: label,
           fileStructureNotes: meta.fileStructureNotes.length ? meta.fileStructureNotes : undefined,

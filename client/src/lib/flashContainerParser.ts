@@ -14,6 +14,13 @@ import {
   CONTAINER_LAYOUT,
   type EcuConfig, type ContainerFileHeader, type ContainerBlockStruct,
 } from '../../../shared/ecuDatabase';
+import {
+  extractEcuTypePrefixFromTuneFileName,
+  extractGmFilenameOsAndPartNumbers,
+  hasGmRawHeaderMagic,
+  isGmRawTuneBinary,
+  readGmOsAsciiAtOffset0x20,
+} from '../../../shared/gmTuneBinaryHeuristics';
 import { ecuSupportsServerKeyDerivation, getSecurityProfileMeta } from '../../../shared/seedKeyMeta';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -86,7 +93,8 @@ export interface FlashReadinessCheck {
 
 export interface FlashContainerAnalysis {
   valid: boolean;
-  containerFormat: 'PPEI' | 'DEVPROG' | 'UNKNOWN';
+  /** GM_RAW = GM tool/raw cal image (0xAA55 or filename-inferred), not PPEI/DevProg envelope */
+  containerFormat: 'PPEI' | 'DEVPROG' | 'GM_RAW' | 'UNKNOWN';
   header: PpeiContainerHeader | null;
   devProgHeader: DevProgContainerHeader | null;
   ecuFamily: EcuFamily;
@@ -239,9 +247,193 @@ function parseDevProgContainer(data: Uint8Array): DevProgContainerHeader | null 
 
 // ── Main Parser ────────────────────────────────────────────────────────────
 
-export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
+/**
+ * GM raw / EFI Live–style export: same heuristics as `parseTuneDeployBinary` (server).
+ * Produces a synthetic PPEI-shaped header so FlashContainerPanel can build a flash plan (single block, full file).
+ */
+function buildGmRawFlashContainerAnalysis(bytes: Uint8Array, fileName: string): FlashContainerAnalysis {
+  const fnParts = extractGmFilenameOsAndPartNumbers(fileName);
+  const binaryOs = readGmOsAsciiAtOffset0x20(bytes);
+  const ecuToken = extractEcuTypePrefixFromTuneFileName(fileName);
+  let ecuFamily = ecuToken && getEcuConfig(ecuToken) ? ecuToken : "E41";
+  if (!getEcuConfig(ecuFamily)) ecuFamily = "E41";
+  const ecuConfig = getEcuConfig(ecuFamily);
+  if (!ecuConfig) {
+    return {
+      valid: false,
+      containerFormat: "UNKNOWN",
+      header: null,
+      devProgHeader: null,
+      ecuFamily: "UNKNOWN",
+      ecuConfig: null,
+      flashType: "unknown",
+      dataOffset: 0,
+      dataSize: 0,
+      totalSize: bytes.length,
+      readinessChecks: [],
+      securityInfo: {
+        seedKeyAlgorithm: "UNKNOWN",
+        requiresUnlockBox: false,
+        protocol: "UNKNOWN",
+        seedLevel: 0,
+        canTxAddr: 0,
+        canRxAddr: 0,
+      },
+      flashSequence: [],
+      errors: ["GM raw heuristic: E41 not in ECU database"],
+    };
+  }
+
+  const pnSet = new Set<string>();
+  if (binaryOs) pnSet.add(binaryOs);
+  for (const p of fnParts.partNumbers) pnSet.add(p);
+  const partNumbers = [...pnSet];
+
+  const hasMagic = hasGmRawHeaderMagic(bytes);
+  const header: PpeiContainerHeader = {
+    magic: hasMagic ? "GM_RAW" : "GM_EXPORT",
+    structType: "GM_RAW",
+    creator: "HEURISTIC",
+    dataStartOffset: 0,
+    dataBlockSize: bytes.length,
+    version: "0",
+    vendor: "GM",
+    buildNumber: "0",
+    sourceFilePath: fileName,
+    description: hasMagic
+      ? "GM raw flash image (0xAA55). Full file treated as one calibration block — verify before live flash."
+      : "GM cal export inferred from filename (no 0xAA55). Single-block heuristic — verify before live flash.",
+    ecuType: ecuFamily,
+    vehicleType: "Duramax",
+    partNumbers,
+    flashTags: [],
+    isFullFlash: false,
+    isRescue: false,
+    isGmCrypt: false,
+  };
+
+  const secProfile = getSecurityProfileMeta(ecuFamily);
+  const flashType: FlashType = "calibration";
+  const checks: FlashReadinessCheck[] = [];
+
+  checks.push({
+    id: "container_format",
+    label: "Container Format",
+    status: "pass",
+    detail: hasMagic
+      ? "GM raw binary (0xAA55). Not PPEI/DevProg — flash plan uses heuristic single-block layout."
+      : "GM stock/cal pattern from filename (EFI Live / VCM–style). No V-OP wrapper — heuristic single-block layout.",
+  });
+  checks.push({
+    id: "vendor",
+    label: "Vendor Signature",
+    status: "warn",
+    detail: "Raw or third-party export — not a PPEI-packaged container.",
+  });
+  checks.push({
+    id: "ecu_type",
+    label: "ECU Platform",
+    status: "pass",
+    detail: `${ecuConfig.name} — ${ecuConfig.protocol}, ${ecuConfig.oem}`,
+  });
+  checks.push({
+    id: "data_integrity",
+    label: "Data Block Integrity",
+    status: "warn",
+    detail: `Full file (${(bytes.length / 1024 / 1024).toFixed(2)} MB) as one block at offset 0 — confirm vs your tool.`,
+  });
+  checks.push({
+    id: "part_numbers",
+    label: "Part Numbers",
+    status: partNumbers.length > 0 ? "pass" : "warn",
+    detail:
+      partNumbers.length > 0
+        ? `${partNumbers.length} IDs: ${partNumbers.join(", ")}`
+        : "No part numbers from filename or offset 0x20",
+  });
+  checks.push({
+    id: "flash_type",
+    label: "Flash Type",
+    status: "info",
+    detail: "CALIBRATION (heuristic) — confirm OS vs cal scope for this image.",
+  });
+
+  const needsUnlockBox = secProfile?.requiresUnlockBox ?? false;
+  checks.push({
+    id: "security",
+    label: "Security Requirements",
+    status: needsUnlockBox ? "warn" : "pass",
+    detail: needsUnlockBox
+      ? `${ecuFamily} may require hardware unlock box`
+      : `${ecuFamily} uses ${secProfile?.algorithmType ?? "standard"} seed/key`,
+  });
+  const serverKeyReady = ecuSupportsServerKeyDerivation(secProfile);
+  checks.push({
+    id: "seed_key",
+    label: "Security Key (server)",
+    status: serverKeyReady ? "pass" : needsUnlockBox ? "info" : "warn",
+    detail: serverKeyReady
+      ? `Server can derive GM key for ${ecuFamily}`
+      : "No server-side key profile — unlocked ECUs may still work",
+  });
+  checks.push({
+    id: "protocol",
+    label: "Communication Protocol",
+    status: "info",
+    detail:
+      ecuConfig.protocol === "UDS"
+        ? `UDS — ${ecuConfig.canSpeed} kbps`
+        : ecuConfig.protocol === "GMLAN"
+          ? `GMLAN — ${ecuConfig.canSpeed} kbps`
+          : String(ecuConfig.protocol),
+  });
+  checks.push({
+    id: "can_addressing",
+    label: "CAN Bus Addressing",
+    status: "info",
+    detail: `TX: 0x${ecuConfig.txAddr.toString(16).toUpperCase()}, RX: 0x${ecuConfig.rxAddr.toString(16).toUpperCase()}`,
+  });
+  checks.push({
+    id: "creator",
+    label: "Creator Verification",
+    status: "warn",
+    detail: "No PPEI creator metadata — IDs from filename / offset 0x20 only.",
+  });
+
+  const securityInfo = {
+    seedKeyAlgorithm: secProfile
+      ? `${secProfile.algorithmType} (${secProfile.description})`
+      : `Standard ${ecuConfig.protocol} security`,
+    requiresUnlockBox: secProfile?.requiresUnlockBox ?? false,
+    protocol: (ecuConfig.protocol ?? "UNKNOWN") as "GMLAN" | "UDS" | "UNKNOWN",
+    seedLevel: ecuConfig.seedLevel ?? 0,
+    canTxAddr: ecuConfig.txAddr ?? 0,
+    canRxAddr: ecuConfig.rxAddr ?? 0,
+  };
+
+  const flashSequence = buildFlashSequenceStrings(ecuConfig, false);
+
+  return {
+    valid: true,
+    containerFormat: "GM_RAW",
+    header,
+    devProgHeader: null,
+    ecuFamily,
+    ecuConfig,
+    flashType,
+    dataOffset: 0,
+    dataSize: bytes.length,
+    totalSize: bytes.length,
+    readinessChecks: checks,
+    securityInfo,
+    flashSequence,
+    errors: [],
+  };
+}
+
+export function parsePpeiContainer(data: ArrayBuffer, fileName?: string): FlashContainerAnalysis {
   try {
-    return parsePpeiContainerInner(data);
+    return parsePpeiContainerInner(data, fileName);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const bytes = new Uint8Array(data);
@@ -271,7 +463,7 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
   }
 }
 
-function parsePpeiContainerInner(data: ArrayBuffer): FlashContainerAnalysis {
+function parsePpeiContainerInner(data: ArrayBuffer, fileName?: string): FlashContainerAnalysis {
   const bytes = new Uint8Array(data);
   const errors: string[] = [];
   const checks: FlashReadinessCheck[] = [];
@@ -288,6 +480,10 @@ function parsePpeiContainerInner(data: ArrayBuffer): FlashContainerAnalysis {
       },
       flashSequence: [], errors: ['File too small to be a valid container (< 1792 bytes)'],
     };
+  }
+
+  if (isGmRawTuneBinary(bytes, fileName)) {
+    return buildGmRawFlashContainerAnalysis(bytes, fileName ?? "upload.bin");
   }
 
   let devProgHeader: DevProgContainerHeader | null = null;
@@ -550,9 +746,10 @@ function parsePpeiContainerInner(data: ArrayBuffer): FlashContainerAnalysis {
   };
 }
 
-export function isPpeiContainer(data: ArrayBuffer): boolean {
+export function isPpeiContainer(data: ArrayBuffer, fileName?: string): boolean {
   if (data.byteLength < 256) return false;
   const bytes = new Uint8Array(data);
+  if (isGmRawTuneBinary(bytes, fileName)) return true;
   const magic = readAsciiField(bytes, 0, 16);
   if (magic.includes('IPF')) return true;
   if (data.byteLength > CONTAINER_LAYOUT.HEADER_OFFSET + 100) {
@@ -564,6 +761,14 @@ export function isPpeiContainer(data: ArrayBuffer): boolean {
 export function getContainerSummary(analysis: FlashContainerAnalysis): string {
   if (!analysis.valid) return 'Invalid or unrecognized container';
   const lines: string[] = [];
+  if (analysis.containerFormat === 'GM_RAW' && analysis.header) {
+    const h = analysis.header;
+    lines.push(`${h.ecuType} — GM raw / export (heuristic) [${h.magic}]`);
+    lines.push(`Data: ${(analysis.dataSize / 1024 / 1024).toFixed(2)} MB @ offset 0`);
+    lines.push(`Parts: ${h.partNumbers.join(', ') || '—'}`);
+    lines.push(`Protocol: ${analysis.securityInfo.protocol}`);
+    return lines.join('\n');
+  }
   if (analysis.devProgHeader) {
     const dp = analysis.devProgHeader;
     lines.push(`${dp.ecuType} — ${analysis.flashType === 'fullflash' ? 'Full Flash' : 'Calibration Only'} [DevProg V2]`);

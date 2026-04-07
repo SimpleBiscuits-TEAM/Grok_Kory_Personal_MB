@@ -1,6 +1,9 @@
 /**
  * L5P ECU Reference Module — E41 Controller Knowledge Base
- * 
+ *
+ * Full quasi-A2L for 2017 L5P (ECM_E41): `test_files/E41_L5P_2017/E41_a171711502_quasi.a2l`
+ * (extracted from `E41_a171711502_quasi_2017 L5P a2L.zip`; companion: `E41_a171711502_L5P_150227_1.ptp`).
+ *
  * Built from the E41 A2L calibration definition (71,246 unique parameters).
  * Maps GM internal naming conventions to human-readable descriptions and
  * provides calibration structure context for smarter diagnostic analysis.

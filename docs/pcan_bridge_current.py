@@ -389,7 +389,10 @@ class OBDProtocol:
                 payload = frame_data[1:1 + length]
                 response_mode = payload[0]
                 if response_mode == (mode + 0x40):
-                    return payload[2:]  # Skip mode + pid bytes
+                    # Mode 0x22 positive: 62 DID_hi DID_lo [data...] — skip 3 bytes, not 2 (Mode 01 uses 1-byte PID).
+                    if mode == 0x22:
+                        return payload[3:] if len(payload) >= 3 else payload[2:]
+                    return payload[2:]  # Mode 01/09: mode + 1-byte PID
                 elif response_mode == 0x7F:
                     return payload  # Negative response
 
@@ -423,10 +426,12 @@ class OBDProtocol:
                     except asyncio.TimeoutError:
                         break
 
-                # Trim to actual length and skip mode+pid header
+                # Trim to actual length and skip mode + PID/DID header
                 payload = payload[:total_length]
                 if len(payload) > 2:
-                    return payload[2:]  # Skip mode + pid
+                    if mode == 0x22 and len(payload) >= 3:
+                        return payload[3:]  # 62 + 2-byte DID
+                    return payload[2:]  # mode + 1-byte PID (e.g. Mode 01/09)
                 return payload
 
     async def send_raw_frame(self, arb_id: int, data: list, req_id: str, extended: bool = False) -> dict:
@@ -1435,14 +1440,17 @@ class PCANBridge:
                     self.protocol = OBDProtocol(self.bus)
                     await self.protocol.start()
 
-            filter_ids = msg.get("arb_ids", None)
-            filter_set = set(filter_ids) if filter_ids else None
+            # Clients differ: IntelliSpy / PCANConnection may send arb_ids or filter_ids
+            raw_ids = msg.get("arb_ids")
+            if raw_ids is None:
+                raw_ids = msg.get("filter_ids")
+            filter_set = set(raw_ids) if raw_ids else None
 
             ws = msg.get("_ws")
             if ws and ws not in self._monitor_clients:
                 task = asyncio.create_task(self._bus_monitor_loop(ws, filter_set))
                 self._monitor_clients[ws] = {"task": task, "filter": filter_set}
-                log.info(f"IntelliSpy: Bus monitor started for {ws.remote_address} (filter: {filter_ids or 'all'})")
+                log.info(f"IntelliSpy: Bus monitor started for {ws.remote_address} (filter: {raw_ids or 'all'})")
 
             return {
                 "type": "monitor_started",

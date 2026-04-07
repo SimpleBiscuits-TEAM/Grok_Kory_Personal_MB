@@ -168,6 +168,30 @@ function formatHexData(data: number[]): string {
   return data.map(b => formatHexByte(b)).join(' ');
 }
 
+/** Bridges differ: `bus_frame` vs `can_frame`, `arb_id` vs `arbitration_id`, string vs number. */
+function parseBridgeCanArbId(msg: Record<string, unknown>): number | null {
+  if (!('arb_id' in msg) && !('arbitration_id' in msg)) return null;
+  const raw = msg.arb_id ?? msg.arbitration_id;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw >>> 0;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    const n = /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+    return Number.isFinite(n) ? (n >>> 0) : null;
+  }
+  return null;
+}
+
+function parseBridgeCanData(msg: Record<string, unknown>): number[] {
+  const raw = msg.data;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => {
+    if (typeof x === 'number' && Number.isFinite(x)) return x & 0xff;
+    if (typeof x === 'string' && /^[0-9a-fA-F]{1,2}$/.test(x)) return parseInt(x, 16) & 0xff;
+    const n = parseInt(String(x), 10);
+    return Number.isFinite(n) ? (n & 0xff) : 0;
+  });
+}
+
 function formatAsciiData(data: number[]): string {
   return data.map(b => (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '.').join('');
 }
@@ -522,8 +546,9 @@ export default function IntelliSpy() {
   const knoxChatMutation = trpc.intellispy.knoxChat.useMutation();
   const knoxChatScrollRef = useRef<HTMLDivElement>(null);
 
-  // ECU Communication Loss Detection
+  // ECU Communication Loss Detection / bridge errors
   const [ecuLostReason, setEcuLostReason] = useState<string | null>(null);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
   const lastFrameTimeRef = useRef<number>(Date.now());
   const ecuLostTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ECU_TIMEOUT_MS = 10000; // 10 seconds without frames = ECU lost
@@ -651,9 +676,10 @@ export default function IntelliSpy() {
         // and reinitializes the CAN bus. Instead, read the bridge's active protocol
         // from the 'connected' message above. User can switch protocol manually later.
 
-        // Auto-start bus monitoring so traffic flows immediately
-        ws.send(JSON.stringify({ type: 'start_monitor' }));
+        // Auto-start bus monitoring — send both keys so older/newer bridges accept filters
+        ws.send(JSON.stringify({ type: 'start_monitor', arb_ids: [], filter_ids: [] }));
         setStatus('monitoring');
+        setBridgeError(null);
         setCaptureStartTime(Date.now());
         frameCountRef.current = 0;
         setFlashProgress(createFlashProgress());
@@ -689,12 +715,14 @@ export default function IntelliSpy() {
   const startMonitor = useCallback((filterIds?: number[]) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const msg: Record<string, unknown> = { type: 'start_monitor' };
+    const msg: Record<string, unknown> = { type: 'start_monitor', arb_ids: [], filter_ids: [] };
     if (filterIds && filterIds.length > 0) {
       msg.arb_ids = filterIds;
+      msg.filter_ids = filterIds;
     }
 
     wsRef.current.send(JSON.stringify(msg));
+    setBridgeError(null);
     setStatus('monitoring');
     setCaptureStartTime(Date.now());
     frameCountRef.current = 0;
@@ -733,11 +761,16 @@ export default function IntelliSpy() {
   // ─── Frame Processing ─────────────────────────────────────────────────
 
   const handleBridgeMessage = useCallback((msg: Record<string, unknown>) => {
-    if (msg.type === 'bus_frame') {
-      const arbId = msg.arb_id as number;
-      const data = msg.data as number[];
-      const timestamp = msg.timestamp as number;
-      const frameNumber = msg.frame_number as number;
+    const frameType = msg.type;
+    if (frameType === 'bus_frame' || frameType === 'can_frame') {
+      const parsedArb = parseBridgeCanArbId(msg);
+      if (parsedArb === null) return;
+      const arbId = parsedArb;
+      const data = parseBridgeCanData(msg);
+      const timestamp =
+        typeof msg.timestamp === 'number' ? msg.timestamp : Date.now() / 1000;
+      const frameNumber =
+        typeof msg.frame_number === 'number' ? msg.frame_number : frameCountRef.current + 1;
 
       // Identify module
       const moduleInfo = identifyModule(arbId);
@@ -774,6 +807,7 @@ export default function IntelliSpy() {
       if (ecuLostReason) {
         setEcuLostReason(null);
       }
+      setBridgeError(null);
 
       // Update stats
       const stats = statsRef.current;
@@ -815,8 +849,15 @@ export default function IntelliSpy() {
           frameBufferRef.current = frameBufferRef.current.slice(-MAX_CAPTURED_FRAMES);
         }
       }
+    } else if (msg.type === 'error') {
+      const text = typeof msg.message === 'string' ? msg.message : 'Bridge error';
+      setBridgeError(text);
+      if (/CAN bus not available|not initialized|Failed to open/i.test(text)) {
+        setEcuLostReason(text);
+      }
     } else if (msg.type === 'monitor_started') {
       setStatus('monitoring');
+      setBridgeError(null);
     } else if (msg.type === 'monitor_stopped') {
       setStatus('connected');
     } else if (msg.type === 'protocol_changed') {
@@ -1210,6 +1251,16 @@ export default function IntelliSpy() {
             <div className="font-['Share_Tech_Mono',monospace] text-[10px] text-zinc-500 mt-2 leading-relaxed">
               • Check vehicle ignition is ON &nbsp;• Verify PCAN adapter connection &nbsp;• Check CAN bus wiring
             </div>
+          </div>
+        </div>
+      )}
+
+      {bridgeError && (
+        <div className="flex items-start gap-3 px-4 py-2 border-b border-amber-900/50 bg-amber-950/25">
+          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="font-['Rajdhani',sans-serif] text-xs text-amber-200/90 leading-relaxed">
+            <span className="font-semibold text-amber-400">Bridge: </span>
+            {bridgeError}
           </div>
         </div>
       )}
