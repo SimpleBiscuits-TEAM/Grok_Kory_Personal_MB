@@ -1,5 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
+import { GUEST_OPEN_ID } from "@shared/guestUser";
 import { useCallback, useEffect, useMemo } from "react";
 
 type UseAuthOptions = {
@@ -49,7 +50,10 @@ export function useAuth(options?: UseAuthOptions) {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
       error: meQuery.error ?? logoutMutation.error ?? null,
-      isAuthenticated: Boolean(meQuery.data),
+      /** True only for a real OAuth session — `auth.me` still returns a synthetic guest when logged out. */
+      isAuthenticated: Boolean(
+        meQuery.data && meQuery.data.openId !== GUEST_OPEN_ID
+      ),
     };
   }, [
     meQuery.data,
