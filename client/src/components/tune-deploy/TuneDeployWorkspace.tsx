@@ -34,6 +34,12 @@ import {
   Fingerprint,
   Info,
   Copy,
+  Radio,
+  Plug,
+  Plus,
+  X,
+  Send,
+  Link2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -338,9 +344,9 @@ function MetadataInspector({
 
 export default function TuneDeployWorkspace() {
   const { user } = useAuth();
-  const signedIn = Boolean(user && user.openId !== GUEST_OPEN_ID);
-  /** Local `pnpm dev`: analyze + drop queue work without OAuth (server mirrors this). Library list/upload stay signed-in only. */
-  const canAnalyze = signedIn || import.meta.env.DEV;
+  // DEV BYPASS: treat everyone as signed in for faster development
+  const signedIn = true; // was: Boolean(user && user.openId !== GUEST_OPEN_ID);
+  const canAnalyze = true; // was: signedIn || import.meta.env.DEV;
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [search, setSearch] = useState("");
@@ -358,7 +364,7 @@ export default function TuneDeployWorkspace() {
       limit: 80,
       offset: 0,
     },
-    { enabled: signedIn }
+    { enabled: true /* was: signedIn */ }
   );
 
   const deleteMutation = trpc.tuneDeploy.delete.useMutation({
@@ -591,7 +597,32 @@ export default function TuneDeployWorkspace() {
             />
           </div>
 
-          <div className="mt-4 space-y-2 max-h-[320px] overflow-y-auto pr-1">
+          {/* Bulk actions bar */}
+          {queue.filter(it => it.status === "analyzed").length > 1 && (
+            <div className="mt-3 flex items-center gap-3 px-2 py-2 rounded-lg bg-zinc-900/60 border border-zinc-800">
+              <span className="text-[11px] text-zinc-400">
+                {queue.filter(it => it.status === "analyzed").length} files ready
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  const ready = queue.filter(it => it.status === "analyzed");
+                  for (const item of ready) {
+                    await uploadToLibrary(item);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-500 text-white transition-colors"
+              >
+                <CloudUpload className="w-3.5 h-3.5" />
+                Upload All to Library
+              </button>
+              <span className="text-[10px] text-zinc-600">
+                {queue.filter(it => it.status === "done").length} uploaded · {queue.filter(it => it.status === "error").length} failed
+              </span>
+            </div>
+          )}
+
+          <div className="mt-4 space-y-2 max-h-[420px] overflow-y-auto pr-1">
             <AnimatePresence initial={false}>
               {queue.length === 0 && (
                 <p className="text-xs text-zinc-600 text-center py-6">No files in queue</p>
@@ -853,6 +884,458 @@ export default function TuneDeployWorkspace() {
         queueItem={selectedQueue}
         libraryRow={selectedLib}
       />
+
+      {/* Device Management & Tune Assignment */}
+      <DeviceManagementPanel
+        libraryRows={libraryRows}
+      />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Device Management & Tune Assignment Panel
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function DeviceManagementPanel({ libraryRows }: {
+  libraryRows: Array<{ id: number; fileName: string; meta: TuneDeployParsedMetadata }>;
+}) {
+  const [showAddDevice, setShowAddDevice] = useState(false);
+  const [newDeviceType, setNewDeviceType] = useState<"vop" | "pcan">("vop");
+  const [newSerial, setNewSerial] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [newVehicle, setNewVehicle] = useState("");
+  const [newVin, setNewVin] = useState("");
+  const [assignDeviceId, setAssignDeviceId] = useState<number | null>(null);
+  const [assignCalId, setAssignCalId] = useState<number | null>(null);
+  const [assignNotes, setAssignNotes] = useState("");
+
+  const devicesQuery = trpc.tuneDeploy.listDevices.useQuery();
+  const assignmentsQuery = trpc.tuneDeploy.listAssignments.useQuery({});
+  const utils = trpc.useUtils();
+
+  const addDeviceMut = trpc.tuneDeploy.addDevice.useMutation({
+    onSuccess: () => {
+      toast.success("Device registered");
+      utils.tuneDeploy.listDevices.invalidate();
+      setShowAddDevice(false);
+      setNewSerial("");
+      setNewLabel("");
+      setNewVehicle("");
+      setNewVin("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteDeviceMut = trpc.tuneDeploy.deleteDevice.useMutation({
+    onSuccess: () => {
+      toast.success("Device removed");
+      utils.tuneDeploy.listDevices.invalidate();
+      utils.tuneDeploy.listAssignments.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const assignTuneMut = trpc.tuneDeploy.assignTune.useMutation({
+    onSuccess: () => {
+      toast.success("Tune assigned to device");
+      utils.tuneDeploy.listAssignments.invalidate();
+      setAssignDeviceId(null);
+      setAssignCalId(null);
+      setAssignNotes("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateAssignmentMut = trpc.tuneDeploy.updateAssignment.useMutation({
+    onSuccess: () => {
+      utils.tuneDeploy.listAssignments.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteAssignmentMut = trpc.tuneDeploy.deleteAssignment.useMutation({
+    onSuccess: () => {
+      toast.success("Assignment removed");
+      utils.tuneDeploy.listAssignments.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const devices = devicesQuery.data ?? [];
+  const assignments = assignmentsQuery.data ?? [];
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      {/* Devices Panel */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-600/30 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
+              <Radio className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-zinc-100">Devices</h3>
+              <p className="text-[11px] text-zinc-500">
+                V-OP & PCAN programmers by serial number
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddDevice(!showAddDevice)}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Register Device
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {showAddDevice && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden mb-4"
+            >
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Type</label>
+                    <select
+                      value={newDeviceType}
+                      onChange={(e) => setNewDeviceType(e.target.value as "vop" | "pcan")}
+                      className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200"
+                    >
+                      <option value="vop">V-OP Programmer</option>
+                      <option value="pcan">PCAN USB Adapter</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Serial Number</label>
+                    <input
+                      value={newSerial}
+                      onChange={(e) => setNewSerial(e.target.value)}
+                      placeholder="e.g. VOP-2024-00142"
+                      className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Label (optional)</label>
+                    <input
+                      value={newLabel}
+                      onChange={(e) => setNewLabel(e.target.value)}
+                      placeholder="e.g. Shop VOP #1"
+                      className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Vehicle (optional)</label>
+                    <input
+                      value={newVehicle}
+                      onChange={(e) => setNewVehicle(e.target.value)}
+                      placeholder="e.g. 2021 Silverado L5P"
+                      className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">VIN (optional)</label>
+                  <input
+                    value={newVin}
+                    onChange={(e) => setNewVin(e.target.value.toUpperCase().slice(0, 17))}
+                    placeholder="17-character VIN"
+                    className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 font-mono placeholder:text-zinc-600"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddDevice(false)}
+                    className="text-[11px] px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!newSerial.trim() || addDeviceMut.isPending}
+                    onClick={() => {
+                      addDeviceMut.mutate({
+                        deviceType: newDeviceType,
+                        serialNumber: newSerial,
+                        label: newLabel || undefined,
+                        vehicleDescription: newVehicle || undefined,
+                        vin: newVin || undefined,
+                      });
+                    }}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors"
+                  >
+                    {addDeviceMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
+                    Register
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {devicesQuery.isLoading && (
+          <div className="flex items-center gap-2 text-xs text-zinc-500 py-6 justify-center">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading devices…
+          </div>
+        )}
+
+        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+          {devices.length === 0 && !devicesQuery.isLoading && (
+            <p className="text-xs text-zinc-600 text-center py-8">
+              No devices registered. Click "Register Device" to add a V-OP or PCAN programmer.
+            </p>
+          )}
+          {devices.map((dev) => {
+            const devAssignments = assignments.filter((a) => a.deviceId === dev.id);
+            const pendingCount = devAssignments.filter((a) => a.status === "pending").length;
+            return (
+              <div
+                key={dev.id}
+                className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 hover:border-zinc-600 transition-colors"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
+                    dev.deviceType === "vop"
+                      ? "bg-red-500/15 border border-red-500/25"
+                      : "bg-blue-500/15 border border-blue-500/25"
+                  }`}>
+                    {dev.deviceType === "vop"
+                      ? <Cpu className="w-4.5 h-4.5 text-red-400" />
+                      : <Plug className="w-4.5 h-4.5 text-blue-400" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-zinc-200 truncate">
+                        {dev.label || dev.serialNumber}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
+                        dev.deviceType === "vop"
+                          ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                          : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                      }`}>
+                        {dev.deviceType.toUpperCase()}
+                      </span>
+                      {pendingCount > 0 && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                          {pendingCount} pending
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                      S/N: {dev.serialNumber}
+                    </div>
+                    {dev.vehicleDescription && (
+                      <div className="text-[10px] text-zinc-500 mt-0.5 flex items-center gap-1">
+                        <Car className="w-3 h-3" /> {dev.vehicleDescription}
+                      </div>
+                    )}
+                    {dev.vin && (
+                      <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                        VIN: {dev.vin}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    title="Remove device"
+                    onClick={() => {
+                      if (confirm(`Remove device ${dev.label || dev.serialNumber}?`)) {
+                        deleteDeviceMut.mutate({ id: dev.id });
+                      }
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-red-500/20 text-zinc-600 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-[10px] text-zinc-600 mt-3 text-center">
+          {devices.length} device{devices.length === 1 ? "" : "s"} registered
+        </p>
+      </motion.section>
+
+      {/* Assignments Panel */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-5"
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-600/30 to-green-500/20 border border-emerald-500/30 flex items-center justify-center">
+            <Link2 className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-zinc-100">Tune Assignments</h3>
+            <p className="text-[11px] text-zinc-500">
+              Link calibrations to target devices for deployment
+            </p>
+          </div>
+        </div>
+
+        {/* New Assignment Form */}
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/15 p-4 mb-4 space-y-3">
+          <div className="text-[10px] text-emerald-300/80 uppercase tracking-wider font-semibold mb-1">New Assignment</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Target Device</label>
+              <select
+                value={assignDeviceId ?? ""}
+                onChange={(e) => setAssignDeviceId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200"
+              >
+                <option value="">Select device…</option>
+                {devices.filter((d) => d.isActive).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label || d.serialNumber} ({d.deviceType.toUpperCase()})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">Calibration</label>
+              <select
+                value={assignCalId ?? ""}
+                onChange={(e) => setAssignCalId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200"
+              >
+                <option value="">Select calibration…</option>
+                {libraryRows.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.fileName} — {r.meta.osVersion || "no OS"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <input
+            value={assignNotes}
+            onChange={(e) => setAssignNotes(e.target.value)}
+            placeholder="Notes (optional) — e.g. 'Stage 2 tune for dyno day'"
+            className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              disabled={!assignDeviceId || !assignCalId || assignTuneMut.isPending}
+              onClick={() => {
+                if (assignDeviceId && assignCalId) {
+                  assignTuneMut.mutate({
+                    calibrationId: assignCalId,
+                    deviceId: assignDeviceId,
+                    notes: assignNotes || undefined,
+                  });
+                }
+              }}
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 transition-colors"
+            >
+              {assignTuneMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Assign Tune
+            </button>
+          </div>
+        </div>
+
+        {/* Assignment List */}
+        {assignmentsQuery.isLoading && (
+          <div className="flex items-center gap-2 text-xs text-zinc-500 py-6 justify-center">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading assignments…
+          </div>
+        )}
+
+        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+          {assignments.length === 0 && !assignmentsQuery.isLoading && (
+            <p className="text-xs text-zinc-600 text-center py-6">
+              No assignments yet. Select a device and calibration above to deploy a tune.
+            </p>
+          )}
+          {assignments.map((a: any) => {
+            const statusColors: Record<string, string> = {
+              pending: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+              deployed: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+              failed: "bg-red-500/20 text-red-300 border-red-500/30",
+              cancelled: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30",
+            };
+            return (
+              <div
+                key={a.id}
+                className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-zinc-200 truncate">
+                        {a.calibrationFileName || `Cal #${a.calibrationId}`}
+                      </span>
+                      <span className="text-[10px] text-zinc-600">→</span>
+                      <span className="text-xs text-zinc-300 truncate">
+                        {a.deviceLabel || a.deviceSerial || `Device #${a.deviceId}`}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider border ${statusColors[a.status] || statusColors.pending}`}>
+                        {a.status}
+                      </span>
+                    </div>
+                    {a.notes && (
+                      <div className="text-[10px] text-zinc-500 mt-1 truncate">{a.notes}</div>
+                    )}
+                    <div className="text-[10px] text-zinc-600 mt-1">
+                      {a.createdAt ? new Date(a.createdAt).toLocaleString() : ""}
+                      {a.deployedAt ? ` · Deployed ${new Date(a.deployedAt).toLocaleString()}` : ""}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {a.status === "pending" && (
+                      <button
+                        type="button"
+                        title="Mark as deployed"
+                        onClick={() => updateAssignmentMut.mutate({ id: a.id, status: "deployed" })}
+                        className="p-1.5 rounded-lg hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Remove assignment"
+                      onClick={() => {
+                        if (confirm("Remove this tune assignment?")) {
+                          deleteAssignmentMut.mutate({ id: a.id });
+                        }
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-[10px] text-zinc-600 mt-3 text-center">
+          {assignments.length} assignment{assignments.length === 1 ? "" : "s"}
+          {" · "}
+          {assignments.filter((a: any) => a.status === "pending").length} pending
+        </p>
+      </motion.section>
     </div>
   );
 }

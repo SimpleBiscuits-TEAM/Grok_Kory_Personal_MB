@@ -892,3 +892,13 @@
 ## Tune Deploy — Fix GM_RAW OS Version
 - [x] Fix osVersion showing garbage ASCII ("3A3H3L3M3N3O3P3Q3R") instead of correct OS number "12709844" for GM raw binaries
 - [x] Redesign Tune Deploy metadata display from raw JSON into a polished professional UI card
+
+## Temporary: Disable Auth Restrictions for Development
+- [x] Disable all sign-in restrictions, access code gates, and auth blocks for faster dev workflow
+
+## Tune Deploy — Bulk Upload & Device Targeting
+- [x] Accept multiple files at once in Tune Deploy (bulk library upload)
+- [x] Parse all files through the pipeline in parallel/sequence
+- [x] Add device targeting by V-OP serial number
+- [x] Add device targeting by PCAN serial number
+- [x] Deploy matching tunes to targeted devices

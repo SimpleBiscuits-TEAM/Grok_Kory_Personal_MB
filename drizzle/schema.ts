@@ -1133,6 +1133,60 @@ export const tuneDeployCalibrations = mysqlTable("tune_deploy_calibrations", {
 export type TuneDeployCalibrationRow = typeof tuneDeployCalibrations.$inferSelect;
 export type InsertTuneDeployCalibration = typeof tuneDeployCalibrations.$inferInsert;
 
+// ── Tune Deploy Devices (V-OP / PCAN serial targeting) ──────────────────────
+/**
+ * Registered flash devices. Each device is identified by its serial number
+ * (V-OP serial or PCAN serial). Tunes are assigned to specific devices so
+ * the correct calibration is deployed to the right hardware.
+ */
+export const tuneDeployDevices = mysqlTable("tune_deploy_devices", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 'vop' = V-OP programmer, 'pcan' = PCAN USB adapter */
+  deviceType: mysqlEnum("deviceType", ["vop", "pcan"]).notNull(),
+  /** Hardware serial number (unique per device) */
+  serialNumber: varchar("serialNumber", { length: 128 }).notNull().unique(),
+  /** Friendly label for the device, e.g. "Shop VOP #1", "Customer Truck" */
+  label: varchar("label", { length: 255 }),
+  /** Vehicle this device is typically connected to */
+  vehicleDescription: varchar("vehicleDescription", { length: 512 }),
+  /** VIN of the target vehicle (optional) */
+  vin: varchar("vin", { length: 17 }),
+  /** Last time this device checked in / was seen online */
+  lastSeenAt: timestamp("lastSeenAt"),
+  /** Whether this device is active and should receive deployments */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployDevice = typeof tuneDeployDevices.$inferSelect;
+export type InsertTuneDeployDevice = typeof tuneDeployDevices.$inferInsert;
+
+// ── Tune Deploy Assignments (calibration → device mapping) ──────────────────
+/**
+ * Links a calibration from the library to a target device.
+ * When the device connects, it checks for pending assignments and
+ * deploys the matching tune.
+ */
+export const tuneDeployAssignments = mysqlTable("tune_deploy_assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id */
+  calibrationId: int("calibrationId").notNull(),
+  /** FK to tune_deploy_devices.id */
+  deviceId: int("deviceId").notNull(),
+  /** pending = waiting for device, deployed = sent to device, failed = deploy error */
+  status: mysqlEnum("status", ["pending", "deployed", "failed", "cancelled"]).default("pending").notNull(),
+  /** Notes about this assignment */
+  notes: text("notes"),
+  /** When the tune was actually deployed to the device */
+  deployedAt: timestamp("deployedAt"),
+  assignedBy: int("assignedBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployAssignment = typeof tuneDeployAssignments.$inferSelect;
+export type InsertTuneDeployAssignment = typeof tuneDeployAssignments.$inferInsert;
+
 
 // ── CASTING MODE — Live Streaming & Virtual Dyno Events ─────────────────────
 

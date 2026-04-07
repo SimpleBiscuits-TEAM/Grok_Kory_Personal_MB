@@ -1,7 +1,12 @@
 import { and, desc, eq, like, or, count, type SQL } from "drizzle-orm";
 import {
   tuneDeployCalibrations,
+  tuneDeployDevices,
+  tuneDeployAssignments,
   type InsertTuneDeployCalibration,
+  type InsertTuneDeployDevice,
+  type TuneDeployDevice,
+  type TuneDeployAssignment,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import {
@@ -184,6 +189,155 @@ export async function deleteTuneDeployCalibration(id: number): Promise<boolean> 
     return true;
   } catch (e) {
     console.error("[tuneDeployDb] delete failed:", e);
+    return false;
+  }
+}
+
+// ── Device Management ─────────────────────────────────────────────────────
+
+export async function listDevices(): Promise<TuneDeployDevice[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(tuneDeployDevices)
+    .orderBy(desc(tuneDeployDevices.createdAt));
+}
+
+export async function insertDevice(
+  row: Omit<InsertTuneDeployDevice, "id" | "createdAt" | "updatedAt">
+): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [r] = await db.insert(tuneDeployDevices).values(row).$returningId();
+    return r?.id ?? null;
+  } catch (e) {
+    console.error("[tuneDeployDb] insertDevice failed:", e);
+    return null;
+  }
+}
+
+export async function updateDevice(
+  id: number,
+  updates: Partial<Pick<TuneDeployDevice, "label" | "vehicleDescription" | "vin" | "isActive">>
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.update(tuneDeployDevices).set(updates).where(eq(tuneDeployDevices.id, id));
+    return true;
+  } catch (e) {
+    console.error("[tuneDeployDb] updateDevice failed:", e);
+    return false;
+  }
+}
+
+export async function deleteDevice(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    // Also cancel any pending assignments for this device
+    await db.update(tuneDeployAssignments)
+      .set({ status: "cancelled" })
+      .where(and(eq(tuneDeployAssignments.deviceId, id), eq(tuneDeployAssignments.status, "pending")));
+    await db.delete(tuneDeployDevices).where(eq(tuneDeployDevices.id, id));
+    return true;
+  } catch (e) {
+    console.error("[tuneDeployDb] deleteDevice failed:", e);
+    return false;
+  }
+}
+
+// ── Assignment Management ─────────────────────────────────────────────────
+
+export async function listAssignments(opts?: {
+  deviceId?: number;
+  calibrationId?: number;
+  status?: string;
+}): Promise<Array<TuneDeployAssignment & { deviceSerial?: string; deviceLabel?: string; calibrationFileName?: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions: SQL[] = [];
+  if (opts?.deviceId) conditions.push(eq(tuneDeployAssignments.deviceId, opts.deviceId));
+  if (opts?.calibrationId) conditions.push(eq(tuneDeployAssignments.calibrationId, opts.calibrationId));
+  if (opts?.status) conditions.push(eq(tuneDeployAssignments.status, opts.status as any));
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = await db
+    .select({
+      id: tuneDeployAssignments.id,
+      calibrationId: tuneDeployAssignments.calibrationId,
+      deviceId: tuneDeployAssignments.deviceId,
+      status: tuneDeployAssignments.status,
+      notes: tuneDeployAssignments.notes,
+      deployedAt: tuneDeployAssignments.deployedAt,
+      assignedBy: tuneDeployAssignments.assignedBy,
+      createdAt: tuneDeployAssignments.createdAt,
+      updatedAt: tuneDeployAssignments.updatedAt,
+      deviceSerial: tuneDeployDevices.serialNumber,
+      deviceLabel: tuneDeployDevices.label,
+      calibrationFileName: tuneDeployCalibrations.fileName,
+    })
+    .from(tuneDeployAssignments)
+    .leftJoin(tuneDeployDevices, eq(tuneDeployAssignments.deviceId, tuneDeployDevices.id))
+    .leftJoin(tuneDeployCalibrations, eq(tuneDeployAssignments.calibrationId, tuneDeployCalibrations.id))
+    .where(where)
+    .orderBy(desc(tuneDeployAssignments.createdAt));
+
+  return rows as any;
+}
+
+export async function createAssignment(opts: {
+  calibrationId: number;
+  deviceId: number;
+  notes?: string;
+  assignedBy?: number;
+}): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [r] = await db.insert(tuneDeployAssignments).values({
+      calibrationId: opts.calibrationId,
+      deviceId: opts.deviceId,
+      notes: opts.notes ?? null,
+      assignedBy: opts.assignedBy ?? null,
+    }).$returningId();
+    return r?.id ?? null;
+  } catch (e) {
+    console.error("[tuneDeployDb] createAssignment failed:", e);
+    return null;
+  }
+}
+
+export async function updateAssignmentStatus(
+  id: number,
+  status: "pending" | "deployed" | "failed" | "cancelled",
+  deployedAt?: Date
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    const updates: any = { status };
+    if (deployedAt) updates.deployedAt = deployedAt;
+    await db.update(tuneDeployAssignments).set(updates).where(eq(tuneDeployAssignments.id, id));
+    return true;
+  } catch (e) {
+    console.error("[tuneDeployDb] updateAssignmentStatus failed:", e);
+    return false;
+  }
+}
+
+export async function deleteAssignment(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    await db.delete(tuneDeployAssignments).where(eq(tuneDeployAssignments.id, id));
+    return true;
+  } catch (e) {
+    console.error("[tuneDeployDb] deleteAssignment failed:", e);
     return false;
   }
 }
