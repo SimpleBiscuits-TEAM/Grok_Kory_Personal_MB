@@ -865,3 +865,8 @@
 ## Wire Remaining Diagnostic Routers (Apr 5, 2026)
 - [x] Wire diagnostic.chat into quad-agent pipeline (already wired in previous build)
 - [x] Wire diagnostic.quickLookup into quad-agent pipeline (already wired in previous build)
+
+## GitHub Commit History Display
+- [x] Build server-side tRPC procedure to fetch latest commits from GitHub API
+- [x] Build frontend component to display commit history on the page
+- [x] Show commit hash, message, author, and timestamp

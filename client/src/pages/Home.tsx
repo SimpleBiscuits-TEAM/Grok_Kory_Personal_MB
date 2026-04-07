@@ -37,6 +37,7 @@ import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import PpeiHeader from '@/components/PpeiHeader';
+import GitHubCommitHistory from '@/components/GitHubCommitHistory';
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -623,6 +624,9 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+            {/* GitHub Commit History */}
+            <GitHubCommitHistory />
 
             {/* Bottom brand tagline */}
             <div className="mt-6 text-center ppei-anim-fade-in ppei-delay-600">
