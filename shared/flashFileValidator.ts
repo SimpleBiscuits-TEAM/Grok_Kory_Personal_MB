@@ -189,6 +189,50 @@ export function validateFlashFile(data: Uint8Array): FileValidationResult {
   };
 }
 
+/** DevProg/PPEI container CRC32 at 0x1000 (big-endian), payload from 0x1004..EOF — see `fixContainerCrc`. */
+export interface ContainerCrc32Status {
+  applicable: boolean;
+  /** null when not applicable */
+  match: boolean | null;
+  storedHex?: string;
+  computedHex?: string;
+  message: string;
+}
+
+/**
+ * Lightweight CRC check for importers (Tune Deploy, etc.) without running the full `validateFlashFile` gate.
+ */
+export function getContainerCrc32Status(data: Uint8Array): ContainerCrc32Status {
+  const det = detectFileFormat(data);
+  if (data.length < 0x1008) {
+    return {
+      applicable: false,
+      match: null,
+      message: "File too small for container CRC32 field at offset 0x1000",
+    };
+  }
+  if (!det.hasCrc) {
+    return {
+      applicable: false,
+      match: null,
+      message: `No container CRC slot — ${det.details}`,
+    };
+  }
+  const storedCrc = readUint32BE(data, 0x1000);
+  const computedCrc = crc32(data.slice(0x1004));
+  const match = storedCrc === computedCrc;
+  const hx = (n: number) => `0x${n.toString(16).toUpperCase().padStart(8, "0")}`;
+  return {
+    applicable: true,
+    match,
+    storedHex: hx(storedCrc),
+    computedHex: hx(computedCrc),
+    message: match
+      ? `CRC32 verified ${hx(storedCrc)}`
+      : `CRC32 mismatch — stored ${hx(storedCrc)}, computed ${hx(computedCrc)}`,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CRC32 (Standard IEEE 802.3)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -235,6 +279,41 @@ export function fixContainerCrc(data: Uint8Array): Uint8Array {
   const computedCrc = crc32(fixed.slice(0x1004));
   writeUint32BE(fixed, 0x1000, computedCrc);
   return fixed;
+}
+
+/**
+ * CRC32 big-endian at 0x1000 over payload 0x1004..EOF — shared by DevProg and (typical) PPEI layouts.
+ * Unlike `getContainerCrc32Status`, this does not consult `detectFileFormat`; use for strict upload checks.
+ */
+export function verifyStandardContainerSlotCrc32(data: Uint8Array): {
+  ok: boolean;
+  match: boolean;
+  storedHex: string;
+  computedHex: string;
+  message: string;
+} {
+  if (data.length < 0x1008) {
+    return {
+      ok: false,
+      match: false,
+      storedHex: "",
+      computedHex: "",
+      message: "File too small for standard container CRC field at 0x1000 (need ≥ 0x1008 bytes).",
+    };
+  }
+  const storedCrc = readUint32BE(data, 0x1000);
+  const computedCrc = crc32(data.slice(0x1004));
+  const match = storedCrc === computedCrc;
+  const hx = (n: number) => `0x${n.toString(16).toUpperCase().padStart(8, "0")}`;
+  return {
+    ok: true,
+    match,
+    storedHex: hx(storedCrc),
+    computedHex: hx(computedCrc),
+    message: match
+      ? `CRC32 verified ${hx(storedCrc)}`
+      : `CRC32 mismatch — stored ${hx(storedCrc)}, computed ${hx(computedCrc)}`,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -109,7 +109,8 @@ export default function EcuScanPanel({
           <div className="flex-1">
             <h3 className="text-sm font-bold text-zinc-100">ECU Scanner</h3>
             <p className="text-[10px] text-zinc-500">
-              Read ECU identification, calibration part numbers, and CRC/CVN values
+              Read ECU identification, calibration part numbers, and CRC/CVN values — compared to this file’s
+              sw_c1–sw_c9 match keys (auto-filled from the container + Tune Deploy analysis on the Overview tab).
             </p>
           </div>
           {report && !scanning && (

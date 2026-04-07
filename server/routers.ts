@@ -31,6 +31,7 @@ import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { geofenceRouter } from "./routers/geofence";
 import { flashRouter } from "./routers/flash";
+import { tuneDeployRouter } from "./routers/tuneDeploy";
 import { weatherRouter } from "./routers/weather";
 import { dynoRouter } from "./routers/dyno";
 import { cloudRouter } from "./routers/cloud";
@@ -263,6 +264,9 @@ export const appRouter = router({
 
   // Flash Container Management & VOP 3.0 Upload Pipeline
   flash: flashRouter,
+
+  // Tune Deploy — calibration library (R2 + metadata + future vehicle match)
+  tuneDeploy: tuneDeployRouter,
 
   // Vehicle-Reported Weather Network
   weather: weatherRouter,

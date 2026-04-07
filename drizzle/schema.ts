@@ -1104,6 +1104,35 @@ export const knoxFiles = mysqlTable("knox_files", {
 export type KnoxFile = typeof knoxFiles.$inferSelect;
 export type InsertKnoxFile = typeof knoxFiles.$inferInsert;
 
+// ── Tune Deploy — calibration binary library (R2 + searchable metadata) ────
+/**
+ * Indexed metadata for uploaded calibrations. Files live in object storage (R2 via storage proxy);
+ * this table powers search, filters, and future vehicle-connected auto-match.
+ * NOTE: Stack uses MySQL today; JSON columns mirror how you would model this in Postgres.
+ */
+export const tuneDeployCalibrations = mysqlTable("tune_deploy_calibrations", {
+  id: int("id").autoincrement().primaryKey(),
+  uploadedByUserId: int("uploadedByUserId").notNull(),
+  fileName: varchar("fileName", { length: 512 }).notNull(),
+  r2Key: varchar("r2Key", { length: 512 }).notNull(),
+  storageUrl: text("storageUrl"),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  sizeBytes: int("sizeBytes").notNull(),
+  vehicleFamily: varchar("vehicleFamily", { length: 128 }).notNull(),
+  vehicleSubType: varchar("vehicleSubType", { length: 128 }).notNull(),
+  modelYear: int("modelYear"),
+  osVersion: varchar("osVersion", { length: 256 }),
+  ecuType: varchar("ecuType", { length: 128 }),
+  ecuHardwareId: varchar("ecuHardwareId", { length: 128 }),
+  /** Denormalized for SQL LIKE search; also stored inside parsedMeta JSON */
+  partNumbersCsv: text("partNumbersCsv"),
+  /** Full Zod-validated parse result + extras */
+  parsedMeta: json("parsedMeta").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TuneDeployCalibrationRow = typeof tuneDeployCalibrations.$inferSelect;
+export type InsertTuneDeployCalibration = typeof tuneDeployCalibrations.$inferInsert;
+
 
 // ── CASTING MODE — Live Streaming & Virtual Dyno Events ─────────────────────
 
