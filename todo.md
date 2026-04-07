@@ -870,3 +870,8 @@
 - [x] Build server-side tRPC procedure to fetch latest commits from GitHub API
 - [x] Build frontend component to display commit history on the page
 - [x] Show commit hash, message, author, and timestamp
+
+## GitHub Commit History — Production Fix
+- [x] Fix "No commits found" on published site — switch from local git log to GitHub API with auth token
+- [x] Store GitHub token as environment secret via webdev_request_secrets
+- [x] Verify commits load on both dev and published site
