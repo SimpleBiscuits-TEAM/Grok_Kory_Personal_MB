@@ -224,7 +224,11 @@ export function parseTuneDeployBinary(buffer: Buffer, originalFileName: string):
   const ecuConfig = ecuType ? getEcuConfig(ecuType) : undefined;
 
   const { osNumber } = extractBinaryMetadata(buffer);
-  let osVersion = osNumber || headerOsHint;
+  // For GM raw binaries, prefer the OS from offset 0x20 (headerOsHint) over
+  // the generic extractBinaryMetadata which may pick up garbage ASCII.
+  let osVersion = format === "GM_RAW"
+    ? (headerOsHint || osNumber)
+    : (osNumber || headerOsHint);
 
   const ascii = extractAsciiStrings(buffer);
   let calibrationPartNumbers = extractPartNumbersFromText(ascii);

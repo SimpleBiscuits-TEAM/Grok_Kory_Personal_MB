@@ -888,3 +888,7 @@
 ## Tune Deploy — E41 Stock BIN File Support
 - [x] Fix parser to recognize E41 stock calibration BIN files (currently rejected as "Unknown layout")
 - [x] Extract part numbers from filename pattern (E41_STOCK_12709844_12688366_...)
+
+## Tune Deploy — Fix GM_RAW OS Version
+- [x] Fix osVersion showing garbage ASCII ("3A3H3L3M3N3O3P3Q3R") instead of correct OS number "12709844" for GM raw binaries
+- [x] Redesign Tune Deploy metadata display from raw JSON into a polished professional UI card

@@ -27,6 +27,13 @@ import {
   Trash2,
   Gauge,
   Filter,
+  FileCode2,
+  ShieldCheck,
+  ShieldAlert,
+  Tag,
+  Fingerprint,
+  Info,
+  Copy,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -79,6 +86,254 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+/* ─── Metadata Inspector ─── polished card replacing raw JSON dump ─── */
+function MetadataInspector({
+  queueItem,
+  libraryRow,
+}: {
+  queueItem?: QueueItem;
+  libraryRow?: { meta: TuneDeployParsedMetadata; fileName: string; sha256: string; sizeBytes: number };
+}) {
+  const meta = queueItem?.analyze?.meta ?? libraryRow?.meta;
+  const crc = queueItem?.analyze?.containerCrc32;
+  const fileName = queueItem?.file.name ?? libraryRow?.fileName;
+  const sha256 = queueItem?.analyze?.sha256 ?? libraryRow?.sha256;
+  const fileSize = queueItem?.file.size ?? libraryRow?.sizeBytes;
+
+  if (!meta) {
+    return (
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6">
+        <h4 className="text-sm font-semibold text-zinc-200 mb-3 flex items-center gap-2">
+          <Hash className="w-4 h-4 text-orange-400" />
+          Metadata Inspector
+        </h4>
+        <div className="flex flex-col items-center justify-center py-10 text-zinc-600">
+          <Info className="w-8 h-8 mb-2 text-zinc-700" />
+          <p className="text-xs">Select a queue item or library entry to inspect metadata.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard");
+  };
+
+  const formatLabel = meta.containerFormat === "GM_RAW"
+    ? "GM Raw Flash Binary"
+    : meta.containerFormat === "PPEI"
+      ? "PPEI IPF Container"
+      : meta.containerFormat === "DEVPROG"
+        ? "DevProg V2 Container"
+        : meta.containerFormat === "RAW"
+          ? "Raw Binary"
+          : "Unknown";
+
+  const structureLabel = TUNE_FILE_STRUCTURE_FAMILY_LABEL[meta.fileStructureFamily] ?? meta.fileStructureFamily;
+
+  const yearDisplay = meta.modelYear
+    ? String(meta.modelYear)
+    : meta.modelYearStart && meta.modelYearEnd
+      ? `${meta.modelYearStart}–${meta.modelYearEnd}`
+      : meta.modelYearStart
+        ? `${meta.modelYearStart}+`
+        : "—";
+
+  return (
+    <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+          <Hash className="w-4 h-4 text-orange-400" />
+          Metadata Inspector
+        </h4>
+        {fileName && (
+          <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[300px]">{fileName}</span>
+        )}
+      </div>
+
+      {/* Top row: Vehicle + Format badges */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 border border-red-500/30 text-xs font-semibold text-red-300">
+          <Car className="w-3.5 h-3.5" />
+          {meta.vehicleFamily} {meta.vehicleSubType !== meta.vehicleFamily ? `· ${meta.vehicleSubType}` : ""}
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600/15 border border-orange-500/25 text-xs font-medium text-orange-300">
+          <FileCode2 className="w-3.5 h-3.5" />
+          {formatLabel}
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700/50 text-xs font-medium text-zinc-300">
+          <Calendar className="w-3.5 h-3.5" />
+          {yearDisplay}
+        </span>
+        {meta.ecuType && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/15 border border-blue-500/25 text-xs font-medium text-blue-300">
+            <Cpu className="w-3.5 h-3.5" />
+            ECU: {meta.ecuType}
+          </span>
+        )}
+      </div>
+
+      {/* Main grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* OS Version */}
+        <div className="rounded-xl bg-zinc-900/60 border border-zinc-800/60 p-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5">
+            <Gauge className="w-3 h-3" /> Operating System
+          </div>
+          <div className="text-lg font-mono font-bold text-zinc-100">
+            {meta.osVersion || <span className="text-zinc-600 text-sm">Not detected</span>}
+          </div>
+          {meta.osVersion && (
+            <button
+              type="button"
+              onClick={() => copyToClipboard(meta.osVersion!)}
+              className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors"
+            >
+              <Copy className="w-2.5 h-2.5" /> Copy
+            </button>
+          )}
+        </div>
+
+        {/* Calibration Part Numbers */}
+        <div className="rounded-xl bg-zinc-900/60 border border-zinc-800/60 p-4">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5">
+            <Tag className="w-3 h-3" /> Calibration Part Numbers
+          </div>
+          {meta.calibrationPartNumbers.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {meta.calibrationPartNumbers.map((pn, i) => (
+                <button
+                  key={pn}
+                  type="button"
+                  onClick={() => copyToClipboard(pn)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md font-mono text-xs transition-colors ${
+                    i === 0
+                      ? "bg-red-600/25 border border-red-500/30 text-red-200 hover:bg-red-600/40"
+                      : "bg-zinc-800/80 border border-zinc-700/40 text-zinc-300 hover:bg-zinc-700/60"
+                  }`}
+                  title={i === 0 ? "Primary OS / Cal PN — click to copy" : "Click to copy"}
+                >
+                  {pn}
+                  {i === 0 && <span className="text-[9px] text-red-400/80 ml-1">OS</span>}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="text-xs text-zinc-600">No part numbers detected</span>
+          )}
+        </div>
+      </div>
+
+      {/* Secondary info row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/40 px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1">Structure</div>
+          <div className="text-[11px] text-zinc-300 font-medium">{structureLabel}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/40 px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1">Hardware ID</div>
+          <div className="text-[11px] text-zinc-300 font-mono">{meta.ecuHardwareId || "—"}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/40 px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1">VIN</div>
+          <div className="text-[11px] text-zinc-300 font-mono">{meta.vin || "—"}</div>
+        </div>
+        <div className="rounded-lg bg-zinc-900/40 border border-zinc-800/40 px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1">File Size</div>
+          <div className="text-[11px] text-zinc-300 font-mono">{fileSize ? formatBytes(fileSize) : "—"}</div>
+        </div>
+      </div>
+
+      {/* Compatibility label */}
+      {meta.vehicleCompatibilityLabel && (
+        <div className="rounded-lg bg-zinc-900/30 border border-zinc-800/30 px-4 py-2.5 mb-4">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1">Compatibility</div>
+          <div className="text-xs text-zinc-400">{meta.vehicleCompatibilityLabel}</div>
+        </div>
+      )}
+
+      {/* CRC32 status */}
+      {crc?.applicable && (
+        <div className={`rounded-lg border px-4 py-3 mb-4 flex items-start gap-3 ${
+          crc.match
+            ? "bg-emerald-500/10 border-emerald-500/25"
+            : "bg-amber-500/10 border-amber-500/25"
+        }`}>
+          {crc.match ? (
+            <ShieldCheck className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+          ) : (
+            <ShieldAlert className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          )}
+          <div>
+            <div className={`text-xs font-medium ${crc.match ? "text-emerald-300" : "text-amber-300"}`}>
+              Container CRC32 {crc.match ? "Verified" : "Mismatch"}
+            </div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">{crc.message}</div>
+            {(crc.storedHex || crc.computedHex) && (
+              <div className="text-[10px] font-mono text-zinc-500 mt-1">
+                {crc.storedHex && <span>Stored: <span className="text-zinc-400">{crc.storedHex}</span></span>}
+                {crc.storedHex && crc.computedHex && <span className="mx-2">·</span>}
+                {crc.computedHex && <span>Computed: <span className="text-zinc-400">{crc.computedHex}</span></span>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SHA256 */}
+      {sha256 && (
+        <div className="rounded-lg bg-zinc-900/30 border border-zinc-800/30 px-4 py-2.5 mb-4">
+          <div className="text-[9px] uppercase tracking-wider text-zinc-600 mb-1 flex items-center gap-1">
+            <Fingerprint className="w-3 h-3" /> SHA-256
+          </div>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(sha256)}
+            className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1.5"
+          >
+            {sha256}
+            <Copy className="w-2.5 h-2.5 shrink-0" />
+          </button>
+        </div>
+      )}
+
+      {/* Warnings */}
+      {meta.warnings.length > 0 && (
+        <div className="rounded-lg bg-amber-500/8 border border-amber-500/20 px-4 py-3 mb-4">
+          <div className="text-[10px] uppercase tracking-wider text-amber-400/80 mb-2 flex items-center gap-1.5">
+            <AlertTriangle className="w-3 h-3" /> Warnings
+          </div>
+          <ul className="space-y-1">
+            {meta.warnings.map((w, i) => (
+              <li key={i} className="text-[11px] text-amber-300/70 flex items-start gap-2">
+                <span className="text-amber-500/50 mt-0.5">•</span>
+                {w}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Structure notes */}
+      {meta.fileStructureNotes.length > 0 && (
+        <div className="rounded-lg bg-zinc-900/30 border border-zinc-800/30 px-4 py-3">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-2 flex items-center gap-1.5">
+            <Info className="w-3 h-3" /> Analysis Notes
+          </div>
+          <ul className="space-y-1">
+            {meta.fileStructureNotes.map((n, i) => (
+              <li key={i} className="text-[11px] text-zinc-500">
+                {n}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function TuneDeployWorkspace() {
@@ -594,32 +849,10 @@ export default function TuneDeployWorkspace() {
       </div>
 
       {/* Metadata inspector */}
-      <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
-        <h4 className="text-sm font-semibold text-zinc-200 mb-3 flex items-center gap-2">
-          <Hash className="w-4 h-4 text-orange-400" />
-          Metadata preview
-        </h4>
-        {!selectedQueue && !selectedLib && (
-          <p className="text-xs text-zinc-600">Select a queue item or library row for full metadata.</p>
-        )}
-        {selectedQueue?.analyze && (
-          <>
-            {selectedQueue.analyze.containerCrc32 && (
-              <pre className="text-[11px] leading-relaxed text-zinc-400 font-mono overflow-x-auto p-3 rounded-lg bg-black/50 border border-zinc-800/80 mb-2">
-                {JSON.stringify({ containerCrc32: selectedQueue.analyze.containerCrc32 }, null, 2)}
-              </pre>
-            )}
-            <pre className="text-[11px] leading-relaxed text-zinc-400 font-mono overflow-x-auto p-3 rounded-lg bg-black/50 border border-zinc-800/80">
-              {JSON.stringify(selectedQueue.analyze.meta, null, 2)}
-            </pre>
-          </>
-        )}
-        {selectedLib && (
-          <pre className="text-[11px] leading-relaxed text-zinc-400 font-mono overflow-x-auto p-3 rounded-lg bg-black/50 border border-zinc-800/80">
-            {JSON.stringify(selectedLib.meta, null, 2)}
-          </pre>
-        )}
-      </section>
+      <MetadataInspector
+        queueItem={selectedQueue}
+        libraryRow={selectedLib}
+      />
     </div>
   );
 }
