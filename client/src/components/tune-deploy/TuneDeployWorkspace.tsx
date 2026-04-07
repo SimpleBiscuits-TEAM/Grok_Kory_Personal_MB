@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { TRPCClientError } from "@trpc/client";
 
 type TuneDeployUploadErrorJson = {
   ok?: boolean;
@@ -499,7 +500,13 @@ export default function TuneDeployWorkspace() {
             </div>
           )}
           {listQuery.isError && (
-            <p className="text-xs text-red-400 py-4">{(listQuery.error as Error).message}</p>
+            <p className="text-xs text-red-400 py-4">
+              {listQuery.error instanceof TRPCClientError
+                ? listQuery.error.message
+                : listQuery.error instanceof Error
+                  ? listQuery.error.message
+                  : String(listQuery.error)}
+            </p>
           )}
 
           <div className="flex-1 min-h-[280px] max-h-[420px] overflow-y-auto space-y-4 pr-1">
