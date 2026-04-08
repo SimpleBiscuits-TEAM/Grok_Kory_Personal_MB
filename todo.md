@@ -909,3 +909,10 @@
 - [x] Tobi's readiness check (secProfile?.aesKeyHex?.length === 32) works with placeholder
 - [x] Vite production build passes with zero errors
 - [x] All pre-existing tests unaffected (13 failures are pre-existing: GitHub API token, auth mocks, LLM mocks)
+
+## Pull Latest from GROK Branch & Publish
+- [x] Fetch and merge latest GROK branch into main
+- [x] Resolve any merge conflicts (none — clean merge)
+- [x] Verify build passes
+- [x] Clean up dead getSecurityProfile code from seedKeyAlgorithms.ts (GROK replaced with getSecurityProfileMeta + ecuSupportsServerKeyDerivation)
+- [x] Save checkpoint and publish

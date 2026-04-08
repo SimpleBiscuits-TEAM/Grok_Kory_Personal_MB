@@ -14,8 +14,6 @@
  * The browser uses shared/seedKeyMeta.ts (generated JSON) for non-secret metadata.
  */
 
-import { ECU_SECURITY_META } from './seedKeyMeta';
-
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type SeedKeyAlgorithmType =
@@ -182,40 +180,3 @@ export function bytesToHex(bytes: Uint8Array, separator = ' '): string {
   return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(separator);
 }
 
-// ── Client-safe security profile lookup ───────────────────────────────────
-// Returns metadata + a placeholder aesKeyHex (32-char string) for ECUs whose
-// real AES key lives in server/seedKeyProfiles.ts. This lets Tobi's readiness
-// check (`secProfile?.aesKeyHex?.length === 32`) work on the client without
-// ever shipping the actual key hex to the browser.
-//
-// NOTE: seedKeyMeta.ts only uses `import type` from this file, so the
-// circular reference is type-only and erased at runtime — no real cycle.
-
-/** ECU types that have a hardcoded AES key in server/seedKeyProfiles.ts */
-const ECU_TYPES_WITH_AES_KEY: ReadonlySet<string> = new Set([
-  'E41', 'E88', 'E90', 'E99', 'E92', 'E98', 'E80', 'E83', 'E78',
-  'E67', 'E39', 'E46', 'E45',
-  'T87', 'T87A',
-]);
-
-/**
- * Client-safe security profile lookup.
- *
- * Returns the ECU security metadata from seedKeyMeta plus a 32-char
- * placeholder `aesKeyHex` when the server holds the real key.
- * The actual key hex never leaves the server.
- */
-export function getSecurityProfile(
-  ecuType: string,
-): (Omit<EcuSecurityProfile, 'aesKeyHex'> & { aesKeyHex?: string }) | undefined {
-  const upper = ecuType.toUpperCase();
-  const meta = ECU_SECURITY_META[upper];
-  if (!meta) return undefined;
-  return {
-    ...meta,
-    // 32-char placeholder so `.aesKeyHex.length === 32` evaluates true
-    aesKeyHex: ECU_TYPES_WITH_AES_KEY.has(upper)
-      ? '00000000000000000000000000000000'
-      : undefined,
-  };
-}
