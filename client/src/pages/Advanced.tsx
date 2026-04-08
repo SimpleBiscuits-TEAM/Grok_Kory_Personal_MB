@@ -967,8 +967,8 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
     </div>
   );
 
-  // Compare mode — full-screen compare view
-  if (analyzerMode === 'compare') {
+  // When no data loaded and compare mode — show standalone CompareView with upload zones
+  if (!data && analyzerMode === 'compare') {
     return (
       <div>
         <ModeToggle />
@@ -1136,6 +1136,17 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
       <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><DtcSearch /></div>
       <div><SectionHeader icon={<Cpu style={{ width: 18, height: 18, color: sColor.red }} />} title="ENGINE REFERENCE DATABASE" /><EcuReferencePanel /></div>
+
+      {/* Compare section — shown when compare mode is active, data already loaded above */}
+      {analyzerMode === 'compare' && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '0.75rem', borderBottom: `1px solid ${sColor.red}4d`, marginBottom: '1rem' }}>
+            <Gauge style={{ width: 20, height: 20, color: sColor.red }} />
+            <h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>DATALOG COMPARISON</h2>
+          </div>
+          <CompareView onBack={() => setAnalyzerMode('analyze')} embedded />
+        </div>
+      )}
 
       {(error || exportError) && (
         <div style={{ position: 'fixed', bottom: '1rem', right: '1rem', background: sColor.bgCard, border: `1px solid ${sColor.red}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1rem 1.25rem', display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '420px', zIndex: 50 }}>

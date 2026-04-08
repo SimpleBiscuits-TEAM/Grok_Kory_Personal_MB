@@ -936,4 +936,17 @@
 - [x] Wire all three charts into Advanced.tsx analyzer output
 - [x] Wire ScreenGuard into App.tsx globally
 - [x] Verify build passes
-- [ ] Push changes to GROK branch
+- [x] Push changes to GROK branch
+
+## MAF Comparison Chart — Normal vs Low/Slow MAF
+- [ ] Investigate existing CompareView and MAF overlay functionality
+- [ ] Build MAF comparison chart showing normal vs slow/low MAF overlay
+- [ ] Verify restored single-log charts (RPMvMAF, HPvsRPM, TimeSeries) actually render after upload
+- [ ] Push to GROK
+
+## Bug: Advanced tab broken + MAF comparison missing
+- [x] Diagnose what broke in Advanced.tsx (our chart additions may have caused issues)
+- [x] Fix Advanced tab to render all analysis content properly — Compare mode early return removed, now shows full analysis + compare section inline
+- [ ] Restore MAF comparison chart (normal vs low MAF overlay from two logs)
+- [ ] Push fixes to GROK
+- [x] Compare mode must show ALL normal mode content (charts, stats, diagnostics, health report, etc.) plus additional comparison features — no compromise from normal mode
