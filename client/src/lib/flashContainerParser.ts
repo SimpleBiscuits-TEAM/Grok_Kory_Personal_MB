@@ -634,10 +634,10 @@ function parsePpeiContainerInner(data: ArrayBuffer, fileName?: string): FlashCon
       id: 'seed_key', label: 'Security Key (server)',
       status: serverKeyReady ? 'pass' : needsUnlockBox ? 'info' : 'warn',
       detail: serverKeyReady
-        ? `Server can derive GM AES key for ${ecuFamily} — flash will call computeSecurityKey`
+        ? `Server can derive key for ${ecuFamily}`
         : needsUnlockBox
           ? 'Hardware unlock box handles security'
-          : `No server-side GM key profile for ${ecuFamily} — unlocked ECUs may still work with dummy key`,
+          : `No server-side key profile — unlocked ECUs may still work`,
     });
 
     checks.push({
