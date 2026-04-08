@@ -40,7 +40,7 @@ import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
-import { StatsSummary } from '@/components/Charts';
+import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
 import DtcSearch from '@/components/DtcSearch';
@@ -1105,6 +1105,10 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
       )}
 
       <div ref={statsRef}><StatsSummary data={data} /></div>
+
+      <div><RPMvMAFChart data={data} binnedData={binnedData} /></div>
+      <div><HPvsRPMChart data={data} binnedData={binnedData} /></div>
+      <div><TimeSeriesChart data={data} /></div>
 
       {dragAnalysis && <div><SectionHeader icon={<Flag style={{ width: 18, height: 18, color: sColor.red }} />} title="DRAG RACING ANALYZER" /><div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1.25rem' }}><DragTimeslip analysis={dragAnalysis} /></div></div>}
 

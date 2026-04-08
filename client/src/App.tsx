@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
+import ScreenGuard from "./components/ScreenGuard";
 import { Redirect } from "wouter";
 // Lazy-load all heavy pages for code splitting
 const Home = lazy(() => import("./pages/Home"));
@@ -94,6 +95,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
+          <ScreenGuard active={true} />
           <DebugReportButton />
         </TooltipProvider>
       </ThemeProvider>

@@ -3,8 +3,6 @@ import {
   Line,
   AreaChart,
   Area,
-  ScatterChart,
-  Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -14,131 +12,155 @@ import {
   ComposedChart,
 } from 'recharts';
 import { ProcessedMetrics } from '@/lib/dataProcessor';
+import { useMemo } from 'react';
 
 interface ChartProps {
   data: ProcessedMetrics;
   binnedData?: any[];
 }
 
+/* ── shared PPEI dark-theme tokens ── */
+const theme = {
+  bg: 'oklch(0.13 0.006 260)',
+  border: 'oklch(0.22 0.008 260)',
+  grid: 'oklch(0.20 0.006 260)',
+  axis: 'oklch(0.55 0.008 260)',
+  title: 'white',
+  titleFont: '"Bebas Neue", "Impact", sans-serif',
+  labelFont: '"Share Tech Mono", monospace',
+  tooltipBg: 'oklch(0.16 0.006 260)',
+  tooltipBorder: 'oklch(0.28 0.008 260)',
+  red: 'oklch(0.52 0.22 25)',
+  blue: 'oklch(0.70 0.18 200)',
+  cyan: 'oklch(0.72 0.16 195)',
+  green: 'oklch(0.65 0.20 145)',
+  amber: 'oklch(0.75 0.18 60)',
+  orange: 'oklch(0.75 0.18 40)',
+};
+
+const tooltipStyle = {
+  backgroundColor: theme.tooltipBg,
+  border: `1px solid ${theme.tooltipBorder}`,
+  borderRadius: '4px',
+  padding: '8px 12px',
+  fontFamily: theme.labelFont,
+  fontSize: '0.75rem',
+  color: 'white',
+};
+
 /**
- * RPM vs MAF Flow chart with vehicle speed overlay
+ * RPM vs MAF Flow — line chart sorted by RPM, with optional mean trend
  */
 export function RPMvMAFChart({ data, binnedData }: ChartProps) {
-  const chartData = data.rpm.map((rpm, i) => ({
-    rpm,
-    maf: data.maf[i],
-    vehicleSpeed: data.vehicleSpeed[i],
-  }));
+  const chartData = useMemo(() => {
+    const raw = data.rpm.map((rpm, i) => ({ rpm, maf: data.maf[i] }));
+    // Sort by RPM for a clean left-to-right line
+    raw.sort((a, b) => a.rpm - b.rpm);
+    // Downsample for performance (max 600 points)
+    const step = Math.max(1, Math.ceil(raw.length / 600));
+    return raw.filter((_, i) => i % step === 0);
+  }, [data]);
 
   return (
-    <div className="w-full h-96 bg-white rounded-lg border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">RPM vs Mass Airflow (MAF)</h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+    <div style={{ width: '100%', height: '24rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: '3px', padding: '1rem' }}>
+      <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
+        RPM vs MASS AIRFLOW (MAF)
+      </h3>
+      <ResponsiveContainer width="100%" height="85%">
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
           <XAxis
-            type="number"
             dataKey="rpm"
-            name="Engine RPM"
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
+            type="number"
+            stroke={theme.axis}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
           <YAxis
-            type="number"
             dataKey="maf"
-            name="MAF (lb/min)"
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
+            type="number"
+            stroke={theme.axis}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'MAF (lb/min)', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '6px',
-              padding: '8px',
-            }}
-            formatter={(value: any) => value.toFixed(1)}
-            labelFormatter={(value: any) => `RPM: ${value.toFixed(0)}`}
-          />
-          <Scatter
-            name="MAF Flow"
-            data={chartData}
-            fill="#3b82f6"
-            fillOpacity={0.3}
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(2)} labelFormatter={(v: any) => `RPM: ${Number(v).toFixed(0)}`} />
+          <Line
+            type="monotone"
+            dataKey="maf"
+            stroke={theme.blue}
+            strokeWidth={1.5}
+            dot={false}
             isAnimationActive={false}
+            name="MAF Flow"
           />
           {binnedData && (
             <Line
               type="monotone"
               dataKey="mafMean"
               data={binnedData}
-              stroke="#1e40af"
+              stroke={theme.red}
               strokeWidth={2.5}
               dot={false}
               isAnimationActive={false}
               name="Mean MAF Trend"
             />
           )}
-        </ScatterChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
 /**
- * Estimated Horsepower vs RPM chart with dual methods
+ * Estimated Horsepower vs RPM — dual-method line chart
  */
 export function HPvsRPMChart({ data, binnedData }: ChartProps) {
-  const chartData = data.rpm.map((rpm, i) => ({
-    rpm,
-    hpTorque: data.hpTorque[i],
-    hpMaf: data.hpMaf[i],
-  }));
+  const chartData = useMemo(() => {
+    const raw = data.rpm.map((rpm, i) => ({ rpm, hpTorque: data.hpTorque[i], hpMaf: data.hpMaf[i] }));
+    raw.sort((a, b) => a.rpm - b.rpm);
+    const step = Math.max(1, Math.ceil(raw.length / 600));
+    return raw.filter((_, i) => i % step === 0);
+  }, [data]);
 
   return (
-    <div className="w-full h-96 bg-white rounded-lg border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Estimated Horsepower vs RPM</h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+    <div style={{ width: '100%', height: '24rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.green}`, borderRadius: '3px', padding: '1rem' }}>
+      <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
+        ESTIMATED HORSEPOWER vs RPM
+      </h3>
+      <ResponsiveContainer width="100%" height="85%">
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
           <XAxis
-            type="number"
             dataKey="rpm"
-            name="Engine RPM"
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
+            type="number"
+            stroke={theme.axis}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
           <YAxis
-            type="number"
+            stroke={theme.axis}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'Horsepower', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+          />
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(1)} labelFormatter={(v: any) => `RPM: ${Number(v).toFixed(0)}`} />
+          <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
+          <Line
+            type="monotone"
             dataKey="hpTorque"
-            name="HP"
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '6px',
-              padding: '8px',
-            }}
-            formatter={(value: any) => value.toFixed(1)}
-            labelFormatter={(value: any) => `RPM: ${value.toFixed(0)}`}
-          />
-          <Scatter
+            stroke={theme.blue}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
             name="HP (Torque method)"
-            data={chartData}
-            fill="#3b82f6"
-            fillOpacity={0.2}
-            isAnimationActive={false}
           />
-          <Scatter
-            name="HP (MAF method)"
-            data={chartData}
+          <Line
+            type="monotone"
             dataKey="hpMaf"
-            fill="#06b6d4"
-            fillOpacity={0.2}
+            stroke={theme.cyan}
+            strokeWidth={1.5}
+            dot={false}
             isAnimationActive={false}
+            name="HP (MAF method)"
           />
           {binnedData && (
             <>
@@ -146,8 +168,8 @@ export function HPvsRPMChart({ data, binnedData }: ChartProps) {
                 type="monotone"
                 dataKey="hpTorqueMean"
                 data={binnedData}
-                stroke="#1e40af"
-                strokeWidth={2}
+                stroke={theme.red}
+                strokeWidth={2.5}
                 dot={false}
                 isAnimationActive={false}
                 name="Mean HP (Torque)"
@@ -156,87 +178,84 @@ export function HPvsRPMChart({ data, binnedData }: ChartProps) {
                 type="monotone"
                 dataKey="hpMafMean"
                 data={binnedData}
-                stroke="#0891b2"
-                strokeWidth={2}
+                stroke={theme.amber}
+                strokeWidth={2.5}
                 dot={false}
                 isAnimationActive={false}
                 name="Mean HP (MAF)"
               />
             </>
           )}
-        </ScatterChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
 /**
- * Time-series overview with multiple channels
+ * Time-series overview — RPM, MAF, Boost, HP over time
  */
 export function TimeSeriesChart({ data }: ChartProps) {
-  const chartData = data.rpm.map((_, i) => ({
-    time: data.timeMinutes[i],
-    rpm: data.rpm[i],
-    maf: data.maf[i],
-    boost: data.boost[i],
-    hp: data.hpTorque[i],
-  }));
-
-  // Downsample for performance
-  const downsampledData = chartData.filter((_, i) => i % Math.ceil(chartData.length / 500) === 0);
+  const chartData = useMemo(() => {
+    const raw = data.rpm.map((_, i) => ({
+      time: data.timeMinutes[i],
+      rpm: data.rpm[i],
+      maf: data.maf[i],
+      boost: data.boost[i],
+      hp: data.hpTorque[i],
+    }));
+    // Downsample for performance (max 600 points)
+    const step = Math.max(1, Math.ceil(raw.length / 600));
+    return raw.filter((_, i) => i % step === 0);
+  }, [data]);
 
   return (
-    <div className="w-full h-96 bg-white rounded-lg border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Time-Series Overview</h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={downsampledData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+    <div style={{ width: '100%', height: '24rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.amber}`, borderRadius: '3px', padding: '1rem' }}>
+      <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
+        TIME-SERIES OVERVIEW
+      </h3>
+      <ResponsiveContainer width="100%" height="85%">
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
           <XAxis
             dataKey="time"
-            stroke="#6b7280"
-            style={{ fontSize: '12px' }}
-            label={{ value: 'Time (min)', position: 'insideBottomRight', offset: -10 }}
+            stroke={theme.axis}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'Time (min)', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
           <YAxis
             yAxisId="left"
-            stroke="#3b82f6"
-            style={{ fontSize: '12px' }}
-            label={{ value: 'RPM / MAF', angle: -90, position: 'insideLeft' }}
+            stroke={theme.blue}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'RPM / MAF', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
           <YAxis
             yAxisId="right"
             orientation="right"
-            stroke="#f59e0b"
-            style={{ fontSize: '12px' }}
-            label={{ value: 'Boost (psi) / HP', angle: 90, position: 'insideRight' }}
+            stroke={theme.amber}
+            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+            label={{ value: 'Boost (psi) / HP', angle: 90, position: 'insideRight', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '6px',
-              padding: '8px',
-            }}
-            formatter={(value: any) => value.toFixed(1)}
-          />
-          <Legend />
+          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(1)} />
+          <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
           <Area
             yAxisId="left"
             type="monotone"
             dataKey="rpm"
-            fill="#3b82f6"
-            stroke="#1e40af"
-            fillOpacity={0.2}
+            fill={theme.blue}
+            stroke={theme.blue}
+            fillOpacity={0.12}
+            strokeWidth={1.5}
             isAnimationActive={false}
             name="RPM"
           />
-          <Area
+          <Line
             yAxisId="left"
             type="monotone"
             dataKey="maf"
-            fill="#06b6d4"
-            stroke="#0891b2"
-            fillOpacity={0.2}
+            stroke={theme.cyan}
+            strokeWidth={1.5}
+            dot={false}
             isAnimationActive={false}
             name="MAF (lb/min)"
           />
@@ -244,7 +263,7 @@ export function TimeSeriesChart({ data }: ChartProps) {
             yAxisId="right"
             type="monotone"
             dataKey="boost"
-            stroke="#f59e0b"
+            stroke={theme.amber}
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}
@@ -254,7 +273,7 @@ export function TimeSeriesChart({ data }: ChartProps) {
             yAxisId="right"
             type="monotone"
             dataKey="hp"
-            stroke="#10b981"
+            stroke={theme.green}
             strokeWidth={2}
             dot={false}
             isAnimationActive={false}

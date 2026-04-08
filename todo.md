@@ -924,3 +924,16 @@
 - [ ] Access code persists in localStorage so users don't re-enter every page load
 - [ ] Dev bypass skips access code gate too (localhost devs go straight in)
 - [ ] Update .env.example with DEV_BYPASS_AUTH documentation
+
+## Bug: Missing Charts in Datalog Analyzer
+- [x] Investigate MAF difference between normal and slow response datalogs
+- [x] Identify which charts were removed/broken (RPMvMAF, HPvsRPM, TimeSeries from Charts.tsx)
+- [x] Convert RPMvMAFChart from scatter plot to line graph
+- [x] Convert HPvsRPMChart from scatter to line graph
+- [x] Ensure TimeSeriesChart is line-based (already is)
+- [x] Restyle all 3 charts to match PPEI dark theme
+- [x] Wire all three charts into Home.tsx analyzer output
+- [x] Wire all three charts into Advanced.tsx analyzer output
+- [x] Wire ScreenGuard into App.tsx globally
+- [x] Verify build passes
+- [ ] Push changes to GROK branch

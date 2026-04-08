@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
-import { StatsSummary } from '@/components/Charts';
+import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
@@ -932,6 +932,21 @@ export default function Home() {
             {/* Stats Summary */}
             <div ref={statsRef} className="ppei-section-reveal ppei-delay-200">
               <StatsSummary data={data} />
+            </div>
+
+            {/* RPM vs MAF */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <RPMvMAFChart data={data} binnedData={binnedData} />
+            </div>
+
+            {/* HP vs RPM */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <HPvsRPMChart data={data} binnedData={binnedData} />
+            </div>
+
+            {/* Time-Series Overview */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <TimeSeriesChart data={data} />
             </div>
 
             {/* Drag Racing Analyzer */}
