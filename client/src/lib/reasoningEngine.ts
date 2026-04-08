@@ -1045,7 +1045,12 @@ function analyzeBoostLeak(
         `appear worse than either would be in isolation.`,
       evidence,
       suggestion:
-        'Perform a boost leak test on the charge system. Check all intercooler boots, clamps, ' +
+        'IMPORTANT: Before assuming a boost leak, check if the vehicle has an aftermarket intake ' +
+        'or if the OEM MAF baffle has been removed. A larger pre-MAF tube diameter causes the ' +
+        'MAF sensor to under-read (lower air velocity across the heated element = lower reported ' +
+        'airflow), which makes the smoke limiter engage prematurely and limits power. In this case, ' +
+        'the fix is a MAF scaling tune revision, not a mechanical repair. If the intake is stock, ' +
+        'perform a boost leak test on the charge system. Check all intercooler boots, clamps, ' +
         'intercooler end tanks, up-pipe connections, and turbo outlet. Even a small leak can ' +
         'significantly reduce peak boost. If the vehicle also has a converter stall concern, ' +
         'address the boost leak first — restoring full boost pressure may partially compensate ' +

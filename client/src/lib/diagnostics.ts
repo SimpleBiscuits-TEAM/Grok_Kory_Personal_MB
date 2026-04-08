@@ -909,7 +909,7 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
         title: 'Low MAF at Idle',
         description: `MAF flow drops below 2 lb/min at idle for extended periods (minimum: ${minIdleMaf.toFixed(1)} lb/min).`,
         recommendation:
-          'Check MAF sensor for contamination or blockage. Contact tuner to verify MAF calibration. May indicate intake restriction or sensor fault.',
+          'If an aftermarket intake is installed or the OEM baffle has been removed, the MAF sensor may be under-reading due to the larger pre-MAF tube diameter — this is expected physics, not a sensor fault. The fix is a MAF scaling tune revision to recalibrate the transfer function for the new tube geometry. If the intake is stock, check MAF sensor for contamination or blockage and contact tuner to verify MAF calibration.',
       });
     }
   }

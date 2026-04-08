@@ -942,11 +942,17 @@
 - [x] Investigate existing CompareView and MAF overlay functionality
 - [x] Build MAF comparison chart showing normal vs slow/low MAF overlay — CompareView PID overlay already supports this, MAF now default-selected
 - [ ] Verify restored single-log charts (RPMvMAF, HPvsRPM, TimeSeries) actually render after upload
-- [ ] Push to GROK
+- [x] Push to GROK
 
 ## Bug: Advanced tab broken + MAF comparison missing
 - [x] Diagnose what broke in Advanced.tsx (our chart additions may have caused issues)
 - [x] Fix Advanced tab to render all analysis content properly — Compare mode early return removed, now shows full analysis + compare section inline
 - [x] Restore MAF comparison chart (normal vs low MAF overlay from two logs) — CompareView already has MAF in PID overlay charts, added MAF + HP to default selected PIDs
-- [ ] Push fixes to GROK
+- [x] Push fixes to GROK
 - [x] Compare mode must show ALL normal mode content (charts, stats, diagnostics, health report, etc.) plus additional comparison features — no compromise from normal mode
+
+## Knox AI Training — MAF Baffle / Intake Tube Sizing Knowledge
+- [x] Train Knox and AI agents on MAF baffle removal causing under-reading (larger pre-MAF area → pressure drop → slower element heating → MAF-limited/smoke-limited)
+- [x] Include knowledge about intake companies designing around stock MAF metering to avoid tune requirement
+- [x] Include recommended fix: tune revision for MAF scaling with larger tube
+- [x] Verify Knox knowledge base updated and agents can reference this in diagnostics
