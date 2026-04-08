@@ -26,6 +26,12 @@ import {
   updateAssignmentStatus,
   deleteAssignment,
 } from "../tuneDeployDb";
+import { normalizeHardwareSerialKey, normalizeVinKey } from "../../shared/cloudVehicleLinkKeys";
+
+function storageNormalizeVin(vin: string | undefined): string | null {
+  if (!vin?.trim()) return null;
+  return normalizeVinKey(vin).slice(0, 17);
+}
 
 export const tuneDeployRouter = router({
   // ── Calibration Library ──────────────────────────────────────────────────
@@ -67,15 +73,18 @@ export const tuneDeployRouter = router({
         label: z.string().max(255).optional(),
         vehicleDescription: z.string().max(512).optional(),
         vin: z.string().max(17).optional(),
+        ecuSerial: z.string().max(128).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const id = await insertDevice({
         deviceType: input.deviceType,
         serialNumber: input.serialNumber,
         label: input.label ?? null,
         vehicleDescription: input.vehicleDescription ?? null,
-        vin: input.vin ?? null,
+        vin: storageNormalizeVin(input.vin) ?? null,
+        ecuSerial: normalizeHardwareSerialKey(input.ecuSerial) ?? null,
+        createdBy: ctx.user?.id ?? null,
       });
       if (id == null) {
         throw new TRPCError({
@@ -93,11 +102,19 @@ export const tuneDeployRouter = router({
         label: z.string().max(255).optional(),
         vehicleDescription: z.string().max(512).optional(),
         vin: z.string().max(17).optional(),
+        ecuSerial: z.string().max(128).optional(),
         isActive: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      const { id, ...updates } = input;
+      const { id, vin, ecuSerial, ...rest } = input;
+      const updates = {
+        ...rest,
+        ...(vin !== undefined ? { vin: storageNormalizeVin(vin) } : {}),
+        ...(ecuSerial !== undefined
+          ? { ecuSerial: normalizeHardwareSerialKey(ecuSerial) ?? null }
+          : {}),
+      };
       const ok = await updateDevice(id, updates);
       if (!ok) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update device" });
@@ -136,11 +153,12 @@ export const tuneDeployRouter = router({
         notes: z.string().max(1000).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const id = await createAssignment({
         calibrationId: input.calibrationId,
         deviceId: input.deviceId,
         notes: input.notes,
+        assignedBy: ctx.user?.id,
       });
       if (id == null) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create assignment" });

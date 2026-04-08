@@ -1151,6 +1151,8 @@ export const tuneDeployDevices = mysqlTable("tune_deploy_devices", {
   vehicleDescription: varchar("vehicleDescription", { length: 512 }),
   /** VIN of the target vehicle (optional) */
   vin: varchar("vin", { length: 17 }),
+  /** ECU / module serial when known — links to cloud enrollment `ecuSerial` for MY VEHICLE */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
   /** Last time this device checked in / was seen online */
   lastSeenAt: timestamp("lastSeenAt"),
   /** Whether this device is active and should receive deployments */
@@ -1839,6 +1841,10 @@ export const cloudEnrollments = mysqlTable("cloud_enrollments", {
   /** Vehicle identification */
   vehicleId: varchar("vehicleId", { length: 64 }),
   vin: varchar("vin", { length: 17 }),
+  /** V-OP / PCAN programmer serial — matches `tune_deploy_devices.serialNumber` for Tune Deploy → Cloud MY VEHICLE */
+  programmerSerial: varchar("programmerSerial", { length: 128 }),
+  /** ECU serial — matches `tune_deploy_devices.ecuSerial` when set */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
   /** Vehicle classification for grouping */
   vehicleYear: int("vehicleYear"),
   vehicleMake: varchar("vehicleMake", { length: 64 }),

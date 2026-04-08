@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { GUEST_OPEN_ID } from "@shared/guestUser";
 import type { TuneDeployContainerCrc32, TuneDeployParsedMetadata } from "@shared/tuneDeploySchemas";
+import { getEcuConfig } from "@shared/ecuDatabase";
 import { TUNE_FILE_STRUCTURE_FAMILY_LABEL } from "@shared/tuneFileStructureFamilies";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
@@ -49,6 +50,9 @@ type TuneDeployUploadErrorJson = {
   ok?: boolean;
   error?: string;
   code?: string;
+  hint?: string;
+  r2Key?: string;
+  storageUrl?: string | null;
   details?: string[];
   detectedFileStructureFamily?: string;
   detectedFileStructureLabel?: string;
@@ -59,6 +63,8 @@ type TuneDeployUploadErrorJson = {
 function formatTuneDeployUploadError(json: TuneDeployUploadErrorJson, statusText: string): string {
   let msg = json.error || statusText || "Upload failed";
   if (json.code) msg = `[${json.code}] ${msg}`;
+  if (json.hint) msg += `\n\n${json.hint}`;
+  if (json.r2Key) msg += `\n\nStorage key (if upload reached object storage): ${json.r2Key}`;
   if (json.detectedFileStructureLabel && json.detectedFileStructureFamily) {
     msg += `\nDetected file layout: ${json.detectedFileStructureLabel} (${json.detectedFileStructureFamily})`;
   }
@@ -92,6 +98,60 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+/** Same 2-column ECU grid as FLASH → Flash Container → Overview (when `ecuType` matches DB). */
+function FlashEcuOverviewGrid({ meta }: { meta: TuneDeployParsedMetadata }) {
+  const cfg = meta.ecuType ? getEcuConfig(meta.ecuType) : undefined;
+  const rows: { label: string; value: string }[] = [];
+
+  if (cfg) {
+    rows.push(
+      { label: "ECU Platform", value: cfg.name },
+      { label: "Protocol", value: `${cfg.protocol} (CAN ${cfg.canSpeed} kbps)` },
+      { label: "OEM", value: cfg.oem },
+      { label: "Controller Type", value: cfg.controllerType.toUpperCase() },
+      {
+        label: "CAN TX / RX",
+        value: `0x${cfg.txAddr.toString(16).toUpperCase()} / 0x${cfg.rxAddr.toString(16).toUpperCase()}`,
+      },
+      {
+        label: "Transfer Size",
+        value: cfg.xferSize
+          ? `0x${cfg.xferSize.toString(16).toUpperCase()} (${cfg.xferSize} bytes)`
+          : "Default",
+      },
+      { label: "Seed Level", value: `0x${cfg.seedLevel.toString(16).padStart(2, "0")}` },
+    );
+  } else if (meta.ecuType) {
+    rows.push(
+      { label: "ECU type (from file)", value: meta.ecuType },
+      {
+        label: "Database match",
+        value: "No ECU database entry for this type string — use FLASH → Flash Container with the binary for full addressing / readiness.",
+      },
+    );
+  }
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="mb-4">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-1.5">
+        <Radio className="w-3 h-3" />
+        Flash ECU overview
+        <span className="normal-case text-zinc-600 font-normal">(same layout as Flash Container)</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {rows.map((item) => (
+          <div key={item.label} className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{item.label}</div>
+            <div className="text-sm text-zinc-200 font-medium mt-0.5 break-words">{item.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ─── Metadata Inspector ─── polished card replacing raw JSON dump ─── */
@@ -181,6 +241,8 @@ function MetadataInspector({
           </span>
         )}
       </div>
+
+      <FlashEcuOverviewGrid meta={meta} />
 
       {/* Main grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -460,9 +522,10 @@ export default function TuneDeployWorkspace() {
         const json = (await res.json()) as TuneDeployUploadErrorJson & { id?: number };
         if (!res.ok || !json.ok) {
           const full = formatTuneDeployUploadError(json, res.statusText);
+          const toastDesc = [json.error, json.hint].filter(Boolean).join("\n\n") || res.statusText;
           toast.error("Tune Deploy upload rejected", {
-            description: json.error || res.statusText,
-            duration: 8000,
+            description: toastDesc,
+            duration: 12_000,
           });
           throw new Error(full);
         }
@@ -906,6 +969,7 @@ function DeviceManagementPanel({ libraryRows }: {
   const [newLabel, setNewLabel] = useState("");
   const [newVehicle, setNewVehicle] = useState("");
   const [newVin, setNewVin] = useState("");
+  const [newEcuSerial, setNewEcuSerial] = useState("");
   const [assignDeviceId, setAssignDeviceId] = useState<number | null>(null);
   const [assignCalId, setAssignCalId] = useState<number | null>(null);
   const [assignNotes, setAssignNotes] = useState("");
@@ -923,6 +987,7 @@ function DeviceManagementPanel({ libraryRows }: {
       setNewLabel("");
       setNewVehicle("");
       setNewVin("");
+      setNewEcuSerial("");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1056,6 +1121,15 @@ function DeviceManagementPanel({ libraryRows }: {
                     className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 font-mono placeholder:text-zinc-600"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">ECU serial (optional)</label>
+                  <input
+                    value={newEcuSerial}
+                    onChange={(e) => setNewEcuSerial(e.target.value)}
+                    placeholder="ECU / module serial — links Cloud MY VEHICLE"
+                    className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 font-mono placeholder:text-zinc-600"
+                  />
+                </div>
                 <div className="flex gap-2 justify-end">
                   <button
                     type="button"
@@ -1074,6 +1148,7 @@ function DeviceManagementPanel({ libraryRows }: {
                         label: newLabel || undefined,
                         vehicleDescription: newVehicle || undefined,
                         vin: newVin || undefined,
+                        ecuSerial: newEcuSerial.trim() || undefined,
                       });
                     }}
                     className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors"
@@ -1146,6 +1221,11 @@ function DeviceManagementPanel({ libraryRows }: {
                     {dev.vin && (
                       <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
                         VIN: {dev.vin}
+                      </div>
+                    )}
+                    {dev.ecuSerial && (
+                      <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                        ECU: {dev.ecuSerial}
                       </div>
                     )}
                   </div>
