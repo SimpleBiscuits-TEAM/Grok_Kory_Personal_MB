@@ -969,6 +969,7 @@ function DeviceManagementPanel({ libraryRows }: {
   const [newLabel, setNewLabel] = useState("");
   const [newVehicle, setNewVehicle] = useState("");
   const [newVin, setNewVin] = useState("");
+  const [newEcuSerial, setNewEcuSerial] = useState("");
   const [assignDeviceId, setAssignDeviceId] = useState<number | null>(null);
   const [assignCalId, setAssignCalId] = useState<number | null>(null);
   const [assignNotes, setAssignNotes] = useState("");
@@ -986,6 +987,7 @@ function DeviceManagementPanel({ libraryRows }: {
       setNewLabel("");
       setNewVehicle("");
       setNewVin("");
+      setNewEcuSerial("");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1119,6 +1121,15 @@ function DeviceManagementPanel({ libraryRows }: {
                     className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 font-mono placeholder:text-zinc-600"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">ECU serial (optional)</label>
+                  <input
+                    value={newEcuSerial}
+                    onChange={(e) => setNewEcuSerial(e.target.value)}
+                    placeholder="ECU / module serial — links Cloud MY VEHICLE"
+                    className="w-full py-2 px-2 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-zinc-200 font-mono placeholder:text-zinc-600"
+                  />
+                </div>
                 <div className="flex gap-2 justify-end">
                   <button
                     type="button"
@@ -1137,6 +1148,7 @@ function DeviceManagementPanel({ libraryRows }: {
                         label: newLabel || undefined,
                         vehicleDescription: newVehicle || undefined,
                         vin: newVin || undefined,
+                        ecuSerial: newEcuSerial.trim() || undefined,
                       });
                     }}
                     className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors"
@@ -1209,6 +1221,11 @@ function DeviceManagementPanel({ libraryRows }: {
                     {dev.vin && (
                       <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
                         VIN: {dev.vin}
+                      </div>
+                    )}
+                    {dev.ecuSerial && (
+                      <div className="text-[10px] text-zinc-600 font-mono mt-0.5">
+                        ECU: {dev.ecuSerial}
                       </div>
                     )}
                   </div>
