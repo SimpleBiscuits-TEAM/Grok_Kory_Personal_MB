@@ -268,7 +268,18 @@ export function registerTuneDeployRoutes(app: Express): void {
       }
 
       const partNumbersCsv = meta.calibrationPartNumbers.join(",").slice(0, 65000);
-      const id = await insertTuneDeployCalibration({
+      let parsedMetaJson: typeof meta;
+      try {
+        parsedMetaJson = JSON.parse(JSON.stringify(meta)) as typeof meta;
+      } catch {
+        res.status(500).json({
+          ok: false,
+          error: "Could not serialize calibration metadata for storage.",
+        });
+        return;
+      }
+
+      const insertRes = await insertTuneDeployCalibration({
         uploadedByUserId: user.id,
         fileName,
         r2Key: objectKey,
@@ -282,16 +293,24 @@ export function registerTuneDeployRoutes(app: Express): void {
         ecuType: meta.ecuType,
         ecuHardwareId: meta.ecuHardwareId,
         partNumbersCsv: partNumbersCsv || null,
-        parsedMeta: meta,
+        parsedMeta: parsedMetaJson,
       });
 
-      if (id == null) {
+      if (!insertRes.ok) {
         res.status(503).json({
           ok: false,
-          error: "Database unavailable or insert failed. File was uploaded to storage; reconcile manually if needed.",
+          code: insertRes.code,
+          error: insertRes.message,
+          r2Key: objectKey,
+          storageUrl,
+          hint:
+            insertRes.code === "DATABASE_NOT_CONFIGURED"
+              ? "The file may already be in object storage under r2Key above. After configuring DATABASE_URL and migrations, you can re-upload or remove the orphan object."
+              : "See server log for the full MySQL error. Fix the database, then re-upload or insert a row pointing at the same r2Key.",
         });
         return;
       }
+      const id = insertRes.id;
 
       res.json({
         ok: true,
