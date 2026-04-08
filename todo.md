@@ -902,3 +902,10 @@
 - [x] Add device targeting by V-OP serial number
 - [x] Add device targeting by PCAN serial number
 - [x] Deploy matching tunes to targeted devices
+
+## Fix Deployment Build Failure — Missing getSecurityProfile Export
+- [x] Add getSecurityProfile() to shared/seedKeyAlgorithms.ts (client-safe, returns meta + 32-char placeholder aesKeyHex for ECUs with server-side keys)
+- [x] Maintain security separation: real AES key hex stays in server/seedKeyProfiles.ts only
+- [x] Tobi's readiness check (secProfile?.aesKeyHex?.length === 32) works with placeholder
+- [x] Vite production build passes with zero errors
+- [x] All pre-existing tests unaffected (13 failures are pre-existing: GitHub API token, auth mocks, LLM mocks)
