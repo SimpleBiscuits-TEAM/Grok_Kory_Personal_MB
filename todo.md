@@ -916,3 +916,11 @@
 - [x] Verify build passes
 - [x] Clean up dead getSecurityProfile code from seedKeyAlgorithms.ts (GROK replaced with getSecurityProfileMeta + ecuSupportsServerKeyDerivation)
 - [x] Save checkpoint and publish
+
+## Localhost Auth — Make sign-in work from Cursor/localhost
+- [x] Investigate OAuth flow and what breaks on localhost
+- [ ] DEV_BYPASS_AUTH=1 env var: auto-authenticates as owner on localhost (skips OAuth)
+- [ ] Access code gate on production: users must enter KINGKONG before accessing app
+- [ ] Access code persists in localStorage so users don't re-enter every page load
+- [ ] Dev bypass skips access code gate too (localhost devs go straight in)
+- [ ] Update .env.example with DEV_BYPASS_AUTH documentation
