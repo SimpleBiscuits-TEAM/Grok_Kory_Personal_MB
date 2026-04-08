@@ -32,6 +32,7 @@ import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 
 import { APP_VERSION } from '@/lib/version';
+import { PPEI_DATALOG_SUPPORT_EMAIL } from '@shared/const';
 import { ShareCard, buildDynoShareData, buildDiagnosticShareData, buildHealthShareData } from '@/components/ShareCard';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
@@ -47,7 +48,8 @@ export default function Home() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
   const [healthReport, setHealthReport] = useState<HealthReportData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** Set when CSV/WP8 parse fails — we notify PPEI and ask the user to email the file. */
+  const [unsupportedFile, setUnsupportedFile] = useState<{ name: string } | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [manualVin, setManualVin] = useState('');
@@ -83,9 +85,9 @@ export default function Home() {
 
   const processFile = useCallback(async (file: File) => {
     setLoading(true);
-    setError(null);
+    setUnsupportedFile(null);
     try {
-      // Detect .wp8 files (Dynojet Power Vision datalogs)
+      // Detect .wp8 binary datalogs (WP8 / Power Vision style)
       // On the Home page, always generate a general health report (no redirect to Honda Talon Tuner)
       if (file.name.toLowerCase().endsWith('.wp8')) {
         const { parseWP8, wp8ToDuramaxData } = await import('@/lib/wp8Parser');
@@ -198,7 +200,7 @@ export default function Home() {
       setShowProTeaser(true);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setError('File load error \u2014 This file format has been reported to the PPEI team for review. We\'ll update the tool to support it.');
+      setUnsupportedFile({ name: file.name });
       setData(null);
       setBinnedData(undefined);
       setDiagnostics(null);
@@ -432,7 +434,27 @@ export default function Home() {
                     Drag &amp; drop your datalog file here, or click to browse
                   </p>
                   <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.62 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
-                    CSV &amp; WP8 (DYNOJET) SUPPORTED
+                    CSV &amp; WP8 SUPPORTED
+                  </p>
+                  <p style={{
+                    fontFamily: '"Rajdhani", sans-serif',
+                    color: 'oklch(0.60 0.010 260)',
+                    fontSize: '0.8rem',
+                    marginTop: '0.4rem',
+                    lineHeight: 1.45,
+                    textAlign: 'center',
+                    maxWidth: '22rem',
+                    marginLeft: 'auto',
+                    marginRight: 'auto',
+                  }}>
+                    Other datalog formats or errors — please email{' '}
+                    <a
+                      href={`mailto:${PPEI_DATALOG_SUPPORT_EMAIL}`}
+                      style={{ color: 'oklch(0.62 0.18 25)', fontWeight: 600 }}
+                    >
+                      {PPEI_DATALOG_SUPPORT_EMAIL}
+                    </a>
+                    .
                   </p>
 
                 </div>
@@ -994,7 +1016,7 @@ export default function Home() {
         )}
 
         {/* Error toast — positioned above the feedback button */}
-        {(error || exportError) && (
+        {(unsupportedFile || exportError) && (
           <div style={{
             position: 'fixed',
             bottom: '5rem',
@@ -1007,18 +1029,52 @@ export default function Home() {
             display: 'flex',
             alignItems: 'flex-start',
             gap: '12px',
-            maxWidth: '420px',
+            maxWidth: '440px',
             zIndex: 1000,
             boxShadow: '0 4px 20px oklch(0 0 0 / 0.5)'
           }}>
             <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
-                {error ? 'FILE LOAD ERROR' : 'PDF EXPORT FAILED'}
+                {unsupportedFile ? 'DATALOG NOT SUPPORTED' : 'PDF EXPORT FAILED'}
               </p>
-              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
-                {error || exportError}
-              </p>
+              {unsupportedFile ? (
+                <>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: '0.35rem 0 0', lineHeight: 1.45 }}>
+                    We could not read <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.78 0.008 260)' }}>{unsupportedFile.name}</span>.
+                    A report was sent to the PPEI team. Please email this datalog to{' '}
+                    <a
+                      href={`mailto:${PPEI_DATALOG_SUPPORT_EMAIL}?subject=${encodeURIComponent(`Unsupported datalog: ${unsupportedFile.name}`)}&body=${encodeURIComponent(`Attached is a datalog file that did not open in V-OP (${unsupportedFile.name}).\n\nTuning tool / vehicle (optional):\n\n`)}`}
+                      style={{ color: 'oklch(0.62 0.18 25)', fontWeight: 600 }}
+                    >
+                      {PPEI_DATALOG_SUPPORT_EMAIL}
+                    </a>
+                    {' '}so we can add support. There is no automatic conversion for unknown formats yet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setUnsupportedFile(null)}
+                    style={{
+                      marginTop: '0.65rem',
+                      background: 'transparent',
+                      color: 'oklch(0.55 0.008 260)',
+                      fontFamily: '"Bebas Neue", sans-serif',
+                      fontSize: '0.8rem',
+                      letterSpacing: '0.06em',
+                      padding: '6px 12px',
+                      borderRadius: '3px',
+                      border: '1px solid oklch(0.28 0.008 260)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    DISMISS
+                  </button>
+                </>
+              ) : (
+                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
+                  {exportError}
+                </p>
+              )}
             </div>
           </div>
         )}

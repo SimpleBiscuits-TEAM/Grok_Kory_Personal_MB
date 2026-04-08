@@ -13,6 +13,7 @@ vi.mock("../tuneDeployDb", () => ({
       label: "Shop VOP #1",
       vehicleDescription: "2021 Silverado L5P",
       vin: null,
+      ecuSerial: null,
       lastSeenAt: null,
       isActive: true,
       createdBy: null,
@@ -93,6 +94,7 @@ describe("tuneDeploy router — device management", () => {
         deviceType: "pcan",
         serialNumber: "PCAN-001",
         label: "Test PCAN",
+        createdBy: null,
       })
     );
   });
@@ -106,6 +108,20 @@ describe("tuneDeploy router — device management", () => {
     expect(insertDevice).toHaveBeenCalledWith(
       expect.objectContaining({
         serialNumber: "VOP-TEST-123",
+      })
+    );
+  });
+
+  it("addDevice normalizes optional ECU serial", async () => {
+    const caller = appRouter.createCaller(createCtx());
+    await caller.tuneDeploy.addDevice({
+      deviceType: "vop",
+      serialNumber: "VOP-1",
+      ecuSerial: "  ecu-abc  ",
+    });
+    expect(insertDevice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ecuSerial: "ECU-ABC",
       })
     );
   });
@@ -159,6 +175,7 @@ describe("tuneDeploy router — tune assignments", () => {
       calibrationId: 10,
       deviceId: 1,
       notes: "Stage 2 tune for dyno day",
+      assignedBy: null,
     });
   });
 

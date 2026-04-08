@@ -1,8 +1,9 @@
-import { and, desc, eq, like, or, count, type SQL } from "drizzle-orm";
+import { and, desc, eq, like, or, count, ne, inArray, sql, type SQL } from "drizzle-orm";
 import {
   tuneDeployCalibrations,
   tuneDeployDevices,
   tuneDeployAssignments,
+  cloudEnrollments,
   type InsertTuneDeployCalibration,
   type InsertTuneDeployDevice,
   type TuneDeployDevice,
@@ -14,18 +15,62 @@ import {
   type TuneDeployListInput,
   type TuneDeployParsedMetadata,
 } from "../shared/tuneDeploySchemas";
+import { normalizeHardwareSerialKey, normalizeVinKey } from "../shared/cloudVehicleLinkKeys";
+
+export type InsertTuneDeployCalibrationResult =
+  | { ok: true; id: number }
+  | { ok: false; code: "DATABASE_NOT_CONFIGURED"; message: string }
+  | { ok: false; code: "INSERT_FAILED"; message: string };
+
+function humanizeTuneDeployInsertError(raw: string): string {
+  if (/doesn't exist|no such table|ER_NO_SUCH_TABLE|1146/i.test(raw)) {
+    return (
+      "MySQL table tune_deploy_calibrations (or related tune_deploy_*) is missing. " +
+      "Apply migrations so journal reaches 0006_mysterious_titanium_man (e.g. pnpm run db:push or drizzle-kit migrate)."
+    );
+  }
+  if (/ER_ACCESS_DENIED|access denied|1045/i.test(raw)) {
+    return "MySQL rejected credentials — check DATABASE_URL user, password, and host.";
+  }
+  if (/ECONNREFUSED|ENOTFOUND/i.test(raw)) {
+    return "Cannot reach MySQL — check DATABASE_URL host/port and that the server is running.";
+  }
+  return raw;
+}
 
 export async function insertTuneDeployCalibration(
   row: InsertTuneDeployCalibration
-): Promise<number | null> {
+): Promise<InsertTuneDeployCalibrationResult> {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) {
+    return {
+      ok: false,
+      code: "DATABASE_NOT_CONFIGURED",
+      message:
+        "DATABASE_URL is not set or the database client failed to initialize. Set DATABASE_URL in .env (see .env.example) and restart the server.",
+    };
+  }
   try {
     const [r] = await db.insert(tuneDeployCalibrations).values(row).$returningId();
-    return r?.id ?? null;
+    const id = r?.id != null ? Number(r.id) : NaN;
+    if (!Number.isFinite(id) || id <= 0) {
+      console.error("[tuneDeployDb] insert returned no usable id:", r);
+      return {
+        ok: false,
+        code: "INSERT_FAILED",
+        message:
+          "Insert ran but no row id was returned. Check MySQL logs, user permissions, and that tune_deploy_calibrations has an AUTO_INCREMENT primary key.",
+      };
+    }
+    return { ok: true, id };
   } catch (e) {
     console.error("[tuneDeployDb] insert failed:", e);
-    return null;
+    const raw = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      code: "INSERT_FAILED",
+      message: humanizeTuneDeployInsertError(raw),
+    };
   }
 }
 
@@ -220,7 +265,7 @@ export async function insertDevice(
 
 export async function updateDevice(
   id: number,
-  updates: Partial<Pick<TuneDeployDevice, "label" | "vehicleDescription" | "vin" | "isActive">>
+  updates: Partial<Pick<TuneDeployDevice, "label" | "vehicleDescription" | "vin" | "ecuSerial" | "isActive">>
 ): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
@@ -247,6 +292,145 @@ export async function deleteDevice(id: number): Promise<boolean> {
     console.error("[tuneDeployDb] deleteDevice failed:", e);
     return false;
   }
+}
+
+/** Normalize VIN for comparison (Tune Deploy device vs cloud enrollment). */
+export function normalizeTuneDeployVin(vin: string | null | undefined): string | null {
+  const t = normalizeVinKey(vin);
+  return t.length >= 11 ? t : null;
+}
+
+export type TuneDeploymentForCloudRow = {
+  assignmentId: number;
+  status: string;
+  deviceId: number;
+  deviceSerial: string | null;
+  deviceEcuSerial: string | null;
+  deviceLabel: string | null;
+  deviceVin: string | null;
+  calibrationId: number;
+  calibrationFileName: string | null;
+  vehicleFamily: string | null;
+  vehicleSubType: string | null;
+  osVersion: string | null;
+  deployedAt: Date | null;
+  createdAt: Date;
+};
+
+/**
+ * Assignments for Tune Deploy devices linked to this user:
+ * - device.createdBy === userId, or
+ * - device VIN / programmer serial / ECU serial matches any active cloud enrollment row for this user.
+ * Future: customer sign-in / intake forms can set the same enrollment fields so calibrations appear without manual Cloud enroll.
+ * Excludes cancelled assignments.
+ */
+export async function listTuneDeploymentsForUser(userId: number): Promise<TuneDeploymentForCloudRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const enrollRows = await db
+    .select({
+      vin: cloudEnrollments.vin,
+      programmerSerial: cloudEnrollments.programmerSerial,
+      ecuSerial: cloudEnrollments.ecuSerial,
+    })
+    .from(cloudEnrollments)
+    .where(and(eq(cloudEnrollments.userId, userId), eq(cloudEnrollments.isActive, true)));
+
+  const vinList = [
+    ...new Set(
+      enrollRows
+        .map((r) => normalizeTuneDeployVin(r.vin))
+        .filter((v): v is string => v != null),
+    ),
+  ];
+  const programmerList = [
+    ...new Set(
+      enrollRows
+        .map((r) => normalizeHardwareSerialKey(r.programmerSerial))
+        .filter((v): v is string => v != null),
+    ),
+  ];
+  const ecuList = [
+    ...new Set(
+      enrollRows
+        .map((r) => normalizeHardwareSerialKey(r.ecuSerial))
+        .filter((v): v is string => v != null),
+    ),
+  ];
+
+  const owned = await db
+    .select({ id: tuneDeployDevices.id })
+    .from(tuneDeployDevices)
+    .where(eq(tuneDeployDevices.createdBy, userId));
+
+  let vinDeviceRows: { id: number }[] = [];
+  if (vinList.length > 0) {
+    const vinOr = or(
+      ...vinList.map((v) => sql`UPPER(TRIM(${tuneDeployDevices.vin})) = ${v}`),
+    )!;
+    vinDeviceRows = await db.select({ id: tuneDeployDevices.id }).from(tuneDeployDevices).where(vinOr);
+  }
+
+  let programmerDeviceRows: { id: number }[] = [];
+  if (programmerList.length > 0) {
+    const progOr = or(
+      ...programmerList.map(
+        (p) => sql`UPPER(REPLACE(TRIM(${tuneDeployDevices.serialNumber}), ' ', '')) = ${p}`,
+      ),
+    )!;
+    programmerDeviceRows = await db.select({ id: tuneDeployDevices.id }).from(tuneDeployDevices).where(progOr);
+  }
+
+  let ecuDeviceRows: { id: number }[] = [];
+  if (ecuList.length > 0) {
+    const ecuOr = or(
+      ...ecuList.map(
+        (p) => sql`UPPER(REPLACE(TRIM(${tuneDeployDevices.ecuSerial}), ' ', '')) = ${p}`,
+      ),
+    )!;
+    ecuDeviceRows = await db
+      .select({ id: tuneDeployDevices.id })
+      .from(tuneDeployDevices)
+      .where(and(sql`${tuneDeployDevices.ecuSerial} IS NOT NULL`, ecuOr));
+  }
+
+  const deviceIds = [
+    ...new Set([
+      ...owned.map((o) => o.id),
+      ...vinDeviceRows.map((v) => v.id),
+      ...programmerDeviceRows.map((v) => v.id),
+      ...ecuDeviceRows.map((v) => v.id),
+    ]),
+  ];
+  if (deviceIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      assignmentId: tuneDeployAssignments.id,
+      status: tuneDeployAssignments.status,
+      deviceId: tuneDeployDevices.id,
+      deviceSerial: tuneDeployDevices.serialNumber,
+      deviceEcuSerial: tuneDeployDevices.ecuSerial,
+      deviceLabel: tuneDeployDevices.label,
+      deviceVin: tuneDeployDevices.vin,
+      calibrationId: tuneDeployCalibrations.id,
+      calibrationFileName: tuneDeployCalibrations.fileName,
+      vehicleFamily: tuneDeployCalibrations.vehicleFamily,
+      vehicleSubType: tuneDeployCalibrations.vehicleSubType,
+      osVersion: tuneDeployCalibrations.osVersion,
+      deployedAt: tuneDeployAssignments.deployedAt,
+      createdAt: tuneDeployAssignments.createdAt,
+    })
+    .from(tuneDeployAssignments)
+    .innerJoin(tuneDeployDevices, eq(tuneDeployAssignments.deviceId, tuneDeployDevices.id))
+    .innerJoin(tuneDeployCalibrations, eq(tuneDeployAssignments.calibrationId, tuneDeployCalibrations.id))
+    .where(
+      and(inArray(tuneDeployAssignments.deviceId, deviceIds), ne(tuneDeployAssignments.status, "cancelled")),
+    )
+    .orderBy(desc(tuneDeployAssignments.createdAt));
+
+  return rows as TuneDeploymentForCloudRow[];
 }
 
 // ── Assignment Management ─────────────────────────────────────────────────

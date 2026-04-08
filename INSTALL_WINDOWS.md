@@ -91,7 +91,7 @@ DATABASE_URL=mysql://USER:PASSWORD@127.0.0.1:3306/DATABASE_NAME
 Use your real MySQL user, password, host, port, and database name.  
 If you skip this, leave `.env` empty or omit `DATABASE_URL` — the UI may still load, but DB-backed features will not work.
 
-Other variables are optional for a minimal local UI. For **Manus sign-in** (same as hosted WebDev), copy the block from **`.env.example`**: at minimum set **`VITE_APP_ID`** and **`JWT_SECRET`**. The app defaults the OAuth portal to **`https://portal.manus.im`** and the token API to **`https://api.manus.im`** when those URL variables are omitted. Add **`BUILT_IN_FORGE_*`** when you use Knox / LLM features.
+Other variables are optional for a minimal local UI. For **Manus sign-in** (same as hosted WebDev), copy the block from **`.env.example`**: at minimum set **`VITE_APP_ID`** and **`JWT_SECRET`**. The app defaults the OAuth portal to **`https://portal.manus.im`** and the token API to **`https://api.manus.im`** when those URL variables are omitted. Add **`BUILT_IN_FORGE_*`** when you use Knox / LLM features **or** hosted object storage (Manus Forge). **Tune file upload** in development works without Forge: binaries are stored under **`.data/object-storage`** and served via **`/api/dev-object-storage`**. For production without Forge, set **`LOCAL_OBJECT_STORAGE_DIR`** (see **`.env.example`**). The library still needs **MySQL**: set **`DATABASE_URL`** and apply migrations (through **`0006_mysterious_titanium_man`**, which creates **`tune_deploy_calibrations`** and related tables) or uploads will fail after storage with a clear **`DATABASE_NOT_CONFIGURED`** or missing-table message.
 
 ---
 
