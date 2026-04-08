@@ -9,10 +9,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { analyzeFlashLogForRecommendations } from '@shared/flashLogRecommendations';
+import { downloadFlashSessionXlsx } from '@/lib/flashLogExcelExport';
 import {
   Play, Pause, Square, AlertTriangle, CheckCircle2, XCircle,
-  Radio, ArrowLeft, RotateCcw, ChevronDown, ChevronUp, Download, FileText,
-  Timer, Cpu, Key,
+  Radio, ArrowLeft, RotateCcw, ChevronDown, ChevronUp, Download,
+  Timer, Cpu, FileSpreadsheet,
 } from 'lucide-react';
 import {
   type FlashPlan, type SimulatorState, type SimulatorLogEntry,
@@ -190,6 +194,46 @@ function KeyCyclePrompt({ state, countdown, onConfirm }: {
 const SPEED_OPTIONS = [1, 2, 5, 10] as const;
 type SpeedMultiplier = typeof SPEED_OPTIONS[number];
 
+function csvEscapeCell(s: string): string {
+  const t = s.replace(/"/g, '""');
+  return `"${t}"`;
+}
+
+/** Excel-friendly UTF-8 CSV of flash / dry-run CAN log (timestamp_ms, phase, type, message, block_id, nrc_code). */
+function buildFlashCanLogCsv(
+  log: SimulatorLogEntry[],
+  plan: FlashPlan,
+  connectionMode: string,
+  sessionUuid: string,
+  result: SimulatorState['result'],
+  dryRun: boolean,
+  elapsedMs: number,
+): string {
+  const headerLines = [
+    '# V-OP flash CAN / UDS recording',
+    `# ECU: ${plan.ecuName}`,
+    `# Mode: ${plan.flashMode}`,
+    `# Connection: ${connectionMode}`,
+    `# Session: ${sessionUuid}`,
+    `# Result: ${result ?? 'in_progress'}`,
+    `# Dry_run: ${dryRun}`,
+    `# Elapsed_ms: ${elapsedMs}`,
+    `# Entries: ${log.length}`,
+  ];
+  const cols = ['timestamp_ms', 'phase', 'type', 'message', 'block_id', 'nrc_code'];
+  const dataRows = log.map((e) =>
+    [
+      String(Math.round(e.timestamp)),
+      csvEscapeCell(e.phase),
+      csvEscapeCell(e.type),
+      csvEscapeCell(e.message),
+      e.blockId != null ? String(e.blockId) : '',
+      e.nrcCode != null ? String(e.nrcCode) : '',
+    ].join(','),
+  );
+  return `\ufeff${headerLines.join('\n')}\n${cols.join(',')}\n${dataRows.join('\n')}\n`;
+}
+
 export default function FlashMissionControl({
   plan, connectionMode, sessionUuid, onComplete, onBack,
   pcanConnection, containerData, containerHeader, dryRun = false,
@@ -201,6 +245,8 @@ export default function FlashMissionControl({
   const [keyCycleCountdown, setKeyCycleCountdown] = useState(0);
   const keyCycleResolveRef = useRef<(() => void) | null>(null);
   const [speedMultiplier, setSpeedMultiplier] = useState<SpeedMultiplier>(1);
+  const [mcTab, setMcTab] = useState<'run' | 'export'>('run');
+  const [recoFixNote, setRecoFixNote] = useState('');
   const logEndRef = useRef<HTMLDivElement>(null);
   const pendingLogsRef = useRef<SimulatorLogEntry[]>([]);
   const lastFlushRef = useRef(0);
@@ -217,6 +263,10 @@ export default function FlashMissionControl({
   const appendLogs = trpc.flash.appendLogs.useMutation();
   const completeSession = trpc.flash.completeSession.useMutation();
   const computeSecurityKeyMutation = trpc.flash.computeSecurityKey.useMutation();
+  const { data: recoAggregates } = trpc.flash.recoLearningAggregates.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const recoSubmit = trpc.flash.recoLearningSubmit.useMutation();
 
   // ── Safety: beforeunload warning during flash ──────────────────────────
   useEffect(() => {
@@ -440,6 +490,34 @@ export default function FlashMissionControl({
     if (sim.result && !showLog) setShowLog(true);
   }, [sim.result]);
 
+  const exportSlug = `${isDryRun ? 'dry-run-' : ''}${sessionUuid.slice(0, 8)}-${sim.result?.toLowerCase() || (sim.isRunning ? 'in-progress' : 'ready')}`;
+
+  const recoAnalysis = useMemo(
+    () =>
+      analyzeFlashLogForRecommendations(
+        sim.log,
+        plan,
+        {
+          result: sim.result,
+          statusMessage: sim.statusMessage,
+          elapsedMs: sim.elapsedMs,
+          dryRun: isDryRun,
+          isRunning: sim.isRunning,
+        },
+        { aggregates: recoAggregates ?? undefined },
+      ),
+    [
+      sim.log,
+      plan,
+      sim.result,
+      sim.statusMessage,
+      sim.elapsedMs,
+      isDryRun,
+      sim.isRunning,
+      recoAggregates,
+    ],
+  );
+
   // Download log as text file
   const handleDownloadLog = useCallback(() => {
     const lines = sim.log.map(e => {
@@ -453,6 +531,7 @@ export default function FlashMissionControl({
       `ECU: ${plan.ecuName}`,
       `Mode: ${plan.flashMode}`,
       `Connection: ${connectionMode}`,
+      `Dry run: ${isDryRun}`,
       `Session: ${sessionUuid}`,
       `Result: ${sim.result}`,
       `Duration: ${formatDuration(sim.elapsedMs)}`,
@@ -465,10 +544,85 @@ export default function FlashMissionControl({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `flash-log-${sessionUuid.slice(0, 8)}-${sim.result?.toLowerCase() || 'unknown'}.txt`;
+    a.download = `flash-can-log-${exportSlug}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [sim, plan, connectionMode, sessionUuid]);
+  }, [sim, plan, connectionMode, sessionUuid, isDryRun, exportSlug]);
+
+  const handleDownloadCsv = useCallback(() => {
+    const csv = buildFlashCanLogCsv(
+      sim.log,
+      plan,
+      connectionMode,
+      sessionUuid,
+      sim.result,
+      isDryRun,
+      sim.elapsedMs,
+    );
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `flash-can-log-${exportSlug}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [sim.log, sim.result, sim.elapsedMs, plan, connectionMode, sessionUuid, isDryRun, exportSlug]);
+
+  const handleDownloadXlsx = useCallback(() => {
+    try {
+      downloadFlashSessionXlsx({
+        filenameBase: `flash-session-${exportSlug}`,
+        log: sim.log,
+        plan,
+        meta: {
+          connectionMode,
+          sessionUuid,
+          result: sim.result,
+          dryRun: isDryRun,
+          elapsedMs: sim.elapsedMs,
+        },
+        analysis: recoAnalysis,
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error('Could not build Excel workbook. Try CSV export.');
+    }
+  }, [
+    sim.log,
+    plan,
+    connectionMode,
+    sessionUuid,
+    sim.result,
+    isDryRun,
+    sim.elapsedMs,
+    exportSlug,
+    recoAnalysis,
+  ]);
+
+  const submitRecoFeedback = useCallback(
+    (helpful: boolean) => {
+      recoSubmit.mutate(
+        {
+          patternKey: recoAnalysis.primaryPatternKey,
+          helpful,
+          fixApplied: recoFixNote.trim() || undefined,
+          sessionUuid,
+        },
+        {
+          onSuccess: (r) => {
+            if (r.ok) {
+              toast.success('Thanks — this improves future export hints.');
+              setRecoFixNote('');
+            } else {
+              toast.error('Could not save feedback (database unavailable).');
+            }
+          },
+          onError: () => toast.error('Could not save feedback.'),
+        },
+      );
+    },
+    [recoSubmit, recoAnalysis.primaryPatternKey, recoFixNote, sessionUuid],
+  );
 
   return (
     <div className="relative min-h-[600px] rounded-lg border border-zinc-800 bg-black/90 overflow-hidden">
@@ -511,6 +665,143 @@ export default function FlashMissionControl({
           </Badge>
         </div>
 
+        {/* RUN vs EXPORT — CAN log export for Excel / post-mortem (dry run + live) */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
+          <button
+            type="button"
+            onClick={() => setMcTab('run')}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors ${
+              mcTab === 'run'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                : 'text-zinc-500 border border-transparent hover:text-zinc-300'
+            }`}
+          >
+            RUN
+          </button>
+          <button
+            type="button"
+            onClick={() => setMcTab('export')}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors flex items-center gap-1.5 ${
+              mcTab === 'export'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                : 'text-zinc-500 border border-transparent hover:text-zinc-300'
+            }`}
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            EXPORT
+            {sim.log.length > 0 && (
+              <span className="text-[10px] opacity-80 tabular-nums">({sim.log.length})</span>
+            )}
+          </button>
+        </div>
+
+        {mcTab === 'export' ? (
+          <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
+            <div>
+              <h4 className="text-sm font-mono font-bold text-zinc-200 mb-1">CAN / UDS recording</h4>
+              <p className="text-xs text-zinc-500 leading-relaxed">
+                Download everything captured during simulator, dry run, or live flash.{' '}
+                <span className="text-zinc-400">Excel (.xls)</span> workbook puts <span className="text-zinc-400">Recommendations</span>{' '}
+                first (what failed, when, heuristic fixes + disclaimer), then <span className="text-zinc-400">CAN_log</span>.{' '}
+                <span className="text-zinc-400">CSV</span> is UTF-8 for a single-sheet log.{' '}
+                <span className="text-zinc-400">TXT</span> is the human-readable session log. Partial export is allowed while running.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sim.log.length === 0}
+                onClick={handleDownloadXlsx}
+                className="font-mono text-xs border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/50"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1" />
+                DOWNLOAD EXCEL (2 SHEETS)
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sim.log.length === 0}
+                onClick={handleDownloadCsv}
+                className="font-mono text-xs border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1" />
+                DOWNLOAD CSV (EXCEL)
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sim.log.length === 0}
+                onClick={handleDownloadLog}
+                className="font-mono text-xs border-zinc-600"
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                DOWNLOAD TXT LOG
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setMcTab('run')} className="font-mono text-xs text-zinc-500">
+                ← Back to run
+              </Button>
+            </div>
+            <div className="rounded-md border border-zinc-800 bg-black/30 p-3 space-y-2">
+              <h5 className="text-xs font-mono font-bold text-zinc-300">Improve recommendations (optional)</h5>
+              <p className="text-[10px] text-zinc-500 leading-relaxed">
+                Anonymous feedback is tied to the current session&apos;s primary issue key{' '}
+                <span className="text-zinc-400 font-mono break-all">{recoAnalysis.primaryPatternKey}</span>.
+                If a suggestion was wrong, say so; if you fixed the problem, describe what worked (voltage, cable, session, etc.).
+              </p>
+              <Textarea
+                value={recoFixNote}
+                onChange={(e) => setRecoFixNote(e.target.value)}
+                placeholder="What actually fixed it (optional, max ~2000 chars)…"
+                className="min-h-[72px] text-xs font-mono bg-zinc-950 border-zinc-700"
+                maxLength={2000}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={recoSubmit.isPending}
+                  onClick={() => submitRecoFeedback(true)}
+                  className="font-mono text-xs"
+                >
+                  Mark hints helpful
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={recoSubmit.isPending}
+                  onClick={() => submitRecoFeedback(false)}
+                  className="font-mono text-xs border-zinc-600"
+                >
+                  Hints not helpful
+                </Button>
+              </div>
+            </div>
+            <div className="text-[10px] font-mono text-zinc-600">
+              Session <span className="text-zinc-400">{sessionUuid.slice(0, 8)}…</span>
+              {' · '}
+              {isDryRun ? 'Dry run' : connectionMode === 'pcan' ? 'PCAN' : 'Simulator'}
+              {' · '}
+              {sim.log.length} entries
+              {sim.result && ` · ${sim.result}`}
+            </div>
+            {sim.log.length > 0 && (
+              <ScrollArea className="h-48 rounded border border-zinc-800 bg-black/40 p-2">
+                <div className="space-y-0.5 font-mono text-[10px] text-zinc-500">
+                  {sim.log.slice(-40).map((entry, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className="text-zinc-600 w-14 shrink-0">{Math.round(entry.timestamp)}ms</span>
+                      <span className={LOG_TYPE_COLORS[entry.type] || 'text-zinc-400'}>{entry.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+        ) : (
+          <>
         {/* Progress */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
@@ -578,6 +869,16 @@ export default function FlashMissionControl({
               >
                 <Square className="h-3 w-3 mr-1" /> {isRealFlash ? '⚠ EMERGENCY ABORT' : 'ABORT'}
               </Button>
+              {sim.log.length > 0 && (
+                <>
+                  <Button size="sm" variant="outline" onClick={handleDownloadCsv} className="font-mono text-xs border-emerald-800/60 text-emerald-400">
+                    <FileSpreadsheet className="h-3 w-3 mr-1" /> CSV
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setMcTab('export')} className="font-mono text-xs border-zinc-600 text-zinc-400">
+                    EXPORT
+                  </Button>
+                </>
+              )}
             </>
           )}
           {sim.result && (
@@ -585,8 +886,14 @@ export default function FlashMissionControl({
               <Button size="sm" onClick={() => onComplete(sim.result!)} className="bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs">
                 <CheckCircle2 className="h-3 w-3 mr-1" /> DONE
               </Button>
-              <Button size="sm" variant="outline" onClick={handleDownloadLog} className="font-mono text-xs border-zinc-700">
-                <Download className="h-3 w-3 mr-1" /> DOWNLOAD LOG
+              <Button size="sm" variant="outline" onClick={handleDownloadCsv} disabled={sim.log.length === 0} className="font-mono text-xs border-emerald-800 text-emerald-300">
+                <FileSpreadsheet className="h-3 w-3 mr-1" /> CSV
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDownloadLog} disabled={sim.log.length === 0} className="font-mono text-xs border-zinc-700">
+                <Download className="h-3 w-3 mr-1" /> TXT LOG
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setMcTab('export')} className="font-mono text-xs border-zinc-700">
+                EXPORT TAB
               </Button>
               <Button size="sm" variant="outline" onClick={onBack} className="font-mono text-xs border-zinc-700">
                 <ArrowLeft className="h-3 w-3 mr-1" /> BACK
@@ -702,7 +1009,23 @@ export default function FlashMissionControl({
               </div>
             </ScrollArea>
           )}
+          {sim.log.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setMcTab('export')}
+                className="h-7 text-[10px] font-mono text-emerald-400/90 hover:text-emerald-300 px-2"
+              >
+                <FileSpreadsheet className="h-3 w-3 mr-1" />
+                Export tab (CSV / TXT)
+              </Button>
+            </div>
+          )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

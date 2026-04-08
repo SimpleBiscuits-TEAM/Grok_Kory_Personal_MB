@@ -2,6 +2,9 @@
 **/node_modules
 .pnpm-store/
 
+# Local dev object storage (tune uploads, etc. when Forge is unset)
+.data/
+
 # Build outputs
 dist/
 build/

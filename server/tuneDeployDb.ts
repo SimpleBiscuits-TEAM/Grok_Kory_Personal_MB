@@ -15,17 +15,60 @@ import {
   type TuneDeployParsedMetadata,
 } from "../shared/tuneDeploySchemas";
 
+export type InsertTuneDeployCalibrationResult =
+  | { ok: true; id: number }
+  | { ok: false; code: "DATABASE_NOT_CONFIGURED"; message: string }
+  | { ok: false; code: "INSERT_FAILED"; message: string };
+
+function humanizeTuneDeployInsertError(raw: string): string {
+  if (/doesn't exist|no such table|ER_NO_SUCH_TABLE|1146/i.test(raw)) {
+    return (
+      "MySQL table tune_deploy_calibrations (or related tune_deploy_*) is missing. " +
+      "Apply migrations so journal reaches 0006_mysterious_titanium_man (e.g. pnpm run db:push or drizzle-kit migrate)."
+    );
+  }
+  if (/ER_ACCESS_DENIED|access denied|1045/i.test(raw)) {
+    return "MySQL rejected credentials — check DATABASE_URL user, password, and host.";
+  }
+  if (/ECONNREFUSED|ENOTFOUND/i.test(raw)) {
+    return "Cannot reach MySQL — check DATABASE_URL host/port and that the server is running.";
+  }
+  return raw;
+}
+
 export async function insertTuneDeployCalibration(
   row: InsertTuneDeployCalibration
-): Promise<number | null> {
+): Promise<InsertTuneDeployCalibrationResult> {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) {
+    return {
+      ok: false,
+      code: "DATABASE_NOT_CONFIGURED",
+      message:
+        "DATABASE_URL is not set or the database client failed to initialize. Set DATABASE_URL in .env (see .env.example) and restart the server.",
+    };
+  }
   try {
     const [r] = await db.insert(tuneDeployCalibrations).values(row).$returningId();
-    return r?.id ?? null;
+    const id = r?.id != null ? Number(r.id) : NaN;
+    if (!Number.isFinite(id) || id <= 0) {
+      console.error("[tuneDeployDb] insert returned no usable id:", r);
+      return {
+        ok: false,
+        code: "INSERT_FAILED",
+        message:
+          "Insert ran but no row id was returned. Check MySQL logs, user permissions, and that tune_deploy_calibrations has an AUTO_INCREMENT primary key.",
+      };
+    }
+    return { ok: true, id };
   } catch (e) {
     console.error("[tuneDeployDb] insert failed:", e);
-    return null;
+    const raw = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      code: "INSERT_FAILED",
+      message: humanizeTuneDeployInsertError(raw),
+    };
   }
 }
 
