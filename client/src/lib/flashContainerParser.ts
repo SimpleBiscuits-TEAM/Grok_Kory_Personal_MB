@@ -22,7 +22,6 @@ import {
   readGmOsAsciiAtOffset0x20,
 } from '../../../shared/gmTuneBinaryHeuristics';
 import { ecuSupportsServerKeyDerivation, getSecurityProfileMeta } from '../../../shared/seedKeyMeta';
-import { getSecurityProfile } from '../../../shared/seedKeyAlgorithms';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -548,7 +547,7 @@ function parsePpeiContainerInner(data: ArrayBuffer, fileName?: string): FlashCon
   }
 
   const ecuConfig = getEcuConfig(ecuFamily) ?? null;
-  const secProfile = getSecurityProfile(ecuFamily);
+  const secProfile = getSecurityProfileMeta(ecuFamily);
   const flashType: FlashType = isFullFlash ? 'fullflash' : 'calibration';
 
   // ── Readiness Checks ──────────────────────────────────────────────────
@@ -630,16 +629,15 @@ function parsePpeiContainerInner(data: ArrayBuffer, fileName?: string): FlashCon
         : `${ecuFamily} uses ${secProfile?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
     });
 
-    // Check if AES key is available from Seed_key.cs hardcoded profiles
-    const hasHardcodedKey = secProfile?.aesKeyHex && secProfile.aesKeyHex.length === 32;
+    const serverKeyReady = ecuSupportsServerKeyDerivation(secProfile);
     checks.push({
-      id: 'seed_key', label: 'Security Key (Seed_key.cs)',
-      status: hasHardcodedKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
-      detail: hasHardcodedKey
-        ? `✅ AES key available (Seed_key.cs — ${ecuFamily}) — seed/key computation ready`
+      id: 'seed_key', label: 'Security Key (server)',
+      status: serverKeyReady ? 'pass' : needsUnlockBox ? 'info' : 'warn',
+      detail: serverKeyReady
+        ? `Server can derive key for ${ecuFamily}`
         : needsUnlockBox
           ? 'Hardware unlock box handles security'
-          : `No Seed_key.cs entry for ${ecuFamily} — will use dummy key (only works on unlocked ECUs)`,
+          : `No server-side key profile — unlocked ECUs may still work`,
     });
 
     checks.push({
