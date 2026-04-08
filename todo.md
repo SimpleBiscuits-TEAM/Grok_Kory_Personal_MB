@@ -939,14 +939,14 @@
 - [x] Push changes to GROK branch
 
 ## MAF Comparison Chart — Normal vs Low/Slow MAF
-- [ ] Investigate existing CompareView and MAF overlay functionality
-- [ ] Build MAF comparison chart showing normal vs slow/low MAF overlay
+- [x] Investigate existing CompareView and MAF overlay functionality
+- [x] Build MAF comparison chart showing normal vs slow/low MAF overlay — CompareView PID overlay already supports this, MAF now default-selected
 - [ ] Verify restored single-log charts (RPMvMAF, HPvsRPM, TimeSeries) actually render after upload
 - [ ] Push to GROK
 
 ## Bug: Advanced tab broken + MAF comparison missing
 - [x] Diagnose what broke in Advanced.tsx (our chart additions may have caused issues)
 - [x] Fix Advanced tab to render all analysis content properly — Compare mode early return removed, now shows full analysis + compare section inline
-- [ ] Restore MAF comparison chart (normal vs low MAF overlay from two logs)
+- [x] Restore MAF comparison chart (normal vs low MAF overlay from two logs) — CompareView already has MAF in PID overlay charts, added MAF + HP to default selected PIDs
 - [ ] Push fixes to GROK
 - [x] Compare mode must show ALL normal mode content (charts, stats, diagnostics, health report, etc.) plus additional comparison features — no compromise from normal mode

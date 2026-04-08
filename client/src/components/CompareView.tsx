@@ -482,7 +482,7 @@ function CompareCharts({ dataA, dataB, labelA, labelB }: {
   labelA: string;
   labelB: string;
 }) {
-  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm']);
+  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm', 'maf', 'hpTorque']);
   const [showPidPicker, setShowPidPicker] = useState(false);
 
   // Filter to PIDs that have data in at least one log
