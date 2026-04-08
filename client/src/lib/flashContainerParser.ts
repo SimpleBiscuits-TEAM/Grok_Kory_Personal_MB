@@ -14,7 +14,7 @@ import {
   CONTAINER_LAYOUT,
   type EcuConfig, type ContainerFileHeader, type ContainerBlockStruct,
 } from '../../../shared/ecuDatabase';
-import { ecuSupportsServerKeyDerivation, getSecurityProfileMeta } from '../../../shared/seedKeyMeta';
+import { getSecurityProfile } from '../../../shared/seedKeyAlgorithms';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -308,7 +308,7 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
   }
 
   const ecuConfig = getEcuConfig(ecuFamily) ?? null;
-  const secProfile = getSecurityProfileMeta(ecuFamily);
+  const secProfile = getSecurityProfile(ecuFamily);
   const flashType: FlashType = isFullFlash ? 'fullflash' : 'calibration';
 
   // ── Readiness Checks ──────────────────────────────────────────────────
@@ -390,15 +390,16 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
         : `${ecuFamily} uses ${secProfile?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
     });
 
-    const serverKeyReady = ecuSupportsServerKeyDerivation(secProfile);
+    // Check if AES key is available from Seed_key.cs hardcoded profiles
+    const hasHardcodedKey = secProfile?.aesKeyHex && secProfile.aesKeyHex.length === 32;
     checks.push({
-      id: 'seed_key', label: 'Security Key (server)',
-      status: serverKeyReady ? 'pass' : needsUnlockBox ? 'info' : 'warn',
-      detail: serverKeyReady
-        ? `Server can derive GM AES key for ${ecuFamily} — flash will call computeSecurityKey`
+      id: 'seed_key', label: 'Security Key (Seed_key.cs)',
+      status: hasHardcodedKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
+      detail: hasHardcodedKey
+        ? `✅ AES key available (Seed_key.cs — ${ecuFamily}) — seed/key computation ready`
         : needsUnlockBox
           ? 'Hardware unlock box handles security'
-          : `No server-side GM key profile for ${ecuFamily} — unlocked ECUs may still work with dummy key`,
+          : `No Seed_key.cs entry for ${ecuFamily} — will use dummy key (only works on unlocked ECUs)`,
     });
 
     checks.push({
