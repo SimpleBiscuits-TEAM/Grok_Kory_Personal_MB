@@ -984,4 +984,11 @@
 ## Bug: Strat not recognizing EFILive error codes from PPEI KB
 - [x] Review scraped KB content for error code $0502 and other codes — confirmed only 4 codes in original KB article
 - [x] Fix Strat system prompt / knowledge base to include all error codes — added 30+ EFILive error codes from official documentation
-- [ ] Push fix to GROK
+- [x] Push fix to GROK
+
+## Strat Response Style Fix — Resolution-First, Short & Direct
+- [x] Read PDF guide for $0502 error resolution procedure
+- [x] Update Strat system prompt to be resolution-first (give the fix immediately, not ask questions first)
+- [x] Update $0502 knowledge with accurate fix: BBX config, re-install EFILive V8, reprogram BBX, ask about BBX file from purchase
+- [x] Keep responses short, simple, to the point — no lengthy qualifying questions upfront
+- [ ] Push to GROK
