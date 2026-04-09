@@ -29,7 +29,9 @@ import {
   type FuelType,
   type PIDManufacturer,
 } from './obdConnection';
-import { decodeVinNhtsa, decodeVinLocal } from './universalVinDecoder';
+import { parseOBDResponse } from 'obd-utils';
+import { getMode01ProbePidOrder, getStandardPidsMatchingElmCatalog } from './obdElmCorePids';
+import { decodeVinLocal, decodeVinNhtsa } from './universalVinDecoder';
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
 import {
   CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS,
@@ -38,6 +40,43 @@ import {
 } from './canTransportTiming';
 
 type EventCallback = (event: ConnectionEvent) => void;
+
+/** Swap localhost ↔ 127.0.0.1 so we can try both (Windows often prefers ::1 for "localhost"). */
+function alternateLocalhostBridgeUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'localhost') {
+      u.hostname = '127.0.0.1';
+    } else if (u.hostname === '127.0.0.1') {
+      u.hostname = 'localhost';
+    } else {
+      return null;
+    }
+    // Avoid trailing slash from URL serialization (breaks WebSocket string equality)
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Default bridge WebSocket URLs. Prefer 127.0.0.1 first: on some Windows setups
+ * `localhost` resolves to IPv6 while the bridge listens on IPv4 only, so wss/ws
+ * to "localhost" never connects and live data / PID lists do not populate.
+ */
+export function defaultBridgeWebSocketCandidates(
+  secure = 'wss://127.0.0.1:8766',
+  insecure = 'ws://127.0.0.1:8765'
+): string[] {
+  const out: string[] = [];
+  for (const base of [secure, insecure]) {
+    if (!out.includes(base)) out.push(base);
+    const alt = alternateLocalhostBridgeUrl(base);
+    if (alt && !out.includes(alt)) out.push(alt);
+  }
+  return out;
+}
 
 // ─── Bridge Protocol Types ──────────────────────────────────────────────────
 
@@ -369,9 +408,9 @@ export interface BusMonitorFrame {
 }
 
 export interface PCANConnectionConfig {
-  bridgeUrl?: string;       // Default: auto-detect (wss://localhost:8766 then ws://localhost:8765)
-  bridgeUrlSecure?: string; // Default: wss://localhost:8766
-  bridgeUrlInsecure?: string; // Default: ws://localhost:8765
+  bridgeUrl?: string;       // Tried first; then wss/ws candidates (127.0.0.1 before localhost)
+  bridgeUrlSecure?: string; // Default: wss://127.0.0.1:8766
+  bridgeUrlInsecure?: string; // Default: ws://127.0.0.1:8765
   reconnectAttempts?: number; // Default: 3
   requestTimeout?: number;   // Default: CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS
 }
@@ -387,6 +426,8 @@ export class PCANConnection {
   private bridgeUrl: string;
   private bridgeUrlSecure: string;
   private bridgeUrlInsecure: string;
+  /** When set, connect() tries this URL before secure/insecure candidates. */
+  private userSpecifiedBridgeUrl: string | null;
   private reconnectAttempts: number;
   private requestTimeout: number;
   private requestId = 0;
@@ -405,9 +446,10 @@ export class PCANConnection {
   private gmLiveSessionAtByTx = new Map<number, number>();
 
   constructor(config: PCANConnectionConfig = {}) {
-    this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
-    this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://localhost:8765';
-    this.bridgeUrl = config.bridgeUrl ?? this.bridgeUrlSecure; // Start with secure
+    this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://127.0.0.1:8766';
+    this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://127.0.0.1:8765';
+    this.userSpecifiedBridgeUrl = config.bridgeUrl ?? null;
+    this.bridgeUrl = this.userSpecifiedBridgeUrl ?? this.bridgeUrlSecure;
     this.reconnectAttempts = config.reconnectAttempts ?? 3;
     this.requestTimeout = config.requestTimeout ?? CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS;
   }
@@ -444,15 +486,13 @@ export class PCANConnection {
 
   /**
    * Check if the PCAN bridge is running.
-   * Tries wss://localhost:8766 first (works from HTTPS pages),
-   * then falls back to ws://localhost:8765.
+   * Tries wss:// on 127.0.0.1 and localhost, then ws:// (same hosts).
    * Returns { available, url } with the working URL.
    */
   static async isBridgeAvailable(
-    secureUrl = 'wss://localhost:8766',
-    insecureUrl = 'ws://localhost:8765'
+    secureUrl = 'wss://127.0.0.1:8766',
+    insecureUrl = 'ws://127.0.0.1:8765'
   ): Promise<{ available: boolean; url: string }> {
-    // Try secure first (works from HTTPS pages without mixed content issues)
     const tryUrl = (url: string): Promise<boolean> => {
       return new Promise((resolve) => {
         try {
@@ -489,13 +529,11 @@ export class PCANConnection {
       });
     };
 
-    // Try wss:// first
-    if (await tryUrl(secureUrl)) {
-      return { available: true, url: secureUrl };
-    }
-    // Fall back to ws://
-    if (await tryUrl(insecureUrl)) {
-      return { available: true, url: insecureUrl };
+    const candidates = defaultBridgeWebSocketCandidates(secureUrl, insecureUrl);
+    for (const url of candidates) {
+      if (await tryUrl(url)) {
+        return { available: true, url };
+      }
     }
     return { available: false, url: insecureUrl };
   }
@@ -507,9 +545,11 @@ export class PCANConnection {
       this.setState('connecting');
       this.emit('log', null, 'Connecting to PCAN-USB bridge...');
 
-      // Try wss:// (secure) first, then ws:// (insecure)
-      // HTTPS pages block ws:// due to mixed content, so wss:// is preferred
-      const urlsToTry = [this.bridgeUrlSecure, this.bridgeUrlInsecure];
+      // Try user URL first, then wss/ws with 127.0.0.1 before localhost (Windows IPv6 localhost)
+      const candidates = defaultBridgeWebSocketCandidates(this.bridgeUrlSecure, this.bridgeUrlInsecure);
+      const urlsToTry = this.userSpecifiedBridgeUrl
+        ? [...new Set([this.userSpecifiedBridgeUrl, ...candidates])]
+        : candidates;
       let connected = false;
 
       for (const url of urlsToTry) {
@@ -549,8 +589,8 @@ export class PCANConnection {
           '  pip install cryptography\n' +
           '  (then restart the bridge — it auto-generates a certificate)\n\n' +
           'First time with TLS? Accept the certificate:\n' +
-          '  1. Open https://localhost:8766 in Chrome\n' +
-          '  2. Click Advanced → Proceed to localhost\n' +
+          '  1. Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome\n' +
+          '  2. Click Advanced → Proceed\n' +
           '  3. Then retry connecting here'
         );
         this.setState('disconnected');
@@ -692,8 +732,8 @@ export class PCANConnection {
         pid: 0x02,
       }) as unknown as BridgeOBDResponse;
 
-      if (vinResponse.data && vinResponse.data.length >= 17) {
-        const vin = String.fromCharCode(...vinResponse.data.slice(0, 17));
+      const vin = this.parseVinFromMode0902(vinResponse.data);
+      if (vin) {
         this.vehicleInfo.vin = vin;
         this.emit('log', null, `VIN: ${vin}`);
 
@@ -747,6 +787,7 @@ export class PCANConnection {
     // 2. Scan supported standard PIDs using Mode 01 PID 00/20/40/60
     this.emit('log', null, 'Scanning supported PIDs...');
     await this.scanSupportedStandardPids();
+    this.seedChevroletGmCatalogPids();
 
     const stdCount = this.getAvailablePids().length;
     const extCount = this.getAvailableExtendedPids().length;
@@ -782,8 +823,73 @@ export class PCANConnection {
           }
         }
       } catch {
-        // If a bitmask PID fails, just skip it
-        break;
+        // Try remaining bitmask PIDs — some ECUs NACK $00 but answer $20/$40/$60
+        continue;
+      }
+    }
+
+    // Always probe common live PIDs and merge — bitmasks are often wrong/empty on EU gateways
+    // while RPM/speed/etc. still respond (matches ELM parseVin skipping non-printable count byte).
+    await this.probeGenericMode01Pids();
+  }
+
+  /**
+   * J1979 Mode 09 PID 02: data is [count][17× ASCII VIN]. Count is usually 0x01.
+   * Skip non-printable / count bytes so position 1 is WMI (e.g. 1, 4, 5, W…).
+   */
+  private parseVinFromMode0902(data: number[] | undefined): string | null {
+    if (!data?.length) return null;
+    let i = 0;
+    while (i < data.length && (data[i] < 0x20 || data[i] > 0x7e)) {
+      i++;
+    }
+    if (data.length - i < 17) return null;
+    return String.fromCharCode(...data.slice(i, i + 17));
+  }
+
+  /**
+   * Chevrolet / GM: pre-enable Mode 01 PIDs that exist in both our STANDARD_PIDS and the
+   * `obd-utils` ELM catalog so datalogging can start even when bitmask/probes miss (common on some CAN setups).
+   */
+  private seedChevroletGmCatalogPids(): void {
+    const vin = this.vehicleInfo.vin;
+    if (!vin || vin.length !== 17) return;
+    const { manufacturer } = decodeVinLocal(vin);
+    if (manufacturer !== 'gm') return;
+
+    const defs = getStandardPidsMatchingElmCatalog();
+    let added = 0;
+    for (const p of defs) {
+      if (!this.supportedPids.has(p.pid)) {
+        this.supportedPids.add(p.pid);
+        added++;
+      }
+    }
+    if (added > 0) {
+      this.emit(
+        'log',
+        null,
+        `Chevrolet/GM: pre-enabled ${added} Mode 01 PIDs from ELM/OBD-II catalog — start logging and the bus will skip any the ECU NACKs.`
+      );
+    }
+  }
+
+  /** Discover Mode 01 PIDs using `obd-utils` ELM catalog order; merge successes into supportedPids. */
+  private async probeGenericMode01Pids(): Promise<void> {
+    this.emit('log', null, 'Probing Mode 01 PIDs (obd-utils / ELM327 catalog)...');
+    const probes = getMode01ProbePidOrder(48);
+    for (const pid of probes) {
+      try {
+        const response = (await this.sendRequest({
+          type: 'obd_request',
+          mode: 0x01,
+          pid,
+        })) as unknown as BridgeOBDResponse;
+        if (response.data && response.data.length > 0) {
+          this.supportedPids.add(pid);
+        }
+      } catch {
+        // ignore
       }
     }
   }
@@ -824,6 +930,19 @@ export class PCANConnection {
   }
 
   // ─── PID Reading ──────────────────────────────────────────────────────────
+
+  /** ELM327-style hex parse (`obd-utils`) when our formula fails or returns non-finite. */
+  private decodePidWithElmUtils(mode: number, pidNum: number, data: number[]): number | null {
+    if (mode !== 0x01 || !data.length) return null;
+    const svc = (mode + 0x40).toString(16).padStart(2, '0');
+    const p = pidNum.toString(16).padStart(2, '0');
+    const body = data.map((b) => b.toString(16).padStart(2, '0')).join('');
+    const parsed = parseOBDResponse(svc + p + body);
+    const v = parsed.value;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v);
+    return null;
+  }
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
@@ -886,19 +1005,48 @@ export class PCANConnection {
         CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
       ) as unknown as BridgeOBDResponse;
 
-      if (response.data && response.data.length > 0) {
-        const value = pid.formula(response.data);
+      const raw = response.data;
+      if (!raw?.length) return null;
+      // ISO 15765 negative response passed through as data
+      if (raw[0] === 0x7f) return null;
+
+      try {
+        const value = pid.formula(raw);
+        if (typeof value === 'number' && !Number.isFinite(value)) {
+          const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+          if (alt === null) return null;
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value: alt,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        }
         return {
           pid: pid.pid,
           name: pid.name,
           shortName: pid.shortName,
           value,
           unit: pid.unit,
-          rawBytes: response.data,
+          rawBytes: raw,
+          timestamp: Date.now(),
+        };
+      } catch {
+        const alt = mode === 0x01 ? this.decodePidWithElmUtils(mode, pid.pid, raw) : null;
+        if (alt === null) return null;
+        return {
+          pid: pid.pid,
+          name: pid.name,
+          shortName: pid.shortName,
+          value: alt,
+          unit: pid.unit,
+          rawBytes: raw,
           timestamp: Date.now(),
         };
       }
-      return null;
     } catch {
       return null;
     }
@@ -2446,11 +2594,8 @@ export class PCANConnection {
     }
     this.pendingRequests.clear();
 
-    // Try to open a new WebSocket (try last successful URL first)
-    const urlsToTry = this.bridgeUrl
-      ? [this.bridgeUrl, this.bridgeUrlSecure, this.bridgeUrlInsecure]
-      : [this.bridgeUrlSecure, this.bridgeUrlInsecure];
-    // Deduplicate
+    const expanded = defaultBridgeWebSocketCandidates(this.bridgeUrlSecure, this.bridgeUrlInsecure);
+    const urlsToTry = this.bridgeUrl ? [this.bridgeUrl, ...expanded] : expanded;
     const uniqueUrls = [...new Set(urlsToTry)];
 
     for (const url of uniqueUrls) {

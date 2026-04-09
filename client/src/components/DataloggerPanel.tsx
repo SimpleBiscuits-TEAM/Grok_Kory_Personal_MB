@@ -1000,7 +1000,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setDetectedBridgeUrl(null);
         addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
         addLog('If bridge IS running, you may need to accept the TLS certificate:');
-        addLog('  Open https://localhost:8766 in Chrome → Advanced → Proceed');
+        addLog('  Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome → Advanced → Proceed');
       }
     } catch {
       setBridgeAvailable(false);
@@ -2697,7 +2697,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
                         <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
                           <strong>Click CHECK</strong> above, then <strong>CONNECT</strong> — you're live!
-                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time? Accept the certificate at <strong style={{ color: sColor.text }}>https://localhost:8766</strong></div>
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time? Accept the certificate at <strong style={{ color: sColor.text }}>https://127.0.0.1:8766</strong> (or localhost)</div>
                         </div>
                       </div>
                     </div>

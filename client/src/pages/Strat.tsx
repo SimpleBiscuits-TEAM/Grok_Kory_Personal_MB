@@ -2,7 +2,7 @@
  * Strat — PPEI Post-Sale Tech Support AI Agent
  * Helps customers AFTER purchase with installation, device setup,
  * tune flashing, data logging, error code troubleshooting, and
- * general product support for EFILive, EZ LYNK, HP Tuners, and DEBETA.
+ * general product support across PPEI tuning tools and platforms.
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -10,7 +10,7 @@ import { trpc } from '@/lib/trpc';
 import PpeiHeader from '@/components/PpeiHeader';
 import { AIChatBox, type Message } from '@/components/AIChatBox';
 import {
-  Headphones, Wrench, BookOpen, MessageCircle, Phone,
+  Headphones, BookOpen, MessageCircle, Phone,
   Star, X, CheckCircle, Send,
 } from 'lucide-react';
 
@@ -390,21 +390,6 @@ export function StratContent() {
           alignItems: 'center',
           gap: '4px',
         }}>
-          <Wrench size={10} style={{ color: sColor.amber }} />
-          EFILIVE · EZ LYNK · HP TUNERS · DEBETA
-        </div>
-        <div style={{
-          fontFamily: sFont.mono,
-          fontSize: '0.6rem',
-          color: sColor.textDim,
-          background: sColor.cardBg,
-          border: `1px solid ${sColor.border}`,
-          borderRadius: '4px',
-          padding: '4px 8px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
-        }}>
           <Phone size={10} style={{ color: sColor.green }} />
           ESCALATION: (337) 485-7070
         </div>
@@ -460,7 +445,6 @@ export default function Strat() {
   } = useStratChat();
 
   const stats = [
-    { icon: Wrench, label: 'Products Supported', value: '4 Platforms', color: sColor.amber },
     { icon: BookOpen, label: 'KB Articles', value: '23', color: sColor.blue },
     { icon: MessageCircle, label: 'AI-Powered', value: 'Instant', color: sColor.green },
     { icon: Phone, label: 'Escalation', value: '(337) 485-7070', color: sColor.cyan },

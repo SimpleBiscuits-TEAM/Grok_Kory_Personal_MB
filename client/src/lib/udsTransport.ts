@@ -18,6 +18,7 @@
  */
 
 import { NRC_CODES } from './udsReference';
+import { defaultBridgeWebSocketCandidates } from './pcanConnection';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -92,9 +93,7 @@ export class UDSTransport {
   // ─── Connection ───────────────────────────────────────────────────────────
 
   async connect(bridgeUrl?: string): Promise<boolean> {
-    const urlsToTry = bridgeUrl
-      ? [bridgeUrl]
-      : ['wss://localhost:8766', 'ws://localhost:8765'];
+    const urlsToTry = bridgeUrl ? [bridgeUrl] : defaultBridgeWebSocketCandidates();
 
     for (const url of urlsToTry) {
       try {

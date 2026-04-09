@@ -37,6 +37,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  const isDev = process.env.NODE_ENV === "development";
 
   // ── Security Headers (helmet) ──────────────────────────────────────────
   // Sets Content-Security-Policy, Strict-Transport-Security, X-Frame-Options,
@@ -50,7 +51,7 @@ async function startServer() {
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com"],
           imgSrc: ["'self'", "data:", "blob:", "https:"],
-          connectSrc: ["'self'", "https:", "wss:"],
+          connectSrc: ["'self'", "https:", "wss:", ...(isDev ? (["ws:"] as const) : [])],
           mediaSrc: ["'self'", "blob:"],
           workerSrc: ["'self'", "blob:"],
           frameSrc: ["'self'"],
@@ -59,12 +60,15 @@ async function startServer() {
           formAction: ["'self'"],
         },
       },
-      // Enable HSTS for HTTPS deployments
-      strictTransportSecurity: {
-        maxAge: 31536000, // 1 year
-        includeSubDomains: true,
-        preload: true,
-      },
+      // Never send HSTS over plain HTTP in dev — browsers may upgrade to https://localhost
+      // and then show "connection refused" because this server is not TLS.
+      strictTransportSecurity: isDev
+        ? false
+        : {
+            maxAge: 31536000, // 1 year
+            includeSubDomains: true,
+            preload: true,
+          },
       // Prevent clickjacking
       frameguard: { action: "deny" },
       // Prevent MIME type sniffing
@@ -191,8 +195,12 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+  const host = process.env.HOST ?? "0.0.0.0";
+  server.listen(port, host, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    if (host === "0.0.0.0") {
+      console.log(`  Open http://127.0.0.1:${port}/ if your browser does not resolve localhost`);
+    }
   });
 }
 

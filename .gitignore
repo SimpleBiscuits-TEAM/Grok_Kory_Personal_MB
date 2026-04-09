@@ -122,3 +122,7 @@ client/public/__manus__/version.json
 
 # Git graph HTML (npm run git-map / git-map:watch)
 docs/git-repository-map.html
+
+# Local bridge / Python artifacts (do not commit)
+docs/.certs/
+docs/__pycache__/

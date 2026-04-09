@@ -112,6 +112,32 @@ Stop the server with **Ctrl+C** in the same cmd window.
 
 ---
 
+## 7. PCAN WebSocket bridge (hardware / IntelliSpy / flash)
+
+The browser talks to CAN hardware through a **local Python WebSocket bridge** (`docs/pcan_bridge_current.py`). Node does not start this; run it in a **second** terminal when you need the bridge.
+
+1. Install Python 3 if you do not have it (https://www.python.org/downloads/ — check **Add python.exe to PATH**), or use the **`py`** launcher.
+2. Install Python dependencies (once):
+
+```bat
+cd /d C:\Projects\V-OP
+py -3 -m pip install -r bridge\requirements.txt
+```
+
+3. **Trust the self-signed TLS cert once:** open **https://localhost:8766** in Chrome and proceed past the warning (needed for **wss://**).
+4. Start the bridge:
+
+```bat
+cd /d C:\Projects\V-OP
+bridge\run-bridge.cmd
+```
+
+Or: `py -3 docs\pcan_bridge_current.py`
+
+You still need **PCAN-USB drivers** (PEAK) and hardware; the pip packages only satisfy the Python side.
+
+---
+
 ## Quick reference — copy/paste sequence (after Node is installed)
 
 Adjust `C:\Projects\V-OP` to your path.

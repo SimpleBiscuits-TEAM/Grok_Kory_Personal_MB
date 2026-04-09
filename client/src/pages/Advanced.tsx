@@ -1306,7 +1306,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1343,7 +1343,7 @@ const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
-  { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  { id: 'devtools', label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
@@ -1368,6 +1368,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const allTabs = isAdmin
     ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...adminTabs, ...superAdminTabs]
     : [...tabs, ...(showTalonTab ? [talonTab] : [])];
+  const mainTabCountBeforeAdmin = tabs.length + (showTalonTab ? 1 : 0);
 
   // Pick up WP8 data from sessionStorage (set by Home.tsx on .wp8 upload)
   useEffect(() => {
@@ -1445,7 +1446,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
           {allTabs.map((tab, idx) => (
             <Fragment key={tab.id}>
               {/* Admin section divider */}
-              {isAdmin && idx === tabs.length && (
+              {isAdmin && idx === mainTabCountBeforeAdmin && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
               <button onClick={() => { setActiveTab(tab.id); }} style={{
@@ -1468,7 +1469,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
         {/* DEV TOOLS — consolidated admin panel */}
-        {activeTab === ('devtools' as TabId) && isAdmin && (
+        {activeTab === 'devtools' && isAdmin && (
           <div className="ppei-anim-fade-up">
             {/* Dev sub-tab navigation */}
             <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', borderBottom: `1px solid oklch(0.20 0.008 260)`, overflowX: 'auto', flexWrap: 'wrap' }}>
@@ -1737,5 +1738,6 @@ function TasksGate() {
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
-  return <AdvancedDashboard onLock={() => {}} />;
+  const [, navigate] = useLocation();
+  return <AdvancedDashboard onLock={() => navigate('/')} />;
 }

@@ -193,6 +193,9 @@ importers:
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      obd-utils:
+        specifier: ^0.2.1
+        version: 0.2.1
       react:
         specifier: ^19.2.1
         version: 19.2.1
@@ -3902,6 +3905,10 @@ packages:
   normalize-range@0.1.2:
     resolution: {integrity: sha512-bdok/XvKII3nUpklnV6P2hxtMNrCboOjAcyBuQnWEhO665FwrSNRxU+AqpsyvO6LgGYPspN+lu5CLtw4jPRKNA==}
     engines: {node: '>=0.10.0'}
+
+  obd-utils@0.2.1:
+    resolution: {integrity: sha512-0L6K2LJMKCrjZSpCQ6iNvq/02EnxyFGb1kcmfKBQveFw+bLgHxaFc9EZAqQo8skHG80RGg3S4bhBP866+aXsSA==}
+    hasBin: true
 
   object-assign@4.1.1:
     resolution: {integrity: sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==}
@@ -8925,6 +8932,10 @@ snapshots:
   node-releases@2.0.23: {}
 
   normalize-range@0.1.2: {}
+
+  obd-utils@0.2.1:
+    dependencies:
+      commander: 8.3.0
 
   object-assign@4.1.1: {}
 

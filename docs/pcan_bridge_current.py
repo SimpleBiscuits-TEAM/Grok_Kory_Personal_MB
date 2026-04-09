@@ -85,7 +85,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 # ─── Immediate startup banner ────────────────────────────────────────────────
 print(flush=True)
@@ -184,7 +184,9 @@ PROTOCOL_BITRATES = {
 SUPPORTED_PROTOCOLS = ['obd2', 'j1939', 'uds', 'canfd', 'raw']
 
 # Timeouts
-OBD_RESPONSE_TIMEOUT = 2.0   # seconds
+OBD_RESPONSE_TIMEOUT = 2.0   # seconds (GM Mode 22 / single-shot requests)
+# ISO 15765: try ECM physical (0x7E0) then functional (0x7DF). EU gateways often ignore 7DF.
+OBD_STANDARD_TRY_TIMEOUT = 1.35  # seconds per attempt (two attempts ≈ 2.7s)
 ISOTP_FRAME_TIMEOUT = 1.0    # seconds
 J1939_RESPONSE_TIMEOUT = 3.0 # seconds (J1939 can be slower)
 UDS_RESPONSE_TIMEOUT = 5.0   # seconds (UDS services can take longer)
@@ -322,57 +324,99 @@ class OBDProtocol:
             except asyncio.QueueEmpty:
                 break
 
+    def _extract_obd_positive_payload(self, mode: int, pid: int, payload: List[int]) -> Optional[List[int]]:
+        """Return application data for a positive OBD response, or None if this frame is not our answer."""
+        if not payload:
+            return None
+        if payload[0] != (mode + 0x40):
+            return None
+        if mode == 0x22:  # GM Mode 22 — 62 DID_hi DID_lo data...
+            if len(payload) < 3:
+                return None
+            if payload[1] != ((pid >> 8) & 0xFF) or payload[2] != (pid & 0xFF):
+                return None
+            return payload[3:]
+        if mode in (0x01, 0x02):
+            if len(payload) < 2 or payload[1] != pid:
+                return None
+            return payload[2:]
+        if mode == 0x09:
+            if len(payload) < 2 or payload[1] != pid:
+                return None
+            rest = payload[2:] if len(payload) > 2 else []
+            # J1979 PID 02 (VIN): [message_count][17 ASCII] — count is usually 0x01
+            if pid == 0x02 and len(rest) >= 18 and rest[0] < 0x20:
+                rest = rest[1:]
+            return rest
+        # Mode 03/07: 43/47 then DTC bytes (no PID field). Mode 04: 44 + optional data.
+        if mode in (0x03, 0x04, 0x07):
+            return payload[1:] if len(payload) > 1 else []
+        return payload[1:] if len(payload) > 1 else []
+
     async def send_obd_request(self, mode: int, pid: int, req_id: str) -> dict:
         """Send an OBD-II request and wait for the response."""
-        self._drain_queue()
-
-        # Build the CAN frame
+        # Build the CAN payload once
         if mode == 0x22:  # GM Mode 22 (extended PID)
             pid_hi = (pid >> 8) & 0xFF
             pid_lo = pid & 0xFF
             data = [0x03, mode, pid_hi, pid_lo, 0x00, 0x00, 0x00, 0x00]
-            arb_id = ECM_REQUEST_ID
         elif mode == 0x09 and pid == 0x02:
-            # VIN request
             data = [0x02, mode, pid, 0x00, 0x00, 0x00, 0x00, 0x00]
-            arb_id = OBD_REQUEST_ID
         else:
-            # Standard Mode 01/02/03/04/05/06/09
             data = [0x02, mode, pid, 0x00, 0x00, 0x00, 0x00, 0x00]
-            arb_id = OBD_REQUEST_ID
 
-        msg = can.Message(
-            arbitration_id=arb_id,
-            data=data,
-            is_extended_id=False
-        )
-        try:
-            self.bus.send(msg)
-        except can.CanError as e:
-            return {
-                "type": "error",
-                "id": req_id,
-                "message": f"CAN send error: {e}"
-            }
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(mode, pid),
-                timeout=OBD_RESPONSE_TIMEOUT
+        # GM Mode 22: physical ECM only, single long timeout
+        if mode == 0x22:
+            self._drain_queue()
+            msg = can.Message(
+                arbitration_id=ECM_REQUEST_ID,
+                data=data,
+                is_extended_id=False
             )
-            return {
-                "type": "obd_response",
-                "id": req_id,
-                "mode": mode,
-                "pid": pid,
-                "data": response
-            }
-        except asyncio.TimeoutError:
-            return {
-                "type": "error",
-                "id": req_id,
-                "message": f"Timeout waiting for response (Mode {mode:02X} PID {pid:04X})"
-            }
+            try:
+                self.bus.send(msg)
+            except can.CanError as e:
+                return {"type": "error", "id": req_id, "message": f"CAN send error: {e}"}
+            try:
+                response = await asyncio.wait_for(
+                    self._wait_for_response(mode, pid),
+                    timeout=OBD_RESPONSE_TIMEOUT
+                )
+                return {"type": "obd_response", "id": req_id, "mode": mode, "pid": pid, "data": response}
+            except asyncio.TimeoutError:
+                return {
+                    "type": "error",
+                    "id": req_id,
+                    "message": f"Timeout waiting for response (Mode {mode:02X} PID {pid:04X})"
+                }
+
+        # Standard OBD: physical 0x7E0 first, then functional 0x7DF (EU / BMW gateways)
+        arb_sequence = [ECM_REQUEST_ID, OBD_REQUEST_ID]
+        last_err: Optional[str] = None
+        for arb_id in arb_sequence:
+            self._drain_queue()
+            msg = can.Message(arbitration_id=arb_id, data=data, is_extended_id=False)
+            try:
+                self.bus.send(msg)
+            except can.CanError as e:
+                return {"type": "error", "id": req_id, "message": f"CAN send error: {e}"}
+            try:
+                response = await asyncio.wait_for(
+                    self._wait_for_response(mode, pid),
+                    timeout=OBD_STANDARD_TRY_TIMEOUT
+                )
+                return {
+                    "type": "obd_response",
+                    "id": req_id,
+                    "mode": mode,
+                    "pid": pid,
+                    "data": response
+                }
+            except asyncio.TimeoutError:
+                last_err = f"Timeout waiting for response (Mode {mode:02X} PID {pid:04X})"
+                continue
+
+        return {"type": "error", "id": req_id, "message": last_err or "No OBD response"}
 
     async def _wait_for_response(self, mode: int, pid: int) -> list:
         """Wait for and parse an OBD-II response, handling ISO-TP multi-frame."""
@@ -382,19 +426,21 @@ class OBDProtocol:
                 continue
 
             frame_data = list(msg.data)
+            if not frame_data:
+                continue
             pci_type = (frame_data[0] >> 4) & 0x0F
 
             if pci_type == 0:  # Single frame
                 length = frame_data[0] & 0x0F
+                if length == 0 or len(frame_data) < 1 + length:
+                    continue
                 payload = frame_data[1:1 + length]
-                response_mode = payload[0]
-                if response_mode == (mode + 0x40):
-                    # Mode 0x22 positive: 62 DID_hi DID_lo [data...] — skip 3 bytes, not 2 (Mode 01 uses 1-byte PID).
-                    if mode == 0x22:
-                        return payload[3:] if len(payload) >= 3 else payload[2:]
-                    return payload[2:]  # Mode 01/09: mode + 1-byte PID
-                elif response_mode == 0x7F:
-                    return payload  # Negative response
+                if payload and payload[0] == 0x7F:
+                    return payload
+                extracted = self._extract_obd_positive_payload(mode, pid, payload)
+                if extracted is not None:
+                    return extracted
+                continue
 
             elif pci_type == 1:  # First frame (multi-frame)
                 total_length = ((frame_data[0] & 0x0F) << 8) | frame_data[1]
@@ -426,13 +472,15 @@ class OBDProtocol:
                     except asyncio.TimeoutError:
                         break
 
-                # Trim to actual length and skip mode + PID/DID header
                 payload = payload[:total_length]
-                if len(payload) > 2:
-                    if mode == 0x22 and len(payload) >= 3:
-                        return payload[3:]  # 62 + 2-byte DID
-                    return payload[2:]  # mode + 1-byte PID (e.g. Mode 01/09)
-                return payload
+                if not payload:
+                    continue
+                if payload[0] == 0x7F:
+                    return payload
+                extracted = self._extract_obd_positive_payload(mode, pid, payload)
+                if extracted is not None:
+                    return extracted
+                continue
 
     async def send_raw_frame(self, arb_id: int, data: list, req_id: str, extended: bool = False) -> dict:
         """Send a raw CAN frame and return the next response."""

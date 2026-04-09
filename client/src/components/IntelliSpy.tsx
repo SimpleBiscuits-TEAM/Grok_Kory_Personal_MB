@@ -36,7 +36,7 @@ import { lookupModule, ALL_KNOWN_MODULES, type KnownModule } from '@/lib/moduleS
 import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
-import { PCANConnection } from '@/lib/pcanConnection';
+import { PCANConnection, defaultBridgeWebSocketCandidates } from '@/lib/pcanConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import KnoxConfidenceDashboard from '@/components/KnoxConfidenceDashboard';
 
@@ -547,7 +547,7 @@ const FLASH_STAGE_LABELS: Record<string, { label: string; color: string; step: n
 export default function IntelliSpy() {
   // Connection state
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  const [bridgeUrl, setBridgeUrl] = useState('wss://localhost:8766');
+  const [bridgeUrl, setBridgeUrl] = useState('wss://127.0.0.1:8766');
   const wsRef = useRef<WebSocket | null>(null);
   /** PCAN WebSocket vs V-OP USB binary bridge */
   const [spyTransport, setSpyTransport] = useState<'ws' | 'vop'>('ws');
@@ -855,9 +855,10 @@ export default function IntelliSpy() {
     setStatus('connecting');
 
     // Use detected URL first, then fall back to defaults
+    const fallback = defaultBridgeWebSocketCandidates();
     const urlsToTry = detectedBridgeUrl
-      ? [detectedBridgeUrl, ...(['wss://localhost:8766', 'ws://localhost:8765'].filter(u => u !== detectedBridgeUrl))]
-      : ['wss://localhost:8766', 'ws://localhost:8765'];
+      ? [detectedBridgeUrl, ...fallback.filter((u) => u !== detectedBridgeUrl)]
+      : fallback;
     let connected = false;
 
     for (const url of urlsToTry) {
