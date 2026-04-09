@@ -1173,5 +1173,5 @@ Do **not** treat **Duramax forum defaults** as authoritative for a **6.2L L87 / 
 
 ### Calibration image reference (offline, not used by live datalogger)
 - Example field package: **E90** ECM segments (OS **12716900**), **T93** TCM (**24044027** / **24054706**) — for editor/calibration tooling only; live scanning remains **ISO-TP OBD/UDS**, not bin parsing.
-- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **`E90-` / `T93-`** names) under `tune-deploy/GM/…` with metadata from `tuneDeployParser`; see repo **`gmE90SilveradoSniffReference`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
+- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **\`E90-\` / \`T93-\`** names) under \`tune-deploy/GM/…\` with metadata from \`tuneDeployParser\`; see repo **\`gmE90SilveradoSniffReference\`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
 `;
