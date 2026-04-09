@@ -968,4 +968,15 @@
 - [x] Integrate Strat agent into existing SUPPORT tab in Advanced.tsx — moved to user-facing tabs, Strat shows for all users, SupportAdminPanel shows below for super_admin
 - [x] Add /strat route in App.tsx
 - [x] Verify build passes
-- [ ] Push all to GROK
+- [x] Push all to GROK
+
+## Strat Agent Feedback Form
+- [x] Create strat_feedback database table (migration) and apply it
+- [x] Add submitFeedback mutation to strat router (server)
+- [x] Build feedback form UI in StratContent that appears after 5 user messages
+- [x] Store rating (1-5 stars), detailed comment, and session context
+- [x] Verify build passes and push to GROK
+
+## Bug: Knox quad-agent reasoning display missing
+- [x] Investigate why Knox Alpha/Beta/Gamma/Delta agent reasoning is no longer showing under analysis — confirmed working as intended: final reconciled answer shows by default in Analyzer, individual agent breakdown available in Editor KnoxChat and IntelliSpy
+- [x] No fix needed — user confirmed they prefer the final synthesized result, with option to debug individual agents when needed

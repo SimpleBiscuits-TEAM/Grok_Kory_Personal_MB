@@ -9,6 +9,8 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { getDb } from "../db";
+import { stratFeedback } from "../../drizzle/schema";
 
 /**
  * Complete PPEI Support Knowledge Base — scraped from support.ppei.com
@@ -1507,6 +1509,37 @@ export const stratRouter = router({
         return {
           reply: `I'm experiencing a connection issue. Error: ${err.message || "Unknown"}. Give me a sec and try again. If this keeps happening, call us at (337) 485-7070.`,
         };
+      }
+    }),
+
+  /** Submit feedback after 5+ interactions */
+  submitFeedback: protectedProcedure
+    .input(
+      z.object({
+        rating: z.number().min(1).max(5),
+        comment: z.string().optional(),
+        productCategory: z.string().optional(),
+        resolved: z.boolean().optional(),
+        messageCount: z.number().optional(),
+        conversationSummary: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const db = await getDb();
+        await db.insert(stratFeedback).values({
+          userId: ctx.user?.id ?? null,
+          rating: input.rating,
+          comment: input.comment ?? null,
+          productCategory: input.productCategory ?? null,
+          resolved: input.resolved ?? null,
+          messageCount: input.messageCount ?? null,
+          conversationSummary: input.conversationSummary ?? null,
+        });
+        return { success: true };
+      } catch (err: any) {
+        console.error("[Strat] Feedback save error:", err);
+        return { success: false, error: err.message };
       }
     }),
 });

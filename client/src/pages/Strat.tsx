@@ -4,12 +4,15 @@
  * tune flashing, data logging, error code troubleshooting, and
  * general product support for EFILive, EZ LYNK, HP Tuners, and DEBETA.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import PpeiHeader from '@/components/PpeiHeader';
 import { AIChatBox, type Message } from '@/components/AIChatBox';
-import { Headphones, Wrench, BookOpen, MessageCircle, Phone } from 'lucide-react';
+import {
+  Headphones, Wrench, BookOpen, MessageCircle, Phone,
+  Star, X, CheckCircle, Send,
+} from 'lucide-react';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -38,12 +41,224 @@ const SUGGESTED_PROMPTS = [
   "HP Tuners T93 TCM install guide",
 ];
 
-/**
- * StratContent — Embeddable version for use inside Advanced SUPPORT tab (no header/wrapper)
- */
-export function StratContent() {
-  const { loading: authLoading } = useAuth();
+const FEEDBACK_THRESHOLD = 5; // Show feedback after 5 user messages
+
+/* ─── Feedback Form Component ─────────────────────────────────────────── */
+function StratFeedbackForm({
+  onSubmit,
+  onDismiss,
+  isPending,
+  messageCount,
+}: {
+  onSubmit: (data: { rating: number; comment: string; resolved: boolean }) => void;
+  onDismiss: () => void;
+  isPending: boolean;
+  messageCount: number;
+}) {
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [resolved, setResolved] = useState<boolean | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    if (rating === 0) return;
+    onSubmit({ rating, comment, resolved: resolved ?? false });
+    setSubmitted(true);
+  };
+
+  if (submitted) {
+    return (
+      <div style={{
+        background: 'rgba(0,200,255,0.05)',
+        border: `1px solid rgba(0,200,255,0.2)`,
+        borderRadius: '8px',
+        padding: '1.25rem',
+        margin: '0.75rem 0',
+        textAlign: 'center',
+      }}>
+        <CheckCircle size={28} style={{ color: sColor.green, margin: '0 auto 0.5rem' }} />
+        <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'white', letterSpacing: '0.04em' }}>
+          THANKS FOR THE FEEDBACK
+        </div>
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, marginTop: '0.25rem' }}>
+          YOUR INPUT HELPS US IMPROVE STRAT
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: 'rgba(0,200,255,0.04)',
+      border: `1px solid rgba(0,200,255,0.15)`,
+      borderRadius: '8px',
+      padding: '1.25rem',
+      margin: '0.75rem 0',
+      position: 'relative',
+    }}>
+      {/* Dismiss button */}
+      <button
+        onClick={onDismiss}
+        style={{
+          position: 'absolute',
+          top: '0.5rem',
+          right: '0.5rem',
+          background: 'none',
+          border: 'none',
+          color: sColor.textDim,
+          cursor: 'pointer',
+          padding: '4px',
+        }}
+        title="Dismiss"
+      >
+        <X size={14} />
+      </button>
+
+      {/* Title */}
+      <div style={{
+        fontFamily: sFont.heading,
+        fontSize: '1rem',
+        color: sColor.cyan,
+        letterSpacing: '0.06em',
+        marginBottom: '0.75rem',
+      }}>
+        HOW'S STRAT DOING?
+      </div>
+
+      {/* Star Rating */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim, marginBottom: '0.35rem', letterSpacing: '0.06em' }}>
+          RATING
+        </div>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          {[1, 2, 3, 4, 5].map(n => (
+            <button
+              key={n}
+              onClick={() => setRating(n)}
+              onMouseEnter={() => setHoverRating(n)}
+              onMouseLeave={() => setHoverRating(0)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px',
+                transition: 'transform 0.15s',
+                transform: (hoverRating >= n || rating >= n) ? 'scale(1.15)' : 'scale(1)',
+              }}
+            >
+              <Star
+                size={22}
+                fill={(hoverRating >= n || rating >= n) ? sColor.amber : 'transparent'}
+                style={{ color: (hoverRating >= n || rating >= n) ? sColor.amber : sColor.border }}
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Resolved? */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim, marginBottom: '0.35rem', letterSpacing: '0.06em' }}>
+          WAS YOUR ISSUE RESOLVED?
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {[
+            { label: 'YES', value: true, color: sColor.green },
+            { label: 'NO', value: false, color: sColor.red },
+          ].map(opt => (
+            <button
+              key={opt.label}
+              onClick={() => setResolved(opt.value)}
+              style={{
+                fontFamily: sFont.mono,
+                fontSize: '0.6rem',
+                letterSpacing: '0.06em',
+                padding: '4px 14px',
+                borderRadius: '4px',
+                border: `1px solid ${resolved === opt.value ? opt.color : sColor.border}`,
+                background: resolved === opt.value ? `${opt.color}22` : 'transparent',
+                color: resolved === opt.value ? opt.color : sColor.textDim,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Comment */}
+      <div style={{ marginBottom: '0.75rem' }}>
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim, marginBottom: '0.35rem', letterSpacing: '0.06em' }}>
+          DETAILED COMMENTS (OPTIONAL)
+        </div>
+        <textarea
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          placeholder="Tell us about your experience — what worked, what didn't, what could be better..."
+          rows={3}
+          style={{
+            width: '100%',
+            fontFamily: sFont.body,
+            fontSize: '0.8rem',
+            color: 'white',
+            background: sColor.cardBg,
+            border: `1px solid ${sColor.border}`,
+            borderRadius: '4px',
+            padding: '0.5rem',
+            resize: 'vertical',
+            outline: 'none',
+          }}
+        />
+      </div>
+
+      {/* Submit */}
+      <button
+        onClick={handleSubmit}
+        disabled={rating === 0 || isPending}
+        style={{
+          fontFamily: sFont.mono,
+          fontSize: '0.65rem',
+          letterSpacing: '0.06em',
+          padding: '6px 20px',
+          borderRadius: '4px',
+          border: `1px solid ${rating > 0 ? sColor.cyan : sColor.border}`,
+          background: rating > 0 ? 'rgba(0,200,255,0.1)' : 'transparent',
+          color: rating > 0 ? sColor.cyan : sColor.textDim,
+          cursor: rating > 0 ? 'pointer' : 'not-allowed',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          transition: 'all 0.15s',
+          opacity: isPending ? 0.6 : 1,
+        }}
+      >
+        <Send size={12} />
+        {isPending ? 'SUBMITTING...' : 'SUBMIT FEEDBACK'}
+      </button>
+
+      <div style={{
+        fontFamily: sFont.mono,
+        fontSize: '0.5rem',
+        color: sColor.textDim,
+        marginTop: '0.5rem',
+        opacity: 0.6,
+      }}>
+        {messageCount} MESSAGES IN THIS SESSION
+      </div>
+    </div>
+  );
+}
+
+/* ─── Shared chat hook ────────────────────────────────────────────────── */
+function useStratChat() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [userMsgCount, setUserMsgCount] = useState(0);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackDismissed, setFeedbackDismissed] = useState(false);
+  const feedbackShownRef = useRef(false);
 
   const chatMut = trpc.strat.chat.useMutation({
     onSuccess: (data) => {
@@ -57,6 +272,16 @@ export function StratContent() {
     },
   });
 
+  const feedbackMut = trpc.strat.submitFeedback.useMutation();
+
+  // Show feedback form after threshold
+  useEffect(() => {
+    if (userMsgCount >= FEEDBACK_THRESHOLD && !feedbackShownRef.current && !feedbackDismissed) {
+      feedbackShownRef.current = true;
+      setShowFeedback(true);
+    }
+  }, [userMsgCount, feedbackDismissed]);
+
   const handleSend = useCallback((content: string) => {
     const userMessage: Message = { role: 'user', content };
     setMessages(prev => {
@@ -68,7 +293,47 @@ export function StratContent() {
       chatMut.mutate({ message: content, history: history.slice(0, -1) });
       return newMessages;
     });
+    setUserMsgCount(c => c + 1);
   }, [chatMut]);
+
+  const handleFeedbackSubmit = useCallback((data: { rating: number; comment: string; resolved: boolean }) => {
+    // Build a short summary from the conversation
+    const userMsgs = messages.filter(m => m.role === 'user').map(m => m.content);
+    const summary = userMsgs.slice(0, 5).join(' | ').substring(0, 500);
+
+    feedbackMut.mutate({
+      rating: data.rating,
+      comment: data.comment || undefined,
+      resolved: data.resolved,
+      messageCount: userMsgCount,
+      conversationSummary: summary || undefined,
+    });
+  }, [feedbackMut, messages, userMsgCount]);
+
+  const handleFeedbackDismiss = useCallback(() => {
+    setShowFeedback(false);
+    setFeedbackDismissed(true);
+  }, []);
+
+  return {
+    messages,
+    handleSend,
+    isLoading: chatMut.isPending,
+    showFeedback,
+    feedbackMut,
+    handleFeedbackSubmit,
+    handleFeedbackDismiss,
+    userMsgCount,
+  };
+}
+
+/* ─── StratContent — Embeddable version for SUPPORT tab ───────────────── */
+export function StratContent() {
+  const { loading: authLoading } = useAuth();
+  const {
+    messages, handleSend, isLoading,
+    showFeedback, feedbackMut, handleFeedbackSubmit, handleFeedbackDismiss, userMsgCount,
+  } = useStratChat();
 
   if (authLoading) {
     return (
@@ -160,11 +425,21 @@ export function StratContent() {
         </div>
       </div>
 
+      {/* Feedback form — appears after 5 messages */}
+      {showFeedback && (
+        <StratFeedbackForm
+          onSubmit={handleFeedbackSubmit}
+          onDismiss={handleFeedbackDismiss}
+          isPending={feedbackMut.isPending}
+          messageCount={userMsgCount}
+        />
+      )}
+
       {/* Chat */}
       <AIChatBox
         messages={messages}
         onSendMessage={handleSend}
-        isLoading={chatMut.isPending}
+        isLoading={isLoading}
         placeholder="Ask Strat about installation, tune flashing, data logging, error codes, or device setup..."
         height="calc(100vh - 320px)"
         emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. I can help you with installation, tune flashing, data logging, error codes, and device setup. What product did you get?"
@@ -179,38 +454,10 @@ export function StratContent() {
  */
 export default function Strat() {
   const { loading: authLoading } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  const chatMutation = trpc.strat.chat.useMutation({
-    onSuccess: (data) => {
-      const reply: Message = {
-        role: 'assistant',
-        content: String(data.reply ?? ''),
-      };
-      setMessages(prev => [...prev, reply]);
-    },
-    onError: (error) => {
-      const errMsg: Message = {
-        role: 'assistant',
-        content: `Connection issue — give me a sec. Error: ${error.message}. If this keeps up, call us at (337) 485-7070.`,
-      };
-      setMessages(prev => [...prev, errMsg]);
-    },
-  });
-
-  const handleSend = (content: string) => {
-    const userMessage: Message = { role: 'user', content };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    const history = newMessages
-      .filter(m => m.role !== 'system')
-      .slice(-20)
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-    chatMutation.mutate({
-      message: content,
-      history: history.slice(0, -1),
-    });
-  };
+  const {
+    messages, handleSend, isLoading,
+    showFeedback, feedbackMut, handleFeedbackSubmit, handleFeedbackDismiss, userMsgCount,
+  } = useStratChat();
 
   const stats = [
     { icon: Wrench, label: 'Products Supported', value: '4 Platforms', color: sColor.amber },
@@ -292,10 +539,20 @@ export default function Strat() {
 
       {/* Chat Area */}
       <div className="container mx-auto px-4 py-6">
+        {/* Feedback form — appears after 5 messages */}
+        {showFeedback && (
+          <StratFeedbackForm
+            onSubmit={handleFeedbackSubmit}
+            onDismiss={handleFeedbackDismiss}
+            isPending={feedbackMut.isPending}
+            messageCount={userMsgCount}
+          />
+        )}
+
         <AIChatBox
           messages={messages}
           onSendMessage={handleSend}
-          isLoading={chatMutation.isPending}
+          isLoading={isLoading}
           placeholder="Ask Strat about installation, tune flashing, data logging, error codes, or device setup..."
           height="calc(100vh - 400px)"
           emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. I can help you with installation, tune flashing, data logging, error codes, and device setup. What product did you get?"

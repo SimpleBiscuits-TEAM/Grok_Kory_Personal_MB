@@ -57,6 +57,13 @@
       "when": 1775683200000,
       "tag": "0008_flash_sessions_vop_usb",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1775748728025,
+      "tag": "0008_goofy_captain_universe",
+      "breakpoints": true
     }
   ]
 }

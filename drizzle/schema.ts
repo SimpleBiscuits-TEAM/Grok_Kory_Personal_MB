@@ -2074,3 +2074,30 @@ export const streamTelemetryPoints = mysqlTable("stream_telemetry_points", {
 });
 export type StreamTelemetryPoint = typeof streamTelemetryPoints.$inferSelect;
 export type InsertStreamTelemetryPoint = typeof streamTelemetryPoints.$inferInsert;
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STRAT — Post-Sale Tech Support Agent Feedback
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const stratFeedback = mysqlTable("strat_feedback", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — nullable for unauthenticated users */
+  userId: int("userId"),
+  /** Star rating 1-5 */
+  rating: int("rating").notNull(),
+  /** Detailed comment from the user */
+  comment: text("comment"),
+  /** What product the user was asking about (auto-detected from conversation) */
+  productCategory: varchar("productCategory", { length: 64 }),
+  /** Whether the issue was resolved by Strat */
+  resolved: boolean("resolved"),
+  /** Number of messages in the conversation when feedback was given */
+  messageCount: int("messageCount"),
+  /** Summary of the conversation topics (auto-generated) */
+  conversationSummary: text("conversationSummary"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type StratFeedback = typeof stratFeedback.$inferSelect;
+export type InsertStratFeedback = typeof stratFeedback.$inferInsert;
