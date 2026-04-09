@@ -1010,3 +1010,11 @@
 - [x] Update client feedback form to send chat history with submission
 - [x] Build admin feedback review page — list all feedback with ratings, comments, and full chat logs
 - [x] Owner notification when feedback is submitted
+
+## Strat — BBX File Downloads (Duramax + Cummins) + Configuration Instructions
+- [x] Upload DURAMAX_AllDieselBBX2.12.22.bbx to CDN
+- [x] Upload AllDieselBBX1.13.23.bbx (Cummins) to CDN
+- [x] Add hardcoded Strat response for Duramax BBX file requests — download link + BBX config steps
+- [x] Add hardcoded Strat response for Cummins BBX file requests — download link + BBX config steps
+- [x] Also update $0502 response to include the appropriate BBX download link based on vehicle type
+- [x] Write tests for BBX file request detection (Duramax and Cummins)

@@ -48,6 +48,85 @@ Your AutoCal is now updated and configured. Try flashing your tune again.
 Did you receive a BBX file along with your tuning and installation instructions when you purchased? If not, let me know and I can help you get the right one.`;
 
 /**
+ * BBX File CDN URLs — uploaded per owner directive.
+ */
+const DURAMAX_BBX_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663499288273/VRRqdUTMemLPozZ853E4Du/DURAMAX_AllDieselBBX2.12.22_8fe25114.bbx';
+const CUMMINS_BBX_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663499288273/VRRqdUTMemLPozZ853E4Du/AllDieselBBX1.13.23_7626c0e0.bbx';
+
+/**
+ * Shared BBX configuration instructions — referenced by both BBX download responses and $0502.
+ */
+const BBX_CONFIG_STEPS = `**How to configure your AutoCal using the BBX file:**
+1. Save the BBX file to your desktop
+2. **Double-click** the BBX file — this opens EFILive with the BBX Quick Setup Manager
+3. Click the **F2: Scan** tab and place a checkmark next to your vehicle's controller(s)
+4. Click the **F3: Tune** tab and select the same controller(s)
+5. Click the dropdown arrow beside the **Program** button at the bottom:
+   - First select **"Format CONFIG file system"** \u2192 click Yes
+   - Then click the dropdown again and select **"Program Selections and Configuration Files (Slower)"** \u2192 click Yes
+6. Wait for the progress bar to finish — you'll see "Configuration files have been copied" \u2192 click OK
+
+Your AutoCal is now configured and ready to flash your tune!`;
+
+/**
+ * ECM Controller reference list for Duramax vehicles.
+ */
+const DURAMAX_CONTROLLER_REF = `**Duramax ECM Controller Reference:**
+- 2001-2004 LB7: **E54**
+- 2004.5-2005.5 LLY: **E60**
+- 2006-2007 LBZ: **E35A**
+- 2007.5-2010 LMM: **E35B**
+- 2011-2014 LML: **E86A**
+- 2015-2016 LML: **E86B**
+- 2006-2008 Allison 6-Speed TCM: **A40**
+- 2001-2005.5 Allison 5-Speed TCM: **AL5**
+- 2009+ Allison 6-Speed TCM: **A50**
+- 2015.5-2016 LML Allison TCM: **T87**`;
+
+/**
+ * ECM Controller reference list for Cummins vehicles.
+ */
+const CUMMINS_CONTROLLER_REF = `**Cummins ECM Controller Reference:**
+- 2006-2007 5.9L Cummins: **CMB**
+- 2007.5-2009 6.7L Cummins: **CMC**
+- 2010-2012 6.7L Cummins: **CMD**
+- 2013-2017 6.7L Cummins: **CME**`;
+
+/**
+ * Hardcoded response when a Duramax customer requests a BBX file.
+ */
+const HARDCODED_DURAMAX_BBX_RESPONSE = `Here's the Duramax All Diesel BBX file — download it here:
+
+**[Download Duramax BBX File](${DURAMAX_BBX_URL})**
+
+Before configuring, make sure your EFILive V8 software is up to date. If you haven't already, download and install the latest version here: [https://www.efilive.com/download-efilive](https://www.efilive.com/download-efilive)
+
+Then connect your AutoCal/FlashScan via USB, open EFILive V8, click **"Check Firmware"**, and update **Boot Block**, **Firmware**, and **Config Files** if any are out of date.
+
+${BBX_CONFIG_STEPS}
+
+${DURAMAX_CONTROLLER_REF}
+
+Select the controller(s) that match your vehicle in both the F2: Scan and F3: Tune tabs. Let me know if you need help figuring out which one to pick!`;
+
+/**
+ * Hardcoded response when a Cummins customer requests a BBX file.
+ */
+const HARDCODED_CUMMINS_BBX_RESPONSE = `Here's the Cummins All Diesel BBX file — download it here:
+
+**[Download Cummins BBX File](${CUMMINS_BBX_URL})**
+
+Before configuring, make sure your EFILive V8 software is up to date. If you haven't already, download and install the latest version here: [https://www.efilive.com/download-efilive](https://www.efilive.com/download-efilive)
+
+Then connect your AutoCal/FlashScan via USB, open EFILive V8, click **"Check Firmware"**, and update **Boot Block**, **Firmware**, and **Config Files** if any are out of date.
+
+${BBX_CONFIG_STEPS}
+
+${CUMMINS_CONTROLLER_REF}
+
+Select the controller(s) that match your vehicle in both the F2: Scan and F3: Tune tabs. Let me know if you need help figuring out which one to pick!`;
+
+/**
  * Complete PPEI Support Knowledge Base — scraped from support.ppei.com
  * 23 articles covering EFILive, EZ LYNK, HP Tuners, and DEBETA products.
  */
@@ -1581,8 +1660,34 @@ export const stratRouter = router({
 
       // $0502 — VERY COMMON. Hardcoded response per owner directive.
       if (lowerMsg.includes('0502') || lowerMsg.includes('$0502')) {
+        // Check if we know the vehicle type to include the right BBX download
+        const isDuramax = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
+        const isCummins = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
+        let bbxAddendum = '';
+        if (isDuramax) {
+          bbxAddendum = `\n\n---\n\nSince you have a Duramax, here's the BBX file you'll need:\n\n**[Download Duramax BBX File](${DURAMAX_BBX_URL})**`;
+        } else if (isCummins) {
+          bbxAddendum = `\n\n---\n\nSince you have a Cummins, here's the BBX file you'll need:\n\n**[Download Cummins BBX File](${CUMMINS_BBX_URL})**`;
+        }
         return {
-          reply: HARDCODED_0502_RESPONSE,
+          reply: HARDCODED_0502_RESPONSE + bbxAddendum,
+        };
+      }
+
+      // ── BBX file requests — detect Duramax or Cummins and serve the right file ──
+      const wantsBBX = /\bbbx\b/i.test(lowerMsg) || (/\bbbx\b/i.test(fullContext) && /need|send|get|download|where|have|file|request|provide/i.test(lowerMsg));
+      if (wantsBBX) {
+        const isDuramaxBBX = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
+        const isCumminsBBX = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
+        if (isDuramaxBBX) {
+          return { reply: HARDCODED_DURAMAX_BBX_RESPONSE };
+        }
+        if (isCumminsBBX) {
+          return { reply: HARDCODED_CUMMINS_BBX_RESPONSE };
+        }
+        // If we can't determine the vehicle, ask
+        return {
+          reply: `I can get you the right BBX file! What vehicle do you have? Is it a **Duramax** (GM/Chevy/GMC) or a **Cummins** (Dodge/Ram)? That way I can send you the correct one.`,
         };
       }
 
