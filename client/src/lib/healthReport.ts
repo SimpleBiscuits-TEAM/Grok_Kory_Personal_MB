@@ -325,9 +325,9 @@ function evaluateFuelSystem(data: ProcessedMetrics): FuelSystemSection {
     const pcvVals = validValues(data.pcvDutyCycle);
     const avgPcv = pcvVals.length ? pcvVals.reduce((a, b) => a + b, 0) / pcvVals.length : 0;
     if (avgPcv < 500 && avgPcv > 0) {
-      findings.push('Low rail pressure — PCV below 500mA, fuel system is maxed out. Check fuel pump, lift pump, and filter.');
+      findings.push('Low rail pressure — FPR current below ~500 mA (high effective opening toward rail); fuel system may be maxed. Check lift pump, filter, and air.');
     } else {
-      findings.push('Low rail pressure — PCV above 500mA, a tuning adjustment may resolve this. Contact tuner.');
+      findings.push('Low rail pressure — FPR current above ~500 mA (lower opening); a tuning or regulator calibration review may help. Contact tuner.');
     }
   } else if (highRailFlagged) {
     pressureStatus = '[WARNING] High rail pressure deviation detected';
@@ -874,10 +874,10 @@ function generateRecommendations(
 
   // ── Fuel pressure specific recommendations ──
   if (diagnostics.detectedCodes.includes('LOW_RAIL_PRESSURE')) {
-    recommendations.push('Low fuel rail pressure detected — inspect lift pump output, fuel filter condition, and CP3/CP4 pump health. Check PCV (Pressure Control Valve) current readings for regulator issues.');
+    recommendations.push('Low fuel rail pressure detected — inspect lift pump output, fuel filter condition, and CP3/CP4 pump health. Check FPR / inlet metering current (mA), not a PWM duty %.');
   }
   if (diagnostics.detectedCodes.includes('HIGH_RAIL_PRESSURE')) {
-    recommendations.push('High fuel rail pressure detected — inspect fuel pressure regulator (FPR) and PCV solenoid for sticking or wiring issues.');
+    recommendations.push('High fuel rail pressure detected — inspect fuel pressure regulator (FPR) solenoid and wiring for sticking or faults.');
   }
 
   // ── Boost specific recommendations ──

@@ -104,7 +104,7 @@ export const defaultTasks: Task[] = [
   t("1.4.5", "Rail pressure deviation from desired vs actual + PCV", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P1"),
   t("1.4.6", "Converter slip detection via TCC pressure and zero-slip analysis", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P1"),
   t("1.4.7", "Converter lockup allows -15/+15 RPM slip range without fault", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P1"),
-  t("1.4.8", "PCV duty cycle interpreted correctly", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P2"),
+  t("1.4.8", "FPR/PCV channel treated as mA (not PWM duty %)", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P2"),
   t("1.4.9", "Unpopulated EGT channels NOT shown as faults", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P1"),
   t("1.4.10", "Fault correlation engine links related faults", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P2"),
   t("1.4.11", "Fault prediction engine provides predictive warnings", 1, "Core Analyzer Engine", "Diagnostics & Fault Detection", "P3"),

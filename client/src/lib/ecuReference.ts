@@ -668,7 +668,7 @@ export const DTC_DEFINITIONS: DtcDefinition[] = [
     title: 'Fuel Volume Regulator Control Circuit/Open',
     system: 'Fuel System',
     severity: 'warning',
-    description: 'PCV solenoid performance issue. The ECM cannot achieve the desired fuel pressure through normal PCV duty cycle adjustment.',
+    description: 'FPR / inlet metering (PCV) solenoid performance issue. The ECM cannot achieve the desired fuel pressure through normal commanded-current control (mA), not a simple PWM duty %.',
     causes: [
       'Failed PCV solenoid',
       'Open circuit in PCV wiring',
@@ -6995,7 +6995,7 @@ export const PARAM_TOOLTIPS: Record<string, string> = {
   railActual: 'Actual high-pressure fuel rail pressure (psi). Normal range: 3,000–26,000 psi.',
   railDesired: 'ECM-commanded fuel rail pressure target (psi).',
   railDelta: 'Difference between desired and actual rail pressure. >3,000 psi for >2 sec = P0087 risk.',
-  pcv: 'PCV solenoid current (mA). <500 mA = pump maxed out. >1,600 mA at idle = high pressure issue.',
+  pcv: 'FPR/inlet metering (often labeled PCV): commanded current in mA, not PWM duty %. Rule of thumb: ~400 mA ≈ high opening (more flow toward rail), ~1800 mA ≈ low opening. Very low mA with low rail vs desired → supply/pump limit; very high mA at idle with high rail → tuning/regulator check.',
   vgtPosition: 'VGT vane position (%). 0% = open (low boost). 100% = closed (max boost). >45% at 2,800+ RPM with low boost = boost leak.',
   tccSlip: 'Torque converter clutch slip (RPM). Near-zero = locked. >±50 RPM = possible wear.',
   hp: 'Estimated horsepower. Calculated via HP = Torque × RPM / 5,252 (torque method) or MAF-based BSFC method.',

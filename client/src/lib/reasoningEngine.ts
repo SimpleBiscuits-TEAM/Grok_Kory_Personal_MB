@@ -392,7 +392,7 @@ function analyzeRailPressure(
 
   if (warmSamples.length < 10) return findings;
 
-  // Detect PCV format: EFILive logs mA (typical range 800-1400 mA), HP Tuners logs %
+  // Detect channel format: most Duramax logs use FPR/PCV **mA** (~400–1800); some tools mislabel a column as "% duty"
   const maxPcv = Math.max(...warmSamples.map(s => s.pcv).filter(v => v > 0));
   const isEFILivePcvMa = maxPcv > 200; // mA values >> 100%
 

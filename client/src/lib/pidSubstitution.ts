@@ -289,11 +289,11 @@ export function resolvePids(
     }
   }
 
-  // ─── PCV / Fuel Pressure Regulator ───────────────────────────────────────
-  // Primary: PCV measured current (mA). Fallback: PCV desired current or duty %
+  // ─── FPR / PCV (inlet metering) ───────────────────────────────────────────
+  // Primary: measured current (mA). Fallback: desired current (still mA on GM diesel; not PWM duty %)
   {
     const pcvMeasIdx = find(['ECM.FRPVAC', 'PCM.FRPACOM', 'PCV Measured', 'PCV Current Actual']);
-    const pcvDesIdx  = find(['ECM.FRPVDC', 'PCM.FRPACOM', 'PCV', 'Pressure Regulator', 'PCV Duty']);
+    const pcvDesIdx  = find(['ECM.FRPVDC', 'PCM.FRPACOM', 'PCV', 'Pressure Regulator', 'PCV Duty', 'Fuel Pressure Regulator']);
     const pcvMeasArr = pcvMeasIdx !== -1 ? col(pcvMeasIdx) : [];
     const pcvDesArr  = pcvDesIdx  !== -1 ? col(pcvDesIdx)  : [];
 

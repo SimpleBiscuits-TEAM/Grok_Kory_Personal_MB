@@ -688,7 +688,7 @@ export const PID_PRESETS: PIDPreset[] = [
   },
   {
     name: 'Duramax Fuel System (Extended)',
-    description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, PCV Duty, Injector Balance Rates',
+    description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, FPR current (mA), Injector Balance Rates',
     pids: [
       0x0C,     // RPM
       0x0564,   // FRP Commanded
@@ -696,7 +696,7 @@ export const PID_PRESETS: PIDPreset[] = [
       0x054A,   // FRP Deviation
       0x056C,   // Injection Timing
       0x056D,   // Injection Quantity
-      0x0549,   // PCV Duty
+      0x0549,   // FPR solenoid current (mA), not PWM duty
       0x1940, 0x1941, 0x1942, 0x1943, // IBR Cyl 1-4
       0x1944, 0x1945, 0x1946, 0x1947, // IBR Cyl 5-8
     ],
@@ -817,10 +817,13 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
   {
-    pid: 0x0549, name: 'Pressure Control Valve (PCV) Duty', shortName: 'PCV_DUTY',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    // GM CP3/CP4 inlet metering / FPR: ECM drives solenoid **current (mA)**, not a % duty cycle.
+    // Rule-of-thumb for many Duramax calibrations: ~400 mA ≈ high regulator opening (more flow toward rail),
+    // ~1800 mA ≈ low opening. Map UDS byte linearly to 400–1800 mA (adjust if your A2L disagrees).
+    pid: 0x0549, name: 'Fuel Pressure Regulator Current', shortName: 'FPR_I',
+    unit: 'mA', min: 400, max: 1800, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
+    formula: ([a]) => 400 + (a / 255) * 1400,
   },
   {
     pid: 0x1940, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
@@ -2315,6 +2318,40 @@ export function createCustomPreset(name: string, description: string, pids: numb
   };
 }
 
+/**
+ * Build and persist a datalogger preset from DID-scan results (shared by ELM, PCAN, V-OP transports).
+ */
+export function buildPersistedScanAutoPreset(
+  vehicleInfo: VehicleInfo | undefined,
+  standardSupported: ScanResult[],
+  extendedSupported: ScanResult[],
+): PIDPreset | undefined {
+  const supportedPidNumbers = [
+    ...standardSupported.map(r => r.pid.pid),
+    ...extendedSupported.map(r => r.pid.pid),
+  ];
+  if (supportedPidNumbers.length === 0) return undefined;
+
+  const totalSupported = supportedPidNumbers.length;
+  const vehicleId = vehicleInfo?.vin
+    ? vehicleInfo.vin.slice(-8)
+    : `vehicle_${Date.now()}`;
+
+  const autoPreset = createCustomPreset(
+    `Auto-Scan ${vehicleId}`,
+    `Auto-discovered ${totalSupported} PIDs (${standardSupported.length} std + ${extendedSupported.length} ext) — ${new Date().toLocaleDateString()}`,
+    supportedPidNumbers
+  );
+  autoPreset.id = `autoscan_${vehicleId}_${Date.now()}`;
+
+  const existing = loadCustomPresets();
+  const filtered = existing.filter(p => !p.id?.startsWith(`autoscan_${vehicleId}`));
+  filtered.push(autoPreset);
+  saveCustomPresets(filtered);
+
+  return autoPreset;
+}
+
 export function deleteCustomPreset(presets: PIDPreset[], presetId: string): PIDPreset[] {
   const updated = presets.filter(p => p.id !== presetId);
   saveCustomPresets(updated);
@@ -3123,6 +3160,10 @@ export class OBDConnection {
     return new Set(this.supportedPids);
   }
 
+  getVehicleInfo(): VehicleInfo {
+    return { ...(this.vehicleInfo ?? {}) };
+  }
+
   /**
    * Returns standard (Mode 01) PIDs that the vehicle confirmed it supports
    * via the Mode 01 PID 0x00/0x20/0x40/0x60 bitmask scan.
@@ -3142,11 +3183,12 @@ export class OBDConnection {
   }
 
   /**
-   * Returns all manufacturer-specific extended PIDs (Mode 22).
-   * These are always "available" since support can't be queried via Mode 01 bitmask.
+   * Manufacturer-specific extended PIDs (Mode 22) for the decoded vehicle — same idea as PCAN/V-OP.
    */
   getAvailableExtendedPids(): PIDDefinition[] {
-    return ALL_PIDS.filter(p => (p.service ?? 0x01) === 0x22);
+    const mfr = this.vehicleInfo?.manufacturer ?? 'universal';
+    const fuel = this.vehicleInfo?.fuelType ?? 'any';
+    return getPidsForVehicle(mfr, fuel).filter(p => (p.service ?? 0x01) === 0x22);
   }
 
   getAllAvailablePids(): PIDDefinition[] {
@@ -3807,33 +3849,13 @@ export class OBDConnection {
 
     this.emit('log', null, `Scan complete: ${totalSupported}/${pidsToScan.length} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
 
-    // Auto-generate a vehicle-specific preset from discovered PIDs
-    const supportedPidNumbers = [
-      ...standardSupported.map(r => r.pid.pid),
-      ...extendedSupported.map(r => r.pid.pid),
-    ];
-
-    let autoPreset: PIDPreset | undefined;
-    if (supportedPidNumbers.length > 0) {
-      const vehicleId = this.vehicleInfo?.vin
-        ? this.vehicleInfo.vin.slice(-8)
-        : `vehicle_${Date.now()}`;
-      
-      autoPreset = createCustomPreset(
-        `Auto-Scan ${vehicleId}`,
-        `Auto-discovered ${totalSupported} PIDs (${standardSupported.length} std + ${extendedSupported.length} ext) — ${new Date().toLocaleDateString()}`,
-        supportedPidNumbers
-      );
-      autoPreset.id = `autoscan_${vehicleId}_${Date.now()}`;
-
-      // Save to localStorage
-      const existing = loadCustomPresets();
-      // Remove any previous autoscan preset for this vehicle
-      const filtered = existing.filter(p => !p.id?.startsWith(`autoscan_${vehicleId}`));
-      filtered.push(autoPreset);
-      saveCustomPresets(filtered);
-
-      this.emit('log', null, `Auto-generated preset "${autoPreset.name}" with ${supportedPidNumbers.length} PIDs saved.`);
+    const autoPreset = buildPersistedScanAutoPreset(
+      this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+    );
+    if (autoPreset) {
+      this.emit('log', null, `Auto-generated preset "${autoPreset.name}" with ${autoPreset.pids.length} PIDs saved.`);
     }
 
     const report: DIDScanReport = {

@@ -34,54 +34,103 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+/**
+ * Bind HTTP server so both http://127.0.0.1 and http://localhost work on Windows.
+ * `127.0.0.1`-only rejects browsers that resolve `localhost` → IPv6 (::1).
+ * `0.0.0.0`-only rejects some ::1-only clients. Dual-stack `::` + ipv6Only:false
+ * accepts both; we fall back to 0.0.0.0 if IPv6 is disabled.
+ */
+function listenServer(
+  server: ReturnType<typeof createServer>,
+  port: number,
+  isDev: boolean,
+  onListening: (hostLabel: string) => void,
+): void {
+  const explicit = process.env.HOST?.trim();
+  if (explicit) {
+    server.listen(port, explicit, () => onListening(explicit));
+    return;
+  }
+
+  if (!isDev) {
+    server.listen(port, "0.0.0.0", () => onListening("0.0.0.0"));
+    return;
+  }
+
+  const onFail = (err: NodeJS.ErrnoException) => {
+    server.removeListener("error", onFail);
+    if (err.code === "EADDRINUSE") {
+      console.error(err);
+      process.exit(1);
+    }
+    console.warn(
+      `[V-OP] Could not bind IPv6 dual-stack (::): ${err.message} (${err.code ?? "?"})`,
+    );
+    console.warn(
+      `         Using 0.0.0.0 instead. If the page still won't load, open http://127.0.0.1:${port}/`,
+    );
+    server.listen(port, "0.0.0.0", () => onListening("0.0.0.0"));
+  };
+
+  server.once("error", onFail);
+  server.listen({ port, host: "::", ipv6Only: false }, () => {
+    server.removeListener("error", onFail);
+    onListening(":: (IPv4 + IPv6)");
+  });
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
   const isDev = process.env.NODE_ENV === "development";
 
+  // Plain-text health check (no tRPC / Vite). If this fails, nothing is listening.
+  app.get("/__vop_ping", (_req, res) => {
+    res
+      .status(200)
+      .type("text/plain")
+      .send(
+        `ok\nNODE_ENV=${process.env.NODE_ENV ?? "(unset)"}\n` +
+          `mode=${isDev ? "development (Vite expected)" : "production (static build)"}\n`,
+      );
+  });
+
   // ── Security Headers (helmet) ──────────────────────────────────────────
-  // Sets Content-Security-Policy, Strict-Transport-Security, X-Frame-Options,
-  // X-Content-Type-Options, Referrer-Policy, and more.
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "data:", "blob:", "https:"],
-          connectSrc: ["'self'", "https:", "wss:", ...(isDev ? (["ws:"] as const) : [])],
-          mediaSrc: ["'self'", "blob:"],
-          workerSrc: ["'self'", "blob:"],
-          frameSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"],
-        },
-      },
-      // Never send HSTS over plain HTTP in dev — browsers may upgrade to https://localhost
-      // and then show "connection refused" because this server is not TLS.
-      strictTransportSecurity: isDev
-        ? false
-        : {
-            maxAge: 31536000, // 1 year
-            includeSubDomains: true,
-            preload: true,
+  // Skip Helmet entirely in development: remaining headers (COOP/CORP, etc.) can
+  // still interfere with Vite + module loading on localhost; production stays locked down.
+  if (!isDev) {
+    app.use(
+      helmet({
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:", "https:"],
+            connectSrc: ["'self'", "https:", "wss:"],
+            mediaSrc: ["'self'", "blob:"],
+            workerSrc: ["'self'", "blob:"],
+            frameSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            formAction: ["'self'"],
           },
-      // Prevent clickjacking
-      frameguard: { action: "deny" },
-      // Prevent MIME type sniffing
-      noSniff: true,
-      // Hide X-Powered-By
-      hidePoweredBy: true,
-      // Referrer policy
-      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-      // Cross-Origin policies
-      crossOriginEmbedderPolicy: false, // Disabled to allow loading external images
-      crossOriginResourcePolicy: { policy: "cross-origin" },
-    })
-  );
+        },
+        strictTransportSecurity: {
+          maxAge: 31536000,
+          includeSubDomains: true,
+          preload: true,
+        },
+        frameguard: { action: "deny" },
+        noSniff: true,
+        hidePoweredBy: true,
+        referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+        crossOriginEmbedderPolicy: false,
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+      }),
+    );
+  }
 
   // ── Body Parser ────────────────────────────────────────────────────────
   // JSON limit reduced from 100mb to 2mb. Large file uploads should use
@@ -183,7 +232,15 @@ async function startServer() {
 
   // ── Static / Vite ──────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
+    try {
+      await setupVite(app, server);
+    } catch (err) {
+      console.error(
+        "[V-OP] Vite failed to start — the UI will not load until this is fixed. Common causes: missing deps (run pnpm install), bad vite.config, or port/file permission errors.\n",
+      );
+      console.error(err);
+      process.exit(1);
+    }
   } else {
     serveStatic(app);
   }
@@ -195,12 +252,25 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  const host = process.env.HOST ?? "0.0.0.0";
-  server.listen(port, host, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-    if (host === "0.0.0.0") {
-      console.log(`  Open http://127.0.0.1:${port}/ if your browser does not resolve localhost`);
+  listenServer(server, port, isDev, (hostLabel) => {
+    const mode = isDev ? "development + Vite" : "production static";
+    console.log("");
+    console.log("────────────────────────────────────────────────────────────");
+    console.log(`  V-OP  ${mode}`);
+    console.log(`  bind  ${hostLabel}`);
+    console.log(`  !     This app is NOT on Vite's default :5173 — UI + /api share this port.`);
+    console.log(`  →     http://127.0.0.1:${port}/`);
+    console.log(`  →     http://localhost:${port}/`);
+    console.log(`  ping  http://127.0.0.1:${port}/__vop_ping   (should print "ok" — if not, nothing is reaching Node)`);
+    if (!process.env.HOST?.trim()) {
+      if (isDev) {
+        console.log("  tip   Set HOST=0.0.0.0 in .env if you need LAN / phone access.");
+      } else {
+        console.log("  tip   Production listens on all interfaces (0.0.0.0).");
+      }
     }
+    console.log("────────────────────────────────────────────────────────────");
+    console.log("");
   });
 }
 

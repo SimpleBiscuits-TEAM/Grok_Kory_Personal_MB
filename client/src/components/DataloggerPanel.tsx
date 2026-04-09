@@ -1072,9 +1072,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     if (success) {
       setSupportedPids(conn.getSupportedPids());
       const stdCount = conn.getAvailablePids().length;
-      const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
-      const extCount = extPids.length;
-      const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
+      const vi =
+        typeof (conn as { getVehicleInfo?: () => VehicleInfo }).getVehicleInfo === 'function'
+          ? (conn as { getVehicleInfo: () => VehicleInfo }).getVehicleInfo()
+          : {};
+      const mfr = (vi.manufacturer as PIDManufacturer | undefined) ?? detectedManufacturer;
+      const extCount =
+        typeof conn.getAvailableExtendedPids === 'function'
+          ? conn.getAvailableExtendedPids().length
+          : (MANUFACTURER_PIDS[mfr] || []).length;
+      const mfgLabel = mfr === 'universal' ? 'universal' : mfr.toUpperCase();
       const via =
         adapterType === 'pcan'
           ? 'PCAN-USB bridge'

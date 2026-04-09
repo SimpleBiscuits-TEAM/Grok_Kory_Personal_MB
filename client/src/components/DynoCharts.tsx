@@ -37,6 +37,7 @@ import { DiagnosticReport } from '@/lib/diagnostics';
 import { AlertCircle } from 'lucide-react';
 import { ZoomableChart } from './ZoomableChart';
 import { decodeFuelingState } from '@/lib/cumminsFuelingStates';
+import { assignDistinctSeriesColors } from '@/lib/chartSeriesColors';
 
 export interface DynoChartHandle {
   jumpToTime: (startMin: number, endMin: number) => void;
@@ -404,38 +405,38 @@ const PID_OVERLAYS: PidOverlayDef[] = [
   { key: 'mapAbsolute',        label: 'MAP Absolute',     unit: 'psi',       color: '#818cf8', category: 'Boost' },
   { key: 'barometricPressure', label: 'Baro Pressure',    unit: 'psi',       color: '#94a3b8', category: 'Boost' },
   // ── Fuel System ──
-  { key: 'railPressureActual', label: 'Rail Pressure',    unit: 'psi',       color: '#f59e0b', category: 'Fuel' },
-  { key: 'railPressureDesired',label: 'Rail Desired',     unit: 'psi',       color: '#eab308', category: 'Fuel' },
-  { key: 'pcvDutyCycle',       label: 'PCV Duty',         unit: 'mA',        color: '#fbbf24', category: 'Fuel' },
+  { key: 'railPressureActual', label: 'Rail Pressure',    unit: 'psi',       color: '#f97316', category: 'Fuel' },
+  { key: 'railPressureDesired',label: 'Rail Desired',     unit: 'psi',       color: '#22d3ee', category: 'Fuel' },
+  { key: 'pcvDutyCycle',       label: 'FPR current',      unit: 'mA',        color: '#eab308', category: 'Fuel' },
   { key: 'injectorPulseWidth', label: 'Inj Pulse Width',  unit: 'ms',        color: '#fcd34d', category: 'Fuel' },
   { key: 'injectionTiming',    label: 'Inj Timing',       unit: '°BTDC',     color: '#fde68a', category: 'Fuel' },
   { key: 'fuelQuantity',       label: 'Fuel Qty',         unit: 'mm³',       color: '#f0abfc', category: 'Fuel' },
   // ── Temperatures ──
   { key: 'exhaustGasTemp',     label: 'EGT',              unit: '°F',        color: '#ef4444', category: 'Temps' },
-  { key: 'coolantTemp',        label: 'Coolant',          unit: '°F',        color: '#22d3ee', category: 'Temps' },
-  { key: 'oilTemp',            label: 'Oil Temp',         unit: '°F',        color: '#f97316', category: 'Temps' },
-  { key: 'transFluidTemp',     label: 'Trans Temp',       unit: '°F',        color: '#e879f9', category: 'Temps' },
+  { key: 'coolantTemp',        label: 'Coolant',          unit: '°F',        color: '#06b6d4', category: 'Temps' },
+  { key: 'oilTemp',            label: 'Oil Temp',         unit: '°F',        color: '#fdba74', category: 'Temps' },
+  { key: 'transFluidTemp',     label: 'Trans Temp',       unit: '°F',        color: '#d946ef', category: 'Temps' },
   { key: 'intakeAirTemp',      label: 'IAT',              unit: '°F',        color: '#67e8f9', category: 'Temps' },
   // ── Pressures / Lubrication ──
   { key: 'oilPressure',        label: 'Oil Press',        unit: 'psi',       color: '#84cc16', category: 'Pressures' },
-  { key: 'converterPressure',  label: 'Conv Pressure',    unit: 'psi',       color: '#a3e635', category: 'Pressures' },
+  { key: 'converterPressure',  label: 'Conv Pressure',    unit: 'psi',       color: '#65a30d', category: 'Pressures' },
   // ── Transmission ──
   { key: 'converterSlip',      label: 'Conv Slip',        unit: 'RPM',       color: '#fb7185', category: 'Trans' },
   { key: 'converterDutyCycle', label: 'Conv Duty',        unit: '%',         color: '#f472b6', category: 'Trans' },
-  { key: 'currentGear',        label: 'Gear',             unit: '',          color: '#a78bfa', category: 'Trans' },
+  { key: 'currentGear',        label: 'Gear',             unit: '',          color: '#9333ea', category: 'Trans' },
   { key: 'outputShaftRpm',     label: 'Output Shaft RPM', unit: 'rpm',       color: '#c084fc', category: 'Trans' },
-  { key: 'turbineRpm',         label: 'Turbine RPM',      unit: 'rpm',       color: '#d946ef', category: 'Trans' },
+  { key: 'turbineRpm',         label: 'Turbine RPM',      unit: 'rpm',       color: '#c026d3', category: 'Trans' },
   { key: 'transLinePressureDesired', label: 'Line Press Des', unit: 'psi',   color: '#e879f9', category: 'Trans' },
   { key: 'transLinePressureActual',  label: 'Line Press Act', unit: 'psi',   color: '#a855f7', category: 'Trans' },
   { key: 'transLinePressureDC',      label: 'Line Press DC',  unit: '%',     color: '#9333ea', category: 'Trans', domain: [0, 100] },
   // ── Cummins EGT Probes ──
   { key: 'egt2',              label: 'EGT Probe 2',      unit: '°F',        color: '#f87171', category: 'Temps' },
-  { key: 'egt3',              label: 'EGT Probe 3',      unit: '°F',        color: '#fb923c', category: 'Temps' },
-  { key: 'egt4',              label: 'EGT Probe 4',      unit: '°F',        color: '#fbbf24', category: 'Temps' },
+  { key: 'egt3',              label: 'EGT Probe 3',      unit: '°F',        color: '#c2410c', category: 'Temps' },
+  { key: 'egt4',              label: 'EGT Probe 4',      unit: '°F',        color: '#ca8a04', category: 'Temps' },
   { key: 'egt5',              label: 'EGT Probe 5',      unit: '°F',        color: '#a3e635', category: 'Temps' },
   { key: 'egrTemp',           label: 'EGR Temp',          unit: '°F',        color: '#2dd4bf', category: 'Temps' },
-  { key: 'intakeManifoldTemp',label: 'Intake Manifold',   unit: '°F',        color: '#38bdf8', category: 'Temps' },
-  { key: 'chargeCoolerTemp',  label: 'Charge Cooler',     unit: '°F',        color: '#818cf8', category: 'Temps' },
+  { key: 'intakeManifoldTemp',label: 'Intake Manifold',   unit: '°F',        color: '#0ea5e9', category: 'Temps' },
+  { key: 'chargeCoolerTemp',  label: 'Charge Cooler',     unit: '°F',        color: '#4f46e5', category: 'Temps' },
   // ── Cummins Engine ──
   { key: 'turboSpeed',        label: 'Turbo Speed',       unit: 'rpm',       color: '#06b6d4', category: 'Boost' },
   { key: 'exhaustPressure',   label: 'Exhaust Press',     unit: 'psi',       color: '#f43f5e', category: 'Pressures' },
@@ -446,13 +447,13 @@ const PID_OVERLAYS: PidOverlayDef[] = [
   { key: 'calcLoad',          label: 'Calc Load',         unit: '%',         color: '#8b5cf6', category: 'Engine', domain: [0, 100] },
   { key: 'driverDemandTorque', label: 'Driver Demand',    unit: '%',         color: '#ec4899', category: 'Engine', domain: [0, 100] },
   { key: 'actualEngineTorque', label: 'Actual Torque',    unit: '%',         color: '#f43f5e', category: 'Engine', domain: [0, 100] },
-  { key: 'mainInjDuration',   label: 'Main Inj Duration', unit: 'µs',        color: '#d97706', category: 'Fuel' },
-  { key: 'fuelRegCurrent',    label: 'Fuel Reg Current',  unit: 'A',         color: '#b45309', category: 'Fuel' },
+  { key: 'mainInjDuration',   label: 'Main Inj Duration', unit: 'µs',        color: '#b45309', category: 'Fuel' },
+  { key: 'fuelRegCurrent',    label: 'Fuel Reg Current',  unit: 'A',         color: '#78350f', category: 'Fuel' },
   // ── Cummins Injection Detail ──
   { key: 'pilot1Qty',         label: 'Pilot 1 Qty',       unit: 'mm³',       color: '#6ee7b7', category: 'Fuel' },
-  { key: 'pilot2Qty',         label: 'Pilot 2 Qty',       unit: 'mm³',       color: '#34d399', category: 'Fuel' },
+  { key: 'pilot2Qty',         label: 'Pilot 2 Qty',       unit: 'mm³',       color: '#059669', category: 'Fuel' },
   { key: 'post1Qty',          label: 'Post 1 Qty',        unit: 'mm³',       color: '#fca5a5', category: 'Fuel' },
-  { key: 'post2Qty',          label: 'Post 2 Qty',        unit: 'mm³',       color: '#f87171', category: 'Fuel' },
+  { key: 'post2Qty',          label: 'Post 2 Qty',        unit: 'mm³',       color: '#e11d48', category: 'Fuel' },
   { key: 'post3Qty',          label: 'Post 3 Qty',        unit: 'mm³',       color: '#ef4444', category: 'Fuel' },
   { key: 'post4Qty',          label: 'Post 4 Qty',        unit: 'mm³',       color: '#dc2626', category: 'Fuel' },
   // ── Cummins State ──
@@ -471,6 +472,8 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [xMode, setXMode] = useState<'rpm' | 'time'>('rpm');
+  /** Max points for TIME x-axis (higher = finer oscillation detail; zoom uses +/− on chart). */
+  const [timeChartDetail, setTimeChartDetail] = useState<'overview' | 'standard' | 'fine' | 'full'>('standard');
   const [brushIndices, setBrushIndices] = useState<{ startIndex?: number; endIndex?: number }>({});
 
   useImperativeHandle(ref, () => ({
@@ -501,6 +504,12 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
     () => availablePids.filter(p => selectedPids.has(p.key as string)),
     [selectedPids, availablePids]
   );
+
+  /** Per-overlay stroke colors — guaranteed unique among currently selected PIDs. */
+  const pidLineColors = useMemo(() => {
+    const pref = Object.fromEntries(activePidDefs.map(d => [d.key as string, d.color]));
+    return assignDistinctSeriesColors(activePidDefs.map(d => d.key as string), pref);
+  }, [activePidDefs]);
 
   const togglePid = (key: string) => {
     setSelectedPids(prev => {
@@ -533,16 +542,42 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                 : data.hpMaf;
 
     if (!binnedData || binnedData.length === 0) {
-      const step = Math.ceil(data.rpm.length / 80);
-      base = data.rpm
-        .map((rpm, i) => ({
-          rpm: Math.round(rpm),
-          hp: Math.round(hpArr[i] || 0),
-          torque: rpm > 100 ? Math.round((hpArr[i] || 0) * 5252 / rpm) : 0,
-        }))
-        .filter((_, i) => i % step === 0)
-        .filter(d => (d.rpm as number) > 600 && (d.hp as number) > 10 && (d.torque as number) > 0 && (d.torque as number) < 2500)
-        .sort((a, b) => (a.rpm as number) - (b.rpm as number));
+      // RPM-bin average (dyno-style) instead of uniform index skipping — reduces noise from fast sample rates
+      const binAgg = new Map<number, { sumHp: number; count: number }>();
+      for (let i = 0; i < data.rpm.length; i++) {
+        const rpm = data.rpm[i];
+        const hp = hpArr[i] || 0;
+        if (rpm <= 600 || hp <= 10) continue;
+        const torque = rpm > 100 ? (hp * 5252) / rpm : 0;
+        if (torque <= 0 || torque >= 2500) continue;
+        const binRpm = Math.round(rpm / bucketSize) * bucketSize;
+        const cur = binAgg.get(binRpm) ?? { sumHp: 0, count: 0 };
+        cur.sumHp += hp;
+        cur.count += 1;
+        binAgg.set(binRpm, cur);
+      }
+      const sorted = Array.from(binAgg.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([rpmBin, { sumHp, count }]) => {
+          const hpMean = sumHp / count;
+          return {
+            rpm: rpmBin,
+            hp: Math.round(hpMean),
+            torque: rpmBin > 100 ? Math.round((hpMean * 5252) / rpmBin) : 0,
+          };
+        });
+      // Light 3-point smoothing on HP (endpoints preserved)
+      base = sorted.map((row, i, arr) => {
+        if (i === 0 || i === arr.length - 1 || arr.length < 3) return row;
+        const prev = arr[i - 1].hp as number;
+        const next = arr[i + 1].hp as number;
+        const hpSm = Math.round((prev + 2 * (row.hp as number) + next) / 4);
+        return {
+          rpm: row.rpm,
+          hp: hpSm,
+          torque: row.rpm > 100 ? Math.round((hpSm * 5252) / row.rpm) : 0,
+        };
+      });
     } else {
       base = binnedData
         .filter(b => b.rpmBin > 600 && b.hpTorqueMean > 10)
@@ -580,13 +615,18 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       }
       return row;
     });
-  }, [binnedData, data, activePidDefs]);
+  }, [binnedData, data, activePidDefs, hpSource]);
 
-  // TIME-SERIES data: raw samples downsampled to ~300 points
+  // TIME-SERIES data: downsampled for chart performance; use "fine/full" to see fast oscillations
   const timeData = useMemo(() => {
     const n = data.rpm.length;
     if (n === 0) return [];
-    const step = Math.max(1, Math.ceil(n / 300));
+    const maxPts =
+      timeChartDetail === 'overview' ? 400
+        : timeChartDetail === 'standard' ? 1400
+          : timeChartDetail === 'fine' ? 4500
+            : 16000;
+    const step = Math.max(1, Math.ceil(n / maxPts));
     const rows: Array<Record<string, number | null>> = [];
     for (let i = 0; i < n; i += step) {
       const rpm = data.rpm[i] || 0;
@@ -608,7 +648,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       rows.push(row);
     }
     return rows;
-  }, [data, activePidDefs]);
+  }, [data, activePidDefs, hpSource, timeChartDetail]);
 
   // Resolve pending jump-to-time sentinel into real brush indices
   useEffect(() => {
@@ -981,7 +1021,39 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
           );
         })}
         {xMode === 'time' && (
-          <span style={{ color: '#333', fontSize: 9, fontFamily: 'monospace', marginLeft: 4 }}>DRAG BRUSH BELOW TO ZOOM</span>
+          <>
+            <span style={{ color: '#444', fontSize: 9, fontFamily: 'monospace', marginLeft: 6 }}>POINTS:</span>
+            {(['overview', 'standard', 'fine', 'full'] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setTimeChartDetail(d)}
+                title={
+                  d === 'overview' ? '~400 points — smoother curves'
+                    : d === 'standard' ? '~1400 points — balanced'
+                      : d === 'fine' ? '~4500 points — show fast PID oscillations'
+                        : 'Up to ~16k points — full detail (large logs may feel heavy)'
+                }
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                  cursor: 'pointer',
+                  letterSpacing: 0.5,
+                  background: timeChartDetail === d ? '#00c8ff' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${timeChartDetail === d ? '#00c8ff' : '#2a2e3a'}`,
+                  color: timeChartDetail === d ? '#0a0c10' : '#666',
+                  fontWeight: timeChartDetail === d ? 'bold' : 'normal',
+                }}
+              >
+                {d === 'overview' ? 'SMOOTH' : d === 'standard' ? 'STD' : d === 'fine' ? 'FINE' : 'FULL'}
+              </button>
+            ))}
+            <span style={{ color: '#333', fontSize: 8, fontFamily: 'monospace', marginLeft: 6, maxWidth: 280, lineHeight: 1.3 }}>
+              Chart +/− zoom time window · brush below · scroll wheel
+            </span>
+          </>
         )}
       </div>
 
@@ -1040,8 +1112,8 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                 key={`yaxis_${pidDef.key as string}`}
                 yAxisId={`pid_axis_${pidDef.key as string}`}
                 orientation="right"
-                stroke={pidDef.color}
-                tick={{ fill: pidDef.color, fontSize: 9, fontFamily: 'monospace' }}
+                stroke={pidLineColors[idx]}
+                tick={{ fill: pidLineColors[idx], fontSize: 9, fontFamily: 'monospace' }}
                 domain={pidAxisDomains[pidDef.key as string] ?? [0, 100]}
                 width={55}
                 tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v.toFixed(0)}
@@ -1050,7 +1122,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                   angle: 90,
                   position: 'insideRight',
                   offset: idx * 60 + 14,
-                  fill: pidDef.color,
+                  fill: pidLineColors[idx],
                   fontSize: 9,
                   fontFamily: 'monospace',
                 }}
@@ -1060,6 +1132,12 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
               content={(props: any) => {
                 const { active, payload, label } = props;
                 if (!active || !payload?.length) return null;
+                const xHead =
+                  xMode === 'rpm'
+                    ? (label != null ? `${Number(label).toFixed(0)} RPM` : '')
+                    : (label != null
+                      ? `Time ${Number(label).toFixed(3)} min (${(Number(label) * 60).toFixed(1)} s)`
+                      : '');
                 return (
                   <div style={{
                     background: 'rgba(13,15,20,0.97)', border: '1px solid #ff4d00',
@@ -1067,7 +1145,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                     fontSize: 12, color: '#e0e0e0', boxShadow: '0 0 12px rgba(255,77,0,0.3)',
                   }}>
                     <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6 }}>
-                      {label ? `${Number(label).toFixed(0)} RPM` : ''}
+                      {xHead}
                     </div>
                     {payload.map((p: any, i: number) => {
                       if (p.value == null) return null;
@@ -1123,13 +1201,13 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                 dot={false} isAnimationActive={false} name="Torque (lb·ft)" />
             )}
             {/* Render one Line per selected PID, each on its own axis */}
-            {activePidDefs.map(pidDef => (
+            {activePidDefs.map((pidDef, idx) => (
               <Line
                 key={pidDef.key as string}
                 yAxisId={`pid_axis_${pidDef.key as string}`}
                 type="monotone"
                 dataKey={`pid_${pidDef.key as string}`}
-                stroke={pidDef.color}
+                stroke={pidLineColors[idx]}
                 strokeWidth={2}
                 dot={false}
                 isAnimationActive={false}
@@ -1284,15 +1362,22 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
                 label={{ value: 'RAIL PRESSURE (PSI)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
               <Tooltip content={<FaultTooltip xLabel="Time (min)" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
-                formatter={(v) => <span style={{ color: v === 'Desired PSI' ? '#44ff88' : v === 'Actual PSI' ? '#ff4444' : '#ff6622' }}>{v}</span>} />
+                formatter={(v) => (
+                  <span style={{
+                    color:
+                      v === 'Desired PSI' ? '#22d3ee'
+                        : v === 'Actual PSI' ? '#f97316'
+                          : '#ff6622',
+                  }}>{v}</span>
+                )} />
               {faultTimeMin > 0 && (
                 <ReferenceArea x1={faultTimeMin - 0.05} x2={faultTimeMax + 0.05}
                   fill="rgba(255,34,34,0.1)" stroke="#ff2222" strokeWidth={1.5} strokeDasharray="5 3"
                   label={{ value: '⚠ FAULT ZONE', position: 'insideTop', fill: '#ff4444', fontSize: 9, fontFamily: 'monospace' }} />
               )}
-              <Line type="monotone" dataKey="desired" stroke="#44ff88" strokeWidth={2.5}
+              <Line type="monotone" dataKey="desired" stroke="#22d3ee" strokeWidth={2.5} strokeDasharray="6 4"
                 dot={false} isAnimationActive={false} name="Desired PSI" />
-              <Line type="monotone" dataKey="actual" stroke="#ff4444" strokeWidth={2.5}
+              <Line type="monotone" dataKey="actual" stroke="#f97316" strokeWidth={2.5}
                 dot={false} isAnimationActive={false} name="Actual PSI" />
               {isLow && (
                 <Area type="monotone" dataKey="deltaLow" stroke="none"
@@ -1957,42 +2042,57 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
   }, [data, hasBoost, hasVane, hasMaf, hasDesiredBoost, hasDesiredVane]);
 
   return (
-    <div style={{ width: '100%', height: 280 }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={graphData} margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
-          <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10, fill: '#666' }}
-            label={{ value: 'Time (min)', position: 'insideBottom', offset: -2, style: { fill: '#555', fontSize: 10 } }} />
-          <YAxis yAxisId="boost" stroke="#a78bfa" tick={{ fontSize: 10, fill: '#a78bfa' }}
-            label={{ value: 'PSIG', angle: -90, position: 'insideLeft', style: { fill: '#a78bfa', fontSize: 10 } }} />
-          {hasVane && (
-            <YAxis yAxisId="vane" orientation="right" stroke="#fb923c" tick={{ fontSize: 10, fill: '#fb923c' }}
-              domain={[0, 100]}
-              label={{ value: '%', angle: 90, position: 'insideRight', style: { fill: '#fb923c', fontSize: 10 } }} />
-          )}
-          {hasMaf && (
-            <YAxis yAxisId="maf" orientation="right" stroke="#38bdf8" tick={{ fontSize: 10, fill: '#38bdf8' }}
-              label={{ value: 'lb/min', angle: 90, position: 'insideRight', offset: hasVane ? 40 : 0, style: { fill: '#38bdf8', fontSize: 10 } }} />
-          )}
-          <Tooltip
-            contentStyle={{ background: '#0d0f14', border: '1px solid #333', borderRadius: 8, fontSize: 11, fontFamily: 'monospace' }}
-            labelStyle={{ color: '#888' }}
-            formatter={(value: number, name: string) => {
-              const labels: Record<string, string> = {
-                boost: 'Boost Actual', boostDesired: 'Boost Desired',
-                vanePos: 'Vane Actual', vaneDesired: 'Vane Desired',
-                maf: 'MAF',
-              };
-              return [typeof value === 'number' ? value.toFixed(1) : value, labels[name] || name];
-            }}
-          />
-          {hasBoost && <Line yAxisId="boost" type="monotone" dataKey="boost" stroke="#a78bfa" dot={false} strokeWidth={1.5} name="boost" isAnimationActive={false} />}
-          {hasDesiredBoost && <Line yAxisId="boost" type="monotone" dataKey="boostDesired" stroke="#7c3aed" dot={false} strokeWidth={1} strokeDasharray="4 2" name="boostDesired" isAnimationActive={false} />}
-          {hasVane && <Line yAxisId="vane" type="monotone" dataKey="vanePos" stroke="#fb923c" dot={false} strokeWidth={1.5} name="vanePos" isAnimationActive={false} />}
-          {hasDesiredVane && <Line yAxisId="vane" type="monotone" dataKey="vaneDesired" stroke="#d97706" dot={false} strokeWidth={1} strokeDasharray="4 2" name="vaneDesired" isAnimationActive={false} />}
-          {hasMaf && <Line yAxisId={hasVane ? 'maf' : 'boost'} type="monotone" dataKey="maf" stroke="#38bdf8" dot={false} strokeWidth={1.5} name="maf" isAnimationActive={false} />}
-        </ComposedChart>
-      </ResponsiveContainer>
+    <div style={{ width: '100%', height: 300 }}>
+      <ZoomableChart data={graphData} height={300}>
+        {(visibleData) => (
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={visibleData} margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
+              <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10, fill: '#666' }}
+                label={{ value: 'Time (min)', position: 'insideBottom', offset: -2, style: { fill: '#555', fontSize: 10 } }} />
+              <YAxis yAxisId="boost" stroke="#a78bfa" tick={{ fontSize: 10, fill: '#a78bfa' }}
+                label={{ value: 'PSIG', angle: -90, position: 'insideLeft', style: { fill: '#a78bfa', fontSize: 10 } }} />
+              {hasVane && (
+                <YAxis yAxisId="vane" orientation="right" stroke="#fb923c" tick={{ fontSize: 10, fill: '#fb923c' }}
+                  domain={[0, 100]}
+                  label={{ value: '%', angle: 90, position: 'insideRight', style: { fill: '#fb923c', fontSize: 10 } }} />
+              )}
+              {hasMaf && (
+                <YAxis yAxisId="maf" orientation="right" stroke="#22d3ee" tick={{ fontSize: 10, fill: '#22d3ee' }}
+                  label={{ value: 'lb/min', angle: 90, position: 'insideRight', offset: hasVane ? 40 : 0, style: { fill: '#22d3ee', fontSize: 10 } }} />
+              )}
+              <Tooltip
+                contentStyle={{ background: '#0d0f14', border: '1px solid #333', borderRadius: 8, fontSize: 11, fontFamily: 'monospace' }}
+                labelStyle={{ color: '#888' }}
+                formatter={(value: number, name: string) => {
+                  const labels: Record<string, string> = {
+                    boost: 'Boost Actual', boostDesired: 'Boost Desired',
+                    vanePos: 'Vane Actual', vaneDesired: 'Vane Desired',
+                    maf: 'MAF',
+                  };
+                  return [typeof value === 'number' ? value.toFixed(1) : value, labels[name] || name];
+                }}
+              />
+              {hasBoost && <Line yAxisId="boost" type="monotone" dataKey="boost" stroke="#a78bfa" dot={false} strokeWidth={1.5} name="boost" isAnimationActive={false} />}
+              {hasDesiredBoost && <Line yAxisId="boost" type="monotone" dataKey="boostDesired" stroke="#c084fc" dot={false} strokeWidth={1} strokeDasharray="4 2" name="boostDesired" isAnimationActive={false} />}
+              {hasVane && <Line yAxisId="vane" type="monotone" dataKey="vanePos" stroke="#fb923c" dot={false} strokeWidth={1.5} name="vanePos" isAnimationActive={false} />}
+              {hasDesiredVane && <Line yAxisId="vane" type="monotone" dataKey="vaneDesired" stroke="#f59e0b" dot={false} strokeWidth={1} strokeDasharray="4 2" name="vaneDesired" isAnimationActive={false} />}
+              {hasMaf && (
+                <Line
+                  yAxisId="maf"
+                  type="monotone"
+                  dataKey="maf"
+                  stroke="#22d3ee"
+                  dot={false}
+                  strokeWidth={1.5}
+                  name="maf"
+                  isAnimationActive={false}
+                />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </ZoomableChart>
     </div>
   );
 }
@@ -2205,8 +2305,8 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
-          <YAxis yAxisId="psi" stroke="#f59e0b" tick={{ fill: '#f59e0b', fontSize: 10 }}
-            label={{ value: 'Rail Pressure (psi)', angle: -90, position: 'insideLeft', fill: '#f59e0b', fontSize: 10 }} domain={['auto', 'auto']} />
+          <YAxis yAxisId="psi" stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 10 }}
+            label={{ value: 'Rail Pressure (psi)', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} domain={['auto', 'auto']} />
           <YAxis yAxisId="delta" orientation="right" stroke="#ff4444" tick={{ fill: '#ff4444', fontSize: 10 }}
             label={{ value: 'Delta (psi)', angle: 90, position: 'insideRight', fill: '#ff4444', fontSize: 10 }} />
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
@@ -2215,8 +2315,8 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
             label={{ value: '+2600 psi', fill: '#ff4444', fontSize: 9 }} />
           <ReferenceLine yAxisId="delta" y={-2600} stroke="#ff4444" strokeDasharray="4 2"
             label={{ value: '-2600 psi', fill: '#ff4444', fontSize: 9 }} />
-          <Line yAxisId="psi" type="monotone" dataKey="actual" stroke="#f59e0b" dot={false} strokeWidth={1.5} name="Rail Actual (psi)" />
-          <Line yAxisId="psi" type="monotone" dataKey="desired" stroke="#fde68a" dot={false} strokeWidth={1} strokeDasharray="4 2" name="Rail Desired (psi)" />
+          <Line yAxisId="psi" type="monotone" dataKey="actual" stroke="#f97316" dot={false} strokeWidth={2} name="Rail Actual (psi)" />
+          <Line yAxisId="psi" type="monotone" dataKey="desired" stroke="#22d3ee" dot={false} strokeWidth={1.5} strokeDasharray="5 3" name="Rail Desired (psi)" />
           <Line yAxisId="delta" type="monotone" dataKey="delta" stroke="#ff4444" dot={false} strokeWidth={1} name="Delta (psi)" />
         </ComposedChart>
       </ResponsiveContainer>

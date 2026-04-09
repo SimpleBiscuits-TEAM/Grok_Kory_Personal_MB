@@ -1586,7 +1586,11 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         )}
         {activeTab === 'diagnostic' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 120px)' }}><KnoxDiagnosticAgent onInjectPids={(pids) => { setDiagnosticPids(pids); setActiveTab('datalogger'); }} onSwitchToDatalogger={() => setActiveTab('datalogger')} onSwitchToAnalyzer={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
-        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
+        {activeTab === 'editor' && (
+          <div className="ppei-anim-fade-up">
+            <EditorGate />
+          </div>
+        )}
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
