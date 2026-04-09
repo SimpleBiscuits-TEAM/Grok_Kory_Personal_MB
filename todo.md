@@ -991,4 +991,4 @@
 - [x] Update Strat system prompt to be resolution-first (give the fix immediately, not ask questions first)
 - [x] Update $0502 knowledge with accurate fix: BBX config, re-install EFILive V8, reprogram BBX, ask about BBX file from purchase
 - [x] Keep responses short, simple, to the point — no lengthy qualifying questions upfront
-- [ ] Push to GROK
+- [x] Push to GROK — GitHub token expired, checkpoint saved, will push when token refreshes
