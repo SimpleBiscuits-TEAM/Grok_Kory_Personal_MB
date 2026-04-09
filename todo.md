@@ -1018,3 +1018,15 @@
 - [x] Add hardcoded Strat response for Cummins BBX file requests — download link + BBX config steps
 - [x] Also update $0502 response to include the appropriate BBX download link based on vehicle type
 - [x] Write tests for BBX file request detection (Duramax and Cummins)
+
+## Fix Feedback Notification — Include Chat Log
+- [x] Update feedback notification (email/owner notify) to include full chat log transcript between customer and Strat
+
+## Scrape PPEI Error Resolution Site — Natural Troubleshooting
+- [x] Scrape https://ppei-error-app-1.onrender.com/ for all error codes and resolutions (35 codes + EZLYNK troubleshooting)
+- [x] Integrate scraped knowledge into Strat system prompt as ADDITIONAL KB (kept existing KB intact, added expanded reference)
+- [x] Convert hardcoded $0502 to knowledge-based response (BBX file links injected contextually, LLM handles conversation naturally)
+- [x] Strat now feels like a real interaction — uses combined KB from both sources, includes BBX download links when relevant
+
+## Restore Basic Breakdown Button in Analyzer
+- [x] Find and restore the "basic breakdown" button in the analyzer — renamed to BASIC BREAKDOWN, made prominent toggle, defaults to basic view in both HealthReport and DiagnosticReport

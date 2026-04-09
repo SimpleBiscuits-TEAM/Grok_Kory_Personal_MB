@@ -208,37 +208,68 @@ function QuickRundown({ report }: { report: HealthReportData }) {
 
 export default function HealthReport({ report }: HealthReportProps) {
   const v = report.vehicleInfo;
-  const [quickRundown, setQuickRundown] = useState(false);
+  const [basicMode, setBasicMode] = useState(true);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-      {/* ── QUICK RUNDOWN TOGGLE ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {/* ── BASIC BREAKDOWN / FULL REPORT TOGGLE ── */}
+      <div style={{
+        display: 'flex',
+        gap: '0',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        border: '1px solid oklch(0.28 0.010 260)',
+        alignSelf: 'stretch',
+      }}>
         <button
-          onClick={() => setQuickRundown(q => !q)}
+          onClick={() => setBasicMode(true)}
           style={{
-            background: quickRundown ? 'oklch(0.52 0.22 25)' : 'oklch(0.16 0.008 260)',
-            color: quickRundown ? 'white' : 'oklch(0.68 0.010 260)',
+            flex: 1,
+            background: basicMode ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
+            color: basicMode ? 'white' : 'oklch(0.55 0.010 260)',
             fontFamily: '"Bebas Neue", sans-serif',
-            fontSize: '0.8rem',
+            fontSize: '0.95rem',
             letterSpacing: '0.08em',
-            padding: '6px 16px',
-            borderRadius: '3px',
-            border: quickRundown ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.30 0.008 260)',
+            padding: '10px 20px',
+            border: 'none',
             cursor: 'pointer',
-            transition: 'all 0.15s',
+            transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
+            justifyContent: 'center',
+            gap: '8px',
           }}
         >
-          <Gauge style={{ width: '13px', height: '13px' }} />
-          {quickRundown ? 'FULL REPORT' : 'QUICK RUNDOWN'}
+          <Gauge style={{ width: '15px', height: '15px' }} />
+          BASIC BREAKDOWN
+        </button>
+        <button
+          onClick={() => setBasicMode(false)}
+          style={{
+            flex: 1,
+            background: !basicMode ? 'oklch(0.70 0.18 200)' : 'oklch(0.14 0.006 260)',
+            color: !basicMode ? 'white' : 'oklch(0.55 0.010 260)',
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.95rem',
+            letterSpacing: '0.08em',
+            padding: '10px 20px',
+            border: 'none',
+            borderLeft: '1px solid oklch(0.22 0.008 260)',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+          }}
+        >
+          <Wrench style={{ width: '15px', height: '15px' }} />
+          FULL DETAILED REPORT
         </button>
       </div>
 
-      {quickRundown ? (
+      {basicMode ? (
         <QuickRundown report={report} />
       ) : (
         <>

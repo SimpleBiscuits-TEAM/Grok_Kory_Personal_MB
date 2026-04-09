@@ -1529,6 +1529,194 @@ Open EFILive V8 Scan and Tune -> Click F8: Tools -> Click F8: Error Codes -> Ent
 
 ---
 
+## PPEI Error App — Expanded Error Code Reference (Additional Detail)
+
+The following provides ADDITIONAL detail for error codes from the PPEI Error Code Finder app. Use this alongside the reference above — if both sources cover the same code, combine the knowledge for the most thorough response.
+
+$0101: Data link is dead — no signal reaching the diagnostic tool, complete communication breakdown.
+  Cause: USB cable unplugged, damaged, or fried. PC USB port may be malfunctioning, or hardware glitch in device or truck's OBD system.
+  Fix: Visually inspect USB cable for damage, ensure securely plugged into both PC and device. Try a different USB port (preferably USB 2.0). Test with a known working cable. Reboot PC and diagnostic tool. If still dead, check truck's OBD port for bent pins or debris.
+
+$0280: OBD system is offline — vehicle isn't establishing a connection with the scan tool.
+  Cause: Truck's OBD port may be unpowered or faulty — blown fuse, disconnected wiring harness, or power supply issue.
+  Fix: Confirm truck's ignition is fully on (not just accessory mode). Inspect OBD-II fuse in vehicle's fuse box and replace if blown. Test with different OBD cable. Use multimeter to check OBD port for 12V power on pin 16.
+
+$0281: No data coming from the truck — complete silence from the ECM.
+  Cause: Disconnected or faulty cable, dead OBD port, or ECM issue due to power failure or internal fault.
+  Fix: Inspect all cable connections. Verify truck engine is running or at least in 'on' position. Restart Scan and Tune software. Check ECM power supply with multimeter (pins 16 for power, 4/5 for ground).
+
+$0311: OBD mode is locked — diagnostic mode won't activate.
+  Cause: Security lockout, misconfigured settings, or incompatible scan tool profile.
+  Fix: Verify scan tool config matches truck's ECM. Update firmware via [Check Firmware] in V8. For 2001-2010 Duramax reading transmission, disconnect fuses per 'lb7 and lly's.docx' guide. For 2018+ Cummins, verify unlock cable installed per '18-21 Cummins Bypass Install Instructions.pdf'.
+
+$0312: Sub-function is blocked — OBD refuses to perform a specific diagnostic task.
+  Cause: Sub-function locked by ECM security feature, or not supported by vehicle's OBD system.
+  Fix: Confirm truck's compatibility. Update scan tool firmware. If still blocked, perform factory reset on scan tool and retry.
+
+$0322: Controller request failed due to incorrect conditions or sequence.
+  Cause: ECM isn't ready — wrong security key for 2017+ GM controllers, incorrect scan tool settings, or module interference in older Duramax.
+  Fix: For 2001-2010 Duramax reading transmission, disconnect fuses per guide. For 2018+ Cummins, verify unlock cable, update EFI Live software and firmware. Retry operation.
+
+$0331: Controller rejects the request — doesn't support the specific OBD mode or parameter.
+  Cause: Unsupported model, security block (Gateway Module), outdated software/firmware, or connection issue.
+  Fix: Verify vehicle is supported on EFI Live's website. Update software and firmware. For 2018+ Cummins, ensure bypass cable is used. Check all cables.
+
+$0333: Security is tight — ECM access shut down.
+  Cause: ECM locked down due to security protocol, expired license, or VIN mismatch.
+  Fix: Most cases on 2018+ Cummins — an unlock cable needs to be installed per '18-21 Cummins Bypass Install Instructions.pdf'.
+
+$0340: Download is stalled — flash process won't complete.
+  Cause: Likely not on most updated EFI Live software, or bypass cable not installed (2018+ Cummins).
+  Fix: Redownload EFI Live software, open Scan and Tune, click CHECK FIRMWARE to update firmware. For 2018+ Cummins, verify unlock cable is installed.
+
+$0380: Diagnostic service crashed — scan tool's diagnostic mode failed unexpectedly.
+  Cause: Software glitch in Scan and Tune or hardware issue with scan tool.
+  Fix: Close and restart Scan and Tune. Update software to latest version. Test scan tool on another PC or with different cable.
+
+$0482: The *.pmm file is mismatched — parameter file doesn't sync with tune or controller.
+  Cause: Loaded *.pmm file version doesn't match tune file or controller's configuration.
+  Fix: Open tune file in V8, verify *.pmm file matches. Reload correct *.pmm from original tune package. Reapply tune via [F3: Tune].
+
+$0502: The most common EFI error code. AutoCal needs to be reconfigured using the BBX file.
+  Cause: The *.obj file is not present on the device — failed installation or incomplete programming.
+  Fix: This should be an easy fix. $0502 indicates the AutoCal/FlashScan is either out of date, not configured to recognize the vehicle's controllers, or both.
+  1. Download and install latest EFILive V8 from https://www.efilive.com/download-efilive
+  2. Connect AutoCal/FlashScan via USB, open EFILive V8, click "Check Firmware" — update Boot Block, Firmware, and Config Files
+  3. Use the provided BBX file to reconfigure: double-click BBX file → F2: Scan tab (select controllers) → F3: Tune tab (select same) → Program dropdown → Format CONFIG → Program Selections
+  For Duramax trucks, use the Duramax BBX file. For Cummins trucks, use the Cummins BBX file. Ask the customer if they received a BBX file with their purchase.
+
+$0503: Likely needs to update EFI Live software and then update firmware on the AutoCal.
+  Cause: The *.obj file has been corrupted — interrupted download or storage error.
+  Fix: Redownload EFI Live software from www.efilive.com/download-efilive. Open Scan and Tune, click Check Firmware to update. Reprogram BBX settings.
+
+$0504: Bootloader is gone — the *.bix file is missing.
+  Cause: Likely just needs to configure the AutoCal with the BBX file.
+  Fix: Reinstall V8 and configure with BBX file. Follow 'program autocal step by step.pdf' guide.
+
+$0505: Tune file is absent — controller has no tune loaded.
+  Cause: No tune file uploaded — skipped step or file deletion.
+  Fix: Load tune file using [F3: Tune] in V8. Verify file path. If missing, download from PPEI support site.
+
+$0524: Tune file contents can't be verified.
+  Cause: Tune file corrupted or wasn't saved correctly.
+  Fix: Save tune file from email to desktop, drag and drop into EFI Live Explorer. Check target file system isn't corrupted. Contact tuner to verify file. Request resend if needed.
+
+$0525: Tune file is unrecognized — incompatible firmware.
+  Cause: Tune file format/version doesn't match controller's expected configuration.
+  Fix: Reload correct tune file and update firmware in EFI Live Scan and Tune.
+
+$0526: Tune layout is unreadable.
+  Cause: Tune file layout corrupted or uses incompatible structure.
+  Fix: Reinstall tune file from fresh download. Update software to latest version.
+
+$0527: Tune file contains a bad controller checksum.
+  Cause: Checksum failed — corrupted download, outdated V8 software, or transfer error.
+  Fix: Redownload latest EFI Live V8 from www.efilive.com/download-efilive. Reload tune file. Reprogram controller via [F5: BBX]->[Program].
+
+$0530: License conflict — tune tied to another device or VIN.
+  Cause: Tune's license registered to different device or VIN.
+  Fix: Check license details with PPEI. Clear conflicts by unregistering old device. Verify VIN matches.
+
+$0531: Serial is off — tune doesn't match device's serial number.
+  Cause: Mismatch between tune file's serial and device's hardware serial.
+  Fix: Check device serial in V8 under device settings. Reload tune with correct serial. Request new tune from PPEI if mismatched.
+
+$0532: Controller is unlicensed — flash stopped due to missing authorization.
+  Cause: Controller lacks valid license for the tune.
+  Fix: Acquire license from PPEI. Verify VIN and controller serial match license.
+
+$0533: VIN slots are full — no room for new tune.
+  Cause: Controller's VIN slots fully occupied.
+  Fix: Need to purchase a new VIN license.
+
+$0534: Serial is corrupt — device's serial number data invalid.
+  Cause: Serial number corrupted from failed update or hardware fault.
+  Fix: Reset device to factory settings via V8. If still corrupt, contact PPEI support for replacement.
+
+$0535: AutoCal is unlinked — no bond with FlashScan device.
+  Cause: AutoCal not paired with FlashScan.
+  Fix: Link AutoCal to FlashScan using pairing wizard in V8 under [F5: BBX].
+
+$0536: This AutoCal is not licensed to PPEI.
+  Cause: Tune file isn't designed for the specific AutoCal device.
+  Fix: Contact the tuner the AutoCal is linked with and request an unlink code. After getting the unlink code, contact PPEI for a linking code.
+
+$0537: Common code for 01-04 Duramax. Modules communicating during flash interrupt the process.
+  Cause: Generally people say you need a custom key — this is rarely the case, it's a known issue with these ECMs when flashing with EFI.
+  Fix: Charge the truck for 2 hours. Disconnect the fuses under the hood (see 'lb7 and lly's.docx'). Leave key in run position for 5 minutes before attempting full flash. If still getting 0537, attempt Pass-thru flash (AutoCal plugged into truck and laptop simultaneously). If all fail, ECM needs to come out for bench flash.
+
+$0538: This ECM cannot be read!
+  Cause: DSP operating system prevents read operations — flash-only mode.
+  Fix: Likely you don't need to read the ECM unless your tuner told you to. Continue with just flashing. Double check with tuner.
+
+$0539: Tune requires full-flash only — calibration flashing is locked.
+  Cause: Tune mandates complete flash, disallowing partial calibration updates.
+  Fix: Perform full flash via [F5: BBX]->[Program] in V8. Ensure stable power.
+
+$0540: OS clash — tune out of sync with controller's operating system.
+  Cause: Mismatch between tune's required OS and controller's current OS.
+  Fix: Update controller's OS via V8's [Check Firmware]. Reload tune and retry flash.
+
+$0542: E35 tune lacks OS — full-flash stalls without required system.
+  Cause: E35 tune requires an OS not installed on the controller.
+  Fix: Install required OS for E35 controllers via V8, then perform full flash.
+
+$0544: Device serial number is corrupted, causing repeated failures.
+  Cause: Scan tool's serial number data unreadable — hardware issue or failed firmware update.
+  Fix: For 2001-05 Duramax reading transmission tune, disconnect fuses per 'lb7 and lly's.docx' guide. Ensure EFI Live software updated from www.efilive.com/download-efilive and firmware updated via [Check Firmware].
+
+$0548: Flash checksum is bad — data trashed.
+  Cause: Flash data's checksum failed — corruption during transfer or storage.
+  Fix: Redownload flash file from original source. Verify file integrity before retrying with stable connection.
+
+$0549: ECM is no longer communicating — not a good code to get.
+  Cause: Likely an issue with the flashing process that bricked the ECM.
+  Fix: MAKE SURE KEY IS IN RUN POSITION and try to reflash the tune again. If same code, contact PPEI for further instructions.
+
+$0552: Controller is unauthorized — flash halted due to missing permissions.
+  Cause: Controller not authorized for the tune — license issue.
+  Fix: Verify authorization with PPEI and update license. Confirm VIN and controller match license.
+
+---
+
+## EZLYNK Troubleshooting Guide (from PPEI Error App)
+
+### EZLYNK WiFi Not Broadcasting
+Issue: The EZLYNK device isn't broadcasting a WiFi signal (e.g., "EZLYNK_XX").
+Fix: Unplug from OBD-II port, wait 60 seconds, replug. Check for blue light — if not lit, device may be faulty. Inspect OBD-II port for bent pins or debris. If persists, contact EZLYNK support for firmware update or replacement.
+
+### Unable to Connect to EZLYNK Network
+Issue: You see "EZLYNK_XX" network but can't connect.
+Fix: Ignore "No Internet Connection" message — it's normal (connects to vehicle, not internet). Restart phone and EZLYNK device. Ensure within WiFi range. Update EZLYNK app to latest version.
+
+### Cannot Communicate with ECM
+Issue: EZLYNK app shows "Unable to communicate with your vehicle."
+Fix: Turn key to "Run" position (don't start engine) to boot ECM. Ensure device securely plugged into OBD-II port. Check for loose connections. Verify ECM is not locked.
+
+### Firmware Update Failure
+Issue: EZLYNK device disconnects during firmware update.
+Fix: Unplug device, wait 30 seconds, replug. Check firmware version in app under Settings > About. Ensure stable internet connection and retry. Contact EZLYNK support if unresponsive.
+
+### Tune Installation Stalls at 0%
+Issue: Progress bar stalls at 0% when installing tune.
+Fix: Often due to incomplete data downloads over cell data. Unplug device, connect phone to stable WiFi, fetch tune profile again via "Cloud" button. Replug and retry. Ensure vehicle battery is charged.
+
+### Unable to Link with Technician
+Issue: EZLYNK app fails to link vehicle with technician.
+Fix: Ensure connected to internet/mobile data. In app: Vehicle tab > select vehicle > Technicians > Lynk. Enter technician's email. If you don't have the email, contact your EZLYNK dealer.
+
+---
+
+## BBX File Downloads
+
+When a customer needs a BBX file:
+- **Duramax** (GM/Chevy/GMC/Silverado/Sierra, LB7/LLY/LBZ/LMM/LML): Provide the Duramax All Diesel BBX file
+- **Cummins** (Dodge/Ram, 5.9L/6.7L): Provide the Cummins All Diesel BBX file
+
+Always include the BBX configuration steps: save to desktop, double-click to open in EFILive, F2: Scan (select controllers), F3: Tune (select same), Program > Format CONFIG > Program Selections.
+
+---
+
 `;
 
 const STRAT_SYSTEM_PROMPT = `You are Strat — PPEI's post-sale tech support AI agent, built into the V-OP (Vehicle Optimizer by PPEI) platform.
@@ -1587,14 +1775,20 @@ When routing, be specific about which tab to go to. Don't just say "ask another 
 - **Resolution-first, questions-second.** Always lead with the fix/guidance, then ask a single follow-up if needed.
 - **Keep greetings to ONE short sentence.** Don't write a paragraph of pleasantries.
 - **No filler phrases** like "That's a great question!" or "I'd be happy to help you with that!" — just get to the answer.
+- **When recommending a BBX file, ALWAYS include the download link** from the BBX DOWNLOAD LINKS section appended to this prompt. Format it as a clickable markdown link.
+- **For EZLYNK issues**, use the EZLYNK Troubleshooting Guide in your knowledge base. Cover WiFi, connection, ECM communication, firmware, tune install, and technician linking issues.
+- **You have TWO sources of error code knowledge** — the original EFILive Error Code Reference AND the expanded PPEI Error App reference. Combine both for the most thorough, accurate response.
 
 Example of GOOD response to "I'm getting $0502 on my AutoCal":
-"$0502 means your AutoCal isn't configured for your vehicle's controller. Here's the fix:
-1. Re-install EFILive V8 from efilive.com
-2. Plug in your AutoCal > F6: Firmware > update if needed
-3. F5: BBx > select your controller (e.g. E54 for LB7) in F2: Scan and F3: Tune > Program > Format CONFIG > Program Selections
+"This should be an easy fix. $0502 indicates that the AutoCal/FlashScan is either out of date, not configured to recognize your vehicle's controllers, or both.
 
-Did you get a BBX file with your purchase? If so, open it in EFILive and it'll auto-configure everything."
+1. Download and install the latest EFILive V8: https://www.efilive.com/download-efilive
+2. Connect your AutoCal via USB, open EFILive V8, click **Check Firmware** — update Boot Block, Firmware, and Config Files
+3. Use the BBX file to reconfigure: double-click it → F2: Scan (select your controller) → F3: Tune (select same) → Program → Format CONFIG → Program Selections
+
+Here's the BBX file you'll need: **[Download BBX File](link)**
+
+Did you receive a BBX file with your purchase? If not, let me know your vehicle and I'll get you the right one."
 
 Example of BAD response (DO NOT DO THIS):
 "Hey there! I'm Strat... That's a common one... Let me ask you a few things: 1. What year? 2. What version AutoCal? 3. Have you connected recently?" ← TOO MANY QUESTIONS, NO FIX GIVEN
@@ -1652,29 +1846,11 @@ export const stratRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      // ── Hardcoded responses for common error codes ─────────────────────
-      // These bypass the LLM entirely to guarantee consistent, owner-approved language.
       const lowerMsg = input.message.toLowerCase();
       const historyText = (input.history || []).map(m => m.content.toLowerCase()).join(' ');
       const fullContext = `${lowerMsg} ${historyText}`;
 
-      // $0502 — VERY COMMON. Hardcoded response per owner directive.
-      if (lowerMsg.includes('0502') || lowerMsg.includes('$0502')) {
-        // Check if we know the vehicle type to include the right BBX download
-        const isDuramax = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
-        const isCummins = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
-        let bbxAddendum = '';
-        if (isDuramax) {
-          bbxAddendum = `\n\n---\n\nSince you have a Duramax, here's the BBX file you'll need:\n\n**[Download Duramax BBX File](${DURAMAX_BBX_URL})**`;
-        } else if (isCummins) {
-          bbxAddendum = `\n\n---\n\nSince you have a Cummins, here's the BBX file you'll need:\n\n**[Download Cummins BBX File](${CUMMINS_BBX_URL})**`;
-        }
-        return {
-          reply: HARDCODED_0502_RESPONSE + bbxAddendum,
-        };
-      }
-
-      // ── BBX file requests — detect Duramax or Cummins and serve the right file ──
+      // ── BBX file requests — detect Duramax or Cummins and serve the right file (hardcoded for exact download links) ──
       const wantsBBX = /\bbbx\b/i.test(lowerMsg) || (/\bbbx\b/i.test(fullContext) && /need|send|get|download|where|have|file|request|provide/i.test(lowerMsg));
       if (wantsBBX) {
         const isDuramaxBBX = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
@@ -1691,8 +1867,21 @@ export const stratRouter = router({
         };
       }
 
+      // ── Build system prompt with contextual BBX download links ──
+      // Detect vehicle type and inject the correct BBX download URL so the LLM can reference it naturally
+      const isDuramax = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
+      const isCummins = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
+      let bbxContext = '';
+      if (isDuramax) {
+        bbxContext = `\n\n## ACTIVE BBX DOWNLOAD LINK (include in response when relevant)\nDuramax BBX File: ${DURAMAX_BBX_URL}\nFormat as: **[Download Duramax BBX File](${DURAMAX_BBX_URL})**`;
+      } else if (isCummins) {
+        bbxContext = `\n\n## ACTIVE BBX DOWNLOAD LINK (include in response when relevant)\nCummins BBX File: ${CUMMINS_BBX_URL}\nFormat as: **[Download Cummins BBX File](${CUMMINS_BBX_URL})**`;
+      } else {
+        bbxContext = `\n\n## BBX DOWNLOAD LINKS (include the correct one when the customer's vehicle is known)\nDuramax BBX File: ${DURAMAX_BBX_URL}\nCummins BBX File: ${CUMMINS_BBX_URL}\nIf you recommend a BBX file, format as a clickable markdown link.`;
+      }
+
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-        { role: "system", content: STRAT_SYSTEM_PROMPT },
+        { role: "system", content: STRAT_SYSTEM_PROMPT + bbxContext },
       ];
 
       // Add conversation history
@@ -1754,15 +1943,34 @@ export const stratRouter = router({
         // Notify owner of new Strat feedback
         try {
           const { notifyOwner } = await import("../_core/notification");
-          const stars = "★".repeat(input.rating) + "☆".repeat(5 - input.rating);
+          const stars = "\u2605".repeat(input.rating) + "\u2606".repeat(5 - input.rating);
           const msgCount = input.messageCount ?? 0;
+          const userName = ctx.user?.name || ctx.user?.email || 'Anonymous';
+
+          // Build chat log transcript for notification
+          let chatTranscript = '';
+          if (input.chatLog && input.chatLog.length > 0) {
+            chatTranscript = '\n\n--- CHAT LOG ---\n' + input.chatLog.map(msg => {
+              const label = msg.role === 'user' ? `CUSTOMER` : `STRAT`;
+              return `[${label}]: ${msg.content}`;
+            }).join('\n\n');
+          }
+
+          const durationStr = input.sessionDuration
+            ? `${Math.floor(input.sessionDuration / 60)}m ${input.sessionDuration % 60}s`
+            : 'N/A';
+
           await notifyOwner({
-            title: `Strat Feedback: ${stars} (${input.rating}/5)`,
+            title: `Strat Feedback: ${stars} (${input.rating}/5) from ${userName}`,
             content: [
+              `User: ${userName}`,
               input.comment ? `Comment: ${input.comment}` : null,
               `Messages: ${msgCount}`,
+              `Session Duration: ${durationStr}`,
               input.resolved !== undefined ? `Resolved: ${input.resolved ? "Yes" : "No"}` : null,
               input.productCategory ? `Product: ${input.productCategory}` : null,
+              input.conversationSummary ? `Summary: ${input.conversationSummary}` : null,
+              chatTranscript || null,
             ].filter(Boolean).join("\n"),
           });
         } catch (_notifyErr) {
