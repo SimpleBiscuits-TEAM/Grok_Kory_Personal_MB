@@ -502,7 +502,7 @@ export class PCANConnection {
 
   // ─── WebSocket Connection ─────────────────────────────────────────────────
 
-  async connect(): Promise<boolean> {
+  async connect(options?: { skipVehicleInit?: boolean }): Promise<boolean> {
     try {
       this.setState('connecting');
       this.emit('log', null, 'Connecting to PCAN-USB bridge...');
@@ -559,6 +559,12 @@ export class PCANConnection {
 
       this.emit('log', null, 'Bridge connected. Initializing vehicle communication...');
       this.setState('initializing');
+
+      if (options?.skipVehicleInit) {
+        this.setState('ready');
+        this.emit('log', null, 'PCAN-USB bridge ready (vehicle init skipped — use ECU Scan or Datalogger to identify vehicle).');
+        return true;
+      }
 
       // Initialize: read VIN, detect vehicle, scan supported PIDs
       await this.initialize();
