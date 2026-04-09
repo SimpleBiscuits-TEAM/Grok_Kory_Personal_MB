@@ -37,6 +37,7 @@ import { dynoRouter } from "./routers/dyno";
 import { cloudRouter } from "./routers/cloud";
 import { streamingRouter } from "./routers/streaming";
 import { lauraRouter } from "./routers/laura";
+import { stratRouter } from "./routers/strat";
 import { githubRouter } from "./routers/github";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
@@ -283,6 +284,9 @@ export const appRouter = router({
 
   // Laura — Weather AI Agent
   laura: lauraRouter,
+
+  // Strat — Post-Sale Tech Support Agent
+  strat: stratRouter,
 
   // GitHub Commit History
   github: githubRouter,

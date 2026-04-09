@@ -959,3 +959,13 @@
 
 ## Time-Series Chart Tooltip Fix
 - [x] Move Time-Series Overview chart tooltip/popout outside the chart area so it doesn't cover graph data — moved to inline header bar above chart
+
+## Database Migration + Strat Agent Build
+- [x] Apply migration 0008_flash_sessions_vop_usb.sql to database
+- [x] Create server/routers/strat.ts with full PPEI KB knowledge and chat mutation
+- [x] Create client/src/pages/Strat.tsx with StratContent (embedded) component
+- [x] Register stratRouter in server/routers.ts
+- [x] Integrate Strat agent into existing SUPPORT tab in Advanced.tsx — moved to user-facing tabs, Strat shows for all users, SupportAdminPanel shows below for super_admin
+- [x] Add /strat route in App.tsx
+- [x] Verify build passes
+- [ ] Push all to GROK

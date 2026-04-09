@@ -77,6 +77,7 @@ import PpeiHeader from '@/components/PpeiHeader';
 
 // Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
 const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
+const StratPanel = React.lazy(() => import('@/pages/Strat').then(m => ({ default: m.StratContent })));
 const TasksPanel = React.lazy(() => import('@/pages/Tasks').then(m => ({ default: m.TasksContent })));
 // Lazy-load Fleet and Drag panels (moved from top-level nav to Advanced tabs)
 const FleetPanel = React.lazy(() => import('@/pages/Fleet').then(m => ({ default: m.FleetContent })));
@@ -1321,6 +1322,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'cloud' as TabId, label: 'CLOUD', icon: <Cloud style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.72 0.15 200)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1351,9 +1353,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
-  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
-    { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  ] : [];
+  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [];
   const [devSubTab, setDevSubTab] = useState<string>('search');
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
@@ -1590,7 +1590,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
+        {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
         {activeTab === 'tasks' && <div className="ppei-anim-fade-up"><TasksGate /></div>}
         {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
