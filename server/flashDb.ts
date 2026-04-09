@@ -1,41 +1,36 @@
 /**
  * Flash Database Helpers — CRUD operations for flash sessions, logs,
  * queue, stats, snapshots, and file fingerprints.
+ *
+ * When `DATABASE_URL` is unset (common in local dev), MySQL is unavailable.
+ * Session create/read/update use an in-memory map so PCAN dry run / simulator flows work;
+ * logs, stats, fingerprints, and queue writes are no-ops or empty reads.
  */
 import { drizzle } from "drizzle-orm/mysql2";
 import { eq, desc } from "drizzle-orm";
 import {
   flashSessions, flashSessionLogs, flashQueue, ecuSnapshots,
   flashStats, fileFingerprints,
+  type FlashSession,
   type InsertFlashSession, type InsertFlashSessionLog,
   type InsertFlashQueueItem, type InsertEcuSnapshot,
-  type FlashSession,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-function hasMysqlUrl(): boolean {
-  return Boolean(process.env.DATABASE_URL?.trim());
-}
+/** In-memory flash sessions when no DB (local dev). */
+const devFlashSessionsByUuid = new Map<string, FlashSession>();
+let devSessionIdCounter = 1;
 
-function mysqlDb() {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) {
-    throw new Error("DATABASE_URL is not set");
-  }
-  if (!_db) {
-    _db = drizzle(url);
+function getDb(): ReturnType<typeof drizzle> | null {
+  if (!_db && process.env.DATABASE_URL) {
+    _db = drizzle(process.env.DATABASE_URL);
   }
   return _db;
 }
 
-/** In-memory sessions when MySQL is not configured — avoids null `db` crashes. */
-const offlineSessionsByUuid = new Map<string, FlashSession>();
-let offlineNextId = 1;
-
-function offlineCreateRow(data: InsertFlashSession): FlashSession {
+function flashSessionFromInsert(data: InsertFlashSession, id: number): FlashSession {
   const now = new Date();
-  const id = offlineNextId++;
   return {
     id,
     uuid: data.uuid,
@@ -65,22 +60,23 @@ function offlineCreateRow(data: InsertFlashSession): FlashSession {
 // ── SESSIONS ───────────────────────────────────────────────────────────────
 
 export async function createFlashSession(data: InsertFlashSession) {
-  if (!hasMysqlUrl()) {
-    const row = offlineCreateRow(data);
-    offlineSessionsByUuid.set(data.uuid, row);
+  const db = getDb();
+  if (!db) {
+    const id = devSessionIdCounter++;
+    const row = flashSessionFromInsert(data, id);
+    devFlashSessionsByUuid.set(data.uuid, row);
     return row;
   }
-  const db = mysqlDb();
   await db.insert(flashSessions).values(data);
   const [row] = await db.select().from(flashSessions).where(eq(flashSessions.uuid, data.uuid));
-  return row;
+  return row!;
 }
 
 export async function getFlashSession(uuid: string) {
-  if (!hasMysqlUrl()) {
-    return offlineSessionsByUuid.get(uuid) ?? null;
+  const db = getDb();
+  if (!db) {
+    return devFlashSessionsByUuid.get(uuid) ?? null;
   }
-  const db = mysqlDb();
   const [row] = await db.select().from(flashSessions).where(eq(flashSessions.uuid, uuid));
   return row || null;
 }
@@ -89,28 +85,28 @@ export async function updateFlashSession(
   uuid: string,
   updates: Partial<Pick<InsertFlashSession, 'status' | 'progress' | 'durationMs' | 'errorMessage' | 'nrcCode' | 'metadata'>>,
 ) {
-  if (!hasMysqlUrl()) {
-    const row = offlineSessionsByUuid.get(uuid);
-    if (!row) return;
-    offlineSessionsByUuid.set(uuid, {
-      ...row,
+  const db = getDb();
+  if (!db) {
+    const cur = devFlashSessionsByUuid.get(uuid);
+    if (!cur) return;
+    devFlashSessionsByUuid.set(uuid, {
+      ...cur,
       ...updates,
       updatedAt: new Date(),
     });
     return;
   }
-  const db = mysqlDb();
   await db.update(flashSessions).set(updates).where(eq(flashSessions.uuid, uuid));
 }
 
 export async function listFlashSessions(userId: number, limit = 50) {
-  if (!hasMysqlUrl()) {
-    return Array.from(offlineSessionsByUuid.values())
+  const db = getDb();
+  if (!db) {
+    return [...devFlashSessionsByUuid.values()]
       .filter((s) => s.userId === userId)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
   }
-  const db = mysqlDb();
   return db.select().from(flashSessions)
     .where(eq(flashSessions.userId, userId))
     .orderBy(desc(flashSessions.createdAt))
@@ -121,14 +117,14 @@ export async function listFlashSessions(userId: number, limit = 50) {
 
 export async function appendFlashLogs(logs: InsertFlashSessionLog[]) {
   if (!logs.length) return;
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   await db.insert(flashSessionLogs).values(logs);
 }
 
 export async function getFlashSessionLogs(sessionId: number, limit = 500) {
-  if (!hasMysqlUrl()) return [];
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return [];
   return db.select().from(flashSessionLogs)
     .where(eq(flashSessionLogs.sessionId, sessionId))
     .orderBy(flashSessionLogs.timestampMs)
@@ -138,14 +134,14 @@ export async function getFlashSessionLogs(sessionId: number, limit = 500) {
 // ── SNAPSHOTS ──────────────────────────────────────────────────────────────
 
 export async function saveEcuSnapshot(data: InsertEcuSnapshot) {
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   await db.insert(ecuSnapshots).values(data);
 }
 
 export async function getSessionSnapshots(sessionId: number) {
-  if (!hasMysqlUrl()) return [];
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return [];
   return db.select().from(ecuSnapshots)
     .where(eq(ecuSnapshots.sessionId, sessionId));
 }
@@ -172,30 +168,30 @@ export async function compareSnapshots(sessionId: number) {
 // ── QUEUE ──────────────────────────────────────────────────────────────────
 
 export async function addToQueue(data: InsertFlashQueueItem) {
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   await db.insert(flashQueue).values(data);
 }
 
 export async function getQueueItems(userId: number) {
-  if (!hasMysqlUrl()) return [];
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return [];
   return db.select().from(flashQueue)
     .where(eq(flashQueue.userId, userId))
     .orderBy(flashQueue.priority, desc(flashQueue.createdAt));
 }
 
 export async function updateQueueItem(id: number, updates: Partial<InsertFlashQueueItem>) {
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   await db.update(flashQueue).set(updates).where(eq(flashQueue.id, id));
 }
 
 // ── STATS ──────────────────────────────────────────────────────────────────
 
 export async function updateFlashStats(ecuType: string, success: boolean, durationMs: number) {
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   const [existing] = await db.select().from(flashStats).where(eq(flashStats.ecuType, ecuType));
   if (existing) {
     const newTotal = existing.totalAttempts + 1;
@@ -220,18 +216,22 @@ export async function updateFlashStats(ecuType: string, success: boolean, durati
 }
 
 export async function getAllFlashStats() {
-  if (!hasMysqlUrl()) return [];
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return [];
   return db.select().from(flashStats).orderBy(desc(flashStats.totalAttempts));
 }
 
 export async function getOverallSuccessRate() {
-  if (!hasMysqlUrl()) {
+  const db = getDb();
+  if (!db) {
     return {
-      totalAttempts: 0, totalSuccess: 0, totalFail: 0, successRate: 0, byEcu: [],
+      totalAttempts: 0,
+      totalSuccess: 0,
+      totalFail: 0,
+      successRate: 0,
+      byEcu: [] as Awaited<ReturnType<typeof getAllFlashStats>>,
     };
   }
-  const db = mysqlDb();
   const stats = await db.select().from(flashStats);
   const totalAttempts = stats.reduce((s, r) => s + r.totalAttempts, 0);
   const totalSuccess = stats.reduce((s, r) => s + r.successCount, 0);
@@ -246,8 +246,8 @@ export async function getOverallSuccessRate() {
 // ── FILE FINGERPRINTS ──────────────────────────────────────────────────────
 
 export async function checkDuplicateFile(fileHash: string) {
-  if (!hasMysqlUrl()) return null;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return null;
   const [existing] = await db.select().from(fileFingerprints)
     .where(eq(fileFingerprints.fileHash, fileHash));
   return existing || null;
@@ -257,8 +257,8 @@ export async function upsertFileFingerprint(
   fileHash: string, ecuType: string, fileName: string,
   fileSize: number, uploadedBy: number, sessionId: number, result: 'success' | 'failed',
 ) {
-  if (!hasMysqlUrl()) return;
-  const db = mysqlDb();
+  const db = getDb();
+  if (!db) return;
   const existing = await checkDuplicateFile(fileHash);
   if (existing) {
     await db.update(fileFingerprints).set({
@@ -277,10 +277,10 @@ export async function upsertFileFingerprint(
 // ── SESSION COMPARISON ─────────────────────────────────────────────────────
 
 export async function compareSessions(sessionIdA: number, sessionIdB: number) {
-  if (!hasMysqlUrl()) {
-    const rows = Array.from(offlineSessionsByUuid.values());
-    const a = rows.find((s) => s.id === sessionIdA) ?? null;
-    const b = rows.find((s) => s.id === sessionIdB) ?? null;
+  const db = getDb();
+  if (!db) {
+    const a = [...devFlashSessionsByUuid.values()].find((s) => s.id === sessionIdA);
+    const b = [...devFlashSessionsByUuid.values()].find((s) => s.id === sessionIdB);
     if (!a || !b) return null;
     return {
       sessionA: a, sessionB: b,
@@ -292,7 +292,6 @@ export async function compareSessions(sessionIdA: number, sessionIdB: number) {
       },
     };
   }
-  const db = mysqlDb();
   const [a] = await db.select().from(flashSessions).where(eq(flashSessions.id, sessionIdA));
   const [b] = await db.select().from(flashSessions).where(eq(flashSessions.id, sessionIdB));
   if (!a || !b) return null;

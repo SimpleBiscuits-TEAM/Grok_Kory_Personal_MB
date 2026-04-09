@@ -1,6 +1,6 @@
 /**
  * FlashContainerPanel — ECU Flash Container Analysis & Upload Tool
- * 
+ *
  * Features:
  * - Drag-and-drop binary upload (.bin, .hex, .cal)
  * - PPEI and DevProg V2 container header parsing and display
@@ -8,8 +8,13 @@
  * - Flash readiness checklist with pass/fail/warn indicators
  * - Hex viewer for binary inspection
  * - Flash sequence visualization with ECU-specific steps
- * - Upload-to-flasher (WiFi URL / BLE transfer prep)
+ * - Upload-to-flasher (WiFi URL / BLE transfer prep) — `flash.prepareForTransfer` → object storage
  * - 50+ ECU platform support from shared ECU database
+ *
+ * Vehicle / cloud matching:
+ * - ECU Scan compares live ECU cal part numbers to ContainerFileHeader `sw_c1`..`sw_c9` (see `compareWithContainer`).
+ * - DevProg `softwareNumbers` / PPEI `partNumbers` are copied into those slots; Tune Deploy analyze fills gaps + OS hint.
+ * - **Tune Deploy** tab: same parser + team library (R2) for cal binaries — use both together for auto-match vs manual sw_c entry.
  */
 
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
@@ -32,11 +37,20 @@ import {
   type FlashType,
 } from '../lib/flashContainerParser';
 import {
+  calibrationListToSwFields,
+  mergeDetectedCalibrationIntoHeader,
+} from '@shared/containerCalibrationSlots';
+import type { TuneDeployParsedMetadata } from '@shared/tuneDeploySchemas';
+import { GUEST_OPEN_ID } from '@shared/guestUser';
+import { useAuth } from '@/_core/hooks/useAuth';
+import {
   Upload, FileCheck, Shield, Cpu, Zap, AlertTriangle,
   CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
   HardDrive, Binary, Wifi, Bluetooth, RotateCcw, Eye,
   Database, Clock, Lock, Radio, Activity, BarChart3, Search,
+  Layers,
 } from 'lucide-react';
+import TuneDeployWorkspace from '@/components/tune-deploy/TuneDeployWorkspace';
 
 // ── Hex Viewer Sub-component ─────────────────────────────────────────────
 
@@ -156,13 +170,23 @@ function ReadinessChecklist({ checks }: { checks: FlashContainerAnalysis['readin
 // ── Main Component ───────────────────────────────────────────────────────
 
 export default function FlashContainerPanel() {
+  const { user } = useAuth();
+  const signedInForTuneDeploy = Boolean(user && user.openId !== GUEST_OPEN_ID);
+  /** Dev server allows analyze without OAuth; library/upload still needs real sign-in. */
+  const canRunTuneDeployAnalyze = signedInForTuneDeploy || import.meta.env.DEV;
+
+  /** Tune Deploy = calibration library / R2 pipeline; Container = existing flash flow */
+  const [flashWorkspace, setFlashWorkspace] = useState<'container' | 'tuneDeploy'>('container');
   const [analysis, setAnalysis] = useState<FlashContainerAnalysis | null>(null);
+  /** Server-side Tune Deploy parse — fills sw_c1..9 + file_id for ECU scan / cloud match when the container omits them */
+  const [autoIdentifiedMeta, setAutoIdentifiedMeta] = useState<TuneDeployParsedMetadata | null>(null);
   const [rawData, setRawData] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState<string>('');
   const [flashTypeOverride, setFlashTypeOverride] = useState<FlashType | null>(null);
   const [activeSection, setActiveSection] = useState<string>('overview');
   const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'ready' | 'uploading' | 'done'>('idle');
   const [missionControlMode, setMissionControlMode] = useState<'simulator' | 'pcan' | null>(null);
   const [showPreFlight, setShowPreFlight] = useState(false);
@@ -210,12 +234,46 @@ export default function FlashContainerPanel() {
     }
   }, [activeSection, pcanBridgeAvailable, checkPcanBridge]);
 
-  // Convert client-side analysis to ContainerFileHeader for generateFlashPlan
+  /**
+   * Tune Deploy analyze API — same heuristics as the library uploader.
+   * Feeds sw_c1..9 / file_id so ECU Scan compare + cloud transfer matching work without hand-typed cal IDs.
+   */
+  useEffect(() => {
+    if (!rawData || !canRunTuneDeployAnalyze || !fileName) {
+      setAutoIdentifiedMeta(null);
+      return;
+    }
+    const ac = new AbortController();
+    const run = async () => {
+      try {
+        const blob = new Blob([new Uint8Array(rawData)], { type: 'application/octet-stream' });
+        const res = await fetch('/api/tune-deploy/analyze', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(fileName),
+          },
+          body: blob,
+          credentials: 'include',
+          signal: ac.signal,
+        });
+        const j = (await res.json()) as { ok?: boolean; meta?: TuneDeployParsedMetadata };
+        if (j.ok && j.meta) setAutoIdentifiedMeta(j.meta);
+        else setAutoIdentifiedMeta(null);
+      } catch {
+        if (!ac.signal.aborted) setAutoIdentifiedMeta(null);
+      }
+    };
+    void run();
+    return () => ac.abort();
+  }, [rawData, canRunTuneDeployAnalyze, fileName]);
+
+  // ContainerFileHeader for flash plan, ECU scan (`compareWithContainer`), and WiFi/BLE transfer prep
   const containerFileHeader = useMemo((): EcuContainerFileHeader | null => {
     if (!analysis) return null;
     const dp = analysis.devProgHeader;
     if (dp) {
-      return {
+      let h: EcuContainerFileHeader = {
         offset: '0', flashernumber: dp.flashernumber, udid: dp.udid,
         vin: dp.vin, seed: dp.seed, key: dp.key, file_id: dp.fileId,
         create_date: dp.createDate, expire_date: dp.expireDate,
@@ -226,7 +284,7 @@ export default function FlashContainerPanel() {
         xferSize: dp.xferSize.toString(16), ForceOS: dp.forceOS ? 'true' : 'false',
         block_struct: dp.blocks, ecu_type: dp.ecuType,
         hardware_number: dp.hardwareNumber,
-        // Pass verify section for CAN address info (key computation uses Seed_key.cs, not container)
+        ...calibrationListToSwFields(dp.softwareNumbers),
         verify: dp.verify ? {
           controller_type: dp.verify.controllerType,
           canspeed: dp.verify.canSpeed,
@@ -236,21 +294,34 @@ export default function FlashContainerPanel() {
           rxprefix: dp.verify.rxprefix,
         } : undefined,
       };
+      if (autoIdentifiedMeta?.calibrationPartNumbers?.length) {
+        h = mergeDetectedCalibrationIntoHeader(h, autoIdentifiedMeta.calibrationPartNumbers, {
+          osHintForEmptyFileId: autoIdentifiedMeta.osVersion,
+        });
+      }
+      return h;
     }
-    const h = analysis.header;
-    if (h) {
-      return {
+    const hHdr = analysis.header;
+    if (hHdr) {
+      let h: EcuContainerFileHeader = {
         offset: '0', flashernumber: 0, udid: '', vin: '', seed: '', key: '',
         file_id: '', create_date: 0, expire_date: 0, max_flash_count: 0,
         header_length: '0', block_count: 1, block_boot: 0, block_erase: 0,
         file_size: analysis.totalSize.toString(16), comp_enc: '0',
-        lzss: 'false', xferSize: '0', ForceOS: h.isFullFlash ? 'true' : 'false',
-        block_struct: [{ block_id: 0, start_adresse: analysis.dataOffset.toString(16), end_adresse: (analysis.dataOffset + analysis.dataSize).toString(16), block_length: analysis.dataSize.toString(16), OS: h.isFullFlash ? 'true' : 'false' }],
-        ecu_type: h.ecuType || analysis.ecuFamily, hardware_number: '',
+        lzss: 'false', xferSize: '0', ForceOS: hHdr.isFullFlash ? 'true' : 'false',
+        block_struct: [{ block_id: 0, start_adresse: analysis.dataOffset.toString(16), end_adresse: (analysis.dataOffset + analysis.dataSize).toString(16), block_length: analysis.dataSize.toString(16), OS: hHdr.isFullFlash ? 'true' : 'false' }],
+        ecu_type: hHdr.ecuType || analysis.ecuFamily, hardware_number: '',
+        ...calibrationListToSwFields(hHdr.partNumbers),
       };
+      if (autoIdentifiedMeta?.calibrationPartNumbers?.length) {
+        h = mergeDetectedCalibrationIntoHeader(h, autoIdentifiedMeta.calibrationPartNumbers, {
+          osHintForEmptyFileId: autoIdentifiedMeta.osVersion,
+        });
+      }
+      return h;
     }
     return null;
-  }, [analysis]);
+  }, [analysis, autoIdentifiedMeta]);
 
   // Generate flash plan from analysis
   const flashPlan = useMemo((): FlashPlan | null => {
@@ -262,7 +333,7 @@ export default function FlashContainerPanel() {
 
   // Compute file hash on upload
   const computeFileHash = useCallback(async (data: Uint8Array): Promise<string> => {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data.slice());
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
   }, []);
 
@@ -302,6 +373,7 @@ export default function FlashContainerPanel() {
 
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true);
+    setFileError(null);
     setFileName(file.name);
     try {
       const buffer = await file.arrayBuffer();
@@ -311,8 +383,8 @@ export default function FlashContainerPanel() {
       // Compute file hash
       computeFileHash(bytes).then(h => setFileHash(h));
 
-      if (isPpeiContainer(buffer)) {
-        const result = parsePpeiContainer(buffer);
+      if (isPpeiContainer(buffer, file.name)) {
+        const result = parsePpeiContainer(buffer, file.name);
         setAnalysis(result);
         setFlashTypeOverride(null);
         setUploadStatus('ready');
@@ -324,19 +396,26 @@ export default function FlashContainerPanel() {
           totalSize: bytes.length,
           readinessChecks: [{
             id: 'format', label: 'Container Format',
-            status: 'fail', detail: 'Not a recognized format. Expected PPEI (IPF) or DevProg JSON at 0x1004.',
+            status: 'fail',
+            detail:
+              'Not a V-OP / PPEI / DevProg flash container (PPEI IPF, DevProg JSON @ 0x1004, or supported GM raw). '
+              + 'EFI Live / HP Tuners / raw cal segments need export or conversion to PPEI IPF or DevProg V2 .bin.',
           }],
           securityInfo: { seedKeyAlgorithm: 'UNKNOWN', requiresUnlockBox: false, protocol: 'UNKNOWN', seedLevel: 0, canTxAddr: 0, canRxAddr: 0 },
-          flashSequence: [], errors: ['Unrecognized file format'],
+          flashSequence: [], errors: ['Unrecognized file format — not a V-OP container envelope'],
         });
         setUploadStatus('idle');
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error('Failed to parse container:', err);
+      setFileError(msg);
+      setRawData(null);
+      setAnalysis(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [computeFileHash]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -350,9 +429,51 @@ export default function FlashContainerPanel() {
     setIsDragOver(true);
   }, []);
 
+  const workspaceToggle = (
+    <div className="flex flex-wrap gap-2 mb-4 p-1 rounded-xl bg-zinc-900/60 border border-zinc-800">
+      <button
+        type="button"
+        onClick={() => setFlashWorkspace('container')}
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
+          flashWorkspace === 'container'
+            ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+        }`}
+      >
+        <Zap className="w-3.5 h-3.5" />
+        FLASH CONTAINER
+      </button>
+      <button
+        type="button"
+        onClick={() => setFlashWorkspace('tuneDeploy')}
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
+          flashWorkspace === 'tuneDeploy'
+            ? 'bg-red-500/20 text-red-200 border border-red-500/40'
+            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+        }`}
+      >
+        <Layers className="w-3.5 h-3.5" />
+        TUNE DEPLOY
+      </button>
+    </div>
+  );
+
+  if (flashWorkspace === 'tuneDeploy') {
+    return (
+      <div className="h-full flex flex-col min-h-0">
+        {workspaceToggle}
+        <div className="flex-1 min-h-0 overflow-auto">
+          <TuneDeployWorkspace />
+        </div>
+      </div>
+    );
+  }
+
   const resetAll = () => {
     setAnalysis(null);
     setRawData(null);
+    setAutoIdentifiedMeta(null);
+    setFileError(null);
     setFileName('');
     setFlashTypeOverride(null);
     setUploadStatus('idle');
@@ -371,6 +492,7 @@ export default function FlashContainerPanel() {
   if (!analysis) {
     return (
       <div className="h-full flex flex-col">
+        {workspaceToggle}
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
             <Zap className="w-5 h-5 text-amber-400" />
@@ -403,6 +525,11 @@ export default function FlashContainerPanel() {
               <p className="text-zinc-300 font-medium">Drop ECU binary here</p>
               <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
               <p className="text-zinc-600 text-xs mt-4">.bin, .hex, .cal — PPEI container format</p>
+              {fileError && (
+                <p className="text-red-400 text-xs mt-4 max-w-md text-center px-2">
+                  Error: {fileError}
+                </p>
+              )}
             </>
           )}
           <input
@@ -488,6 +615,14 @@ export default function FlashContainerPanel() {
 
   return (
     <div className="h-full flex flex-col">
+      {workspaceToggle}
+      {analysis.errors.length > 0 && (
+        <div className="mb-3 p-3 rounded-lg bg-red-950/50 border border-red-500/35 text-xs text-red-100/95 space-y-1">
+          {analysis.errors.map((e) => (
+            <div key={e}>{e}</div>
+          ))}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
@@ -595,6 +730,67 @@ export default function FlashContainerPanel() {
                 </div>
               ))}
             </div>
+
+            {/* Tune Deploy ↔ ECU Scan / cloud transfer (sw_c1..9) */}
+            <div className="p-4 rounded-lg border border-cyan-500/25 bg-cyan-950/30">
+              <div className="flex items-start gap-2">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-zinc-300 space-y-2">
+                  <p>
+                    <span className="text-cyan-300 font-semibold">Vehicle match keys</span>
+                    {' — ECU Scan compares your connected ECU to this file using '}
+                    <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">sw_c1</code>
+                    …
+                    <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">sw_c9</code>
+                    {' (same fields the old workflow required you to type by hand). Those slots are now filled from the container header and, when you’re signed in, '}
+                    <span className="text-cyan-200">Tune Deploy binary analysis</span>
+                    {' fills any gaps + OS hint for empty '}
+                    <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">file_id</code>.
+                  </p>
+                  {!canRunTuneDeployAnalyze && (
+                    <p className="text-amber-200/90">Sign in to run automatic binary analysis on this upload.</p>
+                  )}
+                  {canRunTuneDeployAnalyze && autoIdentifiedMeta && (
+                    <p className="text-zinc-400">
+                      Auto-ID: {autoIdentifiedMeta.calibrationPartNumbers.length} calibration token(s) detected
+                      {autoIdentifiedMeta.osVersion ? ` · OS hint ${autoIdentifiedMeta.osVersion}` : ''}.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setFlashWorkspace('tuneDeploy')}
+                    className="text-left text-cyan-400 hover:text-cyan-300 underline-offset-2 hover:underline font-medium"
+                  >
+                    Open Tune Deploy — index this tune in the team library (R2) for search & future auto-match
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {containerFileHeader && [1, 2, 3, 4, 5, 6, 7, 8, 9].some((i) => {
+              const v = containerFileHeader[`sw_c${i}` as keyof EcuContainerFileHeader];
+              return typeof v === 'string' && v.trim().length > 0;
+            }) && (
+              <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
+                <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+                  Match keys sent to ECU Scan / flasher cloud pipeline (sw_c1–sw_c9)
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+                    const v = containerFileHeader[`sw_c${i}` as keyof EcuContainerFileHeader];
+                    if (typeof v !== 'string' || !v.trim()) return null;
+                    return (
+                      <span
+                        key={i}
+                        className="px-2.5 py-1 bg-cyan-950/50 rounded-md text-sm font-mono text-cyan-200 border border-cyan-800/50"
+                      >
+                        sw_c{i}: {v}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Part Numbers */}
             {h && h.partNumbers.length > 0 && (
@@ -729,7 +925,9 @@ export default function FlashContainerPanel() {
             <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
               <h3 className="text-sm font-medium text-zinc-200 mb-3">Upload to VOP 3.0 Flasher</h3>
               <p className="text-xs text-zinc-400 mb-4">
-                Transfer the validated container to your VOP 3.0 hardware for ECU programming.
+                Transfer the validated container to your VOP 3.0 hardware for ECU programming
+                (server uploads payload via <code className="text-zinc-500">flash.prepareForTransfer</code> — same object storage path family as Tune Deploy).
+                ECU Scan and the flasher use the populated <code className="text-zinc-500">sw_c1–sw_c9</code> keys from Overview so a connected vehicle can be matched to this tune without re-typing cal IDs.
                 {analysis.ecuConfig && ` Target: ${analysis.ecuConfig.name} via ${analysis.ecuConfig.protocol} at CAN ${analysis.ecuConfig.canSpeed}kbps.`}
               </p>
 

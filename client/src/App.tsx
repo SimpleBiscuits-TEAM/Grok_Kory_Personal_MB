@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
+import ScreenGuard from "./components/ScreenGuard";
 import { Redirect } from "wouter";
 // Lazy-load all heavy pages for code splitting
 const Home = lazy(() => import("./pages/Home"));
@@ -17,6 +18,7 @@ const SupportJoin = lazy(() => import("./pages/SupportJoin"));
 const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
 // Pitch and Tasks now live inside Advanced tab (redirected)
 const Calibrations = lazy(() => import("./pages/Calibrations"));
+const TuneDeployPage = lazy(() => import("./pages/TuneDeploy"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -72,6 +74,7 @@ function Router() {
         <Route path={"/pitch"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/calibrations"} component={Calibrations} />
+        <Route path={"/tune-deploy"} component={TuneDeployPage} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />
@@ -92,6 +95,7 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
+          <ScreenGuard active={true} />
           <DebugReportButton />
         </TooltipProvider>
       </ThemeProvider>

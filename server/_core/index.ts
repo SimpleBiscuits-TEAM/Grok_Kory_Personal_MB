@@ -11,6 +11,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { knoxShieldMiddleware } from "../lib/knoxShieldMiddleware";
+import { registerTuneDeployRoutes } from "../tuneDeployRoutes";
+import { registerDevObjectStorageRoute } from "../storage";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -155,6 +157,12 @@ async function startServer() {
 
   // ── OAuth ──────────────────────────────────────────────────────────────
   registerOAuthRoutes(app);
+
+  // ── Local object storage (when Forge S3 proxy is not configured) ────────
+  registerDevObjectStorageRoute(app);
+
+  // ── Tune Deploy (raw binary upload — avoids JSON body size limits) ─────
+  registerTuneDeployRoutes(app);
 
   // ── tRPC API ───────────────────────────────────────────────────────────
   app.use(

@@ -875,3 +875,84 @@
 - [x] Fix "No commits found" on published site — switch from local git log to GitHub API with auth token
 - [x] Store GitHub token as environment secret via webdev_request_secrets
 - [x] Verify commits load on both dev and published site
+
+## Restore LLM Chatbot Agents
+- [ ] Investigate what chatbot/agent components exist in GitHub but are missing from Manus
+- [ ] Pull latest changes from GitHub repo (simplebiscuits/Good-Gravy-2)
+- [ ] Restore missing chatbot/agent files and routes
+- [ ] Verify chatbots render and function correctly
+
+## Flash Container — Tune Deploy
+- [x] Update FlashContainerPanel to show "Tune Deploy" in the flasher section
+
+## Tune Deploy — E41 Stock BIN File Support
+- [x] Fix parser to recognize E41 stock calibration BIN files (currently rejected as "Unknown layout")
+- [x] Extract part numbers from filename pattern (E41_STOCK_12709844_12688366_...)
+
+## Tune Deploy — Fix GM_RAW OS Version
+- [x] Fix osVersion showing garbage ASCII ("3A3H3L3M3N3O3P3Q3R") instead of correct OS number "12709844" for GM raw binaries
+- [x] Redesign Tune Deploy metadata display from raw JSON into a polished professional UI card
+
+## Temporary: Disable Auth Restrictions for Development
+- [x] Disable all sign-in restrictions, access code gates, and auth blocks for faster dev workflow
+
+## Tune Deploy — Bulk Upload & Device Targeting
+- [x] Accept multiple files at once in Tune Deploy (bulk library upload)
+- [x] Parse all files through the pipeline in parallel/sequence
+- [x] Add device targeting by V-OP serial number
+- [x] Add device targeting by PCAN serial number
+- [x] Deploy matching tunes to targeted devices
+
+## Fix Deployment Build Failure — Missing getSecurityProfile Export
+- [x] Add getSecurityProfile() to shared/seedKeyAlgorithms.ts (client-safe, returns meta + 32-char placeholder aesKeyHex for ECUs with server-side keys)
+- [x] Maintain security separation: real AES key hex stays in server/seedKeyProfiles.ts only
+- [x] Tobi's readiness check (secProfile?.aesKeyHex?.length === 32) works with placeholder
+- [x] Vite production build passes with zero errors
+- [x] All pre-existing tests unaffected (13 failures are pre-existing: GitHub API token, auth mocks, LLM mocks)
+
+## Pull Latest from GROK Branch & Publish
+- [x] Fetch and merge latest GROK branch into main
+- [x] Resolve any merge conflicts (none — clean merge)
+- [x] Verify build passes
+- [x] Clean up dead getSecurityProfile code from seedKeyAlgorithms.ts (GROK replaced with getSecurityProfileMeta + ecuSupportsServerKeyDerivation)
+- [x] Save checkpoint and publish
+
+## Localhost Auth — Make sign-in work from Cursor/localhost
+- [x] Investigate OAuth flow and what breaks on localhost
+- [ ] DEV_BYPASS_AUTH=1 env var: auto-authenticates as owner on localhost (skips OAuth)
+- [ ] Access code gate on production: users must enter KINGKONG before accessing app
+- [ ] Access code persists in localStorage so users don't re-enter every page load
+- [ ] Dev bypass skips access code gate too (localhost devs go straight in)
+- [ ] Update .env.example with DEV_BYPASS_AUTH documentation
+
+## Bug: Missing Charts in Datalog Analyzer
+- [x] Investigate MAF difference between normal and slow response datalogs
+- [x] Identify which charts were removed/broken (RPMvMAF, HPvsRPM, TimeSeries from Charts.tsx)
+- [x] Convert RPMvMAFChart from scatter plot to line graph
+- [x] Convert HPvsRPMChart from scatter to line graph
+- [x] Ensure TimeSeriesChart is line-based (already is)
+- [x] Restyle all 3 charts to match PPEI dark theme
+- [x] Wire all three charts into Home.tsx analyzer output
+- [x] Wire all three charts into Advanced.tsx analyzer output
+- [x] Wire ScreenGuard into App.tsx globally
+- [x] Verify build passes
+- [x] Push changes to GROK branch
+
+## MAF Comparison Chart — Normal vs Low/Slow MAF
+- [x] Investigate existing CompareView and MAF overlay functionality
+- [x] Build MAF comparison chart showing normal vs slow/low MAF overlay — CompareView PID overlay already supports this, MAF now default-selected
+- [ ] Verify restored single-log charts (RPMvMAF, HPvsRPM, TimeSeries) actually render after upload
+- [x] Push to GROK
+
+## Bug: Advanced tab broken + MAF comparison missing
+- [x] Diagnose what broke in Advanced.tsx (our chart additions may have caused issues)
+- [x] Fix Advanced tab to render all analysis content properly — Compare mode early return removed, now shows full analysis + compare section inline
+- [x] Restore MAF comparison chart (normal vs low MAF overlay from two logs) — CompareView already has MAF in PID overlay charts, added MAF + HP to default selected PIDs
+- [x] Push fixes to GROK
+- [x] Compare mode must show ALL normal mode content (charts, stats, diagnostics, health report, etc.) plus additional comparison features — no compromise from normal mode
+
+## Knox AI Training — MAF Baffle / Intake Tube Sizing Knowledge
+- [x] Train Knox and AI agents on MAF baffle removal causing under-reading (larger pre-MAF area → pressure drop → slower element heating → MAF-limited/smoke-limited)
+- [x] Include knowledge about intake companies designing around stock MAF metering to avoid tune requirement
+- [x] Include recommended fix: tune revision for MAF scaling with larger tube
+- [x] Verify Knox knowledge base updated and agents can reference this in diagnostics

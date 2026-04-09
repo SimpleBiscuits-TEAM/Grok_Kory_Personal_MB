@@ -29,7 +29,7 @@ import {
   type FuelType,
   type PIDManufacturer,
 } from './obdConnection';
-import { decodeVinNhtsa } from './universalVinDecoder';
+import { decodeVinNhtsa, decodeVinLocal } from './universalVinDecoder';
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
 
 type EventCallback = (event: ConnectionEvent) => void;
@@ -62,6 +62,83 @@ interface BridgeError {
   type: 'error';
   id?: string;
   message: string;
+}
+
+/**
+ * NHTSA sometimes labels HD diesels as gasoline; WMI + engine text still identify diesel.
+ */
+function applyPcanDieselFuelReconciliation(info: VehicleInfo): void {
+  const vin = info.vin;
+  if (vin && vin.length === 17) {
+    const local = decodeVinLocal(vin);
+    if (local.fuelType === 'diesel') {
+      info.fuelType = 'diesel';
+    }
+  }
+  const blob = `${info.engineType ?? ''} ${info.model ?? ''} ${info.make ?? ''}`.toLowerCase();
+  if (/duramax|\bdiesel\b|\bl5p\b|\blml\b|\bl5d\b|\blz0\b|\blm2\b/.test(blob)) {
+    info.fuelType = 'diesel';
+  }
+}
+
+/**
+ * Mode 0x22 catalog for PCAN: must not rely on `universal` alone (no extended PIDs) or on a
+ * single wrong fuel filter that drops all GM diesel DIDs.
+ */
+function extendedMode22PidsForPcanVehicle(info: VehicleInfo): PIDDefinition[] {
+  const vin = info.vin;
+  let mfr: PIDManufacturer = info.manufacturer ?? 'universal';
+  let fuel: FuelType = info.fuelType ?? 'any';
+
+  if (vin && vin.length === 17) {
+    const local = decodeVinLocal(vin);
+    if (mfr === 'universal' && local.manufacturer !== 'universal') {
+      mfr = local.manufacturer;
+    }
+    if (local.fuelType === 'diesel') {
+      fuel = 'diesel';
+    }
+  }
+
+  const text = `${info.make ?? ''} ${info.model ?? ''} ${info.engineType ?? ''}`.toLowerCase();
+  if (mfr === 'universal' && /chev|gmc|cadillac|buick|silverado|sierra/.test(text)) {
+    mfr = 'gm';
+  }
+  if (/duramax|\bdiesel\b|\bl5p\b|\blml\b|\bl5d\b|\blz0\b|\blm2\b/.test(text)) {
+    fuel = 'diesel';
+  }
+
+  let list = getPidsForVehicle(mfr, fuel).filter((p) => (p.service ?? 0x01) === 0x22);
+  if (mfr === 'gm' && list.length < 12 && fuel !== 'any') {
+    list = getPidsForVehicle('gm', 'any').filter((p) => (p.service ?? 0x01) === 0x22);
+  }
+  if (list.length === 0 && vin && vin.length === 17 && decodeVinLocal(vin).manufacturer === 'gm') {
+    list = getPidsForVehicle('gm', 'any').filter((p) => (p.service ?? 0x01) === 0x22);
+  }
+  return list;
+}
+
+/** GM_EXTENDED_PIDS `ecuHeader` (e.g. "7E0") → physical CAN TX id for UDS. */
+function parsePidEcuTxId(header?: string): number {
+  if (!header?.trim()) return 0x7e0;
+  const n = parseInt(header.trim().replace(/^0x/i, ''), 16);
+  return Number.isFinite(n) && n > 0 ? n : 0x7e0;
+}
+
+/** Do not send GM E41-style 0x10 0x03 on 0x7E0 when we already know the vehicle is non-GM. */
+const NON_GM_FOR_GMLAN_SESSION = new Set<PIDManufacturer>([
+  'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
+  'canam', 'seadoo', 'polaris', 'kawasaki',
+]);
+
+/** True when vehicle metadata points at a GM ECM (L5P / Duramax / Chevy GMC truck). */
+function isVehicleInfoGmLikely(info: VehicleInfo): boolean {
+  if (info.manufacturer === 'gm') return true;
+  if (info.vin && info.vin.length === 17 && decodeVinLocal(info.vin).manufacturer === 'gm') return true;
+  const t = `${info.make ?? ''} ${info.model ?? ''} ${info.engineType ?? ''}`.toLowerCase();
+  if (/chev|gmc|buick|cadillac|silverado|sierra|duramax|\bl5p\b|\blml\b|2500|3500/.test(t)) return true;
+  // NHTSA/VIN decode can miss make but still describe the diesel (E41 / 6.6L).
+  return /\be41\b|6\.6.*diesel|duramax|l5p/.test(t);
 }
 
 // ─── PCAN Connection Class ──────────────────────────────────────────────────
@@ -255,6 +332,8 @@ export class PCANConnection {
   private monitorFrameHandler: ((event: MessageEvent) => void) | null = null;
   private udsResponseListener: ((msg: Record<string, unknown>) => void) | null = null;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  /** Per ECM TX: last time we sent 0x10 extended session for GM live UDS 0x22 */
+  private gmLiveSessionAtByTx = new Map<number, number>();
 
   constructor(config: PCANConnectionConfig = {}) {
     this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
@@ -542,7 +621,16 @@ export class PCANConnection {
         this.vehicleInfo.vin = vin;
         this.emit('log', null, `VIN: ${vin}`);
 
-        // Decode VIN via NHTSA
+        // Always seed from local WMI so a failed NHTSA fetch does not leave manufacturer unset.
+        const localVin = decodeVinLocal(vin);
+        this.vehicleInfo.manufacturer = localVin.manufacturer;
+        this.vehicleInfo.make = localVin.make;
+        this.vehicleInfo.year = localVin.year;
+        if (localVin.fuelType !== 'any') {
+          this.vehicleInfo.fuelType = localVin.fuelType;
+        }
+
+        // Decode VIN via NHTSA (richer model/engine; may mis-label fuel on some HD trucks)
         try {
           const decoded = await decodeVinNhtsa(vin);
           if (decoded) {
@@ -562,6 +650,14 @@ export class PCANConnection {
           }
         } catch {
           this.emit('log', null, 'VIN decode failed — continuing with basic info');
+        }
+
+        applyPcanDieselFuelReconciliation(this.vehicleInfo);
+
+        // E41 / L5P: UDS 0x22 live data typically needs extended session (0x10 0x03) on 0x7E0.
+        if (isVehicleInfoGmLikely(this.vehicleInfo)) {
+          this.emit('log', null, 'GM vehicle — opening extended diagnostic session on ECM (0x7E0) for live DIDs...');
+          await this.ensureGmLiveDataSessionForTx(0x7e0);
         }
       }
     } catch (e) {
@@ -616,11 +712,92 @@ export class PCANConnection {
     }
   }
 
+  /**
+   * GM E41 / L5P: extended diagnostic session on the physical ECM is usually required before
+   * UDS ReadDataByIdentifier (0x22) returns live parameters. Cached ~8s per request address.
+   */
+  private async ensureGmLiveDataSessionForTx(ecmTx: number): Promise<void> {
+    if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
+    const mfr = this.vehicleInfo.manufacturer;
+    if (mfr && NON_GM_FOR_GMLAN_SESSION.has(mfr)) return;
+    const now = Date.now();
+    const last = this.gmLiveSessionAtByTx.get(ecmTx) ?? 0;
+    if (now - last < 12000) return;
+
+    try {
+      await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
+    } catch {
+      // ignore
+    }
+    let extendedOk = false;
+    try {
+      const r = await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
+      extendedOk = !!r?.positiveResponse;
+    } catch {
+      // ignore
+    }
+    if (!extendedOk) {
+      try {
+        await this.sendUDSRequest(0x10, 0x01, [], ecmTx, 3000);
+      } catch {
+        // ignore
+      }
+    }
+    this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
+    await new Promise(r => setTimeout(r, 60));
+  }
+
   // ─── PID Reading ──────────────────────────────────────────────────────────
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
       const mode = pid.service || 0x01;
+      // Mode 0x22 = UDS ReadDataByIdentifier — must use UDS/ISO-TP path (`uds_request` / raw CAN).
+      // `obd_request` is for SAE J1979 modes 01/03/09; many bridges mishandle 0x22 there.
+      if (mode === 0x22) {
+        const tx = parsePidEcuTxId(pid.ecuHeader);
+        await this.ensureGmLiveDataSessionForTx(tx);
+        const uds = await this.readUDSDID(pid.pid, tx);
+        if (!uds?.positiveResponse || !uds.data?.length) {
+          // Fallback: bridges that only implement OBD framing (fixed reference bridge strips 2-byte DID).
+          try {
+            const response = await this.sendRequest({
+              type: 'obd_request',
+              mode: 0x22,
+              pid: pid.pid,
+            }) as unknown as BridgeOBDResponse;
+            if (response.data && response.data.length > 0) {
+              const value = pid.formula(response.data);
+              return {
+                pid: pid.pid,
+                name: pid.name,
+                shortName: pid.shortName,
+                value,
+                unit: pid.unit,
+                rawBytes: response.data,
+                timestamp: Date.now(),
+              };
+            }
+          } catch {
+            // ignore
+          }
+          return null;
+        }
+        // Positive 0x62: [DID_hi, DID_lo, ...value] — formulas expect value bytes only (ELM parity).
+        const payload = uds.data.length >= 2 ? uds.data.slice(2) : uds.data;
+        if (payload.length === 0) return null;
+        const value = pid.formula(payload);
+        return {
+          pid: pid.pid,
+          name: pid.name,
+          shortName: pid.shortName,
+          value,
+          unit: pid.unit,
+          rawBytes: payload,
+          timestamp: Date.now(),
+        };
+      }
+
       const response = await this.sendRequest({
         type: 'obd_request',
         mode,
@@ -903,12 +1080,19 @@ export class PCANConnection {
     if (includeStandard) {
       allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
     }
+    let extPids: PIDDefinition[] = [];
     if (includeExtended) {
-      const extPids = getPidsForVehicle(
-        this.vehicleInfo.manufacturer || 'universal',
-        this.vehicleInfo.fuelType || 'any'
-      ).filter(p => (p.service || 0x01) === 0x22);
+      extPids = extendedMode22PidsForPcanVehicle(this.vehicleInfo);
       allPids.push(...extPids);
+    }
+
+    // Open GM ECM session(s) before scanning Mode 22 so the first DID does not time out cold.
+    if (extPids.length > 0) {
+      const addrs = new Set(extPids.map(p => parsePidEcuTxId(p.ecuHeader)));
+      for (const addr of addrs) {
+        if (options?.abortSignal?.aborted) break;
+        await this.ensureGmLiveDataSessionForTx(addr);
+      }
     }
 
     let current = 0;
@@ -963,10 +1147,7 @@ export class PCANConnection {
   }
 
   getAvailableExtendedPids(): PIDDefinition[] {
-    return getPidsForVehicle(
-      this.vehicleInfo.manufacturer || 'universal',
-      this.vehicleInfo.fuelType || 'any'
-    ).filter(p => (p.service || 0x01) === 0x22);
+    return extendedMode22PidsForPcanVehicle(this.vehicleInfo);
   }
 
   getAllAvailablePids(): PIDDefinition[] {
@@ -1213,7 +1394,7 @@ export class PCANConnection {
 
       // Tell bridge to start streaming
       try {
-        await this.sendRequest({ type: 'start_monitor', filter_ids: [] });
+        await this.sendRequest({ type: 'start_monitor', filter_ids: [], arb_ids: [] });
         await new Promise(r => setTimeout(r, 100));
       } catch {
         // Monitor might already be running on bridge side
@@ -1777,6 +1958,7 @@ export class PCANConnection {
       await this.sendRequest({
         type: 'start_monitor',
         filter_ids: options?.filterIds || [],
+        arb_ids: options?.filterIds || [],
       });
       this.emit('log', null, `Bus monitor started (${ALL_PROTOCOLS[this.currentProtocol].name})`);
       return true;
@@ -1823,8 +2005,21 @@ export class PCANConnection {
    * Identifies OBD-II, J1939, UDS, and flash-related frames.
    */
   private decodeBusFrame(msg: BridgeMessage, decodeFlash = true): BusMonitorFrame {
-    const arbId = (msg.arb_id as number) || 0;
-    const data = (msg.data as number[]) || [];
+    const rawArb = msg.arb_id ?? msg.arbitration_id;
+    const arbId =
+      typeof rawArb === 'number' && Number.isFinite(rawArb)
+        ? rawArb >>> 0
+        : typeof rawArb === 'string'
+          ? (() => {
+              const s = rawArb.trim();
+              const n = /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+              return Number.isFinite(n) ? (n >>> 0) : 0;
+            })()
+          : 0;
+    const rawData = msg.data;
+    const data = Array.isArray(rawData)
+      ? rawData.map((x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x & 0xff : 0))
+      : [];
     const isExtended = (msg.is_extended as boolean) || arbId > 0x7FF;
 
     const frame: BusMonitorFrame = {
@@ -2106,6 +2301,7 @@ export class PCANConnection {
     }
 
     this.supportedPids.clear();
+    this.gmLiveSessionAtByTx.clear();
     this.vehicleInfo = {};
     this.currentSession = null;
     this.setState('disconnected');

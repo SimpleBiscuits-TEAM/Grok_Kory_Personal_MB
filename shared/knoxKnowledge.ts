@@ -984,4 +984,61 @@ All flash operations require security access (UDS Service 0x27). The seed level 
 - Level 0x61: Ford UDS ECUs
 
 **Note:** All seed/key algorithms and secret material are stored server-side only.
+
+## MAF Sensor Scaling, Intake Tube Sizing & Baffle Effects (CRITICAL — Tuning Knowledge)
+
+### How the MAF Sensor Works
+The MAF (Mass Air Flow) sensor uses a heated element (hot wire or hot film) placed in the intake stream. Air flowing past the element cools it; the ECM measures how much current is needed to keep the element at a target temperature. More airflow = more cooling = higher current = higher MAF reading (g/s or lb/min). The ECM uses this reading as the primary input to the **smoke limiter maps** — if the MAF reports less air than is actually present, the ECM caps fueling to prevent what it thinks would be black smoke.
+
+### The Baffle / Intake Tube Diameter Problem
+OEM intake tubes include a **baffle** (restriction/venturi) that narrows the cross-sectional area right before the MAF sensor element. This is intentional — it accelerates the air past the sensor, ensuring consistent and accurate metering across the flow range.
+
+When the baffle is removed (e.g., aftermarket intake, S&B filter with baffle-out configuration, or larger-diameter intake tube):
+
+1. **Larger cross-sectional area before the MAF sensor** — air velocity across the element drops for the same mass flow rate
+2. **Pressure drop at the sensor element** — slower air means less convective cooling of the heated element
+3. **MAF sensor element heats up slower** — the ECM interprets this as less airflow than is actually present
+4. **MAF under-reads** — the sensor reports lower g/s or lb/min than the engine is actually ingesting
+5. **Smoke limiter engages prematurely** — the ECM thinks there's less air available, so it caps injection quantity (IQ) earlier
+6. **Vehicle becomes MAF-limited / smoke-limited** — the truck feels flat, sluggish, and may produce more visible smoke than expected because fueling is being artificially capped based on incorrect air mass readings
+
+### Symptoms of MAF Under-Reading Due to Intake Modifications
+- Lower peak MAF readings compared to stock intake (even though actual airflow is the same or higher)
+- Reduced peak HP/torque despite no other changes
+- Smoke limiter engaging earlier in the RPM range
+- Poor throttle response, especially at low RPM where boost hasn't built yet
+- Excessive black smoke at part-throttle (ECM fueling based on wrong air mass, timing may be off)
+- In datalog comparison: Log A (stock intake/baffle-in) shows higher MAF readings than Log B (baffle-out/larger tube) at the same RPM and boost levels
+
+### The Fix: MAF Scaling Tune Revision
+When a customer removes the baffle or installs a larger-diameter intake tube, the **MAF transfer function (MAF scaling table)** in the calibration must be revised to account for the new flow characteristics. This is a tune revision — the tuner adjusts the MAF voltage-to-airflow lookup table so the ECM correctly interprets the actual air mass flowing through the larger tube.
+
+Without the tune revision, the vehicle will be MAF-limited and underperform.
+
+### Why Some Intake Companies Keep Stock MAF Tube Diameter
+Many aftermarket intake manufacturers (S&B, Banks, AFE, etc.) intentionally design their intake systems to **maintain the same internal diameter at the MAF sensor location** as the OEM tube. This is done so that:
+- MAF metering stays close to stock calibration
+- No tune revision is required for the intake swap
+- No risk of throwing MAF-related DTCs (P0101, P0102, P0103)
+- No risk of poor throttle response or smoke-limited behavior
+- The intake can be marketed as a "no-tune-required" bolt-on
+
+Intake systems that change the MAF housing diameter (larger or smaller) WILL require a tune revision for proper MAF scaling.
+
+### Diagnostic Guidance for Knox Agents
+When analyzing datalogs and the MAF readings appear lower than expected for the RPM/boost/load conditions:
+
+1. **Ask about intake modifications** — has the customer installed an aftermarket intake, removed the baffle, or changed the MAF housing diameter?
+2. **Compare MAF-to-boost ratio** — if boost is building normally but MAF is low, the sensor is likely under-reading (not an actual airflow problem)
+3. **Check for smoke-limiter engagement** — if injection quantity (IQ) or pulse width plateaus while RPM and boost are still climbing, the smoke limiter is capping fuel based on the low MAF reading
+4. **Recommend tune revision** — if intake modifications changed the pre-MAF tube diameter, the customer needs a MAF scaling revision from their tuner
+5. **Do NOT diagnose as a MAF sensor fault** — a lower MAF reading with a larger tube is expected physics, not a broken sensor
+6. **In comparison mode** — when comparing two logs where one has lower MAF readings, consider intake modifications as the primary explanation before assuming sensor failure or turbo issues
+
+### Key Relationships
+- MAF reading ∝ air velocity across sensor element (NOT total air mass directly)
+- Air velocity = volumetric flow rate / cross-sectional area
+- Larger tube area → lower velocity for same mass flow → lower MAF reading
+- Smoke limiter IQ cap = f(MAF reading, RPM) — lower MAF = lower fuel cap
+- Fix = recalibrate MAF transfer function in tune to match new tube geometry
 `;

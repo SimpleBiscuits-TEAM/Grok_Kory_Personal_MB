@@ -12,6 +12,7 @@
 export type DetectedFormat =
   | 'PPEI_CONTAINER'     // PPEI .bin with JSON header at 0x1004
   | 'DEVPROG_V2'         // DevProg V2 MAUI container
+  | 'GM_RAW_BINARY'      // GM raw flash binary (0xAA55 header, part number at 0x20)
   | 'RAW_BINARY'         // Raw binary (no container)
   | 'INTEL_HEX'          // Intel HEX format
   | 'S_RECORD'           // Motorola S-Record
@@ -62,6 +63,29 @@ export function detectFileFormat(data: Uint8Array): FormatDetectionResult {
     }
   } catch {
     // Not a JSON header
+  }
+
+  // Check for GM raw flash binary: 0xAA55 header magic with 8-digit part number at offset 0x20
+  if (data.length >= 0x30 && data[0] === 0xAA && data[1] === 0x55) {
+    // Verify there's an ASCII part number at offset 0x20 (GM convention)
+    const pnSlice = data.slice(0x20, 0x28);
+    const pnStr = new TextDecoder('ascii', { fatal: false }).decode(pnSlice);
+    const isGmPn = /^\d{8}$/.test(pnStr);
+    if (isGmPn) {
+      return {
+        format: 'GM_RAW_BINARY',
+        confidence: 0.85,
+        details: `GM raw flash binary — OS/cal PN ${pnStr} at 0x20, 0xAA55 header`,
+        hasCrc: false,
+      };
+    }
+    // 0xAA55 header without recognizable PN — still likely GM raw
+    return {
+      format: 'GM_RAW_BINARY',
+      confidence: 0.7,
+      details: 'GM raw flash binary — 0xAA55 header magic detected',
+      hasCrc: false,
+    };
   }
 
   // Check for padding pattern (0xFF or 0x00 in first 0x1000 bytes)
@@ -189,6 +213,50 @@ export function validateFlashFile(data: Uint8Array): FileValidationResult {
   };
 }
 
+/** DevProg/PPEI container CRC32 at 0x1000 (big-endian), payload from 0x1004..EOF — see `fixContainerCrc`. */
+export interface ContainerCrc32Status {
+  applicable: boolean;
+  /** null when not applicable */
+  match: boolean | null;
+  storedHex?: string;
+  computedHex?: string;
+  message: string;
+}
+
+/**
+ * Lightweight CRC check for importers (Tune Deploy, etc.) without running the full `validateFlashFile` gate.
+ */
+export function getContainerCrc32Status(data: Uint8Array): ContainerCrc32Status {
+  const det = detectFileFormat(data);
+  if (data.length < 0x1008) {
+    return {
+      applicable: false,
+      match: null,
+      message: "File too small for container CRC32 field at offset 0x1000",
+    };
+  }
+  if (!det.hasCrc) {
+    return {
+      applicable: false,
+      match: null,
+      message: `No container CRC slot — ${det.details}`,
+    };
+  }
+  const storedCrc = readUint32BE(data, 0x1000);
+  const computedCrc = crc32(data.slice(0x1004));
+  const match = storedCrc === computedCrc;
+  const hx = (n: number) => `0x${n.toString(16).toUpperCase().padStart(8, "0")}`;
+  return {
+    applicable: true,
+    match,
+    storedHex: hx(storedCrc),
+    computedHex: hx(computedCrc),
+    message: match
+      ? `CRC32 verified ${hx(storedCrc)}`
+      : `CRC32 mismatch — stored ${hx(storedCrc)}, computed ${hx(computedCrc)}`,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // CRC32 (Standard IEEE 802.3)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -235,6 +303,41 @@ export function fixContainerCrc(data: Uint8Array): Uint8Array {
   const computedCrc = crc32(fixed.slice(0x1004));
   writeUint32BE(fixed, 0x1000, computedCrc);
   return fixed;
+}
+
+/**
+ * CRC32 big-endian at 0x1000 over payload 0x1004..EOF — shared by DevProg and (typical) PPEI layouts.
+ * Unlike `getContainerCrc32Status`, this does not consult `detectFileFormat`; use for strict upload checks.
+ */
+export function verifyStandardContainerSlotCrc32(data: Uint8Array): {
+  ok: boolean;
+  match: boolean;
+  storedHex: string;
+  computedHex: string;
+  message: string;
+} {
+  if (data.length < 0x1008) {
+    return {
+      ok: false,
+      match: false,
+      storedHex: "",
+      computedHex: "",
+      message: "File too small for standard container CRC field at 0x1000 (need ≥ 0x1008 bytes).",
+    };
+  }
+  const storedCrc = readUint32BE(data, 0x1000);
+  const computedCrc = crc32(data.slice(0x1004));
+  const match = storedCrc === computedCrc;
+  const hx = (n: number) => `0x${n.toString(16).toUpperCase().padStart(8, "0")}`;
+  return {
+    ok: true,
+    match,
+    storedHex: hx(storedCrc),
+    computedHex: hx(computedCrc),
+    message: match
+      ? `CRC32 verified ${hx(storedCrc)}`
+      : `CRC32 mismatch — stored ${hx(storedCrc)}, computed ${hx(computedCrc)}`,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

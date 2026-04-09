@@ -1104,6 +1104,91 @@ export const knoxFiles = mysqlTable("knox_files", {
 export type KnoxFile = typeof knoxFiles.$inferSelect;
 export type InsertKnoxFile = typeof knoxFiles.$inferInsert;
 
+// ── Tune Deploy — calibration binary library (R2 + searchable metadata) ────
+/**
+ * Indexed metadata for uploaded calibrations. Files live in object storage (R2 via storage proxy);
+ * this table powers search, filters, and future vehicle-connected auto-match.
+ * NOTE: Stack uses MySQL today; JSON columns mirror how you would model this in Postgres.
+ */
+export const tuneDeployCalibrations = mysqlTable("tune_deploy_calibrations", {
+  id: int("id").autoincrement().primaryKey(),
+  uploadedByUserId: int("uploadedByUserId").notNull(),
+  fileName: varchar("fileName", { length: 512 }).notNull(),
+  r2Key: varchar("r2Key", { length: 512 }).notNull(),
+  storageUrl: text("storageUrl"),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  sizeBytes: int("sizeBytes").notNull(),
+  vehicleFamily: varchar("vehicleFamily", { length: 128 }).notNull(),
+  vehicleSubType: varchar("vehicleSubType", { length: 128 }).notNull(),
+  modelYear: int("modelYear"),
+  osVersion: varchar("osVersion", { length: 256 }),
+  ecuType: varchar("ecuType", { length: 128 }),
+  ecuHardwareId: varchar("ecuHardwareId", { length: 128 }),
+  /** Denormalized for SQL LIKE search; also stored inside parsedMeta JSON */
+  partNumbersCsv: text("partNumbersCsv"),
+  /** Full Zod-validated parse result + extras */
+  parsedMeta: json("parsedMeta").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TuneDeployCalibrationRow = typeof tuneDeployCalibrations.$inferSelect;
+export type InsertTuneDeployCalibration = typeof tuneDeployCalibrations.$inferInsert;
+
+// ── Tune Deploy Devices (V-OP / PCAN serial targeting) ──────────────────────
+/**
+ * Registered flash devices. Each device is identified by its serial number
+ * (V-OP serial or PCAN serial). Tunes are assigned to specific devices so
+ * the correct calibration is deployed to the right hardware.
+ */
+export const tuneDeployDevices = mysqlTable("tune_deploy_devices", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 'vop' = V-OP programmer, 'pcan' = PCAN USB adapter */
+  deviceType: mysqlEnum("deviceType", ["vop", "pcan"]).notNull(),
+  /** Hardware serial number (unique per device) */
+  serialNumber: varchar("serialNumber", { length: 128 }).notNull().unique(),
+  /** Friendly label for the device, e.g. "Shop VOP #1", "Customer Truck" */
+  label: varchar("label", { length: 255 }),
+  /** Vehicle this device is typically connected to */
+  vehicleDescription: varchar("vehicleDescription", { length: 512 }),
+  /** VIN of the target vehicle (optional) */
+  vin: varchar("vin", { length: 17 }),
+  /** ECU / module serial when known — links to cloud enrollment `ecuSerial` for MY VEHICLE */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
+  /** Last time this device checked in / was seen online */
+  lastSeenAt: timestamp("lastSeenAt"),
+  /** Whether this device is active and should receive deployments */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployDevice = typeof tuneDeployDevices.$inferSelect;
+export type InsertTuneDeployDevice = typeof tuneDeployDevices.$inferInsert;
+
+// ── Tune Deploy Assignments (calibration → device mapping) ──────────────────
+/**
+ * Links a calibration from the library to a target device.
+ * When the device connects, it checks for pending assignments and
+ * deploys the matching tune.
+ */
+export const tuneDeployAssignments = mysqlTable("tune_deploy_assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id */
+  calibrationId: int("calibrationId").notNull(),
+  /** FK to tune_deploy_devices.id */
+  deviceId: int("deviceId").notNull(),
+  /** pending = waiting for device, deployed = sent to device, failed = deploy error */
+  status: mysqlEnum("status", ["pending", "deployed", "failed", "cancelled"]).default("pending").notNull(),
+  /** Notes about this assignment */
+  notes: text("notes"),
+  /** When the tune was actually deployed to the device */
+  deployedAt: timestamp("deployedAt"),
+  assignedBy: int("assignedBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployAssignment = typeof tuneDeployAssignments.$inferSelect;
+export type InsertTuneDeployAssignment = typeof tuneDeployAssignments.$inferInsert;
+
 
 // ── CASTING MODE — Live Streaming & Virtual Dyno Events ─────────────────────
 
@@ -1756,6 +1841,10 @@ export const cloudEnrollments = mysqlTable("cloud_enrollments", {
   /** Vehicle identification */
   vehicleId: varchar("vehicleId", { length: 64 }),
   vin: varchar("vin", { length: 17 }),
+  /** V-OP / PCAN programmer serial — matches `tune_deploy_devices.serialNumber` for Tune Deploy → Cloud MY VEHICLE */
+  programmerSerial: varchar("programmerSerial", { length: 128 }),
+  /** ECU serial — matches `tune_deploy_devices.ecuSerial` when set */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
   /** Vehicle classification for grouping */
   vehicleYear: int("vehicleYear"),
   vehicleMake: varchar("vehicleMake", { length: 64 }),

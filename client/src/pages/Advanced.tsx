@@ -40,7 +40,7 @@ import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
-import { StatsSummary } from '@/components/Charts';
+import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
 import DtcSearch from '@/components/DtcSearch';
@@ -967,8 +967,8 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
     </div>
   );
 
-  // Compare mode — full-screen compare view
-  if (analyzerMode === 'compare') {
+  // When no data loaded and compare mode — show standalone CompareView with upload zones
+  if (!data && analyzerMode === 'compare') {
     return (
       <div>
         <ModeToggle />
@@ -1106,6 +1106,10 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
       <div ref={statsRef}><StatsSummary data={data} /></div>
 
+      <div><RPMvMAFChart data={data} binnedData={binnedData} /></div>
+      <div><HPvsRPMChart data={data} binnedData={binnedData} /></div>
+      <div><TimeSeriesChart data={data} /></div>
+
       {dragAnalysis && <div><SectionHeader icon={<Flag style={{ width: 18, height: 18, color: sColor.red }} />} title="DRAG RACING ANALYZER" /><div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1.25rem' }}><DragTimeslip analysis={dragAnalysis} /></div></div>}
 
       <div><SectionHeader icon={<BarChart3 style={{ width: 18, height: 18, color: sColor.red }} />} title="LOG DETAILS" /><div ref={dynoContainerRef}><DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} /></div></div>
@@ -1133,6 +1137,17 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
       <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><DtcSearch /></div>
       <div><SectionHeader icon={<Cpu style={{ width: 18, height: 18, color: sColor.red }} />} title="ENGINE REFERENCE DATABASE" /><EcuReferencePanel /></div>
 
+      {/* Compare section — shown when compare mode is active, data already loaded above */}
+      {analyzerMode === 'compare' && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '0.75rem', borderBottom: `1px solid ${sColor.red}4d`, marginBottom: '1rem' }}>
+            <Gauge style={{ width: 20, height: 20, color: sColor.red }} />
+            <h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>DATALOG COMPARISON</h2>
+          </div>
+          <CompareView onBack={() => setAnalyzerMode('analyze')} embedded />
+        </div>
+      )}
+
       {(error || exportError) && (
         <div style={{ position: 'fixed', bottom: '1rem', right: '1rem', background: sColor.bgCard, border: `1px solid ${sColor.red}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1rem 1.25rem', display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '420px', zIndex: 50 }}>
           <AlertCircle style={{ width: 18, height: 18, color: sColor.red, flexShrink: 0, marginTop: '2px' }} />
@@ -1152,7 +1167,8 @@ const EDITOR_CODE = 'KINGKONG';
 const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true');
+  // DEV BYPASS: skip access code gate for faster development
+  const [unlocked, setUnlocked] = useState(true /* was: () => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true' */);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
@@ -1604,7 +1620,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 const TASKS_CODE = 'KINGKONG';
 
 function TasksGate() {
-  const [unlocked, setUnlocked] = useState(false);
+  // DEV BYPASS: skip access code gate for faster development
+  const [unlocked, setUnlocked] = useState(true /* was: false */);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);

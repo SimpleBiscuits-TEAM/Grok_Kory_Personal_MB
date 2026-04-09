@@ -808,7 +808,37 @@ function parseHPTunersCSV(content: string): DuramaxData {
   // Boost actual: prefer direct gauge psi channels
   // 'Boost/Vacuum' = gauge psi (HP Tuners full-description export)
   // 'Boost Pressure' = gauge psi (HP Tuners short-name export)
-  const boostGaugePsigIdx = getColumnIndex(['Boost/Vacuum', 'Boost Pressure', 'Boost (psi)', 'Boost Gauge']);
+  // HP Tuners may label turbo vane / actuator command as "Boost Pressure Actuator Pressure" (PSI units) —
+  // that is NOT intake boost; substring match on "Boost Pressure" must skip those columns.
+  const boostGaugePsigIdx = (() => {
+    // Exclude HP Tuners mislabels: Status/OL columns, actuator DC%, desired/commanded targets, vane.
+    // Ford "Boost Pressure A/B (SAE)" is manifold-side absolute (psia-like), not PSIG — use MAP−baro instead.
+    const skipFalseBoostGauge = (h: string) =>
+      /actuator/i.test(h) ||
+      /status/i.test(h) ||
+      /\bdesired\s+boost\b/i.test(h) ||
+      /\bcommanded\s+boost\b/i.test(h) ||
+      /\bboost\s+pressure\b.*\(sae\)/i.test(h) ||
+      (/vane/i.test(h) && /boost|turbo/i.test(h));
+    const exactKeys = [
+      'Boost/Vacuum',
+      'Boost (psi)',
+      'Boost Gauge',
+      'Boost Pressure',
+    ] as const;
+    for (const keyword of exactKeys) {
+      const idx = headers.findIndex((h) => h === keyword && !skipFalseBoostGauge(h));
+      if (idx !== -1) return idx;
+    }
+    const substringKeys = ['Boost/Vacuum', 'Boost (psi)', 'Boost Gauge', 'Boost Pressure'] as const;
+    for (const keyword of substringKeys) {
+      const idx = headers.findIndex(
+        (h) => h.includes(keyword) && !skipFalseBoostGauge(h),
+      );
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  })();
 
   // MAP absolute: used as fallback when no direct boost gauge channel exists
   // Prefer Hi-Res A/B channel, then standard SAE MAP.
@@ -817,7 +847,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const boostIdx = (() => {
     // Helper: check if a column index has at least one non-empty numeric value
     // in the first few data rows after the header.
-    const colHasData = (colIdx: number): boolean => {
+    const colHasData = (colIdx: number, requirePositiveSignal = false): boolean => {
       if (colIdx === -1) return false;
       // Find the first data row (skip units row / blanks)
       let sampleStart = headerIndex + 1;
@@ -825,25 +855,70 @@ function parseHPTunersCSV(content: string): DuramaxData {
         const fv = parseFloat(lines[s].split(',')[0]);
         if (!isNaN(fv)) { sampleStart = s; break; }
       }
-      // Check up to 5 data rows for a non-empty numeric value
-      for (let s = sampleStart; s < Math.min(sampleStart + 5, lines.length); s++) {
+      let maxSeen = -Infinity;
+      for (let s = sampleStart; s < Math.min(sampleStart + 40, lines.length); s++) {
         const cols = lines[s].split(',');
         if (colIdx < cols.length) {
           const val = cols[colIdx].trim();
-          if (val !== '' && !isNaN(parseFloat(val))) return true;
+          const v = parseFloat(val);
+          if (val !== '' && !isNaN(v)) maxSeen = Math.max(maxSeen, v);
         }
       }
-      return false;
+      if (maxSeen === -Infinity) return false;
+      // Hi-res MAP slots often read 0 when unused; skip so we fall back to "Manifold Absolute Pressure"
+      if (requirePositiveSignal && maxSeen <= 0) return false;
+      return true;
     };
 
+    // Ford / HP Tuners: primary MAP without "Intake" prefix — reliable when Hi-Res columns are zero-filled
+    const manifoldAbsIdx = headers.findIndex((h) => h === 'Manifold Absolute Pressure');
+    if (manifoldAbsIdx !== -1 && colHasData(manifoldAbsIdx)) return manifoldAbsIdx;
+
     const hiResA = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure A (SAE) (Hi Res)');
-    if (hiResA !== -1 && colHasData(hiResA)) return hiResA;
+    if (hiResA !== -1 && colHasData(hiResA, true)) return hiResA;
     // L5P logs use "B" variant for the high-resolution MAP channel
     const hiResB = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure B (SAE) (Hi Res)');
-    if (hiResB !== -1 && colHasData(hiResB)) return hiResB;
+    if (hiResB !== -1 && colHasData(hiResB, true)) return hiResB;
+    // Duplicate Hi-Res headers: pick the column with the strongest signal (2025 Powerstroke logs)
+    const hiResAllIdxs = headers
+      .map((h, i) => ({ h, i }))
+      .filter(
+        ({ h }) =>
+          h.includes('Intake Manifold Absolute Pressure') &&
+          h.includes('Hi Res') &&
+          !/exhaust/i.test(h),
+      )
+      .map(({ i }) => i);
+    if (hiResAllIdxs.length > 1) {
+      let bestI = -1;
+      let bestMax = -Infinity;
+      for (const i of hiResAllIdxs) {
+        let mx = -Infinity;
+        let sampleStart = headerIndex + 1;
+        for (let s = headerIndex + 1; s < Math.min(headerIndex + 6, lines.length); s++) {
+          const fv = parseFloat(lines[s].split(',')[0]);
+          if (!isNaN(fv)) {
+            sampleStart = s;
+            break;
+          }
+        }
+        for (let s = sampleStart; s < Math.min(sampleStart + 80, lines.length); s++) {
+          const cols = lines[s].split(',');
+          if (i < cols.length) {
+            const v = parseFloat(cols[i].trim());
+            if (!isNaN(v)) mx = Math.max(mx, v);
+          }
+        }
+        if (mx > bestMax) {
+          bestMax = mx;
+          bestI = i;
+        }
+      }
+      if (bestI !== -1 && bestMax > 0) return bestI;
+    }
     // Generic Hi-Res fallback (any variant letter)
     const hiResAny = headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') && h.includes('Hi Res'));
-    if (hiResAny !== -1 && colHasData(hiResAny)) return hiResAny;
+    if (hiResAny !== -1 && colHasData(hiResAny, true)) return hiResAny;
     const sae = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure (SAE)');
     if (sae !== -1) return sae;
     // IMPORTANT: Exclude exhaust-side pressure columns ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")

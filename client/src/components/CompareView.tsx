@@ -19,6 +19,8 @@ import { Streamdown } from 'streamdown';
 
 interface CompareViewProps {
   onBack: () => void;
+  /** When true, hides the back button and header (used when embedded inline in analyze view) */
+  embedded?: boolean;
 }
 
 interface LogSlot {
@@ -31,7 +33,7 @@ interface LogSlot {
 
 const emptySlot: LogSlot = { file: null, fileName: null, data: null, loading: false, error: null };
 
-export default function CompareView({ onBack }: CompareViewProps) {
+export default function CompareView({ onBack, embedded }: CompareViewProps) {
   const [logA, setLogA] = useState<LogSlot>({ ...emptySlot });
   const [logB, setLogB] = useState<LogSlot>({ ...emptySlot });
   const [report, setReport] = useState<ComparisonReport | null>(null);
@@ -116,49 +118,53 @@ export default function CompareView({ onBack }: CompareViewProps) {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={onBack}
-        style={{
-          background: 'transparent',
-          color: 'oklch(0.68 0.010 260)',
-          fontFamily: '"Bebas Neue", sans-serif',
-          fontSize: '0.9rem',
-          letterSpacing: '0.08em',
-          padding: '6px 0',
-          border: 'none',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          marginBottom: '1rem',
-          transition: 'color 0.15s',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.color = 'white')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
-      >
-        ← BACK TO ANALYZER
-      </button>
+      {/* Back button — hidden when embedded inline */}
+      {!embedded && (
+        <button
+          onClick={onBack}
+          style={{
+            background: 'transparent',
+            color: 'oklch(0.68 0.010 260)',
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.9rem',
+            letterSpacing: '0.08em',
+            padding: '6px 0',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginBottom: '1rem',
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'white')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
+        >
+          ← BACK TO ANALYZER
+        </button>
+      )}
 
-      {/* Header */}
-      <div className="text-center mb-6">
-        <h2 className="ppei-gradient-text" style={{
-          fontFamily: '"Bebas Neue", "Impact", sans-serif',
-          fontSize: '2.5rem',
-          letterSpacing: '0.1em',
-          marginBottom: '0.4rem'
-        }}>
-          DATALOG COMPARISON
-        </h2>
-        <p style={{
-          fontFamily: '"Rajdhani", sans-serif',
-          fontSize: '0.95rem',
-          color: 'oklch(0.68 0.010 260)',
-          letterSpacing: '0.03em'
-        }}>
-          Upload two datalogs to compare tune changes, tuner differences, or before/after modifications
-        </p>
-      </div>
+      {/* Header — hidden when embedded (parent provides section header) */}
+      {!embedded && (
+        <div className="text-center mb-6">
+          <h2 className="ppei-gradient-text" style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '2.5rem',
+            letterSpacing: '0.1em',
+            marginBottom: '0.4rem'
+          }}>
+            DATALOG COMPARISON
+          </h2>
+          <p style={{
+            fontFamily: '"Rajdhani", sans-serif',
+            fontSize: '0.95rem',
+            color: 'oklch(0.68 0.010 260)',
+            letterSpacing: '0.03em'
+          }}>
+            Upload two datalogs to compare tune changes, tuner differences, or before/after modifications
+          </p>
+        </div>
+      )}
 
       {/* Upload area — two side-by-side drop zones */}
       <div className="grid md:grid-cols-2 gap-4 mb-4">
@@ -476,7 +482,7 @@ function CompareCharts({ dataA, dataB, labelA, labelB }: {
   labelA: string;
   labelB: string;
 }) {
-  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm']);
+  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm', 'maf', 'hpTorque']);
   const [showPidPicker, setShowPidPicker] = useState(false);
 
   // Filter to PIDs that have data in at least one log

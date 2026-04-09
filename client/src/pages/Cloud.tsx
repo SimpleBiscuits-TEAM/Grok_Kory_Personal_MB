@@ -6,7 +6,7 @@
  * averages — no more guessing from forums. Fleets can benchmark against the crowd
  * and compare efficiency between fleets to make data-driven purchasing decisions.
  */
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
@@ -17,10 +17,11 @@ import {
   Loader2, Cloud, Truck, BarChart3, Activity, Database,
   Shield, Users, Fuel, Thermometer, Gauge, Zap, AlertTriangle,
   TrendingUp, TrendingDown, Minus, CheckCircle, XCircle,
-  ChevronDown, ChevronUp, Trophy, Globe, Building2, Car,
+  ChevronDown, ChevronUp, Trophy, Globe, Building2, Car, Package,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { normalizeVinKey, normalizeHardwareSerialKey } from '@shared/cloudVehicleLinkKeys';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", sans-serif',
@@ -211,6 +212,9 @@ function EnrollmentPanel() {
 
   const [form, setForm] = useState({
     vehicleYear: '', vehicleMake: '', vehicleModel: '', vehicleEngine: '',
+    vin: '',
+    programmerSerial: '',
+    ecuSerial: '',
     vehicleClass: 'stock', region: '', state: '',
     shareMpg: true, shareHealth: true, sharePerformance: true, shareDtcs: true,
   });
@@ -250,6 +254,13 @@ function EnrollmentPanel() {
                   <div style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, marginTop: 4 }}>
                     Type: {e.vehicleTypeKey} · Class: {e.vehicleClass ?? 'stock'}
                   </div>
+                  {(e.vin || e.programmerSerial || e.ecuSerial) && (
+                    <div style={{ fontFamily: sFont.mono, fontSize: 10, color: sColor.textDim, marginTop: 6, lineHeight: 1.5 }}>
+                      {e.vin ? <div>VIN (Tune Deploy link): {e.vin}</div> : null}
+                      {e.programmerSerial ? <div>Programmer S/N: {e.programmerSerial}</div> : null}
+                      {e.ecuSerial ? <div>ECU S/N: {e.ecuSerial}</div> : null}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                     {e.shareMpg && <Badge variant="outline" style={{ fontSize: 10, borderColor: sColor.green, color: sColor.green }}>MPG</Badge>}
                     {e.shareHealth && <Badge variant="outline" style={{ fontSize: 10, borderColor: sColor.cyan, color: sColor.cyan }}>HEALTH</Badge>}
@@ -295,6 +306,21 @@ function EnrollmentPanel() {
             <label style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, display: 'block', marginBottom: 4 }}>ENGINE</label>
             <Input value={form.vehicleEngine} onChange={e => setForm(f => ({ ...f, vehicleEngine: e.target.value }))}
               placeholder="6.6L Duramax L5P" style={{ fontFamily: sFont.mono, background: sColor.bg, borderColor: sColor.border }} />
+          </div>
+          <div>
+            <label style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, display: 'block', marginBottom: 4 }}>VIN (OPTIONAL)</label>
+            <Input value={form.vin} onChange={e => setForm(f => ({ ...f, vin: e.target.value.toUpperCase().replace(/\s/g, '').slice(0, 17) }))}
+              placeholder="Links Tune Deploy calibrations to this vehicle" style={{ fontFamily: sFont.mono, background: sColor.bg, borderColor: sColor.border }} />
+          </div>
+          <div>
+            <label style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, display: 'block', marginBottom: 4 }}>PROGRAMMER S/N (OPTIONAL)</label>
+            <Input value={form.programmerSerial} onChange={e => setForm(f => ({ ...f, programmerSerial: e.target.value }))}
+              placeholder="V-OP or PCAN serial — must match Tune Deploy device" style={{ fontFamily: sFont.mono, background: sColor.bg, borderColor: sColor.border }} />
+          </div>
+          <div>
+            <label style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, display: 'block', marginBottom: 4 }}>ECU S/N (OPTIONAL)</label>
+            <Input value={form.ecuSerial} onChange={e => setForm(f => ({ ...f, ecuSerial: e.target.value }))}
+              placeholder="ECU serial — must match Tune Deploy device when set" style={{ fontFamily: sFont.mono, background: sColor.bg, borderColor: sColor.border }} />
           </div>
           <div>
             <label style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, display: 'block', marginBottom: 4 }}>CLASS</label>
@@ -350,6 +376,9 @@ function EnrollmentPanel() {
             vehicleMake: form.vehicleMake,
             vehicleModel: form.vehicleModel,
             vehicleEngine: form.vehicleEngine || undefined,
+            vin: form.vin.trim() || undefined,
+            programmerSerial: form.programmerSerial.trim() || undefined,
+            ecuSerial: form.ecuSerial.trim() || undefined,
             vehicleClass: form.vehicleClass,
             state: form.state || undefined,
             shareMpg: form.shareMpg,
@@ -371,6 +400,7 @@ function EnrollmentPanel() {
 function VehicleComparison() {
   const { user } = useAuth();
   const enrollmentsQuery = trpc.cloud.getMyEnrollment.useQuery(undefined, { enabled: !!user });
+  const tuneDeploymentsQuery = trpc.cloud.getMyTuneDeployments.useQuery(undefined, { enabled: !!user });
   const enrollments = enrollmentsQuery.data ?? [];
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -380,6 +410,31 @@ function VehicleComparison() {
     { enabled: !!activeId }
   );
   const comparison = compareQuery.data;
+
+  const selectedEnrollment = enrollments.find((e) => e.id === activeId);
+  const allTuneDeps = tuneDeploymentsQuery.data?.deployments ?? [];
+  const enrollmentVin = normalizeVinKey(selectedEnrollment?.vin);
+  const enrollmentProg = normalizeHardwareSerialKey(selectedEnrollment?.programmerSerial ?? null);
+  const enrollmentEcu = normalizeHardwareSerialKey(selectedEnrollment?.ecuSerial ?? null);
+  const hasTuneLinkFilter =
+    enrollmentVin.length >= 11 || !!enrollmentProg || !!enrollmentEcu;
+  const filteredTuneDeps = !hasTuneLinkFilter
+    ? allTuneDeps
+    : allTuneDeps.filter((d) => {
+        let ok = false;
+        if (enrollmentVin.length >= 11) {
+          const dv = normalizeVinKey(d.deviceVin);
+          if (dv === enrollmentVin || dv.length < 11) ok = true;
+        }
+        if (enrollmentProg && normalizeHardwareSerialKey(d.deviceSerial) === enrollmentProg) ok = true;
+        if (
+          enrollmentEcu &&
+          d.deviceEcuSerial &&
+          normalizeHardwareSerialKey(d.deviceEcuSerial) === enrollmentEcu
+        )
+          ok = true;
+        return ok;
+      });
 
   if (!user) {
     return (
@@ -423,6 +478,84 @@ function VehicleComparison() {
           ))}
         </div>
       )}
+
+      {/* Tune Deploy — calibrations linked by account, VIN, programmer S/N, or ECU S/N */}
+      <div style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}`, borderRadius: 8, padding: 20 }}>
+        <h3 style={{ fontFamily: sFont.heading, fontSize: 18, color: '#fff', marginBottom: 8, letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Package style={{ width: 20, height: 20, color: sColor.amber }} />
+          TUNE DEPLOY — YOUR CALIBRATIONS
+        </h3>
+        <p style={{ fontFamily: sFont.body, fontSize: 12, color: sColor.textDim, marginBottom: 14, lineHeight: 1.45 }}>
+          Calibrations for devices you registered while signed in, or that match this enrollment’s VIN, programmer serial, or ECU serial.
+          {hasTuneLinkFilter
+            ? ' Showing rows that match any identifier you set on this enrollment (when VIN is set, devices without a VIN still appear).'
+            : ' Add a VIN, programmer S/N, and/or ECU S/N when you enroll to filter this list per vehicle.'}
+        </p>
+        {tuneDeploymentsQuery.isLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: sFont.mono, fontSize: 12, color: sColor.textDim }}>
+            <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} /> Loading…
+          </div>
+        ) : filteredTuneDeps.length === 0 ? (
+          <div style={{ fontFamily: sFont.body, fontSize: 13, color: sColor.textDim }}>
+            No Tune Deploy assignments yet for this view. Use Advanced → Flash → Tune Deploy to register your programmer and assign a calibration from the library.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {filteredTuneDeps.map((row) => (
+              <div
+                key={row.assignmentId}
+                style={{
+                  padding: 12,
+                  borderRadius: 6,
+                  background: 'oklch(0.12 0.005 260)',
+                  border: `1px solid ${sColor.border}`,
+                }}
+              >
+                <div style={{ fontFamily: sFont.body, fontSize: 14, color: '#fff', marginBottom: 4 }}>
+                  {row.calibrationFileName ?? `Calibration #${row.calibrationId}`}
+                </div>
+                <div style={{ fontFamily: sFont.mono, fontSize: 11, color: sColor.textDim, lineHeight: 1.5 }}>
+                  {[row.vehicleFamily, row.vehicleSubType].filter(Boolean).join(' · ')}
+                  {row.osVersion ? ` · OS ${row.osVersion}` : ''}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                  <Badge
+                    variant="outline"
+                    style={{
+                      fontFamily: sFont.mono,
+                      fontSize: 10,
+                      borderColor:
+                        row.status === 'deployed'
+                          ? sColor.green
+                          : row.status === 'failed'
+                            ? sColor.red
+                            : sColor.amber,
+                      color:
+                        row.status === 'deployed'
+                          ? sColor.green
+                          : row.status === 'failed'
+                            ? sColor.red
+                            : sColor.amber,
+                    }}
+                  >
+                    {row.status.toUpperCase()}
+                  </Badge>
+                  <span style={{ fontFamily: sFont.mono, fontSize: 10, color: sColor.textDim }}>
+                    Device: {row.deviceLabel || row.deviceSerial || `#${row.deviceId}`}
+                    {row.deviceVin ? ` · VIN ${row.deviceVin}` : ''}
+                    {row.deviceEcuSerial ? ` · ECU ${row.deviceEcuSerial}` : ''}
+                  </span>
+                </div>
+                {row.deployedAt && (
+                  <div style={{ fontFamily: sFont.mono, fontSize: 10, color: sColor.textDim, marginTop: 6 }}>
+                    Deployed {new Date(row.deployedAt).toLocaleString()}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Comparison Dashboard */}
       <div style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}`, borderRadius: 8, padding: 20 }}>

@@ -13,6 +13,13 @@ import { getSecurityProfile } from '../seedKeyService';
 import * as flashDb from '../flashDb';
 import { notifyOwner } from '../_core/notification';
 import crypto from 'crypto';
+import { eq, desc } from 'drizzle-orm';
+import { feedback } from '../../drizzle/schema';
+import { getDb, insertFeedback } from '../db';
+import {
+  FLASH_RECO_LEARNING_ERROR_TYPE,
+  type RecoLearningAggregate,
+} from '../../shared/flashLogRecommendations';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -659,4 +666,92 @@ export const flashRouter = router({
 
       return { success: true };
     }),
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FLASH EXPORT — RECOMMENDATION LEARNING (optional anonymous feedback)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  recoLearningSubmit: publicProcedure
+    .input(z.object({
+      patternKey: z.string().max(220),
+      helpful: z.boolean(),
+      fixApplied: z.string().max(2000).optional(),
+      sessionUuid: z.string().max(64).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const saved = await insertFeedback({
+        type: 'feedback',
+        message: JSON.stringify({
+          v: 1,
+          patternKey: input.patternKey,
+          helpful: input.helpful,
+          fixApplied: input.fixApplied?.trim() || undefined,
+          sessionUuid: input.sessionUuid,
+        }),
+        errorType: FLASH_RECO_LEARNING_ERROR_TYPE,
+        context: 'Flash export recommendation learning',
+      });
+      return { ok: saved };
+    }),
+
+  recoLearningAggregates: publicProcedure.query(async (): Promise<Record<string, RecoLearningAggregate>> => {
+    const db = await getDb();
+    if (!db) return {};
+    const rows = await db
+      .select({ message: feedback.message })
+      .from(feedback)
+      .where(eq(feedback.errorType, FLASH_RECO_LEARNING_ERROR_TYPE))
+      .orderBy(desc(feedback.createdAt))
+      .limit(800);
+
+    const buckets = new Map<string, { helpful: number; unhelpful: number; fixes: string[] }>();
+
+    for (const r of rows) {
+      try {
+        const j = JSON.parse(r.message) as {
+          patternKey?: string;
+          helpful?: boolean;
+          fixApplied?: string;
+        };
+        if (!j.patternKey) continue;
+        let b = buckets.get(j.patternKey);
+        if (!b) {
+          b = { helpful: 0, unhelpful: 0, fixes: [] };
+          buckets.set(j.patternKey, b);
+        }
+        if (j.helpful) b.helpful += 1;
+        else b.unhelpful += 1;
+        const fix = j.fixApplied?.trim();
+        if (fix) {
+          b.fixes.push(fix);
+          if (b.fixes.length > 40) b.fixes.splice(0, b.fixes.length - 40);
+        }
+      } catch {
+        /* skip malformed */
+      }
+    }
+
+    function topFixesFromList(fixes: string[], limit: number): string[] {
+      const counts = new Map<string, number>();
+      for (const raw of fixes) {
+        const f = raw.trim();
+        if (!f.length) continue;
+        counts.set(f, (counts.get(f) ?? 0) + 1);
+      }
+      return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([k]) => k);
+    }
+
+    const out: Record<string, RecoLearningAggregate> = {};
+    for (const [k, b] of buckets) {
+      out[k] = {
+        helpful: b.helpful,
+        unhelpful: b.unhelpful,
+        topFixes: topFixesFromList(b.fixes, 5),
+      };
+    }
+    return out;
+  }),
 });

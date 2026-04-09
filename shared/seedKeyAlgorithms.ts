@@ -179,3 +179,4 @@ export function hexToBytes(hex: string): Uint8Array {
 export function bytesToHex(bytes: Uint8Array, separator = ' '): string {
   return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(separator);
 }
+

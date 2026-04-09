@@ -5,6 +5,8 @@ import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import {
   cloudEnrollments, cloudVehicleSnapshots, cloudFleetAggregates,
 } from "../../drizzle/schema";
+import { listTuneDeploymentsForUser } from "../tuneDeployDb";
+import { normalizeHardwareSerialKey, normalizeVinKey } from "../../shared/cloudVehicleLinkKeys";
 
 // ── Helper: generate vehicleTypeKey from vehicle info ──────────────────────
 function makeVehicleTypeKey(year: number | null, make: string | null, model: string | null, engine: string | null): string {
@@ -42,6 +44,10 @@ export const cloudRouter = router({
   enroll: protectedProcedure.input(z.object({
     vehicleId: z.string().optional(),
     vin: z.string().max(17).optional(),
+    /** V-OP / PCAN serial — matches Tune Deploy device `serialNumber` for MY VEHICLE */
+    programmerSerial: z.string().max(128).optional(),
+    /** ECU serial — matches Tune Deploy device `ecuSerial` when set */
+    ecuSerial: z.string().max(128).optional(),
     vehicleYear: z.number().min(1900).max(2100).optional(),
     vehicleMake: z.string().optional(),
     vehicleModel: z.string().optional(),
@@ -63,10 +69,17 @@ export const cloudRouter = router({
       input.vehicleEngine ?? null,
     );
 
+    const vinStored =
+      input.vin?.trim() ? normalizeVinKey(input.vin).slice(0, 17) : null;
+    const programmerStored = normalizeHardwareSerialKey(input.programmerSerial);
+    const ecuStored = normalizeHardwareSerialKey(input.ecuSerial);
+
     const [result] = await db.insert(cloudEnrollments).values({
       userId: ctx.user.id,
       vehicleId: input.vehicleId,
-      vin: input.vin,
+      vin: vinStored,
+      programmerSerial: programmerStored,
+      ecuSerial: ecuStored,
       vehicleYear: input.vehicleYear,
       vehicleMake: input.vehicleMake,
       vehicleModel: input.vehicleModel,
@@ -91,13 +104,25 @@ export const cloudRouter = router({
     shareHealth: z.boolean().optional(),
     sharePerformance: z.boolean().optional(),
     shareDtcs: z.boolean().optional(),
+    vin: z.string().max(17).optional(),
+    programmerSerial: z.string().max(128).optional(),
+    ecuSerial: z.string().max(128).optional(),
   })).mutation(async ({ ctx, input }) => {
     const db = (await getDb())!;
-    const updates: Record<string, boolean> = {};
+    const updates: Record<string, unknown> = {};
     if (input.shareMpg !== undefined) updates.shareMpg = input.shareMpg;
     if (input.shareHealth !== undefined) updates.shareHealth = input.shareHealth;
     if (input.sharePerformance !== undefined) updates.sharePerformance = input.sharePerformance;
     if (input.shareDtcs !== undefined) updates.shareDtcs = input.shareDtcs;
+    if (input.vin !== undefined) {
+      updates.vin = input.vin.trim() ? normalizeVinKey(input.vin).slice(0, 17) : null;
+    }
+    if (input.programmerSerial !== undefined) {
+      updates.programmerSerial = normalizeHardwareSerialKey(input.programmerSerial) ?? null;
+    }
+    if (input.ecuSerial !== undefined) {
+      updates.ecuSerial = normalizeHardwareSerialKey(input.ecuSerial) ?? null;
+    }
 
     await db.update(cloudEnrollments)
       .set(updates)
@@ -114,6 +139,16 @@ export const cloudRouter = router({
       .set({ isActive: false, unenrolledAt: new Date() })
       .where(and(eq(cloudEnrollments.id, input.enrollmentId), eq(cloudEnrollments.userId, ctx.user.id)));
     return { success: true };
+  }),
+
+  /**
+   * Tune Deploy calibrations assigned to this user's hardware (device owner, or cloud enrollment
+   * match on VIN / programmer serial / ECU serial). Shown on Cloud → MY VEHICLE.
+   * TODO: Customer sign-in / intake form can populate the same enrollment identifiers without using this Cloud tab.
+   */
+  getMyTuneDeployments: protectedProcedure.query(async ({ ctx }) => {
+    const deployments = await listTuneDeploymentsForUser(ctx.user.id);
+    return { deployments };
   }),
 
   // ── Data Submission ────────────────────────────────────────────────────────
