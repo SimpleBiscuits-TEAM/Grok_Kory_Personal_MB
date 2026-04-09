@@ -129,6 +129,82 @@ describe('Ford Powerstroke Exhaust MAP vs Boost', () => {
       const data = parseCSV(csv);
       expect(data.boostSource).toBe('map_derived');
     });
+
+    it('2025 Powerstroke-style: use Manifold Absolute Pressure when Status/Hi-Res are non-boost', () => {
+      const headers = [
+        'Offset',
+        'Manifold Absolute Pressure',
+        'Mass Airflow',
+        'Engine RPM',
+        'Boost Pressure B Status (SAE)',
+        'Intake Manifold Absolute Pressure B (SAE) (Hi Res)',
+        'Mass Airflow (SAE)',
+        'Actual Engine Torque (SAE)',
+        'Barometric Pressure',
+        'Engine Coolant Temp',
+      ];
+      const lines = [headers.join(',')];
+      for (let i = 0; i < 20; i++) {
+        lines.push(
+          [
+            (i * 0.5).toFixed(3),
+            '14.65',
+            '3.2',
+            '600',
+            '0',
+            '0',
+            '3.2',
+            '40',
+            '14.36',
+            '190',
+          ].join(','),
+        );
+      }
+      lines.push(
+        ['10.0', '22.5', '24', '2800', '0', '0', '24', '85', '14.36', '180'].join(','),
+      );
+      const data = parseCSV(lines.join('\n'));
+      expect(Math.max(...data.boost)).toBeGreaterThan(5);
+      expect(data.boostSource).toBe('map_derived');
+    });
+
+    it('should NOT use HP Tuners "Boost Pressure Actuator Pressure" as PSIG boost (use intake MAP)', () => {
+      const headers = [
+        'Offset',
+        'Engine RPM (SAE)',
+        'Mass Airflow (SAE)',
+        'Actual Engine Torque (SAE)',
+        'Boost Pressure Actuator Pressure (SAE)',
+        'Intake Manifold Absolute Pressure (SAE)',
+        'Vehicle Speed (SAE)',
+        'Barometric Pressure (SAE)',
+        'Engine Coolant Temp (SAE)',
+      ];
+      const lines = [headers.join(',')];
+      for (let i = 0; i < 20; i++) {
+        const rpm = 800 + i * 100;
+        const intakeMapPsia = 14.7 + i * 1.5;
+        const actuatorMislabeledPsi = 65 + i;
+        lines.push(
+          [
+            (i * 0.5).toFixed(3),
+            rpm.toString(),
+            (20 + i * 3).toString(),
+            '40',
+            actuatorMislabeledPsi.toString(),
+            intakeMapPsia.toFixed(1),
+            '30',
+            '14.7',
+            '190',
+          ].join(','),
+        );
+      }
+      const data = parseCSV(lines.join('\n'));
+      const maxBoost = Math.max(...data.boost);
+      expect(maxBoost).toBeLessThan(40);
+      expect(maxBoost).toBeGreaterThan(5);
+      expect(data.boostSource).toBe('map_derived');
+    });
   });
 
   describe('pidSubstitution.ts - resolvePids', () => {
@@ -175,6 +251,32 @@ describe('Ford Powerstroke Exhaust MAP vs Boost', () => {
       const maxBoost = Math.max(...result.channels['boost']);
       expect(maxBoost).toBeGreaterThan(5);   // Real boost from intake MAP
       expect(maxBoost).toBeLessThan(35);     // Not exhaust backpressure
+    });
+
+    it('should NOT treat "Boost Pressure Actuator Pressure" as direct boost PID', () => {
+      const headers = [
+        'Engine RPM',
+        'Mass Air Flow',
+        'Boost Pressure Actuator Pressure',
+        'Intake Manifold Absolute Pressure',
+        'Barometric Pressure',
+      ];
+      const rows: number[][] = [];
+      for (let i = 0; i < 20; i++) {
+        rows.push([
+          800 + i * 100,
+          20 + i * 3,
+          75 + i,
+          14.7 + i * 1.5,
+          14.7,
+        ]);
+      }
+      const rpm = rows.map((r) => r[0]);
+      const offsets = rows.map((_, i) => i * 0.5);
+      const result = resolvePids(headers, rows, rpm, offsets, 'hptuners');
+      const maxBoost = Math.max(...result.channels['boost']);
+      expect(maxBoost).toBeLessThan(35);
+      expect(maxBoost).toBeGreaterThan(5);
     });
   });
 });

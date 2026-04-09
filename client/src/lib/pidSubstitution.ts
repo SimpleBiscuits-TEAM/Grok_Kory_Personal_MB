@@ -106,7 +106,17 @@ export function resolvePids(
   // ─── Boost Pressure ──────────────────────────────────────────────────────
   // Priority: direct gauge PID → MAP absolute (subtract idle baseline) → zero
   {
-    const directIdx = find(['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M']);
+    const skipFalseBoostGauge = (h: string) =>
+      /actuator/i.test(h) ||
+      /status/i.test(h) ||
+      /\bdesired\s+boost\b/i.test(h) ||
+      /\bcommanded\s+boost\b/i.test(h) ||
+      /\bboost\s+pressure\b.*\(sae\)/i.test(h) ||
+      (/vane/i.test(h) && /boost|turbo/i.test(h));
+    const directIdx = find(
+      ['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M'],
+      skipFalseBoostGauge,
+    );
     // IMPORTANT: Exclude exhaust-side headers ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")
     // which are backpressure, NOT intake boost.
     const isExhaust = (h: string) => /exhaust/i.test(h);
