@@ -139,15 +139,19 @@ export function parseCanSniffCsv(text: string): { frames: ParsedSniffFrame[]; sk
 
 const GM_ECM_TX = 0x7e0;
 const GM_ECM_RX = 0x7e8;
-const GM_TCM_TX = 0x7e1;
-const GM_TCM_RX = 0x7e9;
+// Legacy TCM address (GMT900/K2XX, Allison/6L80)
+const GM_TCM_TX_LEGACY = 0x7e1;
+const GM_TCM_RX_LEGACY = 0x7e9;
+// Global B TCM address (2019+ T87/T93 10-speed, verified via BUSMASTER sniff)
+const GM_TCM_TX_GLOBALB = 0x7e2;
+const GM_TCM_RX_GLOBALB = 0x7ea;
 const OBD_FUNC = 0x7df;
 
 function isEcuRxId(id: number): boolean {
-  return id === GM_ECM_RX || id === GM_TCM_RX;
+  return id === GM_ECM_RX || id === GM_TCM_RX_LEGACY || id === GM_TCM_RX_GLOBALB;
 }
 function isEcuTxId(id: number): boolean {
-  return id === GM_ECM_TX || id === GM_TCM_TX || id === OBD_FUNC;
+  return id === GM_ECM_TX || id === GM_TCM_TX_LEGACY || id === GM_TCM_TX_GLOBALB || id === OBD_FUNC;
 }
 
 function decodeMode01FromResponse(data: number[], lineIndex: number, timeMs: number, canId: number): DiagEvent | null {
@@ -293,7 +297,7 @@ export function correlatePeriodicWithDiagResponses(
   const windowMs = opts?.windowMs ?? 100;
   const exclude =
     opts?.excludeIds ??
-    new Set([GM_ECM_TX, GM_ECM_RX, GM_TCM_TX, GM_TCM_RX, OBD_FUNC, 0x101]);
+    new Set([GM_ECM_TX, GM_ECM_RX, GM_TCM_TX_LEGACY, GM_TCM_RX_LEGACY, GM_TCM_TX_GLOBALB, GM_TCM_RX_GLOBALB, OBD_FUNC, 0x101]);
 
   const responses = diagEvents.filter(
     (e) => e.kind === 'mode01_response' || e.kind === 'uds22_response'
@@ -363,7 +367,7 @@ export function inferFromCanSniffCsv(
   opts?: { windowMs?: number; excludeIds?: Set<number> }
 ): SniffInferenceReport {
   const notes: string[] = [
-    'Assumes ISO-TP **single-frame** OBD on 7E0/7E8 (and 7E1/7E9). Multi-frame VIN / long $22 not reassembled here.',
+    'Assumes ISO-TP **single-frame** OBD on 7E0/7E8, 7E1/7E9 (legacy TCM), and 7E2/7EA (Global B TCM). Multi-frame VIN / long $22 not reassembled here.',
     'Periodic correlation uses raw byte equality in a time window — verify with A2L/DBC before treating as ground truth.',
   ];
   const { frames, skipped } = parseCanSniffCsv(text);

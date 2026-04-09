@@ -592,36 +592,67 @@ export const PID_PRESETS: PIDPreset[] = [
     pids: [0x0C, 0x10, 0x0E, 0x14, 0x06, 0x07, 0x04],
   },
   {
-    name: 'GM E90 / L87 6.2L Gas Truck',
+    name: 'GM E90 / L87 6.2L Gas Truck (Core)',
     description:
-      'Silverado/Sierra 6.2L (E90): Mode 01 core channels aligned with typical EFI Live ECM/TCM columns, ' +
-      'plus GM Mode 22 oil/trans DIDs (7E0/7E1). Raw PT CAN frame IDs from field sniffs live in gmE90SilveradoSniffReference.',
+      'Silverado/Sierra 6.2L (E90) core channels: RPM, MAF, MAP, Spark, FRP, Torque, Oil, Trans. ' +
+      'All PIDs via UDS $22 — verified against BUSMASTER passive sniff + EFI Live V8 CSV. ' +
+      'TCM on 7E2/7EA (NOT 7E1). See gmE90SilveradoSniffReference for PT-CAN frame IDs.',
     pids: [
+      // ── ECM core (Mode 01 standard PIDs) ──
       0x0C, // RPM
       0x0D, // VSS
-      0x04, // LOAD
+      0x04, // LOAD_PCT
       0x05, // ECT
       0x0B, // MAP
       0x0E, // SPARKADV
       0x0F, // IAT
       0x10, // MAF
-      0x11, // TPS
-      0x23, // FRP (GDI gauge, kPa)
-      0x42, // VPWR
+      0x11, // TP
+      0x23, // FRP_C (GDI fuel rail pressure)
       0x46, // AAT
-      0x47, // TPS_B
+      0x47, // TP_B
       0x49, // APP_D
-      0x4C, // TAC (commanded throttle actuator)
+      0x4A, // APP
+      0x4C, // TAC_PCT
       0x06, // STFT B1
       0x07, // LTFT B1
-      0x05A0, // TFT (Mode 22 TCM)
-      0x05A1, // TCC slip
-      0x05A2, // TCC commanded pressure
-      0x05A3, // Trans output speed
-      0x05A4, // Trans input speed
-      0x05B0, // EOT (Mode 22 ECM)
-      0x05B1, // EOP
-      0x05B2, // Oil life %
+      // ── ECM extended (GM-specific UDS $22 DIDs) ──
+      0x119C, // ENGOILP — Engine Oil Pressure
+      0x131F, // FRPDI — Fuel Rail Pressure Desired
+      0x1470, // MAPU — MAP Unfiltered
+      0x2012, // TCDBPR — TC Desired Boost Pressure
+      0x208A, // TTQRET — Trans Torque Reduction Spark Retard
+      0x328A, // AFMIR2 — AFM Inhibit Reason 2
+      // ── TCM core (T93 10L80/10L90 via 7E2→7EA) ──
+      0x1940, // TFT_T93 — Trans Fluid Temp
+      0x1941, // TIS_T93 — Trans Input Speed
+      0x1942, // TOS_T93 — Trans Output Speed
+      0x194C, // TCCSLIP_T93 — TCC Slip
+      0x194F, // TCCP_T93 — TCC Commanded Pressure
+      0x1124, // GEAR_T93 — Current Gear
+      0x197E, // TURBINE_T93 — Turbine Speed
+    ],
+  },
+  {
+    name: 'GM E90 / L87 6.2L Gas Truck (Full EFI Live)',
+    description:
+      'Complete EFI Live V8 channel set: 30 ECM + 58 TCM DIDs (88 total). ' +
+      'Matches exact polling order from BUSMASTER sniff. Heavy bus load — use for bench/dyno only.',
+    pids: [
+      // ── ECM (30 DIDs on 7E0) ──
+      0x0C, 0x0D, 0x04, 0x05, 0x0B, 0x0E, 0x0F, 0x10, 0x11, 0x23,
+      0x45, 0x46, 0x47, 0x49, 0x4A, 0x4C, 0x5C, 0x61, 0x62, 0x63,
+      0x119C, 0x12DA, 0x131F, 0x1470, 0x2012, 0x204D, 0x208A, 0x248B, 0x308A, 0x328A,
+      // ── TCM (58 DIDs on 7E2) ──
+      0x1940, 0x1941, 0x1942, 0x194C, 0x194F, 0x195B, 0x195D, 0x1124, 0x197E, 0x1991,
+      0x1141, 0x1992, 0x1993, 0x1994, 0x1995, 0x199A, 0x19A1, 0x19D4,
+      0x1232, 0x1233, 0x1234, 0x1235, 0x1236, 0x1237,
+      0x2809, 0x280A, 0x280C, 0x280F, 0x2810, 0x2811,
+      0x2812, 0x2813, 0x2814, 0x2815, 0x2816, 0x2817,
+      0x2818, 0x2819, 0x281A,
+      0x281B, 0x281C, 0x2820, 0x2821, 0x2822, 0x2823, 0x2824,
+      0x1A01, 0x1A18, 0x1A1F, 0x1A26, 0x1A2D, 0x1A88,
+      0x2804, 0x2805, 0x2806, 0x321B, 0x1238, 0x1239,
     ],
   },
   {
@@ -1109,6 +1140,434 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // GM E90 / Global B Gas Truck — ECM Extended DIDs (UDS $22 on 7E0→7E8)
+  // Verified against BUSMASTER passive sniff + EFI Live V8 CSV export
+  // 2021 Sierra/Silverado 6.2L L87 — E90 ECM, T93 TCM
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── ECM: Standard J1979 PIDs accessed via UDS $22 (not Mode 01) ──
+  // Note: On Global B / E90, EFI Live requests ALL PIDs via service $22.
+  // The DID numbers match Mode 01 PIDs but are requested as UDS ReadDataByIdentifier.
+  // Standard Mode 01 also works for these, but $22 is the EFI Live convention.
+  // The following GM-specific ECM DIDs have NO Mode 01 equivalent:
+  {
+    pid: 0x119C, name: 'Engine Oil Pressure (E90)', shortName: 'ENGOILP',
+    unit: 'psi', min: 0, max: 150, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.0145038,  // kPa * 0.145038 / 10
+  },
+  {
+    pid: 0x12DA, name: 'MAF Raw Frequency', shortName: 'MAFFREQ2',
+    unit: 'Hz', min: 0, max: 12000, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x131F, name: 'Fuel Rail Pressure Desired', shortName: 'FRPDI',
+    unit: 'psi', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038,  // kPa to psi
+  },
+  {
+    pid: 0x1470, name: 'MAP Unfiltered (Upstream)', shortName: 'MAPU',
+    unit: 'psi', min: 0, max: 50, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,  // Pa to psi
+  },
+  {
+    pid: 0x2012, name: 'TC Desired Boost Pressure', shortName: 'TCDBPR',
+    unit: 'psi', min: 0, max: 40, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,  // Pa to psi
+  },
+  {
+    pid: 0x204D, name: 'Accelerator Pedal Position E', shortName: 'APP_E',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+  },
+  {
+    pid: 0x208A, name: 'Trans Torque Reduction Spark Retard', shortName: 'TTQRET',
+    unit: '°', min: -60, max: 60, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
+  },
+  {
+    pid: 0x248B, name: 'Relative Throttle Position', shortName: 'TP_R',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+  },
+  {
+    pid: 0x308A, name: 'TC Torque Reduction Limiter Reason', shortName: 'TCTQRLR',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // bitfield
+  },
+  {
+    pid: 0x328A, name: 'AFM Inhibit Reason 2', shortName: 'AFMIR2',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // bitfield
+  },
+  // ── TCM: E90 / T93 10-speed (10L80/10L90) via 7E2→7EA ──
+  // CRITICAL: On 2019+ GM Global B trucks, the TCM responds on 7E2/7EA, NOT 7E1/7E9.
+  // 7E1/7E9 is the Allison/6L80 address used on older GMT900/K2XX platforms.
+  // Verified via BUSMASTER passive sniff: 88 frames on 7E2, 85 responses on 7EA.
+  {
+    pid: 0x1940, name: 'Transmission Fluid Temperature (T93)', shortName: 'TFT_T93',
+    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01 - 40,
+  },
+  {
+    pid: 0x1941, name: 'Transmission Input Speed (T93)', shortName: 'TIS_T93',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x1942, name: 'Transmission Output Speed (T93)', shortName: 'TOS_T93',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x194C, name: 'TCC Slip (T93)', shortName: 'TCCSLIP_T93',
+    unit: 'rpm', min: -5000, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768),
+  },
+  {
+    pid: 0x194F, name: 'TCC Commanded Pressure (T93)', shortName: 'TCCP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x195B, name: 'Transmission Clutch Slip (T93)', shortName: 'TCSLIP_T93',
+    unit: 'rpm', min: -5000, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768),
+  },
+  {
+    pid: 0x195D, name: 'TCC Slip Error (T93)', shortName: 'TCCSERR_T93',
+    unit: 'rpm', min: -5000, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768),
+  },
+  {
+    pid: 0x1124, name: 'Current Gear (T93)', shortName: 'GEAR_T93',
+    unit: '', min: 0, max: 10, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x197E, name: 'Turbine Speed (T93)', shortName: 'TURBINE_T93',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x1991, name: 'Battery Voltage (TCM)', shortName: 'VOLTS_TCM',
+    unit: 'V', min: 0, max: 20, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1141, name: 'PRNDL Position (T93)', shortName: 'PRNDL_T93',
+    unit: '', min: 0, max: 15, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x1992, name: 'Diagnostic Transmission Ratio', shortName: 'DTRATIO_T93',
+    unit: ':1', min: 0, max: 20, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1993, name: 'Transfer Case Ratio', shortName: 'TCRATIO_T93',
+    unit: ':1', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1994, name: 'Gear Box Ratio', shortName: 'BOXRATIO_T93',
+    unit: ':1', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1995, name: 'Modeled Gear Ratio', shortName: 'MGRATIO_T93',
+    unit: ':1', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x199A, name: 'Engine Torque Commanded (TCM)', shortName: 'TRQENG_T93',
+    unit: 'Nm', min: -1000, max: 2000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    pid: 0x19A1, name: 'TC Speed Ratio', shortName: 'TCSR_T93',
+    unit: ':1', min: 0, max: 5, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x19D4, name: 'TCC Reference Slip', shortName: 'TCCRS_T93',
+    unit: 'rpm', min: -2000, max: 2000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768),
+  },
+  // ── TCM Shift Timing ──
+  {
+    pid: 0x1232, name: '1-2 Shift Time', shortName: 'SHIFT12_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1233, name: '2-3 Shift Time', shortName: 'SHIFT23_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1234, name: '3-4 Shift Time', shortName: 'SHIFT34_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1235, name: '4-5 Shift Time', shortName: 'SHIFT45_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1236, name: '5-6 Shift Time', shortName: 'SHIFT56_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x1237, name: 'Last Shift Time', shortName: 'SHIFTLAST_T93',
+    unit: 's', min: 0, max: 10, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  // ── TCM Solenoid Pressure Control ──
+  {
+    pid: 0x2809, name: 'PCS1 Commanded Pressure', shortName: 'PCS1CP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x280A, name: 'PCS2 Commanded Pressure', shortName: 'PCS2CP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x280C, name: 'PCS3 Commanded Pressure', shortName: 'PCS3CP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x280F, name: 'PCS4 Commanded Pressure', shortName: 'PCS4CP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x2810, name: 'PCS5 Commanded Pressure', shortName: 'PCS5CP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x2811, name: 'TCC PCS Commanded Pressure', shortName: 'TCCPCSCP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  // ── TCM Solenoid On-State ──
+  {
+    pid: 0x2812, name: 'PCS1 Output Status', shortName: 'PCS1OS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2813, name: 'PCS2 Output Status', shortName: 'PCS2OS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2814, name: 'PCS3 Output Status', shortName: 'PCS3OS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2815, name: 'PCS4 Output Status', shortName: 'PCS4OS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2816, name: 'PCS5 Output Status', shortName: 'PCS5OS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2817, name: 'TCC PCS Output Status', shortName: 'TCCPCSOS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  // ── TCM Current Control ──
+  {
+    pid: 0x2818, name: 'HSD1 Current Control', shortName: 'HSD1CC_T93',
+    unit: 'mA', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x2819, name: 'HSD2 Current Control', shortName: 'HSD2CC_T93',
+    unit: 'mA', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    pid: 0x281A, name: 'TCCE Current Control', shortName: 'TCCECC_T93',
+    unit: 'mA', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  // ── TCM Status / Control ──
+  {
+    pid: 0x281B, name: 'TCC Status', shortName: 'TCCS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x281C, name: 'Brake Pedal Status (TCM)', shortName: 'BRKR_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2820, name: 'Transmission Base Pattern', shortName: 'TBASEPAT_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2821, name: 'Accelerator Effective Position (TCM)', shortName: 'ACCEP_T93',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+  },
+  {
+    pid: 0x2822, name: 'Primary Oncoming Clutch', shortName: 'TPOC_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2823, name: 'Full Feed Fill Pressure', shortName: 'TFFFP_T93',
+    unit: 'kPa', min: 0, max: 3000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x2824, name: 'TISS/TOSS Regulated Voltage Supply Status', shortName: 'TRVSS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  // ── TCM Diagnostics ──
+  {
+    pid: 0x1A01, name: 'Tap Up/Down State', shortName: 'TUDSTATE_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1A18, name: 'Warmup Cycles Without Emissions Fault', shortName: 'WUEMPASS_T93',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x1A1F, name: 'Warmup Cycles Without Non-Emissions Fault', shortName: 'WUPASS_T93',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x1A26, name: 'Odometer Since Codes Cleared', shortName: 'ODOCLR_T93',
+    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1A2D, name: 'Mileage Since Last Code Cleared', shortName: 'ODOFIRST_T93',
+    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1A88, name: 'Odometer When Last Code Set Cleared', shortName: 'ODOLAST_T93',
+    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x2804, name: 'Freeze Frame Counter (TCM)', shortName: 'FFCOUNT_T93',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x2805, name: 'Freeze Frame Pass Counter (TCM)', shortName: 'FFPASS_T93',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x2806, name: 'Freeze Frame Not Run Counter (TCM)', shortName: 'FFNOTRUN_T93',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x321B, name: 'Service Fast Learn Status', shortName: 'FASTLRN_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1238, name: 'Transmission Cleaning Procedure Status', shortName: 'TCPS_T93',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x1239, name: 'Distance Travelled This Cycle', shortName: 'DISTTRV_T93',
+    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
+    formula: ([a, b]) => (a * 256) + b,
   },
 ];
 

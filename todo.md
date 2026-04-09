@@ -1070,3 +1070,14 @@
 - [x] Train Knox on: rail surge patterns, mA command differences between tune versions, fuel error fault detection
 - [ ] Update advanced analyzer to detect rapid actual vs desired rail surges as fuel error faults
 - [ ] Update advanced analyzer to catch mA command differences when comparing two logs
+
+## E90 Gas Truck PID Verification & Integration
+- [x] Update Knox knowledge base with verified E90 PID-to-DID mappings (30 ECM + 58 TCM)
+- [x] Add all 10 missing GM-specific ECM DIDs to obdConnection.ts GM_EXTENDED_PIDS
+- [x] Add all 58 TCM DIDs to obdConnection.ts (currently only 5 TCM PIDs exist)
+- [x] Fix E90 preset: TCM uses 7E2→7EA (not 7E1→7E9)
+- [x] Update E90 preset to include all 88 PIDs (30 ECM + 58 TCM)
+- [x] Update gmE90SilveradoSniffReference.ts with verified DID mappings and EFI Live names
+- [x] Update canSniffObdInference.ts to handle 7E2/7EA TCM traffic
+- [x] Write vitest tests for new E90 PID definitions (46 tests across 2 test files, all passing)
+- [x] Verify datalogger correctly selects E90 PIDs when connecting to GM gas truck (Core + Full EFI Live presets verified)

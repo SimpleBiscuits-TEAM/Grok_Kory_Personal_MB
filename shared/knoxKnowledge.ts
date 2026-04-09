@@ -1157,7 +1157,7 @@ When analyzing datalogs and the MAF readings appear lower than expected for the 
 ### How Knox and agents should reason for **GM gas** (e.g. Gen V LT, Global B, E90 ECM, T93 TCM)
 1. **Prioritize SAE J1979 Mode 01** semantics: trims (STFT/LTFT), O2 or equivalency ratio, spark timing / knock, MAP, MAF, IAT/ECT, catalyst and misfire-related PIDs when logged, EVAP where relevant.
 2. **High-pressure fuel (GDI)**: Mode 01 **0x23** (fuel rail gauge pressure) may appear; do **not** frame it as CP3/CP4 common-rail diesel diagnostics unless the user confirmed diesel.
-3. **Transmission**: On many Global B trucks, extended trans data uses **UDS on 7E1** (GM Mode 22 DIDs such as TFT, TCC slip) — align explanations with EFI Live **TCM.*** or Banks-style naming when present.
+3. **Transmission**: On 2019+ Global B trucks (E90/T93), the TCM responds on **7E2/7EA** (NOT 7E1/7E9). 7E1/7E9 is the Allison/6L80 address used on older GMT900/K2XX platforms. The T93 10-speed (10L80/10L90) uses GM Mode 22 DIDs for TFT, TCC slip, gear, turbine speed, shift timing, solenoid pressure control, and clutch diagnostics — align explanations with EFI Live **TCM.*** naming when present.
 4. **Boosted gas (e.g. turbo V6/V8)**: Use **MAP + MAF + load + spark/knock** together; avoid **diesel smoke-limiter / MAF-vs-boost leak** narratives unless the log clearly shows turbocharged operation and the question is charge-air related.
 5. **Exhaust temperature**: If a gas truck logs an EGT-like channel, **do not assume diesel pyro limits (e.g. 1300°F sustained)** without knowing sensor location and OEM intent — gasoline turbo exhaust can read differently than Duramax towing pyro.
 
@@ -1173,5 +1173,70 @@ Do **not** treat **Duramax forum defaults** as authoritative for a **6.2L L87 / 
 
 ### Calibration image reference (offline, not used by live datalogger)
 - Example field package: **E90** ECM segments (OS **12716900**), **T93** TCM (**24044027** / **24054706**) — for editor/calibration tooling only; live scanning remains **ISO-TP OBD/UDS**, not bin parsing.
-- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **`E90-` / `T93-`** names) under `tune-deploy/GM/…` with metadata from `tuneDeployParser`; see repo **`gmE90SilveradoSniffReference`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
+- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **\`E90-\` / \`T93-\`** names) under \`tune-deploy/GM/…\` with metadata from \`tuneDeployParser\`; see repo **\`gmE90SilveradoSniffReference\`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
+
+### Verified E90 ECM DID Inventory (from BUSMASTER passive sniff + EFI Live V8 CSV)
+EFI Live V8 requests ALL PIDs via UDS \$22 (service 0x22), even standard J1979 PIDs. The DID numbers match Mode 01 PIDs but are requested as UDS ReadDataByIdentifier. Standard Mode 01 also works.
+
+**20 Standard J1979 PIDs (via \$22 on 7E0):**
+- 0x0004 ECM.LOAD_PCT (Calculated Load Value, %)
+- 0x0005 ECM.ECT (Engine Coolant Temperature)
+- 0x000B ECM.MAP (Manifold Absolute Pressure)
+- 0x000C ECM.RPM (Engine RPM)
+- 0x000D ECM.VSS (Vehicle Speed)
+- 0x000E ECM.SPARKADV (Ignition Timing Advance)
+- 0x000F ECM.IAT (Intake Air Temperature)
+- 0x0010 ECM.MAF (Mass Air Flow, g/s)
+- 0x0011 ECM.TP (Throttle Position)
+- 0x0023 ECM.FRP_C (Fuel Rail Pressure, GDI)
+- 0x0045 ECM.TTQRL (Relative Throttle Position)
+- 0x0046 ECM.AAT (Ambient Air Temperature)
+- 0x0047 ECM.TP_B (Absolute Throttle Position B)
+- 0x0049 ECM.APP_D (Accelerator Pedal Position D)
+- 0x004A ECM.APP (Accelerator Pedal Position)
+- 0x004C ECM.TAC_PCT (Commanded Throttle Actuator, %)
+- 0x005C ECM.EOT_B (Engine Oil Temperature)
+- 0x0061 ECM.TQ_DD (Engine Torque Demand, %)
+- 0x0062 ECM.TQ_ACT (Actual Engine Torque, %)
+- 0x0063 ECM.TQ_REF (Engine Reference Torque, Nm)
+
+**10 GM-Specific Extended DIDs (via \$22 on 7E0, no Mode 01 equivalent):**
+- 0x119C ECM.ENGOILP (Engine Oil Pressure, psi)
+- 0x12DA ECM.MAFFREQ2 (MAF Raw Frequency, Hz)
+- 0x131F ECM.FRPDI (Fuel Rail Pressure Desired, psi)
+- 0x1470 ECM.MAPU (MAP Unfiltered/Upstream, psi)
+- 0x2012 ECM.TCDBPR (TC Desired Boost Pressure, psi)
+- 0x204D ECM.APP_E (Accelerator Pedal Position Effective, %)
+- 0x208A ECM.TTQRET (Trans Torque Reduction Spark Retard, degrees)
+- 0x248B ECM.TP_R (Relative Throttle Position, %)
+- 0x308A ECM.TCTQRLR (TC Torque Reduction Limiter Reason, bitfield)
+- 0x328A ECM.AFMIR2 (AFM Inhibit Reason 2, bitfield)
+
+### Verified T93 TCM DID Inventory (58 DIDs on 7E2/7EA)
+**Core transmission channels:**
+- 0x1940 TCM.TFT (Trans Fluid Temp), 0x1941 TCM.TISS (Input Speed), 0x1942 TCM.TOSS (Output Speed)
+- 0x194C TCM.TCCSLIP (TCC Slip), 0x194F TCM.TCCP (TCC Commanded Pressure)
+- 0x1124 TCM.GEAR (Current Gear), 0x197E TCM.TURBINE (Turbine Speed)
+- 0x1991 TCM.VOLTS (Battery Voltage), 0x1141 TCM.PRNDL (PRNDL Position)
+- 0x1992-0x1995 Gear ratios (diagnostic, TC, gearbox, modeled)
+- 0x199A TCM.TRQENG (Engine Torque Commanded by TCM)
+- 0x19A1 TCM.TCSR (TC Speed Ratio), 0x19D4 TCM.TCCRS (TCC Reference Slip)
+
+**Shift timing:** 0x1232-0x1237 (1-2, 2-3, 3-4, 4-5, 5-6, last shift times in seconds)
+
+**Solenoid pressure control:** 0x2809-0x2811 (PCS1-PCS5 + TCC PCS commanded pressures, kPa)
+
+**Solenoid on-state:** 0x2812-0x2817 (PCS1-PCS5 + TCC PCS output status)
+
+**Current control:** 0x2818-0x281A (HSD1, HSD2, TCCE current in mA)
+
+**Status/control:** 0x281B-0x2824 (TCC status, brake pedal, base pattern, accel position, oncoming clutch, fill pressure, TISS/TOSS supply)
+
+**Diagnostics:** 0x1A01 (tap up/down), 0x1A18/0x1A1F (warmup cycles), 0x1A26/0x1A2D/0x1A88 (odometer), 0x2804-0x2806 (freeze frame), 0x321B (fast learn), 0x1238 (cleaning procedure), 0x1239 (distance this cycle)
+
+### Bus Sniff Summary (KOER baseline vs EFI Live active)
+- **KOER baseline**: 148 unique PT-CAN arb IDs, 73,350 frames (no diagnostic traffic)
+- **EFI Live active**: 167 unique arb IDs, 132,041 frames
+- **19 IDs only in EFI log**: diagnostic request/response IDs + EFI Live broadcast (0x5E8/0x5EA at ~4000 frames each) + init/config (0x641-0x64F)
+- **All 148 KOER baseline IDs confirmed present** in gmE90SilveradoSniffReference.ts
 `;
