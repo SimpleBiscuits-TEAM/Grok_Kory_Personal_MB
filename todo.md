@@ -1057,3 +1057,16 @@
 - [x] When customer mentions P0502 in context of AutoCal/EFILive, treat it as $0502 (EFI error code) not OBD-II DTC
 - [x] Add disambiguation logic to Strat — normalizes P0xxx to $0xxx when EFI context detected in message or history
 - [x] Updated system prompt to explain P vs $ prefix disambiguation to LLM
+
+## Strat + Knox — Evolving Language, Less Scripted
+- [ ] Update Strat system prompt: vary phrasing, don't use same opening/structure every time, adapt tone to conversation flow
+- [ ] Update Knox system prompt: vary humor style, don't repeat same jokes/entrance lines, evolve personality across messages
+- [ ] Add instruction to both agents: if customer has dealt with agent before (history shows prior interactions), skip the intro formalities and get straight to business
+- [ ] Ensure explanations evolve — same concept explained differently each time, not copy-paste scripts
+
+## Datalog Rail Pressure / mA Analysis + Knox Training + Analyzer Fix
+- [x] Analyze v3 and v4 datalogs — compare rail pressure actual vs desired and FPR mA command patterns
+- [x] Identify the rail discrepancies and mA differences between tune versions
+- [x] Train Knox on: rail surge patterns, mA command differences between tune versions, fuel error fault detection
+- [ ] Update advanced analyzer to detect rapid actual vs desired rail surges as fuel error faults
+- [ ] Update advanced analyzer to catch mA command differences when comparing two logs

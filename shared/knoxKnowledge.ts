@@ -99,6 +99,104 @@ Too-frequent regens = soot model miscalibration, fuel dilution, or injector issu
 - **Very high mA** with odd rail behavior → regulator/tuning/wiring; cross-check OEM docs for that ECM
 - **Current swinging wildly** with stable desired rail → air, filter restriction, marginal pump, or electrical fault
 
+### Rail Pressure Surge Detection & Multi-Log mA Comparison (CRITICAL for CP3 conversions)
+
+**Rail Pressure Surge / Hunting Pattern:**
+When actual rail pressure rapidly oscillates around desired (overshooting then undershooting, or vice versa), this is called **rail hunting** or **rail surge**. It indicates the FPR control loop cannot stabilize — the ECM is chasing the target but overshooting corrections.
+
+**How to detect it:**
+- **Rail error > 3 kPSI (actual vs desired)** sustained for more than 2-3 data points = significant surge event
+- **Rail error > 5 kPSI** = critical surge — pump capacity limit or regulator saturation
+- **Rate of change of rail error > 50 kPSI/s** = rapid hunting — the control loop is oscillating
+- **Pattern: actual OVERSHOOTS desired during acceleration, then UNDERSHOOTS at high RPM** = classic CP3 conversion issue where the tune's rail targets exceed CP3 delivery capacity at peak demand
+
+**What to look for in mA during surges (remember: lower mA = more open regulator, higher mA = more closed):**
+- If mA is very low (<500 mA, regulator nearly wide open) while rail is STILL low vs desired → pump is at physical capacity limit, regulator is already as open as it can go
+- If mA is very high (>1600 mA, regulator mostly closed) while rail is HIGH vs desired → regulator is over-restricting, tune needs to allow more opening (lower mA targets)
+- If mA is swinging wildly (>200 mA oscillation) while desired rail is stable → air in fuel, filter restriction, or pump mechanical issue
+- If mA is in normal mid-range (800-1400) but rail still won't track → tune calibration issue, Fuel Flow Base table needs revision for the installed pump
+
+**Multi-Log Comparison — mA Differences Between Tune Versions:**
+When comparing two datalogs from the same vehicle with different tune versions:
+- Compare mA commanded at the SAME RPM ranges — if one tune commands significantly different mA (>30 mA difference at same RPM), it indicates different regulator calibration strategy
+- Lower mA at high RPM = regulator more open = tune is allowing more fuel delivery to chase rail pressure
+- Higher mA at high RPM = regulator more closed = tune is restricting delivery to prevent over-pressure/surge on CP3
+- If one log shows better rail tracking (lower actual vs desired error) with different mA commands, the tune with better tracking has better-calibrated Fuel Flow Base maps
+- **Key diagnostic:** If Tune A commands lower mA (more open) than Tune B at the same RPM but has WORSE rail tracking, the regulator is already wide open and the pump physically cannot deliver enough — the pump is at its capacity limit
+- **CP3 conversion specific:** V3-to-V4 tune revisions often RAISE mA (more closed regulator) to give the CP3 more controlled delivery. If the newer tune shows higher mA at mid-RPM (1500-2500) but similar mA at peak RPM (2500+), it's recalibrating the mid-range to prevent surge while acknowledging the pump's peak limit where it needs to be more open.
+
+**Platform-Specific Fuel Flow Base Adjustment Rules:**
+
+**LML (2011-2016 Duramax) with CP3 conversion:**
+Generally, the Fuel Flow Base mA values only need to be changed on an LML past **35,700 mm3/s** fuel flow demand. Below that threshold, the stock CP4.2 curve works fine even with a CP3 conversion. The surge/hunting issues appear at higher flow demands where the CP3's delivery characteristics diverge from the CP4.2.
+- When diagnosing rail surge on an LML CP3 conversion, check if the surge events correlate with fuel flow demand exceeding 35,700 mm3/s
+- If surge only occurs above 35,700 mm3/s, the Fuel Flow Base table only needs revision in that upper range
+- If surge occurs below 35,700 mm3/s, there may be a mechanical issue (pump wear, air, filter) rather than a calibration problem
+
+**LB7/LLY (2001-2006 Duramax) with LBZ/LMM pump or regulator swap:**
+This is a DIFFERENT calibration approach than LML. When an LB7 or LLY gets an LBZ or LMM fuel pump or regulator swap, the **entire Fuel Flow Base curve gets raised by approximately 16%** across the board — from idle through WOT.
+- Unlike the LML where only the upper range (>35,700 mm3/s) needs adjustment, the LB7/LLY needs the WHOLE curve turned up because the LBZ/LMM pump/regulator has different flow characteristics across the entire operating range
+- The ~16% increase applies uniformly — idle, cruise, and WOT all get the same proportional bump
+- This is needed to get CP3 pressure under control at both idle (where the LBZ/LMM regulator behaves differently than the stock LB7/LLY unit) AND at WOT (where peak delivery differs)
+- If you see rail pressure issues on an LB7/LLY with an LBZ/LMM pump swap at BOTH idle and WOT, the Fuel Flow Base curve has not been raised — the whole thing needs ~16% increase
+- If only WOT is surging but idle is fine, the curve may have been partially adjusted or there's a different mechanical issue
+
+**L5P (2017+ Duramax) with stroker pump:**
+The L5P is the most conservative when it comes to Fuel Flow Base adjustments.
+- Generally only the **bottom 3 cells** (lowest flow demand points) need adjusting
+- Adjustments are only needed when a **stroker pump** is added — and sometimes not even then
+- **Only adjust if surge actually happens** — do NOT preemptively change the Fuel Flow Base on an L5P stroker pump install. The stock HP4 curve often works fine even with a stroker
+- If an L5P with a stroker pump shows rail surge, start by adjusting only those bottom 3 cells before touching anything else
+- If surge persists after adjusting the bottom 3, then investigate mechanical causes (air, filter, pump install issue) rather than expanding the Fuel Flow Base changes
+
+**Calibration Rule of Thumb — Overshoot/Undershoot % → mA Adjustment (CRITICAL for tuners):**
+Many times, the average percentage that actual rail pressure is overshooting and undershooting desired directly determines the percentage of mA increase needed in the Fuel Flow Base table to resolve rail surge.
+- Example: If actual rail is averaging 10% overshoot/undershoot around desired, the Fuel Flow Base mA values need to be raised by approximately 10% at those operating points.
+- This is a practical starting-point calibration method — measure the average rail error as a % of desired, then raise mA by that same % in the Fuel Flow Base table.
+- After the mA adjustment, re-log and verify that the overshoot/undershoot has decreased. If it's still surging, repeat the process with the new residual error %.
+- This iterative approach converges quickly — typically 1-3 tune revisions to get rail tracking within acceptable tolerance.
+- **When analyzing two comparison logs:** If the newer tune raised mA by X% and the rail surge decreased by approximately X%, the calibration rule is working correctly. If the surge didn't decrease proportionally, there may be a mechanical issue (pump wear, air intrusion, filter restriction) on top of the calibration problem.
+
+**Fuel Flow Base Table — Calibration Reference for mA Commands (LGH/LML Duramax CP3 Conversion):**
+The **Fuel Flow Base** table is the primary calibration table that maps RPM and load to commanded FPR/PCV mA. This is where the ECM gets its baseline mA command for a given operating point.
+
+- When a CP3 conversion is done on an LGH/LML (2011-2016 Duramax, factory CP4.2 replaced with CP3), the Fuel Flow Base table MUST be recalibrated because the CP3 has different flow characteristics than the CP4.2.
+- **Higher mA in a revised tune = intentional strategy** to reduce regulator opening and prevent the CP3 from being over-driven. This is NOT a fault — it's a tune correction.
+- **"Desired Flow vs Compute mA" curve** maps the relationship between desired fuel flow and the commanded mA. The revised tune shifts this curve to command higher mA at the same flow demand, giving the ECM more regulator authority.
+- When comparing two datalogs from the same CP3-converted truck with different tune versions:
+  - If the newer tune commands higher mA at the same RPM/load → the calibrator raised the Fuel Flow Base to control the pump better
+  - If rail tracking improves (actual closer to desired) with the higher mA → the revision is working
+  - If rail tracking is still poor despite higher mA → the pump may be at its physical capacity limit, or the Fuel Flow Base needs further adjustment
+  - The mA difference between tunes is the calibrator's adjustment, not a sensor or hardware fault
+- **Key insight for diagnostics:** When you see two logs from the same vehicle with different mA commands at the same RPM, ALWAYS check if the Fuel Flow Base was revised before flagging it as an anomaly. The higher-mA log is likely the corrective tune.
+
+**FPR/PCV mA → Regulator Opening Relationship (CRITICAL):**
+- **mA is INVERSELY proportional to regulator opening** — LOWER mA = MORE open regulator
+- 400 mA = ~95% open regulator
+- 0 mA = 100% open regulator (the last theoretical 5%)
+- ~1800-1900 mA = near-closed regulator (minimal fuel flow)
+- So when the ECM commands LOW mA, it is opening the regulator wide to allow maximum fuel delivery
+- When the ECM commands HIGH mA, it is closing the regulator to restrict fuel delivery
+- **Higher mA in a CP3 tune = MORE regulator restriction = controlling the pump so it doesn't over-deliver and surge**
+
+**Stock LGH/LML Fuel Flow Base Curve (CP4.2 factory baseline):**
+The bone stock "Desired Flow vs Compute mA" curve for the LGH/LML with factory CP4.2 is a roughly linear declining curve:
+- At low fuel flow demand: ~1800-1900 mA (regulator mostly closed, minimal flow)
+- At high fuel flow demand: ~400-500 mA (regulator ~95% open, near-maximum flow)
+- Setting mA to 0 gives the last 5% of regulator opening (100% open)
+- The curve is smooth and linear — the ECM progressively opens the regulator (lowers mA) as fuel demand increases
+- **CP3 conversion tunes shift this entire curve UPWARD** — commanding higher mA at the same flow demand point. This keeps the regulator more closed because the CP3 has different flow characteristics and can surge/cavitate if the regulator opens too aggressively.
+- A well-calibrated CP3 tune might command 200-400 mA higher than stock at the same flow demand, especially in the mid-to-high flow range where the CP3's delivery curve diverges most from the CP4.2.
+- If you see mA values that are significantly LOWER than stock at high flow demand on a CP3 truck, the tune has NOT been properly revised for the CP3 — the regulator is opening too wide, which is a setup for rail surge and pump wear.
+
+**Fuel Error Fault Criteria (for diagnostic analysis):**
+- Rapid actual vs desired rail pressure divergence: |error| > 3 kPSI for 3+ consecutive points
+- Peak rail error > 5 kPSI at any point
+- Rail error rate of change > 50 kPSI/s sustained
+- mA at extremes (<1100 or >1800) while rail error > 2 kPSI
+- These patterns should be flagged as **FUEL PRESSURE FAULT** in diagnostic analysis, not just warnings
+- **EXCEPTION:** If the higher-mA log shows better rail tracking, the mA increase is intentional calibration — flag the LOWER-mA log as having inadequate regulator authority instead
+
 ### LB7 Specific (2001-2004)
 - CP3.3 high pressure fuel pump
 - Allison 1000 5-speed (AL5) transmission
