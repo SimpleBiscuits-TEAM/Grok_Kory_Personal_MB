@@ -992,3 +992,7 @@
 - [x] Update $0502 knowledge with accurate fix: BBX config, re-install EFILive V8, reprogram BBX, ask about BBX file from purchase
 - [x] Keep responses short, simple, to the point — no lengthy qualifying questions upfront
 - [x] Push to GROK — GitHub token expired, checkpoint saved, will push when token refreshes
+
+## GROK Pull — PCAN Bridge + OBD Routing + Strat UI Fix
+- [x] Pulled 2 commits from GROK: PCAN bridge and local dev (OBD routing, obd-utils, Windows fixes v0.12.2), Strat UI platform list fix
+- [x] 21 files merged, no conflicts — build passes cleanly
