@@ -1030,3 +1030,12 @@
 
 ## Restore Basic Breakdown Button in Analyzer
 - [x] Find and restore the "basic breakdown" button in the analyzer — renamed to BASIC BREAKDOWN, made prominent toggle, defaults to basic view in both HealthReport and DiagnosticReport
+
+## Knox AI Assisting Strat Support Agent — Live Conversation UI
+- [x] Audit Strat chat mutation flow and Knox queryKnox pipeline
+- [x] Build server-side Strat-Knox conversation engine (Strat detects when Knox help needed, asks Knox, Knox replies with humor, Strat synthesizes final answer)
+- [x] Return multi-step conversation messages to frontend (Strat thinking → Strat asks Knox → Knox responds → Strat delivers answer)
+- [x] Build frontend live conversation UI — show Strat and Knox messages appearing in sequence with typing indicators
+- [x] Knox personality: humorous, knowledgeable, confident — distinct from Strat's support tone
+- [x] Strat and Knox should have banter and humor between each other to keep customer entertained while diagnosing
+- [x] Update tests for Knox-assisted Strat responses

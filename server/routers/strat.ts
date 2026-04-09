@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 import { getDb } from "../db";
 import { stratFeedback } from "../../drizzle/schema";
 
@@ -1845,7 +1846,7 @@ export const stratRouter = router({
           .optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const lowerMsg = input.message.toLowerCase();
       const historyText = (input.history || []).map(m => m.content.toLowerCase()).join(' ');
       const fullContext = `${lowerMsg} ${historyText}`;
@@ -1856,19 +1857,25 @@ export const stratRouter = router({
         const isDuramaxBBX = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
         const isCumminsBBX = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
         if (isDuramaxBBX) {
-          return { reply: HARDCODED_DURAMAX_BBX_RESPONSE };
+          return { reply: HARDCODED_DURAMAX_BBX_RESPONSE, conversationSteps: [] };
         }
         if (isCumminsBBX) {
-          return { reply: HARDCODED_CUMMINS_BBX_RESPONSE };
+          return { reply: HARDCODED_CUMMINS_BBX_RESPONSE, conversationSteps: [] };
         }
-        // If we can't determine the vehicle, ask
         return {
           reply: `I can get you the right BBX file! What vehicle do you have? Is it a **Duramax** (GM/Chevy/GMC) or a **Cummins** (Dodge/Ram)? That way I can send you the correct one.`,
+          conversationSteps: [],
         };
       }
 
-      // ── Build system prompt with contextual BBX download links ──
-      // Detect vehicle type and inject the correct BBX download URL so the LLM can reference it naturally
+      // ── Detect if Knox should assist ──
+      // Knox helps with: error codes, diagnostics, technical troubleshooting, ECU questions, flash issues
+      const needsKnox = /error|\$0[0-9]{3}|\$0[0-9a-f]{3}|diagnostic|dtc|pid|ecu|flash|won'?t start|misfire|boost|fuel|injection|turbo|limp|check engine|cel|code|trouble|sensor|voltage|pressure|temp|knock|timing|transmission|tcm|won'?t flash|brick|fail|stuck/i.test(lowerMsg);
+
+      // ── Simple questions — Strat handles alone (no Knox needed) ──
+      const isSimpleQuestion = /^(hey|hi|hello|what do you do|how are you|thanks|thank you|ok|got it|cool|awesome|perfect|great)/i.test(lowerMsg.trim()) && !needsKnox;
+
+      // ── Build BBX context for system prompt ──
       const isDuramax = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
       const isCummins = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
       let bbxContext = '';
@@ -1880,32 +1887,166 @@ export const stratRouter = router({
         bbxContext = `\n\n## BBX DOWNLOAD LINKS (include the correct one when the customer's vehicle is known)\nDuramax BBX File: ${DURAMAX_BBX_URL}\nCummins BBX File: ${CUMMINS_BBX_URL}\nIf you recommend a BBX file, format as a clickable markdown link.`;
       }
 
-      const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-        { role: "system", content: STRAT_SYSTEM_PROMPT + bbxContext },
-      ];
+      // ── Simple path — Strat alone ──
+      if (isSimpleQuestion || !needsKnox) {
+        const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+          { role: "system", content: STRAT_SYSTEM_PROMPT + bbxContext },
+        ];
+        if (input.history) {
+          for (const msg of input.history) messages.push({ role: msg.role, content: msg.content });
+        }
+        messages.push({ role: "user", content: input.message });
 
-      // Add conversation history
-      if (input.history) {
-        for (const msg of input.history) {
-          messages.push({ role: msg.role, content: msg.content });
+        try {
+          const response = await invokeLLM({ messages });
+          const reply = response.choices?.[0]?.message?.content || "I'm having a moment — let me regroup. Try that again?";
+          return { reply, conversationSteps: [] };
+        } catch (err: any) {
+          console.error("[Strat] LLM error:", err);
+          return {
+            reply: `I'm experiencing a connection issue. Error: ${err.message || "Unknown"}. Give me a sec and try again. If this keeps happening, call us at (337) 485-7070.`,
+            conversationSteps: [],
+          };
         }
       }
 
-      // Add current message
-      messages.push({ role: "user", content: input.message });
+      // ── Knox-assisted path — live conversation between Strat and Knox ──
+      type ConversationStep = {
+        speaker: 'strat' | 'knox';
+        content: string;
+        type: 'handoff' | 'thinking' | 'response' | 'banter' | 'final';
+      };
+      const steps: ConversationStep[] = [];
 
+      // Step 1: Strat acknowledges and hands off to Knox with personality
       try {
-        const response = await invokeLLM({ messages });
-        const reply =
-          response.choices?.[0]?.message?.content ||
-          "I'm having a moment — let me regroup. Try that again?";
-        return { reply };
-      } catch (err: any) {
-        console.error("[Strat] LLM error:", err);
-        return {
-          reply: `I'm experiencing a connection issue. Error: ${err.message || "Unknown"}. Give me a sec and try again. If this keeps happening, call us at (337) 485-7070.`,
-        };
+        const handoffResponse = await invokeLLM({
+          messages: [
+            {
+              role: 'system',
+              content: `You are Strat, PPEI's tech support agent. You just received a technical question from a customer that requires Knox's expertise. Write a SHORT, casual one-liner (1-2 sentences max) acknowledging the customer's issue and telling them you're pulling Knox in to help. Be warm and slightly humorous. Examples of tone:
+- "Ooh, that's a good one. Let me grab Knox — he lives for this stuff."
+- "Alright, I know just the guy for this. Hey Knox, you busy?"
+- "Classic error code territory. Let me get Knox on the line — he's the brain around here."
+Do NOT provide any technical answer yet. Just the handoff line.`,
+            },
+            { role: 'user', content: input.message },
+          ],
+        });
+        const handoffLine = handoffResponse.choices?.[0]?.message?.content || "Let me pull Knox in on this one — he's our technical wizard.";
+        steps.push({ speaker: 'strat', content: handoffLine, type: 'handoff' });
+      } catch {
+        steps.push({ speaker: 'strat', content: "Let me pull Knox in on this — he's our technical wizard.", type: 'handoff' });
       }
+
+      // Step 2: Knox enters with humor and provides technical analysis
+      let knoxAnswer = '';
+      try {
+        const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+        const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+        const knoxResult = await queryKnox({
+          question: input.message,
+          accessLevel: effectiveLevel >= 2 ? effectiveLevel : 2,
+          domain: 'general',
+          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
+          history: input.history?.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        });
+        knoxAnswer = knoxResult.answer;
+      } catch (knoxErr: any) {
+        console.warn('[Strat] Knox pipeline failed, falling back to direct LLM:', knoxErr.message);
+        // Fallback: use direct LLM with Knox personality
+        try {
+          const fallbackResp = await invokeLLM({
+            messages: [
+              {
+                role: 'system',
+                content: `You are Knox — PPEI's AI diagnostic and technical expert. You've been pulled into a tech support conversation by your colleague Strat. Provide a detailed, accurate technical answer to the customer's question. Use the PPEI knowledge base below for reference.\n\nYour personality: confident, witty, technically deep but approachable. You crack jokes but never at the expense of accuracy. You're the kind of engineer who explains complex things with analogies and humor.\n\n${PPEI_SUPPORT_KB.slice(0, 15000)}${bbxContext}`,
+              },
+              { role: 'user', content: input.message },
+            ],
+          });
+          knoxAnswer = fallbackResp.choices?.[0]?.message?.content || 'Let me look into this further.';
+        } catch {
+          knoxAnswer = 'Having a bit of trouble connecting to my databases right now. Let me hand this back to Strat.';
+        }
+      }
+
+      // Step 3: Generate Knox's entry banter + technical response
+      try {
+        const knoxEntryResponse = await invokeLLM({
+          messages: [
+            {
+              role: 'system',
+              content: `You are Knox, PPEI's AI diagnostic expert. Strat just pulled you into a tech support conversation. You need to:
+1. Write a SHORT humorous entrance line (1-2 sentences) — like you just walked into the room. Be witty, confident, maybe tease Strat a little. Examples:
+- "*cracks knuckles* Alright, somebody said there's an error code? That's my favorite kind of puzzle."
+- "Strat called me in? Must be serious. Just kidding — I was already eavesdropping."
+- "Did someone say $0502? That's practically my middle name."
+
+2. Then provide your technical analysis/answer based on this Knox research:
+${knoxAnswer.slice(0, 6000)}
+
+Format your response as:
+ENTRANCE: [your humorous entrance line]
+ANALYSIS: [your technical answer, rewritten in Knox's voice — confident, clear, with personality. Include step-by-step instructions if applicable. Reference BBX download links if relevant.]${bbxContext}
+
+Keep the ANALYSIS concise but thorough. Use markdown formatting.`,
+            },
+            { role: 'user', content: input.message },
+          ],
+        });
+        const knoxFull = knoxEntryResponse.choices?.[0]?.message?.content || '';
+
+        // Parse Knox's entrance and analysis
+        const entranceMatch = knoxFull.match(/ENTRANCE:\s*(.+?)(?=\nANALYSIS:|$)/s);
+        const analysisMatch = knoxFull.match(/ANALYSIS:\s*(.+)/s);
+
+        const entrance = entranceMatch?.[1]?.trim() || "*walks in* Alright, what do we got?";
+        const analysis = analysisMatch?.[1]?.trim() || knoxAnswer;
+
+        steps.push({ speaker: 'knox', content: entrance, type: 'banter' });
+        steps.push({ speaker: 'knox', content: analysis, type: 'response' });
+      } catch {
+        steps.push({ speaker: 'knox', content: "*walks in* Alright, let me take a look at this.", type: 'banter' });
+        steps.push({ speaker: 'knox', content: knoxAnswer, type: 'response' });
+      }
+
+      // Step 4: Strat wraps up with a friendly summary/follow-up
+      try {
+        const wrapUpResponse = await invokeLLM({
+          messages: [
+            {
+              role: 'system',
+              content: `You are Strat, PPEI's tech support agent. Knox just provided a technical answer to the customer. Write a SHORT wrap-up (1-3 sentences max) that:
+- Thanks or teases Knox briefly (keep the banter going)
+- Confirms the key action items for the customer in plain language
+- Asks ONE follow-up question if needed
+- Reminds them you're here if they need more help
+
+Examples of tone:
+- "There you go — Knox never misses. Try those steps and let me know how it goes!"
+- "See? I told you he's good. Follow those steps and holler if you hit a snag."
+- "Knox dropping knowledge as usual. Give that a shot and let us know!"
+
+Do NOT repeat Knox's technical steps. Just wrap up warmly.`,
+            },
+            { role: 'user', content: `Customer asked: ${input.message}\n\nKnox's answer summary: ${knoxAnswer.slice(0, 1000)}` },
+          ],
+        });
+        const wrapUp = wrapUpResponse.choices?.[0]?.message?.content || "There you go! Try those steps and let me know how it goes.";
+        steps.push({ speaker: 'strat', content: wrapUp, type: 'final' });
+      } catch {
+        steps.push({ speaker: 'strat', content: "There you go! Try those steps and let me know how it goes. We're here if you need anything else.", type: 'final' });
+      }
+
+      // Build the combined reply (for history/fallback)
+      const combinedReply = steps.map(s => {
+        const label = s.speaker === 'knox' ? '**Knox:**' : '**Strat:**';
+        return `${label} ${s.content}`;
+      }).join('\n\n');
+
+      return { reply: combinedReply, conversationSteps: steps };
     }),
 
   /** Submit feedback after 5+ interactions */
