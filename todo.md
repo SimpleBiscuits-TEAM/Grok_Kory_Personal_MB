@@ -956,3 +956,6 @@
 - [x] Include knowledge about intake companies designing around stock MAF metering to avoid tune requirement
 - [x] Include recommended fix: tune revision for MAF scaling with larger tube
 - [x] Verify Knox knowledge base updated and agents can reference this in diagnostics
+
+## Time-Series Chart Tooltip Fix
+- [x] Move Time-Series Overview chart tooltip/popout outside the chart area so it doesn't cover graph data — moved to inline header bar above chart

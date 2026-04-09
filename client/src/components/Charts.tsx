@@ -12,7 +12,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import { ProcessedMetrics } from '@/lib/dataProcessor';
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 
 interface ChartProps {
   data: ProcessedMetrics;
@@ -209,13 +209,53 @@ export function TimeSeriesChart({ data }: ChartProps) {
     return raw.filter((_, i) => i % step === 0);
   }, [data]);
 
+  // External tooltip state — renders ABOVE the chart, never covering data
+  const [hoverData, setHoverData] = useState<{time: number; rpm: number; maf: number; boost: number; hp: number} | null>(null);
+
+  const handleMouseMove = useCallback((state: any) => {
+    if (state?.activePayload?.length) {
+      const p = state.activePayload[0].payload;
+      setHoverData({ time: p.time, rpm: p.rpm, maf: p.maf, boost: p.boost, hp: p.hp });
+    }
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverData(null);
+  }, []);
+
   return (
-    <div style={{ width: '100%', height: '24rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.amber}`, borderRadius: '3px', padding: '1rem' }}>
-      <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
-        TIME-SERIES OVERVIEW
-      </h3>
-      <ResponsiveContainer width="100%" height="85%">
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+    <div style={{ width: '100%', height: '26rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.amber}`, borderRadius: '3px', padding: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 0 0.5rem 0' }}>
+        <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: 0 }}>
+          TIME-SERIES OVERVIEW
+        </h3>
+        {/* External tooltip bar — sits in the header row, never covers the chart */}
+        <div style={{
+          display: 'flex',
+          gap: '1rem',
+          alignItems: 'center',
+          fontFamily: theme.labelFont,
+          fontSize: '0.72rem',
+          color: 'oklch(0.60 0.008 260)',
+          minHeight: '1.4rem',
+          opacity: hoverData ? 1 : 0.4,
+          transition: 'opacity 0.15s',
+        }}>
+          {hoverData ? (
+            <>
+              <span style={{ color: theme.axis }}>t: <b style={{ color: 'white' }}>{hoverData.time.toFixed(3)}</b></span>
+              <span style={{ color: theme.blue }}>RPM: <b style={{ color: 'white' }}>{hoverData.rpm.toFixed(1)}</b></span>
+              <span style={{ color: theme.cyan }}>MAF: <b style={{ color: 'white' }}>{hoverData.maf.toFixed(1)}</b></span>
+              <span style={{ color: theme.amber }}>Boost: <b style={{ color: 'white' }}>{hoverData.boost.toFixed(1)}</b></span>
+              <span style={{ color: theme.green }}>HP: <b style={{ color: 'white' }}>{hoverData.hp.toFixed(1)}</b></span>
+            </>
+          ) : (
+            <span>Hover chart for values</span>
+          )}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height="88%">
+        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
           <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
           <XAxis
             dataKey="time"
@@ -236,7 +276,8 @@ export function TimeSeriesChart({ data }: ChartProps) {
             style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
             label={{ value: 'Boost (psi) / HP', angle: 90, position: 'insideRight', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
           />
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(1)} />
+          {/* Hidden tooltip — we use the external bar instead */}
+          <Tooltip content={() => null} />
           <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
           <Area
             yAxisId="left"
