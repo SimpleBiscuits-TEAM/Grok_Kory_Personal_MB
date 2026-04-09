@@ -14,6 +14,102 @@ interface DiagnosticPID {
   category: string;
 }
 
+/** Matches client `engineFuel` and log-side inference. */
+type CombustionFamily = 'diesel' | 'spark' | 'unknown';
+
+const DIESEL_ONLY_CATEGORIES = new Set([
+  'dpf_soot',
+  'dpf_regen',
+  'nox_scr',
+  'injector_health',
+  'egt_overtemp',
+]);
+
+function resolveCombustionFamily(engineFuel?: 'unknown' | 'diesel' | 'gasoline'): CombustionFamily {
+  if (engineFuel === 'gasoline') return 'spark';
+  if (engineFuel === 'diesel') return 'diesel';
+  return 'unknown';
+}
+
+function filterCategoriesForCombustion(categories: string[], family: CombustionFamily): string[] {
+  if (family !== 'spark') return categories;
+  return categories.filter((c) => !DIESEL_ONLY_CATEGORIES.has(c));
+}
+
+/** Strip PIDs that are diesel-aftertreatment or VGT/cylinder-balance specific when advising spark engines. */
+function isDieselSpecificPid(p: DiagnosticPID): boolean {
+  const sn = p.shortName.toUpperCase();
+  if (/^CYL\d+_BAL$/.test(sn)) return true;
+  if (
+    sn.includes('VGT_') ||
+    sn.includes('DPF_') ||
+    sn.includes('SCR_') ||
+    sn === 'NH3_LOAD' ||
+    sn === 'DEF_LVL' ||
+    sn === 'NOX'
+  ) {
+    return true;
+  }
+  if (p.service === 0x22 && p.pid === 0x1638) return true; // GM diesel fuel rate L/h
+  if (
+    p.service === 0x22 &&
+    [0x303e, 0x3337, 0x331c, 0x331b, 0x334b, 0x3311, 0x1540, 0x1543, 0x2041, 0x1689, 0x168a].includes(
+      p.pid
+    )
+  ) {
+    return true;
+  }
+  if (p.service === 0x01 && (p.pid === 0x7c || p.pid === 0x7e)) return true; // Mode 01 DPF-related
+  return false;
+}
+
+function filterPidsForCombustion(pids: DiagnosticPID[], family: CombustionFamily): DiagnosticPID[] {
+  if (family !== 'spark') return pids;
+  return pids.filter((p) => !isDieselSpecificPid(p));
+}
+
+function buildVehicleDiagnosticContext(
+  vehicleYear: number | undefined,
+  vehicleEngine: string | undefined,
+  family: CombustionFamily
+): string {
+  const vehicleLine =
+    vehicleYear && vehicleEngine
+      ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
+      : vehicleEngine
+        ? `Vehicle: ${vehicleEngine} (year unknown)`
+        : vehicleYear
+          ? `Vehicle: ${vehicleYear} (engine unknown)`
+          : 'Vehicle: year/engine unknown';
+
+  if (family === 'spark') {
+    return `${vehicleLine}. Fuel: gasoline (spark-ignition). Use GM gas / SAE J1979 framing — not Duramax DPF/VGT/SCR-only narratives unless the user clearly has diesel.`;
+  }
+  if (family === 'diesel') {
+    return `${vehicleLine}. Fuel: diesel.`;
+  }
+  return `${vehicleLine}. Fuel type not specified — consider both diesel and gasoline possibilities where relevant.`;
+}
+
+function buildDiagnosticKnoxModuleContext(
+  categories: string[],
+  family: CombustionFamily,
+  engineFuel?: 'unknown' | 'diesel' | 'gasoline'
+): string {
+  const base = `Diagnostic categories: ${categories.join(', ')}. Engine fuel selection: ${engineFuel ?? 'unknown'}.`;
+  if (family === 'spark') {
+    return `${base}
+
+ANALYZER_COMBUSTION_FAMILY: spark
+GM_GAS_ANALYZER: true
+Follow KNOX knowledge section "V-OP Analyzer — GM Gasoline (Spark-Ignition) vs Diesel". Do not apply Duramax-only MAF idle smoke-limiter, rail/CP3/CP4, VGT, DPF, SCR, or diesel EGT limit stories to this case. When validating with external knowledge, prefer NHTSA, GM service bulletins, J1979, and GM full-size gas truck / LT communities over Duramax forum defaults.`;
+  }
+  if (family === 'diesel') {
+    return `${base}\nANALYZER_COMBUSTION_FAMILY: diesel`;
+  }
+  return `${base}\nANALYZER_COMBUSTION_FAMILY: unknown`;
+}
+
 /**
  * Master PID catalog organized by diagnostic category.
  * Knox uses this to map customer complaints to the exact PIDs needed.
@@ -323,6 +419,66 @@ const TEST_CONDITIONS: Record<string, {
   },
 };
 
+type TestConditionBundle = (typeof TEST_CONDITIONS)[string];
+
+/** Gasoline-oriented copy when the user selects gasoline / spark context. */
+const SPARK_TEST_OVERRIDES: Partial<Record<string, TestConditionBundle>> = {
+  turbo_boost: {
+    title: 'Boost / Intake Pressure Test (Gasoline)',
+    description: 'Evaluate MAP, MAF, and load response. On turbocharged gas trucks, correlate boost with spark, knock, and commanded torque.',
+    steps: [
+      'Warm the engine to full operating temperature',
+      'From a steady cruise (~2500–3500 RPM where safe), perform several moderate-to-full throttle accelerations',
+      'If turbocharged, log several pulls from ~2000 RPM toward redline in a safe gear',
+      'Include light cruise segments to compare MAP/MAF at the same RPM',
+      'End with 2 minutes of steady highway cruise',
+    ],
+    duration: '15–20 minutes',
+    warnings: [
+      'Do not assume diesel VGT vanes or diesel smoke-limiter behavior — use trims, spark, and knock as primary gasoline indicators',
+      'Vacuum/boost leaks can show as lean trims or erratic MAF/MAP without a traditional “boost gauge” symptom on some setups',
+    ],
+  },
+  fuel_system: {
+    title: 'Gasoline Fuel System Test',
+    description: 'Evaluate Mode 01 rail pressure (GDI), trims, MAP/MAF, and throttle correlation — not CP3/CP4 diesel rail narratives unless confirmed diesel.',
+    steps: [
+      'Cold start: log 2–3 minutes of idle',
+      'Warm to operating temperature; note short-term and long-term fuel trims at idle and cruise',
+      'Several moderate and WOT accelerations from rolling cruise',
+      'Include a decel fuel-cut segment (foot fully off throttle from cruise)',
+      'End with 2 minutes of steady cruise',
+    ],
+    duration: '20–25 minutes',
+    warnings: [
+      'High-pressure gasoline rail pressure is not the same diagnostic story as Duramax common-rail CP3/CP4 failures',
+      'Low/high fuel trim patterns often point to vacuum leaks, MAF scaling, or O2/catalyst issues before condemning a pump',
+    ],
+  },
+  reduced_power: {
+    title: 'Reduced Power / Limp (Gasoline)',
+    description: 'Capture RPM, load, throttle, trims, and any logged torque or throttle-follower channels when power is limited.',
+    steps: [
+      'Start logging before the condition appears if possible',
+      'Drive until reduced power or limp occurs; note time in the log',
+      'Hold the condition briefly if safe, then ease off and repeat once if you can do so safely',
+      'Include both light-throttle cruise and moderate acceleration in the same session',
+    ],
+    duration: '15–30 minutes',
+    warnings: [
+      'Do not clear DTCs before logging if you need freeze-frame context',
+      'Gasoline limp modes are often throttle, catalyst, misfire, or knock-related — avoid defaulting to DPF/regen explanations',
+    ],
+  },
+};
+
+function resolveTestCondition(category: string, family: CombustionFamily): TestConditionBundle {
+  if (family === 'spark' && SPARK_TEST_OVERRIDES[category]) {
+    return SPARK_TEST_OVERRIDES[category]!;
+  }
+  return TEST_CONDITIONS[category] || TEST_CONDITIONS.performance_general;
+}
+
 /* ─── Complaint-to-Category Mapping ─── */
 const COMPLAINT_KEYWORDS: Record<string, string[]> = {
   dpf_soot: ['soot', 'dpf', 'particulate', 'filter loading', 'soot load', 'dpf full', 'dpf clogged', 'high soot'],
@@ -378,6 +534,12 @@ function deduplicatePids(categories: string[]): DiagnosticPID[] {
   return result;
 }
 
+function collectPidsForCategories(categories: string[], family: CombustionFamily): DiagnosticPID[] {
+  const filteredCats = filterCategoriesForCombustion(categories, family);
+  const deduped = deduplicatePids(filteredCats);
+  return filterPidsForCombustion(deduped, family);
+}
+
 /* ─── Router ─── */
 export const diagnosticAgentRouter = router({
   /**
@@ -389,9 +551,11 @@ export const diagnosticAgentRouter = router({
       complaint: z.string().min(3).max(2000),
       vehicleYear: z.number().optional(),
       vehicleEngine: z.string().optional(),
+      engineFuel: z.enum(['unknown', 'diesel', 'gasoline']).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const { complaint, vehicleYear, vehicleEngine } = input;
+      const { complaint, vehicleYear, vehicleEngine, engineFuel } = input;
+      const combustionFamily = resolveCombustionFamily(engineFuel);
 
       // Step 1: Keyword-based category matching
       const matchedCategories = matchComplaintToCategories(complaint);
@@ -400,11 +564,18 @@ export const diagnosticAgentRouter = router({
       let categories = matchedCategories;
       if (categories.length === 0) {
         try {
+          const fuelHint =
+            combustionFamily === 'spark'
+              ? 'The vehicle is GASOLINE (spark-ignition). Prefer categories that make sense for gas trucks/SUVs; do NOT select diesel-only aftertreatment categories (dpf_soot, dpf_regen, nox_scr, injector_health cylinder-balance style, egt_overtemp framed for diesel pyro) unless the complaint explicitly describes diesel systems.'
+              : combustionFamily === 'diesel'
+                ? 'The vehicle is DIESEL. Diesel aftertreatment and VGT-related categories are allowed when the complaint fits.'
+                : 'Fuel type is unknown — the vehicle may be diesel or gasoline; choose categories that fit the complaint.';
+
           const result = await invokeLLM({
             messages: [
               {
                 role: "system",
-                content: `You are an automotive diagnostic classifier. Given a customer complaint about a diesel truck, classify it into one or more of these categories: ${Object.keys(DIAGNOSTIC_PID_CATALOG).join(', ')}. Return ONLY a JSON array of category strings, nothing else.`
+                content: `You are an automotive diagnostic classifier. Given a customer complaint about a truck or SUV, classify it into one or more of these categories: ${Object.keys(DIAGNOSTIC_PID_CATALOG).join(', ')}. ${fuelHint} Return ONLY a JSON object with a "categories" array of strings, nothing else.`
               },
               { role: "user", content: complaint }
             ],
@@ -432,13 +603,13 @@ export const diagnosticAgentRouter = router({
         }
       }
 
-      // If still nothing, default to general performance
+      categories = filterCategoriesForCombustion(categories, combustionFamily);
       if (categories.length === 0) categories = ['performance_general'];
 
       // Step 3: Collect PIDs and test conditions
-      const recommendedPids = deduplicatePids(categories);
+      const recommendedPids = collectPidsForCategories(categories, combustionFamily);
       const primaryCategory = categories[0];
-      const testCondition = TEST_CONDITIONS[primaryCategory] || TEST_CONDITIONS.performance_general;
+      const testCondition = resolveTestCondition(primaryCategory, combustionFamily);
 
       // Step 4: Generate Knox's explanation via triple-agent pipeline
       let knoxExplanation = '';
@@ -449,9 +620,7 @@ export const diagnosticAgentRouter = router({
         `- ${p.name} (${p.shortName}) [${p.service === 0x22 ? 'Mode 22' : 'Mode 01'} 0x${p.pid.toString(16).toUpperCase()}] — ${p.unit}`
       ).join('\n');
 
-      const vehicleCtx = vehicleYear && vehicleEngine
-        ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
-        : 'Vehicle: Duramax diesel (year unknown)';
+      const vehicleCtx = buildVehicleDiagnosticContext(vehicleYear, vehicleEngine, combustionFamily);
 
       try {
         const knoxResult = await queryKnox({
@@ -461,7 +630,7 @@ Selected diagnostic PIDs:\n${pidList}\n\nTest conditions: ${testCondition.title}
           accessLevel: effectiveLevel,
           domain: 'diagnostics',
           vehicleContext: vehicleCtx,
-          moduleContext: `Diagnostic categories: ${categories.join(', ')}`,
+          moduleContext: buildDiagnosticKnoxModuleContext(categories, combustionFamily, engineFuel),
         });
         knoxExplanation = knoxResult.answer;
       } catch {
@@ -501,19 +670,25 @@ Selected diagnostic PIDs:\n${pidList}\n\nTest conditions: ${testCondition.title}
       dataSummary: z.string(), // Key stats from the datalog
       vehicleYear: z.number().optional(),
       vehicleEngine: z.string().optional(),
+      engineFuel: z.enum(['unknown', 'diesel', 'gasoline']).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const { complaint, availablePids, dataSummary, vehicleYear, vehicleEngine } = input;
+      const { complaint, availablePids, dataSummary, vehicleYear, vehicleEngine, engineFuel } = input;
+      const combustionFamily = resolveCombustionFamily(engineFuel);
 
-      const vehicleContext = vehicleYear && vehicleEngine
-        ? `Vehicle: ${vehicleYear} ${vehicleEngine}`
-        : 'Vehicle: Duramax diesel (year unknown)';
+      const vehicleContext = buildVehicleDiagnosticContext(vehicleYear, vehicleEngine, combustionFamily);
       const userAccessLevel2 = (ctx.user?.accessLevel || 0) as AccessLevel;
       const effectiveLevel2: AccessLevel = userAccessLevel2 >= 3 ? 3 : userAccessLevel2 >= 2 ? 2 : 1;
 
       // Determine what PIDs are missing
       const matchedCategories = matchComplaintToCategories(complaint);
-      const idealPids = deduplicatePids(matchedCategories.length > 0 ? matchedCategories : ['performance_general']);
+      const categorySet =
+        filterCategoriesForCombustion(
+          matchedCategories.length > 0 ? matchedCategories : ['performance_general'],
+          combustionFamily
+        );
+      const categoriesForIdeal = categorySet.length > 0 ? categorySet : ['performance_general'];
+      const idealPids = collectPidsForCategories(categoriesForIdeal, combustionFamily);
 
       // Find PIDs that aren't in the datalog
       const availableLower = availablePids.map(p => p.toLowerCase());
@@ -534,7 +709,7 @@ Selected diagnostic PIDs:\n${pidList}\n\nTest conditions: ${testCondition.title}
           accessLevel: effectiveLevel2,
           domain: 'diagnostics',
           vehicleContext,
-          moduleContext: `Uploaded datalog with ${availablePids.length} PIDs. Vehicle-specific data for validation.`,
+          moduleContext: `${buildDiagnosticKnoxModuleContext(categoriesForIdeal, combustionFamily, engineFuel)}\nUploaded datalog with ${availablePids.length} PIDs. Vehicle-specific data for validation.`,
         });
         analysis = knoxResult2.answer;
       } catch (err) {
@@ -545,7 +720,7 @@ Selected diagnostic PIDs:\n${pidList}\n\nTest conditions: ${testCondition.title}
             messages: [
               {
                 role: "system",
-                content: `You are Knox, the PPEI V-OP AI Diagnostic Agent. Expert diesel diagnostician.
+                content: `You are Knox, the PPEI V-OP AI Diagnostic Agent. Expert powertrain diagnostician for diesel and gasoline trucks/SUVs.
 ${vehicleContext}
 
 Knowledge base:

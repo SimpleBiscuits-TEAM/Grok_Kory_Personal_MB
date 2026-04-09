@@ -365,6 +365,7 @@ const LS_LT_PLATFORM: VehiclePlatform = {
     'LS engines are known for reliable ignition systems but coil packs can fail, especially on high-mileage vehicles.',
     'Oil consumption on 5.3L LS engines (especially 2007-2013) is a known issue related to PCV and ring design.',
     'The LT4 (supercharged 6.2L) has different monitoring requirements than naturally aspirated variants.',
+    'Global B gasoline trucks (e.g. E90 ECM on 2019+ Silverado/Sierra 6.2L L87) expose most tune/diagnostic channels via standard OBD Mode 01 and GM UDS Mode 22 on 7E0/7E1; a PT CAN frame capture lists periodic IDs but does not replace those services for tools that query the ECM over ISO-TP.',
   ],
 };
 

@@ -592,6 +592,39 @@ export const PID_PRESETS: PIDPreset[] = [
     pids: [0x0C, 0x10, 0x0E, 0x14, 0x06, 0x07, 0x04],
   },
   {
+    name: 'GM E90 / L87 6.2L Gas Truck',
+    description:
+      'Silverado/Sierra 6.2L (E90): Mode 01 core channels aligned with typical EFI Live ECM/TCM columns, ' +
+      'plus GM Mode 22 oil/trans DIDs (7E0/7E1). Raw PT CAN frame IDs from field sniffs live in gmE90SilveradoSniffReference.',
+    pids: [
+      0x0C, // RPM
+      0x0D, // VSS
+      0x04, // LOAD
+      0x05, // ECT
+      0x0B, // MAP
+      0x0E, // SPARKADV
+      0x0F, // IAT
+      0x10, // MAF
+      0x11, // TPS
+      0x23, // FRP (GDI gauge, kPa)
+      0x42, // VPWR
+      0x46, // AAT
+      0x47, // TPS_B
+      0x49, // APP_D
+      0x4C, // TAC (commanded throttle actuator)
+      0x06, // STFT B1
+      0x07, // LTFT B1
+      0x05A0, // TFT (Mode 22 TCM)
+      0x05A1, // TCC slip
+      0x05A2, // TCC commanded pressure
+      0x05A3, // Trans output speed
+      0x05A4, // Trans input speed
+      0x05B0, // EOT (Mode 22 ECM)
+      0x05B1, // EOP
+      0x05B2, // Oil life %
+    ],
+  },
+  {
     name: 'O2 / Lambda Sensors',
     description: 'All O2 sensor voltages and wideband lambda',
     pids: [0x0C, 0x14, 0x15, 0x18, 0x19, 0x34, 0x35],
@@ -2439,6 +2472,12 @@ export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: Fu
     }
     if (manufacturer === 'gm' || manufacturer === 'universal') {
       if (name.includes('duramax')) return true;
+      if (
+        (fuelType === 'gasoline' || fuelType === 'any') &&
+        (name.includes('gm e90') || name.includes('l87'))
+      ) {
+        return true;
+      }
     }
     // Gas-specific presets
     if (fuelType === 'gasoline' || fuelType === 'any') {

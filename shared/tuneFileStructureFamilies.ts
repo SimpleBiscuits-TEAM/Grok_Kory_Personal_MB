@@ -9,6 +9,11 @@ import { detectFileFormat } from "./flashFileValidator";
  * Other ecosystems (EFI Live, HP Tuners / .hpt, etc.) use different headers, checksum rules, and segment maps.
  * Tune Deploy **strict upload** currently validates only the V-OP container slot CRC + DevProg JSON checks; extend this
  * module with magic-byte sniffers and per-family validators as you add import support.
+ *
+ * **E90 / T93 (GM gas + matching TCM):** The same **GM_RAW_BINARY** / DevProg / PPEI envelopes used for Duramax
+ * apply here; `server/lib/tuneDeployParser.ts` maps **E90** / **T93** filenames to `vehicleFamily: "GM"`.
+ * Canonical SPS segment part numbers and PT CAN sniff IDs live in `client/src/lib/gmE90SilveradoSniffReference.ts`.
+ * Providing an **A2L** later links map/RAM symbols to those binaries for editor features and clearer live-PID semantics.
  */
 export const TUNE_FILE_STRUCTURE_FAMILIES = [
   /** DevProg V2–style JSON header (often reported as PPEI_CONTAINER in `detectFileFormat` when flasher fields present). */

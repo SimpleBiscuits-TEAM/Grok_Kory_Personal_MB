@@ -107,4 +107,30 @@ describe("parseTuneDeployBinary — GM raw binary support", () => {
     expect(meta.osVersion).toBe("12709844");
     expect(meta.warnings.some((w) => w.includes("does not start with 0xAA55"))).toBe(true);
   });
+
+  it("infers GM gasoline family from E90 filename (Global B / EcoTec3)", () => {
+    const buf = buildGmRawBinary("12716900");
+    const meta = parseTuneDeployBinary(buf, "E90-12716900_EFILive_Editable.BIN");
+    expect(meta.ecuType).toBe("E90");
+    expect(meta.vehicleFamily).toBe("GM");
+    expect(meta.vehicleSubType).toBe("E90");
+    expect(meta.osVersion).toBe("12716900");
+  });
+
+  it("infers GM_RAW from E90-OS merged filename without 0xAA55 (large EFI Live–style export)", () => {
+    const buf = Buffer.alloc(0x100_000, 0x42);
+    const meta = parseTuneDeployBinary(buf, "E90-12716900_EFILive_Editable.bin");
+    expect(meta.containerFormat).toBe("GM_RAW");
+    expect(meta.ecuType).toBe("E90");
+    expect(meta.osVersion).toBe("12716900");
+    expect(meta.vehicleFamily).toBe("GM");
+  });
+
+  it("infers GM T93 from TCM filename", () => {
+    const buf = buildGmRawBinary("24044027", 0x6000);
+    const meta = parseTuneDeployBinary(buf, "T93-24044027_EFILive_Editable.BIN");
+    expect(meta.ecuType).toBe("T93");
+    expect(meta.vehicleSubType).toBe("T93");
+    expect(meta.vehicleFamily).toBe("GM");
+  });
 });

@@ -1146,4 +1146,32 @@ When analyzing datalogs and the MAF readings appear lower than expected for the 
 - Larger tube area → lower velocity for same mass flow → lower MAF reading
 - Smoke limiter IQ cap = f(MAF reading, RPM) — lower MAF = lower fuel cap
 - Fix = recalibrate MAF transfer function in tune to match new tube geometry
+
+## V-OP Analyzer — GM Gasoline (Spark-Ignition) vs Diesel (Diagnostic Agent & Knox)
+
+### What the app infers today
+- Parsed datalogs carry **combustion inference** (diesel vs spark vs unknown) from column names and OBD PID presence, plus optional **# FuelType:** CSV metadata.
+- When **spark** is inferred or **FuelType: gasoline** is set, the **analyzer disables diesel-only checks** (Duramax-style idle MAF lb/min bands, common-rail rail/PCV narratives, VGT/DPF/SCR fault framing, diesel EGT limit stories).
+- **Unknown** combustion keeps legacy diesel-tool defaults so existing Duramax CSVs behave as before.
+
+### How Knox and agents should reason for **GM gas** (e.g. Gen V LT, Global B, E90 ECM, T93 TCM)
+1. **Prioritize SAE J1979 Mode 01** semantics: trims (STFT/LTFT), O2 or equivalency ratio, spark timing / knock, MAP, MAF, IAT/ECT, catalyst and misfire-related PIDs when logged, EVAP where relevant.
+2. **High-pressure fuel (GDI)**: Mode 01 **0x23** (fuel rail gauge pressure) may appear; do **not** frame it as CP3/CP4 common-rail diesel diagnostics unless the user confirmed diesel.
+3. **Transmission**: On many Global B trucks, extended trans data uses **UDS on 7E1** (GM Mode 22 DIDs such as TFT, TCC slip) — align explanations with EFI Live **TCM.*** or Banks-style naming when present.
+4. **Boosted gas (e.g. turbo V6/V8)**: Use **MAP + MAF + load + spark/knock** together; avoid **diesel smoke-limiter / MAF-vs-boost leak** narratives unless the log clearly shows turbocharged operation and the question is charge-air related.
+5. **Exhaust temperature**: If a gas truck logs an EGT-like channel, **do not assume diesel pyro limits (e.g. 1300°F sustained)** without knowing sensor location and OEM intent — gasoline turbo exhaust can read differently than Duramax towing pyro.
+
+### External research vectors (for agents + future live web search)
+When **GM_GAS_ANALYZER** or **ANALYZER_COMBUSTION_FAMILY: spark** is in module context, corroboration should prefer **current, model-year-specific** sources in this order:
+- **NHTSA recalls and investigations** (public)
+- **GM service bulletins / technical summaries** (public summaries, TechLink-style)
+- **OEM service diagnostic charts** for reported DTCs on that year/engine
+- **SAE J1979 / ISO 15031** for generic OBD PID meaning
+- Communities: **Silverado/Sierra owner forums**, **GM full-size truck boards**, **LS/LT performance** context where it applies to the same engine family
+
+Do **not** treat **Duramax forum defaults** as authoritative for a **6.2L L87 / 5.3L L84** gas log.
+
+### Calibration image reference (offline, not used by live datalogger)
+- Example field package: **E90** ECM segments (OS **12716900**), **T93** TCM (**24044027** / **24054706**) — for editor/calibration tooling only; live scanning remains **ISO-TP OBD/UDS**, not bin parsing.
+- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **`E90-` / `T93-`** names) under `tune-deploy/GM/…` with metadata from `tuneDeployParser`; see repo **`gmE90SilveradoSniffReference`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
 `;

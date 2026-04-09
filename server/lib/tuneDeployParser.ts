@@ -117,6 +117,30 @@ function inferVehicleFromEcu(ecuType: string | null | undefined): Pick<
     };
   }
 
+  /** Global B / EcoTec3 gasoline ECMs — Tune Deploy library + Flash container (see `gmE90SilveradoSniffReference.ts`). */
+  if (t.includes("E90") || t.includes("E88") || t.includes("E92") || t.includes("E98")) {
+    const sub = t.includes("E90") ? "E90" : t.includes("E88") ? "E88" : t.includes("E92") ? "E92" : "E98";
+    return {
+      vehicleFamily: "GM",
+      vehicleSubType: sub,
+      vehicleCompatibilityLabel: `GM gasoline ECM (${sub} — EcoTec3 / Global B; typical full-size truck/SUV — verify OS PN & VIN)`,
+      modelYear: null,
+      modelYearStart: 2019,
+      modelYearEnd: null,
+    };
+  }
+  if (t.includes("T93")) {
+    return {
+      vehicleFamily: "GM",
+      vehicleSubType: "T93",
+      vehicleCompatibilityLabel:
+        "GM T93 TCM (10L80/10L90 family — full-size truck; verify OS PN / VIN vs application)",
+      modelYear: null,
+      modelYearStart: 2019,
+      modelYearEnd: null,
+    };
+  }
+
   return {
     vehicleFamily: "Unknown",
     vehicleSubType: ecuType?.slice(0, 32) || "general",

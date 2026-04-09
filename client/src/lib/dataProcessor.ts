@@ -3,6 +3,13 @@
  * Handles CSV parsing for both HP Tuners and EFILIVE formats
  */
 
+import {
+  extractColumnTokensForCombustionInference,
+  extractObdPidNumbersFromText,
+  resolveCombustionFromLogContext,
+  type CombustionInferenceResult,
+} from './combustionInference';
+
 /**
  * Audit record for the boost absolute-vs-gauge calibration pass.
  * Stored on every processed log so the UI can explain what was corrected.
@@ -36,6 +43,8 @@ export interface VehicleMeta {
   fuelType?: string;      // 'diesel' | 'gasoline' | 'hybrid' | 'any'
   displacement?: string;
   protocol?: string;
+  /** Heuristic diesel vs spark-ignition classification from columns/PIDs (see combustionInference). */
+  combustionInference?: CombustionInferenceResult;
 }
 
 export interface DuramaxData {
@@ -348,6 +357,18 @@ export function parseCSV(content: string): DuramaxData {
   if (vehicleMeta) {
     result.vehicleMeta = vehicleMeta;
   }
+
+  const columnTokens = extractColumnTokensForCombustionInference(content);
+  const pidNums = extractObdPidNumbersFromText(content.slice(0, 24000));
+  const combustionInference = resolveCombustionFromLogContext(
+    result.vehicleMeta,
+    columnTokens,
+    pidNums
+  );
+  result.vehicleMeta = {
+    ...(result.vehicleMeta || {}),
+    combustionInference,
+  };
 
   return result;
 }
@@ -3091,3 +3112,17 @@ export function createBinnedData(
       count: values.maf.length,
     }));
 }
+
+// ─── Combustion family (diesel vs spark) — re-export for analyzer / diagnostics ──
+export type { CombustionFamily, CombustionInferenceResult } from './combustionInference';
+export {
+  extractColumnTokensForCombustionInference,
+  extractObdPidNumbersFromText,
+  formatCombustionInferenceSummary,
+  getCombustionFamilyFromProcessedVehicleMeta,
+  inferCombustionFromColumnTokens,
+  inferCombustionFromObdPids,
+  resolveCombustionFromLogContext,
+  shouldApplyDieselAnalyzerRules,
+} from './combustionInference';
+export type { AnalyzerVehicleMetaLike } from './combustionInference';

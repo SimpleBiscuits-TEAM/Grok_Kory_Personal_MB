@@ -32,7 +32,7 @@ import type { Message } from '@/components/AIChatBox';
 import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 
 // Normal mode imports for merged analyzer
-import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
+import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
@@ -1042,6 +1042,9 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
             <p style={{ fontFamily: sFont.mono, fontSize: '0.85rem', color: 'white', fontWeight: 600, margin: 0 }}>{fileName}</p>
             <p style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, margin: 0 }}>
               {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
+              {data.vehicleMeta?.combustionInference
+                ? <span> · {formatCombustionInferenceSummary(data.vehicleMeta.combustionInference)}</span>
+                : null}
               {hasFaults ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {diagnostics!.issues.length} potential fault area(s)</span> : <span style={{ color: sColor.green }}> · No fault areas detected</span>}
             </p>
           </div>

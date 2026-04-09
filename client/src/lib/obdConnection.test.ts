@@ -375,6 +375,7 @@ describe('PID_PRESETS', () => {
     expect(names).toContain('Duramax DPF / DEF / Emissions');
     expect(names).toContain('Diesel Turbo/Boost');
     expect(names).toContain('Gas Engine Monitor');
+    expect(names).toContain('GM E90 / L87 6.2L Gas Truck');
   });
 
   it('all preset PIDs exist in ALL_PIDS', () => {
@@ -903,6 +904,12 @@ describe('getPresetsForVehicle', () => {
     const presets = getPresetsForVehicle('gm', 'diesel');
     const names = presets.map(p => p.name);
     expect(names.some(n => n.includes('Duramax') || n.includes('Diesel'))).toBe(true);
+  });
+
+  it('returns GM E90 6.2L gas preset for gm/gasoline', () => {
+    const presets = getPresetsForVehicle('gm', 'gasoline');
+    const names = presets.map(p => p.name);
+    expect(names.some(n => n.includes('E90') || n.includes('L87'))).toBe(true);
   });
 
   it('always includes universal presets', () => {

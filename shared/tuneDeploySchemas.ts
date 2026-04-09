@@ -1,6 +1,12 @@
 /**
  * Tune Deploy — shared Zod schemas & types for calibration library metadata.
  * Portable to a future Next.js App Router: import these in Route Handlers and Server Actions.
+ *
+ * **ECU/format readiness:** `vehicleFamily` / `ecuType` / `calibrationPartNumbers` are filled by
+ * `server/lib/tuneDeployParser.ts` + `shared/gmTuneBinaryHeuristics.ts`. **E90** (gas ECM) and **T93** (TCM) share
+ * that pipeline with E41; field SPS layout and CAN reference data are documented in
+ * `client/src/lib/gmE90SilveradoSniffReference.ts`. When **A2L** is available for a stock, RAM addresses and
+ * measurement definitions can augment sniff/OBD channels for live editing and PID documentation.
  */
 import { z } from "zod";
 import {

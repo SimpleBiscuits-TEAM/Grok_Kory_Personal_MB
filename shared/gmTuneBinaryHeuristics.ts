@@ -1,6 +1,11 @@
 /**
  * Shared GM tune / cal .bin heuristics for Tune Deploy (server) and Flash container (client).
  * Aligns detection with `server/lib/tuneDeployParser.ts` GM_RAW rules + filename fallback.
+ *
+ * **E90 / Global B gas (Tune Deploy):** EFI Live merged exports often look like
+ * `E90-12716900_EFILive_Editable.bin` or TCM `T93-24044027_…` — see
+ * `client/src/lib/gmE90SilveradoSniffReference.ts` for SPS segment part numbers that appear in those trees.
+ * When an A2L is supplied later, RAM/symbol info can complement these heuristics for live edit and PID labeling.
  */
 
 export function hasGmRawHeaderMagic(data: Uint8Array): boolean {
@@ -42,6 +47,10 @@ export function shouldInferGmRawFromFilename(fileName: string, byteLength: numbe
   if (byteLength < 0x3000) return false;
   const base = (fileName.replace(/\\/g, "/").split("/").pop() || fileName).trim();
   if (!/\.bin$/i.test(base)) return false;
+  // EFI Live merged cal: E90-12716900_…, T93-24044027_… (may only expose one 8-digit token in the basename)
+  if (/^(E\d{1,3}|T\d{1,3})-\d{8}/i.test(base) && byteLength >= 0x80_000) {
+    return true;
+  }
   const pns = extractGmEightDigitIdsFromFileName(fileName);
   if (pns.length < 2) return false;
   if (/^E\d{1,3}_STOCK_/i.test(base)) return true;

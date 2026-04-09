@@ -5,6 +5,9 @@
  * Ties to **Flash container** flow: the same parse result fills `sw_c1..sw_c9` on the loaded container
  * (see `FlashContainerPanel` + `shared/containerCalibrationSlots.ts`) so ECU Scan / cloud flasher matching
  * no longer depends on hand-entered part numbers when the binary contains detectable cal/OS tokens.
+ *
+ * **GM E90 / T93:** Gas ECM and TCM cals use the same ingest rules as other **GM_RAW** / V-OP containers; parser
+ * maps **E90** / **T93** to `vehicleFamily: "GM"`. Reference data: `client/src/lib/gmE90SilveradoSniffReference.ts`.
  */
 import { useCallback, useMemo, useState, useRef } from "react";
 import { trpc } from "@/lib/trpc";

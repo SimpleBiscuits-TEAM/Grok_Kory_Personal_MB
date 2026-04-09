@@ -181,7 +181,9 @@ function isVehicleInfoGmLikely(info: VehicleInfo): boolean {
   if (info.manufacturer === 'gm') return true;
   if (info.vin && info.vin.length === 17 && decodeVinLocal(info.vin).manufacturer === 'gm') return true;
   const t = `${info.make ?? ''} ${info.model ?? ''} ${info.engineType ?? ''}`.toLowerCase();
-  if (/chev|gmc|buick|cadillac|silverado|sierra|duramax|\bl5p\b|\blml\b|2500|3500/.test(t)) return true;
+  if (/chev|gmc|buick|cadillac|silverado|sierra|duramax|\bl5p\b|\blml\b|2500|3500|\bl87\b|\bl86\b/.test(t)) {
+    return true;
+  }
   // NHTSA/VIN decode can miss make but still describe the diesel (E41 / 6.6L).
   return /\be41\b|6\.6.*diesel|duramax|l5p/.test(t);
 }

@@ -11,7 +11,7 @@ import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket } from 'lucide-react';
-import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
+import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
@@ -697,6 +697,9 @@ export default function Home() {
                     margin: 0
                   }}>
                     {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
+                    {data.vehicleMeta?.combustionInference
+                      ? <span> · {formatCombustionInferenceSummary(data.vehicleMeta.combustionInference)}</span>
+                      : null}
                     {hasFaults
                       ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {(diagnostics?.issues.length ?? 0) + (hasReasoningFaults ? 1 : 0)} potential fault area(s) detected</span>
                       : <span style={{ color: 'oklch(0.65 0.20 145)' }}> · No fault areas detected</span>

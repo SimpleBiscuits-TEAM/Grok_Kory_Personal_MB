@@ -21,6 +21,7 @@
 
 import type { ProcessedMetrics } from './dataProcessor';
 import type { DiagnosticReport } from './diagnostics';
+import { shouldApplyDieselAnalyzerRules } from './combustionInference';
 
 export interface ReasoningFinding {
   id: string;
@@ -79,6 +80,7 @@ export function runReasoningEngine(
 ): ReasoningReport {
   const findings: ReasoningFinding[] = [];
   const betaImprovements: BetaImprovement[] = [];
+  const dieselRules = shouldApplyDieselAnalyzerRules(data.vehicleMeta);
 
   // ── Step 1: Build operating context ──────────────────────────────────────
   const ctx = buildOperatingContext(data);
@@ -86,26 +88,32 @@ export function runReasoningEngine(
   // ── Step 2: TCC / Transmission reasoning ─────────────────────────────────
   findings.push(...analyzeTccBehavior(data, ctx, diagnostics));
 
-  // ── Step 3: Rail pressure / fuel system reasoning ─────────────────────────
-  findings.push(...analyzeRailPressure(data, ctx, diagnostics));
+  // ── Step 3: Rail pressure / fuel system reasoning (common-rail diesel) ───
+  if (dieselRules) {
+    findings.push(...analyzeRailPressure(data, ctx, diagnostics));
+  }
 
   // ── Step 4: Thermal management reasoning ─────────────────────────────────
   findings.push(...analyzeThermalManagement(data, ctx));
 
-  // ── Step 5: Boost / VGT correlation reasoning ────────────────────────────
+  // ── Step 5: Boost / VGT correlation reasoning (VGT sections no-op without vane PIDs)
   findings.push(...analyzeBoostSystem(data, ctx));
 
-  // ── Step 5b: Converter stall vs turbo spool mismatch ─────────────────────
-  findings.push(...analyzeConverterStallVsTurboSpool(data, ctx));
+  // ── Step 5b: Converter stall vs turbo spool (diesel turbo / smoke narrative)
+  if (dieselRules) {
+    findings.push(...analyzeConverterStallVsTurboSpool(data, ctx));
+  }
 
-  // ── Step 5c: Boost leak detection ────────────────────────────────────────
-  findings.push(...analyzeBoostLeak(data, ctx));
+  // ── Step 5c: Boost leak via MAF vs boost heuristics (diesel-calibrated)
+  if (dieselRules) {
+    findings.push(...analyzeBoostLeak(data, ctx));
+  }
 
   // ── Step 5d: Performance recommendations ─────────────────────────────────
-  findings.push(...generatePerformanceRecommendations(data, ctx));
+  findings.push(...generatePerformanceRecommendations(data, ctx, dieselRules));
 
   // ── Step 6: Beta improvement suggestions ─────────────────────────────────
-  betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics));
+  betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics, dieselRules));
 
   // ── Step 7: Generate summary ──────────────────────────────────────────────
   const summary = generateSummary(findings, ctx, diagnostics);
@@ -1091,18 +1099,19 @@ function getToolDisplayName(fileFormat: string): string {
 
 function generatePerformanceRecommendations(
   data: ProcessedMetrics,
-  ctx: OperatingContext
+  ctx: OperatingContext,
+  dieselRules: boolean
 ): ReasoningFinding[] {
   const findings: ReasoningFinding[] = [];
 
-  // ── Injector pulse width analysis ──
-  const ipwNonZero = data.injectorPulseWidth.filter(v => v > 0);
+  // ── Injector pulse width analysis (direct-injection diesel framing) ──
+  const ipwNonZero = dieselRules ? data.injectorPulseWidth.filter(v => v > 0) : [];
   const maxIpw = ipwNonZero.length > 0 ? Math.max(...ipwNonZero) : 0;
   const avgIpw = ipwNonZero.length > 0 ? ipwNonZero.reduce((a, b) => a + b, 0) / ipwNonZero.length : 0;
 
   // Solenoid injectors: > 2500 uS is race-level
   // Piezo injectors: > 1.5 ms is race-level
-  const isPiezo = ctx.platform === 'LML' || ctx.platform === 'L5P';
+  const isPiezo = dieselRules && (ctx.platform === 'LML' || ctx.platform === 'L5P');
   const raceThreshold = isPiezo ? 1.5 : 2.5;
   const highThreshold = isPiezo ? 1.2 : 2.0;
 
@@ -1146,16 +1155,16 @@ function generatePerformanceRecommendations(
     });
   }
 
-  // ── Rail pressure headroom analysis ──
-  const rpActual = data.railPressureActual.filter(v => v > 0);
-  const rpDesired = data.railPressureDesired.filter(v => v > 0);
+  // ── Rail pressure headroom analysis (CP3 / common-rail diesel) ──
+  const rpActual = dieselRules ? data.railPressureActual.filter(v => v > 0) : [];
+  const rpDesired = dieselRules ? data.railPressureDesired.filter(v => v > 0) : [];
   const maxRpActual = rpActual.length > 0 ? Math.max(...rpActual) : 0;
   const maxRpDesired = rpDesired.length > 0 ? Math.max(...rpDesired) : 0;
 
   // Detect if rail pressure is at the CP3 pump's physical limit
   // Stock CP3 typically maxes out around 26,000-27,000 psi
   const cp3Limit = 26500;
-  if (maxRpActual > cp3Limit && maxRpDesired > maxRpActual + 500) {
+  if (dieselRules && maxRpActual > cp3Limit && maxRpDesired > maxRpActual + 500) {
     findings.push({
       id: 'perf-cp3-limit',
       category: 'fuel_system',
@@ -1176,10 +1185,10 @@ function generatePerformanceRecommendations(
     });
   }
 
-  // ── Boost-to-power efficiency ──
+  // ── Boost-to-power efficiency (Duramax-oriented thresholds) ──
   const maxBoost = data.stats.boostMax;
   const maxHp = Math.max(data.stats.hpTorqueMax, data.stats.hpMafMax, data.stats.hpAccelMax);
-  if (maxBoost > 0 && maxHp > 100) {
+  if (dieselRules && maxBoost > 0 && maxHp > 100) {
     const hpPerPsi = maxHp / maxBoost;
     // Typical efficiency: 10-15 HP/psi for stock turbo, 15-25 for aftermarket
     if (hpPerPsi < 8 && maxBoost > 25) {
@@ -1204,14 +1213,14 @@ function generatePerformanceRecommendations(
     }
   }
 
-  // ── EGT management recommendations ──
-  const egtNonZero = data.exhaustGasTemp.filter(v => v > 0);
+  // ── EGT management recommendations (diesel thermal limits; gas EGT differs) ──
+  const egtNonZero = dieselRules ? data.exhaustGasTemp.filter(v => v > 0) : [];
   const maxEgt = egtNonZero.length > 0 ? Math.max(...egtNonZero) : 0;
   const avgEgt = egtNonZero.length > 10
     ? egtNonZero.reduce((a, b) => a + b, 0) / egtNonZero.length
     : 0;
 
-  if (maxEgt > 1400 && avgEgt > 900) {
+  if (dieselRules && maxEgt > 1400 && avgEgt > 900) {
     findings.push({
       id: 'perf-high-egt',
       category: 'thermal',
@@ -1289,7 +1298,8 @@ function generateBetaImprovements(
   data: ProcessedMetrics,
   ctx: OperatingContext,
   findings: ReasoningFinding[],
-  diagnostics: DiagnosticReport
+  diagnostics: DiagnosticReport,
+  dieselRules: boolean
 ): BetaImprovement[] {
   const improvements: BetaImprovement[] = [];
   const toolName = getToolDisplayName(ctx.fileFormat);
@@ -1304,7 +1314,9 @@ function generateBetaImprovements(
   const isLb7ByPids = ctx.fileFormat === 'efilive' && data.fileFormat === 'efilive' &&
     data.exhaustGasTemp.every(v => v === 0) && data.turboVanePosition.every(v => v === 0);
   const hasNoFactoryEgt = isLb7ByPlatform || isLb7ByPids;
-  if (data.exhaustGasTemp.every(v => v === 0) && !hasNoFactoryEgt) missingPids.push('Exhaust Gas Temperature (EGT)');
+  if (dieselRules && data.exhaustGasTemp.every(v => v === 0) && !hasNoFactoryEgt) {
+    missingPids.push('Exhaust Gas Temperature (EGT)');
+  }
   if (data.oilPressure.every(v => v === 0)) missingPids.push('Oil Pressure');
   if (data.oilTemp.every(v => v === 0)) missingPids.push('Oil Temperature');
   if (data.transFluidTemp.every(v => v === 0)) missingPids.push('Transmission Fluid Temperature');
@@ -1318,7 +1330,7 @@ function generateBetaImprovements(
       suggestion:
         `Adding these parameters to your ${toolName} configuration would enable more comprehensive ` +
         `diagnostics.` +
-        (hasEgt ? ` EGT is particularly valuable for detecting fueling issues and exhaust system health.` : '') +
+        (hasEgt && dieselRules ? ` EGT is particularly valuable for detecting fueling issues and exhaust system health.` : '') +
         ` Oil pressure and temperature help identify lubrication system concerns under load.`,
       priority: hasEgt ? 'high' : 'medium',
     });
@@ -1349,13 +1361,16 @@ function generateBetaImprovements(
   const sampleRateHz = logDurationSec > 0 ? sampleCount / logDurationSec : 0;
 
   if (sampleRateHz > 0 && sampleRateHz < 8) {
+    const dieselSampleDetail = dieselRules
+      ? 'brief slip events, rail pressure spikes, and boost transients. '
+      : 'brief TCC slip events and boost transients. ';
     improvements.push({
       id: 'sample-rate',
       area: 'Data Quality',
       observation: `Estimated sample rate: ~${sampleRateHz.toFixed(1)} Hz. Higher sample rates improve transient event detection.`,
       suggestion:
         `Increasing your ${toolName} sample rate to 10+ Hz will improve detection of ` +
-        `brief slip events, rail pressure spikes, and boost transients. ` +
+        dieselSampleDetail +
         `Short-duration events (<300ms) may be missed at lower sample rates.`,
       priority: 'medium',
     });
