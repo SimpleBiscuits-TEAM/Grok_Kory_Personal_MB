@@ -31,6 +31,11 @@ import {
 } from './obdConnection';
 import { decodeVinNhtsa, decodeVinLocal } from './universalVinDecoder';
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
+import {
+  CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS,
+  CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+  CAN_LIVE_UDS_DID_TIMEOUT_MS,
+} from './canTransportTiming';
 
 type EventCallback = (event: ConnectionEvent) => void;
 
@@ -281,6 +286,70 @@ export function parseIsoTpDataToUdsResponse(
   };
 }
 
+/** Parse a full reassembled UDS payload (no ISO-TP PCI) — used after multi-frame ISO-TP RX from ECU. */
+export function parseUdsDiagnosticPayload(
+  service: number,
+  subFunction: number | undefined,
+  payload: number[],
+): UDSResponse | null {
+  if (payload.length === 0) return null;
+
+  const responseServiceId = payload[0];
+
+  if (responseServiceId === 0x7f) {
+    const rejectedService = payload.length > 1 ? payload[1] : service;
+    const nrc = payload.length > 2 ? payload[2] : 0;
+    return {
+      service: rejectedService,
+      serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
+      subFunction,
+      data: payload,
+      positiveResponse: false,
+      nrc,
+      nrcName: decodeNRC(nrc),
+      isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId === service + 0x40) {
+    return {
+      service,
+      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId >= 0x40 && responseServiceId !== 0x7f) {
+    const actualService = responseServiceId - 0x40;
+    return {
+      service: actualService,
+      serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  return {
+    service,
+    serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+    subFunction,
+    data: payload,
+    positiveResponse: false,
+    nrc: undefined,
+    nrcName: 'unparseable response',
+    isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+    timestamp: Date.now(),
+  };
+}
+
 export interface BusMonitorFrame {
   arbId: number;
   arbIdHex: string;
@@ -304,7 +373,7 @@ export interface PCANConnectionConfig {
   bridgeUrlSecure?: string; // Default: wss://localhost:8766
   bridgeUrlInsecure?: string; // Default: ws://localhost:8765
   reconnectAttempts?: number; // Default: 3
-  requestTimeout?: number;   // Default: 3000ms
+  requestTimeout?: number;   // Default: CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS
 }
 
 export class PCANConnection {
@@ -340,7 +409,7 @@ export class PCANConnection {
     this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://localhost:8765';
     this.bridgeUrl = config.bridgeUrl ?? this.bridgeUrlSecure; // Start with secure
     this.reconnectAttempts = config.reconnectAttempts ?? 3;
-    this.requestTimeout = config.requestTimeout ?? 3000;
+    this.requestTimeout = config.requestTimeout ?? CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   // ─── Event System (identical to OBDConnection) ────────────────────────────
@@ -584,7 +653,7 @@ export class PCANConnection {
     return `req_${++this.requestId}`;
   }
 
-  private sendRequest(msg: BridgeMessage): Promise<BridgeMessage> {
+  private sendRequest(msg: BridgeMessage, timeoutOverrideMs?: number): Promise<BridgeMessage> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
@@ -594,10 +663,11 @@ export class PCANConnection {
       const id = msg.id || this.nextRequestId();
       msg.id = id;
 
+      const deadlineMs = timeoutOverrideMs ?? this.requestTimeout;
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`Request timeout: ${msg.type}`));
-      }, this.requestTimeout);
+      }, deadlineMs);
 
       this.pendingRequests.set(id, { resolve, reject, timer });
       this.ws.send(JSON.stringify(msg));
@@ -761,11 +831,14 @@ export class PCANConnection {
         if (!uds?.positiveResponse || !uds.data?.length) {
           // Fallback: bridges that only implement OBD framing (fixed reference bridge strips 2-byte DID).
           try {
-            const response = await this.sendRequest({
-              type: 'obd_request',
-              mode: 0x22,
-              pid: pid.pid,
-            }) as unknown as BridgeOBDResponse;
+            const response = await this.sendRequest(
+              {
+                type: 'obd_request',
+                mode: 0x22,
+                pid: pid.pid,
+              },
+              CAN_LIVE_UDS_DID_TIMEOUT_MS,
+            ) as unknown as BridgeOBDResponse;
             if (response.data && response.data.length > 0) {
               const value = pid.formula(response.data);
               return {
@@ -798,11 +871,14 @@ export class PCANConnection {
         };
       }
 
-      const response = await this.sendRequest({
-        type: 'obd_request',
-        mode,
-        pid: pid.pid,
-      }) as unknown as BridgeOBDResponse;
+      const response = await this.sendRequest(
+        {
+          type: 'obd_request',
+          mode,
+          pid: pid.pid,
+        },
+        CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+      ) as unknown as BridgeOBDResponse;
 
       if (response.data && response.data.length > 0) {
         const value = pid.formula(response.data);
@@ -1280,13 +1356,16 @@ export class PCANConnection {
     // Strategy 1: Try native uds_request first (if bridge supports it)
     if (this.udsNativeSupported) {
       try {
-        const response = await this.sendRequest({
-          type: 'uds_request',
-          service,
-          sub: subFunction,
-          data: data || [],
-          target: targetAddress,
-        });
+        const response = await this.sendRequest(
+          {
+            type: 'uds_request',
+            service,
+            sub: subFunction,
+            data: data || [],
+            target: targetAddress,
+          },
+          timeoutMs,
+        );
 
         console.log(`[UDS] uds_request response type=${response.type}`, JSON.stringify(response).slice(0, 200));
 
@@ -1337,7 +1416,7 @@ export class PCANConnection {
 
     // Strategy 3: Last resort — obd_request (only works for standard OBD modes)
     console.log(`[UDS] Falling back to OBD transport for svc=${svcHex}`);
-    return this.sendUDSviaOBD(service, subFunction, data, targetAddress);
+    return this.sendUDSviaOBD(service, subFunction, data, targetAddress, timeoutMs);
   }
 
   /**
@@ -1356,6 +1435,90 @@ export class PCANConnection {
    *
    * If no bus monitor is running, we start one with our own handler.
    */
+  /**
+   * ECU sent ISO-TP First Frame (PCI 0x1*) — send Flow Control and reassemble consecutive frames.
+   * Required for long GMLAN responses (e.g. ReadDID 0x1A 0x90 → 0x10 0x13 FF then CFs).
+   */
+  private async receiveIsoTpMultiFrameFromEcu(
+    targetAddress: number,
+    responseArbId: number,
+    firstFrame: number[],
+    timeoutMs: number,
+  ): Promise<number[] | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return null;
+
+    const totalLen = ((firstFrame[0] & 0x0f) << 8) | firstFrame[1];
+    if (totalLen < 1 || totalLen > 4095) {
+      console.log(`[ISO-TP RX] invalid total length ${totalLen}`);
+      return null;
+    }
+
+    const out: number[] = [];
+    for (let i = 2; i < 8 && out.length < totalLen; i++) {
+      out.push(firstFrame[i] ?? 0);
+    }
+    if (out.length >= totalLen) {
+      return out.slice(0, totalLen);
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    let expectedSeq = 1;
+
+    const waitCf = (): Promise<number[] | null> =>
+      new Promise((resolve) => {
+        const t = setTimeout(() => {
+          this.udsResponseListener = null;
+          resolve(null);
+        }, Math.max(30, deadline - Date.now()));
+
+        this.udsResponseListener = (msg: Record<string, unknown>) => {
+          const msgType = msg.type as string;
+          if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+          const rawArbId = msg.arb_id ?? msg.arbitration_id;
+          const arbId = typeof rawArbId === 'string'
+            ? (rawArbId.startsWith('0x') ? parseInt(rawArbId, 16) : parseInt(rawArbId, 10))
+            : Number(rawArbId);
+          if (arbId !== responseArbId) return;
+
+          const fd = (msg.data as number[]) || [];
+          if (fd.length === 0) return;
+          const pci = (fd[0] >> 4) & 0x0f;
+          if (pci !== 2) return;
+          const seq = fd[0] & 0x0f;
+          if (seq !== expectedSeq) {
+            console.log(`[ISO-TP RX] sequence mismatch: want ${expectedSeq}, got ${seq}`);
+            return;
+          }
+          clearTimeout(t);
+          this.udsResponseListener = null;
+          resolve(fd);
+        };
+      });
+
+    const fc = [0x30, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    this.ws.send(
+      JSON.stringify({
+        type: 'can_send',
+        id: this.nextRequestId(),
+        arb_id: targetAddress,
+        data: fc,
+      }),
+    );
+
+    while (out.length < totalLen) {
+      if (Date.now() > deadline) return null;
+      const cf = await waitCf();
+      if (!cf) return null;
+      for (let j = 1; j < 8 && out.length < totalLen; j++) {
+        out.push(cf[j] ?? 0);
+      }
+      expectedSeq = (expectedSeq + 1) & 0x0f;
+    }
+
+    return out.slice(0, totalLen);
+  }
+
   private async sendUDSviaRawCAN(
     service: number,
     subFunction?: number,
@@ -1456,7 +1619,7 @@ export class PCANConnection {
     // Set up response capture via udsResponseListener.
     // The existing monitorFrameHandler (whether ours or IntelliSpy's) will call
     // this.udsResponseListener for every can_frame/bus_frame.
-    const responsePromise = new Promise<number[] | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
       const timeout = setTimeout(() => {
         this.udsResponseListener = null;
         resolve(null);
@@ -1466,7 +1629,7 @@ export class PCANConnection {
         const msgType = msg.type as string;
         // Only process CAN frame messages
         if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
-        
+
         const rawArbId = msg.arb_id ?? msg.arbitration_id;
         const arbId = typeof rawArbId === 'string'
           ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
@@ -1477,45 +1640,67 @@ export class PCANConnection {
           ? (arbId >= 0x7E8 && arbId <= 0x7EF)
           : (arbId === responseArbId);
 
-        if (isMatch) {
-          const frameData: number[] = (msg.data as number[]) || [];
-          if (frameData.length === 0) return; // Ignore empty frames
+        if (!isMatch) return;
 
-          // Validate response: check if the response service ID makes sense
-          // for what we sent. This helps reject stale buffered responses.
-          const pciLen = frameData[0] & 0x0F;
-          const respSvcId = frameData.length > 1 ? frameData[1] : 0;
-          const expectedPositive = service + 0x40;
-          const isNegative = respSvcId === 0x7F;
-          const isPositiveMatch = respSvcId === expectedPositive;
-          // For negative responses, also verify the rejected service matches what we sent.
-          // This prevents capturing NRC responses to other services (e.g., TesterPresent NRC
-          // being captured by a SecurityAccess listener).
-          const isNegativeForUs = isNegative && frameData.length > 2 && frameData[2] === service;
-          // Accept any negative response if we can't verify the service byte
-          const isNegativeUnknown = isNegative && (frameData.length <= 2);
+        const frameData: number[] = (msg.data as number[]) || [];
+        if (frameData.length === 0) return;
 
-          if (isPositiveMatch) {
-            clearTimeout(timeout);
-            this.udsResponseListener = null;
-            resolve(frameData);
-          } else if (isNegativeForUs || isNegativeUnknown) {
-            // Check for NRC 0x78 (responsePending) — ECU is processing, keep waiting
-            const nrc = frameData.length > 3 ? frameData[3] : 0;
-            if (nrc === 0x78) {
-              console.log(`[UDS] NRC 0x78 (responsePending) — ECU processing, waiting for real response...`);
-              return; // Keep listener active, don't resolve
+        const pciType = (frameData[0] >> 4) & 0x0f;
+
+        // ISO-TP First Frame from ECU — send Flow Control and reassemble (GMLAN long ReadDID, etc.)
+        if (pciType === 1) {
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          void (async () => {
+            try {
+              const assembled = await this.receiveIsoTpMultiFrameFromEcu(
+                targetAddress,
+                responseArbId,
+                frameData,
+                timeoutMs,
+              );
+              if (!assembled || assembled.length === 0) {
+                resolve(null);
+                return;
+              }
+              resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+            } catch {
+              resolve(null);
             }
-            clearTimeout(timeout);
-            this.udsResponseListener = null;
-            resolve(frameData);
-          } else {
-            // Response doesn't match expected service — likely stale or from another service
-            const reason = isNegative
-              ? `NRC for svc=0x${(frameData[2] ?? 0).toString(16)}, we sent svc=0x${service.toString(16)}`
-              : `positive svc=0x${respSvcId.toString(16)}, expected=0x${expectedPositive.toString(16)}`;
-            console.log(`[UDS] Discarding non-matching frame: arb=0x${arbId.toString(16)} ${reason} data=[${frameData.map(b => b.toString(16)).join(',')}]`);
+          })();
+          return;
+        }
+
+        if (pciType !== 0) {
+          console.log(`[UDS] Ignoring unexpected PCI type ${pciType} (not SF)`);
+          return;
+        }
+
+        const respSvcId = frameData.length > 1 ? frameData[1] : 0;
+        const expectedPositive = service + 0x40;
+        const isNegative = respSvcId === 0x7F;
+        const isPositiveMatch = respSvcId === expectedPositive;
+        const isNegativeForUs = isNegative && frameData.length > 2 && frameData[2] === service;
+        const isNegativeUnknown = isNegative && (frameData.length <= 2);
+
+        if (isPositiveMatch) {
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          resolve(this.parseISOTPResponse(service, subFunction, frameData));
+        } else if (isNegativeForUs || isNegativeUnknown) {
+          const nrc = frameData.length > 3 ? frameData[3] : 0;
+          if (nrc === 0x78) {
+            console.log(`[UDS] NRC 0x78 (responsePending) — ECU processing, waiting for real response...`);
+            return;
           }
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          resolve(this.parseISOTPResponse(service, subFunction, frameData));
+        } else {
+          const reason = isNegative
+            ? `NRC for svc=0x${(frameData[2] ?? 0).toString(16)}, we sent svc=0x${service.toString(16)}`
+            : `positive svc=0x${respSvcId.toString(16)}, expected=0x${expectedPositive.toString(16)}`;
+          console.log(`[UDS] Discarding non-matching frame: arb=0x${arbId.toString(16)} ${reason} data=[${frameData.map(b => b.toString(16)).join(',')}]`);
         }
       };
     });
@@ -1528,13 +1713,12 @@ export class PCANConnection {
       data: frame,
     }));
 
-    // Wait for the response
-    const rawData = await responsePromise;
-    if (!rawData || rawData.length === 0) {
+    const udsResult = await responsePromise;
+    if (!udsResult) {
       throw new Error('Timeout waiting for CAN response');
     }
 
-    return this.parseISOTPResponse(service, subFunction, rawData);
+    return udsResult;
   }
 
   /**
@@ -1737,7 +1921,7 @@ export class PCANConnection {
     // We must keep listening past NRC 0x78 until we get the actual positive/negative response.
     // First chunk after erase can take ~22s; normal chunks take ~20ms.
     const MF_RESPONSE_TIMEOUT = 30000; // 30s to handle first-chunk-after-erase scenario
-    const responsePromise = new Promise<number[] | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
       const respTimeout = setTimeout(() => {
         this.udsResponseListener = null;
         resolve(null);
@@ -1752,61 +1936,74 @@ export class PCANConnection {
           ? ((rawArbId as string).startsWith('0x') ? parseInt(rawArbId as string, 16) : parseInt(rawArbId as string, 10))
           : Number(rawArbId);
 
-        if (arbId === responseArbId) {
-          const frameData: number[] = (msg.data as number[]) || [];
-          if (frameData.length === 0) return;
+        if (arbId !== responseArbId) return;
 
-          const pciType = (frameData[0] >> 4) & 0x0F;
+        const frameData: number[] = (msg.data as number[]) || [];
+        if (frameData.length === 0) return;
 
-          // Accept single-frame responses (positive or negative)
-          if (pciType === 0) {
-            const respSvc = frameData.length > 1 ? frameData[1] : 0;
-            const expectedPositive = service + 0x40;
-            const isNegativeForUs = respSvc === 0x7F && frameData.length > 2 && frameData[2] === service;
-            const isPositiveMatch = respSvc === expectedPositive;
+        const pciType = (frameData[0] >> 4) & 0x0f;
 
-            if (isPositiveMatch) {
-              clearTimeout(respTimeout);
-              this.udsResponseListener = null;
-              resolve(frameData);
-            } else if (isNegativeForUs) {
-              // Check if this is NRC 0x78 (responsePending)
-              const nrc = frameData.length > 3 ? frameData[3] : 0;
-              if (nrc === 0x78) {
-                // NRC 0x78 = ECU received data, writing to flash. Keep waiting for 0x76.
-                // Do NOT resolve — the ECU will send the real response shortly.
-                console.log(`[UDS-MF] NRC 0x78 (responsePending) — ECU writing, waiting for positive response...`);
-                return; // Keep listener active
+        if (pciType === 1) {
+          clearTimeout(respTimeout);
+          this.udsResponseListener = null;
+          void (async () => {
+            try {
+              const assembled = await this.receiveIsoTpMultiFrameFromEcu(
+                targetAddress,
+                responseArbId,
+                frameData,
+                MF_RESPONSE_TIMEOUT,
+              );
+              if (!assembled || assembled.length === 0) {
+                resolve(null);
+                return;
               }
-              // Other NRC — resolve as negative
-              clearTimeout(respTimeout);
-              this.udsResponseListener = null;
-              resolve(frameData);
+              resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+            } catch {
+              resolve(null);
             }
-          }
-          // Also accept first-frame responses (for multi-frame positive responses)
-          if (pciType === 1) {
+          })();
+          return;
+        }
+
+        if (pciType === 0) {
+          const respSvc = frameData.length > 1 ? frameData[1] : 0;
+          const expectedPositive = service + 0x40;
+          const isNegativeForUs = respSvc === 0x7F && frameData.length > 2 && frameData[2] === service;
+          const isPositiveMatch = respSvc === expectedPositive;
+
+          if (isPositiveMatch) {
             clearTimeout(respTimeout);
             this.udsResponseListener = null;
-            resolve(frameData);
+            resolve(this.parseISOTPResponse(service, subFunction, frameData));
+          } else if (isNegativeForUs) {
+            const nrc = frameData.length > 3 ? frameData[3] : 0;
+            if (nrc === 0x78) {
+              console.log(`[UDS-MF] NRC 0x78 (responsePending) — ECU writing, waiting for positive response...`);
+              return;
+            }
+            clearTimeout(respTimeout);
+            this.udsResponseListener = null;
+            resolve(this.parseISOTPResponse(service, subFunction, frameData));
           }
         }
       };
     });
 
-    const rawData = await responsePromise;
-    if (!rawData || rawData.length === 0) {
+    const udsResult = await responsePromise;
+    if (!udsResult) {
       throw new Error('Timeout waiting for CAN response after multi-frame send');
     }
 
-    return this.parseISOTPResponse(service, subFunction, rawData);
+    return udsResult;
   }
 
   private async sendUDSviaOBD(
     service: number,
     subFunction?: number,
     data?: number[],
-    targetAddress = 0x7E0
+    targetAddress = 0x7E0,
+    timeoutMs = 5000,
   ): Promise<UDSResponse | null> {
     try {
       // Build the payload: [service, subFunction?, ...data]
@@ -1814,13 +2011,16 @@ export class PCANConnection {
       if (subFunction !== undefined) payload.push(subFunction);
       if (data) payload.push(...data);
 
-      const response = await this.sendRequest({
-        type: 'obd_request',
-        mode: service,
-        pid: subFunction ?? 0x00,
-        data: payload,
-        target: targetAddress,
-      }) as unknown as BridgeOBDResponse;
+      const response = await this.sendRequest(
+        {
+          type: 'obd_request',
+          mode: service,
+          pid: subFunction ?? 0x00,
+          data: payload,
+          target: targetAddress,
+        },
+        timeoutMs,
+      ) as unknown as BridgeOBDResponse;
 
       // Parse the OBD response as a UDS response
       // OBD response data contains the raw response bytes after the service+0x40 byte
@@ -1885,7 +2085,13 @@ export class PCANConnection {
    */
   async readUDSDID(did: number, targetAddress = 0x7E0): Promise<UDSResponse | null> {
     try {
-      return await this.sendUDSRequest(0x22, undefined, [(did >> 8) & 0xFF, did & 0xFF], targetAddress);
+      return await this.sendUDSRequest(
+        0x22,
+        undefined,
+        [(did >> 8) & 0xff, did & 0xff],
+        targetAddress,
+        CAN_LIVE_UDS_DID_TIMEOUT_MS,
+      );
     } catch {
       return null;
     }

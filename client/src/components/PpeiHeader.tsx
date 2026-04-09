@@ -31,6 +31,9 @@ const sColor = {
   navText: 'oklch(0.65 0.010 260)',
   navActive: 'oklch(0.52 0.22 25)',
   navActiveBg: 'oklch(0.18 0.02 25)',
+  devBadge: 'oklch(0.72 0.14 85)',
+  devBadgeBg: 'rgba(255, 180, 60, 0.12)',
+  devBadgeBorder: 'rgba(255, 180, 60, 0.35)',
 };
 
 interface NavItem {
@@ -42,6 +45,8 @@ interface NavItem {
   admin?: boolean;
   /** If set, opens an external URL instead of navigating internally */
   external?: string;
+  /** Experimental / developer tooling — shows a small badge next to the label */
+  devFeature?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -50,6 +55,7 @@ const navItems: NavItem[] = [
   { label: 'SHOP', path: '/shop', external: 'https://ppei.com/' },
   { label: 'SUPPORT', path: '/support', external: 'https://ppei.com/' },
   { label: 'COMMUNITY', path: '/community' },
+  { label: 'GIT-MAP', path: '/git-map', devFeature: true },
 ];
 
 export default function PpeiHeader() {
@@ -194,8 +200,28 @@ export default function PpeiHeader() {
               }
               return (
                 <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                  <div className="ppei-btn-hover" style={navStyle}>
+                  <div className="ppei-btn-hover" style={{ ...navStyle, gap: '6px' }}>
                     {item.label}
+                    {item.devFeature && (
+                      <span
+                        title="Developer / experimental feature"
+                        style={{
+                          fontFamily: sFont.mono,
+                          fontSize: '0.45rem',
+                          fontWeight: 'bold',
+                          letterSpacing: '0.06em',
+                          color: sColor.devBadge,
+                          background: sColor.devBadgeBg,
+                          border: `1px solid ${sColor.devBadgeBorder}`,
+                          borderRadius: '3px',
+                          padding: '1px 5px',
+                          lineHeight: 1.4,
+                          flexShrink: 0,
+                        }}
+                      >
+                        dev
+                      </span>
+                    )}
                   </div>
                 </Link>
               );
@@ -468,8 +494,27 @@ export default function PpeiHeader() {
             }
             return (
               <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                <div style={mobileNavStyle}>
+                <div style={{ ...mobileNavStyle, gap: '4px' }}>
                   {item.label}
+                  {item.devFeature && (
+                    <span
+                      title="Developer / experimental feature"
+                      style={{
+                        fontFamily: sFont.mono,
+                        fontSize: '0.4rem',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.05em',
+                        color: sColor.devBadge,
+                        background: sColor.devBadgeBg,
+                        border: `1px solid ${sColor.devBadgeBorder}`,
+                        borderRadius: '2px',
+                        padding: '0 4px',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      dev
+                    </span>
+                  )}
                 </div>
               </Link>
             );

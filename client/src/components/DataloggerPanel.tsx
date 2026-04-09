@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import { PCANConnection } from '@/lib/pcanConnection';
-import { VopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
+import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
 import LiveGaugeDashboard from '@/components/gauges/LiveGaugeDashboard';
@@ -1017,7 +1017,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       conn = new PCANConnection(detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {});
       addLog('Connecting via PCAN-USB WebSocket bridge...');
     } else if (adapterType === 'can2usb') {
-      conn = new VopCan2UsbConnection();
+      conn = getSharedVopCan2UsbConnection();
+      conn.clearEventListeners();
       addLog('Connecting to V-OP Can2USB (USB–CAN bridge)…');
     } else {
       conn = new OBDConnection({
@@ -1066,6 +1067,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     connectionRef.current = conn;
 
     const success = await conn.connect();
+    // Sync React UI with transport (needed when reusing an already-open V-OP bridge: stateChange may not update UI reliably).
+    setConnectionState(conn.getState());
     if (success) {
       setSupportedPids(conn.getSupportedPids());
       const stdCount = conn.getAvailablePids().length;

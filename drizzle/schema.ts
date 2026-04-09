@@ -1470,8 +1470,8 @@ export const flashSessions = mysqlTable("flash_sessions", {
   ecuName: varchar("ecuName", { length: 128 }),
   /** Flash mode: full_flash, calibration, patch_only */
   flashMode: mysqlEnum("flashMode", ["full_flash", "calibration", "patch_only"]).notNull(),
-  /** Connection mode: simulator or pcan */
-  connectionMode: mysqlEnum("connectionMode", ["simulator", "pcan"]).notNull(),
+  /** Connection mode: simulator, PCAN bridge, or V-OP USB2CAN (Web Serial) */
+  connectionMode: mysqlEnum("connectionMode", ["simulator", "pcan", "vop_usb"]).notNull(),
   /** Session status */
   status: mysqlEnum("status", ["pending", "running", "success", "failed", "aborted"]).default("pending").notNull(),
   /** File hash (FNV-1a) for duplicate detection */

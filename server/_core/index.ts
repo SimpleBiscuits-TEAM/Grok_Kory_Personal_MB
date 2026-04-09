@@ -13,6 +13,7 @@ import { serveStatic, setupVite } from "./vite";
 import { knoxShieldMiddleware } from "../lib/knoxShieldMiddleware";
 import { registerTuneDeployRoutes } from "../tuneDeployRoutes";
 import { registerDevObjectStorageRoute } from "../storage";
+import { registerGitMapRoute } from "../gitMapRoute";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -52,7 +53,7 @@ async function startServer() {
           connectSrc: ["'self'", "https:", "wss:"],
           mediaSrc: ["'self'", "blob:"],
           workerSrc: ["'self'", "blob:"],
-          frameSrc: ["'none'"],
+          frameSrc: ["'self'"],
           objectSrc: ["'none'"],
           baseUri: ["'self'"],
           formAction: ["'self'"],
@@ -163,6 +164,9 @@ async function startServer() {
 
   // ── Tune Deploy (raw binary upload — avoids JSON body size limits) ─────
   registerTuneDeployRoutes(app);
+
+  // ── Dev: Git map HTML (iframe target for /git-map) ─────────────────────
+  registerGitMapRoute(app);
 
   // ── tRPC API ───────────────────────────────────────────────────────────
   app.use(

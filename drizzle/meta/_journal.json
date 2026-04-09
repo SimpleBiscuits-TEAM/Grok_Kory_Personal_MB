@@ -50,6 +50,13 @@
       "when": 1775595843805,
       "tag": "0006_mysterious_titanium_man",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1775683200000,
+      "tag": "0008_flash_sessions_vop_usb",
+      "breakpoints": true
     }
   ]
 }

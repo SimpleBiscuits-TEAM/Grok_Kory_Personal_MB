@@ -9,6 +9,16 @@ import {
   getEcuConfig, FlashStep, FLASH_STEP_DESCRIPTIONS,
 } from './ecuDatabase';
 
+/** GM short (5) / full (6) flash — part names in flash order (sw_c1..sw_c6); UI shows "Block N — …" only */
+const GM_5_6_PART_NAMES = [
+  'Operating System',
+  'Vehicle System',
+  'Fuel System',
+  'Speedometer Calibration',
+  'Diagnostic Calibration',
+  'Engine Calibration',
+] as const;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -118,24 +128,38 @@ export interface SimulatorState {
 // BLOCK SECTION NAME MAPPING
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Map block address ranges to human-readable section names for GM ECUs */
+/**
+ * Section title for UI: **Block N** = Nth transfer in this run (1..filtered count).
+ * For GM C1–C6 containers, the **part name** comes from `containerBlockId` (sw_c slot), not N — so short-flash
+ * (skip C1/OS) shows e.g. "Block 1 — Vehicle System" when the first transfer is container block_id 2.
+ */
 function getBlockSectionName(
-  blockId: number, startAddr: string, blockType: 'OS' | 'CAL' | 'PATCH', ecuType: string, totalBlocks: number,
+  sequenceIndex: number,
+  containerBlockId: number,
+  blockType: 'OS' | 'CAL' | 'PATCH',
+  ecuType: string,
+  totalBlocks: number,
 ): string {
-  const addr = parseInt(startAddr, 16);
-  
-  // Single-block containers (common for L5P/E41) — the one block contains everything
+  const ecuCfg = getEcuConfig(ecuType);
+  const isGmlan = ecuCfg?.protocol === 'GMLAN';
+  const label = (name: string) => `Block ${sequenceIndex} — ${name}`;
+
   if (totalBlocks === 1) {
-    if (blockType === 'OS') return 'Operating System + Calibration';
-    return 'Full Calibration';
+    if (blockType === 'OS') return label('Operating System + Calibration');
+    return label('Full Calibration');
   }
 
-  // Multi-block GM ECU section mapping by address range
-  // These are typical for E88, E90, E92, E98, etc.
-  if (blockType === 'OS') return 'Operating System';
-  if (blockType === 'PATCH') return 'OS Patch';
+  if (blockType === 'PATCH') return label('OS Patch');
 
-  // Calibration block naming by position/ID
+  if (isGmlan && (totalBlocks === 5 || totalBlocks === 6)) {
+    const slot = Number(containerBlockId);
+    if (slot >= 1 && slot <= GM_5_6_PART_NAMES.length) {
+      return label(GM_5_6_PART_NAMES[slot - 1]);
+    }
+  }
+
+  if (blockType === 'OS') return label('Operating System');
+
   const calNames: Record<number, string> = {
     1: 'Engine Calibration (Fuel & Spark Tables)',
     2: 'Transmission Calibration (Shift Points & Line Pressure)',
@@ -147,10 +171,9 @@ function getBlockSectionName(
     8: 'Exhaust & Aftertreatment (EGR, DPF, DEF)',
   };
 
-  // For cal blocks, use block_id to determine section
-  // Block IDs in multi-block containers are typically sequential after OS block(s)
-  const calBlockIndex = blockId; // block_id from container
-  return calNames[calBlockIndex] || `Calibration Segment ${calBlockIndex}`;
+  return calNames[sequenceIndex]
+    ? label(calNames[sequenceIndex])
+    : label(`Calibration segment ${sequenceIndex}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -321,13 +344,15 @@ export function generateFlashPlan(
   // USB share one code path. Per-block rc34 (e.g. 34 10 0F FE …) follows in the engine.
 
   let totalBytes = 0;
+  let blockSequence = 0;
   for (const block of filteredBlocks) {
+    blockSequence++;
     const blockLen = block.block_length ? parseInt(block.block_length, 16) : 0;
     const isOS = block.OS === 'true';
     const isPatch = block.OS === 'patch' || block.OS === 'forcepatch';
     const blockType = isPatch ? 'PATCH' as const : isOS ? 'OS' as const : 'CAL' as const;
     const sectionName = getBlockSectionName(
-      block.block_id, block.start_adresse || '0', blockType, ecuType, filteredBlocks.length,
+      blockSequence, block.block_id, blockType, ecuType, filteredBlocks.length,
     );
 
     // Erase handling:
@@ -379,14 +404,14 @@ export function generateFlashPlan(
     }
   }
 
-  // Phase 7: POST_FLASH
-  // GMLAN ECUs: Service 0x31 is not supported (NRC 0x11 on E41). Made nonFatal for GMLAN
-  // so the flash continues to VERIFICATION even if this command fails.
-  commands.push({
-    id: cmdId++, phase: 'POST_FLASH', label: 'Routine Control — Check Programming Dependencies',
-    canTx: `${txHex} 04 31 01 FF 01`, expectedPositive: '71', timeoutMs: 10000, retries: 2,
-    nonFatal: isGMLAN,  // GMLAN: 0x31 not supported, safe to skip
-  });
+  // Phase 7: POST_FLASH — UDS RoutineControl 0x31 0x01 0xFF 0x01 (check programming dependencies).
+  // Omitted for GMLAN: not supported on typical GM ECMs (would NRC or waste time).
+  if (!isGMLAN) {
+    commands.push({
+      id: cmdId++, phase: 'POST_FLASH', label: 'Routine Control — Check Programming Dependencies',
+      canTx: `${txHex} 04 31 01 FF 01`, expectedPositive: '71', timeoutMs: 10000, retries: 2,
+    });
+  }
 
   // Phase 8: VERIFICATION
   // BUSMASTER raw log post-flash sequence (exact order):
@@ -475,7 +500,7 @@ export function generateFlashPlan(
   });
   commands.push({
     id: cmdId++, phase: 'KEY_CYCLE', label: 'Waiting for ECU boot-up...',
-    timeoutMs: 8000, retries: 0,
+    timeoutMs: 3500, retries: 0,
     userAction: {
       type: 'WAIT_BOOT',
       prompt: 'ECU is booting up with the new calibration. Please wait...',

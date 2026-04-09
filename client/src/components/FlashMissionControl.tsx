@@ -3,7 +3,7 @@
  * simulation OR real PCAN flash, animated progress, CAN bus log stream,
  * countdown timer, section names, and server session recording.
  */
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from 'react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { analyzeFlashLogForRecommendations } from '@shared/flashLogRecommendations';
 import { downloadFlashSessionXlsx } from '@/lib/flashLogExcelExport';
 import {
@@ -38,8 +39,10 @@ interface FlashMissionControlProps {
   sessionUuid: string;
   onComplete: (result: 'SUCCESS' | 'FAILED' | 'ABORTED') => void;
   onBack: () => void;
-  /** PCAN WebSocket or V-OP USB — required for real hardware flash */
+  /** PCAN WebSocket or V-OP USB — optional snapshot (may be stale on first paint). */
   flashBridge?: FlashBridgeConnection | null;
+  /** Read at Start click — parent refs do not trigger re-renders; this fixes intermittent null snapshot. */
+  flashBridgeRef?: RefObject<FlashBridgeConnection | null>;
   /** Raw container file data — required for real PCAN flash */
   containerData?: ArrayBuffer | null;
   /** Parsed container header — required for real PCAN flash */
@@ -237,7 +240,7 @@ function buildFlashCanLogCsv(
 
 export default function FlashMissionControl({
   plan, connectionMode, sessionUuid, onComplete, onBack,
-  flashBridge, containerData, containerHeader, dryRun = false,
+  flashBridge, flashBridgeRef, containerData, containerHeader, dryRun = false,
 }: FlashMissionControlProps) {
   const [sim, setSim] = useState<SimulatorState>(() => createSimulatorState(plan));
   const [showLog, setShowLog] = useState(true);
@@ -259,6 +262,12 @@ export default function FlashMissionControl({
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
   const isRealFlash = connectionMode === 'pcan' || connectionMode === 'vop_usb';
   const isDryRun = dryRun && isRealFlash;
+  /** Active run with no final result yet (simulator or hardware). */
+  const flashLocked = sim.isRunning && !sim.result;
+  /** Real hardware flash (PCAN / V-OP): lock UI so side interactions do not disturb CAN timing. */
+  const hardwareFlashLocked = flashLocked && isRealFlash;
+  /** User switched away or blurred — show high-visibility warning (timers/USB may throttle). */
+  const [flashBackgroundWarning, setFlashBackgroundWarning] = useState(false);
 
   const updateSession = trpc.flash.updateSession.useMutation();
   const appendLogs = trpc.flash.appendLogs.useMutation();
@@ -268,6 +277,59 @@ export default function FlashMissionControl({
     staleTime: 60_000,
   });
   const recoSubmit = trpc.flash.recoLearningSubmit.useMutation();
+
+  // Hardware flash: keep RUN tab — export UI can steal focus and main-thread time.
+  useEffect(() => {
+    if (hardwareFlashLocked) setMcTab('run');
+  }, [hardwareFlashLocked]);
+
+  // Real hardware: prominent warning when the user leaves this tab/window (timing/CAN risk).
+  useEffect(() => {
+    if (!hardwareFlashLocked) {
+      setFlashBackgroundWarning(false);
+      return;
+    }
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        setFlashBackgroundWarning(true);
+        toast.custom(
+          () => (
+            <div className="w-[min(100vw-2rem,28rem)] rounded-lg border-2 border-amber-500 bg-zinc-950 p-4 text-left shadow-2xl">
+              <div className="font-mono text-sm font-bold tracking-wide text-amber-200">FLASH TAB IN BACKGROUND</div>
+              <p className="mt-2 text-xs leading-relaxed text-zinc-200">
+                A live flash is running. Keep this tab in the foreground — background tabs may throttle JavaScript and USB/serial, which can disrupt CAN timing.
+              </p>
+            </div>
+          ),
+          { duration: 15000, id: 'flash-tab-background' },
+        );
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          try {
+            new Notification('Flash in progress', {
+              body: 'Return to the flash tab. Background operation may disrupt CAN/USB timing.',
+              tag: 'flash-tab-bg',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
+      } else {
+        setFlashBackgroundWarning(false);
+      }
+    };
+    const onBlur = () => setFlashBackgroundWarning(true);
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') setFlashBackgroundWarning(false);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [hardwareFlashLocked]);
 
   // ── Safety: beforeunload warning during flash ──────────────────────────
   useEffect(() => {
@@ -339,10 +401,12 @@ export default function FlashMissionControl({
     startTimeRef.current = Date.now();
     updateSession.mutate({ uuid: sessionUuid, status: 'running', progress: 0 });
 
-    if (isRealFlash && flashBridge && containerData && containerHeader) {
+    const bridge = flashBridgeRef?.current ?? flashBridge ?? null;
+
+    if (isRealFlash && bridge && containerData && containerHeader) {
       let skipConnect = false;
       if (connectionMode === 'vop_usb') {
-        const vop = flashBridge as VopCan2UsbConnection;
+        const vop = bridge as VopCan2UsbConnection;
         const usbOk = await vop.connect({ skipVehicleInit: true });
         if (!usbOk) {
           updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
@@ -374,6 +438,10 @@ export default function FlashMissionControl({
               durationMs: duration,
               errorMessage: result === 'FAILED' ? sim.statusMessage : undefined,
             });
+          }
+          // Release Web Serial port so Datalogger / OS can reopen the adapter without unplugging USB.
+          if (connectionMode === 'vop_usb' && bridge) {
+            void (bridge as VopCan2UsbConnection).disconnect();
           }
         },
         onUserAction: async (action, waitMs) => {
@@ -408,7 +476,7 @@ export default function FlashMissionControl({
       };
 
       const engine = new PCANFlashEngine({
-        connection: flashBridge,
+        connection: bridge,
         skipConnect,
         plan,
         containerData,
@@ -429,11 +497,25 @@ export default function FlashMissionControl({
       flashEngineRef.current = engine;
       setSim(prev => ({ ...prev, isRunning: true }));
       engine.execute(); // Fire and forget — callbacks handle state updates
+    } else if (isRealFlash) {
+      updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
+      const reason = !bridge
+        ? 'CAN adapter not ready. Return to Hardware Flash, confirm the PCAN bridge or V-OP USB, then launch again.'
+        : !containerData || !containerHeader
+          ? 'Container data is missing. Reload the file and try again.'
+          : 'Cannot start real flash.';
+      toast.error(reason);
+      setSim(prev => ({
+        ...prev,
+        isRunning: false,
+        result: null,
+        statusMessage: reason,
+      }));
     } else {
       // Simulator mode
       setSim(prev => ({ ...prev, isRunning: true }));
     }
-  }, [sessionUuid, updateSession, isRealFlash, connectionMode, flashBridge, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
+  }, [sessionUuid, updateSession, isRealFlash, connectionMode, flashBridge, flashBridgeRef, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
 
   const handlePause = useCallback(() => {
     setSim(prev => ({ ...prev, isPaused: !prev.isPaused }));
@@ -646,11 +728,27 @@ export default function FlashMissionControl({
     <div className="relative min-h-[600px] rounded-lg border border-zinc-800 bg-black/90 overflow-hidden">
       <DataStreamBackground active={sim.isRunning && !sim.isPaused && !sim.result} />
 
-      <div className="relative z-10 p-4 space-y-4">
+      {hardwareFlashLocked && flashBackgroundWarning && (
+        <div
+          className="pointer-events-none fixed inset-0 z-[95] flex items-center justify-center bg-red-950/80 px-4 backdrop-blur-[2px]"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="max-w-lg rounded-xl border-4 border-red-500 bg-black/95 p-6 text-center shadow-2xl">
+            <AlertTriangle className="mx-auto mb-3 h-14 w-14 text-red-400" />
+            <p className="font-mono text-lg font-bold uppercase tracking-wide text-red-100">Do not leave this tab</p>
+            <p className="mt-3 text-sm leading-relaxed text-zinc-200">
+              Flash is active. Switching away can throttle the browser and disturb USB/CAN timing. Return here immediately and keep this window focused.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={cn('relative z-10 p-4 space-y-4', hardwareFlashLocked && 'pb-24')}>
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={onBack} disabled={sim.isRunning && !sim.result}>
+            <Button variant="ghost" size="sm" onClick={onBack} disabled={hardwareFlashLocked}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <div>
@@ -669,7 +767,14 @@ export default function FlashMissionControl({
                 )}
               </h3>
               <p className="text-xs text-zinc-500">
-                {isDryRun ? 'DRY RUN — Non-destructive test' : connectionMode === 'pcan' ? 'Real PCAN Bridge Flash' : 'Simulator Mode'} — {plan.ecuName}
+                {isDryRun
+                  ? 'DRY RUN — Non-destructive test'
+                  : connectionMode === 'pcan'
+                    ? 'Real PCAN Bridge Flash'
+                    : connectionMode === 'vop_usb'
+                      ? 'V-OP USB2CAN Bridge Flash'
+                      : 'Simulator Mode'}{' '}
+                — {plan.ecuName}
               </p>
             </div>
           </div>
@@ -687,8 +792,9 @@ export default function FlashMissionControl({
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
           <button
             type="button"
+            disabled={hardwareFlashLocked}
             onClick={() => setMcTab('run')}
-            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors ${
+            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors disabled:opacity-40 disabled:pointer-events-none ${
               mcTab === 'run'
                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                 : 'text-zinc-500 border border-transparent hover:text-zinc-300'
@@ -698,8 +804,9 @@ export default function FlashMissionControl({
           </button>
           <button
             type="button"
+            disabled={hardwareFlashLocked}
             onClick={() => setMcTab('export')}
-            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold tracking-wide transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none ${
               mcTab === 'export'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                 : 'text-zinc-500 border border-transparent hover:text-zinc-300'
@@ -729,7 +836,7 @@ export default function FlashMissionControl({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={sim.log.length === 0}
+                disabled={hardwareFlashLocked || sim.log.length === 0}
                 onClick={handleDownloadXlsx}
                 className="font-mono text-xs border-cyan-700/50 text-cyan-300 hover:bg-cyan-950/50"
               >
@@ -739,7 +846,7 @@ export default function FlashMissionControl({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={sim.log.length === 0}
+                disabled={hardwareFlashLocked || sim.log.length === 0}
                 onClick={handleDownloadCsv}
                 className="font-mono text-xs border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50"
               >
@@ -749,14 +856,20 @@ export default function FlashMissionControl({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={sim.log.length === 0}
+                disabled={hardwareFlashLocked || sim.log.length === 0}
                 onClick={handleDownloadLog}
                 className="font-mono text-xs border-zinc-600"
               >
                 <Download className="h-3.5 w-3.5 mr-1" />
                 DOWNLOAD TXT LOG
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setMcTab('run')} className="font-mono text-xs text-zinc-500">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={hardwareFlashLocked}
+                onClick={() => setMcTab('run')}
+                className="font-mono text-xs text-zinc-500"
+              >
                 ← Back to run
               </Button>
             </div>
@@ -773,13 +886,14 @@ export default function FlashMissionControl({
                 placeholder="What actually fixed it (optional, max ~2000 chars)…"
                 className="min-h-[72px] text-xs font-mono bg-zinc-950 border-zinc-700"
                 maxLength={2000}
+                disabled={hardwareFlashLocked}
               />
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
-                  disabled={recoSubmit.isPending}
+                  disabled={hardwareFlashLocked || recoSubmit.isPending}
                   onClick={() => submitRecoFeedback(true)}
                   className="font-mono text-xs"
                 >
@@ -789,7 +903,7 @@ export default function FlashMissionControl({
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={recoSubmit.isPending}
+                  disabled={hardwareFlashLocked || recoSubmit.isPending}
                   onClick={() => submitRecoFeedback(false)}
                   className="font-mono text-xs border-zinc-600"
                 >
@@ -800,7 +914,7 @@ export default function FlashMissionControl({
             <div className="text-[10px] font-mono text-zinc-600">
               Session <span className="text-zinc-400">{sessionUuid.slice(0, 8)}…</span>
               {' · '}
-              {isDryRun ? 'Dry run' : connectionMode === 'pcan' ? 'PCAN' : 'Simulator'}
+              {isDryRun ? 'Dry run' : connectionMode === 'pcan' ? 'PCAN' : connectionMode === 'vop_usb' ? 'V-OP USB' : 'Simulator'}
               {' · '}
               {sim.log.length} entries
               {sim.result && ` · ${sim.result}`}
@@ -849,22 +963,24 @@ export default function FlashMissionControl({
           </div>
         </div>
 
-        {/* Key Cycle Prompt */}
+        {/* Key cycle prompt — above fixed emergency bar so confirm stays clickable */}
         {keyCycleState && (
-          <KeyCyclePrompt
-            state={keyCycleState}
-            countdown={keyCycleCountdown}
-            onConfirm={() => {
-              if (keyCycleResolveRef.current) {
-                keyCycleResolveRef.current();
-                keyCycleResolveRef.current = null;
-              }
-            }}
-          />
+          <div className="relative z-[110]">
+            <KeyCyclePrompt
+              state={keyCycleState}
+              countdown={keyCycleCountdown}
+              onConfirm={() => {
+                if (keyCycleResolveRef.current) {
+                  keyCycleResolveRef.current();
+                  keyCycleResolveRef.current = null;
+                }
+              }}
+            />
+          </div>
         )}
 
-        {/* Controls */}
-        <div className="flex gap-2">
+        {/* Controls — during hardware flash, only the fixed emergency bar is used */}
+        <div className="flex flex-wrap gap-2">
           {!sim.isRunning && !sim.result && (
             <Button size="sm" onClick={handleStart} className={`text-white font-mono text-xs ${
               isDryRun ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-emerald-600 hover:bg-emerald-500'
@@ -872,20 +988,20 @@ export default function FlashMissionControl({
               <Play className="h-3 w-3 mr-1" /> {isDryRun ? 'START DRY RUN' : isRealFlash ? 'START REAL FLASH' : 'START FLASH'}
             </Button>
           )}
-          {sim.isRunning && !sim.result && (
+          {/* Simulator: pause / export allowed; hardware flash uses only the fixed emergency bar */}
+          {flashLocked && !isRealFlash && (
             <>
-              {!isRealFlash && (
-                <Button size="sm" variant="outline" onClick={handlePause} className="font-mono text-xs border-zinc-700">
-                  {sim.isPaused ? <Play className="h-3 w-3 mr-1" /> : <Pause className="h-3 w-3 mr-1" />}
-                  {sim.isPaused ? 'RESUME' : 'PAUSE'}
-                </Button>
-              )}
-              <Button size="sm" variant="outline" onClick={handleAbort}
-                className={`font-mono text-xs ${isRealFlash
-                  ? 'border-red-600 text-red-300 hover:bg-red-900/50 font-bold'
-                  : 'border-red-800 text-red-400 hover:bg-red-900/30'}`}
+              <Button size="sm" variant="outline" onClick={handlePause} className="font-mono text-xs border-zinc-700">
+                {sim.isPaused ? <Play className="h-3 w-3 mr-1" /> : <Pause className="h-3 w-3 mr-1" />}
+                {sim.isPaused ? 'RESUME' : 'PAUSE'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleAbort}
+                className="font-mono text-xs border-red-800 text-red-400 hover:bg-red-900/30"
               >
-                <Square className="h-3 w-3 mr-1" /> {isRealFlash ? '⚠ EMERGENCY ABORT' : 'ABORT'}
+                <Square className="h-3 w-3 mr-1" /> ABORT
               </Button>
               {sim.log.length > 0 && (
                 <>
@@ -927,8 +1043,10 @@ export default function FlashMissionControl({
             {SPEED_OPTIONS.map(s => (
               <button
                 key={s}
+                type="button"
+                disabled={hardwareFlashLocked}
                 onClick={() => setSpeedMultiplier(s)}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all disabled:opacity-40 disabled:pointer-events-none ${
                   speedMultiplier === s
                     ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
                     : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
@@ -1006,8 +1124,12 @@ export default function FlashMissionControl({
 
         {/* Log stream */}
         <div>
-          <button onClick={() => setShowLog(!showLog)}
-            className="flex items-center gap-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 transition-colors mb-1">
+          <button
+            type="button"
+            disabled={hardwareFlashLocked}
+            onClick={() => setShowLog(!showLog)}
+            className="flex items-center gap-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 transition-colors mb-1 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed"
+          >
             {showLog ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             CAN BUS LOG ({sim.log.length} entries)
           </button>
@@ -1033,6 +1155,7 @@ export default function FlashMissionControl({
                 type="button"
                 size="sm"
                 variant="ghost"
+                disabled={hardwareFlashLocked}
                 onClick={() => setMcTab('export')}
                 className="h-7 text-[10px] font-mono text-emerald-400/90 hover:text-emerald-300 px-2"
               >
@@ -1045,6 +1168,31 @@ export default function FlashMissionControl({
           </>
         )}
       </div>
+
+      {/* During hardware flash: only emergency abort remains interactive (fixed bar). */}
+      {hardwareFlashLocked && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+          aria-live="polite"
+        >
+          <div className="pointer-events-auto w-full max-w-lg px-2">
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
+              onClick={handleAbort}
+              className={`w-full font-mono text-sm font-bold shadow-lg ${
+                isRealFlash
+                  ? 'border-2 border-red-500 bg-red-950/90 text-red-100 hover:bg-red-900/90'
+                  : 'border-red-800 bg-zinc-950/95 text-red-300 hover:bg-red-950/50'
+              }`}
+            >
+              <Square className="h-4 w-4 mr-2 shrink-0" />
+              {isRealFlash ? 'EMERGENCY ABORT' : 'ABORT'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

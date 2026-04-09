@@ -37,7 +37,7 @@ import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
 import { PCANConnection } from '@/lib/pcanConnection';
-import { VopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
+import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import KnoxConfidenceDashboard from '@/components/KnoxConfidenceDashboard';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -812,7 +812,7 @@ export default function IntelliSpy() {
       }
       setStatus('connecting');
       try {
-        if (!vopConnRef.current) vopConnRef.current = new VopCan2UsbConnection({});
+        if (!vopConnRef.current) vopConnRef.current = getSharedVopCan2UsbConnection({});
         const v = vopConnRef.current;
         const ok = await v.connect({ skipVehicleInit: true });
         if (!ok) {

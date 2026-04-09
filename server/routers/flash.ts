@@ -319,7 +319,7 @@ export const flashRouter = router({
       ecuType: z.string().max(32),
       ecuName: z.string().max(128).optional(),
       flashMode: z.enum(['full_flash', 'calibration', 'patch_only']),
-      connectionMode: z.enum(['simulator', 'pcan']),
+      connectionMode: z.enum(['simulator', 'pcan', 'vop_usb']),
       fileHash: z.string().max(64).optional(),
       fileName: z.string().max(256).optional(),
       fileSize: z.number().optional(),

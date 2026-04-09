@@ -17,7 +17,7 @@
  * - **Tune Deploy** tab: same parser + team library (R2) for cal binaries — use both together for auto-match vs manual sw_c entry.
  */
 
-import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect, type MutableRefObject } from 'react';
 import { trpc } from '@/lib/trpc';
 import PreFlightChecklist from './PreFlightChecklist';
 import FlashMissionControl from './FlashMissionControl';
@@ -29,6 +29,7 @@ import {
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader as EcuContainerFileHeader } from '../../../shared/ecuDatabase';
 import { PCANConnection } from '../lib/pcanConnection';
+import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '../lib/vopCan2UsbConnection';
 import type { FlashBridgeConnection } from '../lib/flashBridgeConnection';
 import {
   parsePpeiContainer,
@@ -48,9 +49,11 @@ import {
   CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
   HardDrive, Binary, Wifi, Bluetooth, RotateCcw, Eye,
   Database, Clock, Lock, Radio, Activity, BarChart3, Search,
-  Layers,
+  Layers, Usb,
 } from 'lucide-react';
 import TuneDeployWorkspace from '@/components/tune-deploy/TuneDeployWorkspace';
+
+type FlashConnectionMode = 'simulator' | 'pcan' | 'vop_usb';
 
 // ── Hex Viewer Sub-component ─────────────────────────────────────────────
 
@@ -188,9 +191,9 @@ export default function FlashContainerPanel() {
   const [isLoading, setIsLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'ready' | 'uploading' | 'done'>('idle');
-  const [missionControlMode, setMissionControlMode] = useState<'simulator' | 'pcan' | null>(null);
+  const [missionControlMode, setMissionControlMode] = useState<FlashConnectionMode | null>(null);
   const [showPreFlight, setShowPreFlight] = useState(false);
-  const [pendingMode, setPendingMode] = useState<'simulator' | 'pcan' | null>(null);
+  const [pendingMode, setPendingMode] = useState<FlashConnectionMode | null>(null);
   const [dryRunMode, setDryRunMode] = useState(false);
   const [fileHash, setFileHash] = useState<string>('');
   const [sessionUuid, setSessionUuid] = useState<string>('');
@@ -198,7 +201,13 @@ export default function FlashContainerPanel() {
   const [pcanBridgeUrl, setPcanBridgeUrl] = useState<string | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
   const pcanConnectionRef = useRef<PCANConnection | null>(null);
+  const vopConnectionRef = useRef<VopCan2UsbConnection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const vopUsbSupported = useMemo(
+    () => typeof window !== 'undefined' && VopCan2UsbConnection.isSupported(),
+    [],
+  );
 
   const createSession = trpc.flash.createSession.useMutation();
 
@@ -229,10 +238,17 @@ export default function FlashContainerPanel() {
 
   // Check bridge when PCAN section becomes active
   useEffect(() => {
-    if ((activeSection === 'pcan' || activeSection === 'ecuscan') && pcanBridgeAvailable === null) {
+    if ((activeSection === 'hardware_flash' || activeSection === 'ecuscan') && pcanBridgeAvailable === null) {
       checkPcanBridge();
     }
   }, [activeSection, pcanBridgeAvailable, checkPcanBridge]);
+
+  // Lazily allocate V-OP USB transport when user opens that tab (Web Serial — Chrome/Edge desktop)
+  useEffect(() => {
+    if (activeSection === 'hardware_flash' && !vopConnectionRef.current) {
+      vopConnectionRef.current = getSharedVopCan2UsbConnection();
+    }
+  }, [activeSection]);
 
   /**
    * Tune Deploy analyze API — same heuristics as the library uploader.
@@ -337,8 +353,7 @@ export default function FlashContainerPanel() {
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
   }, []);
 
-  // Handle launch (PCAN or Simulator)
-  const handleLaunch = useCallback((mode: 'simulator' | 'pcan', isDryRun = false) => {
+  const handleLaunch = useCallback((mode: FlashConnectionMode, isDryRun = false) => {
     setPendingMode(mode);
     setDryRunMode(isDryRun);
     setShowPreFlight(true);
@@ -349,6 +364,12 @@ export default function FlashContainerPanel() {
     if (!pendingMode || !analysis || !flashPlan) return;
     setShowPreFlight(false);
     try {
+      if (pendingMode === 'pcan') {
+        await checkPcanBridge();
+      }
+      if (pendingMode === 'vop_usb' && !vopConnectionRef.current) {
+        vopConnectionRef.current = getSharedVopCan2UsbConnection();
+      }
       const ecuType = analysis.ecuConfig?.ecuType || analysis.devProgHeader?.ecuType || analysis.ecuFamily;
       const uuid = crypto.randomUUID();
       const result = await createSession.mutateAsync({
@@ -362,7 +383,7 @@ export default function FlashContainerPanel() {
     } catch (err) {
       console.error('Failed to create flash session:', err);
     }
-  }, [pendingMode, analysis, flashPlan, fileName, fileHash, effectiveFlashType, createSession]);
+  }, [pendingMode, analysis, flashPlan, fileName, fileHash, effectiveFlashType, createSession, checkPcanBridge]);
 
   // Handle MissionControl completion
   const handleFlashComplete = useCallback((result: 'SUCCESS' | 'FAILED' | 'ABORTED') => {
@@ -485,6 +506,8 @@ export default function FlashContainerPanel() {
     setSessionUuid('');
     setPcanBridgeAvailable(null);
     setPcanBridgeUrl(null);
+    void vopConnectionRef.current?.disconnect();
+    vopConnectionRef.current = null;
   };
 
   // ── Upload Screen ──────────────────────────────────────────────────────
@@ -560,7 +583,7 @@ export default function FlashContainerPanel() {
     { id: 'hex', label: 'Hex Viewer', icon: Binary },
     { id: 'upload', label: 'Upload to Flasher', icon: Wifi },
     { id: 'ecuscan', label: 'ECU Scan', icon: Search },
-    { id: 'pcan', label: 'PCAN Flash', icon: Radio },
+    { id: 'hardware_flash', label: 'Hardware Flash', icon: Layers },
     { id: 'simulator', label: 'Simulator', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   ];
@@ -578,7 +601,16 @@ export default function FlashContainerPanel() {
           flashBridge={
             missionControlMode === 'pcan' && pcanConnectionRef.current
               ? (pcanConnectionRef.current as unknown as FlashBridgeConnection)
-              : null
+              : missionControlMode === 'vop_usb' && vopConnectionRef.current
+                ? (vopConnectionRef.current as FlashBridgeConnection)
+                : null
+          }
+          flashBridgeRef={
+            missionControlMode === 'pcan'
+              ? (pcanConnectionRef as MutableRefObject<FlashBridgeConnection | null>)
+              : missionControlMode === 'vop_usb'
+                ? (vopConnectionRef as MutableRefObject<FlashBridgeConnection | null>)
+                : undefined
           }
           containerData={rawData ? new Uint8Array(rawData).buffer : null}
           containerHeader={containerFileHeader}
@@ -599,7 +631,10 @@ export default function FlashContainerPanel() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-zinc-100">Pre-Flight Diagnostics</h2>
-            <p className="text-xs text-zinc-500">Validating ECU and container before {pendingMode.toUpperCase()} flash</p>
+            <p className="text-xs text-zinc-500">
+              Validating ECU and container before{' '}
+              {pendingMode === 'vop_usb' ? 'V-OP USB2CAN' : pendingMode === 'pcan' ? 'PCAN' : pendingMode.toUpperCase()} flash
+            </p>
           </div>
         </div>
         <PreFlightChecklist
@@ -1096,25 +1131,28 @@ export default function FlashContainerPanel() {
           />
         )}
 
-        {/* ── PCAN Flash Section ── */}
-        {activeSection === 'pcan' && (
+        {/* ── Hardware flash: PCAN-USB (bridge) + V-OP USB2CAN (Web Serial) — same engine, pick adapter ── */}
+        {activeSection === 'hardware_flash' && (
           <div className="space-y-4">
             <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30 flex items-center justify-center">
-                  <Radio className="w-5 h-5 text-red-400" />
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
+                  <Layers className="w-5 h-5 text-amber-400" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-zinc-100">PCAN Hardware Flash</h3>
-                  <p className="text-[10px] text-zinc-500">Flash ECU via PCAN-USB adapter — requires physical CAN bus connection</p>
+                  <h3 className="text-sm font-bold text-zinc-100">Hardware CAN flash</h3>
+                  <p className="text-[10px] text-zinc-500">
+                    One flash procedure for both adapters: <span className="text-zinc-400">PCAN-USB</span> via the local WebSocket bridge, or{' '}
+                    <span className="text-zinc-400">V-OP USB2CAN</span> via Web Serial. Connect to the vehicle CAN bus (OBD-II), then use the column for your hardware.
+                  </p>
                 </div>
               </div>
-              <div className="space-y-2 text-xs">
+
+              <div className="space-y-2 text-xs mb-4">
                 {[
-                  { status: analysis.ecuConfig ? 'ok' : 'warn', text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — will use default CAN addresses' },
+                  { status: analysis.ecuConfig ? 'ok' : 'warn', text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — default CAN addresses' },
                   { status: analysis.valid ? 'ok' : 'fail', text: 'Container validated and CRC32 verified' },
                   { status: !flashPlan ? 'fail' : flashPlan.validationErrors.length > 0 ? 'fail' : 'ok', text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
-                  { status: pcanBridgeAvailable === true ? 'ok' : checkingBridge ? 'warn' : 'fail', text: checkingBridge ? 'Checking PCAN-USB bridge...' : pcanBridgeAvailable === true ? `PCAN-USB bridge detected${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'secure' : 'standard'})` : ''}` : 'PCAN-USB bridge — not detected (ensure pcan_bridge.py is running)' },
                 ].map((req, i) => (
                   <div key={i} className="flex items-center gap-2">
                     {req.status === 'ok' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : req.status === 'warn' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
@@ -1132,39 +1170,93 @@ export default function FlashContainerPanel() {
                   </div>
                 )}
               </div>
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={() => handleLaunch('pcan', true)}
-                  disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
-                  title="Test the full command sequence without writing to ECU flash"
-                  className="flex-1 py-3 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-sm hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  🧪 Dry Run
-                </button>
-                <button
-                  onClick={() => handleLaunch('pcan', false)}
-                  disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
-                  title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
-                  className="flex-1 py-3 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-sm hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Radio className="w-4 h-4 inline mr-2" />
-                  Launch Flash
-                </button>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* PCAN */}
+                <div className="rounded-lg border border-zinc-700/80 bg-black/20 p-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="text-xs font-bold text-zinc-200">PCAN-USB</span>
+                    <span className="text-[10px] text-zinc-500">WebSocket bridge (pcan_bridge.py)</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-[11px]">
+                    {pcanBridgeAvailable === true ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" /> : checkingBridge ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />}
+                    <span className="text-zinc-400">
+                      {checkingBridge ? 'Checking bridge…' : pcanBridgeAvailable === true ? `Bridge OK${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'wss' : 'ws'})` : ''}` : 'Bridge not detected — run pcan_bridge.py with the PEAK adapter connected'}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleLaunch('pcan', true)}
+                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
+                      title="Run the full sequence without writing ECU flash"
+                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-xs hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Dry Run
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLaunch('pcan', false)}
+                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
+                      title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
+                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-xs hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Launch
+                    </button>
+                  </div>
+                  {pcanBridgeAvailable === false && (
+                    <button
+                      type="button"
+                      onClick={checkPcanBridge}
+                      disabled={checkingBridge}
+                      className="w-full py-1.5 rounded border border-zinc-600 text-zinc-400 text-[10px] hover:border-zinc-500 hover:text-zinc-300 disabled:opacity-40"
+                    >
+                      {checkingBridge ? 'Checking…' : 'Re-check bridge'}
+                    </button>
+                  )}
+                </div>
+
+                {/* V-OP USB2CAN */}
+                <div className="rounded-lg border border-zinc-700/80 bg-black/20 p-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Usb className="w-4 h-4 text-violet-400 shrink-0" />
+                    <span className="text-xs font-bold text-zinc-200">V-OP USB2CAN</span>
+                    <span className="text-[10px] text-zinc-500">Web Serial (Chrome / Edge)</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-[11px]">
+                    {vopUsbSupported ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />}
+                    <span className="text-zinc-400">
+                      {vopUsbSupported ? 'Web Serial available — you will pick the COM port when flash starts' : 'Web Serial unavailable — use Chrome or Edge on desktop (HTTPS or localhost)'}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleLaunch('vop_usb', true)}
+                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !vopUsbSupported}
+                      title="Run the full sequence without writing ECU flash"
+                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-xs hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Dry Run
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLaunch('vop_usb', false)}
+                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !vopUsbSupported}
+                      title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
+                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold text-xs hover:from-violet-500 hover:to-fuchsia-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Launch
+                    </button>
+                  </div>
+                </div>
               </div>
-              {pcanBridgeAvailable === false && (
-                <button
-                  onClick={checkPcanBridge}
-                  disabled={checkingBridge}
-                  className="mt-2 w-full py-2 rounded-lg border border-zinc-700 text-zinc-400 text-xs hover:border-zinc-600 hover:text-zinc-300 transition-all disabled:opacity-40"
-                >
-                  {checkingBridge ? 'Checking...' : '↻ Re-check PCAN Bridge Connection'}
-                </button>
-              )}
             </div>
-            <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 text-xs text-amber-400/80">
-              <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5" />
-              PCAN flash requires a physical PCAN-USB adapter connected to the vehicle's OBD-II port.
-              Ensure ignition is ON and battery voltage is stable before proceeding.
+
+            <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 text-xs text-amber-200/90">
+              <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5 align-text-bottom" />
+              Vehicle: ignition ON, stable battery, OBD-II connected. Stay on this tab during a live flash. V-OP: select the correct USB serial port when prompted.
             </div>
           </div>
         )}

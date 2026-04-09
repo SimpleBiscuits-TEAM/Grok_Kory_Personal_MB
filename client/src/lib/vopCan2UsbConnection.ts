@@ -31,8 +31,14 @@ import {
   getPidsForVehicle,
 } from './obdConnection';
 import { decodeVinNhtsa } from './universalVinDecoder';
-import { type UDSResponse, parseIsoTpDataToUdsResponse } from './pcanConnection';
+import { type UDSResponse, parseIsoTpDataToUdsResponse, parseUdsDiagnosticPayload } from './pcanConnection';
 import type { FlashBridgeConnection } from './flashBridgeConnection';
+import {
+  CAN_ISO_TP_DEFAULT_TIMEOUT_MS,
+  CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+  CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_USB_BRIDGE_ACK_TIMEOUT_MS,
+} from './canTransportTiming';
 
 type EventCallback = (event: ConnectionEvent) => void;
 
@@ -52,12 +58,6 @@ const FLAG_RTR = 1 << 1;
 const OBD_TX_ID = 0x7e0;
 const OBD_RX_ID = 0x7e8;
 
-/** Live Mode 01/09-style SF — ECU typically answers well under this; keeps sample loop tight. */
-const ISO_TP_OBD_POLL_TIMEOUT_MS = 250;
-/** Mode 22 in live log (often SF; FF+CF still bounded for responsive buses). */
-const ISO_TP_UDS_DID_TIMEOUT_MS = 250;
-/** VIN, bitmask scan, DTCs, flash — worst-case ECU / multi-frame. */
-const ISO_TP_DEFAULT_TIMEOUT_MS = 2500;
 
 function crc16Ccitt(data: Uint8Array, off: number, len: number): number {
   let crc = 0xffff;
@@ -148,6 +148,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   off(type: ConnectionEventType, callback: EventCallback): void {
     const list = this.listeners.get(type) || [];
     this.listeners.set(type, list.filter(cb => cb !== callback));
+  }
+
+  /** Drop all event listeners (e.g. before re-binding UI when reusing the shared connection). */
+  clearEventListeners(): void {
+    this.listeners.clear();
   }
 
   private emit(type: ConnectionEventType, data?: unknown, message?: string): void {
@@ -267,7 +272,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         const hit = this.rxFrames.splice(idx, 1)[0];
         return hit.data;
       }
-      await new Promise(r => setTimeout(r, 4));
+      await new Promise(r => setTimeout(r, 2));
     }
     return null;
   }
@@ -288,11 +293,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           this.ackWaiters.splice(i, 1);
           resolve(false);
         }
-      }, 3000);
+      }, CAN_USB_BRIDGE_ACK_TIMEOUT_MS);
     });
   }
 
-  private async isoTpRequest(pdu: number[], responseTimeoutMs = ISO_TP_DEFAULT_TIMEOUT_MS): Promise<number[] | null> {
+  private async isoTpRequest(pdu: number[], responseTimeoutMs = CAN_ISO_TP_DEFAULT_TIMEOUT_MS): Promise<number[] | null> {
     if (pdu.length > 7) {
       this.emit('log', null, 'ISO-TP SF request max 7B — use shorter OBD request');
       return null;
@@ -380,6 +385,31 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         this.emit('error', null, 'Web Serial not available (use Chrome/Edge desktop).');
         return false;
       }
+
+      // One SerialPort per device: a second open() throws "The port is already open".
+      // Reuse when this instance already holds the port (e.g. shared singleton: Flash tab + Datalogger).
+      if (this.isFlashTransportOpen()) {
+        this.emit('log', null, 'USB CAN bridge already open — reusing connection.');
+        if (options?.skipVehicleInit) {
+          this.setState('ready');
+          return true;
+        }
+        if (this.supportedPids.size > 0) {
+          this.setState('ready');
+          this.emit('vehicleInfo', this.vehicleInfo);
+          this.emit('pidAvailability', {
+            supported: this.getAllAvailablePids(),
+            unsupported: [],
+          });
+          return true;
+        }
+        this.setState('initializing');
+        await this.initialize();
+        this.setState('ready');
+        this.emit('log', null, 'V-OP Can2USB ready.');
+        return true;
+      }
+
       this.setState('connecting');
       this.emit('log', null, 'Select V-OP Can2USB (USB Serial/JTAG COM port)…');
       this.port = await navigator.serial.requestPort({
@@ -504,7 +534,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           ? [0x22, (pid.pid >> 8) & 0xff, pid.pid & 0xff]
           : [service, pid.pid];
 
-      const respTimeout = service === 0x22 ? ISO_TP_UDS_DID_TIMEOUT_MS : ISO_TP_OBD_POLL_TIMEOUT_MS;
+      const respTimeout = service === 0x22 ? CAN_LIVE_UDS_DID_TIMEOUT_MS : CAN_LIVE_OBD_MODE01_TIMEOUT_MS;
       const resp = await this.isoTpRequest(pdu, respTimeout);
       if (!resp || resp.length < 2) return null;
 
@@ -853,6 +883,65 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     return this.vopSendUdsSingleFrame(service, subFunction, udsPayload, targetAddress, timeoutMs);
   }
 
+  /** ISO-TP FF from ECU → Flow Control + consecutive frames (same as PCAN raw path). */
+  private async vopReceiveIsoTpMultiFrameFromEcu(
+    targetAddress: number,
+    responseArbId: number,
+    firstFrame: number[],
+    timeoutMs: number,
+  ): Promise<number[] | null> {
+    const totalLen = ((firstFrame[0] & 0x0f) << 8) | firstFrame[1];
+    if (totalLen < 1 || totalLen > 4095) return null;
+
+    const out: number[] = [];
+    for (let i = 2; i < 8 && out.length < totalLen; i++) {
+      out.push(firstFrame[i] ?? 0);
+    }
+    if (out.length >= totalLen) {
+      return out.slice(0, totalLen);
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    let expectedSeq = 1;
+
+    const waitCf = (): Promise<number[] | null> =>
+      new Promise((resolve) => {
+        const t = setTimeout(() => {
+          this.vopFlashUdsListener = null;
+          resolve(null);
+        }, Math.max(30, deadline - Date.now()));
+
+        this.vopFlashUdsListener = (arbId, dataU8) => {
+          if (arbId !== responseArbId) return;
+          const fd = [...dataU8];
+          if (fd.length === 0) return;
+          const pci = (fd[0] >> 4) & 0x0f;
+          if (pci !== 2) return;
+          const seq = fd[0] & 0x0f;
+          if (seq !== expectedSeq) return;
+          clearTimeout(t);
+          this.vopFlashUdsListener = null;
+          resolve(fd);
+        };
+      });
+
+    const fc = new Uint8Array([0x30, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    const fcOk = await this.sendCanTx(targetAddress, false, fc, true);
+    if (!fcOk) return null;
+
+    while (out.length < totalLen) {
+      if (Date.now() > deadline) return null;
+      const cf = await waitCf();
+      if (!cf) return null;
+      for (let j = 1; j < 8 && out.length < totalLen; j++) {
+        out.push(cf[j] ?? 0);
+      }
+      expectedSeq = (expectedSeq + 1) & 0x0f;
+    }
+
+    return out.slice(0, totalLen);
+  }
+
   private async vopSendUdsSingleFrame(
     service: number,
     subFunction: number | undefined,
@@ -870,7 +959,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.vopFlashUdsListener = null;
     await new Promise(r => setTimeout(r, 150));
 
-    const responsePromise = new Promise<number[] | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
       const timeout = setTimeout(() => {
         this.vopFlashUdsListener = null;
         resolve(null);
@@ -886,6 +975,30 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
         if (!isMatch) return;
 
+        const pciType = (frameData[0] >> 4) & 0x0f;
+
+        if (pciType === 1) {
+          if (responseArbId < 0) return;
+          clearTimeout(timeout);
+          this.vopFlashUdsListener = null;
+          void (async () => {
+            const assembled = await this.vopReceiveIsoTpMultiFrameFromEcu(
+              targetAddress,
+              responseArbId,
+              frameData,
+              timeoutMs,
+            );
+            if (!assembled || assembled.length === 0) {
+              resolve(null);
+              return;
+            }
+            resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+          })();
+          return;
+        }
+
+        if (pciType !== 0) return;
+
         const respSvcId = frameData.length > 1 ? frameData[1] : 0;
         const expectedPositive = service + 0x40;
         const isNegative = respSvcId === 0x7f;
@@ -896,13 +1009,13 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         if (isPositiveMatch) {
           clearTimeout(timeout);
           this.vopFlashUdsListener = null;
-          resolve(frameData);
+          resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
         } else if (isNegativeForUs || isNegativeUnknown) {
           const nrc = frameData.length > 3 ? frameData[3] : 0;
           if (nrc === 0x78) return;
           clearTimeout(timeout);
           this.vopFlashUdsListener = null;
-          resolve(frameData);
+          resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
         }
       };
     });
@@ -914,11 +1027,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       throw new Error('CAN TX rejected by USB bridge');
     }
 
-    const rawData = await responsePromise;
-    if (!rawData || rawData.length === 0) {
+    const udsResult = await responsePromise;
+    if (!udsResult) {
       throw new Error('Timeout waiting for CAN response');
     }
-    return parseIsoTpDataToUdsResponse(service, subFunction, rawData);
+    return udsResult;
   }
 
   private async vopSendUdsMultiFrame(
@@ -1034,7 +1147,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
 
     const mfTimeout = Math.min(Math.max(timeoutMs * 6, 30_000), 120_000);
-    const responsePromise = new Promise<number[] | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
       const respTimeout = setTimeout(() => {
         this.vopFlashUdsListener = null;
         resolve(null);
@@ -1046,6 +1159,25 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         if (frameData.length === 0) return;
         const pciType = (frameData[0] >> 4) & 0x0f;
 
+        if (pciType === 1) {
+          clearTimeout(respTimeout);
+          this.vopFlashUdsListener = null;
+          void (async () => {
+            const assembled = await this.vopReceiveIsoTpMultiFrameFromEcu(
+              targetAddress,
+              responseArbId,
+              frameData,
+              mfTimeout,
+            );
+            if (!assembled || assembled.length === 0) {
+              resolve(null);
+              return;
+            }
+            resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+          })();
+          return;
+        }
+
         if (pciType === 0) {
           const respSvc = frameData.length > 1 ? frameData[1] : 0;
           const expectedPositive = service + 0x40;
@@ -1055,28 +1187,23 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           if (isPositiveMatch) {
             clearTimeout(respTimeout);
             this.vopFlashUdsListener = null;
-            resolve(frameData);
+            resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
           } else if (isNegativeForUs) {
             const nrc = frameData.length > 3 ? frameData[3] : 0;
             if (nrc === 0x78) return;
             clearTimeout(respTimeout);
             this.vopFlashUdsListener = null;
-            resolve(frameData);
+            resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
           }
-        }
-        if (pciType === 1) {
-          clearTimeout(respTimeout);
-          this.vopFlashUdsListener = null;
-          resolve(frameData);
         }
       };
     });
 
-    const rawData = await responsePromise;
-    if (!rawData || rawData.length === 0) {
+    const udsResult = await responsePromise;
+    if (!udsResult) {
       throw new Error('Timeout waiting for CAN response after multi-frame send');
     }
-    return parseIsoTpDataToUdsResponse(service, subFunction, rawData);
+    return udsResult;
   }
 
   private async cleanupPort(): Promise<void> {
@@ -1117,4 +1244,17 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.setState('disconnected');
     this.emit('log', null, 'Disconnected');
   }
+}
+
+let sharedVopInstance: VopCan2UsbConnection | null = null;
+
+/**
+ * Single Web Serial owner for the V-OP bridge. Multiple tabs/panels must not each `new` + `open()`
+ * the same COM port — Chrome throws "The port is already open".
+ */
+export function getSharedVopCan2UsbConnection(config?: VopCan2UsbConnectionConfig): VopCan2UsbConnection {
+  if (!sharedVopInstance) {
+    sharedVopInstance = new VopCan2UsbConnection(config);
+  }
+  return sharedVopInstance;
 }

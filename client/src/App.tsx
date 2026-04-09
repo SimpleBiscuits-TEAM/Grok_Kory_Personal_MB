@@ -19,6 +19,7 @@ const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
 // Pitch and Tasks now live inside Advanced tab (redirected)
 const Calibrations = lazy(() => import("./pages/Calibrations"));
 const TuneDeployPage = lazy(() => import("./pages/TuneDeploy"));
+const GitMapPage = lazy(() => import("./pages/GitMap"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -75,6 +76,7 @@ function Router() {
         <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/calibrations"} component={Calibrations} />
         <Route path={"/tune-deploy"} component={TuneDeployPage} />
+        <Route path={"/git-map"} component={GitMapPage} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />
