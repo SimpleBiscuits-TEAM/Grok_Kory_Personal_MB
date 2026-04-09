@@ -1,0 +1,14 @@
+---
+description: '@devprog' = EDS_DevProg_V2_MAUI C# repo path — canonical flash/container reference code.
+alwaysApply: true
+---
+
+# @devprog (= DevProg C# codebase)
+
+When the user says **@devprog**, they mean this folder (local C# / .NET MAUI project):
+
+`C:\Users\Tobi2\source\repos\EDS_DevProg_V2_MAUI\EDS_DevProg_V2_MAUI`
+
+- Use that tree as the **authoritative code reference** for container layout, flash handling, GMLAN/PPEI parity, and any behavior we mirror in Good-Gravy-2.
+- Typical entry point for on-disk CONTAINER binaries: `Models\App\DevProgFlashFile.cs` — `Create` / CONTAINER branch (`FileName.Contains("CONTAINER")`).
+- TypeScript counterparts: `shared/devProgContainerJson.ts`, `CONTAINER_LAYOUT` in `shared/ecuDatabase.ts`, flash router — must stay aligned with **that C# project**, not the other way around.

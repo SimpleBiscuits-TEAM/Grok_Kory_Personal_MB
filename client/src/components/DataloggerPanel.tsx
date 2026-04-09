@@ -2,8 +2,8 @@
  * DataloggerPanel — Live OBD-II Datalogger
  * 
  * Features:
- * - WebSerial connection to ELM327-compatible adapters (OBDLink EX, MX+, SX, STN2xx)
- * - Raw CAN via local bridge: PCAN-USB or V-OP Can2USB (same WebSocket bridge)
+ * - WebSerial: ELM327 adapters (OBDLink EX, MX+, SX, STN2xx)
+ * - Raw CAN: PCAN-USB via local Python WebSocket bridge; V-OP Can2USB USB–CAN bridge (Web Serial)
  * - Standard Mode 01 + GM Mode 22 extended PIDs (diesel-specific)
  * - PID selection with built-in and user-customizable preset groups
  * - Real-time gauge display with live values
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import { PCANConnection } from '@/lib/pcanConnection';
+import { VopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
 import LiveGaugeDashboard from '@/components/gauges/LiveGaugeDashboard';
@@ -837,8 +838,8 @@ export interface DataloggerPanelProps {
   injectedPids?: { pid: number; service: number; name: string; shortName: string }[];
 }
 
-/** ELM327 via WebSerial, or raw CAN via local WebSocket bridge (PCAN-USB / V-OP Can2USB). */
-export type DataloggerAdapterType = 'elm327' | 'pcan' | 'can2usb';
+/** UI order: PCAN-USB (WS bridge) → V-OP Can2USB (USB CAN bridge) → ELM327 (WebSerial AT). */
+export type DataloggerAdapterType = 'pcan' | 'can2usb' | 'elm327';
 
 export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
   const isDefaultQuickSelection = (pids: Set<number>) => (
@@ -875,11 +876,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [detectedManufacturer, setDetectedManufacturer] = useState<PIDManufacturer>('universal');
   const [detectedFuelType, setDetectedFuelType] = useState<FuelType>('any');
   const [supportedPids, setSupportedPids] = useState<Set<number> | null>(null);
-  const connectionRef = useRef<OBDConnection | PCANConnection | null>(null);
-  const [adapterType, setAdapterType] = useState<DataloggerAdapterType>('elm327');
-  const isBridgeAdapter = adapterType === 'pcan' || adapterType === 'can2usb';
-  /** Human label for bridge-mode setup copy and logs */
-  const bridgeUiLabel = adapterType === 'can2usb' ? 'V-OP Can2USB' : 'PCAN-USB';
+  const connectionRef = useRef<OBDConnection | PCANConnection | VopCan2UsbConnection | null>(null);
+  const [adapterType, setAdapterType] = useState<DataloggerAdapterType>('can2usb');
+  const usesWebSerial = adapterType === 'elm327' || adapterType === 'can2usb';
+  const usesOrangeAdapterUi = adapterType === 'pcan' || adapterType === 'can2usb';
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
 
@@ -1011,16 +1011,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   }, [addLog]);
 
   const handleConnect = useCallback(async () => {
-    let conn: OBDConnection | PCANConnection;
+    let conn: OBDConnection | PCANConnection | VopCan2UsbConnection;
 
-    if (isBridgeAdapter) {
-      // Raw CAN via WebSocket bridge (PCAN-USB or V-OP Can2USB) — same protocol
-      conn = new PCANConnection(
-        detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {}
-      );
-      addLog(`Connecting via ${bridgeUiLabel} bridge...`);
+    if (adapterType === 'pcan') {
+      conn = new PCANConnection(detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {});
+      addLog('Connecting via PCAN-USB WebSocket bridge...');
+    } else if (adapterType === 'can2usb') {
+      conn = new VopCan2UsbConnection();
+      addLog('Connecting to V-OP Can2USB (USB–CAN bridge)…');
     } else {
-      // ELM327 via WebSerial
       conn = new OBDConnection({
         protocol: '6',
         adaptiveTiming: 2,
@@ -1029,7 +1028,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         spaces: false,
       });
       addLog('Connecting to ELM327-compatible adapter...');
-      addLog('NOTE: Select your adapter from the browser port picker. Raw CAN interfaces (PCAN-USB) will NOT appear — use the PCAN-USB mode instead.');
+      addLog('NOTE: In ELM mode, pick your OBD adapter in the port list. For PCAN-USB use the PCAN tab; for V-OP Can2USB use the V-OP tab.');
     }
 
     conn.on('stateChange', (e) => {
@@ -1073,9 +1072,15 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
       const extCount = extPids.length;
       const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
-      addLog(`Connected via ${isBridgeAdapter ? `${bridgeUiLabel} bridge` : 'ELM327 WebSerial'}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
+      const via =
+        adapterType === 'pcan'
+          ? 'PCAN-USB bridge'
+          : adapterType === 'can2usb'
+            ? 'V-OP Can2USB'
+            : 'ELM327 WebSerial';
+      addLog(`Connected via ${via}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
-  }, [addLog, adapterType, detectedBridgeUrl, isBridgeAdapter, bridgeUiLabel]);
+  }, [addLog, adapterType, detectedBridgeUrl]);
 
   const handleDisconnect = useCallback(async () => {
     if (isLogging) {
@@ -1619,12 +1624,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               style={{
                 fontFamily: sFont.mono, fontSize: '0.7rem', padding: '2px 6px',
                 background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`,
-                borderRadius: '2px', color: isBridgeAdapter ? sColor.orange : sColor.text,
+                borderRadius: '2px', color: usesOrangeAdapterUi ? sColor.orange : sColor.text,
               }}
             >
+              <option value="pcan">PCAN-USB (WS bridge)</option>
+              <option value="can2usb">V-OP Can2USB</option>
               <option value="elm327">ELM327 (WebSerial)</option>
-              <option value="pcan">PCAN-USB (Bridge)</option>
-              <option value="can2usb">V-OP Can2USB (Bridge)</option>
             </select>
           </div>
 
@@ -1632,14 +1637,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           {connectionState === 'disconnected' || connectionState === 'error' ? (
             <button
               onClick={handleConnect}
-              disabled={adapterType === 'elm327' ? !isWebSerialSupported : false}
+              disabled={usesWebSerial ? !isWebSerialSupported : false}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '6px 14px', background: sColor.green, border: 'none',
                 borderRadius: '3px', color: 'oklch(0.10 0.005 260)',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
-                cursor: (adapterType === 'elm327' && !isWebSerialSupported) ? 'not-allowed' : 'pointer',
-                opacity: (adapterType === 'elm327' && !isWebSerialSupported) ? 0.5 : 1,
+                cursor: (usesWebSerial && !isWebSerialSupported) ? 'not-allowed' : 'pointer',
+                opacity: (usesWebSerial && !isWebSerialSupported) ? 0.5 : 1,
               }}
             >
               <Wifi style={{ width: 14, height: 14 }} /> CONNECT
@@ -2481,21 +2486,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 CONNECT YOUR OBD-II ADAPTER
               </div>
 
-              {/* Adapter Mode Tabs */}
+              {/* Adapter Mode Tabs — order: PCAN-USB, V-OP Can2USB, ELM327 */}
               <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '20px', maxWidth: '720px', margin: '0 auto 20px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => setAdapterType('elm327')}
-                  style={{
-                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
-                    borderRadius: '3px', cursor: 'pointer',
-                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
-                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
-                    color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
-                  }}
-                >
-                  <div>ELM327 / OBDLINK</div>
-                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>WebSerial (USB)</div>
-                </button>
                 <button
                   onClick={() => setAdapterType('pcan')}
                   style={{
@@ -2507,7 +2499,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                   }}
                 >
                   <div>PCAN-USB</div>
-                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Python bridge (WS)</div>
                 </button>
                 <button
                   onClick={() => setAdapterType('can2usb')}
@@ -2520,7 +2512,20 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                   }}
                 >
                   <div>V-OP Can2USB</div>
-                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>USB CAN bridge</div>
+                </button>
+                <button
+                  onClick={() => setAdapterType('elm327')}
+                  style={{
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
+                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+                    color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
+                  }}
+                >
+                  <div>ELM327 / OBDLINK</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>WebSerial AT</div>
                 </button>
               </div>
 
@@ -2560,16 +2565,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     <br />{'•'} Try unplugging and re-plugging the USB cable
                     <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
                     <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
-                    <br />{'•'} <strong style={{ color: sColor.orange }}>Have PCAN-USB or V-OP Can2USB?</strong> Switch to the bridge tab above (PCAN-USB or V-OP Can2USB)
+                    <br />{'•'} <strong style={{ color: sColor.orange }}>Raw CAN on USB?</strong> Use the <strong>PCAN-USB</strong> or <strong>V-OP Can2USB</strong> tab above (not ELM327).
                   </div>
                 </>
               )}
 
-              {/* PCAN-USB / V-OP Can2USB — same WebSocket bridge */}
-              {isBridgeAdapter && (
+              {/* PCAN-USB — WebSocket bridge only */}
+              {adapterType === 'pcan' && (
                 <>
                   <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto' }}>
-                    Your <strong style={{ color: sColor.text }}>{bridgeUiLabel}</strong> connects through the same <strong style={{ color: sColor.orange }}>local Python bridge</strong> as PCAN-USB mode — it translates raw CAN frames to OBD-II. Run the VOP Bridge (or <code style={{ fontSize: '0.8em' }}>pcan_bridge.py</code>) on your computer first.
+                    <strong style={{ color: sColor.text }}>PCAN-USB</strong> uses the <strong style={{ color: sColor.orange }}>local Python bridge</strong> (WebSocket). It translates raw CAN to OBD-II. Run the VOP Bridge installer or <code style={{ fontSize: '0.8em' }}>pcan_bridge.py</code> on your PC first — not the V-OP Can2USB serial path.
                   </div>
 
                   {/* Bridge Status */}
@@ -2683,7 +2688,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>2</div>
                         <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
-                          <strong>Plug in</strong> your {bridgeUiLabel} adapter and double-click the VOP Bridge shortcut
+                          <strong>Plug in</strong> your PCAN-USB adapter and double-click the VOP Bridge shortcut
                           <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>Bridge starts automatically if you enabled auto-start during install</div>
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
@@ -2698,19 +2703,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.12 0.02 55 / 0.2)', border: '1px solid oklch(0.25 0.08 55)', borderRadius: '3px' }}>
                         <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.orange, marginBottom: '4px', letterSpacing: '0.06em' }}>SUPPORTED ADAPTERS</div>
-                        {adapterType === 'can2usb' ? (
-                          <>
-                            <div>V-OP Can2USB</div>
-                            <div style={{ fontSize: '0.62rem', color: sColor.textMuted, marginTop: '4px' }}>Configure the bridge for your device (python-can). Same WebSocket protocol as PCAN-USB mode.</div>
-                          </>
-                        ) : (
-                          <>
-                            <div>PCAN-USB</div>
-                            <div>PCAN-USB FD</div>
-                            <div>PCAN-USB Pro</div>
-                            <div>Any python-can adapter</div>
-                          </>
-                        )}
+                        <div>PCAN-USB</div>
+                        <div>PCAN-USB FD</div>
+                        <div>PCAN-USB Pro</div>
+                        <div>Any python-can adapter</div>
                       </div>
                       <div style={{ padding: '8px 10px', background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px' }}>
                         <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, marginBottom: '4px', letterSpacing: '0.06em' }}>WHAT'S INCLUDED</div>
@@ -2738,6 +2734,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     </details>
                   </div>
                 </>
+              )}
+
+              {adapterType === 'can2usb' && (
+                <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto', textAlign: 'center' }}>
+                  <strong style={{ color: sColor.text }}>V-OP Can2USB</strong> is a <strong style={{ color: sColor.orange }}>USB–CAN bridge</strong>. Connect it to your PC, turn the vehicle ignition <strong>ON</strong>, then click <strong style={{ color: sColor.green }}>CONNECT</strong> and pick the device when the browser asks (Chrome or Edge).
+                </div>
               )}
             </div>
           )}

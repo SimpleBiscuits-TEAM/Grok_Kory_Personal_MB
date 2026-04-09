@@ -24,6 +24,7 @@ import {
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader as EcuContainerFileHeader } from '../../../shared/ecuDatabase';
 import { PCANConnection } from '../lib/pcanConnection';
+import type { FlashBridgeConnection } from '../lib/flashBridgeConnection';
 import {
   parsePpeiContainer,
   isPpeiContainer,
@@ -323,7 +324,7 @@ export default function FlashContainerPanel() {
           totalSize: bytes.length,
           readinessChecks: [{
             id: 'format', label: 'Container Format',
-            status: 'fail', detail: 'Not a recognized PPEI container format. Expected IPF magic header.',
+            status: 'fail', detail: 'Not a recognized format. Expected PPEI (IPF) or DevProg JSON at 0x1004.',
           }],
           securityInfo: { seedKeyAlgorithm: 'UNKNOWN', requiresUnlockBox: false, protocol: 'UNKNOWN', seedLevel: 0, canTxAddr: 0, canRxAddr: 0 },
           flashSequence: [], errors: ['Unrecognized file format'],
@@ -447,8 +448,12 @@ export default function FlashContainerPanel() {
           sessionUuid={sessionUuid}
           onComplete={handleFlashComplete}
           onBack={() => { setMissionControlMode(null); setSessionUuid(''); setDryRunMode(false); }}
-          pcanConnection={missionControlMode === 'pcan' ? pcanConnectionRef.current : null}
-          containerData={rawData ? rawData.buffer as ArrayBuffer : null}
+          flashBridge={
+            missionControlMode === 'pcan' && pcanConnectionRef.current
+              ? (pcanConnectionRef.current as unknown as FlashBridgeConnection)
+              : null
+          }
+          containerData={rawData ? new Uint8Array(rawData).buffer : null}
           containerHeader={containerFileHeader}
           dryRun={dryRunMode}
         />

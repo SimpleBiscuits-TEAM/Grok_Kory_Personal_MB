@@ -91,6 +91,119 @@ export interface UDSResponse {
   timestamp: number;
 }
 
+const UDS_NRC_CODES: Record<number, string> = {
+  0x10: 'General Reject',
+  0x11: 'Service Not Supported',
+  0x12: 'Sub-Function Not Supported',
+  0x13: 'Incorrect Message Length / Invalid Format',
+  0x14: 'Response Too Long',
+  0x21: 'Busy — Repeat Request',
+  0x22: 'Conditions Not Correct',
+  0x24: 'Request Sequence Error',
+  0x25: 'No Response From Sub-Net Component',
+  0x26: 'Failure Prevents Execution',
+  0x31: 'Request Out Of Range',
+  0x33: 'Security Access Denied',
+  0x35: 'Invalid Key',
+  0x36: 'Exceeded Number Of Attempts',
+  0x37: 'Required Time Delay Not Expired',
+  0x70: 'Upload/Download Not Accepted',
+  0x71: 'Transfer Data Suspended',
+  0x72: 'General Programming Failure',
+  0x73: 'Wrong Block Sequence Counter',
+  0x78: 'Request Correctly Received — Response Pending',
+  0x7e: 'Sub-Function Not Supported In Active Session',
+  0x7f: 'Service Not Supported In Active Session',
+};
+
+function decodeNRC(nrc: number): string {
+  return UDS_NRC_CODES[nrc] || `Unknown NRC (0x${nrc.toString(16).toUpperCase()})`;
+}
+
+/** ISO-TP first-frame → {@link UDSResponse} (shared by PCAN bridge and V-OP USB bridge). */
+export function parseIsoTpDataToUdsResponse(
+  service: number,
+  subFunction: number | undefined,
+  rawData: number[],
+): UDSResponse | null {
+  const pciType = (rawData[0] >> 4) & 0x0f;
+  let payload: number[];
+
+  if (pciType === 0) {
+    const length = rawData[0] & 0x0f;
+    payload = rawData.slice(1, 1 + length);
+  } else if (pciType === 1) {
+    const totalLen = ((rawData[0] & 0x0f) << 8) | rawData[1];
+    payload = rawData.slice(2);
+    console.log(`[UDS] Multi-frame response (${totalLen} bytes) — partial first frame`);
+  } else {
+    payload = rawData.slice(1);
+  }
+
+  if (payload.length === 0) return null;
+
+  const responseServiceId = payload[0];
+
+  if (responseServiceId === 0x7f) {
+    const rejectedService = payload.length > 1 ? payload[1] : service;
+    const nrc = payload.length > 2 ? payload[2] : 0;
+    return {
+      service: rejectedService,
+      serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
+      subFunction,
+      data: payload,
+      positiveResponse: false,
+      nrc,
+      nrcName: decodeNRC(nrc),
+      isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId === service + 0x40) {
+    return {
+      service,
+      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId >= 0x40 && responseServiceId !== 0x7f) {
+    const actualService = responseServiceId - 0x40;
+    console.log(
+      `[UDS] parseIsoTpDataToUdsResponse: positive 0x${responseServiceId.toString(16)} for svc 0x${actualService.toString(16)} (expected 0x${service.toString(16)})`,
+    );
+    return {
+      service: actualService,
+      serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  console.log(
+    `[UDS] parseIsoTpDataToUdsResponse: unexpected 0x${responseServiceId.toString(16)} for svc 0x${service.toString(16)} — raw: [${payload.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`,
+  );
+  return {
+    service,
+    serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+    subFunction,
+    data: payload,
+    positiveResponse: false,
+    nrc: undefined,
+    nrcName: 'unparseable response',
+    isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+    timestamp: Date.now(),
+  };
+}
+
 export interface BusMonitorFrame {
   arbId: number;
   arbIdHex: string;
@@ -1251,90 +1364,15 @@ export class PCANConnection {
     subFunction: number | undefined,
     rawData: number[]
   ): UDSResponse | null {
-    // Parse ISO-TP PCI from response
-    const pciType = (rawData[0] >> 4) & 0x0F;
-    let payload: number[];
-
-    if (pciType === 0) {
-      // Single frame: PCI low nibble = length
-      const length = rawData[0] & 0x0F;
-      payload = rawData.slice(1, 1 + length);
-    } else if (pciType === 1) {
-      // First frame of multi-frame — for now just extract what we have
-      const totalLen = ((rawData[0] & 0x0F) << 8) | rawData[1];
-      payload = rawData.slice(2);
-      this.emit('log', null, `Multi-frame response (${totalLen} bytes) — partial data extracted`);
-    } else {
-      // Unknown PCI type — use raw data after first byte
-      payload = rawData.slice(1);
+    const r = parseIsoTpDataToUdsResponse(service, subFunction, rawData);
+    if (r && rawData.length > 0) {
+      const pciType = (rawData[0] >> 4) & 0x0f;
+      if (pciType === 1) {
+        const totalLen = ((rawData[0] & 0x0f) << 8) | rawData[1];
+        this.emit('log', null, `Multi-frame response (${totalLen} bytes) — partial data extracted`);
+      }
     }
-
-    if (payload.length === 0) return null;
-
-    const responseServiceId = payload[0];
-
-    // Negative response: 0x7F
-    if (responseServiceId === 0x7F) {
-      const rejectedService = payload.length > 1 ? payload[1] : service;
-      const nrc = payload.length > 2 ? payload[2] : 0;
-      return {
-        service: rejectedService,
-        serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
-        subFunction,
-        data: payload,
-        positiveResponse: false,
-        nrc,
-        nrcName: decodeNRC(nrc),
-        isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
-        timestamp: Date.now(),
-      };
-    }
-
-    // Positive response: service + 0x40
-    if (responseServiceId === service + 0x40) {
-      return {
-        service,
-        serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
-        subFunction,
-        data: payload.slice(1), // Everything after the response service ID
-        positiveResponse: true,
-        isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
-        timestamp: Date.now(),
-      };
-    }
-
-    // Check if the response byte IS a valid positive response for a different
-    // service — this can happen when the bridge ACK arrives before the ECU
-    // response, or when GMLAN services have different response patterns.
-    // A positive response byte is always >= 0x40 and never 0x7F.
-    if (responseServiceId >= 0x40 && responseServiceId !== 0x7F) {
-      // This looks like a positive response for service (responseServiceId - 0x40)
-      const actualService = responseServiceId - 0x40;
-      console.log(`[UDS] parseISOTPResponse: got positive response 0x${responseServiceId.toString(16)} for service 0x${actualService.toString(16)} (expected 0x${service.toString(16)})`);
-      return {
-        service: actualService,
-        serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
-        subFunction,
-        data: payload.slice(1),
-        positiveResponse: true,
-        isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
-        timestamp: Date.now(),
-      };
-    }
-
-    // Unexpected response — return raw data with explicit nrc: undefined
-    console.log(`[UDS] parseISOTPResponse: unexpected response byte 0x${responseServiceId.toString(16)} for service 0x${service.toString(16)} — raw: [${payload.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`);
-    return {
-      service,
-      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
-      subFunction,
-      data: payload,
-      positiveResponse: false,
-      nrc: undefined,
-      nrcName: 'unparseable response',
-      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
-      timestamp: Date.now(),
-    };
+    return r;
   }
 
   /**
@@ -2023,6 +2061,26 @@ export class PCANConnection {
     return false;
   }
 
+  /** Used by {@link PCANFlashEngine} for transport health checks. */
+  isFlashTransportOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /** Fire-and-forget CAN TX (8 bytes, zero-padded) for keepalive / UUDT. */
+  async sendRawCanFrame(arbId: number, data: number[]): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+    const frame = [...data];
+    while (frame.length < 8) frame.push(0x00);
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: `raw_${Date.now()}`,
+      arb_id: arbId,
+      data: frame.slice(0, 8),
+    }));
+  }
+
   async disconnect(): Promise<void> {
     this.stopHeartbeat();
     this.loggingActive = false;
@@ -2053,36 +2111,4 @@ export class PCANConnection {
     this.setState('disconnected');
     this.emit('log', null, 'Disconnected from PCAN-USB bridge');
   }
-}
-
-
-// ─── UDS Negative Response Code Decoder ──────────────────────────────────────
-
-const NRC_CODES: Record<number, string> = {
-  0x10: 'General Reject',
-  0x11: 'Service Not Supported',
-  0x12: 'Sub-Function Not Supported',
-  0x13: 'Incorrect Message Length / Invalid Format',
-  0x14: 'Response Too Long',
-  0x21: 'Busy — Repeat Request',
-  0x22: 'Conditions Not Correct',
-  0x24: 'Request Sequence Error',
-  0x25: 'No Response From Sub-Net Component',
-  0x26: 'Failure Prevents Execution',
-  0x31: 'Request Out Of Range',
-  0x33: 'Security Access Denied',
-  0x35: 'Invalid Key',
-  0x36: 'Exceeded Number Of Attempts',
-  0x37: 'Required Time Delay Not Expired',
-  0x70: 'Upload/Download Not Accepted',
-  0x71: 'Transfer Data Suspended',
-  0x72: 'General Programming Failure',
-  0x73: 'Wrong Block Sequence Counter',
-  0x78: 'Request Correctly Received — Response Pending',
-  0x7E: 'Sub-Function Not Supported In Active Session',
-  0x7F: 'Service Not Supported In Active Session',
-};
-
-function decodeNRC(nrc: number): string {
-  return NRC_CODES[nrc] || `Unknown NRC (0x${nrc.toString(16).toUpperCase()})`;
 }

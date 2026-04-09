@@ -23,18 +23,19 @@ import {
 import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
 import { hexToBytes } from '../../../shared/seedKeyAlgorithms';
 import { PCANFlashEngine, type FlashEngineCallbacks } from '../lib/pcanFlashEngine';
-import { type PCANConnection } from '../lib/pcanConnection';
+import { type FlashBridgeConnection } from '../lib/flashBridgeConnection';
+import { VopCan2UsbConnection } from '../lib/vopCan2UsbConnection';
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface FlashMissionControlProps {
   plan: FlashPlan;
-  connectionMode: 'simulator' | 'pcan';
+  connectionMode: 'simulator' | 'pcan' | 'vop_usb';
   sessionUuid: string;
   onComplete: (result: 'SUCCESS' | 'FAILED' | 'ABORTED') => void;
   onBack: () => void;
-  /** Required for real PCAN flash mode */
-  pcanConnection?: PCANConnection | null;
+  /** PCAN WebSocket or V-OP USB — required for real hardware flash */
+  flashBridge?: FlashBridgeConnection | null;
   /** Raw container file data — required for real PCAN flash */
   containerData?: ArrayBuffer | null;
   /** Parsed container header — required for real PCAN flash */
@@ -192,7 +193,7 @@ type SpeedMultiplier = typeof SPEED_OPTIONS[number];
 
 export default function FlashMissionControl({
   plan, connectionMode, sessionUuid, onComplete, onBack,
-  pcanConnection, containerData, containerHeader, dryRun = false,
+  flashBridge, containerData, containerHeader, dryRun = false,
 }: FlashMissionControlProps) {
   const [sim, setSim] = useState<SimulatorState>(() => createSimulatorState(plan));
   const [showLog, setShowLog] = useState(true);
@@ -210,7 +211,7 @@ export default function FlashMissionControl({
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
-  const isRealFlash = connectionMode === 'pcan';
+  const isRealFlash = connectionMode === 'pcan' || connectionMode === 'vop_usb';
   const isDryRun = dryRun && isRealFlash;
 
   const updateSession = trpc.flash.updateSession.useMutation();
@@ -284,12 +285,28 @@ export default function FlashMissionControl({
   }, [sessionUuid, sim.log.length, sim.progress, flushLogs, updateSession]);
 
   // ── Start flash (simulator or real) ────────────────────────────────────
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback(async () => {
     startTimeRef.current = Date.now();
     updateSession.mutate({ uuid: sessionUuid, status: 'running', progress: 0 });
 
-    if (isRealFlash && pcanConnection && containerData && containerHeader) {
-      // Real PCAN flash
+    if (isRealFlash && flashBridge && containerData && containerHeader) {
+      let skipConnect = false;
+      if (connectionMode === 'vop_usb') {
+        const vop = flashBridge as VopCan2UsbConnection;
+        const usbOk = await vop.connect({ skipVehicleInit: true });
+        if (!usbOk) {
+          updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
+          setSim(prev => ({
+            ...prev,
+            isRunning: false,
+            result: null,
+            statusMessage: 'USB CAN bridge connect failed — grant serial access and press Start again.',
+          }));
+          return;
+        }
+        skipConnect = true;
+      }
+
       const callbacks: FlashEngineCallbacks = {
         onStateUpdate: (newState) => {
           setSim(newState);
@@ -341,7 +358,8 @@ export default function FlashMissionControl({
       };
 
       const engine = new PCANFlashEngine({
-        connection: pcanConnection,
+        connection: flashBridge,
+        skipConnect,
         plan,
         containerData,
         header: containerHeader,
@@ -365,7 +383,7 @@ export default function FlashMissionControl({
       // Simulator mode
       setSim(prev => ({ ...prev, isRunning: true }));
     }
-  }, [sessionUuid, updateSession, isRealFlash, pcanConnection, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
+  }, [sessionUuid, updateSession, isRealFlash, connectionMode, flashBridge, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
 
   const handlePause = useCallback(() => {
     setSim(prev => ({ ...prev, isPaused: !prev.isPaused }));

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { router, protectedProcedure, publicProcedure } from '../_core/trpc';
 import { storagePut } from '../storage';
 import { ECU_DATABASE, getEcuConfig, CONTAINER_LAYOUT, type EcuConfig } from '../../shared/ecuDatabase';
+import { tryParseDevProgContainerRecord } from '../../shared/devProgContainerJson';
 import type { EcuSecurityProfile } from '../../shared/seedKeyAlgorithms';
 import { computeFord3B, computeGM5B, hexToBytes, bytesToHex } from '../../shared/seedKeyAlgorithms';
 import { getSecurityProfile } from '../seedKeyService';
@@ -51,15 +52,12 @@ interface FlashPrepResult {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function parseDevProgHeader(headerBytes: Uint8Array): Record<string, unknown> | null {
-  try {
-    let end = headerBytes.indexOf(0);
-    if (end === -1) end = headerBytes.length;
-    const jsonStr = new TextDecoder('ascii').decode(headerBytes.slice(0, end));
-    return JSON.parse(jsonStr);
-  } catch {
-    return null;
-  }
+/**
+ * Full-file parse: offsets and `header_length` match @devprog `DevProgFlashFile.Create` (CONTAINER)
+ * — `C:\Users\Tobi2\source\repos\EDS_DevProg_V2_MAUI\EDS_DevProg_V2_MAUI\Models\App\DevProgFlashFile.cs`.
+ */
+function parseDevProgHeaderFromFile(data: Uint8Array): Record<string, unknown> | null {
+  return tryParseDevProgContainerRecord(data);
 }
 
 function detectContainerFormat(data: Uint8Array): 'PPEI' | 'DEVPROG' | 'UNKNOWN' {
@@ -67,8 +65,7 @@ function detectContainerFormat(data: Uint8Array): 'PPEI' | 'DEVPROG' | 'UNKNOWN'
     return 'PPEI';
   }
   if (data.length >= CONTAINER_LAYOUT.HEADER_OFFSET + 100) {
-    const headerSlice = data.slice(CONTAINER_LAYOUT.HEADER_OFFSET, CONTAINER_LAYOUT.HEADER_OFFSET + CONTAINER_LAYOUT.HEADER_SIZE);
-    const parsed = parseDevProgHeader(headerSlice);
+    const parsed = parseDevProgHeaderFromFile(data);
     if (parsed && typeof parsed === 'object' && ('ecu_type' in parsed || 'block_count' in parsed)) {
       return 'DEVPROG';
     }
@@ -160,8 +157,7 @@ export const flashRouter = router({
       }
 
       if (format === 'DEVPROG') {
-        const headerSlice = data.slice(CONTAINER_LAYOUT.HEADER_OFFSET, CONTAINER_LAYOUT.HEADER_OFFSET + CONTAINER_LAYOUT.HEADER_SIZE);
-        const header = parseDevProgHeader(headerSlice);
+        const header = parseDevProgHeaderFromFile(data);
         if (!header) {
           return { valid: false, format: 'DEVPROG', ecuType: null, error: 'Failed to parse DevProg JSON header.' };
         }
@@ -220,8 +216,7 @@ export const flashRouter = router({
       let dataStartOffset = 0;
 
       if (format === 'DEVPROG') {
-        const headerSlice = data.slice(CONTAINER_LAYOUT.HEADER_OFFSET, CONTAINER_LAYOUT.HEADER_OFFSET + CONTAINER_LAYOUT.HEADER_SIZE);
-        const header = parseDevProgHeader(headerSlice);
+        const header = parseDevProgHeaderFromFile(data);
         if (!header) {
           return {
             success: false, ecuType: input.ecuType, containerFormat: 'DEVPROG',
@@ -519,7 +514,7 @@ export const flashRouter = router({
     .input(z.object({
       ecuType: z.string().max(32),
       fileHash: z.string().max(64).optional(),
-      connectionMode: z.enum(['simulator', 'pcan']),
+      connectionMode: z.enum(['simulator', 'pcan', 'vop_usb']),
     }))
     .query(async ({ input }) => {
       const ecuConfig = getEcuConfig(input.ecuType);
@@ -553,11 +548,14 @@ export const flashRouter = router({
       }
 
       // Hardware connection
-      if (input.connectionMode === 'pcan') {
+      if (input.connectionMode === 'pcan' || input.connectionMode === 'vop_usb') {
         checks.push({
-          id: 'hw_connection', label: 'PCAN Connection',
+          id: 'hw_connection',
+          label: input.connectionMode === 'vop_usb' ? 'USB CAN Bridge' : 'PCAN Connection',
           status: 'warning',
-          message: 'PCAN hardware check requires physical connection — verify before proceeding',
+          message: input.connectionMode === 'vop_usb'
+            ? 'USB CAN bridge — connect the adapter, ignition ON, grant Web Serial when prompted'
+            : 'PCAN hardware check requires physical connection — verify before proceeding',
           required: false,
         });
       } else {

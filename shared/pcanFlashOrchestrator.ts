@@ -315,19 +315,10 @@ export function generateFlashPlan(
     warnings.push('All blocks marked as OS — flashing entire container in calibration mode');
   }
 
-  // ═══ GM PriRC: Initial RequestDownload (0x34) before first block ═══
-  // E88 procedure: CAN_SEND_USDT (0x7E0, 3400000FFE, with_response=1, timeout=250ms)
-  // This is a "custom GM PriRC" — a RequestDownload sent as USDT on physical address
-  // BEFORE the block loop begins. It prepares the ECU for the upcoming block transfers.
-  // Data: 34 00 00 0F FE = service 0x34, addressAndLengthFormatIdentifier=0x00,
-  //       memoryAddress=0x000F, memorySize=0xFE (or interpreted as GM-specific init)
-  // GM PriRC REMOVED for GMLAN ECUs (log #12 fix):
-  // PriRC (34 00 00 0F FE) is E88-specific. On E41 it always fails (NRC 0x22 or timeout).
-  // The 5s timeout (sendUDSRequest default, ignoring cmd.timeoutMs) burns the ECU's
-  // programming session timer (P3 ~5s) with TesterPresent PAUSED. By the time the
-  // per-block RequestDownload fires, the ECU has dropped the session → NRC 0x22.
-  // The per-block RequestDownload in executeBlockTransfer handles everything correctly.
-  // If E88 support is needed later, add PriRC back with ecuType === 'E88' guard.
+  // ═══ GM PriRC (SendCustomGMPriRC) ═══
+  // Single-frame 05 34 00 00 0F FE after seed/key, before the first per-block 0x34.
+  // Implemented in pcanFlashEngine.executeBlockTransfer() (not here) so PCAN + V-OP
+  // USB share one code path. Per-block rc34 (e.g. 34 10 0F FE …) follows in the engine.
 
   let totalBytes = 0;
   for (const block of filteredBlocks) {

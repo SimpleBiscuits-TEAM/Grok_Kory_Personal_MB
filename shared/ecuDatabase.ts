@@ -692,10 +692,15 @@ export interface ContainerBlockStruct {
   block_id: number;
   pri_rc?: string;
   rc34?: string;
+  /** TransferData template (0x36…); DevProg JSON may use `Rc_36` instead. */
   rc36?: string;
+  Rc_34?: string;
+  Rc_36?: string;
   start_adresse?: string;
   end_adresse?: string;
+  /** DevProg program-by-address mode (e.g. FALSE, STATIC_5, ABS_5, REL_4, CT1BYTE). */
   PrgByAdr?: string;
+  prgbyadr?: string;
   block_length?: string;
   LzssLen?: string;
   post_rc?: string;
@@ -733,6 +738,7 @@ export interface ContainerVerify {
  *   2 bytes: LZSS flags (0x0000 = compressed, else raw)
  *   2 bytes: CRC16-CCITT checksum of decompressed data
  */
+/** Binary layout for DevProg V2 MAUI container files — @devprog `DevProgFlashFile.Create` (CONTAINER): same repo path as in `shared/devProgContainerJson.ts`. */
 export const CONTAINER_LAYOUT = {
   RESERVED_SIZE: 0x1000,
   CRC32_OFFSET: 0x1000,

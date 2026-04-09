@@ -12,9 +12,11 @@
 import {
   ECU_DATABASE, getEcuConfig, FLASH_STEP_DESCRIPTIONS,
   CONTAINER_LAYOUT,
-  type EcuConfig, type ContainerFileHeader, type ContainerBlockStruct,
+  type EcuConfig, type ContainerBlockStruct,
 } from '../../../shared/ecuDatabase';
-import { getSecurityProfile } from '../../../shared/seedKeyAlgorithms';
+import { tryParseDevProgContainerRecord } from '../../../shared/devProgContainerJson';
+import { normalizeDevProgContainerBlock } from '../../../shared/containerBlockJson';
+import { getSecurityProfileMeta, ecuSupportsServerKeyDerivation } from '../../../shared/seedKeyMeta';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -168,62 +170,81 @@ function isDevProgContainer(data: Uint8Array): boolean {
   return false;
 }
 
+function strField(r: Record<string, unknown>, key: string, fallback = ''): string {
+  const v = r[key];
+  if (v == null) return fallback;
+  return String(v).trim();
+}
+
+/** DevProg JSON at 0x1004 — length from `header_length` at 0x1000 (see shared/devProgContainerJson). */
 function parseDevProgContainer(data: Uint8Array): DevProgContainerHeader | null {
-  try {
-    const headerBytes = data.slice(
-      CONTAINER_LAYOUT.HEADER_OFFSET,
-      CONTAINER_LAYOUT.HEADER_OFFSET + CONTAINER_LAYOUT.HEADER_SIZE
-    );
-    let end = 0;
-    for (let i = 0; i < headerBytes.length; i++) {
-      if (headerBytes[i] === 0) { end = i; break; }
-    }
-    if (end === 0) end = headerBytes.length;
-    const jsonStr = new TextDecoder('utf-8').decode(headerBytes.slice(0, end));
-    const json = JSON.parse(jsonStr) as ContainerFileHeader;
-    const softwareNumbers: string[] = [];
-    for (let i = 1; i <= 9; i++) {
-      const sw = (json as unknown as Record<string, string>)[`sw_c${i}`];
-      if (sw) softwareNumbers.push(sw);
-    }
-    return {
-      flashernumber: json.flashernumber,
-      udid: json.udid,
-      vin: json.vin,
-      seed: json.seed,
-      key: json.key,
-      fileId: json.file_id,
-      createDate: json.create_date,
-      expireDate: json.expire_date,
-      maxFlashCount: json.max_flash_count,
-      blockCount: json.block_count,
-      blockBoot: json.block_boot,
-      blockErase: json.block_erase,
-      fileSize: parseHexAscii(json.file_size),
-      compEnc: parseHexAscii(json.comp_enc),
-      lzss: json.lzss === 'true',
-      xferSize: parseHexAscii(json.xferSize),
-      forceOS: json.ForceOS === 'true',
-      ecuType: json.ecu_type,
-      hardwareNumber: json.hardware_number,
-      softwareNumbers,
-      blocks: json.block_struct || [],
-      verify: json.verify ? {
-        controllerType: json.verify.controller_type,
-        canSpeed: json.verify.canspeed,
-        txAddr: json.verify.txadr,
-        rxAddr: json.verify.rxadr,
-        pri_key: json.verify.pri_key,
-        pri_request: json.verify.pri_request,
-        request: json.verify.request,
-        key: json.verify.key,
-        txprefix: json.verify.txprefix,
-        rxprefix: json.verify.rxprefix,
-      } : undefined,
-    };
-  } catch {
-    return null;
+  const record = tryParseDevProgContainerRecord(data);
+  if (!record || typeof record !== 'object') return null;
+
+  const json = record as Record<string, unknown>;
+  const rawBlocks = json.block_struct;
+  if (!Array.isArray(rawBlocks)) return null;
+
+  const blocks: ContainerBlockStruct[] = rawBlocks.map((b) => normalizeDevProgContainerBlock(b));
+
+  const softwareNumbers: string[] = [];
+  for (let i = 1; i <= 9; i++) {
+    const sw = strField(json, `sw_c${i}`);
+    if (sw) softwareNumbers.push(sw);
   }
+
+  const hexOrSize = (key: string): number => {
+    const v = json[key];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    return parseHexAscii(strField(json, key, '0'));
+  };
+
+  const verifyRaw = json.verify;
+  const verify =
+    verifyRaw && typeof verifyRaw === 'object'
+      ? (() => {
+          const v = verifyRaw as Record<string, unknown>;
+          const arr = (x: unknown): string[] | undefined =>
+            Array.isArray(x) ? x.map(String) : undefined;
+          return {
+            controllerType: strField(v, 'controller_type') || strField(v, 'Controller_type'),
+            canSpeed: strField(v, 'canspeed') || strField(v, 'Canspeed'),
+            txAddr: strField(v, 'txadr') || strField(v, 'Txadr'),
+            rxAddr: strField(v, 'rxadr') || strField(v, 'Rxadr'),
+            pri_key: arr(v.pri_key) ?? arr(v.Pri_key),
+            pri_request: arr(v.pri_request),
+            request: arr(v.request),
+            key: arr(v.key),
+            txprefix: arr(v.txprefix) as string[] | undefined,
+            rxprefix: arr(v.rxprefix) as string[] | undefined,
+          };
+        })()
+      : undefined;
+
+  return {
+    flashernumber: Number(json.flashernumber) || 0,
+    udid: strField(json, 'udid'),
+    vin: strField(json, 'vin'),
+    seed: strField(json, 'seed'),
+    key: strField(json, 'key'),
+    fileId: strField(json, 'file_id'),
+    createDate: Number(json.create_date) || 0,
+    expireDate: Number(json.expire_date) || 0,
+    maxFlashCount: Number(json.max_flash_count) || 0,
+    blockCount: Number(json.block_count) || blocks.length,
+    blockBoot: Number(json.block_boot) || 0,
+    blockErase: Number(json.block_erase) || 0,
+    fileSize: hexOrSize('file_size') || data.length,
+    compEnc: hexOrSize('comp_enc'),
+    lzss: String(json.lzss ?? '').toLowerCase() === 'true',
+    xferSize: hexOrSize('xferSize'),
+    forceOS: String(json.ForceOS ?? '').toLowerCase() === 'true',
+    ecuType: strField(json, 'ecu_type'),
+    hardwareNumber: strField(json, 'hardware_number'),
+    softwareNumbers,
+    blocks,
+    verify,
+  };
 }
 
 // ── Main Parser ────────────────────────────────────────────────────────────
@@ -308,7 +329,7 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
   }
 
   const ecuConfig = getEcuConfig(ecuFamily) ?? null;
-  const secProfile = getSecurityProfile(ecuFamily);
+  const secMeta = getSecurityProfileMeta(ecuFamily);
   const flashType: FlashType = isFullFlash ? 'fullflash' : 'calibration';
 
   // ── Readiness Checks ──────────────────────────────────────────────────
@@ -381,17 +402,17 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
   });
 
   if (ecuConfig) {
-    const needsUnlockBox = secProfile?.requiresUnlockBox ?? false;
+    const needsUnlockBox = secMeta?.requiresUnlockBox ?? false;
     checks.push({
       id: 'security', label: 'Security Requirements',
       status: needsUnlockBox ? 'warn' : 'pass',
       detail: needsUnlockBox
         ? `${ecuFamily} requires hardware unlock box (CMAC-based authentication)`
-        : `${ecuFamily} uses ${secProfile?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
+        : `${ecuFamily} uses ${secMeta?.algorithmType ?? 'standard'} seed/key (level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`,
     });
 
     // Check if AES key is available from Seed_key.cs hardcoded profiles
-    const hasHardcodedKey = secProfile?.aesKeyHex && secProfile.aesKeyHex.length === 32;
+    const hasHardcodedKey = ecuSupportsServerKeyDerivation(secMeta);
     checks.push({
       id: 'seed_key', label: 'Security Key (Seed_key.cs)',
       status: hasHardcodedKey ? 'pass' : needsUnlockBox ? 'info' : 'warn',
@@ -473,12 +494,12 @@ export function parsePpeiContainer(data: ArrayBuffer): FlashContainerAnalysis {
   });
 
   const securityInfo = {
-    seedKeyAlgorithm: secProfile
-      ? `${secProfile.algorithmType} (${secProfile.description})`
+    seedKeyAlgorithm: secMeta
+      ? `${secMeta.algorithmType} (${secMeta.description})`
       : ecuConfig
         ? `Standard ${ecuConfig.protocol} security (seed level 0x${ecuConfig.seedLevel.toString(16).padStart(2, '0')})`
         : 'UNKNOWN',
-    requiresUnlockBox: secProfile?.requiresUnlockBox ?? false,
+    requiresUnlockBox: secMeta?.requiresUnlockBox ?? false,
     protocol: (ecuConfig?.protocol ?? 'UNKNOWN') as 'GMLAN' | 'UDS' | 'UNKNOWN',
     seedLevel: ecuConfig?.seedLevel ?? 0,
     canTxAddr: ecuConfig?.txAddr ?? 0,

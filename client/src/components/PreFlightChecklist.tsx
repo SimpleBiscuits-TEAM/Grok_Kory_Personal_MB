@@ -13,9 +13,12 @@ import { AlertTriangle, CheckCircle2, XCircle, Clock, SkipForward, Shield, Zap, 
 interface PreFlightChecklistProps {
   ecuType: string;
   fileHash?: string;
-  connectionMode: 'simulator' | 'pcan';
-  onAllPassed: () => void;
+  connectionMode: 'simulator' | 'pcan' | 'vop_usb';
+  onAllPassed: () => void | Promise<void>;
   onCancel: () => void;
+  /** Shown when starting Mission Control failed (e.g. API / DB error) */
+  sessionCreateError?: string | null;
+  isCreatingSession?: boolean;
 }
 
 const statusIcon = (status: string) => {
@@ -38,7 +41,10 @@ const statusColor = (status: string) => {
   }
 };
 
-export default function PreFlightChecklist({ ecuType, fileHash, connectionMode, onAllPassed, onCancel }: PreFlightChecklistProps) {
+export default function PreFlightChecklist({
+  ecuType, fileHash, connectionMode, onAllPassed, onCancel,
+  sessionCreateError, isCreatingSession,
+}: PreFlightChecklistProps) {
   const [animatedChecks, setAnimatedChecks] = useState<number>(0);
 
   const checklistInput = useMemo(() => ({
@@ -103,6 +109,14 @@ export default function PreFlightChecklist({ ecuType, fileHash, connectionMode, 
           </div>
         )}
 
+        {sessionCreateError && (
+          <div className="p-3 rounded border border-red-500/30 bg-red-500/5 text-red-400 text-sm font-mono space-y-1">
+            <div className="font-semibold">Could not open flash session</div>
+            <div>{sessionCreateError}</div>
+            <p className="text-zinc-500 text-xs font-normal">You can cancel to return to the file overview, or fix the issue and try Proceed again.</p>
+          </div>
+        )}
+
         {data?.checks.map((check, i) => (
           <div
             key={check.id}
@@ -140,16 +154,26 @@ export default function PreFlightChecklist({ ecuType, fileHash, connectionMode, 
             </Button>
             <Button
               size="sm"
-              onClick={onAllPassed}
-              disabled={!!hasFailures}
+              onClick={() => { void onAllPassed(); }}
+              disabled={!!hasFailures || !!isCreatingSession}
               className={`flex-1 font-mono text-xs ${
-                hasFailures
+                hasFailures || isCreatingSession
                   ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white'
               }`}
             >
-              {hasFailures ? 'BLOCKED — FIX REQUIRED CHECKS' : 'PROCEED TO FLASH'}
-              {!hasFailures && <Zap className="h-3 w-3 ml-1" />}
+              {isCreatingSession ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin inline" /> OPENING SESSION…
+                </>
+              ) : hasFailures ? (
+                'BLOCKED — FIX REQUIRED CHECKS'
+              ) : (
+                <>
+                  PROCEED TO FLASH
+                  <Zap className="h-3 w-3 ml-1" />
+                </>
+              )}
             </Button>
           </div>
         )}
