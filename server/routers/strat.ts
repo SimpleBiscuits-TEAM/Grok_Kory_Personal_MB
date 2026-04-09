@@ -1349,14 +1349,13 @@ https://www.ppei.com/support#close
 
 ---
 
-## Error Codes $0333, $0281, $0101, $0537
+## Complete EFILive Error Code Reference
 
-**Source:** https://support.ppei.com/portal/en/kb/articles/0333-0281-0101-0537
+**Sources:** https://support.ppei.com/portal/en/kb/articles/0333-0281-0101-0537 and EFILive official documentation
 
+### General Troubleshooting for Error Codes $0333, $0281, $0101, $0537:
 These codes can occur for a few reasons, but most of the time it is caused by aftermarket electronics or tuning that was previously installed on the vehicle.
-
 To troubleshoot this issue, please proceed with the following:
-
 1) Disconnect/Uninstall any and all aftermarket electronics (they can be reinstalled later).
 2) Ensure that only the AutoCal is connected to the OBD port during the tuning process and not split with another device.
 3) Disconnect the following fuses:
@@ -1367,12 +1366,44 @@ To troubleshoot this issue, please proceed with the following:
    - Radio AMP
    - SEO1 (LB7)
    - SEO2 (LB7)
-
 If the code or issue still exists, we can attempt to flash the ECM in passthrough mode with the use of a windows based laptop and internet access.
-
 In the unlikely event that we cannot get the ECM to accept the flash in passthrough mode, we can have you send your ECM into our facility to be bench flashed. We will mail it back to you tuned and ready for installation.
-
 Please reach out to us at (337) 485-7070 for further assistance.
+
+### All EFILive Error Codes:
+$0101 - No Data Received: EFILive device tried to communicate with vehicle and failed. Check USB/OBDII cables, try another USB port, key 2 clicks forward (on position), engine not running, update device.
+$0106 - Received data out of range: Firmware may need updating. Check boot block, firmware, update BBX settings in EFILive V8.
+$0194 - Write failure: Target file system is full. Reformat Config file system, check SD card/internal memory free space.
+$0281 - No data received or key not in run position: Check all cables, ignition in run position, vehicle supported by EFILive, remove aftermarket electronics.
+$0333 - Security Access Denied: Controller not unlocked or re-armed. Try "Assume Lock may be Faulty" and "Try Alt Keys" in V8 pass-thru. For LB7/LLY, remove radio, radio amp, info fuses.
+$0335 - Invalid Key: Controller locked with customer key. Try pass through flash with "Try Common Alternative Keys", "Assume Lock may be Faulty", "Try Alt Keys". May need new ECM if lock is bad.
+$0340 - Download Not Accepted: For Cummins, re-flash ECM with stock file. For others, contact EFILive.
+$050B - Script file not supported by firmware: Update Firmware and BBX settings.
+$050C - Operation not supported: Read/flash attempted for unsupported controller. Re-program BBX settings via F5: BBX window.
+$0502 - BBX settings corrupted: **VERY COMMON ERROR.** The script (*.obj) file does not exist on the device. Fix: Open EFILive V8 Scan and Tune, go to F5: BBX, click the Read icon and save as "ACV2 Settings", then go to the Tune icon and re-program. Update boot block, firmware, and BBX settings. PPEI has a YouTube video specifically for this: "Loading tunes, updating bbx, 0502 efilive error fix".
+$0503 - Script file not valid: Script (*.obj) file is corrupt. Update boot block, firmware, and BBX settings.
+$0521 - Cannot read from tune file: Tune file corrupted during transfer. Remove file from device, re-download, reload. If persists, request new file from tuner.
+$0525 - Tune file not compatible with software version: Download latest EFILive V8, update boot block, firmware, BBX settings.
+$0530 - Device license mismatch: Tune file restricted to specific devices. Contact PPEI for link code or licensing verification.
+$0532 - Controller needs licensing before flashing: License the controller to your device first, then flash.
+$0533 - No VIN-license slots available: Need to purchase additional VIN license slots. Contact PPEI at (337) 485-7070.
+$0534 - Invalid Serial Number: Corrupt serial number. Retry operation. For LB7/LLY, full-flash stock file to restore serial.
+$0535 - AutoCal not linked to FlashScan: AutoCal must be linked to parent FlashScan. Contact PPEI for link code.
+$0536 - Tune file not registered to this AutoCal: AutoCal can only flash files created for that specific device. Contact PPEI customer service.
+$0537 - Controller locked with custom key: ECM locked by previous tuner. Try pass through with alt keys options. If can't unlock, contact previous tuner or may need new ECM.
+$0539 - Tune file does not allow full flashing: File only supports cal flash. .coz files must be Cal flashed. Contact tuner for full-flash file.
+$053B - Device serial mismatch: Tune file restricted to specific serial. Contact tune file author.
+$053C - Tune file does not allow calibration flashing: File must be full-flashed only.
+$053E - VIN security restriction mismatch: Tune file VIN doesn't match controller. Verify VIN, contact PPEI if mismatch.
+$0540 - Incompatible operating system: Tune file OS doesn't match controller. Contact tuner for correct file.
+$0548 - Flash checksum failed: Data corrupted during programming. Retry flash.
+$0549 - Ignition is switched off: Turn ignition to on position and retry.
+$06FF - Checksum failure: Data corrupted during reprogramming. Retry flash.
+$0677 - Boot loader checksum failed: Boot loader corrupted. Full flash stock file first, then retry tune.
+$0683 - Battery Voltage out of Range: Battery too high or low. Charge battery before flashing if low. Diagnose overcharging if high.
+
+### How to look up unlisted error codes:
+Open EFILive V8 Scan and Tune -> Click F8: Tools -> Click F8: Error Codes -> Enter the error code number for description.
 
 ---
 
@@ -1404,7 +1435,7 @@ You are NOT a sales agent. You are NOT a diagnostic agent. You are a tech suppor
 - EFILive serial numbers and auth codes
 - EFILive BBX settings and configuration file updates
 - EFILive bootblock and firmware updates
-- EFILive error codes ($0333, $0281, $0101, $0537)
+- ALL EFILive error codes ($0101, $0106, $0194, $0281, $0333, $0335, $0340, $050B, $050C, $0502, $0503, $0521, $0525, $0530, $0532, $0533, $0534, $0535, $0536, $0537, $0539, $053B, $053C, $053E, $0540, $0548, $0549, $06FF, $0677, $0683, and more — you have the FULL error code reference in your knowledge base)
 - EZ LYNK AutoAgent installation and setup
 - HP Tuners T93 TCM installation and tuning
 - HP Tuners L5P Duramax TCM transmission tuning

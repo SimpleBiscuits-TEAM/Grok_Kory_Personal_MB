@@ -980,3 +980,8 @@
 ## Bug: Knox quad-agent reasoning display missing
 - [x] Investigate why Knox Alpha/Beta/Gamma/Delta agent reasoning is no longer showing under analysis — confirmed working as intended: final reconciled answer shows by default in Analyzer, individual agent breakdown available in Editor KnoxChat and IntelliSpy
 - [x] No fix needed — user confirmed they prefer the final synthesized result, with option to debug individual agents when needed
+
+## Bug: Strat not recognizing EFILive error codes from PPEI KB
+- [x] Review scraped KB content for error code $0502 and other codes — confirmed only 4 codes in original KB article
+- [x] Fix Strat system prompt / knowledge base to include all error codes — added 30+ EFILive error codes from official documentation
+- [ ] Push fix to GROK
