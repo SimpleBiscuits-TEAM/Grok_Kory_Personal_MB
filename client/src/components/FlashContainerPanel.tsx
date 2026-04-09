@@ -11,6 +11,8 @@
  * - Upload-to-flasher (WiFi URL / BLE transfer prep) — `flash.prepareForTransfer` → object storage
  * - 50+ ECU platform support from shared ECU database
  *
+ * Flash tab entry: **ECU Scan** (vehicle first) or **Tune Deploy** (library). Open container after scan when you know which file matches.
+ *
  * Vehicle / cloud matching:
  * - ECU Scan compares live ECU cal part numbers to ContainerFileHeader `sw_c1`..`sw_c9` (see `compareWithContainer`).
  * - DevProg `softwareNumbers` / PPEI `partNumbers` are copied into those slots; Tune Deploy analyze fills gaps + OS hint.
@@ -52,6 +54,7 @@ import {
   Layers, Usb,
 } from 'lucide-react';
 import TuneDeployWorkspace from '@/components/tune-deploy/TuneDeployWorkspace';
+import { ingestReferenceContainerFromBuffer } from '../lib/ecuContainerSessionStorage';
 
 type FlashConnectionMode = 'simulator' | 'pcan' | 'vop_usb';
 
@@ -178,8 +181,8 @@ export default function FlashContainerPanel() {
   /** Dev server allows analyze without OAuth; library/upload still needs real sign-in. */
   const canRunTuneDeployAnalyze = signedInForTuneDeploy || import.meta.env.DEV;
 
-  /** Tune Deploy = calibration library / R2 pipeline; Container = existing flash flow */
-  const [flashWorkspace, setFlashWorkspace] = useState<'container' | 'tuneDeploy'>('container');
+  /** Tune Deploy = calibration library / R2 pipeline; ECU Scan = connect to vehicle first, then open container */
+  const [flashWorkspace, setFlashWorkspace] = useState<'ecuScan' | 'tuneDeploy'>('ecuScan');
   const [analysis, setAnalysis] = useState<FlashContainerAnalysis | null>(null);
   /** Server-side Tune Deploy parse — fills sw_c1..9 + file_id for ECU scan / cloud match when the container omits them */
   const [autoIdentifiedMeta, setAutoIdentifiedMeta] = useState<TuneDeployParsedMetadata | null>(null);
@@ -236,19 +239,25 @@ export default function FlashContainerPanel() {
     }
   }, []);
 
-  // Check bridge when PCAN section becomes active
+  // Check bridge when ECU Scan workspace or PCAN-backed sections are shown
   useEffect(() => {
-    if ((activeSection === 'hardware_flash' || activeSection === 'ecuscan') && pcanBridgeAvailable === null) {
+    if (
+      (flashWorkspace === 'ecuScan' || activeSection === 'hardware_flash' || activeSection === 'ecuscan')
+      && pcanBridgeAvailable === null
+    ) {
       checkPcanBridge();
     }
-  }, [activeSection, pcanBridgeAvailable, checkPcanBridge]);
+  }, [flashWorkspace, activeSection, pcanBridgeAvailable, checkPcanBridge]);
 
-  // Lazily allocate V-OP USB transport when user opens that tab (Web Serial — Chrome/Edge desktop)
+  // Lazily allocate V-OP USB transport for Hardware Flash or ECU Scan (Web Serial — Chrome/Edge desktop)
   useEffect(() => {
-    if (activeSection === 'hardware_flash' && !vopConnectionRef.current) {
+    if (
+      (activeSection === 'hardware_flash' || flashWorkspace === 'ecuScan')
+      && !vopConnectionRef.current
+    ) {
       vopConnectionRef.current = getSharedVopCan2UsbConnection();
     }
-  }, [activeSection]);
+  }, [activeSection, flashWorkspace]);
 
   /**
    * Tune Deploy analyze API — same heuristics as the library uploader.
@@ -409,6 +418,9 @@ export default function FlashContainerPanel() {
         setAnalysis(result);
         setFlashTypeOverride(null);
         setUploadStatus('ready');
+        if (result.devProgHeader) {
+          ingestReferenceContainerFromBuffer(`(browser) ${file.name}`, file.name, buffer);
+        }
       } else {
         setAnalysis({
           valid: false, containerFormat: 'UNKNOWN',
@@ -454,15 +466,15 @@ export default function FlashContainerPanel() {
     <div className="flex flex-wrap gap-2 mb-4 p-1 rounded-xl bg-zinc-900/60 border border-zinc-800">
       <button
         type="button"
-        onClick={() => setFlashWorkspace('container')}
+        onClick={() => setFlashWorkspace('ecuScan')}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
-          flashWorkspace === 'container'
-            ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+          flashWorkspace === 'ecuScan'
+            ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
             : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
         }`}
       >
-        <Zap className="w-3.5 h-3.5" />
-        FLASH CONTAINER
+        <Search className="w-3.5 h-3.5" />
+        ECU SCAN
       </button>
       <button
         type="button"
@@ -510,61 +522,76 @@ export default function FlashContainerPanel() {
     vopConnectionRef.current = null;
   };
 
-  // ── Upload Screen ──────────────────────────────────────────────────────
+  // ── ECU Scan first: connect & read DIDs, then open matching container ─────
 
   if (!analysis) {
     return (
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col min-h-0">
         {workspaceToggle}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
-            <Zap className="w-5 h-5 text-amber-400" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-zinc-100">ECU Flash Container</h2>
-            <p className="text-xs text-zinc-500">Upload a PPEI container binary for analysis and flash preparation</p>
-          </div>
-        </div>
-
-        <div
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={() => setIsDragOver(false)}
-          onClick={() => fileInputRef.current?.click()}
-          className={`flex-1 min-h-[300px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all ${
-            isDragOver
-              ? 'border-amber-400 bg-amber-500/10'
-              : 'border-zinc-700 hover:border-zinc-500 bg-zinc-900/50'
-          }`}
-        >
-          {isLoading ? (
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-12 h-12 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <span className="text-zinc-400">Parsing container...</span>
-            </div>
-          ) : (
-            <>
-              <Upload className={`w-12 h-12 mb-4 ${isDragOver ? 'text-amber-400' : 'text-zinc-600'}`} />
-              <p className="text-zinc-300 font-medium">Drop ECU binary here</p>
-              <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
-              <p className="text-zinc-600 text-xs mt-4">.bin, .hex, .cal — PPEI container format</p>
-              {fileError && (
-                <p className="text-red-400 text-xs mt-4 max-w-md text-center px-2">
-                  Error: {fileError}
-                </p>
-              )}
-            </>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".bin,.hex,.cal,.Bin,.BIN"
-            className="hidden"
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleFile(file);
-            }}
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-8 pr-1">
+          <EcuScanPanel
+            pcanConnection={pcanConnectionRef.current}
+            vopConnection={vopConnectionRef.current}
+            vopSupported={vopUsbSupported}
+            containerHeader={null}
+            bridgeAvailable={pcanBridgeAvailable === true}
+            bridgeUrl={pcanBridgeUrl}
           />
+
+          <div className="border-t border-zinc-800 pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-zinc-100">Open flash container</h2>
+                <p className="text-xs text-zinc-500">
+                  After the scan shows which calibrations are on the ECU, open the matching PPEI / DevProg container here for analysis and flash prep.
+                </p>
+              </div>
+            </div>
+
+            <div
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={() => setIsDragOver(false)}
+              onClick={() => fileInputRef.current?.click()}
+              className={`min-h-[220px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all ${
+                isDragOver
+                  ? 'border-amber-400 bg-amber-500/10'
+                  : 'border-zinc-700 hover:border-zinc-500 bg-zinc-900/50'
+              }`}
+            >
+              {isLoading ? (
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-zinc-400">Parsing container...</span>
+                </div>
+              ) : (
+                <>
+                  <Upload className={`w-10 h-10 mb-3 ${isDragOver ? 'text-amber-400' : 'text-zinc-600'}`} />
+                  <p className="text-zinc-300 font-medium">Drop ECU binary here</p>
+                  <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
+                  <p className="text-zinc-600 text-xs mt-3">.bin, .hex, .cal — PPEI / DevProg container</p>
+                  {fileError && (
+                    <p className="text-red-400 text-xs mt-4 max-w-md text-center px-2">
+                      Error: {fileError}
+                    </p>
+                  )}
+                </>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".bin,.hex,.cal,.Bin,.BIN"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1125,6 +1152,8 @@ export default function FlashContainerPanel() {
         {activeSection === 'ecuscan' && (
           <EcuScanPanel
             pcanConnection={pcanConnectionRef.current}
+            vopConnection={vopConnectionRef.current}
+            vopSupported={vopUsbSupported}
             containerHeader={containerFileHeader}
             bridgeAvailable={pcanBridgeAvailable === true}
             bridgeUrl={pcanBridgeUrl}
