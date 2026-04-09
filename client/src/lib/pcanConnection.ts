@@ -26,6 +26,7 @@ import {
   STANDARD_PIDS,
   GM_EXTENDED_PIDS,
   getPidsForVehicle,
+  buildPersistedScanAutoPreset,
   type FuelType,
   type PIDManufacturer,
 } from './obdConnection';
@@ -1353,9 +1354,23 @@ export class PCANConnection {
       options?.onProgress?.(current, total, pid, !!reading);
     }
 
+    const duration = Date.now() - startTime;
+    const autoPreset = buildPersistedScanAutoPreset(
+      this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+    );
+    if (autoPreset) {
+      this.emit(
+        'log',
+        null,
+        `Auto-generated preset "${autoPreset.name}" with ${autoPreset.pids.length} PIDs saved.`,
+      );
+    }
+
     return {
-      timestamp: Date.now(),
-      duration: Date.now() - startTime,
+      timestamp: startTime,
+      duration,
       vehicleInfo: this.vehicleInfo,
       standardSupported,
       extendedSupported,
@@ -1363,6 +1378,7 @@ export class PCANConnection {
       extendedUnsupported,
       totalScanned: current,
       totalSupported: standardSupported.length + extendedSupported.length,
+      autoPreset,
     };
   }
 
@@ -1370,6 +1386,10 @@ export class PCANConnection {
 
   getSupportedPids(): Set<number> {
     return new Set(this.supportedPids);
+  }
+
+  getVehicleInfo(): VehicleInfo {
+    return { ...this.vehicleInfo };
   }
 
   getAvailablePids(): PIDDefinition[] {

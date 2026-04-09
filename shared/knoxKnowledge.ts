@@ -40,7 +40,7 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - **Overspeed**: Hard RPM cut (fuel cut, not spark cut on diesel)
 - **Overheating**: Progressive torque reduction based on coolant temp
 - **Turbo Protection**: Low oil pressure → VGT moves to safe (open) position
-- **Rail Pressure Protection**: If actual rail pressure exceeds limit, PCV duty reduced immediately
+- **Rail Pressure Protection**: If actual rail pressure exceeds limit, the ECM reduces **FPR/PCV solenoid command (mA)** immediately — this is current control, not a PWM "duty %" display
 - **DPF Overtemp**: If exhaust temp exceeds threshold during regen, regen aborted
 
 ### NOx Raw Emission Model (from exhmod_rawnoxmdl)
@@ -80,17 +80,16 @@ Too-frequent regens = soot model miscalibration, fuel dilution, or injector issu
 - **2017+ (L5P)**: Denso HP4 — high-pressure pump, only on L5P platform
 - NEVER reference HP4 for pre-2017 trucks. NEVER reference CP4 for LB7/LLY/LBZ/LMM.
 
-### PCV (Pressure Control Valve) / Fuel Pressure Regulator (CRITICAL)
-- PCV controls rail pressure by regulating fuel bypass on the CP3/CP4/HP4 pump
-- PCV is measured in **milliamps (mA)**, NOT percentage or duty cycle
-- If a datalog shows PCV values >100, it is mA, not percent
-- **Higher mA = more fuel bypass = LESS rail pressure** (valve opens more, dumps fuel back to tank)
-- **Lower mA = less fuel bypass = MORE rail pressure** (valve closes, forces more fuel to rail)
-- At ~400mA: pump is supplying roughly 97% of available fuel to the rail
-- Fuel path: Fuel tank → Lift pump (if equipped) → CP3/CP4/HP4 → PCV regulates → Common rail → Injectors
-- PCV at max mA with low rail pressure = fuel supply issue (lift pump, filter, air leak)
-- PCV at min mA with high rail pressure = normal high-load operation
-- PCV oscillating wildly = air in fuel, failing lift pump, or clogged filter
+### FPR / PCV solenoid — **commanded current (mA), not duty cycle** (CRITICAL — GM Duramax)
+- The high-pressure pump **inlet metering / fuel pressure regulator** is often labeled "PCV" in tools, but the live value is **solenoid current in milliamps (mA)**, not a PWM duty percentage. Do not treat a 0–255 byte as "% duty" without verifying the A2L/DID scaling.
+- **mA is still the closed-loop control output**: the ECM **modulates commanded current** to chase rail pressure. On a datalog, mA vs time often **behaves like a "duty-style" working output** — actively hunting — even though the **channel is not labeled or scaled as % duty**. When diagnosing, read **mA movement together with desired vs actual rail**, not the number in isolation.
+- **Regaining rail authority**: if actual rail **will not track desired** and the mA trace shows the strategy **still operating in-band** (moving, not clearly saturated at a mechanical/electrical limit), a valid interpretation is that the system **may need further movement along the commanded-current range** — e.g. **more commanded mA in the direction the error demands** — before rail is back under control. Do not dismiss that pattern just because the plot is mA instead of "% duty"; confirm with **FRP desired vs actual** and whether mA is pinned vs still modulating.
+- **Rule of thumb (many calibrations)**: ~**1800 mA** ≈ **~10% regulator opening**; ~**400 mA** ≈ **~95% opening**, favoring **more rail pressure / effective flow toward the rail**. Between those points, current maps to opening (exact curve is calibration-specific).
+- **Lower mA** → tends toward **more** effective delivery toward the rail (higher "opening" in the sense above). **Higher mA** → tends toward **less** (lower opening). Always compare to **desired vs actual rail pressure** in the same log.
+- Fuel path: Fuel tank → Lift pump (if equipped) → CP3/CP4/HP4 inlet metering (FPR/PCV) → Common rail → Injectors
+- **Very low mA** with **low** rail vs desired → often fuel supply restriction, air, filter, or pump limit
+- **Very high mA** with odd rail behavior → regulator/tuning/wiring; cross-check OEM docs for that ECM
+- **Current swinging wildly** with stable desired rail → air, filter restriction, marginal pump, or electrical fault
 
 ### LB7 Specific (2001-2004)
 - CP3.3 high pressure fuel pump

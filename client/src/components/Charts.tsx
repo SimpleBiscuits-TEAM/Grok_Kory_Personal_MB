@@ -13,6 +13,8 @@ import {
 } from 'recharts';
 import { ProcessedMetrics } from '@/lib/dataProcessor';
 import { useMemo, useState, useCallback } from 'react';
+import { ZoomableChart } from '@/components/ZoomableChart';
+import { assignDistinctSeriesColors } from '@/lib/chartSeriesColors';
 
 interface ChartProps {
   data: ProcessedMetrics;
@@ -48,65 +50,158 @@ const tooltipStyle = {
   color: 'white',
 };
 
+/** Per-series Y domain so unrelated units (RPM vs lb/min, PSIG vs HP) are not forced onto one scale. */
+function paddedYExtent(values: number[], opts?: { padRatio?: number; floorZero?: boolean }): [number, number] {
+  const padRatio = opts?.padRatio ?? 0.06;
+  const floorZero = opts?.floorZero ?? false;
+  const xs = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+  if (xs.length === 0) return [0, 1];
+  let lo = Math.min(...xs);
+  let hi = Math.max(...xs);
+  if (floorZero) lo = Math.min(0, lo);
+  if (hi <= lo) hi = lo + (Math.abs(lo) > 1e-6 ? Math.abs(lo) * 0.05 + 0.5 : 1);
+  const span = hi - lo;
+  const pad = Math.max(span * padRatio, 1e-6);
+  return [lo - pad, hi + pad];
+}
+
+/**
+ * Mean MAF per integer RPM so the X axis has no duplicates — Recharts monotone lines
+ * fail when many steady-state samples share the same RPM.
+ */
+function lineDataMeanMafPerRpm(points: { rpm: number; maf: number }[]): { rpm: number; maf: number }[] {
+  const map = new Map<number, { sum: number; n: number }>();
+  for (const p of points) {
+    if (typeof p.rpm !== 'number' || !Number.isFinite(p.rpm)) continue;
+    if (typeof p.maf !== 'number' || !Number.isFinite(p.maf)) continue;
+    const k = Math.round(p.rpm);
+    const e = map.get(k) ?? { sum: 0, n: 0 };
+    e.sum += p.maf;
+    e.n += 1;
+    map.set(k, e);
+  }
+  return Array.from(map.entries())
+    .map(([rpm, { sum, n }]) => ({ rpm, maf: sum / n }))
+    .sort((a, b) => a.rpm - b.rpm);
+}
+
 /**
  * RPM vs MAF Flow — line chart sorted by RPM, with optional mean trend
  */
+function formatTooltipNumber(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v)) return v.toFixed(2);
+  return '—';
+}
+
+/** Hex stroke — Recharts + some SVG paths handle oklch inconsistently. */
+const MAF_LINE_STROKE = '#38bdf8';
+
 export function RPMvMAFChart({ data, binnedData }: ChartProps) {
   const chartData = useMemo(() => {
-    const raw = data.rpm.map((rpm, i) => ({ rpm, maf: data.maf[i] }));
-    // Sort by RPM for a clean left-to-right line
-    raw.sort((a, b) => a.rpm - b.rpm);
-    // Downsample for performance (max 600 points)
-    const step = Math.max(1, Math.ceil(raw.length / 600));
+    const n = Math.min(data.rpm.length, data.maf?.length ?? 0);
+    const raw: { rpm: number; maf: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const rpm = data.rpm[i];
+      const v = data.maf[i];
+      if (typeof rpm !== 'number' || !Number.isFinite(rpm)) continue;
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      raw.push({ rpm, maf: v });
+    }
+    const step = Math.max(1, Math.ceil(raw.length / 800));
     return raw.filter((_, i) => i % step === 0);
   }, [data]);
+
+  const hasAnyMaf = chartData.some(d => d.maf > 0);
 
   return (
     <div style={{ width: '100%', height: '24rem', background: theme.bg, border: `1px solid ${theme.border}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: '3px', padding: '1rem' }}>
       <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
         RPM vs MASS AIRFLOW (MAF)
       </h3>
-      <ResponsiveContainer width="100%" height="85%">
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
-          <XAxis
-            dataKey="rpm"
-            type="number"
-            stroke={theme.axis}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <YAxis
-            dataKey="maf"
-            type="number"
-            stroke={theme.axis}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'MAF (lb/min)', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(2)} labelFormatter={(v: any) => `RPM: ${Number(v).toFixed(0)}`} />
-          <Line
-            type="monotone"
-            dataKey="maf"
-            stroke={theme.blue}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-            name="MAF Flow"
-          />
-          {binnedData && (
-            <Line
-              type="monotone"
-              dataKey="mafMean"
-              data={binnedData}
-              stroke={theme.red}
-              strokeWidth={2.5}
-              dot={false}
-              isAnimationActive={false}
-              name="Mean MAF Trend"
-            />
-          )}
-        </ComposedChart>
-      </ResponsiveContainer>
+      {!hasAnyMaf && chartData.length > 0 && (
+        <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.75rem', color: theme.axis, fontFamily: theme.labelFont }}>
+          MAF channel is zero or missing in this log — chart needs a logged mass airflow column.
+        </p>
+      )}
+      <ZoomableChart data={chartData} height={280}>
+        {(visibleData) => {
+          const lineData = lineDataMeanMafPerRpm(visibleData);
+          const rpms = visibleData.map(d => d.rpm).filter(Number.isFinite);
+          const rmin = rpms.length ? Math.min(...rpms) : 0;
+          const rmax = rpms.length ? Math.max(...rpms) : 0;
+          const mafs = lineData.map(d => d.maf).filter(v => Number.isFinite(v));
+          let yMin = 0;
+          let yMax = 1;
+          if (mafs.length > 0) {
+            yMin = Math.min(...mafs);
+            yMax = Math.max(...mafs);
+            const pad = Math.max(0.15, (yMax - yMin) * 0.12);
+            yMin = Math.max(0, yMin - pad);
+            yMax = yMax + pad;
+            if (yMax - yMin < 0.5) {
+              yMax = yMin + 0.5;
+            }
+          }
+          const binnedSlice = (binnedData as Array<{ rpm: number; mafMean?: number }> | undefined)?.filter(
+            b => b.rpm >= rmin && b.rpm <= rmax,
+          );
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={lineData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+                <XAxis
+                  dataKey="rpm"
+                  type="number"
+                  domain={['dataMin', 'dataMax']}
+                  stroke={theme.axis}
+                  style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                  label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  dataKey="maf"
+                  type="number"
+                  domain={[yMin, yMax]}
+                  allowDecimals
+                  stroke={theme.axis}
+                  style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                  label={{ value: 'MAF (lb/min)', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v: any) => formatTooltipNumber(v)}
+                  labelFormatter={(_l: any, payload: any[]) => {
+                    const rpm = payload?.[0]?.payload?.rpm;
+                    return rpm != null && Number.isFinite(rpm) ? `RPM: ${Number(rpm).toFixed(0)}` : '';
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="maf"
+                  name="MAF Flow"
+                  stroke={MAF_LINE_STROKE}
+                  strokeWidth={1.75}
+                  dot={false}
+                  connectNulls
+                  isAnimationActive={false}
+                />
+                {binnedSlice && binnedSlice.length > 0 && (
+                  <Line
+                    type="linear"
+                    dataKey="mafMean"
+                    data={[...binnedSlice].sort((a, b) => a.rpm - b.rpm)}
+                    stroke="#f97316"
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                    name="Mean MAF Trend"
+                    connectNulls
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          );
+        }}
+      </ZoomableChart>
     </div>
   );
 }
@@ -127,67 +222,90 @@ export function HPvsRPMChart({ data, binnedData }: ChartProps) {
       <h3 style={{ fontFamily: theme.titleFont, fontSize: '1.15rem', letterSpacing: '0.06em', color: theme.title, margin: '0 0 0.75rem 0' }}>
         ESTIMATED HORSEPOWER vs RPM
       </h3>
-      <ResponsiveContainer width="100%" height="85%">
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
-          <XAxis
-            dataKey="rpm"
-            type="number"
-            stroke={theme.axis}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <YAxis
-            stroke={theme.axis}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'Horsepower', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => v.toFixed(1)} labelFormatter={(v: any) => `RPM: ${Number(v).toFixed(0)}`} />
-          <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
-          <Line
-            type="monotone"
-            dataKey="hpTorque"
-            stroke={theme.blue}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-            name="HP (Torque method)"
-          />
-          <Line
-            type="monotone"
-            dataKey="hpMaf"
-            stroke={theme.cyan}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-            name="HP (MAF method)"
-          />
-          {binnedData && (
-            <>
-              <Line
-                type="monotone"
-                dataKey="hpTorqueMean"
-                data={binnedData}
-                stroke={theme.red}
-                strokeWidth={2.5}
-                dot={false}
-                isAnimationActive={false}
-                name="Mean HP (Torque)"
-              />
-              <Line
-                type="monotone"
-                dataKey="hpMafMean"
-                data={binnedData}
-                stroke={theme.amber}
-                strokeWidth={2.5}
-                dot={false}
-                isAnimationActive={false}
-                name="Mean HP (MAF)"
-              />
-            </>
-          )}
-        </ComposedChart>
-      </ResponsiveContainer>
+      <ZoomableChart data={chartData} height={280}>
+        {(visibleData) => {
+          const rpms = visibleData.map(d => d.rpm).filter(Number.isFinite);
+          const rmin = rpms.length ? Math.min(...rpms) : 0;
+          const rmax = rpms.length ? Math.max(...rpms) : 0;
+          const binnedSlice = (binnedData as Array<{ rpm: number; hpTorqueMean?: number; hpMafMean?: number }> | undefined)?.filter(
+            b => b.rpm >= rmin && b.rpm <= rmax,
+          );
+          const hpSeriesKeys =
+            binnedSlice && binnedSlice.length > 0
+              ? ['hpTorque', 'hpMaf', 'hpTorqueMean', 'hpMafMean']
+              : ['hpTorque', 'hpMaf'];
+          const hpStrokes = assignDistinctSeriesColors(hpSeriesKeys, {
+            hpTorque: '#38bdf8',
+            hpMaf: '#f97316',
+            hpTorqueMean: '#ef4444',
+            hpMafMean: '#a3e635',
+          });
+          const [stTorque, stMaf, stMeanTorque = '#ef4444', stMeanMaf = '#a3e635'] = hpStrokes;
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+                <XAxis
+                  dataKey="rpm"
+                  type="number"
+                  stroke={theme.axis}
+                  style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                  label={{ value: 'Engine RPM', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  stroke={theme.axis}
+                  style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                  label={{ value: 'Horsepower', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => formatTooltipNumber(v)} labelFormatter={(v: any) => `RPM: ${Number(v).toFixed(0)}`} />
+                <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
+                <Line
+                  type="monotone"
+                  dataKey="hpTorque"
+                  stroke={stTorque}
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="HP (Torque method)"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="hpMaf"
+                  stroke={stMaf}
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="HP (MAF method)"
+                />
+                {binnedSlice && binnedSlice.length > 0 && (
+                  <>
+                    <Line
+                      type="monotone"
+                      dataKey="hpTorqueMean"
+                      data={binnedSlice}
+                      stroke={stMeanTorque}
+                      strokeWidth={2.5}
+                      dot={false}
+                      isAnimationActive={false}
+                      name="Mean HP (Torque)"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="hpMafMean"
+                      data={binnedSlice}
+                      stroke={stMeanMaf}
+                      strokeWidth={2.5}
+                      dot={false}
+                      isAnimationActive={false}
+                      name="Mean HP (MAF)"
+                    />
+                  </>
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          );
+        }}
+      </ZoomableChart>
     </div>
   );
 }
@@ -245,7 +363,7 @@ export function TimeSeriesChart({ data }: ChartProps) {
             <>
               <span style={{ color: theme.axis }}>t: <b style={{ color: 'white' }}>{hoverData.time.toFixed(3)}</b></span>
               <span style={{ color: theme.blue }}>RPM: <b style={{ color: 'white' }}>{hoverData.rpm.toFixed(1)}</b></span>
-              <span style={{ color: theme.cyan }}>MAF: <b style={{ color: 'white' }}>{hoverData.maf.toFixed(1)}</b></span>
+              <span style={{ color: theme.orange }}>MAF: <b style={{ color: 'white' }}>{hoverData.maf.toFixed(1)}</b></span>
               <span style={{ color: theme.amber }}>Boost: <b style={{ color: 'white' }}>{hoverData.boost.toFixed(1)}</b></span>
               <span style={{ color: theme.green }}>HP: <b style={{ color: 'white' }}>{hoverData.hp.toFixed(1)}</b></span>
             </>
@@ -254,74 +372,117 @@ export function TimeSeriesChart({ data }: ChartProps) {
           )}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height="88%">
-        <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }} onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
-          <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
-          <XAxis
-            dataKey="time"
-            stroke={theme.axis}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'Time (min)', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <YAxis
-            yAxisId="left"
-            stroke={theme.blue}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'RPM / MAF', angle: -90, position: 'insideLeft', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          <YAxis
-            yAxisId="right"
-            orientation="right"
-            stroke={theme.amber}
-            style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
-            label={{ value: 'Boost (psi) / HP', angle: 90, position: 'insideRight', fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
-          />
-          {/* Hidden tooltip — we use the external bar instead */}
-          <Tooltip content={() => null} />
-          <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
-          <Area
-            yAxisId="left"
-            type="monotone"
-            dataKey="rpm"
-            fill={theme.blue}
-            stroke={theme.blue}
-            fillOpacity={0.12}
-            strokeWidth={1.5}
-            isAnimationActive={false}
-            name="RPM"
-          />
-          <Line
-            yAxisId="left"
-            type="monotone"
-            dataKey="maf"
-            stroke={theme.cyan}
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-            name="MAF (lb/min)"
-          />
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey="boost"
-            stroke={theme.amber}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-            name="Boost (psi)"
-          />
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey="hp"
-            stroke={theme.green}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-            name="HP (Torque)"
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
+      <ZoomableChart data={chartData} height={300}>
+        {(visibleData) => {
+          const [rpmLo, rpmHi] = paddedYExtent(visibleData.map((d) => d.rpm), { padRatio: 0.04, floorZero: false });
+          const [mafLo, mafHi] = paddedYExtent(visibleData.map((d) => d.maf), { padRatio: 0.08, floorZero: true });
+          const [boostLo, boostHi] = paddedYExtent(visibleData.map((d) => d.boost), { padRatio: 0.1, floorZero: true });
+          const [hpLo, hpHi] = paddedYExtent(visibleData.map((d) => d.hp), { padRatio: 0.05, floorZero: false });
+          const axisTick = { fontSize: 10, fontFamily: theme.labelFont };
+          return (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={visibleData}
+                margin={{ top: 10, right: 56, bottom: 22, left: 56 }}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} />
+                <XAxis
+                  dataKey="time"
+                  stroke={theme.axis}
+                  style={{ fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                  label={{ value: 'Time (min)', position: 'insideBottomRight', offset: -10, fill: theme.axis, fontSize: '0.7rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  yAxisId="rpm"
+                  orientation="left"
+                  domain={[rpmLo, rpmHi]}
+                  stroke={theme.blue}
+                  tick={{ ...axisTick, fill: theme.blue }}
+                  width={44}
+                  label={{ value: 'RPM', angle: -90, position: 'insideLeft', fill: theme.blue, fontSize: '0.65rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  yAxisId="maf"
+                  orientation="left"
+                  offset={48}
+                  domain={[mafLo, mafHi]}
+                  allowDecimals
+                  stroke={theme.orange}
+                  tick={{ ...axisTick, fill: theme.orange }}
+                  width={44}
+                  label={{ value: 'MAF lb/min', angle: -90, position: 'insideLeft', fill: theme.orange, fontSize: '0.65rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  yAxisId="boost"
+                  orientation="right"
+                  domain={[boostLo, boostHi]}
+                  allowDecimals
+                  stroke={theme.amber}
+                  tick={{ ...axisTick, fill: theme.amber }}
+                  width={44}
+                  label={{ value: 'Boost PSIG', angle: 90, position: 'insideRight', fill: theme.amber, fontSize: '0.65rem', fontFamily: theme.labelFont }}
+                />
+                <YAxis
+                  yAxisId="hp"
+                  orientation="right"
+                  offset={48}
+                  domain={[hpLo, hpHi]}
+                  allowDecimals
+                  stroke={theme.green}
+                  tick={{ ...axisTick, fill: theme.green }}
+                  width={44}
+                  label={{ value: 'HP / TQ', angle: 90, position: 'insideRight', fill: theme.green, fontSize: '0.65rem', fontFamily: theme.labelFont }}
+                />
+                <Tooltip content={() => null} />
+                <Legend wrapperStyle={{ fontFamily: theme.labelFont, fontSize: '0.72rem', color: theme.axis }} />
+                <Area
+                  yAxisId="rpm"
+                  type="monotone"
+                  dataKey="rpm"
+                  fill={theme.blue}
+                  stroke={theme.blue}
+                  fillOpacity={0.12}
+                  strokeWidth={1.5}
+                  isAnimationActive={false}
+                  name="RPM"
+                />
+                <Line
+                  yAxisId="maf"
+                  type="monotone"
+                  dataKey="maf"
+                  stroke={theme.orange}
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="MAF (lb/min)"
+                />
+                <Line
+                  yAxisId="boost"
+                  type="monotone"
+                  dataKey="boost"
+                  stroke={theme.amber}
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="Boost (psi)"
+                />
+                <Line
+                  yAxisId="hp"
+                  type="monotone"
+                  dataKey="hp"
+                  stroke={theme.green}
+                  strokeWidth={2}
+                  dot={false}
+                  isAnimationActive={false}
+                  name="HP (Torque)"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          );
+        }}
+      </ZoomableChart>
     </div>
   );
 }

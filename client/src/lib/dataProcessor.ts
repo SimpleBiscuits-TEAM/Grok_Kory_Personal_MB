@@ -50,6 +50,7 @@ export interface DuramaxData {
   offset: number[];
   railPressureActual: number[];
   railPressureDesired: number[];
+  /** GM diesel FPR / inlet metering (often labeled PCV): commanded **current in mA**, not PWM duty %. */
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
@@ -134,6 +135,7 @@ export interface ProcessedMetrics {
   timeMinutes: number[];
   railPressureActual: number[];
   railPressureDesired: number[];
+  /** GM diesel FPR / inlet metering (often labeled PCV): commanded **current in mA**, not PWM duty %. */
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
@@ -434,6 +436,8 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'DEF_LVL': '_def_lvl',
   'DEF_RATE': '_def_rate',
   'DEF_QUAL': '_def_qual',
+  'FPR_I': 'pcvDutyCycle',
+  'PCV_DUTY': 'pcvDutyCycle', // legacy datalogger export shortName
   'PCV_DC': 'pcvDutyCycle',
   'PCV_ACT': 'pcvDutyCycle',
   'FUEL_QTY': 'fuelQuantity',
@@ -798,11 +802,17 @@ function parseHPTunersCSV(content: string): DuramaxData {
     // Priority 1: exact SAE lb/min channel
     const sae = headers.findIndex(h => h === 'Mass Airflow (SAE)');
     if (sae !== -1) return sae;
-    // Priority 2: any column with 'Mass Airflow' that is NOT 'Sensor' (Hz)
-    const nonSensor = headers.findIndex(h => h.includes('Mass Airflow') && !h.includes('Sensor'));
+    // Priority 2: "Mass Air Flow" (DST/HP Tuners) or "Mass Airflow" — not Hz/sensor columns
+    const nonSensor = headers.findIndex(
+      h =>
+        /mass\s*air\s*flow/i.test(h) &&
+        !/sensor|hz|frequency/i.test(h),
+    );
     if (nonSensor !== -1) return nonSensor;
-    // Priority 3: fallback to any Mass Airflow column
-    return headers.findIndex(h => h.includes('Mass Airflow'));
+    // Priority 3: legacy substring
+    const legacy = headers.findIndex(h => h.includes('Mass Airflow'));
+    if (legacy !== -1) return legacy;
+    return headers.findIndex(h => /mass\s*air\s*flow/i.test(h));
   })();
 
   // Boost actual: prefer direct gauge psi channels
@@ -1049,6 +1059,14 @@ function parseHPTunersCSV(content: string): DuramaxData {
     const conv = hptConverters[idx];
     return conv ? conv(v) : v;
   };
+
+  // When there is no units row, infer MAF scaling from the header (e.g. "Mass Air Flow (g/s)")
+  if (mafIdx !== -1 && hptUnits.length === 0) {
+    const hl = headers[mafIdx].toLowerCase();
+    if ((hl.includes('g/s') || hl.includes('gram')) && !hl.includes('lb/min')) {
+      hptConverters[mafIdx] = (v: number) => v * 0.132277;
+    }
+  }
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -2028,7 +2046,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const fuelRateIdx = getColumnIndex(['Fuel Flow Rate', 'Cylinder Fuel Rate']);
   const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
   const railDesiredIdx = getColumnIndex(['FRP Commanded']);
-  const pcvIdx = -1; // Banks Power does not log PCV duty cycle — leave unmapped
+  const pcvIdx = -1; // Banks Power does not log FPR/PCV current — leave unmapped
   // MAP Commanded is absolute (PSIA); subtract ambient to get gauge
   const mapCommandedIdx = getColumnIndex(['MAP Commanded']);
   const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
@@ -2412,6 +2430,16 @@ function parseEZLynkCSV(content: string): DuramaxData {
   if (rpmIdx === -1) pidsMissing.push('Engine RPM');
   if (mafIdx === -1) pidsMissing.push('Mass Air Flow');
 
+  // MAF: DST / EZ Lynk headers are usually "Mass Air Flow (g/s)"; internal model + HP math expect lb/min.
+  const mafHeaderLower = mafIdx !== -1 ? headers[mafIdx].toLowerCase() : '';
+  const mafToLbPerMin = (raw: number): number => {
+    if (isNaN(raw)) return 0;
+    if (mafHeaderLower.includes('lb/min') || mafHeaderLower.includes('lb min')) return raw;
+    if (mafHeaderLower.includes('g/s') || mafHeaderLower.includes('gram')) return raw * 0.132277;
+    // Default for this format (documented as g/s above)
+    return raw * 0.132277;
+  };
+
   // Detect if torque column is in Ft-lbf (actual) vs percentage
   // Check header for "Ft-lbf" or "ft-lbf" to determine
   const torqueIsAbsolute = torqueActualIdx !== -1 &&
@@ -2461,7 +2489,7 @@ function parseEZLynkCSV(content: string): DuramaxData {
     if (!hasAnyData) continue; // skip rows with no data at all
 
     rpm.push(!isNaN(rpmVal) ? rpmVal : 0);
-    maf.push(!isNaN(mafVal) ? mafVal : 0);
+    maf.push(mafToLbPerMin(mafVal));
     // EZ Lynk boost is already gauge PSI
     boost.push(!isNaN(boostVal) ? Math.max(0, boostVal) : 0);
     mapAbsolute.push(!isNaN(boostVal) ? boostVal + 14.696 : 14.696);
@@ -3004,12 +3032,15 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
   };
 }
 /**
- * Create binned data for trend liness
+ * Create binned data for trend lines (RPM histogram means).
+ * Includes `rpm` (same value as `rpmBin`) so Recharts XAxis dataKey="rpm" works when a
+ * Line uses `data={binnedData}` alongside the raw scatter series.
  */
 export function createBinnedData(
   data: ProcessedMetrics,
   binCount: number = 30
 ): Array<{
+  rpm: number;
   rpmBin: number;
   mafMean: number;
   hpTorqueMean: number;
@@ -3017,30 +3048,41 @@ export function createBinnedData(
   boostMean: number;
   count: number;
 }> {
+  if (!data.rpm.length) return [];
+
   const rpmMin = data.stats.rpmMin;
   const rpmMax = data.stats.rpmMax;
-  const binSize = (rpmMax - rpmMin) / binCount;
-  
+  if (!Number.isFinite(rpmMin) || !Number.isFinite(rpmMax)) return [];
+
+  let binSize = (rpmMax - rpmMin) / binCount;
+  if (!Number.isFinite(binSize) || binSize <= 0) {
+    binSize = 1;
+  }
+
   const bins: Map<number, { maf: number[]; hpTorque: number[]; hpMaf: number[]; boost: number[] }> = new Map();
-  
+
   for (let i = 0; i < data.rpm.length; i++) {
-    const binIndex = Math.floor((data.rpm[i] - rpmMin) / binSize);
+    const rpm = data.rpm[i];
+    if (!Number.isFinite(rpm)) continue;
+
+    const binIndex = Math.floor((rpm - rpmMin) / binSize);
     const binKey = rpmMin + binIndex * binSize + binSize / 2;
-    
+
     if (!bins.has(binKey)) {
       bins.set(binKey, { maf: [], hpTorque: [], hpMaf: [], boost: [] });
     }
-    
+
     const bin = bins.get(binKey)!;
-    bin.maf.push(data.maf[i]);
-    bin.hpTorque.push(data.hpTorque[i]);
-    bin.hpMaf.push(data.hpMaf[i]);
-    bin.boost.push(data.boost[i]);
+    bin.maf.push(data.maf[i] ?? 0);
+    bin.hpTorque.push(data.hpTorque[i] ?? 0);
+    bin.hpMaf.push(data.hpMaf[i] ?? 0);
+    bin.boost.push(data.boost[i] ?? 0);
   }
-  
+
   return Array.from(bins.entries())
     .sort((a, b) => a[0] - b[0])
     .map(([rpmBin, values]) => ({
+      rpm: rpmBin,
       rpmBin,
       mafMean: values.maf.reduce((a, b) => a + b, 0) / values.maf.length,
       hpTorqueMean: values.hpTorque.reduce((a, b) => a + b, 0) / values.hpTorque.length,

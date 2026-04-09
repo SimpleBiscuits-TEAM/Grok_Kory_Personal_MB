@@ -609,7 +609,7 @@ function checkHighRailPressure(
     }
   }
 
-  // Check idle condition — only when PCV data is actually logged
+  // Check idle condition — only when FPR/PCV current (mA) is logged
   const hasPcvData = pcv.some((v: number) => v > 0);
   if (desired.length > 0 && hasPcvData) {
     const idleIndices = desired
@@ -624,10 +624,10 @@ function checkHighRailPressure(
           issues.push({
             code: 'HIGH-IDLE-RAIL-PRESSURE',
             severity: 'info',
-            title: 'High Idle Rail Pressure - PCV Adjustment Needed',
-            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. PCV current is ${avgIdlePcv.toFixed(0)} mA (below 1600 mA). Higher mA = more fuel bypass, lower mA = more fuel flowing to rail.`,
+            title: 'High Idle Rail Pressure - FPR Current Adjustment Needed',
+            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. FPR/inlet metering current is ${avgIdlePcv.toFixed(0)} mA (below 1600 mA). Rule of thumb: ~400 mA ≈ high regulator opening (more flow toward rail), ~1800 mA ≈ low opening — not a PWM duty %.`,
             recommendation:
-              'An adjustment in tuning can resolve this. Contact your tuner to adjust PCV current at idle for better pressure control.',
+              'An adjustment in tuning can resolve this. Contact your tuner to adjust FPR commanded current at idle for better pressure control.',
           });
         }
       }

@@ -202,15 +202,11 @@ export default defineConfig({
   },
   server: {
     host: true,
-    allowedHosts: [
-      ".manuspre.computer",
-      ".manus.computer",
-      ".manus-asia.computer",
-      ".manuscomputer.ai",
-      ".manusvm.computer",
-      "localhost",
-      "127.0.0.1",
-    ],
+    // Vite 5+ validates the Host header. Browsers using IPv6 loopback send
+    // Host: [::1]:port — not covered by "localhost" / "127.0.0.1", which breaks
+    // dev (403 / blank page) on many Windows setups.
+    // Used only by Express + Vite (`pnpm dev`); production uses built static files.
+    allowedHosts: true,
     fs: {
       strict: true,
       deny: ["**/.*"],

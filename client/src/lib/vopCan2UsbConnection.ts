@@ -29,6 +29,7 @@ import {
   DIDScanReport,
   STANDARD_PIDS,
   getPidsForVehicle,
+  buildPersistedScanAutoPreset,
 } from './obdConnection';
 import { decodeVinNhtsa } from './universalVinDecoder';
 import { type UDSResponse, parseIsoTpDataToUdsResponse, parseUdsDiagnosticPayload } from './pcanConnection';
@@ -776,9 +777,24 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       }
       options?.onProgress?.(cur, tot, pid, !!reading);
     }
+
+    const duration = Date.now() - t0;
+    const autoPreset = buildPersistedScanAutoPreset(
+      this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+    );
+    if (autoPreset) {
+      this.emit(
+        'log',
+        null,
+        `Auto-generated preset "${autoPreset.name}" with ${autoPreset.pids.length} PIDs saved.`,
+      );
+    }
+
     return {
-      timestamp: Date.now(),
-      duration: Date.now() - t0,
+      timestamp: t0,
+      duration,
       vehicleInfo: this.vehicleInfo,
       standardSupported,
       extendedSupported,
@@ -786,11 +802,16 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       extendedUnsupported,
       totalScanned: cur,
       totalSupported: standardSupported.length + extendedSupported.length,
+      autoPreset,
     };
   }
 
   getSupportedPids(): Set<number> {
     return new Set(this.supportedPids);
+  }
+
+  getVehicleInfo(): VehicleInfo {
+    return { ...this.vehicleInfo };
   }
 
   getAvailablePids(): PIDDefinition[] {

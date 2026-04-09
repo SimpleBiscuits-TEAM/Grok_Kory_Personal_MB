@@ -27,7 +27,7 @@ function buildCompareSystemPrompt(): string {
     `- At 2500μs+ pulse width, timing should be 27°+ to efficiently burn the fuel`,
     `- Negative timing (-20° to -7°) = regen mode, 80+ HP loss`,
     `- High pulse width is hard on pistons (wide spray patterns), not the injectors themselves`,
-    `- Rail pressure deviation = actual vs desired gap; watch for PCV saturation`,
+    `- Rail pressure deviation = actual vs desired gap; watch for FPR/inlet metering current (mA) pinned at an extreme vs demand — not a "% duty" channel on GM diesel`,
     `- TCC slip > 100 RPM sustained = potential converter issue`,
     ``,
     `MAF & Intake Tube Knowledge (CRITICAL):`,

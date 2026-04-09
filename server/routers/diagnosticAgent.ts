@@ -231,7 +231,7 @@ const TEST_CONDITIONS: Record<string, {
   },
   fuel_system: {
     title: 'Fuel System Health Test',
-    description: 'Evaluate fuel rail pressure tracking, PCV behavior, and injector delivery.',
+    description: 'Evaluate fuel rail pressure tracking, FPR/inlet metering current (mA), and injector delivery.',
     steps: [
       'Start logging at cold idle (note initial rail pressure)',
       'Let engine warm to operating temperature',
@@ -243,7 +243,7 @@ const TEST_CONDITIONS: Record<string, {
     duration: '20-25 minutes',
     warnings: [
       'Rail pressure should track desired within ±2000 PSI during steady state',
-      'PCV oscillation during steady cruise indicates air in fuel or failing lift pump',
+      'FPR current (mA) oscillating during steady cruise can indicate air in fuel or a failing lift pump',
       'If rail pressure drops during WOT, check fuel filter and lift pump',
     ],
   },

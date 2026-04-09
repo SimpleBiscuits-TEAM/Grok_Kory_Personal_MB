@@ -318,7 +318,7 @@ const PID_CONFIGS: PidConfig[] = [
   { key: 'turboVanePosition', label: 'Turbo Vane Position', unit: '%' },
   { key: 'turboVaneDesired', label: 'Turbo Vane Desired', unit: '%' },
   { key: 'converterSlip', label: 'TCC Slip', unit: 'RPM' },
-  { key: 'pcvDutyCycle', label: 'PCV Duty Cycle', unit: '%' },
+  { key: 'pcvDutyCycle', label: 'FPR current', unit: 'mA' },
   { key: 'vehicleSpeed', label: 'Vehicle Speed', unit: 'MPH' },
   { key: 'coolantTemp', label: 'Coolant Temp', unit: '°F' },
   { key: 'oilTemp', label: 'Oil Temp', unit: '°F' },
