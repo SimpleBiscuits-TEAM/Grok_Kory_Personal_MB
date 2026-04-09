@@ -159,6 +159,11 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "client", "src"),
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      // obd-utils "main" is UMD with dynamic require() — breaks Vite/ESM in the browser
+      "obd-utils": path.resolve(
+        import.meta.dirname,
+        "node_modules/obd-utils/lib/es6/index.js"
+      ),
     },
   },
   envDir: path.resolve(import.meta.dirname),
