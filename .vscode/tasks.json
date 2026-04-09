@@ -24,6 +24,29 @@
       "runOptions": {
         "instanceLimit": 1
       }
+    },
+    {
+      "label": "git-map: HTML-Grafik erzeugen",
+      "type": "shell",
+      "command": "npm run git-map",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "git-map: Watch (Grafik bei Git-Änderung)",
+      "type": "shell",
+      "command": "npm run git-map:watch",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated"
+      }
     }
   ]
 }

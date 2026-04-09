@@ -11,6 +11,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "eval:llm": "tsx scripts/eval-llm-routing.ts",
+    "git-map": "node scripts/git-map.mjs",
+    "git-map:watch": "node scripts/git-map.mjs --watch",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
