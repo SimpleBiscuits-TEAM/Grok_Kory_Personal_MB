@@ -1039,3 +1039,21 @@
 - [x] Knox personality: humorous, knowledgeable, confident — distinct from Strat's support tone
 - [x] Strat and Knox should have banter and humor between each other to keep customer entertained while diagnosing
 - [x] Update tests for Knox-assisted Strat responses
+
+## Strat Conversation Quality Fixes — Stop Repeating, Ask Questions, Escalate
+- [x] Fix BBX hardcoded response: check conversation history, don't re-send if BBX already provided
+- [x] Add loop detection: if Strat gives same/similar response twice, force different approach
+- [x] Improve system prompt: ask diagnostic questions FIRST before dumping full resolution
+- [x] Add escalation tiers in system prompt: basic fix → advanced troubleshooting → Knox consultation → human escalation
+- [x] Ensure Knox consultation triggers when customer says issue persists after trying suggested fix
+- [x] Never repeat the same full response — if customer says "still same error", try a DIFFERENT approach
+
+## Train Knox — CP3 Conversion Knowledge
+- [x] Add CP3 conversion knowledge to Knox KB: trucks with CP3 conversion may need modified tune for more regulator control
+- [x] Low rail pressure from a large tune that starves the pump can increase wear due to lack of lubrication
+- [x] Added CP3 conversion section to shared/knoxKnowledge.ts + diagnosticAgent fuel_system warnings
+
+## P0502 vs $0502 Disambiguation
+- [x] When customer mentions P0502 in context of AutoCal/EFILive, treat it as $0502 (EFI error code) not OBD-II DTC
+- [x] Add disambiguation logic to Strat — normalizes P0xxx to $0xxx when EFI context detected in message or history
+- [x] Updated system prompt to explain P vs $ prefix disambiguation to LLM

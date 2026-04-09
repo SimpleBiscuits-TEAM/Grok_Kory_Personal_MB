@@ -80,6 +80,14 @@ Too-frequent regens = soot model miscalibration, fuel dilution, or injector issu
 - **2017+ (L5P)**: Denso HP4 — high-pressure pump, only on L5P platform
 - NEVER reference HP4 for pre-2017 trucks. NEVER reference CP4 for LB7/LLY/LBZ/LMM.
 
+### CP3 Conversion Considerations (CRITICAL — affects tune requirements)
+- Trucks with a **CP3 conversion** (replacing the factory CP4.2 with a CP3 pump, common on 2011-2016 LML/LGH) **may need a modified tune** to allow for more regulator control.
+- The CP3 has different flow characteristics than the CP4.2 — the ECM's factory fuel pressure maps and FPR/PCV current strategy are calibrated for CP4.2 behavior. A CP3 swap without tune adjustment can result in the ECM not commanding enough regulator authority to maintain proper rail pressure.
+- **Low rail pressure from a large/aggressive tune that starves the pump can increase wear due to lack of lubrication.** The high-pressure pump relies on fuel flow for both pressure generation and internal lubrication. If the tune demands more fuel than the pump can supply (especially at high RPM/load), the pump runs dry and metal-on-metal contact accelerates wear.
+- **Symptoms of CP3 conversion needing tune revision:** Rail pressure dropping below desired under load, FPR/PCV mA pinned at extremes, intermittent low rail pressure codes, pump whine or cavitation noise.
+- **Recommended approach:** When diagnosing low rail pressure on a truck with a CP3 conversion, ALWAYS ask if the tune has been revised for the CP3. If not, recommend a tune revision that recalibrates the FPR/PCV current maps and rail pressure targets for CP3 flow characteristics.
+- This also applies to upgraded CP3 pumps (e.g., CP3.5, stroker CP3) — any pump swap that changes flow volume or pressure behavior requires tune adjustment for proper regulator control.
+
 ### FPR / PCV solenoid — **commanded current (mA), not duty cycle** (CRITICAL — GM Duramax)
 - The high-pressure pump **inlet metering / fuel pressure regulator** is often labeled "PCV" in tools, but the live value is **solenoid current in milliamps (mA)**, not a PWM duty percentage. Do not treat a 0–255 byte as "% duty" without verifying the A2L/DID scaling.
 - **mA is still the closed-loop control output**: the ECM **modulates commanded current** to chase rail pressure. On a datalog, mA vs time often **behaves like a "duty-style" working output** — actively hunting — even though the **channel is not labeled or scaled as % duty**. When diagnosing, read **mA movement together with desired vs actual rail**, not the number in isolation.

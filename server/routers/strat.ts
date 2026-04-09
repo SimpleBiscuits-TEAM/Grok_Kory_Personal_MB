@@ -1747,6 +1747,7 @@ You are NOT a sales agent. You are NOT a diagnostic agent. You are a tech suppor
 - EFILive BBX settings and configuration file updates
 - EFILive bootblock and firmware updates
 - ALL EFILive error codes ($0101, $0106, $0194, $0281, $0333, $0335, $0340, $050B, $050C, $0502, $0503, $0521, $0525, $0530, $0532, $0533, $0534, $0535, $0536, $0537, $0539, $053B, $053C, $053E, $0540, $0548, $0549, $06FF, $0677, $0683, and more — you have the FULL error code reference in your knowledge base)
+- **IMPORTANT: EFI error codes vs OBD-II DTCs** — EFILive uses a $ prefix (e.g. $0502), but customers often type P0502 because they're used to OBD-II DTC format. When a customer mentions a P-prefixed code in the context of AutoCal/EFILive/flashing, treat it as the equivalent $ code. For example, P0502 in AutoCal context = $0502 (BBX not configured), NOT the OBD-II DTC P0502 (Vehicle Speed Sensor Low Input).
 - EZ LYNK AutoAgent installation and setup
 - HP Tuners T93 TCM installation and tuning
 - HP Tuners L5P Duramax TCM transmission tuning
@@ -1771,7 +1772,7 @@ When routing, be specific about which tab to go to. Don't just say "ask another 
 ## CRITICAL RESPONSE RULES — READ THIS FIRST
 **You MUST follow these rules for EVERY response:**
 - **Be SHORT, SIMPLE, and TO THE POINT.** No walls of text. No long introductions.
-- **Give the fix IMMEDIATELY.** Do NOT ask a bunch of qualifying questions before providing guidance. If the customer tells you the error code or issue, give the resolution steps RIGHT AWAY.
+- **Give the fix IMMEDIATELY on FIRST mention of an error code.** If the customer tells you the error code or issue for the first time, give the resolution steps RIGHT AWAY.
 - **Maximum 1 follow-up question per response.** If you need clarification, ask ONE question at the end — not a numbered list of 3-5 questions.
 - **Resolution-first, questions-second.** Always lead with the fix/guidance, then ask a single follow-up if needed.
 - **Keep greetings to ONE short sentence.** Don't write a paragraph of pleasantries.
@@ -1779,6 +1780,27 @@ When routing, be specific about which tab to go to. Don't just say "ask another 
 - **When recommending a BBX file, ALWAYS include the download link** from the BBX DOWNLOAD LINKS section appended to this prompt. Format it as a clickable markdown link.
 - **For EZLYNK issues**, use the EZLYNK Troubleshooting Guide in your knowledge base. Cover WiFi, connection, ECM communication, firmware, tune install, and technician linking issues.
 - **You have TWO sources of error code knowledge** — the original EFILive Error Code Reference AND the expanded PPEI Error App reference. Combine both for the most thorough, accurate response.
+
+## NEVER REPEAT YOURSELF — ESCALATION RULES
+**This is the most important rule. If you already gave the customer a fix and they say it didn't work ("still getting", "same error", "didn't work", "already tried that"), you MUST:**
+1. **NEVER repeat the same instructions.** The customer already tried them. Repeating is frustrating and unhelpful.
+2. **Acknowledge that the previous fix didn't work.** Say something like "Okay, since that didn't resolve it, let's dig deeper."
+3. **Ask DIAGNOSTIC QUESTIONS to narrow down the issue.** Examples:
+   - "What does the AutoCal screen show right now? Any specific text or numbers?"
+   - "When you applied the BBX file, did the progress bar complete successfully or did it give any errors?"
+   - "What version of EFILive V8 are you running? (Check Help > About)"
+   - "Are you connected to the vehicle or just the PC when you see this error?"
+   - "Did the Config Files update show 'OK' or is it still showing out of date?"
+4. **Try DIFFERENT troubleshooting approaches:**
+   - Try a different USB port or USB cable
+   - Try running EFILive as Administrator
+   - Try uninstalling and reinstalling EFILive V8 completely
+   - Try manually selecting controllers in F5: BBX instead of using the BBX file
+   - Try formatting the AutoCal's internal storage (F5: BBX > Format CONFIG)
+   - Factory reset the AutoCal if available
+5. **If 2+ different approaches have been tried and failed**, escalate: "We've tried the standard fixes and this might need hands-on attention. Call **(337) 485-7070** or submit a ticket at **support.ppei.com** — our team can do a remote session or walk you through it live."
+
+**REMEMBER: The conversation history shows what you already told the customer. READ IT. If you see you already gave BBX instructions, firmware update steps, or the same fix — DO NOT give it again. Try something NEW.**
 
 Example of GOOD response to "I'm getting $0502 on my AutoCal":
 "This should be an easy fix. $0502 indicates that the AutoCal/FlashScan is either out of date, not configured to recognize your vehicle's controllers, or both.
@@ -1795,11 +1817,13 @@ Example of BAD response (DO NOT DO THIS):
 "Hey there! I'm Strat... That's a common one... Let me ask you a few things: 1. What year? 2. What version AutoCal? 3. Have you connected recently?" ← TOO MANY QUESTIONS, NO FIX GIVEN
 
 ## How You Respond
-1. **Error codes:** Give the fix steps IMMEDIATELY. Reference the specific error code from your knowledge base. Ask ONE follow-up at the end if needed (e.g., "Did you receive a BBX file with your purchase?").
-2. **Installation questions:** Give the relevant steps right away based on what they told you. If you need their vehicle/device info and they didn't provide it, ask ONE question.
-3. **First message (no specific issue):** Keep it short: "Hey! I'm Strat, PPEI tech support. What do you need help with?"
-4. **Data logging questions:** Give the procedure. If you need to know their device, ask.
-5. **"I don't know" situations:** Be honest and brief: "I want to get you the right answer — call **(337) 485-7070** or submit a ticket at **support.ppei.com**."
+1. **Error codes (FIRST TIME):** Give the fix steps IMMEDIATELY. Reference the specific error code from your knowledge base. Ask ONE follow-up at the end if needed.
+2. **Error codes (CUSTOMER SAYS IT DIDN'T WORK):** Do NOT repeat the same fix. Ask a diagnostic question or try a different approach. See ESCALATION RULES above.
+3. **Installation questions:** Give the relevant steps right away based on what they told you. If you need their vehicle/device info and they didn't provide it, ask ONE question.
+4. **First message (no specific issue):** Keep it short: "Hey! I'm Strat, PPEI tech support. What do you need help with?"
+5. **Data logging questions:** Give the procedure. If you need to know their device, ask.
+6. **"I don't know" situations:** Be honest and brief: "I want to get you the right answer — call **(337) 485-7070** or submit a ticket at **support.ppei.com**."
+7. **Customer is frustrated or says you're stuck:** Acknowledge it, apologize briefly, and immediately try a completely different approach or escalate to phone support.
 
 ## Escalation Rules
 - If the customer has tried all troubleshooting steps and the issue persists → Recommend calling **(337) 485-7070** or submitting a ticket at https://support.ppei.com
@@ -1847,13 +1871,32 @@ export const stratRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const lowerMsg = input.message.toLowerCase();
+      // ── Normalize P-prefix to $-prefix for EFI error codes ──
+      // EFILive uses $ prefix (e.g. $0502), but customers often type P0502 (confusing it with OBD-II DTCs).
+      // When in AutoCal/EFILive context, convert P0xxx to $0xxx for correct matching.
+      const efiContext = /autocal|flashscan|efilive|efi live|bbx|v2 device|v3 device|flash|tune|program cal|program full/i;
+      let normalizedMessage = input.message;
+      if (efiContext.test(input.message) || (input.history || []).some(m => efiContext.test(m.content))) {
+        // In EFI context: P0502 → $0502, P0537 → $0537, etc.
+        normalizedMessage = normalizedMessage.replace(/\bP(0[0-9]{3})\b/gi, '\$$1');
+      }
+      const lowerMsg = normalizedMessage.toLowerCase();
       const historyText = (input.history || []).map(m => m.content.toLowerCase()).join(' ');
       const fullContext = `${lowerMsg} ${historyText}`;
+      const history = input.history || [];
 
-      // ── BBX file requests — detect Duramax or Cummins and serve the right file (hardcoded for exact download links) ──
-      const wantsBBX = /\bbbx\b/i.test(lowerMsg) || (/\bbbx\b/i.test(fullContext) && /need|send|get|download|where|have|file|request|provide/i.test(lowerMsg));
-      if (wantsBBX) {
+      // ── Loop / persistence detection ──
+      // If the customer says the issue persists ("still", "same error", "didn't work", "not working"),
+      // force Knox consultation and DO NOT repeat BBX/hardcoded responses.
+      const persistsPattern = /still (get|hav|see|show|same|stuck)|same (error|issue|problem|thing|code)|didn'?t work|not work|doesn'?t work|already (tried|done|did)|your stuck|you'?re stuck|keeps? (happening|showing|giving|coming)|tried (that|everything|all)/i;
+      const customerPersists = persistsPattern.test(lowerMsg);
+
+      // Check if BBX was already sent in history (don't re-send)
+      const bbxAlreadySent = history.some(m => m.role === 'assistant' && (/Download (Duramax|Cummins) BBX File/i.test(m.content) || /AllDieselBBX/i.test(m.content)));
+
+      // ── BBX file requests — ONLY when customer explicitly asks for BBX and we haven't already sent it ──
+      const wantsBBX = /\bbbx\b/i.test(lowerMsg) && /need|send|get|download|where|have|file|request|provide/i.test(lowerMsg);
+      if (wantsBBX && !bbxAlreadySent && !customerPersists) {
         const isDuramaxBBX = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
         const isCumminsBBX = /cummins|dodge|ram|5\.9|6\.7/i.test(fullContext);
         if (isDuramaxBBX) {
@@ -1870,7 +1913,8 @@ export const stratRouter = router({
 
       // ── Detect if Knox should assist ──
       // Knox helps with: error codes, diagnostics, technical troubleshooting, ECU questions, flash issues
-      const needsKnox = /error|\$0[0-9]{3}|\$0[0-9a-f]{3}|diagnostic|dtc|pid|ecu|flash|won'?t start|misfire|boost|fuel|injection|turbo|limp|check engine|cel|code|trouble|sensor|voltage|pressure|temp|knock|timing|transmission|tcm|won'?t flash|brick|fail|stuck/i.test(lowerMsg);
+      // Also ALWAYS consult Knox when the customer says the issue persists after trying suggested fixes
+      const needsKnox = customerPersists || /error|\$0[0-9]{3}|\$0[0-9a-f]{3}|diagnostic|dtc|pid|ecu|flash|won'?t start|misfire|boost|fuel|injection|turbo|limp|check engine|cel|code|trouble|sensor|voltage|pressure|temp|knock|timing|transmission|tcm|won'?t flash|brick|fail|stuck/i.test(lowerMsg);
 
       // ── Simple questions — Strat handles alone (no Knox needed) ──
       const isSimpleQuestion = /^(hey|hi|hello|what do you do|how are you|thanks|thank you|ok|got it|cool|awesome|perfect|great)/i.test(lowerMsg.trim()) && !needsKnox;
@@ -1889,8 +1933,15 @@ export const stratRouter = router({
 
       // ── Simple path — Strat alone ──
       if (isSimpleQuestion || !needsKnox) {
+        let systemContent = STRAT_SYSTEM_PROMPT + bbxContext;
+        if (customerPersists) {
+          systemContent += `\n\n## PERSISTENCE ALERT\nThe customer is telling you that your previous suggestion DID NOT WORK. DO NOT repeat the same fix. Review the conversation history, acknowledge the issue persists, and try a COMPLETELY DIFFERENT approach or ask a specific diagnostic question. If you've already tried 2+ approaches, escalate to phone support at (337) 485-7070.`;
+        }
+        if (bbxAlreadySent) {
+          systemContent += `\n\n## BBX ALREADY SENT\nYou already sent the BBX file download link earlier in this conversation. DO NOT send it again. If the customer is still having issues after applying the BBX file, troubleshoot WHY it didn't work instead of re-sending the same link.`;
+        }
         const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-          { role: "system", content: STRAT_SYSTEM_PROMPT + bbxContext },
+          { role: "system", content: systemContent },
         ];
         if (input.history) {
           for (const msg of input.history) messages.push({ role: msg.role, content: msg.content });
@@ -1945,11 +1996,14 @@ Do NOT provide any technical answer yet. Just the handoff line.`,
         const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
         const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
 
+        const persistenceContext = customerPersists
+          ? `\n\n**IMPORTANT: The customer says the previous fix did NOT work. They have already tried the standard troubleshooting steps shown in the conversation history. Do NOT repeat the same advice. Suggest DIFFERENT approaches, ask diagnostic questions to narrow down WHY the fix isn't working, or recommend escalation to phone support at (337) 485-7070.**`
+          : '';
         const knoxResult = await queryKnox({
           question: input.message,
           accessLevel: effectiveLevel >= 2 ? effectiveLevel : 2,
           domain: 'general',
-          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
+          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}${persistenceContext}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
           history: input.history?.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
         });
         knoxAnswer = knoxResult.answer;

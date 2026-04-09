@@ -245,6 +245,7 @@ const TEST_CONDITIONS: Record<string, {
       'Rail pressure should track desired within ±2000 PSI during steady state',
       'FPR current (mA) oscillating during steady cruise can indicate air in fuel or a failing lift pump',
       'If rail pressure drops during WOT, check fuel filter and lift pump',
+      'CP3 conversion trucks may need a modified tune for more regulator control — low rail pressure from an aggressive tune that starves the pump increases wear due to lack of lubrication',
     ],
   },
   injector_health: {
