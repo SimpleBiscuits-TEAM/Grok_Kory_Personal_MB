@@ -36,7 +36,7 @@ const sFont = {
 };
 
 // ── Sub-panel type ───────────────────────────────────────────────────────
-type SubPanel = 'dashboard' | 'feedback' | 'sessions' | 'conversations' | 'users' | 'sharelinks' | 'ndas';
+type SubPanel = 'dashboard' | 'feedback' | 'strat-feedback' | 'sessions' | 'conversations' | 'users' | 'sharelinks' | 'ndas';
 
 // ── Main Component ───────────────────────────────────────────────────────
 export default function SupportAdminPanel() {
@@ -45,6 +45,7 @@ export default function SupportAdminPanel() {
   const navItems: { id: SubPanel; label: string; icon: React.ReactNode }[] = [
     { id: 'dashboard', label: 'DASHBOARD', icon: <BarChart3 size={16} /> },
     { id: 'feedback', label: 'FEEDBACK', icon: <Inbox size={16} /> },
+    { id: 'strat-feedback', label: 'STRAT LOGS', icon: <Eye size={16} /> },
     { id: 'sessions', label: 'SESSIONS', icon: <Users size={16} /> },
     { id: 'conversations', label: 'MESSAGES', icon: <MessageSquare size={16} /> },
     { id: 'users', label: 'USERS', icon: <User size={16} /> },
@@ -106,6 +107,7 @@ export default function SupportAdminPanel() {
       <div style={{ flex: 1, minWidth: 0 }}>
         {activePanel === 'dashboard' && <DashboardPanel />}
         {activePanel === 'feedback' && <FeedbackPanel />}
+        {activePanel === 'strat-feedback' && <StratFeedbackPanel />}
         {activePanel === 'sessions' && <SessionsPanel />}
         {activePanel === 'conversations' && <ConversationsPanel />}
         {activePanel === 'users' && <UsersPanel />}
@@ -1592,6 +1594,306 @@ function NdaReviewPanel() {
           <li>Screen capture detection is active on all share-token-gated pages</li>
           <li>Rejected NDAs can be re-submitted by the user</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Strat Feedback Panel — Chat Logs + Ratings ──────────────────────────
+function StratFeedbackPanel() {
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const feedbackQuery = trpc.strat.getFeedback.useQuery();
+
+  const formatDuration = (seconds: number | null | undefined) => {
+    if (!seconds) return '—';
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
+  };
+
+  const avgRating = feedbackQuery.data?.feedback?.length
+    ? (feedbackQuery.data.feedback.reduce((sum: number, f: any) => sum + f.rating, 0) / feedbackQuery.data.feedback.length).toFixed(1)
+    : '—';
+
+  const resolvedCount = feedbackQuery.data?.feedback?.filter((f: any) => f.resolved === true).length ?? 0;
+  const unresolvedCount = feedbackQuery.data?.feedback?.filter((f: any) => f.resolved === false).length ?? 0;
+
+  return (
+    <div>
+      <div style={{
+        fontFamily: sFont.heading,
+        fontSize: '1.4rem',
+        letterSpacing: '0.1em',
+        color: sColor.textPrimary,
+        marginBottom: '0.5rem',
+      }}>
+        STRAT FEEDBACK & CHAT LOGS
+      </div>
+      <p style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textSecondary, marginBottom: '1rem' }}>
+        Review customer feedback from Strat support sessions — includes full chat transcripts.
+      </p>
+
+      {/* Stats */}
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' }}>
+        {[
+          { label: 'TOTAL', value: feedbackQuery.data?.total ?? '—', color: sColor.blue },
+          { label: 'AVG RATING', value: avgRating, color: sColor.yellow },
+          { label: 'RESOLVED', value: resolvedCount, color: sColor.green },
+          { label: 'UNRESOLVED', value: unresolvedCount, color: sColor.red },
+        ].map(s => (
+          <div key={s.label} style={{
+            background: sColor.panel, border: `1px solid ${sColor.panelBorder}`,
+            borderRadius: '3px', padding: '0.6rem 1rem', flex: 1, textAlign: 'center',
+          }}>
+            <div style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: s.color }}>{s.value}</div>
+            <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, letterSpacing: '0.1em' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Refresh */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+        <button
+          onClick={() => feedbackQuery.refetch()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.35rem',
+            padding: '0.35rem 0.75rem',
+            background: 'transparent',
+            border: `1px solid ${sColor.panelBorder}`,
+            borderRadius: '3px',
+            color: sColor.textSecondary,
+            cursor: 'pointer',
+            fontFamily: sFont.mono,
+            fontSize: '0.7rem',
+          }}
+        >
+          <RefreshCw size={12} /> REFRESH
+        </button>
+      </div>
+
+      {/* Loading */}
+      {feedbackQuery.isLoading && (
+        <div style={{ textAlign: 'center', padding: '2rem', color: sColor.textMuted }}>
+          <Loader2 size={20} className="animate-spin" style={{ margin: '0 auto 0.5rem' }} />
+          <div style={{ fontFamily: sFont.body, fontSize: '0.85rem' }}>Loading feedback...</div>
+        </div>
+      )}
+
+      {/* Empty */}
+      {feedbackQuery.data?.feedback?.length === 0 && !feedbackQuery.isLoading && (
+        <div style={{
+          textAlign: 'center', padding: '3rem',
+          background: sColor.panel, border: `1px solid ${sColor.panelBorder}`, borderRadius: '3px',
+        }}>
+          <Inbox size={32} style={{ color: sColor.textMuted, margin: '0 auto 0.75rem' }} />
+          <div style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textSecondary }}>
+            No Strat feedback submissions yet.
+          </div>
+        </div>
+      )}
+
+      {/* Feedback List */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {feedbackQuery.data?.feedback?.map((item: any) => {
+          const isExpanded = expandedId === item.id;
+          const chatLog = item.chatLog as Array<{ role: string; content: string }> | null;
+          const hasChatLog = chatLog && chatLog.length > 0;
+
+          return (
+            <div key={item.id} style={{
+              background: sColor.panel,
+              border: `1px solid ${sColor.panelBorder}`,
+              borderLeft: `3px solid ${item.resolved ? sColor.green : item.resolved === false ? sColor.red : sColor.yellow}`,
+              borderRadius: '4px',
+              overflow: 'hidden',
+            }}>
+              {/* Header row */}
+              <div
+                onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                style={{
+                  padding: '0.75rem 1rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+                  {/* Stars */}
+                  <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star key={s} size={13} fill={s <= item.rating ? sColor.yellow : 'transparent'} style={{ color: s <= item.rating ? sColor.yellow : sColor.textMuted }} />
+                    ))}
+                  </div>
+
+                  {/* User name */}
+                  <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: 'white', fontWeight: 600 }}>
+                    {item.userName || 'Anonymous'}
+                  </span>
+
+                  {/* Resolved badge */}
+                  <span style={{
+                    fontFamily: sFont.mono, fontSize: '0.6rem', letterSpacing: '0.1em',
+                    padding: '0.1rem 0.4rem', borderRadius: '2px',
+                    background: item.resolved ? `${sColor.green}22` : item.resolved === false ? `${sColor.red}22` : `${sColor.yellow}22`,
+                    color: item.resolved ? sColor.green : item.resolved === false ? sColor.red : sColor.yellow,
+                    border: `1px solid ${item.resolved ? sColor.green : item.resolved === false ? sColor.red : sColor.yellow}44`,
+                  }}>
+                    {item.resolved ? 'RESOLVED' : item.resolved === false ? 'UNRESOLVED' : 'N/A'}
+                  </span>
+
+                  {/* Message count */}
+                  {item.messageCount && (
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted }}>
+                      {item.messageCount} msgs
+                    </span>
+                  )}
+
+                  {/* Duration */}
+                  {item.sessionDuration && (
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted }}>
+                      <Clock size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '3px' }} />
+                      {formatDuration(item.sessionDuration)}
+                    </span>
+                  )}
+
+                  {/* Chat log indicator */}
+                  {hasChatLog && (
+                    <span style={{
+                      fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.blue,
+                      padding: '0.1rem 0.4rem', borderRadius: '2px',
+                      background: `${sColor.blue}15`, border: `1px solid ${sColor.blue}33`,
+                    }}>
+                      CHAT LOG
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted }}>
+                    {item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}
+                  </span>
+                  <ChevronRight size={14} style={{
+                    color: sColor.textMuted,
+                    transform: isExpanded ? 'rotate(90deg)' : 'none',
+                    transition: 'transform 0.15s ease',
+                  }} />
+                </div>
+              </div>
+
+              {/* Expanded detail */}
+              {isExpanded && (
+                <div style={{
+                  borderTop: `1px solid ${sColor.borderLight}`,
+                  padding: '1rem',
+                }}>
+                  {/* Comment */}
+                  {item.comment && (
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.1em', marginBottom: '0.35rem' }}>
+                        CUSTOMER COMMENT
+                      </div>
+                      <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textPrimary, lineHeight: 1.5, margin: 0 }}>
+                        {item.comment}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Conversation Summary */}
+                  {item.conversationSummary && (
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.1em', marginBottom: '0.35rem' }}>
+                        CONVERSATION SUMMARY
+                      </div>
+                      <p style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textSecondary, lineHeight: 1.4, margin: 0 }}>
+                        {item.conversationSummary}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Full Chat Log */}
+                  {hasChatLog && (
+                    <div>
+                      <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, letterSpacing: '0.1em', marginBottom: '0.5rem' }}>
+                        FULL CHAT TRANSCRIPT ({chatLog!.length} messages)
+                      </div>
+                      <div style={{
+                        background: 'oklch(0.10 0.005 260)',
+                        border: `1px solid ${sColor.borderLight}`,
+                        borderRadius: '4px',
+                        maxHeight: '400px',
+                        overflowY: 'auto',
+                        padding: '0.75rem',
+                      }}>
+                        {chatLog!.map((msg, idx) => (
+                          <div key={idx} style={{
+                            display: 'flex',
+                            gap: '0.5rem',
+                            marginBottom: idx < chatLog!.length - 1 ? '0.75rem' : 0,
+                            paddingBottom: idx < chatLog!.length - 1 ? '0.75rem' : 0,
+                            borderBottom: idx < chatLog!.length - 1 ? `1px solid oklch(0.15 0.005 260)` : 'none',
+                          }}>
+                            <div style={{
+                              flexShrink: 0,
+                              width: '60px',
+                              fontFamily: sFont.mono,
+                              fontSize: '0.6rem',
+                              letterSpacing: '0.08em',
+                              color: msg.role === 'user' ? sColor.blue : sColor.green,
+                              paddingTop: '0.15rem',
+                              textTransform: 'uppercase',
+                            }}>
+                              {msg.role === 'user' ? 'CUSTOMER' : 'STRAT'}
+                            </div>
+                            <div style={{
+                              flex: 1,
+                              fontFamily: sFont.body,
+                              fontSize: '0.8rem',
+                              color: msg.role === 'user' ? sColor.textPrimary : sColor.textSecondary,
+                              lineHeight: 1.5,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word',
+                            }}>
+                              {msg.content}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No chat log */}
+                  {!hasChatLog && (
+                    <div style={{
+                      fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textMuted,
+                      fontStyle: 'italic', padding: '1rem', textAlign: 'center',
+                      background: 'oklch(0.10 0.005 260)', borderRadius: '4px',
+                    }}>
+                      No chat log available for this session (submitted before chat log tracking was added).
+                    </div>
+                  )}
+
+                  {/* Meta info */}
+                  <div style={{
+                    marginTop: '0.75rem',
+                    display: 'flex',
+                    gap: '1.5rem',
+                    fontFamily: sFont.mono,
+                    fontSize: '0.6rem',
+                    color: sColor.textMuted,
+                  }}>
+                    <span>ID: #{item.id}</span>
+                    <span>User ID: {item.userId || '—'}</span>
+                    {item.productCategory && <span>Product: {item.productCategory}</span>}
+                    {item.sessionDuration && <span>Duration: {formatDuration(item.sessionDuration)}</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

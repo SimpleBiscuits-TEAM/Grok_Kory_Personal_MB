@@ -996,3 +996,17 @@
 ## GROK Pull — PCAN Bridge + OBD Routing + Strat UI Fix
 - [x] Pulled 2 commits from GROK: PCAN bridge and local dev (OBD routing, obd-utils, Windows fixes v0.12.2), Strat UI platform list fix
 - [x] 21 files merged, no conflicts — build passes cleanly
+
+## Strat $0502 Response Fix — Use Exact Owner Language
+- [x] Read BBX reconfiguration PDF for step-by-step instructions
+- [x] Hardcode exact $0502 response in strat.ts — no LLM improvisation, use owner's exact wording
+- [x] Include BBX reconfiguration steps from PDF in the response
+- [x] Include EFILive download link (https://www.efilive.com/download-efilive) in response
+
+## Strat Feedback Review System
+- [x] Include full chat log (customer + Strat messages) with feedback submission
+- [x] Update strat_feedback DB schema to store chat log (JSON column)
+- [x] Update server submitFeedback mutation to accept and store chat log
+- [x] Update client feedback form to send chat history with submission
+- [x] Build admin feedback review page — list all feedback with ratings, comments, and full chat logs
+- [x] Owner notification when feedback is submitted

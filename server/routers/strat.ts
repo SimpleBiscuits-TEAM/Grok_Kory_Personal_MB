@@ -13,6 +13,41 @@ import { getDb } from "../db";
 import { stratFeedback } from "../../drizzle/schema";
 
 /**
+ * Hardcoded $0502 response — bypasses LLM entirely.
+ * Uses exact owner-approved language + BBX reconfiguration steps from PPEI PDF guide.
+ * This guarantees consistent, accurate responses every time.
+ */
+const HARDCODED_0502_RESPONSE = `This should be an easy fix. $0502 indicates that the AutoCal/FlashScan is either out of date, not configured to recognize your vehicle's controllers, or both.
+
+**Step 1 — Download & Install EFILive V8**
+
+Start by following this link to download and install the latest version of EFILive software on your computer (if you haven't done this already): [https://www.efilive.com/download-efilive](https://www.efilive.com/download-efilive)
+
+**Step 2 — Update Firmware**
+
+Once installed, connect the AutoCal/FlashScan to your computer via USB and open the **EFILive V8 Scan and Tune** software. Click **"Check Firmware"** at the top of the page. In the popup window, update each section that needs it:
+- **Boot Block** — click Update if out of date
+- **Firmware** — click Update if out of date
+- **Config Files** — click Update Files if out of date
+
+Once everything shows OK, click **OK** to close.
+
+**Step 3 — Reconfigure BBX Settings**
+
+Use the provided BBX file to reconfigure the AutoCal to recognize your vehicle's controllers:
+1. Locate the BBX file (e.g., "All Diesel bbx") saved to your desktop and **double-click it** — this opens EFILive with the BBX Quick Setup Manager
+2. Click the **F2: Scan** tab and place a checkmark next to your vehicle's controller(s)
+3. Click the **F3: Tune** tab and select the same controller(s)
+4. Click the dropdown arrow beside the **Program** button at the bottom:
+   - First select **"Format CONFIG file system"** → click Yes
+   - Then click the dropdown again and select **"Program Selections and Configuration Files (Slower)"** → click Yes
+5. Wait for the progress bar to finish — you'll see "Configuration files have been copied" → click OK
+
+Your AutoCal is now updated and configured. Try flashing your tune again.
+
+Did you receive a BBX file along with your tuning and installation instructions when you purchased? If not, let me know and I can help you get the right one.`;
+
+/**
  * Complete PPEI Support Knowledge Base — scraped from support.ppei.com
  * 23 articles covering EFILive, EZ LYNK, HP Tuners, and DEBETA products.
  */
@@ -1538,6 +1573,19 @@ export const stratRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      // ── Hardcoded responses for common error codes ─────────────────────
+      // These bypass the LLM entirely to guarantee consistent, owner-approved language.
+      const lowerMsg = input.message.toLowerCase();
+      const historyText = (input.history || []).map(m => m.content.toLowerCase()).join(' ');
+      const fullContext = `${lowerMsg} ${historyText}`;
+
+      // $0502 — VERY COMMON. Hardcoded response per owner directive.
+      if (lowerMsg.includes('0502') || lowerMsg.includes('$0502')) {
+        return {
+          reply: HARDCODED_0502_RESPONSE,
+        };
+      }
+
       const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
         { role: "system", content: STRAT_SYSTEM_PROMPT },
       ];
@@ -1576,6 +1624,11 @@ export const stratRouter = router({
         resolved: z.boolean().optional(),
         messageCount: z.number().optional(),
         conversationSummary: z.string().optional(),
+        chatLog: z.array(z.object({
+          role: z.enum(["user", "assistant"]),
+          content: z.string(),
+        })).optional(),
+        sessionDuration: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -1589,11 +1642,86 @@ export const stratRouter = router({
           resolved: input.resolved ?? null,
           messageCount: input.messageCount ?? null,
           conversationSummary: input.conversationSummary ?? null,
+          chatLog: input.chatLog ?? null,
+          sessionDuration: input.sessionDuration ?? null,
         });
+
+        // Notify owner of new Strat feedback
+        try {
+          const { notifyOwner } = await import("../_core/notification");
+          const stars = "★".repeat(input.rating) + "☆".repeat(5 - input.rating);
+          const msgCount = input.messageCount ?? 0;
+          await notifyOwner({
+            title: `Strat Feedback: ${stars} (${input.rating}/5)`,
+            content: [
+              input.comment ? `Comment: ${input.comment}` : null,
+              `Messages: ${msgCount}`,
+              input.resolved !== undefined ? `Resolved: ${input.resolved ? "Yes" : "No"}` : null,
+              input.productCategory ? `Product: ${input.productCategory}` : null,
+            ].filter(Boolean).join("\n"),
+          });
+        } catch (_notifyErr) {
+          // Non-critical — don't fail feedback submission if notification fails
+        }
+
         return { success: true };
       } catch (err: any) {
         console.error("[Strat] Feedback save error:", err);
         return { success: false, error: err.message };
+      }
+    }),
+
+  /** Get all feedback — admin only */
+  getFeedback: protectedProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).optional(),
+      offset: z.number().min(0).optional(),
+    }).optional())
+    .query(async ({ ctx }) => {
+      // Only owner/admin can view feedback
+      if (ctx.user?.role !== "admin" && ctx.user?.role !== "super_admin") {
+        return { feedback: [], total: 0 };
+      }
+      try {
+        const db = await getDb();
+        const { desc, count, eq, sql } = await import("drizzle-orm");
+        const limit = 50;
+        const offset = 0;
+
+        const rows = await db
+          .select()
+          .from(stratFeedback)
+          .orderBy(desc(stratFeedback.createdAt))
+          .limit(limit)
+          .offset(offset);
+
+        const [{ total }] = await db
+          .select({ total: count() })
+          .from(stratFeedback);
+
+        // Join user names
+        const { users } = await import("../../drizzle/schema");
+        const userIds = [...new Set(rows.filter(r => r.userId).map(r => r.userId!))];
+        let userMap: Record<number, string> = {};
+        if (userIds.length > 0) {
+          const userRows = await db
+            .select({ id: users.id, name: users.name })
+            .from(users);
+          for (const u of userRows) {
+            userMap[u.id] = u.name || "Unknown";
+          }
+        }
+
+        return {
+          feedback: rows.map(r => ({
+            ...r,
+            userName: r.userId ? (userMap[r.userId] || "Unknown") : "Anonymous",
+          })),
+          total,
+        };
+      } catch (err: any) {
+        console.error("[Strat] getFeedback error:", err);
+        return { feedback: [], total: 0 };
       }
     }),
 });

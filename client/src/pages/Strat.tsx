@@ -259,6 +259,7 @@ function useStratChat() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackDismissed, setFeedbackDismissed] = useState(false);
   const feedbackShownRef = useRef(false);
+  const sessionStartRef = useRef(Date.now());
 
   const chatMut = trpc.strat.chat.useMutation({
     onSuccess: (data) => {
@@ -301,12 +302,22 @@ function useStratChat() {
     const userMsgs = messages.filter(m => m.role === 'user').map(m => m.content);
     const summary = userMsgs.slice(0, 5).join(' | ').substring(0, 500);
 
+    // Build full chat log for admin review
+    const chatLog = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+    // Calculate session duration in seconds
+    const sessionDuration = Math.round((Date.now() - sessionStartRef.current) / 1000);
+
     feedbackMut.mutate({
       rating: data.rating,
       comment: data.comment || undefined,
       resolved: data.resolved,
       messageCount: userMsgCount,
       conversationSummary: summary || undefined,
+      chatLog,
+      sessionDuration,
     });
   }, [feedbackMut, messages, userMsgCount]);
 

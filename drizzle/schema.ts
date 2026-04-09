@@ -2096,6 +2096,10 @@ export const stratFeedback = mysqlTable("strat_feedback", {
   messageCount: int("messageCount"),
   /** Summary of the conversation topics (auto-generated) */
   conversationSummary: text("conversationSummary"),
+  /** Full chat log — JSON array of {role, content} messages */
+  chatLog: json("chatLog"),
+  /** Session duration in seconds */
+  sessionDuration: int("sessionDuration"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
