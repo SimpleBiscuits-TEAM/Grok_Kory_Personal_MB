@@ -1222,3 +1222,9 @@
 ## GOD MODE Admin Banner
 - [x] Add "GOD MODE" banner at top of screen when user is signed in as admin role
 - [x] Make it visually distinct so admin knows they see a different view than public
+
+## Strat: Never Assume Tuning Device
+- [x] Add Knox KB rule: when customer asks how to load/flash a tune without specifying device + vehicle, Strat must ask both before giving instructions
+- [x] Supported devices: EFI Live, EZ Lynk, HP Tuners, DynoJet, V-OP (soon)
+- [x] Keep install steps concise and easy to follow once device + vehicle are known
+- [x] Never default to any single device (e.g., don't assume AutoCal/EFI Live)
