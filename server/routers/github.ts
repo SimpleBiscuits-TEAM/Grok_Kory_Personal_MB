@@ -17,6 +17,7 @@ import { publicProcedure, router } from "../_core/trpc";
 
 const GITHUB_OWNER = "simplebiscuits";
 const GITHUB_REPO = "Good-Gravy-2";
+const DEFAULT_BRANCH = "grok"; // Active development branch
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_PER_PAGE = 100; // GitHub API max per page
 const MAX_COMMITS = 200; // Our upper limit
@@ -37,14 +38,17 @@ let cacheTimestamp = 0;
 let resolvedToken: string | null = null;
 
 /**
- * Resolve a working GitHub token. Tries the env var first, then falls back
- * to the `gh` CLI which may have a fresher token in dev sandboxes.
+ * Resolve a working GitHub token.
+ * Priority: GH_TOKEN (sandbox/platform) > GITHUB_API_TOKEN (user-set) > gh CLI fallback
+ * IMPORTANT: GH_TOKEN is the primary working token. GITHUB_API_TOKEN has historically
+ * been unreliable (truncated/expired). Always try GH_TOKEN first.
  */
 async function getGitHubToken(): Promise<string> {
   if (resolvedToken) return resolvedToken;
 
-  const envToken = process.env.GITHUB_API_TOKEN ?? "";
-  if (envToken) {
+  // 1. Try GH_TOKEN first — this is the platform-injected token that gh CLI uses
+  const ghEnvToken = process.env.GH_TOKEN ?? "";
+  if (ghEnvToken && ghEnvToken.length > 10) {
     try {
       const res = await fetch(
         `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`,
@@ -52,31 +56,57 @@ async function getGitHubToken(): Promise<string> {
           headers: {
             Accept: "application/vnd.github.v3+json",
             "User-Agent": "VOP-Platform",
-            Authorization: `token ${envToken}`,
+            Authorization: `token ${ghEnvToken}`,
           },
         }
       );
       if (res.ok) {
-        resolvedToken = envToken;
-        console.log("[GitHub] Using GITHUB_API_TOKEN from environment");
-        return envToken;
+        resolvedToken = ghEnvToken;
+        console.log("[GitHub] Using GH_TOKEN from environment");
+        return ghEnvToken;
       }
-      console.warn(`[GitHub] GITHUB_API_TOKEN returned ${res.status} — trying gh CLI fallback`);
+      console.warn(`[GitHub] GH_TOKEN returned ${res.status}`);
     } catch {
-      console.warn("[GitHub] GITHUB_API_TOKEN validation failed — trying gh CLI fallback");
+      console.warn("[GitHub] GH_TOKEN validation failed");
     }
   }
 
+  // 2. Try GITHUB_API_TOKEN (user-configured secret)
+  const apiToken = process.env.GITHUB_API_TOKEN ?? "";
+  if (apiToken && apiToken.length > 10) {
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`,
+        {
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "VOP-Platform",
+            Authorization: `token ${apiToken}`,
+          },
+        }
+      );
+      if (res.ok) {
+        resolvedToken = apiToken;
+        console.log("[GitHub] Using GITHUB_API_TOKEN from environment");
+        return apiToken;
+      }
+      console.warn(`[GitHub] GITHUB_API_TOKEN returned ${res.status}`);
+    } catch {
+      console.warn("[GitHub] GITHUB_API_TOKEN validation failed");
+    }
+  }
+
+  // 3. Fallback to gh CLI (sandbox only)
   try {
-    const ghToken = execSync("gh auth token", {
+    const cliToken = execSync("gh auth token", {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
     }).trim();
-    if (ghToken) {
-      resolvedToken = ghToken;
+    if (cliToken && cliToken.length > 10) {
+      resolvedToken = cliToken;
       console.log("[GitHub] Using token from gh CLI");
-      return ghToken;
+      return cliToken;
     }
   } catch {
     // gh CLI not available or not authenticated
@@ -127,7 +157,7 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
   try {
     for (let page = 1; page <= pages; page++) {
       const perPage = Math.min(MAX_PER_PAGE, capped - allCommits.length);
-      const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?per_page=${perPage}&page=${page}`;
+      const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?sha=${DEFAULT_BRANCH}&per_page=${perPage}&page=${page}`;
       const res = await fetch(url, { headers });
 
       if (!res.ok) {

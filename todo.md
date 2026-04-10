@@ -1261,3 +1261,10 @@
 
 ## Restore Notifications Tab
 - [x] Move notifications tab back to top-level navigation (added as top-level tab in VOP PRO tab bar)
+
+## Bug: GIT-MAP Not Showing Commits
+- [x] Fix GIT-MAP page not displaying commits — shows "No Commits Found" despite commits existing on grok branch
+- [x] Root cause: GitHub router used GITHUB_API_TOKEN (10 chars, broken/expired) — GH_TOKEN (40 chars) is the working platform token
+- [x] Updated getGitHubToken() priority: GH_TOKEN > GITHUB_API_TOKEN > gh CLI fallback
+- [x] Added length check (>10 chars) to skip obviously truncated/invalid tokens
+- [x] Updated vitest tests to use GH_TOKEN || GITHUB_API_TOKEN — both tests pass
