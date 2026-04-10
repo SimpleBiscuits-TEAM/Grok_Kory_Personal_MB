@@ -400,14 +400,38 @@ export class PCANFlashEngine {
   // ── TesterPresent Keepalive ──────────────────────────────────────────────
 
   /**
+   * Send one TesterPresent frame (GMLAN UUDT on 0x101 or UDS 0x3E 0x80 on physical).
+   * Used by {@link startKeepalive} and the interval; respects {@link keepalivePaused}.
+   */
+  private sendOneKeepaliveFrame(): void {
+    if (!this.keepaliveActive || this.aborted) return;
+    if (this.keepalivePaused) return;
+    const isGmlan = this.isGMLAN;
+    try {
+      if (this.conn.isFlashTransportOpen()) {
+        const frame = isGmlan
+          ? [0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00]  // GMLAN UUDT format
+          : [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00]; // UDS standard
+        const arbId = isGmlan ? 0x101 : this.txAddr;
+        void this.conn.sendRawCanFrame(arbId, frame);
+      }
+    } catch {
+      // Keepalive failure is non-fatal — the next real command will detect connection issues
+    }
+  }
+
+  /**
    * Start sending TesterPresent keepalive.
-   * 
+   *
    * GMLAN: Uses UUDT format (FE 01 3E) on functional address 0x101 every 500ms.
    *   - FE = UUDT (Unsolicited Unacknowledged Diagnostic Transfer) message type
    *   - 01 = single byte payload length
    *   - 3E = TesterPresent service
    *   - ECU does NOT respond to UUDT messages (fire-and-forget)
    *   - Proven from BUSMASTER logs: 427 frames at ~500ms interval throughout flash
+   *
+   * Sends the first TesterPresent immediately; `setInterval` alone would delay the first GMLAN
+   * UUDT by 500ms (BUSMASTER shows TP active as soon as the cyclic begins).
    *
    * UDS: Uses standard 0x3E 0x80 on physical address every 2s.
    *   - 0x80 = suppressPositiveResponse sub-function
@@ -421,28 +445,15 @@ export class PCANFlashEngine {
     const formatDesc = isGmlan ? 'UUDT FE 01 3E on 0x101 every 500ms' : '0x3E 0x80 every 2s';
     this.log('info', this.state.currentPhase, `💓 TesterPresent keepalive started (${formatDesc})`);
 
+    this.sendOneKeepaliveFrame();
+
     this.keepaliveTimer = setInterval(() => {
       if (!this.keepaliveActive || this.aborted) {
         this.stopKeepalive();
         return;
       }
-      // Skip sending if paused (during active UDS request/response).
       if (this.keepalivePaused) return;
-
-      // Fire-and-forget: send TesterPresent.
-      // GMLAN: UUDT on 0x101 (functional broadcast, no response expected)
-      // UDS: 0x3E 0x80 on physical address (suppressPositiveResponse)
-      try {
-        if (this.conn.isFlashTransportOpen()) {
-          const frame = isGmlan
-            ? [0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00]  // GMLAN UUDT format
-            : [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00]; // UDS standard
-          const arbId = isGmlan ? 0x101 : this.txAddr;  // GMLAN: functional broadcast
-          void this.conn.sendRawCanFrame(arbId, frame);
-        }
-      } catch {
-        // Keepalive failure is non-fatal — the next real command will detect connection issues
-      }
+      this.sendOneKeepaliveFrame();
     }, intervalMs);
   }
 
