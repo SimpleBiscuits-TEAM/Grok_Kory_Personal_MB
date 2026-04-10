@@ -2,22 +2,28 @@
  * DieselInjectorFlowConverter — Upload-driven workflow for converting stock OEM
  * injector duration tables to work with aftermarket injectors.
  *
- * Flow: Select Engine → Upload Flow Sheet (or manual entry) → Review → Export
- * Currently supports: Duramax > LB7
+ * Two-step math:
+ *   Step 1: OEM-match — interpolate flow sheet to produce stock mm³ at every cell
+ *   Step 2: Target fueling — add duration in lower-right corner to hit target mm³
+ *
+ * Supports all 7 Duramax engines: LB7, LLY, LBZ, LMM, LML, L5P, L5P E42
  */
 
 import React, { useMemo, useState, useCallback, useRef } from 'react';
 import {
-  LB7_PRESSURE_AXIS_MPA,
-  LB7_QUANTITY_AXIS_MM3,
-  LB7_STOCK_DURATION_TABLE,
-} from '@/lib/lb7InjectorData';
+  ALL_ENGINES,
+  type EngineConfig,
+  type PressureUnit,
+  getPressureAxisInUnit,
+  getPressureAxisMpa,
+} from '@/lib/duramaxInjectorData';
 import {
   generateCorrectedTable,
   formatTableForExport,
   formatTableAsCSV,
   type FlowTestPoint,
   type CorrectionPoint,
+  type CorrectedTableResult,
 } from '@/lib/injectorFlowConverter';
 import { trpc } from '@/lib/trpc';
 import {
@@ -33,13 +39,12 @@ import {
   Table2,
   BarChart3,
   Upload,
-  Camera,
-  Pencil,
   Loader2,
   AlertCircle,
   Trash2,
   Plus,
   RotateCcw,
+  Target,
 } from 'lucide-react';
 
 // ── Shared style tokens (match Advanced.tsx) ────────────────────────────────
@@ -117,13 +122,16 @@ function fileToBase64(file: File): Promise<string> {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // Strip data:image/...;base64, prefix
       const base64 = result.includes(',') ? result.split(',')[1] : result;
       resolve(base64);
     };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function formatPressureLabel(unit: PressureUnit): string {
+  return unit;
 }
 
 // ── Collapsible Section ─────────────────────────────────────────────────────
@@ -169,14 +177,20 @@ function Section({
 function DurationTable({
   table,
   stockTable,
+  engine,
+  displayUnit,
   label,
   showDelta = false,
 }: {
   table: number[][];
   stockTable?: number[][];
+  engine: EngineConfig;
+  displayUnit: PressureUnit;
   label: string;
   showDelta?: boolean;
 }) {
+  const pressureAxis = getPressureAxisInUnit(engine, displayUnit);
+
   const cellStyle: React.CSSProperties = {
     padding: '3px 5px',
     fontFamily: sFont.mono,
@@ -223,23 +237,25 @@ function DurationTable({
             <th style={{ ...headerStyle, position: 'sticky', left: 0, zIndex: 3, background: sColor.bgDark }}>
               <span style={{ fontSize: '0.6rem', color: sColor.textMuted }}>{label}</span>
             </th>
-            {LB7_PRESSURE_AXIS_MPA.map((mpa) => (
-              <th key={mpa} style={headerStyle}>{mpa}</th>
+            {pressureAxis.map((p, i) => (
+              <th key={i} style={headerStyle}>
+                {displayUnit === 'kPa' ? p.toFixed(0) : displayUnit === 'PSI' ? p.toFixed(0) : p % 1 === 0 ? p.toFixed(0) : p.toFixed(1)}
+              </th>
             ))}
           </tr>
           <tr>
             <th style={{ ...headerStyle, position: 'sticky', left: 0, zIndex: 3, background: sColor.bgDark, fontSize: '0.55rem', color: sColor.textMuted }}>
-              mm³\MPa
+              mm³\{displayUnit}
             </th>
-            {LB7_PRESSURE_AXIS_MPA.map((mpa) => (
-              <th key={`u-${mpa}`} style={{ ...headerStyle, fontSize: '0.55rem', color: sColor.textMuted }}>MPa</th>
+            {pressureAxis.map((_, i) => (
+              <th key={`u-${i}`} style={{ ...headerStyle, fontSize: '0.55rem', color: sColor.textMuted }}>{displayUnit}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {table.map((row, r) => (
             <tr key={r}>
-              <td style={rowHeaderStyle}>{LB7_QUANTITY_AXIS_MM3[r]}</td>
+              <td style={rowHeaderStyle}>{engine.quantityAxis[r]}</td>
               {row.map((val, c) => {
                 const bg = showDelta && stockTable
                   ? getDeltaColor(stockTable[r][c], val)
@@ -348,9 +364,13 @@ function ManualTestPointRow({
 export default function DieselInjectorFlowConverter() {
   // ── State ──
   const [step, setStep] = useState<Step>('select-engine');
-  const [engine, setEngine] = useState('');
-  const [variant, setVariant] = useState('');
+  const [selectedEngine, setSelectedEngine] = useState<EngineConfig | null>(null);
+  const [displayUnit, setDisplayUnit] = useState<PressureUnit>('PSI');
   const [entryMode, setEntryMode] = useState<'upload' | 'manual'>('upload');
+
+  // Target fueling
+  const [targetMaxMm3, setTargetMaxMm3] = useState<string>('');
+  const [useTargetFueling, setUseTargetFueling] = useState(false);
 
   // Upload state
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -370,7 +390,7 @@ export default function DieselInjectorFlowConverter() {
 
   // Results state
   const [copied, setCopied] = useState(false);
-  const [activeView, setActiveView] = useState<'corrected' | 'stock' | 'delta'>('corrected');
+  const [activeView, setActiveView] = useState<'corrected' | 'oemMatched' | 'stock' | 'delta'>('corrected');
 
   // ── tRPC mutation ──
   const ocrMutation = trpc.injectorOcr.extractFlowSheet.useMutation();
@@ -380,19 +400,25 @@ export default function DieselInjectorFlowConverter() {
     (tp) => tp.pressureMPa > 0 && tp.durationUs > 0 && tp.avgFlowMm3 > 0
   );
 
-  const result = useMemo(() => {
-    if (step !== 'results' || validTestPoints.length < 2) return null;
+  const result = useMemo<CorrectedTableResult | null>(() => {
+    if (step !== 'results' || validTestPoints.length < 2 || !selectedEngine) return null;
     try {
-      return generateCorrectedTable(validTestPoints);
+      const target = useTargetFueling && targetMaxMm3 ? parseFloat(targetMaxMm3) : undefined;
+      return generateCorrectedTable(validTestPoints, selectedEngine, target);
     } catch {
       return null;
     }
-  }, [step, validTestPoints]);
+  }, [step, validTestPoints, selectedEngine, useTargetFueling, targetMaxMm3]);
 
   // ── Handlers ──
-  const handleEngineSelect = useCallback((eng: string, vari: string) => {
-    setEngine(eng);
-    setVariant(vari);
+  const handleEngineSelect = useCallback((engine: EngineConfig) => {
+    setSelectedEngine(engine);
+    // Set sensible default display unit
+    if (engine.nativePressureUnit === 'kPa') {
+      setDisplayUnit('MPa'); // kPa is unwieldy for display, show MPa
+    } else {
+      setDisplayUnit('PSI'); // Imperial default for PSI/MPa native engines
+    }
     setStep('upload');
   }, []);
 
@@ -426,7 +452,6 @@ export default function DieselInjectorFlowConverter() {
         setExtractedData(data);
         setInjectorLabel(`${data.brand} ${data.injectorModel}`);
 
-        // Convert extracted test points to FlowTestPoint format
         const points: FlowTestPoint[] = data.testPoints.map((tp) => ({
           pressureMPa: tp.pressureMPa,
           durationUs: tp.durationMicroseconds,
@@ -452,30 +477,29 @@ export default function DieselInjectorFlowConverter() {
   }, [validTestPoints]);
 
   const handleCopyTSV = useCallback(() => {
-    if (!result) return;
-    const tsv = formatTableForExport(result.table);
+    if (!result || !selectedEngine) return;
+    const tsv = formatTableForExport(result.table, selectedEngine);
     navigator.clipboard.writeText(tsv).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [result]);
+  }, [result, selectedEngine]);
 
   const handleDownloadCSV = useCallback(() => {
-    if (!result) return;
-    const csv = formatTableAsCSV(result.table);
+    if (!result || !selectedEngine) return;
+    const csv = formatTableAsCSV(result.table, selectedEngine);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${variant}_${injectorLabel.replace(/\s+/g, '_')}_corrected_duration.csv`;
+    a.download = `${selectedEngine.name}_${injectorLabel.replace(/\s+/g, '_')}_corrected_duration.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [result, variant, injectorLabel]);
+  }, [result, selectedEngine, injectorLabel]);
 
   const handleStartOver = useCallback(() => {
     setStep('select-engine');
-    setEngine('');
-    setVariant('');
+    setSelectedEngine(null);
     setImageFile(null);
     setImagePreview(null);
     setOcrError(null);
@@ -489,6 +513,8 @@ export default function DieselInjectorFlowConverter() {
     setInjectorLabel('');
     setCopied(false);
     setActiveView('corrected');
+    setTargetMaxMm3('');
+    setUseTargetFueling(false);
   }, []);
 
   const addTestPoint = useCallback(() => {
@@ -510,6 +536,20 @@ export default function DieselInjectorFlowConverter() {
     { id: 'review', label: '3. REVIEW DATA' },
     { id: 'results', label: '4. RESULTS' },
   ];
+
+  // ── Injector system info per engine ──
+  const getInjectorSystemInfo = (eng: EngineConfig) => {
+    const info: Record<string, { system: string; brand: string; type: string }> = {
+      lb7: { system: 'Bosch CP3 + Bosch CRIN', brand: 'Bosch', type: 'Solenoid' },
+      lly: { system: 'Bosch CP3 + Bosch CRIN', brand: 'Bosch', type: 'Solenoid' },
+      lbz: { system: 'Bosch CP3 + Bosch CRIN', brand: 'Bosch', type: 'Solenoid' },
+      lmm: { system: 'Bosch CP3 + Bosch CRIN', brand: 'Bosch', type: 'Solenoid' },
+      lml: { system: 'Bosch CP4 + Bosch CRIN', brand: 'Bosch', type: 'Solenoid' },
+      l5p: { system: 'Denso HP5 + Denso G4S', brand: 'Denso', type: 'Piezo' },
+      'l5p-e42': { system: 'Denso HP5 + Denso G4S', brand: 'Denso', type: 'Piezo' },
+    };
+    return info[eng.id] || { system: 'Unknown', brand: 'Unknown', type: 'Unknown' };
+  };
 
   return (
     <div style={{ padding: '1rem', maxWidth: '100%', color: sColor.text }}>
@@ -578,98 +618,86 @@ export default function DieselInjectorFlowConverter() {
             SELECT YOUR ENGINE PLATFORM
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px' }}>
-            {/* Duramax LB7 */}
-            <button
-              onClick={() => handleEngineSelect('Duramax', 'LB7')}
-              style={{
-                padding: '20px', background: sColor.bgCard, border: `1px solid ${sColor.border}`,
-                borderRadius: '6px', cursor: 'pointer', textAlign: 'left',
-                transition: 'border-color 0.2s',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = sColor.red)}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = sColor.border)}
-            >
-              <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: sColor.text }}>
-                DURAMAX
-              </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.green, fontWeight: 700 }}>
-                LB7
-              </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '4px' }}>
-                2001–2004 · 6.6L V8 · {'{'}B0720{'}'} Main Injection Pulse
-              </div>
-            </button>
-
-            {/* Placeholder for future engines */}
-            {['LLY', 'LBZ', 'LMM', 'LML', 'L5P'].map((eng) => (
-              <div
-                key={eng}
-                style={{
-                  padding: '20px', background: sColor.bgDark, border: `1px dashed ${sColor.borderLight}`,
-                  borderRadius: '6px', textAlign: 'left', opacity: 0.4,
-                }}
-              >
-                <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: sColor.textMuted }}>
-                  DURAMAX
-                </div>
-                <div style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.textMuted, fontWeight: 700 }}>
-                  {eng}
-                </div>
-                <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '4px' }}>
-                  Coming soon
-                </div>
-              </div>
-            ))}
+            {ALL_ENGINES.map((eng) => {
+              const sysInfo = getInjectorSystemInfo(eng);
+              return (
+                <button
+                  key={eng.id}
+                  onClick={() => handleEngineSelect(eng)}
+                  style={{
+                    padding: '20px', background: sColor.bgCard, border: `1px solid ${sColor.border}`,
+                    borderRadius: '6px', cursor: 'pointer', textAlign: 'left',
+                    transition: 'border-color 0.2s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = sColor.red)}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = sColor.border)}
+                >
+                  <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.08em', color: sColor.text }}>
+                    DURAMAX
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.green, fontWeight: 700 }}>
+                    {eng.name}
+                  </div>
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '4px' }}>
+                    {eng.years} · 6.6L V8 · {sysInfo.brand} {sysInfo.type}
+                  </div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, marginTop: '2px' }}>
+                    {'{' + eng.tableId + '}'} · {eng.nativePressureUnit} native
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* STEP 2: UPLOAD FLOW SHEET OR MANUAL ENTRY                            */}
+      {/* STEP 2: UPLOAD / MANUAL ENTRY                                        */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {step === 'upload' && (
+      {step === 'upload' && selectedEngine && (
         <div>
           {/* Engine badge */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px',
             background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '4px',
-            marginBottom: '1rem',
+            marginBottom: '1rem', flexWrap: 'wrap',
           }}>
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>{engine}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>DURAMAX</span>
             <ArrowRight style={{ width: 14, height: 14, color: sColor.textMuted }} />
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{variant}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{selectedEngine.name}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim }}>({selectedEngine.years})</span>
+            <span style={{
+              marginLeft: 'auto', fontFamily: sFont.mono, fontSize: '0.7rem',
+              padding: '2px 8px', borderRadius: '2px',
+              background: 'oklch(0.52 0.22 25 / 0.15)', border: '1px solid oklch(0.52 0.22 25 / 0.3)',
+              color: sColor.red,
+            }}>
+              {'{' + selectedEngine.tableId + '}'}
+            </span>
           </div>
 
           {/* Mode toggle */}
           <div style={{ display: 'flex', gap: '4px', marginBottom: '1rem' }}>
-            <button
-              onClick={() => setEntryMode('upload')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                padding: '8px 16px', fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700,
-                border: `1px solid ${entryMode === 'upload' ? sColor.red : sColor.border}`,
-                borderRadius: '3px', cursor: 'pointer',
-                background: entryMode === 'upload' ? 'oklch(0.52 0.22 25 / 0.15)' : 'transparent',
-                color: entryMode === 'upload' ? sColor.red : sColor.textDim,
-              }}
-            >
-              <Camera style={{ width: 16, height: 16 }} />
-              UPLOAD FLOW SHEET
-            </button>
-            <button
-              onClick={() => setEntryMode('manual')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                padding: '8px 16px', fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700,
-                border: `1px solid ${entryMode === 'manual' ? sColor.blue : sColor.border}`,
-                borderRadius: '3px', cursor: 'pointer',
-                background: entryMode === 'manual' ? 'oklch(0.70 0.18 200 / 0.15)' : 'transparent',
-                color: entryMode === 'manual' ? sColor.blue : sColor.textDim,
-              }}
-            >
-              <Pencil style={{ width: 16, height: 16 }} />
-              MANUAL ENTRY
-            </button>
+            {([
+              { id: 'upload' as const, label: 'UPLOAD FLOW SHEET', icon: <Upload style={{ width: 14, height: 14 }} /> },
+              { id: 'manual' as const, label: 'MANUAL ENTRY', icon: <Table2 style={{ width: 14, height: 14 }} /> },
+            ]).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setEntryMode(m.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '8px 16px', fontFamily: sFont.body, fontSize: '0.8rem', fontWeight: 700,
+                  letterSpacing: '0.05em', border: `1px solid ${entryMode === m.id ? sColor.red : sColor.border}`,
+                  borderRadius: '3px', cursor: 'pointer',
+                  background: entryMode === m.id ? 'oklch(0.52 0.22 25 / 0.15)' : 'transparent',
+                  color: entryMode === m.id ? sColor.red : sColor.textDim,
+                }}
+              >
+                {m.icon}
+                {m.label}
+              </button>
+            ))}
           </div>
 
           {/* Upload mode */}
@@ -685,17 +713,14 @@ export default function DieselInjectorFlowConverter() {
                   if (file) handleFileSelect(file);
                 }}
               />
-
-              {/* Drop zone */}
               <div
+                onClick={() => fileInputRef.current?.click()}
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
-                onClick={() => fileInputRef.current?.click()}
                 style={{
-                  padding: '40px 20px', textAlign: 'center',
+                  padding: '40px 20px', textAlign: 'center', cursor: 'pointer',
                   border: `2px dashed ${imagePreview ? sColor.green : sColor.border}`,
-                  borderRadius: '8px', cursor: 'pointer',
-                  background: imagePreview ? 'oklch(0.65 0.20 145 / 0.05)' : sColor.bgDark,
+                  borderRadius: '6px', background: sColor.bgDark,
                   transition: 'border-color 0.2s',
                 }}
               >
@@ -724,7 +749,6 @@ export default function DieselInjectorFlowConverter() {
                 )}
               </div>
 
-              {/* OCR error */}
               {ocrError && (
                 <div style={{
                   marginTop: '10px', padding: '10px 14px', background: 'oklch(0.52 0.22 25 / 0.1)',
@@ -736,7 +760,6 @@ export default function DieselInjectorFlowConverter() {
                 </div>
               )}
 
-              {/* Extract button */}
               {imageFile && (
                 <button
                   onClick={handleUploadAndExtract}
@@ -850,7 +873,7 @@ export default function DieselInjectorFlowConverter() {
 
               <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, marginTop: '10px' }}>
                 Enter the test points from your injector flow sheet. You need at least 2 test points at different pressures.
-                The standard 4 test points are pre-filled — just enter the average flow (mm³/stroke) for each.
+                All pressures should be entered in MPa (the tool handles unit conversion internally).
               </p>
             </div>
           )}
@@ -860,7 +883,7 @@ export default function DieselInjectorFlowConverter() {
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* STEP 3: REVIEW EXTRACTED DATA                                        */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {step === 'review' && (
+      {step === 'review' && selectedEngine && (
         <div>
           {/* Engine + injector badge */}
           <div style={{
@@ -868,9 +891,9 @@ export default function DieselInjectorFlowConverter() {
             background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '4px',
             marginBottom: '1rem', flexWrap: 'wrap',
           }}>
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>{engine}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>DURAMAX</span>
             <ArrowRight style={{ width: 14, height: 14, color: sColor.textMuted }} />
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{variant}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{selectedEngine.name}</span>
             {injectorLabel && (
               <>
                 <ArrowRight style={{ width: 14, height: 14, color: sColor.textMuted }} />
@@ -931,6 +954,71 @@ export default function DieselInjectorFlowConverter() {
             </table>
           </div>
 
+          {/* Target Fueling Section */}
+          <div style={{
+            padding: '14px', background: 'oklch(0.12 0.008 260)', borderRadius: '4px',
+            border: `1px solid ${sColor.borderLight}`, marginBottom: '1rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <Target style={{ width: 16, height: 16, color: sColor.purple }} />
+              <span style={{ fontFamily: sFont.heading, fontSize: '0.95rem', letterSpacing: '0.08em', color: sColor.text }}>
+                TARGET FUELING (OPTIONAL)
+              </span>
+            </div>
+            <p style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.textDim, margin: '0 0 10px 0', lineHeight: 1.5 }}>
+              By default, the corrected table matches stock OEM fueling with your aftermarket injectors.
+              Enable target fueling to ADD duration in the lower-right corner of the table to hit a higher mm³ target.
+              The upper-left (idle/light load) stays OEM-matched. The addition ramps progressively toward max fueling.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={useTargetFueling}
+                  onChange={(e) => setUseTargetFueling(e.target.checked)}
+                  style={{ accentColor: sColor.purple }}
+                />
+                <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.text, fontWeight: 700 }}>
+                  Enable Target Fueling
+                </span>
+              </label>
+              {useTargetFueling && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <input
+                    type="number"
+                    value={targetMaxMm3}
+                    onChange={(e) => setTargetMaxMm3(e.target.value)}
+                    placeholder={`Stock max: ${selectedEngine.quantityAxis[selectedEngine.quantityAxis.length - 1]}`}
+                    style={{
+                      padding: '6px 10px', fontFamily: sFont.mono, fontSize: '0.85rem',
+                      background: sColor.bgInput, border: `1px solid ${sColor.purple}`,
+                      borderRadius: '3px', color: sColor.text, width: '140px', textAlign: 'center',
+                    }}
+                  />
+                  <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim }}>mm³ max</span>
+                </div>
+              )}
+            </div>
+            {useTargetFueling && targetMaxMm3 && (
+              <div style={{ marginTop: '8px', fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.purple }}>
+                Stock max: {selectedEngine.quantityAxis[selectedEngine.quantityAxis.length - 1]} mm³ →
+                Target: {targetMaxMm3} mm³
+                {parseFloat(targetMaxMm3) > selectedEngine.quantityAxis[selectedEngine.quantityAxis.length - 1]
+                  ? ` (+${(parseFloat(targetMaxMm3) - selectedEngine.quantityAxis[selectedEngine.quantityAxis.length - 1]).toFixed(1)} mm³ added via duration increase)`
+                  : ' (at or below stock — no additions needed)'}
+              </div>
+            )}
+            {useTargetFueling && (
+              <div style={{ marginTop: '6px', padding: '6px 10px', background: 'oklch(0.15 0.01 300 / 0.3)', borderRadius: '3px', border: `1px solid oklch(0.65 0.20 300 / 0.2)` }}>
+                <p style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.textDim, margin: 0, lineHeight: 1.5 }}>
+                  <Info style={{ width: 11, height: 11, display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                  The mm³ axis labels in the ECM may be hardcoded. The tool adjusts <strong style={{ color: sColor.text }}>duration values only</strong> —
+                  the axis labels stay as-is. The aftermarket injector delivers the target mm³ based on the commanded duration, regardless of what the axis says.
+                </p>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={addTestPoint}
@@ -967,7 +1055,7 @@ export default function DieselInjectorFlowConverter() {
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* STEP 4: RESULTS                                                      */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
-      {step === 'results' && result && (
+      {step === 'results' && result && selectedEngine && (
         <div>
           {/* Engine + injector badge */}
           <div style={{
@@ -975,9 +1063,9 @@ export default function DieselInjectorFlowConverter() {
             background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderRadius: '4px',
             marginBottom: '1rem', flexWrap: 'wrap',
           }}>
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>{engine}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.yellow }}>DURAMAX</span>
             <ArrowRight style={{ width: 14, height: 14, color: sColor.textMuted }} />
-            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{variant}</span>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.85rem', fontWeight: 700, color: sColor.green }}>{selectedEngine.name}</span>
             {injectorLabel && (
               <>
                 <ArrowRight style={{ width: 14, height: 14, color: sColor.textMuted }} />
@@ -990,8 +1078,46 @@ export default function DieselInjectorFlowConverter() {
               background: 'oklch(0.52 0.22 25 / 0.15)', border: '1px solid oklch(0.52 0.22 25 / 0.3)',
               color: sColor.red,
             }}>
-              {'{'} B0720 {'}'} MAIN INJECTION PULSE
+              {'{' + selectedEngine.tableId + '}'} {selectedEngine.tableDescription.split('.')[0]}
             </span>
+          </div>
+
+          {/* Target fueling indicator */}
+          {result.targetFueling && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px',
+              background: 'oklch(0.15 0.01 300 / 0.3)', border: `1px solid oklch(0.65 0.20 300 / 0.3)`,
+              borderRadius: '4px', marginBottom: '1rem',
+            }}>
+              <Target style={{ width: 16, height: 16, color: sColor.purple }} />
+              <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.purple, fontWeight: 700 }}>
+                TARGET FUELING ACTIVE
+              </span>
+              <span style={{ fontFamily: sFont.mono, fontSize: '0.75rem', color: sColor.text }}>
+                Stock {result.targetFueling.stockMaxMm3} mm³ → Target {result.targetFueling.targetMaxMm3} mm³
+                (+{(result.targetFueling.targetMaxMm3 - result.targetFueling.stockMaxMm3).toFixed(1)} mm³ via duration addition)
+              </span>
+            </div>
+          )}
+
+          {/* Display unit toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1rem' }}>
+            <span style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim }}>Display pressure as:</span>
+            {(['PSI', 'MPa', 'kPa'] as PressureUnit[]).map((unit) => (
+              <button
+                key={unit}
+                onClick={() => setDisplayUnit(unit)}
+                style={{
+                  padding: '4px 12px', fontFamily: sFont.mono, fontSize: '0.75rem', fontWeight: 700,
+                  border: `1px solid ${displayUnit === unit ? sColor.yellow : sColor.border}`,
+                  borderRadius: '3px', cursor: 'pointer',
+                  background: displayUnit === unit ? 'oklch(0.75 0.18 60 / 0.15)' : 'transparent',
+                  color: displayUnit === unit ? sColor.yellow : sColor.textMuted,
+                }}
+              >
+                {unit}
+              </button>
+            ))}
           </div>
 
           {/* Correction Points Summary */}
@@ -1048,7 +1174,7 @@ export default function DieselInjectorFlowConverter() {
             <div style={{ marginTop: '8px', padding: '8px 12px', background: 'oklch(0.15 0.008 260)', borderRadius: '4px', border: `1px solid ${sColor.borderLight}` }}>
               <p style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.textDim, margin: 0, lineHeight: 1.6 }}>
                 <Info style={{ width: 12, height: 12, display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-                <strong style={{ color: sColor.text }}>How it works:</strong> The correction factor adjusts the pulse width so the ECM delivers the same fuel quantity as the stock calibration expects.
+                <strong style={{ color: sColor.text }}>Step 1 — OEM Match:</strong> The correction factor adjusts pulse width so the aftermarket injector delivers the same mm³ as the stock calibration expects.
                 Factor {'>'} 1.0 = longer pulse (aftermarket flows less). Factor {'<'} 1.0 = shorter pulse (aftermarket flows more).
               </p>
             </div>
@@ -1062,30 +1188,31 @@ export default function DieselInjectorFlowConverter() {
           >
             <div style={{ overflowX: 'auto' }}>
               <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '120px', padding: '0 4px' }}>
-                {result.correctionCurve.map((pt) => {
+                {result.correctionCurve.map((pt, idx) => {
                   if (pt.pressureMPa === 0) return null;
-                  const maxFactor = Math.max(...result.correctionCurve.filter(p => p.pressureMPa > 0).map(p => p.factor));
-                  const minFactor = Math.min(...result.correctionCurve.filter(p => p.pressureMPa > 0).map(p => p.factor));
+                  const validPts = result.correctionCurve.filter(p => p.pressureMPa > 0);
+                  const maxFactor = Math.max(...validPts.map(p => p.factor));
+                  const minFactor = Math.min(...validPts.map(p => p.factor));
                   const range = maxFactor - minFactor || 1;
                   const height = ((pt.factor - minFactor) / range) * 90 + 10;
                   const barColor = pt.factor > 1.0
-                    ? `oklch(0.52 0.22 25 / ${0.3 + (pt.factor - 1) * 2})`
-                    : `oklch(0.65 0.20 145 / ${0.3 + (1 - pt.factor) * 3})`;
+                    ? `oklch(0.52 0.22 25 / ${Math.min(0.8, 0.3 + (pt.factor - 1) * 2)})`
+                    : `oklch(0.65 0.20 145 / ${Math.min(0.8, 0.3 + (1 - pt.factor) * 3)})`;
                   return (
                     <div
-                      key={pt.pressureMPa}
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: '30px' }}
+                      key={idx}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: '20px' }}
                       title={`${pt.pressureMPa} MPa → ${pt.factor.toFixed(3)}x`}
                     >
-                      <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim, marginBottom: '2px' }}>
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textDim, marginBottom: '2px' }}>
                         {pt.factor.toFixed(2)}
                       </span>
                       <div style={{
-                        width: '100%', maxWidth: '28px', height: `${height}%`,
+                        width: '100%', maxWidth: '24px', height: `${height}%`,
                         background: barColor, borderRadius: '2px 2px 0 0',
                         border: `1px solid ${pt.factor > 1 ? 'oklch(0.52 0.22 25 / 0.4)' : 'oklch(0.65 0.20 145 / 0.4)'}`,
                       }} />
-                      <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, marginTop: '2px' }}>
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.textMuted, marginTop: '2px' }}>
                         {pt.pressureMPa}
                       </span>
                     </div>
@@ -1104,10 +1231,11 @@ export default function DieselInjectorFlowConverter() {
             icon={<Table2 style={{ width: 16, height: 16, color: sColor.green }} />}
             defaultOpen={true}
           >
-            <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', gap: '4px', marginBottom: '10px', flexWrap: 'wrap' }}>
               {([
-                { id: 'corrected' as const, label: `CORRECTED (${injectorLabel || 'AFTERMARKET'})`, color: sColor.green },
-                { id: 'stock' as const, label: 'STOCK OEM', color: sColor.textMuted },
+                { id: 'corrected' as const, label: result.targetFueling ? `FINAL (TARGET ${result.targetFueling.targetMaxMm3}mm³)` : `CORRECTED (${injectorLabel || 'AFTERMARKET'})`, color: sColor.green },
+                ...(result.targetFueling ? [{ id: 'oemMatched' as const, label: 'OEM-MATCHED', color: sColor.blue }] : []),
+                { id: 'stock' as const, label: `STOCK OEM ${selectedEngine.name}`, color: sColor.textMuted },
                 { id: 'delta' as const, label: 'DELTA VIEW', color: sColor.yellow },
               ]).map((tab) => (
                 <button
@@ -1127,10 +1255,32 @@ export default function DieselInjectorFlowConverter() {
             </div>
 
             {activeView === 'corrected' && (
-              <DurationTable table={result.table} stockTable={LB7_STOCK_DURATION_TABLE} label={`${injectorLabel || 'Corrected'} (µs)`} showDelta />
+              <DurationTable
+                table={result.table}
+                stockTable={selectedEngine.durationTable}
+                engine={selectedEngine}
+                displayUnit={displayUnit}
+                label={`${injectorLabel || 'Corrected'} (µs)`}
+                showDelta
+              />
+            )}
+            {activeView === 'oemMatched' && result.oemMatchedTable && (
+              <DurationTable
+                table={result.oemMatchedTable}
+                stockTable={selectedEngine.durationTable}
+                engine={selectedEngine}
+                displayUnit={displayUnit}
+                label="OEM-Matched (µs)"
+                showDelta
+              />
             )}
             {activeView === 'stock' && (
-              <DurationTable table={LB7_STOCK_DURATION_TABLE} label="Stock OEM LB7 (µs)" />
+              <DurationTable
+                table={selectedEngine.durationTable}
+                engine={selectedEngine}
+                displayUnit={displayUnit}
+                label={`Stock OEM ${selectedEngine.name} (µs)`}
+              />
             )}
             {activeView === 'delta' && (
               <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '500px', border: `1px solid ${sColor.border}`, borderRadius: '4px' }}>
@@ -1145,14 +1295,14 @@ export default function DieselInjectorFlowConverter() {
                       }}>
                         Δ µs
                       </th>
-                      {LB7_PRESSURE_AXIS_MPA.map((mpa) => (
-                        <th key={mpa} style={{
+                      {getPressureAxisInUnit(selectedEngine, displayUnit).map((p, i) => (
+                        <th key={i} style={{
                           padding: '3px 5px', fontFamily: sFont.body, fontSize: '0.7rem', fontWeight: 700,
                           textAlign: 'center', background: sColor.bgCard, color: sColor.yellow,
                           borderRight: `1px solid ${sColor.borderLight}`, borderBottom: `1px solid ${sColor.borderLight}`,
                           position: 'sticky', top: 0, zIndex: 2,
                         }}>
-                          {mpa}
+                          {displayUnit === 'kPa' ? p.toFixed(0) : displayUnit === 'PSI' ? p.toFixed(0) : p % 1 === 0 ? p.toFixed(0) : p.toFixed(1)}
                         </th>
                       ))}
                     </tr>
@@ -1166,10 +1316,10 @@ export default function DieselInjectorFlowConverter() {
                           borderRight: `1px solid ${sColor.borderLight}`, borderBottom: `1px solid ${sColor.borderLight}`,
                           position: 'sticky', left: 0, zIndex: 1,
                         }}>
-                          {LB7_QUANTITY_AXIS_MM3[r]}
+                          {selectedEngine.quantityAxis[r]}
                         </td>
                         {row.map((val, c) => {
-                          const stock = LB7_STOCK_DURATION_TABLE[r][c];
+                          const stock = selectedEngine.durationTable[r][c];
                           const delta = val - stock;
                           const bg = getDeltaColor(stock, val);
                           return (
@@ -1243,7 +1393,8 @@ export default function DieselInjectorFlowConverter() {
               <p style={{ fontFamily: sFont.body, fontSize: '0.78rem', color: sColor.textDim, margin: 0, lineHeight: 1.6 }}>
                 <Info style={{ width: 12, height: 12, display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
                 <strong style={{ color: sColor.text }}>Paste into calibration:</strong> Use "Copy Table" for tab-separated format compatible with HP Tuners and EFILive paste operations.
-                Select the entire {'{'}B0720{'}'} Main Injection Pulse table in your calibration software, then paste the copied data to replace all values.
+                Select the entire {'{' + selectedEngine.tableId + '}'} table in your calibration software, then paste the copied data to replace all values.
+                Export uses the engine's native pressure unit ({selectedEngine.nativePressureUnit}) for compatibility.
               </p>
             </div>
           </Section>

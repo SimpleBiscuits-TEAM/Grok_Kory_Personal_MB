@@ -1157,3 +1157,47 @@
 - [x] Ensure language is simple, relaxed, and to the point for customer-facing use
 - [x] Always reference latest BETA version of VCM Suite
 - [x] Primary TDN device is RTD4, secondary is MPVI4
+
+## Move Injector Flow Converter Under EDITOR Tab
+- [x] Move DieselInjectorFlowConverter from standalone INJECTOR FLOW tab into the EDITOR tab in VOP PRO
+- [x] Remove standalone INJECTOR FLOW tab from top-level Advanced navigation
+
+## Move Injector Flow Under EDITOR + Add LLY Support
+- [x] Remove standalone INJECTOR FLOW tab from top-level VOP PRO navigation
+- [x] Extract LLY stock duration table data (PSI-based, {B0720} Main Injection Pulse)
+- [ ] Add LLY as second engine option in DieselInjectorFlowConverter
+- [ ] Support PSI pressure units for LLY (vs MPa for LB7)
+- [ ] Update injectorFlowConverter.ts to handle PSI-based stock tables
+- [ ] Make system unit-aware: pressure (MPa/PSI/bar), fuel quantity (mm³/stroke, mg/stroke), duration (µs/ms)
+- [ ] Normalize units internally for math, output in user's original units
+- [ ] Default display is imperial (PSI) with a "Metric" toggle tab to switch to MPa
+- [x] Extract LBZ stock duration table data (MPa-based, {B0720} Main Injection Pulse, different mm3 breakpoints)
+- [x] Add LBZ as third engine option in DieselInjectorFlowConverter
+- [x] Extract LMM stock duration table data (PSI-based, {B0720} Main Injection Pulse, main pulse only)
+- [x] Add LMM as fourth engine option in DieselInjectorFlowConverter
+- [x] Extract LML stock duration table data (PSI-based, {B0552} Injection Pulses, all pulses, unique breakpoints)
+- [x] Add LML as fifth engine option in DieselInjectorFlowConverter
+
+## L5P Injector Data + Diesel Tab Restructure + Knox KB
+- [x] Extract L5P stock duration table data (kPa-based, {F210001} Injection Time Table, 21 pressure cols, 20 quantity rows)
+- [x] Add L5P as sixth engine option in DieselInjectorFlowConverter
+- [x] Support kPa pressure units for L5P (convert to PSI/MPa for display)
+- [x] Reorganize navigation: create top-level DIESEL tab in VOP PRO with sub-tabs (Duramax first, Ford/Cummins placeholders later)
+- [x] Move Injector Flow Converter under DIESEL > DURAMAX (not under EDITOR)
+- [x] Feed Knox AI the complete injector duration knowledge base (all 7 engines, injection system differences, diagnostic relevance)
+- [ ] Feed diagnostic agents (agentGamma, compare router) injector knowledge for fuel system diagnostics
+- [x] Ensure all 7 engines selectable in DieselInjectorFlowConverter dropdown
+- [x] Default display Imperial (PSI), Metric toggle for MPa/kPa
+- [x] Verify build compiles with only pre-existing TS errors
+- [x] Extract E42 (2024-2026 L5P) stock duration table data (MPa-based, ECM 16856 Main Injector Pulsewidth, 24 pressure cols, 26 quantity rows)
+- [x] Add E42 as seventh engine option in DieselInjectorFlowConverter
+- [x] Refactor injectorFlowConverter.ts to accept any EngineConfig (not LB7-only)
+- [x] Rewrite DieselInjectorFlowConverter.tsx to use duramaxInjectorData.ts for all 7 engines
+- [x] Add Knox diagnostic rule: sustained injection operation in lower-left corner of duration table (low pressure + low quantity = high duration) indicates low rail pressure condition — brief dip is normal, sustained = failing CP3/CP4, FPR, restricted fuel supply, air in lines
+- [x] Implement target-fueling workflow: user specifies desired mm³ at pressure, converter solves for duration using aftermarket flow sheet
+- [x] Handle hardcoded mm³ axis: duration table must deliver actual target mm³ even when axis labels can't change (axis is reference/index only)
+- [x] Build aftermarket injector duration-to-mm³ curve from flow sheet test points at each pressure
+- [x] For each cell, solve inverse: what duration gives desired mm³ at this pressure for the aftermarket injector
+- [x] Fix converter math: Step 1 = OEM-match (interpolate flow sheet to produce stock mm³ at every cell), Step 2 = add duration in lower-right corner to hit target mm³ (progressive ramp, not uniform scale)
+- [x] Update Knox knowledge: L5P unlock/flash corrections — 2017-2023 can unlock+flash in-truck with latest VCM Suite BETA (exception: 2018 E41 ECMs need unlock first), 2024+ E42 must send ECM/TCM in for unlock service before tuning
+- [x] Fix Strat giving wrong L5P TCM unlock info (was saying must send in for all L5P, incorrect)

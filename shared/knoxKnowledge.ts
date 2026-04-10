@@ -1239,4 +1239,80 @@ EFI Live V8 requests ALL PIDs via UDS \$22 (service 0x22), even standard J1979 P
 - **EFI Live active**: 167 unique arb IDs, 132,041 frames
 - **19 IDs only in EFI log**: diagnostic request/response IDs + EFI Live broadcast (0x5E8/0x5EA at ~4000 frames each) + init/config (0x641-0x64F)
 - **All 148 KOER baseline IDs confirmed present** in gmE90SilveradoSniffReference.ts
+
+## Duramax Diesel Injector Duration Tables — Stock Reference & Diagnostic Knowledge
+
+### Overview
+The ECM uses a Main Injection Pulsewidth (duration) table to control fuel delivery. The table maps **fuel rail pressure** (X-axis) vs **fuel quantity in mm³/stroke** (Y-axis) to **injector open time in microseconds (µs)**. This is the primary fueling control table in every Duramax generation.
+
+### All Duramax Generations — Injector System Summary
+| Engine | Years | ECM | Injector Brand | Injector Type | Pump | Table ID | Pressure Unit | Qty Rows | Pressure Cols |
+|--------|-------|-----|----------------|---------------|------|----------|---------------|----------|---------------|
+| LB7 | 2001-2004 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | MPa | 20 | 20 |
+| LLY | 2004.5-2006 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | PSI | 20 | 21 |
+| LBZ | 2006-2007 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | MPa | 20 | 20 |
+| LMM | 2007.5-2010 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | PSI | 20 | 21 |
+| LML | 2011-2016 | Bosch EDC17 | Bosch | Solenoid (CRIN) | CP4.2 | {B0552} | PSI | 20 | 21 |
+| L5P | 2017-2023 | Denso E41 | Denso | Piezo (G4S) | HP5 | {F210001} | kPa | 21 | 21 |
+| L5P E42 | 2024-2026 | Denso E42 (ECM 16856) | Denso | Piezo (G4S) | HP5 | ECM 16856 | MPa | 26 | 24 |
+
+### Key Differences Between Generations
+- **LB7/LBZ**: MPa native pressure axis (0-190 MPa). Bosch CP3 pump. Solenoid injectors.
+- **LLY/LMM**: PSI native pressure axis (0-27557 PSI). Same Bosch CP3 + solenoid architecture.
+- **LML**: PSI native (0-29008 PSI). Switched to CP4.2 pump (single-piston, more failure-prone). Still Bosch solenoid injectors.
+- **L5P (2017-2023)**: kPa native (25000-200000 kPa). Complete system change to Denso: HP5 pump + G4S piezo injectors. Piezo injectors have faster response times and more precise fuel metering than solenoid.
+- **L5P E42 (2024-2026)**: MPa native (12.5-280 MPa). Same Denso system but higher pressure capability (280 MPa = 40,610 PSI). Larger table: 26 quantity rows × 24 pressure columns.
+
+### Diagnostic Use of Duration Tables
+The stock duration tables are the baseline for diagnosing fueling issues:
+
+**LOW RAIL PRESSURE DETECTION (CRITICAL DIAGNOSTIC RULE):**
+If a vehicle's injection duration is consistently operating in the **lower-left corner** of the duration table (low pressure + low quantity = disproportionately high duration values), this indicates a **low rail pressure condition**. The ECM is compensating for insufficient rail pressure by holding the injector open longer to deliver the requested fuel quantity.
+- A **brief dip** into the lower-left corner is normal during cold starts, transient conditions, or momentary load changes.
+- **Sustained operation** in the lower-left corner (more than a few seconds under steady-state conditions) is a diagnostic red flag.
+- **Possible causes**: Weak/failing CP3 or CP4 pump, failing fuel pressure regulator (FPR), restricted fuel supply (clogged filter, kinked line, failing lift pump), air intrusion in fuel lines, failing pressure control valve (PCV), injector leak-back exceeding pump supply capacity.
+- **How to identify in datalogs**: Compare actual injection duration values against the stock table at the current rail pressure and commanded fuel quantity. If actual duration is significantly higher than stock at the same pressure/quantity intersection, the ECM is compensating for low pressure.
+- **CP3 vs CP4 consideration**: CP4.2 pumps (LML) are single-piston and more susceptible to fuel starvation damage. Low rail pressure on an LML should be investigated immediately. CP3 pumps (LB7/LLY/LBZ/LMM) are more robust but can still fail.
+- **L5P HP5 consideration**: The Denso HP5 pump is generally reliable but can be affected by fuel quality issues. Low rail pressure on L5P should check for fuel contamination first.
+
+**AFTERMARKET INJECTOR CALIBRATION:**
+When aftermarket injectors are installed (S&S Diesel, Exergy, Industrial Injection, etc.), the stock duration table must be recalibrated:
+1. **Step 1 — OEM Match**: Using the aftermarket injector's flow sheet (which maps pressure + duration → actual mm³ delivered), compute new duration values so the ECM delivers the SAME mm³ as stock at every cell. This is pure interpolation.
+2. **Step 2 — Target Fueling** (optional): If the customer wants more fuel (e.g., 300 mm³ max instead of stock 100 mm³), additional duration is added progressively in the lower-right corner of the table (high quantity, high pressure). The upper-left (idle/light load) stays OEM-matched.
+3. **mm³ axis labels may be hardcoded in the ECM** — even if the axis says "100 mm³", the duration value can make the aftermarket injector deliver 300 mm³. The axis is just an index; duration controls actual fuel delivery.
+
+The VOP Diesel Injector Flow Converter tool handles this two-step process automatically for all 7 Duramax engines.
+
+## L5P Duramax — Unlock, Read & Flash Compatibility (CORRECTED)
+
+### IMPORTANT: Most L5P trucks can be unlocked and flashed in one quick process
+As long as the **latest VCM Suite BETA version** is used (we ALWAYS use the latest BETA), most L5P Duramax trucks can be unlocked and flashed all in one process without sending any modules in for unlock service.
+
+### Compatibility by Year/Module:
+| Year Range | ECM | TCM | Unlock Method | Notes |
+|------------|-----|-----|---------------|-------|
+| 2017-2019 | E41 (except 2018*) | T87A | In-truck via EZ Lynk, HP Tuners, or EDGE | *2018 E41 ECMs must be unlocked first (exception) |
+| 2020-2023 | E41 | T93 | In-truck via EZ Lynk, HP Tuners, or EDGE | Flash and unlock in one process with latest software |
+| 2024-2026 | E42 | — | **ECM/TCM must be sent in for unlock service** | Once unlocked, module reinstalled, then read/tuned normally |
+
+### Key Rules:
+- **Always use the latest VCM Suite BETA** — this is non-negotiable. Older versions may not support in-truck unlock.
+- **2018 E41 ECMs are the exception** — they still require unlock-first before flashing. All other E41 ECMs (2017, 2019-2023) can be flash+unlocked in-truck.
+- **2024+ (E42)** — these are the only L5P trucks that currently require sending the ECM or TCM in for unlock service prior to tuning. Once the unlock service is complete, the module can be reinstalled and then read/tuned the same as previous year models.
+- **Supported tools for in-truck unlock+flash**: EZ Lynk, HP Tuners, EDGE — all must be on their latest software update.
+- **Reference**: www.hptuners.com for current vehicle compatibility and unlock requirements.
+
+### DO NOT tell customers:
+- ❌ That ALL L5P TCMs need to be sent in for unlock (only 2024+ and 2018 E41 ECMs)
+- ❌ That they need to unlock before flashing (most can do both at once with latest BETA)
+- ❌ That HP Tuners can't flash L5P TCMs without prior unlock (it can, with latest BETA, for 2017-2023 except 2018 E41 ECM)
+
+### Customer Workflow (VCM Suite — for 2017-2023 L5P):
+1. Install latest VCM Suite BETA on Windows laptop
+2. Connect MPVI3/MPVI4/RTD4 via USB to laptop, then OBD-II to vehicle
+3. Go to Flash > Read Vehicle, select ECM or TCM module
+4. The latest BETA handles unlock + read in one process
+5. Save the stock file as backup
+6. Load the PPEI tune file (.hpt), go to Flash > Write Vehicle
+7. Battery must be fully charged or on maintainer during entire process
 `;

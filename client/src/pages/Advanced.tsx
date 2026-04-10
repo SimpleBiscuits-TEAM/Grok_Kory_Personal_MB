@@ -1174,6 +1174,7 @@ const EDITOR_CODE = 'KINGKONG';
 const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
+  const [editorSubTab, setEditorSubTab] = useState<'calibration'>('calibration');
   // DEV BYPASS: skip access code gate for faster development
   const [unlocked, setUnlocked] = useState(true /* was: () => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true' */);
   const [code, setCode] = useState('');
@@ -1211,7 +1212,32 @@ function EditorGate() {
   if (unlocked) {
     return (
       <div className="flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
-        <CalibrationEditor />
+        {/* Editor sub-tab bar */}
+        <div style={{ display: 'flex', gap: '0', borderBottom: `1px solid ${sColor.border}`, background: sColor.bgDark, flexShrink: 0 }}>
+          {[
+            { id: 'calibration' as const, label: 'CALIBRATION EDITOR' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setEditorSubTab(tab.id)}
+              style={{
+                padding: '8px 20px',
+                fontFamily: sFont.heading,
+                fontSize: '0.85rem',
+                letterSpacing: '0.08em',
+                background: editorSubTab === tab.id ? sColor.bgCard : 'transparent',
+                color: editorSubTab === tab.id ? sColor.red : sColor.textDim,
+                border: 'none',
+                borderBottom: editorSubTab === tab.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {editorSubTab === 'calibration' && <CalibrationEditor />}
       </div>
     );
   }
@@ -1310,9 +1336,75 @@ function EditorGate() {
   );
 }
 
+// ─── Diesel Panel (DIESEL > DURAMAX / POWERSTROKE / CUMMINS) ────────────────
+
+function DieselPanel() {
+  const [dieselBrand, setDieselBrand] = useState<'duramax' | 'powerstroke' | 'cummins'>('duramax');
+
+  const brands: { id: 'duramax' | 'powerstroke' | 'cummins'; label: string; years: string; enabled: boolean }[] = [
+    { id: 'duramax', label: 'DURAMAX', years: '2001–2026 · GM/Chevrolet', enabled: true },
+    { id: 'powerstroke', label: 'POWERSTROKE', years: 'Ford · Coming Soon', enabled: false },
+    { id: 'cummins', label: 'CUMMINS', years: 'Ram/Dodge · Coming Soon', enabled: false },
+  ];
+
+  return (
+    <div style={{ padding: '0' }}>
+      {/* Brand sub-tab bar */}
+      <div style={{ display: 'flex', gap: '0', borderBottom: `1px solid ${sColor.border}`, background: sColor.bgDark, flexShrink: 0 }}>
+        {brands.map(brand => (
+          <button
+            key={brand.id}
+            onClick={() => brand.enabled && setDieselBrand(brand.id)}
+            disabled={!brand.enabled}
+            style={{
+              padding: '10px 24px',
+              fontFamily: sFont.heading,
+              fontSize: '0.9rem',
+              letterSpacing: '0.08em',
+              background: dieselBrand === brand.id ? sColor.bgCard : 'transparent',
+              color: !brand.enabled ? sColor.textMuted : dieselBrand === brand.id ? sColor.red : sColor.textDim,
+              border: 'none',
+              borderBottom: dieselBrand === brand.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+              cursor: brand.enabled ? 'pointer' : 'not-allowed',
+              transition: 'all 0.2s',
+              opacity: brand.enabled ? 1 : 0.5,
+            }}
+          >
+            {brand.label}
+            <span style={{ display: 'block', fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textMuted, letterSpacing: '0.02em', marginTop: '1px' }}>
+              {brand.years}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Content area */}
+      {dieselBrand === 'duramax' && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <DieselInjectorFlowConverter />
+        </div>
+      )}
+      {dieselBrand === 'powerstroke' && (
+        <div style={{ padding: '4rem 2rem', textAlign: 'center' }}>
+          <Fuel style={{ width: 48, height: 48, color: sColor.textMuted, margin: '0 auto 1rem' }} />
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.1em', color: sColor.textMuted }}>POWERSTROKE</h2>
+          <p style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.textDim }}>Ford Powerstroke support coming soon</p>
+        </div>
+      )}
+      {dieselBrand === 'cummins' && (
+        <div style={{ padding: '4rem 2rem', textAlign: 'center' }}>
+          <Fuel style={{ width: 48, height: 48, color: sColor.textMuted, margin: '0 auto 1rem' }} />
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.1em', color: sColor.textMuted }}>CUMMINS</h2>
+          <p style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.textDim }}>Ram/Dodge Cummins support coming soon</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger' | 'injector-flow';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger' | 'diesel';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1320,11 +1412,12 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  { id: 'diesel', label: 'DIESEL', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'ppei-flash' as TabId, label: 'PPEI FLASHER', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 280)' }} /> },
   { id: 'ppei-datalogger' as TabId, label: 'PPEI DATALOGGER', icon: <Gauge style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 170)' }} /> },
-  { id: 'injector-flow' as TabId, label: 'INJECTOR FLOW', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.60 0.22 25)' }} /> },
+
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'weather' as TabId, label: 'WEATHER', icon: <CloudSun style={{ width: 16, height: 16, color: 'oklch(0.72 0.16 210)' }} /> },
   { id: 'competition' as TabId, label: 'COMPETITION', icon: <Trophy style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
@@ -1600,11 +1693,16 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             <EditorGate />
           </div>
         )}
+        {activeTab === 'diesel' && (
+          <div className="ppei-anim-fade-up">
+            <DieselPanel />
+          </div>
+        )}
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
         {activeTab === ('ppei-flash' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><PpeiFlashContainerPanel /></div>}
-        {activeTab === ('injector-flow' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', overflow: 'auto' }}><DieselInjectorFlowConverter /></div>}
+
         {activeTab === ('ppei-datalogger' as TabId) && <div className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
