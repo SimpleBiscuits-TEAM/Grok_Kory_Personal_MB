@@ -40,6 +40,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import PpeiHeader from '@/components/PpeiHeader';
 import GitHubCommitHistory from '@/components/GitHubCommitHistory';
 import VehicleCoding from '@/components/VehicleCoding';
+import TireSizeCorrection from '@/components/TireSizeCorrection';
 import DataloggerPanel from '@/components/DataloggerPanel';
 import { Settings } from 'lucide-react';
 
@@ -62,6 +63,7 @@ export default function Home() {
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [showProTeaser, setShowProTeaser] = useState(false);
   const [liteTab, setLiteTab] = useState<'analyze' | 'basic-editor' | 'datalogger'>('analyze');
+  const [editorSubTab, setEditorSubTab] = useState<'vehicle-coding' | 'tire-correction'>('vehicle-coding');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -333,8 +335,35 @@ export default function Home() {
 
         {/* ── BASIC EDITOR Tab ── */}
         {liteTab === 'basic-editor' && (
-          <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}>
-            <VehicleCoding />
+          <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', overflow: 'auto' }}>
+            {/* Editor Sub-tabs */}
+            <div style={{ display: 'flex', gap: '2px', marginBottom: '12px', padding: '2px', background: 'rgba(24,24,27,0.8)', borderRadius: '8px', border: '1px solid rgba(63,63,70,0.3)', width: 'fit-content' }}>
+              {[
+                { id: 'vehicle-coding' as const, label: 'VEHICLE CODING' },
+                { id: 'tire-correction' as const, label: 'TIRE SIZE CORRECTION' },
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  onClick={() => setEditorSubTab(sub.id)}
+                  style={{
+                    padding: '6px 16px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontFamily: "'Share_Tech_Mono', monospace",
+                    letterSpacing: '0.05em',
+                    transition: 'all 0.2s',
+                    background: editorSubTab === sub.id ? '#b91c1c' : 'transparent',
+                    color: editorSubTab === sub.id ? '#fff' : '#71717a',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+            {editorSubTab === 'vehicle-coding' && <VehicleCoding />}
+            {editorSubTab === 'tire-correction' && <TireSizeCorrection />}
           </div>
         )}
 

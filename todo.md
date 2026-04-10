@@ -1228,3 +1228,16 @@
 - [x] Supported devices: EFI Live, EZ Lynk, HP Tuners, DynoJet, V-OP (soon)
 - [x] Keep install steps concise and easy to follow once device + vehicle are known
 - [x] Never default to any single device (e.g., don't assume AutoCal/EFI Live)
+
+## Tire Size Correction Tool (Basic Editor)
+- [x] Build tire size correction calculation engine (manual + auto-correct formulas)
+- [x] Build TireSizeCorrection UI component with Manual and Auto-Correct tabs
+- [x] Manual mode: user enters old/new axle ratio + tire circumference, tool calculates write values (3 options)
+- [x] Auto-Correct mode: user enters ECM speed + GPS speed, tool calculates correction factor and recommended values
+- [x] Auto-Correct saves collected values for later use when binary flashing is wired
+- [x] Show correction factor prominently (e.g., "Your ECM is reading 8% low")
+- [x] 3 decimal places for ratio, 1 for circumference
+- [x] Measurement reminder for loaded tire circumference
+- [x] Warn to re-test after writing (±1-2% normal)
+- [x] Placeholder binary address fields for later wiring (GM = ECM flash)
+- [x] Integrate into Basic Editor (accessible from VOP Lite and VOP PRO)
