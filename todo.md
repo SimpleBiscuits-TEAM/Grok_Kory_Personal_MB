@@ -1258,3 +1258,6 @@
 
 ## Fix: Home Page Support Button
 - [x] Change home page SUPPORT button to open Strat AI support chat instead of redirecting to ppei.com
+
+## Restore Notifications Tab
+- [x] Move notifications tab back to top-level navigation (added as top-level tab in VOP PRO tab bar)

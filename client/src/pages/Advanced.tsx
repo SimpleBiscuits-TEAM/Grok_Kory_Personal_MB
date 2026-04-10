@@ -17,7 +17,7 @@ import {
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
   Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin,
-  CloudSun, Trophy, Cloud
+  CloudSun, Trophy, Cloud, Bell
 } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
@@ -1425,6 +1425,7 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'cloud' as TabId, label: 'CLOUD', icon: <Cloud style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'notifications', label: 'NOTIFICATIONS', icon: <Bell style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.72 0.15 200)' }} /> },
 ];
 
@@ -1702,6 +1703,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
         {activeTab === ('ppei-datalogger' as TabId) && <div className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'notifications' && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
         {activeTab === 'tasks' && <div className="ppei-anim-fade-up"><TasksGate /></div>}
