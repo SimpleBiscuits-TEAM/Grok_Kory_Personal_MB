@@ -1718,6 +1718,261 @@ Always include the BBX configuration steps: save to desktop, double-click to ope
 
 ---
 
+## HP Tuners VCM Suite — Read File & InfoLog Guide
+**Source:** PPEI Official HP Tuners VCM Suite Guide
+
+**IMPORTANT:** Always use the latest BETA version of VCM Suite. Not the stable release — the BETA.
+
+**What the customer needs:**
+- HP Tuners MPVI3 or MPVI4 device
+- Windows laptop with VCM Suite BETA installed
+- USB-C cable (comes with device)
+- Vehicle with fully charged battery (battery charger connected during entire process recommended)
+
+**What they'll produce and send to PPEI:**
+- InfoLog file (.txt)
+- ECM Read file (.hpt)
+- TCM Read file (.hpt)
+
+### Step 1 — Download & Install VCM Suite BETA
+1. Go to https://www.hptuners.com/downloads/
+2. Find "VCM Suite Latest BETA Download" and download the installer
+3. Run the installer, follow prompts
+4. Always open the version labeled BETA — look for "VCM Editor (BETA)" and "VCM Scanner (BETA)" on desktop or Start Menu
+
+### Step 2 — Prep the Vehicle
+- Connect a battery charger to maintain stable voltage during the entire process
+- Close all doors, turn off all accessories (radio, HVAC, headlights, dash cams)
+- Do NOT start the engine at any point
+- Do NOT operate any vehicle functions (door locks, windows, buttons) during reading
+
+### Step 3 — Connect Everything
+1. USB-C cable from laptop to MPVI3/MPVI4
+2. Plug MPVI into vehicle OBD-II port (under dashboard, driver's side)
+3. Turn ignition to ON/RUN (do NOT start engine):
+   - Conventional key: Turn key two clicks forward to ON or RUN
+   - GM push-button: Without pressing brake, hold Start button 8-10 seconds
+   - Dodge/Chrysler/Jeep push-button: Without pressing brake, press Start once (ACC), wait 2 seconds, press again (RUN)
+
+### Step 4 — Generate InfoLog
+1. Open VCM Editor (BETA) or VCM Scanner (BETA)
+2. Click the VCM Suite Info button (blue circle with lowercase "i" in top toolbar)
+3. Inside the Info window, click the blue "i" icon again to poll the software and vehicle (takes 5-20 seconds)
+4. Click the Save icon (floppy disk), save as YourName_InfoLog.txt
+
+### Step 5 — Read ECM (Engine)
+**IMPORTANT:** Close VCM Scanner completely before starting. If scanner is running in background, it blocks VCM Editor.
+1. Open VCM Editor (BETA). Close any open tune files (File > Close)
+2. Click Flash > Read Vehicle
+3. Wait 10-15 seconds for Vehicle Reader to initialize
+4. Click Gather Info — software scans and lists detected controllers
+5. Set dropdowns: ECM = Read, TCM = Do Not Read, others (FSCM) = Do Not Read
+6. Click Read button. Dashboard may flash warning lights, chime, accessories may toggle — this is normal, don't interrupt
+7. Turn off ignition when read is complete
+8. Save: File > Save As > YourName_Stock_ECM.hpt
+
+### Step 6 — Read TCM (Transmission)
+1. Close the ECM file (File > Close)
+2. Turn ignition back to ON/RUN (engine OFF)
+3. Click Flash > Read Vehicle
+4. Wait 10-15 seconds for initialization
+5. Click Gather Info
+6. Set dropdowns: ECM = Do Not Read, TCM = Read, others = Do Not Read
+7. Click Read button
+8. Turn off ignition when complete
+9. Save: File > Save As > YourName_Stock_TCM.hpt
+
+### Step 7 — Send Files to PPEI
+Email all 3 files to your PPEI support thread or support@teamppei.zohodesk.com:
+- YourName_InfoLog.txt
+- YourName_Stock_ECM.hpt
+- YourName_Stock_TCM.hpt
+If you get any error messages, screenshot them and include in the email.
+
+---
+
+## HP Tuners TDN & RTD4 — Customer Setup Guide
+**Source:** PPEI Official TDN RTD4 Customer Guide v2
+
+**Primary device PPEI sells: RTD4.** Secondary option: MPVI4.
+
+**What the customer needs:**
+- HP Tuners RTD4 device (plugs into OBD-II port under dash, driver's side)
+- TDN App (free — Apple App Store or Google Play Store)
+- Smartphone or tablet (iOS or Android with Bluetooth enabled)
+- PPEI Invite Code (changes every week — customer must contact PPEI for the current code)
+
+### Step 1 — Install the TDN App
+- **Android:** https://play.google.com/store/apps/details?id=com.hptuners.tdn
+- **Apple iOS:** https://apps.apple.com/us/app/tune-delivery-network-tdn/id1590560864
+The app is free.
+
+### Step 2 — Pair RTD4 via Bluetooth
+Make sure Bluetooth is enabled on your phone before opening the app. Be near your vehicle.
+
+**iOS:**
+1. Tap START SETUP
+2. Select GOT IT for Bluetooth permission
+3. Tap NEXT (twice)
+4. Connect RTD4 to OBD-II port and turn vehicle ignition on
+5. Tap NEXT, wait for STAT light on RTD4 to turn solid green
+6. When STAT light is solid green, hold down the button on the front of the RTD4 until the BT light starts flashing
+7. Tap NEXT — app scans for devices and pairs
+8. Confirm pairing if prompted
+9. App syncs with server. If firmware updates needed, they download now. Keep phone connected to internet and near device.
+10. Agree to license agreement: Tap I Agree, then ACCEPT
+11. **Recommended:** Immediately tap TOOLS > Resync RTD4 after pairing
+
+**Android:**
+1. Accept Website Privacy Policy — tap ACCEPT
+2. Grant Bluetooth permission — tap OK
+3. Tap OK when app says it will configure TDN-compatible device
+4. Tap NEXT (twice)
+5. Connect RTD4 to OBD-II port and turn ignition on
+6. Tap NEXT, wait for STAT light to turn solid green
+7. Hold down button on RTD4 until BT light starts flashing
+8. Tap NEXT — app scans for devices and pairs
+9. Confirm if prompted. App syncs and may download firmware updates.
+10. Tap Finish when done
+11. **Recommended:** Immediately tap TOOLS > Resync RTD4 after pairing
+
+**Trouble connecting?** Exit the setup wizard, log in via ACCOUNT button first, then retry. Can also re-run setup via TOOLS > Setup RTD4.
+
+### Step 3 — Create HP Tuners Account (skip if you already have one)
+1. Tap ACCOUNT in navigation bar
+2. Tap Create Account — browser opens to HP Tuners My Account page
+3. Fill in required info and click Create
+4. Return to TDN app, enter credentials, tap LOGIN
+5. Fill out your profile (EDIT PROFILE > enter contact details > SAVE PROFILE) so PPEI has your contact info
+
+### Step 4 — Link Account to PPEI Tuning
+**IMPORTANT:** The PPEI Invite Code changes every week. Do NOT use an old code. Contact PPEI for the current code before starting.
+1. Tap ACCOUNT in navigation bar
+2. Tap LINK TUNER tab
+3. Enter the PPEI Invite Code and tap SUBMIT
+4. Confirmation screen appears — tap OK
+5. PPEI auto-accepts almost immediately. "PPEI Tuning" appears under LINKED TUNERS
+6. Tap JOIN to finalize
+You only need to join once. Your account stays linked after the initial connection.
+
+### Step 5 — Gather Info Log
+1. Turn vehicle key to ON position (engine off is fine)
+2. Connect RTD4 to OBD-II port. Confirm STAT light is solid green and Bluetooth is connected
+3. Tap TOOLS icon on navigation bar
+4. Select "Gather Info Log for Tech Support"
+5. Tap GATHER INFO LOG
+6. When finished, tap SHARE
+7. Select "Share via Email / Messaging" and email to: support@teamppei.zohodesk.com
+Include your name, vehicle year/make/model, and a brief description of your modifications.
+
+### Step 6 — Read Your Vehicle
+**CAUTION:** While the read is in process, do NOT start the engine, turn the ignition off, or unplug the RTD4. Keep your phone close and connected to internet.
+
+Before you begin: Vehicle battery fully charged, phone battery fully charged, phone has good internet and Bluetooth on.
+1. Tap FLASH button in navigation bar
+2. Tap READ VEHICLE near bottom of screen
+3. Connect RTD4 to OBD-II and turn ignition to ON (do NOT start engine)
+4. Tap OK to start the read. Takes several minutes.
+5. When complete, a file folder for your vehicle appears. Tap the vehicle name and verify a green check icon appears next to the read file.
+6. If green check is missing: check internet connection, then tap SYNC FILES to resend.
+
+### Step 7 — Sync Files to PPEI
+1. Tap the vehicle name in Tunes screen
+2. Verify green check icon next to read file (means it's uploaded)
+3. If no green check, tap SYNC FILES
+4. Done! PPEI will contact you when your custom tune is ready.
+
+### Writing a Tune (When PPEI Sends Your Tune Back)
+1. Tap FLASH button
+2. Select your vehicle
+3. Tap the tune file (if not visible, tap SYNC FILES to retrieve)
+4. Tap WRITE VEHICLE
+5. Connect RTD4, turn ignition ON (do NOT start engine)
+6. Tap OK — do NOT interrupt the process
+7. When complete, you're ready to start the vehicle
+
+**Note on file names:** A "Read-" file can't be flashed back. Once uploaded, it becomes a "Restore-" file which CAN be flashed to restore stock.
+
+---
+
+## TDN App — Data Logging Guide
+**Source:** HP Tuners TDN/RTD4 User Guide (October 2025)
+
+### Generating a Data Log
+1. Tap the Data Log button on the navigation bar
+2. Tap the settings icon (gear in upper-right corner)
+3. Choose a time limit for the logging session. Set English or metric units if your tuner prefers.
+4. Connect RTD4 to vehicle and start the ignition
+5. Tap START — there's a short delay before logging actually begins
+6. Drive the car (or put it on a dyno) to capture a broad range of engine performance data
+7. When done, tap STOP (or wait for the time limit)
+
+### Sending Log Files to PPEI
+Log files are NOT automatically sent. You choose which ones to send.
+1. Tap DATA LOG button
+2. Tap VIEW & SYNC FILES
+3. Click UPLOAD next to the file you want to send
+4. To upload multiple logs at once, tap UPLOAD LOGS, select files, then tap UPLOAD
+
+### Deleting Unwanted Logs
+Swipe left on a file and tap Delete.
+
+### Adding a Description to a Log
+1. Tap the log file
+2. Tap EDIT
+3. Enter description
+4. Tap OK
+
+### Scanner Configuration Files
+Your tuner may assign a scanner config file to specify exactly what data to capture. The most recent config auto-applies. To change: tap VIEW & SYNC FILES > select vehicle > tap a config file > SELECT or DESELECT.
+
+---
+
+## TDN App — Reading Diagnostic Trouble Codes (DTCs)
+1. Tap the DTC button on the navigation bar
+2. Connect RTD4 to vehicle and start the ignition
+3. Tap READ CODES — app scans for DTCs
+4. When finished, a report appears
+5. To share: tap SHARE button and select email or messaging
+
+---
+
+## TDN App — Tools Menu Reference
+- **Setup RTD4:** Re-runs initial Bluetooth setup. Use if having connection issues.
+- **Resync RTD4:** Forces the device to check for newly purchased credits. Use if credits were just bought and not showing.
+- **Gather Info Log for Tech Support:** Generates an info log to share with PPEI or HP Tuners support.
+- **Change to Pro Interface / Simplified Interface:** Toggle between the two UI designs.
+- **Sync All Files to RTD4:** On by default. Disable if you have many files and only want to sync specific ones.
+- **Checking for Existing Read:** Warns you if you're about to re-read a vehicle you just read (prevents duplicate files).
+- **RTD4 Verification Code:** Get the code needed to register your RTD to your hptuners.com account.
+- **Reset File Sync Data:** Makes the app forget what's been synced. It'll relearn on next sync.
+
+---
+
+## RTD4 LED Status Reference
+
+### STAT LED (Main Status Light)
+- **No color:** Off / no app running
+- **Solid blue:** RTD is powering on
+- **Solid green (medium):** Main application running — normal operation
+- **Fast blinking green:** USB activity
+- **Blinking yellow:** Task running (read/write in progress)
+- **Solid red:** Something failed — check connection and retry
+- **Solid red (over-voltage):** Voltage over 15.5V detected — disconnect battery charger or check alternator
+
+### BT LED (Bluetooth Light)
+- **Slow blinking blue:** Pairing mode — hold button to enter this
+- **Fast blinking blue:** Paired with device
+- **Cyan blue:** Bluetooth device connected
+- **Solid red:** Bluetooth failure
+
+### Standalone Data Logging Button
+- **Fast blinking blue:** Standalone logging started
+- **Slow blinking blue:** Standalone logging in progress
+- **Blinking purple:** Failed to start
+
+---
+
 `;
 
 const STRAT_SYSTEM_PROMPT = `You are Strat — PPEI's post-sale tech support AI agent, built into the V-OP (Vehicle Optimizer by PPEI) platform.

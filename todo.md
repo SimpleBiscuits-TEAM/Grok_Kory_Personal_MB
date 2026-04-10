@@ -1133,12 +1133,12 @@
 - [x] Smooth interpolation across all pressure/quantity breakpoints
 
 ## Diesel Injector Flow Converter — Rework
-- [ ] Fix tab visibility: ensure INJECTOR FLOW tab appears in Advanced nav (check if gated behind admin/role)
-- [ ] Rework UX: user selects engine (LB7), then uploads their flow chart (image or manual entry)
-- [ ] Parse uploaded flow sheet data (image OCR via LLM or manual 4-test-point entry form)
-- [ ] Generate corrected table from user-provided flow data (not hardcoded S&S data)
-- [ ] Show corrected table with copy/paste button and CSV download export
-- [ ] Remove hardcoded S&S data as default — make it upload-driven
+- [x] Fix tab visibility: ensure INJECTOR FLOW tab appears in Advanced nav (check if gated behind admin/role)
+- [x] Rework UX: user selects engine (LB7), then uploads their flow chart (image or manual entry)
+- [x] Parse uploaded flow sheet data (image OCR via LLM or manual 4-test-point entry form)
+- [x] Generate corrected table from user-provided flow data (not hardcoded S&S data)
+- [x] Show corrected table with copy/paste button and CSV download export
+- [x] Remove hardcoded S&S data as default — make it upload-driven
 
 ## Navigation Rename — VOP LITE / VOP PRO
 - [x] Rename "ANALYZE" tab/page to "VOP LITE" in App.tsx top nav (PpeiHeader updated)
@@ -1148,3 +1148,12 @@
 - [x] Rename "CODING" to "BASIC EDITS" in VOP PRO devTabs
 - [x] Update Home.tsx references to match new naming
 - [x] Update any breadcrumbs or internal links referencing old names
+
+## Support Agent — Installation Knowledge Base
+- [x] Extract VCM Suite installation steps from PPEI_HPTuners_VCM_Suite_Guide.pdf
+- [x] Extract TDN/RTD4 installation steps from PPEI_TDN_RTD4_Customer_Guide_v2.pdf
+- [x] Extract TDN App usage steps from TDNAPPUserGuide_NEW.pdf
+- [x] Add all extracted knowledge to the support agent's knowledge base (Knox/Strat)
+- [x] Ensure language is simple, relaxed, and to the point for customer-facing use
+- [x] Always reference latest BETA version of VCM Suite
+- [x] Primary TDN device is RTD4, secondary is MPVI4
