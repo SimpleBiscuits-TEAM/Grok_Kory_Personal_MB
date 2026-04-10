@@ -1241,3 +1241,10 @@
 - [x] Warn to re-test after writing (±1-2% normal)
 - [x] Placeholder binary address fields for later wiring (GM = ECM flash)
 - [x] Integrate into Basic Editor (accessible from VOP Lite and VOP PRO)
+
+## Tire Size Correction — Future: PCAN Bridge Scan/Poll Pre-Population
+- [ ] Wire PCAN bridge connection to Tire Size Correction tool (Basic + Advanced Editor)
+- [ ] Scan/poll current axle ratio and tire circumference from ECM/IPC module via bridge
+- [ ] Auto-populate "Current ECM Values" fields from live module read (no manual entry)
+- [ ] Support multiple module targets (ECM, IPC, TCM) — addresses TBD per vehicle/ECM type
+- [ ] Write corrected values back to module when binary flash pipeline is wired
