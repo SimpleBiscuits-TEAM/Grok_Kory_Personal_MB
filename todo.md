@@ -1081,3 +1081,8 @@
 - [x] Update canSniffObdInference.ts to handle 7E2/7EA TCM traffic
 - [x] Write vitest tests for new E90 PID definitions (46 tests across 2 test files, all passing)
 - [x] Verify datalogger correctly selects E90 PIDs when connecting to GM gas truck (Core + Full EFI Live presets verified)
+
+## Bug Fix — GitHub Commits Not Showing on Home Analyzer Page
+- [x] Investigate why commits are not displaying at the bottom of the home analyzer page (GITHUB_API_TOKEN expired, server returning 401)
+- [x] Fix the commit display component/API (added gh CLI fallback for token resolution, reads process.env fresh instead of cached ENV)
+- [x] Verify commits show correctly (15 commits returned, all 5 tests passing)

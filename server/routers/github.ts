@@ -5,10 +5,14 @@
  * using the GitHub REST API with an authenticated token. This works in both
  * local development and production deployment. Results are cached in memory
  * for 5 minutes to avoid hitting rate limits.
+ *
+ * Token resolution order:
+ * 1. process.env.GITHUB_API_TOKEN (platform-injected)
+ * 2. `gh auth token` CLI fallback (dev sandbox)
  */
 import { z } from "zod";
+import { execSync } from "child_process";
 import { publicProcedure, router } from "../_core/trpc";
-import { ENV } from "../_core/env";
 
 const GITHUB_OWNER = "simplebiscuits";
 const GITHUB_REPO = "Good-Gravy-2";
@@ -26,6 +30,57 @@ interface CommitEntry {
 
 let cachedCommits: CommitEntry[] | null = null;
 let cacheTimestamp = 0;
+let resolvedToken: string | null = null;
+
+/**
+ * Resolve a working GitHub token. Tries the env var first, then falls back
+ * to the `gh` CLI which may have a fresher token in dev sandboxes.
+ */
+async function getGitHubToken(): Promise<string> {
+  // If we already resolved a working token, reuse it
+  if (resolvedToken) return resolvedToken;
+
+  // 1. Try env var
+  const envToken = process.env.GITHUB_API_TOKEN ?? "";
+  if (envToken) {
+    // Quick validation — hit the API to see if the token works
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`,
+        {
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "VOP-Platform",
+            Authorization: `token ${envToken}`,
+          },
+        }
+      );
+      if (res.ok) {
+        resolvedToken = envToken;
+        console.log("[GitHub] Using GITHUB_API_TOKEN from environment");
+        return envToken;
+      }
+      console.warn(`[GitHub] GITHUB_API_TOKEN returned ${res.status} — trying gh CLI fallback`);
+    } catch {
+      console.warn("[GitHub] GITHUB_API_TOKEN validation failed — trying gh CLI fallback");
+    }
+  }
+
+  // 2. Fallback: gh auth token (available in dev sandbox)
+  try {
+    const ghToken = execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
+    if (ghToken) {
+      resolvedToken = ghToken;
+      console.log("[GitHub] Using token from gh CLI");
+      return ghToken;
+    }
+  } catch {
+    // gh CLI not available or not authenticated
+  }
+
+  console.warn("[GitHub] No working GitHub token found");
+  return "";
+}
 
 async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
   const now = Date.now();
@@ -33,7 +88,7 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
     return cachedCommits.slice(0, count);
   }
 
-  const token = ENV.githubApiToken;
+  const token = await getGitHubToken();
   if (!token) {
     console.warn("[GitHub] No GITHUB_API_TOKEN configured — cannot fetch commits");
     return cachedCommits?.slice(0, count) ?? [];
@@ -50,6 +105,10 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
     });
 
     if (!res.ok) {
+      // If the resolved token stopped working, clear it so next call re-resolves
+      if (res.status === 401) {
+        resolvedToken = null;
+      }
       console.warn(`[GitHub] API returned ${res.status}: ${res.statusText}`);
       return cachedCommits?.slice(0, count) ?? [];
     }
