@@ -46,6 +46,8 @@ export interface EcuScanTransport {
     targetAddress?: number,
     timeoutMs?: number,
   ): Promise<UDSResponse | null>;
+  /** GMLAN UUDT TesterPresent on functional 0x101 — implemented by PCAN / V-OP bridges. */
+  sendRawCanFrame?(arbId: number, data: number[]): Promise<void>;
 }
 
 export interface EcuScanResult {
@@ -176,8 +178,21 @@ const GMLAN_DIDS = {
   CAL_SLOT_9: 0xCC,
 } as const;
 
-/** Per-request UDS timeout during ECU scan (no response → fail fast) */
-const ECU_SCAN_UDS_TIMEOUT_MS = 450;
+/**
+ * Default per-request UDS timeout during ECU scan.
+ * PCAN goes through WebSocket + `pcan_bridge` + driver — 450ms was too tight and looked like “scan broken”
+ * (V-OP USB2CAN is direct serial and often responds within that window).
+ */
+const DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS = 1200;
+
+/** Options for {@link EcuScanner} — third constructor argument. */
+export type EcuScannerOptions = {
+  skipVehicleInit?: boolean;
+  /** Override {@link DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS} — use ~2500 for PCAN bridge if needed. */
+  scanUdsTimeoutMs?: number;
+  /** Delay after GMLAN UUDT @ 0x101 before first physical UDS (bus / bridge settle). */
+  postGmlanUudtDelayMs?: number;
+};
 
 /** GM cal/software DID payload → unsigned integer (big-endian), display as decimal */
 function gmPartBytesToDecimalUnsigned(data: number[]): number {
@@ -227,6 +242,15 @@ const SCAN_ADDRESSES = [
   { tx: 0x7E2, rx: 0x7EA, label: 'TCM (Allison)' },
 ] as const;
 
+/** SAE J1979-style physical ECU TX range where GM GMLAN applies — not USDT 0x3E 0x00 (see DevProg `SendTesterPresentGMLAN`). */
+function isGmStylePhysicalTx(tx: number): boolean {
+  return tx >= 0x7e0 && tx <= 0x7e7;
+}
+
+/** Functional broadcast ID for GMLAN UUDT TesterPresent (same bytes as `PcanHardwareService.SendTesterPresentGMLAN`). */
+const GMLAN_TESTER_PRESENT_ARB_ID = 0x101;
+const GMLAN_UUDT_TESTER_PRESENT_DATA = [0xfe, 0x01, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00] as const;
+
 // ── Scanner Class ────────────────────────────────────────────────────────────
 
 export class EcuScanner {
@@ -236,15 +260,21 @@ export class EcuScanner {
   private containerHeader?: ContainerFileHeader;
   /** Passed to {@link EcuScanTransport.connect} — skip slow VIN/PID init when scanning (V-OP / PCAN). */
   private readonly connectOptions?: { skipVehicleInit?: boolean };
+  private readonly scanUdsTimeoutMs: number;
+  private readonly postGmlanUudtDelayMs: number;
 
   constructor(
     connection: EcuScanTransport,
     containerHeader?: ContainerFileHeader,
-    connectOptions?: { skipVehicleInit?: boolean },
+    options?: EcuScannerOptions,
   ) {
     this.connection = connection;
     this.containerHeader = containerHeader;
-    this.connectOptions = connectOptions;
+    this.connectOptions = options?.skipVehicleInit !== undefined
+      ? { skipVehicleInit: options.skipVehicleInit }
+      : undefined;
+    this.scanUdsTimeoutMs = options?.scanUdsTimeoutMs ?? DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS;
+    this.postGmlanUudtDelayMs = options?.postGmlanUudtDelayMs ?? 80;
   }
 
   /**
@@ -347,17 +377,40 @@ export class EcuScanner {
 
     console.log(`[ECU Scanner] Probing ${label} (TX: 0x${txAddr.toString(16)}, RX: 0x${rxAddr.toString(16)})...`);
 
-    // Step 1: Probe with TesterPresent to see if anything responds
-    const probeResp = await this.sendAndRecord(result, 0x3E, 0x00, [], txAddr);
+    // Step 1: Presence / transport probe
+    // GMLAN: USDT TesterPresent (0x3E 0x00 on physical) is wrong — ECUs answer with NRC 0x12. Use UUDT
+    // FE 01 3E on functional 0x101 (matches DevProg `SendTesterPresentGMLAN` + pcanFlashEngine GMLAN keepalive).
+    // Non–GM-style addresses keep standard UDS 0x3E 0x00.
+    let probeResp: UDSResponse | null = null;
+    if (isGmStylePhysicalTx(txAddr)) {
+      result.notes.push('GMLAN: UUDT TesterPresent FE 01 3E @ 0x101 (not USDT 0x3E 0x00 on physical)');
+      if (this.connection.sendRawCanFrame) {
+        try {
+          await this.connection.sendRawCanFrame(GMLAN_TESTER_PRESENT_ARB_ID, [...GMLAN_UUDT_TESTER_PRESENT_DATA]);
+          await this.delay(this.postGmlanUudtDelayMs);
+        } catch (e) {
+          console.warn(`[ECU Scanner] GMLAN UUDT TesterPresent @ 0x101 failed:`, e);
+          result.notes.push('GMLAN UUDT TesterPresent send failed — continuing with session probe');
+        }
+      } else {
+        result.notes.push('No raw CAN send — skip UUDT; use session probe only');
+      }
+      probeResp = null;
+    } else {
+      probeResp = await this.sendAndRecord(result, 0x3E, 0x00, [], txAddr);
+    }
+
+    /** If no USDT TesterPresent response (or GMLAN path), first physical UDS is 0x10 0x02 — never 0x10 0x01 for GM. */
+    let programmingSessionFromFallback = false;
     if (!probeResp) {
-      // Try DiagSessionControl as fallback probe (some ECUs don't support TesterPresent)
-      const diagProbe = await this.sendAndRecord(result, 0x10, 0x01, [], txAddr);
+      const diagProbe = await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
       if (!diagProbe) {
         result.status = 'timeout';
         result.scanDurationMs = Date.now() - startMs;
         console.log(`[ECU Scanner] ${label}: No response — ECU not present or not powered`);
         return result;
       }
+      programmingSessionFromFallback = diagProbe.positiveResponse === true;
     }
 
     result.responding = true;
@@ -366,8 +419,10 @@ export class EcuScanner {
     // The SPS log and bench testing confirm that GMLAN ECUs need 0x10 0x02
     // (DiagSessionControl Programming) before they'll respond to 0x1A ReadDID.
     console.log(`[ECU Scanner] ${label}: ECU responding — entering programming session...`);
-    const sessionResp = await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
-    if (sessionResp?.positiveResponse) {
+    const sessionResp = programmingSessionFromFallback
+      ? null
+      : await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
+    if (sessionResp?.positiveResponse || programmingSessionFromFallback) {
       console.log(`[ECU Scanner] ${label}: Programming session active`);
     }
     await this.delay(100);
@@ -1079,7 +1134,7 @@ export class EcuScanner {
         subFunction,
         data,
         txAddr,
-        ECU_SCAN_UDS_TIMEOUT_MS,
+        this.scanUdsTimeoutMs,
       );
       if (resp) {
         let payload = resp.data || [];

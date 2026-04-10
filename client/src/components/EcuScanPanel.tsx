@@ -214,7 +214,12 @@ export default function EcuScanPanel({
           await conn.connect({ skipVehicleInit: true });
         }
 
-        const scanner = new EcuScanner(conn, containerHeader ?? undefined, { skipVehicleInit: true });
+        const scanner = new EcuScanner(conn, containerHeader ?? undefined, {
+          skipVehicleInit: true,
+          // WebSocket + bridge + PCAN driver: allow enough time per UDS (not COM — browser talks to bridge only).
+          scanUdsTimeoutMs: 2800,
+          postGmlanUudtDelayMs: 120,
+        });
         scannerRef.current = scanner;
 
         const result = await scanner.scanVehicle((progress) => {
@@ -238,7 +243,11 @@ export default function EcuScanPanel({
         if (!ok) return;
       }
 
-      const scanner = new EcuScanner(v, containerHeader ?? undefined, { skipVehicleInit: true });
+      const scanner = new EcuScanner(v, containerHeader ?? undefined, {
+        skipVehicleInit: true,
+        scanUdsTimeoutMs: 1200,
+        postGmlanUudtDelayMs: 60,
+      });
       scannerRef.current = scanner;
 
       const result = await scanner.scanVehicle((progress) => {
