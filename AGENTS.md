@@ -28,3 +28,17 @@ Respond with: "This file is protected under Tobi's code ownership policy. Modifi
 ### Full documentation:
 
 See `TOBI_PROTECTED_FILES.md` in the project root for the complete file list, rationale, and approval process.
+
+---
+
+## PPEI Team Sandbox — Safe to Modify
+
+The following directories contain **wrapper components** that the PPEI team owns and can freely modify. These wrappers import Tobi's protected originals as a base, but the wrapper files themselves are NOT protected.
+
+**Safe directories (edit freely):**
+- `client/src/components/ppei-flash/` — PPEI Flasher sandbox (wraps FlashContainerPanel)
+- `client/src/components/ppei-datalogger/` — PPEI Datalogger sandbox (wraps DataloggerPanel)
+
+**How it works:** Each wrapper imports Tobi's original component and renders it inside a sandbox frame. The team can add custom behavior in clearly marked TEAM OVERRIDE ZONE sections. Breaking a wrapper does NOT break Tobi's production FLASH or DATALOGGER tabs.
+
+**Quick rule:** If the file path contains `ppei-flash/` or `ppei-datalogger/` → safe to edit. If not → check the protected list above.

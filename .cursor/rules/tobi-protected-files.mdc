@@ -108,7 +108,46 @@ Tell the user this work must be routed through Tobi's branch (GROK).
 
 ---
 
+## ✅ PPEI TEAM SANDBOX — SAFE TO MODIFY
+
+### ╔══════════════════════════════════════════════════════════════╗
+### ║  THESE FILES ARE THE TEAM'S SANDBOX — EDIT FREELY!          ║
+### ║  Breaking these does NOT break Tobi's production code.      ║
+### ╚══════════════════════════════════════════════════════════════╝
+
+The following directories contain **wrapper components** that import Tobi's originals as a base. The PPEI team can freely modify, experiment with, and break these files. When Tobi pushes updates, they automatically flow through the wrappers.
+
+### PPEI Flash Sandbox (team can edit freely):
+- `client/src/components/ppei-flash/PpeiFlashContainerPanel.tsx` — Wrapper for FlashContainerPanel
+- `client/src/components/ppei-flash/index.ts` — Barrel export
+- `client/src/components/ppei-flash/README.md` — Team documentation
+- Any new files created in `client/src/components/ppei-flash/`
+
+### PPEI Datalogger Sandbox (team can edit freely):
+- `client/src/components/ppei-datalogger/PpeiDataloggerPanel.tsx` — Wrapper for DataloggerPanel
+- `client/src/components/ppei-datalogger/index.ts` — Barrel export
+- `client/src/components/ppei-datalogger/README.md` — Team documentation
+- Any new files created in `client/src/components/ppei-datalogger/`
+
+### How the wrappers work:
+1. Each wrapper **imports** Tobi's original component (e.g., `import FlashContainerPanel from '@/components/FlashContainerPanel'`)
+2. The wrapper renders the original inside a sandbox frame with team branding
+3. The wrapper provides clearly marked **TEAM OVERRIDE ZONE** sections where the team can add custom behavior
+4. **Tobi's original files are never touched** — only the wrapper files are modified
+5. If a wrapper breaks, the original FLASH and DATALOGGER tabs continue to work perfectly
+
+### When modifying PPEI sandbox files:
+- You MAY freely edit any file in `client/src/components/ppei-flash/` or `client/src/components/ppei-datalogger/`
+- You MAY add new files to these directories
+- You MUST NOT modify the original files they import (those are protected above)
+- You SHOULD use the TEAM OVERRIDE ZONE sections for customizations
+- If you need deeper overrides, create new wrapper files in the sandbox directories
+
+---
+
 ## 📋 REFERENCE
 Full documentation: `TOBI_PROTECTED_FILES.md` in project root
 GitHub CODEOWNERS: `.github/CODEOWNERS` (requires @simplebiscuits approval)
 Protection check script: `scripts/check-tobi-protection.mjs`
+PPEI Flash Sandbox: `client/src/components/ppei-flash/README.md`
+PPEI Datalogger Sandbox: `client/src/components/ppei-datalogger/README.md`

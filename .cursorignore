@@ -74,3 +74,16 @@ server/_core/index.ts
 server/_core/loadEnv.ts
 server/_core/vite.ts
 server/_core/vopDevServerArgv.ts
+
+# ============================================================================
+# PPEI TEAM SANDBOX — NOT BLOCKED (safe to edit)
+# ============================================================================
+# The following directories are WRAPPER components that the PPEI team owns.
+# They import Tobi's originals but are NOT protected themselves.
+# Cursor CAN read and write files in these directories:
+#
+#   client/src/components/ppei-flash/     (PPEI Flasher sandbox)
+#   client/src/components/ppei-datalogger/ (PPEI Datalogger sandbox)
+#
+# Do NOT add these directories to this ignore list.
+# ============================================================================

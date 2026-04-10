@@ -128,10 +128,24 @@ broken flashing. Modify with extreme caution and test flash functionality afterw
 
 ---
 
+## PPEI Team Sandbox (NOT Protected — Safe to Edit)
+
+The following directories contain **wrapper components** that import Tobi's protected originals as a base. The PPEI team can freely modify, experiment with, and break these files without affecting Tobi's production code.
+
+| Directory | Purpose | Wraps |
+|-----------|---------|-------|
+| `client/src/components/ppei-flash/` | PPEI Flasher sandbox | FlashContainerPanel (Category 2) |
+| `client/src/components/ppei-datalogger/` | PPEI Datalogger sandbox | DataloggerPanel (Category 5) |
+
+These wrappers are accessible via the **PPEI FLASHER** and **PPEI DATALOGGER** tabs in the Advanced section. When Tobi pushes updates to his originals, the improvements automatically flow through the wrappers. If a wrapper breaks, the original FLASH and DATALOGGER tabs continue to work.
+
+---
+
 ## Rules
 
-1. **NO AI agent may modify any file listed above** without Kory's explicit approval
+1. **NO AI agent may modify any file listed in Categories 1–9** without Kory's explicit approval
 2. **Tobi's branch → GROK is the source of truth** for all files in Categories 1–7
 3. **Infrastructure files (Category 8)** require flash regression testing after any change
 4. **When merging from GROK**, Tobi's versions of these files always take precedence
 5. **If Cursor or another agent modifies these files**, Manus will detect and repair on next sync
+6. **PPEI sandbox directories** (`ppei-flash/`, `ppei-datalogger/`) are team-owned and may be freely modified by any agent or developer

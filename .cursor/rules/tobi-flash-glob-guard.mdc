@@ -26,3 +26,13 @@ This file is part of the ECU flash, datalogging, tune deploy, or server infrastr
 > "⛔ BLOCKED: This file is protected under Tobi's code ownership. Modifying it requires explicit approval from Kory (project owner). This work should be routed to Tobi's branch (GROK). See TOBI_PROTECTED_FILES.md."
 
 ## Reading is OK. Writing is NOT.
+
+---
+
+## ✅ EXCEPTION: PPEI Sandbox Wrappers
+
+Files inside `client/src/components/ppei-flash/` and `client/src/components/ppei-datalogger/` are **NOT protected**. These are the team's sandbox wrappers that import Tobi's originals. You MAY freely edit, create, and delete files in those directories.
+
+The glob patterns above may match filenames like `PpeiFlashContainerPanel.tsx` because they contain "Flash" in the name. **If the file path starts with `ppei-flash/` or `ppei-datalogger/`, it is a sandbox file and this protection rule does NOT apply.**
+
+Quick check: Is the file in `client/src/components/ppei-flash/` or `client/src/components/ppei-datalogger/`? If yes → SAFE to edit. If no → PROTECTED, do not touch.

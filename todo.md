@@ -1101,3 +1101,15 @@
 - [x] Include infrastructure dependencies (server/_core/) in protection scope
 - [x] Write team summary document for distribution
 
+
+## PPEI Flasher & PPEI Datalogger Tabs (Wrapper Approach)
+- [x] Read Tobi's flash and datalogger component interfaces/props
+- [x] Create PpeiFlashContainerPanel wrapper component
+- [x] Create PpeiDataloggerPanel wrapper component
+- [x] Add PPEI Flasher tab to navigation and App.tsx routing
+- [x] Add PPEI Datalogger tab to navigation and App.tsx routing
+- [x] Update .cursor/rules/tobi-protected-files.mdc with PPEI sandbox safe-zone section
+- [x] Update .cursor/rules/tobi-flash-glob-guard.mdc to exclude ppei-flash/ and ppei-datalogger/ directories
+- [x] Update TOBI_PROTECTED_FILES.md to document PPEI sandbox directories as team-editable
+- [x] Update AGENTS.md with PPEI sandbox guidance
+- [x] Update .cursorignore to NOT ignore ppei-flash/ and ppei-datalogger/ directories

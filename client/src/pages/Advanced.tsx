@@ -74,6 +74,8 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 import PpeiHeader from '@/components/PpeiHeader';
+import { PpeiFlashContainerPanel } from '@/components/ppei-flash';
+import { PpeiDataloggerPanel } from '@/components/ppei-datalogger';
 
 // Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
 const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
@@ -1309,7 +1311,7 @@ function EditorGate() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1319,6 +1321,8 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'ppei-flash' as TabId, label: 'PPEI FLASHER', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 280)' }} /> },
+  { id: 'ppei-datalogger' as TabId, label: 'PPEI DATALOGGER', icon: <Gauge style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 170)' }} /> },
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'weather' as TabId, label: 'WEATHER', icon: <CloudSun style={{ width: 16, height: 16, color: 'oklch(0.72 0.16 210)' }} /> },
   { id: 'competition' as TabId, label: 'COMPETITION', icon: <Trophy style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
@@ -1597,6 +1601,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
+        {activeTab === ('ppei-flash' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><PpeiFlashContainerPanel /></div>}
+        {activeTab === ('ppei-datalogger' as TabId) && <div className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
