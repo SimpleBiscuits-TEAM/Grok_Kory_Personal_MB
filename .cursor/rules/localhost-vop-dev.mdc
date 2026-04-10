@@ -1,0 +1,20 @@
+---
+description: localhost, 127.0.0.1, connection refused, site can't be reached, dev server, npm run dev, __vop_ping, blank page, tsx not found, esbuild knoxKnowledge — V-OP Good-Gravy-2 dev fix playbook
+alwaysApply: true
+---
+
+# Localhost / dev server — repeat this process every time
+
+This repo is **Express + Vite on one port** (default **3000**, or next free port). It is **not** Create React App on :3000 with a separate API on :5000 unless the user is in a different project.
+
+When the user reports **localhost not working**, **connection refused**, **site can’t be reached**, or **dev won’t start**, **execute** (yourself, in the project root):
+
+1. **`npm run dev:doctor`** — prints Node/tsx/port/script checks and the exact URLs to use.
+2. **`npm run dev`** — capture the **first** error. If the shell has no `tsx`/`npx` on PATH, `package.json` must use **`node ./node_modules/tsx/dist/cli.mjs watch server/_core/index.ts`** (not bare `tsx`).
+3. **Esbuild / TransformError in `shared/knoxKnowledge.ts`** — the string `KNOX_KNOWLEDGE_BASE_SANITIZED` is a template literal; any markdown **code** backticks inside it must be **escaped** as `` \` `` or the server never starts.
+4. **Port busy** — log says “using port 3001”; or free **3000** (Windows: `netstat -ano | findstr :3000` then `taskkill /PID … /F`).
+5. **Verify** — open **`http://127.0.0.1:<port>/__vop_ping`** — response must be plain **`ok`**. If not, nothing is listening on that port.
+6. **Do not** tell the user to rely on **`http://localhost:5173/`** alone for this app — Vite middleware shares the Express port; `scripts/dev-hint.mjs` explains this.
+7. **`server/routers/github.ts`** — `gh auth token` must not use bash-only `2>/dev/null`; use `stdio: ['ignore','pipe','ignore']` on Windows.
+
+After fixes, **`npm run dev`** again and confirm **`__vop_ping`** before closing the task.

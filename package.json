@@ -5,6 +5,7 @@
   "license": "MIT",
   "scripts": {
     "predev": "node scripts/dev-hint.mjs",
+    "dev:doctor": "node scripts/dev-doctor.mjs",
     "dev": "cross-env NODE_ENV=development node ./node_modules/tsx/dist/cli.mjs watch server/_core/index.ts",
     "dev:tsx": "node ./node_modules/tsx/dist/cli.mjs watch server/_core/index.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
