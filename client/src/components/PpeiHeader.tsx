@@ -253,33 +253,7 @@ export default function PpeiHeader() {
                     userSelect: 'none',
                     whiteSpace: 'nowrap',
                   }}>{tierLabel}</span>
-                  {/* Upgrade prompt for non-admin users on Advanced */}
-                  {isAdvanced && !isAdmin && (
-                    <span
-                      style={{
-                        fontFamily: sFont.mono,
-                        fontSize: '0.5rem',
-                        letterSpacing: '0.06em',
-                        color: 'oklch(0.78 0.15 80)',
-                        background: 'rgba(255,200,0,0.08)',
-                        border: '1px solid rgba(255,200,0,0.25)',
-                        borderRadius: '3px',
-                        padding: '2px 8px',
-                        lineHeight: 1.4,
-                        cursor: 'default',
-                        whiteSpace: 'nowrap',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                      title="Upgrade to V-OP Pro for full access to Advanced tools and features"
-                    >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'oklch(0.78 0.15 80)' }}>
-                        <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
-                      </svg>
-                      UPGRADE TO PRO
-                    </span>
-                  )}
+                  {/* User is already in VOP PRO if they're on /advanced — no upgrade prompt needed */}
                 </div>
               );
             })()}

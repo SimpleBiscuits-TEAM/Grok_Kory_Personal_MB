@@ -1201,3 +1201,6 @@
 - [x] Fix converter math: Step 1 = OEM-match (interpolate flow sheet to produce stock mm³ at every cell), Step 2 = add duration in lower-right corner to hit target mm³ (progressive ramp, not uniform scale)
 - [x] Update Knox knowledge: L5P unlock/flash corrections — 2017-2023 can unlock+flash in-truck with latest VCM Suite BETA (exception: 2018 E41 ECMs need unlock first), 2024+ E42 must send ECM/TCM in for unlock service before tuning
 - [x] Fix Strat giving wrong L5P TCM unlock info (was saying must send in for all L5P, incorrect)
+
+## Remove "Upgrade to V-OP Pro" Inside VOP PRO
+- [x] Remove or hide any "Upgrade to V-OP Pro" prompts/messaging when user is already inside VOP PRO (they already unlocked it)
