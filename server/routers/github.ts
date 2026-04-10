@@ -66,7 +66,11 @@ async function getGitHubToken(): Promise<string> {
   }
 
   try {
-    const ghToken = execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
+    const ghToken = execSync("gh auth token", {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
     if (ghToken) {
       resolvedToken = ghToken;
       console.log("[GitHub] Using token from gh CLI");

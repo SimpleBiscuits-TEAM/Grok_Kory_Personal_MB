@@ -33,8 +33,8 @@ function timeAgo(dateStr: string): string {
 }
 
 /** Extract first line of a commit message */
-function firstLine(msg: string): string {
-  const line = msg.split('\n')[0];
+function firstLine(msg: string | null | undefined): string {
+  const line = (msg ?? '').split('\n')[0] ?? '';
   return line.length > 120 ? line.substring(0, 117) + '...' : line;
 }
 
