@@ -18,3 +18,9 @@ When the user reports **localhost not working**, **connection refused**, **site 
 7. **`server/routers/github.ts`** — `gh auth token` must not use bash-only `2>/dev/null`; use `stdio: ['ignore','pipe','ignore']` on Windows.
 
 After fixes, **`npm run dev`** again and confirm **`__vop_ping`** before closing the task.
+
+## Proactive — debug before it happens
+
+- After editing **`shared/knoxKnowledge.ts`** inside **`KNOX_KNOWLEDGE_BASE_SANITIZED`**: run **`npm run dev`** once — unescaped markdown code backticks inside that template literal kill startup (esbuild “Expected ';'” / similar).
+- Before merging changes to **`package.json` `dev`**, **`server/_core/index.ts`**, **`server/_core/vite.ts`**, or **`vite.config.ts`**: run **`npm run dev:doctor`** then a short **`npm run dev`** smoke test and hit **`/__vop_ping`**.
+- **Retention:** this file is the project’s retained “memory” for localhost. For a personal Cursor reminder across repos, save a short note in **Cursor Settings → Rules / Memories** pointing at **`npm run dev:doctor`** + **`__vop_ping`** for V-OP.
