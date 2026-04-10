@@ -1,7 +1,6 @@
 /**
  * REST endpoints for large binary upload / analyze (bypasses the 2MB JSON body limit on /api/trpc).
- * Parsed calibrationPartNumbers / osVersion feed `mergeDetectedCalibrationIntoHeader` on the client so
- * ECU Scan (`compareWithContainer`) and the WiFi/BLE flasher cloud path see populated sw_c1..9.
+ * Parsed calibrationPartNumbers / osVersion are shown in the Flash UI (optional); the client does not merge them into the container header.
  * Container CRC32: `getContainerCrc32Status` / `fixContainerCrc` from `shared/flashFileValidator.ts`.
  * Upload with header `X-Tune-Deploy-Fix-Crc: 1` to rewrite CRC at 0x1000 when it was wrong.
  * Rejects 422: unrecognized_container (incl. EFI Live / .hpt / HEX layouts until supported), container_too_small,

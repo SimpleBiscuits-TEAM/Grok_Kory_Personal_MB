@@ -229,7 +229,7 @@ export function generateFlashPlan(
   // Timing and order extracted from raw BUSMASTER CAN log of successful 18 L5P stock flash.
   // All broadcast commands use UUDT format (FE prefix) on functional address 0x101.
   // ECU does NOT respond to UUDT messages — fire-and-forget.
-  // TesterPresent keepalive starts AFTER A5 03 (during bootloader wait), NOT during broadcast.
+  // TesterPresent cyclic starts at step 8 (after A5 03) — do not inject FE 01 3E before 0x28/A5.
   if (isGMLAN) {
     // Step 1: ReturnToNormal (functional broadcast — resets all ECUs to known state)
     // BUSMASTER: first command at 0.29s
@@ -279,14 +279,11 @@ export function generateFlashPlan(
       canTx: `0x101 FE 02 A5 03`, expectedPositive: 'E5', timeoutMs: 5000, retries: 2,
       delayBeforeMs: 50,    // BUSMASTER: 50ms after A5 01
     });
-    // Step 8: Start TesterPresent cyclic AFTER A5 03 (during bootloader wait)
-    // BUSMASTER: keepalive starts immediately after A5 03, runs every ~500ms
-    // for 4.0s before the first seed request. 7 keepalive frames during this window.
-    // The flash engine detects the FE prefix and starts the cyclic keepalive timer.
+    // Step 8: Start TesterPresent cyclic AFTER A5 03 — engine starts interval + first UUDT 3E here.
     commands.push({
       id: cmdId++, phase: 'SESSION_OPEN', label: 'Start TesterPresent Cyclic (UUDT, 500ms)',
       canTx: `0x101 FE 01 3E`, expectedPositive: '7E', timeoutMs: 3000, retries: 1,
-      delayBeforeMs: 50,    // Start immediately after A5 03
+      delayBeforeMs: 50,    // Immediately after A5 03
     });
     // NOTE: No physical session (0x10 0x02 on 0x7E0) between broadcast and security.
     // The broadcast ProgrammingSession (step 3: FE 02 10 02 on 0x101) already

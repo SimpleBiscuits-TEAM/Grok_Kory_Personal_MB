@@ -2,11 +2,11 @@
  * EcuScanPanel — Pre-Flash Vehicle ECU Interrogation
  *
  * Scans all known CAN addresses, reads identifying DIDs,
- * calibration data from the ECU (GMLAN ReadDID / UDS as applicable). Compares against loaded container.
+ * calibration data from the ECU (GMLAN ReadDID / UDS as applicable). Per-ECU file/folder match; Flash-tab container vs first ECU.
  * Supports PCAN-USB (WebSocket bridge) and V-OP USB2CAN (Web Serial).
  */
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, type ChangeEvent } from 'react';
 import { PCANConnection } from '../lib/pcanConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '../lib/vopCan2UsbConnection';
 import {
@@ -20,20 +20,20 @@ import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
 import { gmCan2000DidShortName } from '../lib/gmCan2000DidReference';
 import {
   persistLastVehicleScan,
-  loadEcuContainerSession,
   buildVehicleScanSnapshotV1,
 } from '../lib/ecuContainerSessionStorage';
 import {
-  scoreContainerAgainstScan,
-  rankContainerBinsByScan,
   extractContainerMatchParamsFromBin,
+  scoreContainerAgainstScan,
+  isContainerMatchAcceptable,
+  hasEcuTypeConflict,
   type MatchScoreResult,
 } from '../../../shared/ecuContainerMatch';
 import {
   Search, CheckCircle2, XCircle, AlertTriangle,
   ChevronDown, ChevronRight, Cpu, Radio, Clock,
   Shield, Hash, FileCheck, Loader2, StopCircle,
-  Usb, FolderOpen,
+  Usb, Cloud, Upload,
 } from 'lucide-react';
 
 export type EcuScanTransportChoice = 'pcan' | 'vop';
@@ -45,6 +45,8 @@ interface EcuScanPanelProps {
   containerHeader: ContainerFileHeader | null;
   bridgeAvailable: boolean;
   bridgeUrl: string | null;
+  /** After a successful match check, load this file into the Flash workspace (same as Open container). */
+  onVerifiedContainerLoad?: (file: File) => void | Promise<void>;
 }
 
 export default function EcuScanPanel({
@@ -54,101 +56,137 @@ export default function EcuScanPanel({
   containerHeader,
   bridgeAvailable,
   bridgeUrl,
+  onVerifiedContainerLoad,
 }: EcuScanPanelProps) {
   const [scanning, setScanning] = useState(false);
   const [report, setReport] = useState<VehicleScanReport | null>(null);
   const [expandedEcu, setExpandedEcu] = useState<number | null>(null);
-  const [comparison, setComparison] = useState<ContainerComparison | null>(null);
   const scannerRef = useRef<EcuScanner | null>(null);
   const [scanTransport, setScanTransport] = useState<EcuScanTransportChoice>('pcan');
-  const [folderScanning, setFolderScanning] = useState(false);
-  const [folderRanked, setFolderRanked] = useState<{ path: string; score: MatchScoreResult }[] | null>(null);
-  const [folderError, setFolderError] = useState<string | null>(null);
+  type EcuLocalOpenState = {
+    loading: boolean;
+    probe: {
+      fileName: string;
+      score: MatchScoreResult | null;
+      parseError: string | null;
+      compatible: boolean;
+    } | null;
+    error: string | null;
+  };
+  const emptyLocalOpen = (): EcuLocalOpenState => ({
+    loading: false,
+    probe: null,
+    error: null,
+  });
+  const [localOpenByEcu, setLocalOpenByEcu] = useState<Record<number, EcuLocalOpenState>>({});
+  const fileInputEcuIdxRef = useRef<number | null>(null);
+  const containerFileInputRef = useRef<HTMLInputElement>(null);
 
-  const respondingEcu = useMemo(
-    () => (report?.ecus.find(e => e.responding) ?? null),
-    [report],
+  const comparisonsWithFlashContainer = useMemo(() => {
+    if (!report || !containerHeader) return null;
+    return report.ecus.map(ecu =>
+      ecu.responding ? compareWithContainer(ecu, containerHeader) : null,
+    );
+  }, [report, containerHeader]);
+
+  const flashContainerComparison = useMemo(() => {
+    if (!comparisonsWithFlashContainer || !report) return null;
+    const idx = report.ecus.findIndex(e => e.responding);
+    return idx >= 0 ? comparisonsWithFlashContainer[idx] : null;
+  }, [comparisonsWithFlashContainer, report]);
+
+  const processLocalContainerFileForEcu = useCallback(
+    (ecuIdx: number, file: File) => {
+      const ecu = report?.ecus[ecuIdx];
+      if (!report || !ecu?.responding) {
+        setLocalOpenByEcu(prev => ({
+          ...prev,
+          [ecuIdx]: {
+            ...emptyLocalOpen(),
+            error: 'Run an ECU scan and expand this ECU row before opening a container file.',
+          },
+        }));
+        return;
+      }
+
+      setLocalOpenByEcu(prev => ({
+        ...prev,
+        [ecuIdx]: { ...emptyLocalOpen(), loading: true },
+      }));
+
+      void file
+        .arrayBuffer()
+        .then(buf => {
+          const params = extractContainerMatchParamsFromBin(new Uint8Array(buf));
+          if (!params) {
+            setLocalOpenByEcu(prev => ({
+              ...prev,
+              [ecuIdx]: {
+                loading: false,
+                probe: {
+                  fileName: file.name,
+                  score: null,
+                  parseError:
+                    'Not a DevProg container (no JSON metadata at 0x1004). Expected V-OP / DevProg envelope.',
+                  compatible: false,
+                },
+                error: null,
+              },
+            }));
+            return;
+          }
+          const scan = buildVehicleScanSnapshotV1(ecu);
+          const score = scoreContainerAgainstScan(params, scan);
+          const compatible = isContainerMatchAcceptable(score);
+          setLocalOpenByEcu(prev => ({
+            ...prev,
+            [ecuIdx]: {
+              loading: false,
+              probe: { fileName: file.name, score, parseError: null, compatible },
+              error: null,
+            },
+          }));
+          if (compatible && onVerifiedContainerLoad) {
+            void Promise.resolve(onVerifiedContainerLoad(file)).catch(err => {
+              console.error('[ECU Scan] load verified container failed', err);
+            });
+          }
+        })
+        .catch(err => {
+          setLocalOpenByEcu(prev => ({
+            ...prev,
+            [ecuIdx]: {
+              loading: false,
+              probe: null,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          }));
+        });
+    },
+    [report, onVerifiedContainerLoad],
   );
 
-  /** Referenz-Container (localStorage / zuletzt eingelesen) vs. aktueller Scan */
-  const sessionReferenceScore = useMemo(() => {
-    if (!respondingEcu) return null;
-    const session = loadEcuContainerSession();
-    const ref = session?.referenceContainer;
-    const mp = ref?.matchParams;
-    if (!mp || !ref) return null;
-    const scan = buildVehicleScanSnapshotV1(respondingEcu);
-    return {
-      score: scoreContainerAgainstScan(mp, scan),
-      fileName: ref.fileName,
-      absolutePath: ref.absolutePath,
-    };
-  }, [report, respondingEcu]);
+  const onOpenLocalContainerClick = useCallback((ecuIdx: number) => {
+    fileInputEcuIdxRef.current = ecuIdx;
+    containerFileInputRef.current?.click();
+  }, []);
 
-  const scanFolderForContainers = useCallback(async () => {
-    setFolderError(null);
-    if (!respondingEcu) {
-      setFolderError('Zuerst einen ECU-Scan ausführen.');
-      return;
-    }
-    const w = window as Window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> };
-    if (typeof w.showDirectoryPicker !== 'function') {
-      setFolderError('Ordnerauswahl wird in diesem Browser nicht unterstützt (Chrome/Edge: File System Access API). Alternativ: npx tsx scripts/find-containers-for-ecu.ts …');
-      return;
-    }
-    setFolderScanning(true);
-    setFolderRanked(null);
-    try {
-      const root = await w.showDirectoryPicker();
-      const candidates: { path: string; params: NonNullable<ReturnType<typeof extractContainerMatchParamsFromBin>> }[] = [];
-      async function walk(dh: FileSystemDirectoryHandle, prefix: string): Promise<void> {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for await (const [name, handle] of (dh as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
-          if (handle.kind === 'directory') {
-            await walk(handle as FileSystemDirectoryHandle, `${prefix}${name}/`);
-          } else if (name.toLowerCase().endsWith('.bin')) {
-            const fh = handle as FileSystemFileHandle;
-            const file = await fh.getFile();
-            const buf = await file.arrayBuffer();
-            const params = extractContainerMatchParamsFromBin(new Uint8Array(buf));
-            if (params) {
-              candidates.push({ path: `${prefix}${name}`, params });
-            }
-          }
-        }
-      }
-      await walk(root, '');
-      const scan = buildVehicleScanSnapshotV1(respondingEcu);
-      const ranked = rankContainerBinsByScan(candidates, scan);
-      setFolderRanked(ranked);
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') {
-        setFolderError(null);
-      } else {
-        setFolderError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setFolderScanning(false);
-    }
-  }, [respondingEcu]);
+  const onContainerFileInputChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      const idx = fileInputEcuIdxRef.current;
+      e.target.value = '';
+      if (!file || idx == null) return;
+      processLocalContainerFileForEcu(idx, file);
+    },
+    [processLocalContainerFileForEcu],
+  );
 
   useEffect(() => {
     if (!bridgeAvailable && vopSupported) {
       setScanTransport('vop');
     }
   }, [bridgeAvailable, vopSupported]);
-
-  // Run comparison when report or container changes
-  useEffect(() => {
-    if (report && containerHeader) {
-      const ecu = report.ecus.find(e => e.responding);
-      if (ecu) {
-        setComparison(compareWithContainer(ecu, containerHeader));
-        return;
-      }
-    }
-    setComparison(null);
-  }, [report, containerHeader]);
 
   const canStartPcan = bridgeAvailable && Boolean(pcanConnection || bridgeUrl);
   const canStartVop = vopSupported;
@@ -161,7 +199,7 @@ export default function EcuScanPanel({
 
     setScanning(true);
     setReport(null);
-    setComparison(null);
+    setLocalOpenByEcu({});
 
     try {
       if (scanTransport === 'pcan') {
@@ -176,7 +214,12 @@ export default function EcuScanPanel({
           await conn.connect({ skipVehicleInit: true });
         }
 
-        const scanner = new EcuScanner(conn, containerHeader ?? undefined, { skipVehicleInit: true });
+        const scanner = new EcuScanner(conn, containerHeader ?? undefined, {
+          skipVehicleInit: true,
+          // WebSocket + bridge + PCAN driver: allow enough time per UDS (not COM — browser talks to bridge only).
+          scanUdsTimeoutMs: 2800,
+          postGmlanUudtDelayMs: 120,
+        });
         scannerRef.current = scanner;
 
         const result = await scanner.scanVehicle((progress) => {
@@ -200,7 +243,11 @@ export default function EcuScanPanel({
         if (!ok) return;
       }
 
-      const scanner = new EcuScanner(v, containerHeader ?? undefined, { skipVehicleInit: true });
+      const scanner = new EcuScanner(v, containerHeader ?? undefined, {
+        skipVehicleInit: true,
+        scanUdsTimeoutMs: 1200,
+        postGmlanUudtDelayMs: 60,
+      });
       scannerRef.current = scanner;
 
       const result = await scanner.scanVehicle((progress) => {
@@ -236,6 +283,15 @@ export default function EcuScanPanel({
 
   return (
     <div className="space-y-4">
+      {/* Always mounted so ref is valid before first scan completes (fixes no-op file picker). */}
+      <input
+        ref={containerFileInputRef}
+        type="file"
+        accept=".bin,application/octet-stream"
+        className="hidden"
+        onChange={onContainerFileInputChange}
+      />
+
       {/* Header */}
       <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
         <div className="flex items-center gap-3 mb-3">
@@ -245,9 +301,10 @@ export default function EcuScanPanel({
           <div className="flex-1">
             <h3 className="text-sm font-bold text-zinc-100">ECU Scanner</h3>
             <p className="text-[10px] text-zinc-500">
-              Read ECU identification and calibration data on the vehicle. After you open a
-              container below, results are compared to sw_c1–sw_c9 (from the header and Tune Deploy analysis when
-              signed in).
+              Read ECU identification and calibration data on the vehicle. After a scan, open a matching local{' '}
+              <span className="font-mono">.bin</span> per ECU — we verify calibration slots, then load the container for
+              flashing. The container opened on the Flash tab is compared to the{' '}
+              <span className="text-zinc-400">first responding</span> ECU.
             </p>
           </div>
           {report && !scanning && (
@@ -387,158 +444,36 @@ export default function EcuScanPanel({
             </div>
           </div>
 
-          {/* Geladener Container (Flash-Tab) — alle Slots gleich? */}
-          {comparison && containerHeader && (
+          {flashContainerComparison && containerHeader && (
             <div
               className={`p-3 rounded-lg border ${
-                comparison.allMatch
+                flashContainerComparison.allMatch
                   ? 'bg-green-500/10 border-green-500/30'
-                  : comparison.changedCount > 0
+                  : flashContainerComparison.changedCount > 0
                     ? 'bg-amber-500/10 border-amber-500/30'
                     : 'bg-zinc-900/40 border-zinc-800/50'
               }`}
             >
               <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <FileCheck className="w-4 h-4 shrink-0 text-cyan-400" />
-                Geöffneter Container vs. Fahrzeug
+                Open Flash-tab container vs vehicle
               </div>
               <p className="text-[10px] text-zinc-500 mt-1">
-                Vergleich mit dem aktuell in der App geladenen Container (sw_c1–sw_c9).
+                Comparison with the container loaded in the Flash tab (sw_c1–sw_c9), <span className="text-zinc-400">first responding ECU</span>.
               </p>
-              {comparison.allMatch ? (
+              {flashContainerComparison.allMatch ? (
                 <p className="text-sm text-green-400 mt-2 font-medium">
-                  Alle Kalibrierungs-Slots stimmen mit dem ECU-Scan überein — dieser Container passt zum verbundenen Steuergerät.
+                  All calibration slots match the ECU scan — this container matches the connected module.
                 </p>
-              ) : comparison.changedCount > 0 ? (
+              ) : flashContainerComparison.changedCount > 0 ? (
                 <p className="text-sm text-amber-300/90 mt-2">
-                  {comparison.changedCount} Slot(s) weichen vom Fahrzeug ab — anderer Container oder andere Kalibration.
+                  {flashContainerComparison.changedCount} slot(s) differ from the vehicle — different container or calibration.
                 </p>
               ) : (
-                <p className="text-[10px] text-zinc-500 mt-2">Kein vollständiger Slot-Vergleich möglich (fehlende Daten).</p>
+                <p className="text-[10px] text-zinc-500 mt-2">Cannot complete slot comparison (missing data).</p>
               )}
             </div>
           )}
-
-          {/* Session-Referenzcontainer (z. B. Bench-File / zuletzt eingelesen) */}
-          {sessionReferenceScore && (
-            <div
-              className={`p-3 rounded-lg border ${
-                sessionReferenceScore.score.confidence >= 0.85
-                  ? 'bg-green-500/10 border-green-500/25'
-                  : sessionReferenceScore.score.confidence >= 0.45
-                    ? 'bg-cyan-500/10 border-cyan-500/25'
-                    : 'bg-zinc-900/40 border-zinc-800/50'
-              }`}
-            >
-              <div className="text-xs font-semibold text-zinc-200">Referenz-Container (Session)</div>
-              <p className="text-[10px] text-zinc-500 mt-0.5 break-all">
-                {sessionReferenceScore.fileName}
-              </p>
-              <p className="text-[9px] text-zinc-600 mt-0.5 break-all font-mono">
-                {sessionReferenceScore.absolutePath}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-                <span className="text-zinc-400">
-                  Übereinstimmung:{' '}
-                  <span className="text-zinc-100 font-mono">
-                    {(sessionReferenceScore.score.confidence * 100).toFixed(0)}%
-                  </span>
-                </span>
-                <span className="text-zinc-400">
-                  Slots:{' '}
-                  <span className="text-zinc-100 font-mono">
-                    {sessionReferenceScore.score.slotMatches}/{sessionReferenceScore.score.nonEmptyContainerSlots}
-                  </span>
-                </span>
-                {sessionReferenceScore.score.ecuTypeMatch === true && (
-                  <span className="text-emerald-400/90">ecu_type ✓</span>
-                )}
-                {sessionReferenceScore.score.hardwareMatch === true && (
-                  <span className="text-emerald-400/90">hardware ✓</span>
-                )}
-              </div>
-              {sessionReferenceScore.score.confidence >= 0.85 && (
-                <p className="text-sm text-green-400/95 mt-2">
-                  Referenz-Container passt sehr gut zum aktuellen ECU-Scan.
-                </p>
-              )}
-              {sessionReferenceScore.score.notes.length > 0 && (
-                <ul className="mt-2 text-[9px] text-zinc-500 list-disc pl-4 space-y-0.5">
-                  {sessionReferenceScore.score.notes.slice(0, 6).map((n, i) => (
-                    <li key={i}>{n}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {/* Alle Container in einem Ordner (lokal) */}
-          <div className="p-3 rounded-lg border border-zinc-800/60 bg-zinc-900/30">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
-                  <FolderOpen className="w-4 h-4 text-amber-400/90" />
-                  Container-Dateien im Ordner finden
-                </div>
-                <p className="text-[10px] text-zinc-500 mt-0.5">
-                  Wählt einen Ordner — alle <span className="font-mono">.bin</span> mit DevProg-Header werden gegen den letzten Scan gewertet und sortiert.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void scanFolderForContainers()}
-                disabled={!respondingEcu || folderScanning}
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs font-medium hover:bg-amber-500/25 disabled:opacity-40"
-              >
-                {folderScanning ? 'Ordner wird gelesen…' : 'Ordner wählen…'}
-              </button>
-            </div>
-            {folderError && (
-              <p className="text-[10px] text-red-400/90 mt-2">{folderError}</p>
-            )}
-            {folderRanked && folderRanked.length > 0 && (
-              <div className="mt-3 max-h-64 overflow-y-auto border border-zinc-800/60 rounded-lg">
-                <table className="w-full text-[10px]">
-                  <thead className="text-zinc-500 bg-zinc-900/80 sticky top-0">
-                    <tr>
-                      <th className="text-left p-2 font-medium">Datei / Pfad</th>
-                      <th className="text-right p-2 font-mono">Match</th>
-                      <th className="text-right p-2 font-mono">Slots</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {folderRanked.map((row, i) => (
-                      <tr
-                        key={`${row.path}-${i}`}
-                        className={
-                          row.score.confidence >= 0.85
-                            ? 'bg-green-500/5'
-                            : row.score.confidence >= 0.45
-                              ? 'bg-cyan-500/5'
-                              : i % 2 === 0
-                                ? 'bg-zinc-900/20'
-                                : ''
-                        }
-                      >
-                        <td className="p-2 font-mono text-zinc-300 break-all max-w-[min(100vw,28rem)]">
-                          {row.path}
-                        </td>
-                        <td className="p-2 text-right text-zinc-200 font-mono">
-                          {(row.score.confidence * 100).toFixed(0)}%
-                        </td>
-                        <td className="p-2 text-right text-zinc-400 font-mono">
-                          {row.score.slotMatches}/{row.score.nonEmptyContainerSlots || '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {folderRanked && folderRanked.length === 0 && !folderScanning && (
-              <p className="text-[10px] text-zinc-600 mt-2">Keine parsbaren DevProg-Container in diesem Ordner.</p>
-            )}
-          </div>
 
           {/* ECU Cards */}
           {report.ecus.map((ecu, idx) => (
@@ -548,16 +483,18 @@ export default function EcuScanPanel({
               expanded={expandedEcu === idx}
               onToggle={() => setExpandedEcu(expandedEcu === idx ? null : idx)}
               comparison={
-                comparison && ecu.responding && containerHeader
-                  ? comparison
+                comparisonsWithFlashContainer && ecu.responding && containerHeader
+                  ? comparisonsWithFlashContainer[idx] ?? null
                   : null
               }
+              localOpen={localOpenByEcu[idx] ?? emptyLocalOpen()}
+              onOpenLocalContainer={() => onOpenLocalContainerClick(idx)}
             />
           ))}
 
-          {/* Slot-Details: geöffneter Container */}
-          {comparison && containerHeader && (
-            <ContainerComparisonCard comparison={comparison} />
+          {/* Slot-level: Flash-tab container vs first responding ECU */}
+          {flashContainerComparison && containerHeader && (
+            <ContainerComparisonCard comparison={flashContainerComparison} />
           )}
         </>
       )}
@@ -583,11 +520,24 @@ function EcuCard({
   expanded,
   onToggle,
   comparison,
+  localOpen,
+  onOpenLocalContainer,
 }: {
   ecu: EcuScanResult;
   expanded: boolean;
   onToggle: () => void;
   comparison: ContainerComparison | null;
+  localOpen: {
+    loading: boolean;
+    probe: {
+      fileName: string;
+      score: MatchScoreResult | null;
+      parseError: string | null;
+      compatible: boolean;
+    } | null;
+    error: string | null;
+  };
+  onOpenLocalContainer: () => void;
 }) {
   if (!ecu.responding) {
     return (
@@ -672,6 +622,90 @@ function EcuCard({
 
       {expanded && (
         <div className="border-t border-zinc-800 p-3 space-y-3">
+          <div className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3 space-y-3">
+            <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+              Match container to this ECU
+            </div>
+            <p className="text-[10px] text-zinc-600 leading-snug">
+              Open one local <span className="font-mono">.bin</span>. We compare software calibration slots to{' '}
+              <span className="text-zinc-400">this</span> ECU (TX{' '}
+              <span className="font-mono">0x{ecu.txAddr.toString(16).toUpperCase()}</span>). If the check passes, the
+              container is loaded for flash (Overview, Readiness, Hardware Flash). CAN adapter type does not affect the
+              check.
+            </p>
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+              <button
+                type="button"
+                disabled
+                title="Library / cloud — not connected yet"
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-zinc-700/50 bg-zinc-900/50 text-zinc-500 text-xs font-medium cursor-not-allowed"
+              >
+                <Cloud className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                From library / cloud…
+              </button>
+              <button
+                type="button"
+                onClick={onOpenLocalContainer}
+                disabled={localOpen.loading}
+                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 text-cyan-200 text-xs font-medium hover:bg-cyan-500/20 disabled:opacity-50"
+              >
+                <Upload className="w-3.5 h-3.5 shrink-0" />
+                {localOpen.loading ? 'Reading…' : 'Open local container file…'}
+              </button>
+            </div>
+            {localOpen.error && (
+              <p className="text-[10px] text-red-400/90">{localOpen.error}</p>
+            )}
+            {localOpen.probe && (
+              <div
+                className={`rounded-md border p-2 text-[10px] ${
+                  localOpen.probe.compatible
+                    ? 'border-green-500/35 bg-green-500/5 text-green-300'
+                    : 'border-red-500/35 bg-red-500/10 text-red-200/95'
+                }`}
+              >
+                <div className="font-medium text-zinc-200 break-all">{localOpen.probe.fileName}</div>
+                {localOpen.probe.parseError ? (
+                  <p className="mt-1 text-red-300/95">{localOpen.probe.parseError}</p>
+                ) : localOpen.probe.score ? (
+                  <>
+                    <p className="mt-1 text-zinc-400">
+                      Match:{' '}
+                      <span className="font-mono text-zinc-200">
+                        {(localOpen.probe.score.confidence * 100).toFixed(0)}% · Slots{' '}
+                        {localOpen.probe.score.slotMatches}/{localOpen.probe.score.nonEmptyContainerSlots}
+                      </span>
+                    </p>
+                    {localOpen.probe.compatible ? (
+                      <>
+                        <p className="mt-1 text-green-400/95">
+                          File matches this ECU — loading container for flash…
+                        </p>
+                        {hasEcuTypeConflict(localOpen.probe.score) && (
+                          <p className="mt-1 text-amber-200/95 text-[10px]">
+                            Note: file <span className="font-mono">ecu_type</span> does not match the scan guess — verify
+                            the correct module.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="mt-1 font-medium text-amber-200">
+                        Warning: not compatible with this vehicle / ECU (calibration mismatch or missing slots on scan).
+                      </p>
+                    )}
+                    {localOpen.probe.score.notes.length > 0 && (
+                      <ul className="mt-1.5 text-zinc-500 list-disc pl-4 space-y-0.5">
+                        {localOpen.probe.score.notes.slice(0, 8).map((n, i) => (
+                          <li key={i}>{n}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
+
           <div>
             <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
               ECU Identity
@@ -934,27 +968,32 @@ function ContainerComparisonCard({ comparison }: { comparison: ContainerComparis
         ? 'bg-amber-500/5 border-amber-500/20'
         : 'bg-zinc-900/40 border-zinc-800/50'
     }`}>
-      <div className="flex items-center gap-2 mb-2">
-        {comparison.allMatch ? (
-          <CheckCircle2 className="w-4 h-4 text-green-400" />
-        ) : comparison.changedCount > 0 ? (
-          <AlertTriangle className="w-4 h-4 text-amber-400" />
-        ) : (
-          <FileCheck className="w-4 h-4 text-zinc-400" />
-        )}
-        <span className="text-xs font-bold text-zinc-200">
-          Slot-Vergleich (ECU ↔ Container)
-        </span>
-        {comparison.changedCount > 0 && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
-            {comparison.changedCount} changed
+      <div className="mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {comparison.allMatch ? (
+            <CheckCircle2 className="w-4 h-4 text-green-400" />
+          ) : comparison.changedCount > 0 ? (
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+          ) : (
+            <FileCheck className="w-4 h-4 text-zinc-400" />
+          )}
+          <span className="text-xs font-bold text-zinc-200">
+            Slot comparison (ECU ↔ Flash-tab container)
           </span>
-        )}
+          {comparison.changedCount > 0 && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              {comparison.changedCount} changed
+            </span>
+          )}
+        </div>
+        <p className="text-[10px] text-zinc-500 mt-1.5 leading-relaxed">
+          Per index: GM C1…C9 (scan) vs sw_c1…sw_c9 (file). Same part in another slot does not count as a match.
+        </p>
       </div>
 
       {comparison.slots.length > 0 ? (
         <div className="space-y-1">
-          {comparison.slots.map((slot) => (
+          {comparison.slots.filter(s => s.profileRelevant !== false).map((slot) => (
             <div key={slot.index} className="flex items-center gap-2 text-[10px]">
               <span className="text-zinc-600 w-5 text-right font-mono">#{slot.index}</span>
               <span className="font-mono text-zinc-400 w-28 truncate" title={slot.ecuPart || '—'}>

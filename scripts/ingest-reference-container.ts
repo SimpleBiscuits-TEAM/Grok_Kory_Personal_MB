@@ -1,6 +1,6 @@
 /**
- * CLI: read a DevProg container .bin and write `.data/ecu-container-session.json`
- * with `referenceContainer.matchParams` for agent / offline matching.
+ * CLI: read a DevProg container .bin and write `.data/last-container-ingest.json`
+ * with parsed match params (for agents / debugging — not used as in-app “reference container”).
  *
  * Usage: npx tsx scripts/ingest-reference-container.ts "C:\path\to\file.bin"
  */
@@ -28,27 +28,17 @@ function main() {
   const matchParams = extractContainerMatchParamsFromBin(u8);
   const dir = path.join(root, '.data');
   fs.mkdirSync(dir, { recursive: true });
-  const out = path.join(dir, 'ecu-container-session.json');
-  let existing: Record<string, unknown> = {};
-  if (fs.existsSync(out)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(out, 'utf-8')) as Record<string, unknown>;
-    } catch {
-      /* ignore */
-    }
-  }
-  const session = {
-    ...existing,
+  const out = path.join(dir, 'last-container-ingest.json');
+  const payload = {
     version: 1 as const,
     updatedAt: Date.now(),
-    referenceContainer: {
+    file: {
       absolutePath: abs,
       fileName: path.basename(abs),
       matchParams,
-      lastIngestedAt: Date.now(),
     },
   };
-  fs.writeFileSync(out, JSON.stringify(session, null, 2), 'utf-8');
+  fs.writeFileSync(out, JSON.stringify(payload, null, 2), 'utf-8');
   console.log('Wrote', out);
   if (!matchParams) {
     console.warn('Warning: could not parse DevProg header — matchParams is null');

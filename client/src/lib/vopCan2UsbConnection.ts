@@ -113,6 +113,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private rxBuf = new Uint8Array(0);
 
   private vopFlashUdsListener: ((arbId: number, data: Uint8Array) => void) | null = null;
+  /** Reject for the in-flight {@link sendUDSRequest} wait (emergency abort). */
+  private vopUdsInFlightReject: ((err: Error) => void) | null = null;
   private canRxMonitorCallbacks = new Set<(arbId: number, flags: number, data: Uint8Array) => void>();
 
   private state: ConnectionState = 'disconnected';
@@ -845,11 +847,16 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     return this.writer !== null && this.port !== null && this.readActive;
   }
 
+  /**
+   * Fire-and-forget CAN TX (flash keepalive / GMLAN UUDT). Matches {@link PCANConnection.sendRawCanFrame}:
+   * do **not** wait for a USB ACK — the bridge still transmits; ACK-wait would stack delays (~800ms+ each)
+   * when the host fires many frames quickly (SESSION_OPEN + 500ms TesterPresent).
+   */
   async sendRawCanFrame(arbId: number, data: number[]): Promise<void> {
     if (!this.writer) throw new Error('USB CAN bridge not connected');
     const frame = new Uint8Array(8);
     for (let i = 0; i < 8; i++) frame[i] = data[i] ?? 0;
-    const ok = await this.sendCanTx(arbId, false, frame, true);
+    const ok = await this.sendCanTx(arbId, false, frame, false);
     if (!ok) throw new Error('CAN TX rejected by USB bridge');
   }
 
@@ -874,6 +881,18 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     } catch {
       await this.cleanupPort();
       return false;
+    }
+  }
+
+  /** Stops UDS listeners and rejects the active {@link sendUDSRequest} wait (emergency user abort). */
+  cancelInFlightDiagnostics(): void {
+    this.vopFlashUdsListener = null;
+    for (const w of this.ackWaiters) w.resolve(false);
+    this.ackWaiters.length = 0;
+    if (this.vopUdsInFlightReject) {
+      const r = this.vopUdsInFlightReject;
+      this.vopUdsInFlightReject = null;
+      r(new Error('Aborted'));
     }
   }
 
@@ -980,8 +999,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.vopFlashUdsListener = null;
     await new Promise(r => setTimeout(r, 150));
 
-    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
+      this.vopUdsInFlightReject = reject;
       const timeout = setTimeout(() => {
+        this.vopUdsInFlightReject = null;
         this.vopFlashUdsListener = null;
         resolve(null);
       }, timeoutMs);
@@ -1009,6 +1030,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
               frameData,
               timeoutMs,
             );
+            this.vopUdsInFlightReject = null;
             if (!assembled || assembled.length === 0) {
               resolve(null);
               return;
@@ -1030,12 +1052,14 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         if (isPositiveMatch) {
           clearTimeout(timeout);
           this.vopFlashUdsListener = null;
+          this.vopUdsInFlightReject = null;
           resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
         } else if (isNegativeForUs || isNegativeUnknown) {
           const nrc = frameData.length > 3 ? frameData[3] : 0;
           if (nrc === 0x78) return;
           clearTimeout(timeout);
           this.vopFlashUdsListener = null;
+          this.vopUdsInFlightReject = null;
           resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
         }
       };
@@ -1168,8 +1192,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
 
     const mfTimeout = Math.min(Math.max(timeoutMs * 6, 30_000), 120_000);
-    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
+    const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
+      this.vopUdsInFlightReject = reject;
       const respTimeout = setTimeout(() => {
+        this.vopUdsInFlightReject = null;
         this.vopFlashUdsListener = null;
         resolve(null);
       }, mfTimeout);
@@ -1190,6 +1216,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
               frameData,
               mfTimeout,
             );
+            this.vopUdsInFlightReject = null;
             if (!assembled || assembled.length === 0) {
               resolve(null);
               return;
@@ -1208,12 +1235,14 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           if (isPositiveMatch) {
             clearTimeout(respTimeout);
             this.vopFlashUdsListener = null;
+            this.vopUdsInFlightReject = null;
             resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
           } else if (isNegativeForUs) {
             const nrc = frameData.length > 3 ? frameData[3] : 0;
             if (nrc === 0x78) return;
             clearTimeout(respTimeout);
             this.vopFlashUdsListener = null;
+            this.vopUdsInFlightReject = null;
             resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
           }
         }
@@ -1254,6 +1283,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.port = null;
     for (const w of this.ackWaiters) w.resolve(false);
     this.ackWaiters.length = 0;
+    if (this.vopUdsInFlightReject) {
+      const r = this.vopUdsInFlightReject;
+      this.vopUdsInFlightReject = null;
+      r(new Error('Disconnected'));
+    }
   }
 
   async disconnect(): Promise<void> {

@@ -2640,6 +2640,19 @@ export class PCANConnection {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Clears raw-CAN UDS listeners and rejects pending {@link sendUDSRequest} waits so
+   * {@link PCANFlashEngine.abort} stops CAN traffic immediately.
+   */
+  cancelInFlightDiagnostics(): void {
+    this.udsResponseListener = null;
+    for (const [, pending] of Array.from(this.pendingRequests.entries())) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Aborted'));
+    }
+    this.pendingRequests.clear();
+  }
+
   /** Fire-and-forget CAN TX (8 bytes, zero-padded) for keepalive / UUDT. */
   async sendRawCanFrame(arbId: number, data: number[]): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
