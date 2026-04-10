@@ -1350,9 +1350,9 @@ export class PCANFlashEngine {
     // UUDT messages (GMLAN functional broadcast): fire-and-forget, no response expected.
     // Send the raw CAN frame directly and return immediately.
     if (isUUDT) {
-      // TesterPresent UUDT (FE 01 3E): if keepalive is not yet running (e.g. plan has no
-      // FE 02 10 02 before this step), start the cyclic timer. Usually keepalive already
-      // started right after programming session broadcast — see below.
+      // GMLAN: cyclic TesterPresent (UUDT FE 01 3E) must start AFTER A5 03 (plan step 8), not after
+      // FE 02 10 02 — BUSMASTER order is 0x28 → A2 → A5 01 → A5 03 first; injecting 3E earlier breaks timing.
+      // This command (FE 01 3E) starts the timer; {@link sendOneKeepaliveFrame} sends the first frame immediately.
       const isTesterPresentUUDT = serviceId === UDS.TESTER_PRESENT;
       if (isTesterPresentUUDT && !this.keepaliveActive) {
         this.startKeepalive();
@@ -1373,17 +1373,6 @@ export class PCANFlashEngine {
           while (frame.length < 8) frame.push(0x00);
           void this.conn.sendRawCanFrame(cmdTxAddr, frame.slice(0, 8));
           this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT \u2014 no response expected)`);
-          // GMLAN: start TesterPresent cyclic immediately after programming session is opened
-          // on the functional broadcast (FE 02 10 02 on 0x101) — before 0x28 / A5 / later steps.
-          if (
-            this.isGMLAN
-            && serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL
-            && subFunction === 0x02
-            && !this.keepaliveActive
-          ) {
-            this.startKeepalive();
-            this.log('success', cmd.phase, '💓 TesterPresent cyclic started (after programming session UUDT 0x10 0x02)');
-          }
         } else {
           this.log('warning', cmd.phase, `${cmd.label} \u2014 CAN bridge not open, skipping UUDT`);
         }
@@ -1444,15 +1433,17 @@ export class PCANFlashEngine {
           const rxHex = (response.data || []).map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
           this.log('can_rx', cmd.phase, `RX: 0x${this.rxAddr.toString(16).toUpperCase()} ${rxHex}`);
           this.log('success', cmd.phase, `✓ ${cmd.label}`);
-          // GMLAN PRE_CHECK: physical DiagnosticSessionControl 0x10 0x02 on 0x7E0 — start cyclic TP here too.
+          // Dry-run PRE_CHECK only: physical 0x10 0x02 enables DID reads before SESSION_OPEN broadcast.
           if (
-            this.isGMLAN
+            this.dryRun
+            && cmd.phase === 'PRE_CHECK'
+            && this.isGMLAN
             && serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL
             && subFunction === 0x02
             && !this.keepaliveActive
           ) {
             this.startKeepalive();
-            this.log('success', cmd.phase, '💓 TesterPresent cyclic started (after programming session 0x10 0x02)');
+            this.log('success', cmd.phase, '💓 TesterPresent cyclic started (after PRE_CHECK programming session)');
           }
           this.state.statusMessage = cmd.label;
           this.emitState();
