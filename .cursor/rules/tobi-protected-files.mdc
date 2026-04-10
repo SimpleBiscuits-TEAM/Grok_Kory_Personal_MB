@@ -1,0 +1,96 @@
+---
+description: CRITICAL — Tobi's flash/datalogging files are PROTECTED. Do not modify without owner approval.
+alwaysApply: true
+---
+
+# ⛔ TOBI PROTECTED FILES — DO NOT MODIFY
+
+## STOP. READ THIS BEFORE TOUCHING ANY FLASH, DATALOGGING, OR ECU FILE.
+
+Tobi maintains all flash, datalogging, ECU scan, PCAN, V-OP CAN, and tune deploy code.
+His code is **production-tested on real ECUs** and **only he can efficiently fix it** if broken.
+
+**On April 9–10, 2026, AI agent changes to infrastructure files broke ECU flashing.**
+This rule exists to prevent that from ever happening again.
+
+## PROTECTED FILES — DO NOT MODIFY
+
+### Flash Engine & Transport (modifying these can BRICK ECUs)
+- `client/src/lib/pcanFlashEngine.ts`
+- `client/src/lib/pcanConnection.ts`
+- `client/src/lib/pcanConnection.test.ts`
+- `client/src/lib/vopCan2UsbConnection.ts`
+- `client/src/lib/flashBridgeConnection.ts`
+- `shared/pcanFlashOrchestrator.ts`
+- `shared/flashFileValidator.ts`
+- `shared/flashVerify.ts`
+- `shared/flashVerify.test.ts`
+- `shared/flashLogRecommendations.ts`
+- `shared/flashLogRecommendations.test.ts`
+- `shared/ecuContainerMatch.ts`
+- `shared/ecuSoftwareSlotMask.ts`
+
+### Flash UI
+- `client/src/components/FlashContainerPanel.tsx`
+- `client/src/components/FlashDashboard.tsx`
+- `client/src/components/FlashMissionControl.tsx`
+- `client/src/components/EcuScanPanel.tsx`
+
+### Flash Support
+- `client/src/lib/ecuContainerSessionStorage.ts`
+- `client/src/lib/ecuScanner.ts`
+- `client/src/lib/flashContainerParser.ts`
+- `client/src/lib/flashLogExcelExport.ts`
+
+### Flash Server
+- `server/routers/flash.ts`
+- `server/routers/flash.test.ts`
+- `server/routers/flash-integration.test.ts`
+- `server/flashDb.ts`
+- `server/flash.test.ts`
+
+### Datalogging
+- `client/src/components/DataloggerPanel.tsx`
+- `client/src/lib/obdConnection.ts`
+- `client/src/lib/obdConnection.test.ts`
+- `server/routers/datalogCache.ts`
+- `server/routers/datalogNaming.ts`
+
+### Tune Deploy
+- `server/tuneDeployRoutes.ts`
+- `server/tuneDeployDb.ts`
+- `server/routers/tuneDeploy.ts`
+- `server/routers/tuneDeploy.test.ts`
+- `server/lib/tuneDeployParser.ts`
+- `server/lib/tuneDeployParser.test.ts`
+- `shared/tuneDeploySchemas.ts`
+
+### Firmware
+- `firmware/**` (all files)
+
+### Flash Scripts
+- `scripts/find-containers-for-ecu.ts`
+- `scripts/fix-flash-tables.mjs`
+- `scripts/generate-flash-fix-pdf.ts`
+- `scripts/ingest-reference-container.ts`
+
+### Infrastructure Dependencies (changes here have BROKEN flash before)
+- `server/_core/index.ts` — server binding, Helmet, CSP, WebSocket proxy
+- `server/_core/loadEnv.ts` — NODE_ENV override logic
+- `server/_core/vite.ts` — Vite middleware / SPA fallback
+- `server/_core/vopDevServerArgv.ts` — dev server detection
+
+## WHAT TO DO INSTEAD
+
+1. **If you need to change a protected file:** STOP and tell the user:
+   "This file is protected under Tobi's code ownership. Modifying it requires explicit approval from Kory (project owner). See TOBI_PROTECTED_FILES.md."
+
+2. **If you need to change an infrastructure file (server/_core/):** STOP and warn:
+   "⚠️ WARNING: This infrastructure file is a dependency of Tobi's flash system. Changes here have previously broken ECU flashing. Modification requires owner approval. See TOBI_PROTECTED_FILES.md."
+
+3. **If your task requires flash/datalogging changes:** Tell the user this work should be routed to Tobi's branch.
+
+4. **If you are reading these files for context:** That is fine. READ is allowed. WRITE is not.
+
+## REFERENCE
+See `TOBI_PROTECTED_FILES.md` in the project root for full documentation.

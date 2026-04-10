@@ -1092,3 +1092,12 @@
 - [x] Update GitHubCommitHistory UI component with user-selectable commit count (15, 50, 100, 200)
 - [x] Make commit history section collapsible/expandable (folder-style toggle with FolderOpen/FolderClosed icons)
 - [x] Update tests for new pagination logic (7 tests, all passing, including 200-max and >100 pagination test)
+## Tobi Code Protection System
+- [x] Identify all Tobi-owned flash, datalogging, ECU, and transport files (9 categories, 60+ files)
+- [x] Create TOBI_PROTECTED_FILES.md manifest documenting all protected files with rationale
+- [x] Create .github/CODEOWNERS requiring @simplebiscuits approval for all protected files
+- [x] Create .cursor/rules/tobi-protected-files.mdc blocking AI agents from modifying protected files
+- [x] Create scripts/check-tobi-protection.mjs for pre-push GROK sync validation
+- [x] Include infrastructure dependencies (server/_core/) in protection scope
+- [x] Write team summary document for distribution
+
