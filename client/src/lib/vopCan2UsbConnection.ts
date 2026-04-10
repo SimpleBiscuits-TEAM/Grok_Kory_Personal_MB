@@ -847,11 +847,16 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     return this.writer !== null && this.port !== null && this.readActive;
   }
 
+  /**
+   * Fire-and-forget CAN TX (flash keepalive / GMLAN UUDT). Matches {@link PCANConnection.sendRawCanFrame}:
+   * do **not** wait for a USB ACK — the bridge still transmits; ACK-wait would stack delays (~800ms+ each)
+   * when the host fires many frames quickly (SESSION_OPEN + 500ms TesterPresent).
+   */
   async sendRawCanFrame(arbId: number, data: number[]): Promise<void> {
     if (!this.writer) throw new Error('USB CAN bridge not connected');
     const frame = new Uint8Array(8);
     for (let i = 0; i < 8; i++) frame[i] = data[i] ?? 0;
-    const ok = await this.sendCanTx(arbId, false, frame, true);
+    const ok = await this.sendCanTx(arbId, false, frame, false);
     if (!ok) throw new Error('CAN TX rejected by USB bridge');
   }
 

@@ -403,7 +403,7 @@ export class PCANFlashEngine {
    * Send one TesterPresent frame (GMLAN UUDT on 0x101 or UDS 0x3E 0x80 on physical).
    * Used by {@link startKeepalive} and the interval; respects {@link keepalivePaused}.
    */
-  private sendOneKeepaliveFrame(): void {
+  private async sendOneKeepaliveFrame(): Promise<void> {
     if (!this.keepaliveActive || this.aborted) return;
     if (this.keepalivePaused) return;
     const isGmlan = this.isGMLAN;
@@ -413,7 +413,7 @@ export class PCANFlashEngine {
           ? [0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00]  // GMLAN UUDT format
           : [0x02, 0x3E, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00]; // UDS standard
         const arbId = isGmlan ? 0x101 : this.txAddr;
-        void this.conn.sendRawCanFrame(arbId, frame);
+        await this.conn.sendRawCanFrame(arbId, frame);
       }
     } catch {
       // Keepalive failure is non-fatal — the next real command will detect connection issues
@@ -445,7 +445,7 @@ export class PCANFlashEngine {
     const formatDesc = isGmlan ? 'UUDT FE 01 3E on 0x101 every 500ms' : '0x3E 0x80 every 2s';
     this.log('info', this.state.currentPhase, `💓 TesterPresent keepalive started (${formatDesc})`);
 
-    this.sendOneKeepaliveFrame();
+    void this.sendOneKeepaliveFrame();
 
     this.keepaliveTimer = setInterval(() => {
       if (!this.keepaliveActive || this.aborted) {
@@ -453,7 +453,7 @@ export class PCANFlashEngine {
         return;
       }
       if (this.keepalivePaused) return;
-      this.sendOneKeepaliveFrame();
+      void this.sendOneKeepaliveFrame();
     }, intervalMs);
   }
 
@@ -1371,7 +1371,7 @@ export class PCANFlashEngine {
         if (this.conn.isFlashTransportOpen()) {
           const frame = [...dataBytes];
           while (frame.length < 8) frame.push(0x00);
-          void this.conn.sendRawCanFrame(cmdTxAddr, frame.slice(0, 8));
+          await this.conn.sendRawCanFrame(cmdTxAddr, frame.slice(0, 8));
           this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT \u2014 no response expected)`);
         } else {
           this.log('warning', cmd.phase, `${cmd.label} \u2014 CAN bridge not open, skipping UUDT`);
