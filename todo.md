@@ -1248,3 +1248,13 @@
 - [ ] Auto-populate "Current ECM Values" fields from live module read (no manual entry)
 - [ ] Support multiple module targets (ECM, IPC, TCM) — addresses TBD per vehicle/ECM type
 - [ ] Write corrected values back to module when binary flash pipeline is wired
+
+## Bug: Dev Tools Missing
+- [x] Restore missing dev tools — devTabs were defined but not included in allTabs array for admin users
+
+## Bug: GOD MODE Not Showing for Team Members
+- [x] Fix GOD MODE banner to show for all team members — user fixing admin role in DB directly
+- [x] Ensure all team members are treated as admin / have GOD MODE access — user managing via DB
+
+## Fix: Home Page Support Button
+- [x] Change home page SUPPORT button to open Strat AI support chat instead of redirecting to ppei.com

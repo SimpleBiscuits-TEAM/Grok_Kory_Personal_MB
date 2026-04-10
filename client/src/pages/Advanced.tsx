@@ -1469,7 +1469,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const talonTab = { id: 'talon' as TabId, label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> };
   const showTalonTab = activeTab === 'talon' || injectedWP8 !== null;
   const allTabs = isAdmin
-    ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...adminTabs, ...superAdminTabs]
+    ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...devTabs, ...adminTabs, ...superAdminTabs]
     : [...tabs, ...(showTalonTab ? [talonTab] : [])];
   const mainTabCountBeforeAdmin = tabs.length + (showTalonTab ? 1 : 0);
 

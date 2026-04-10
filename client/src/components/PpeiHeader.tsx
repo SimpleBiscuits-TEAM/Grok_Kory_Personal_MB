@@ -53,7 +53,7 @@ const navItems: NavItem[] = [
   { label: 'VOP LITE', path: '/' },
   { label: 'VOP PRO', path: '/advanced' },
   { label: 'SHOP', path: '/shop', external: 'https://ppei.com/' },
-  { label: 'SUPPORT', path: '/support', external: 'https://ppei.com/' },
+  { label: 'SUPPORT', path: '/strat' },
   { label: 'COMMUNITY', path: '/community' },
   { label: 'GIT-MAP', path: '/git-map', devFeature: true },
 ];
