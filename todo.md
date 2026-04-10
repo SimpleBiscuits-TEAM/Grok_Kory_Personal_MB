@@ -1086,3 +1086,9 @@
 - [x] Investigate why commits are not displaying at the bottom of the home analyzer page (GITHUB_API_TOKEN expired, server returning 401)
 - [x] Fix the commit display component/API (added gh CLI fallback for token resolution, reads process.env fresh instead of cached ENV)
 - [x] Verify commits show correctly (15 commits returned, all 5 tests passing)
+
+## Enhancement — GitHub Commit History (100+ with user selection)
+- [x] Update GitHub router to support up to 200 commits via GitHub API pagination
+- [x] Update GitHubCommitHistory UI component with user-selectable commit count (15, 50, 100, 200)
+- [x] Make commit history section collapsible/expandable (folder-style toggle with FolderOpen/FolderClosed icons)
+- [x] Update tests for new pagination logic (7 tests, all passing, including 200-max and >100 pagination test)

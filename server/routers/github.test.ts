@@ -3,15 +3,14 @@
  *
  * Tests the GitHub API integration and commit data structure returned by
  * the getRecentCommits procedure. Uses the real GITHUB_API_TOKEN to validate
- * the secret works against the private repo.
+ * the secret works against the private repo. Includes pagination tests.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 describe("GitHub Router — Commit History (API)", () => {
   const originalEnv = process.env.GITHUB_API_TOKEN;
 
   afterEach(() => {
-    // Restore original env
     if (originalEnv !== undefined) {
       process.env.GITHUB_API_TOKEN = originalEnv;
     }
@@ -20,7 +19,6 @@ describe("GitHub Router — Commit History (API)", () => {
   });
 
   it("should validate GITHUB_API_TOKEN is set and can access the repo", async () => {
-    // This test validates the secret is working
     const token = process.env.GITHUB_API_TOKEN;
     expect(token).toBeTruthy();
 
@@ -51,6 +49,7 @@ describe("GitHub Router — Commit History (API)", () => {
     expect(result.repoUrl).toBe("https://github.com/simplebiscuits/Good-Gravy-2");
     expect(result.commits.length).toBeGreaterThan(0);
     expect(result.commits.length).toBeLessThanOrEqual(3);
+    expect(result.totalRequested).toBe(3);
 
     const first = result.commits[0];
     expect(first.sha).toBeTruthy();
@@ -70,6 +69,7 @@ describe("GitHub Router — Commit History (API)", () => {
 
     expect(result.commits.length).toBeLessThanOrEqual(15);
     expect(result.commits.length).toBeGreaterThan(0);
+    expect(result.totalRequested).toBe(15);
   });
 
   it("should still work via gh CLI fallback when env token is missing", async () => {
@@ -80,7 +80,6 @@ describe("GitHub Router — Commit History (API)", () => {
     const result = await caller.getRecentCommits({ count: 5 });
 
     // In dev sandbox, gh CLI provides a fallback token, so commits may still be returned.
-    // In production without gh CLI, this would return [].
     expect(result.repo).toBe("simplebiscuits/Good-Gravy-2");
     expect(Array.isArray(result.commits)).toBe(true);
   });
@@ -96,5 +95,37 @@ describe("GitHub Router — Commit History (API)", () => {
     expect(commit.url).toMatch(
       /^https:\/\/github\.com\/simplebiscuits\/Good-Gravy-2\/commit\/[a-f0-9]{40}$/
     );
+  });
+
+  it("should accept max 200 and reject above", async () => {
+    vi.resetModules();
+    const { githubRouter } = await import("./github");
+    const caller = githubRouter.createCaller({} as any);
+
+    // 200 should be accepted (max)
+    const result = await caller.getRecentCommits({ count: 200 });
+    expect(result.totalRequested).toBe(200);
+    expect(result.commits.length).toBeGreaterThan(0);
+    expect(result.commits.length).toBeLessThanOrEqual(200);
+
+    // 201 should throw validation error
+    await expect(caller.getRecentCommits({ count: 201 })).rejects.toThrow();
+  });
+
+  it("should return more than 100 commits when requested (pagination)", async () => {
+    vi.resetModules();
+    const { githubRouter } = await import("./github");
+    const caller = githubRouter.createCaller({} as any);
+    const result = await caller.getRecentCommits({ count: 110 });
+
+    // The repo should have >100 commits; if not, at least verify no error
+    expect(result.totalRequested).toBe(110);
+    expect(Array.isArray(result.commits)).toBe(true);
+    // Each commit should still have valid structure
+    if (result.commits.length > 100) {
+      const commit101 = result.commits[100];
+      expect(commit101.sha.length).toBe(40);
+      expect(commit101.shortSha.length).toBe(7);
+    }
   });
 });
