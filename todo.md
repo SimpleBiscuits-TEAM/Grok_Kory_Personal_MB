@@ -1215,3 +1215,10 @@
 - [x] Add delta view showing difference between stock and modified tables with color coding
 - [x] Integrate comparison visualization into DieselInjectorFlowConverter results section
 - [x] Support all 7 Duramax engines in the comparison view
+
+## Bug: Flow chart upload stuck at step 2
+- [x] Fix: User uploads flow chart image but can't proceed past step 2 (upload step) in Diesel Injector Flow Converter — root cause: 2MB JSON body limit exceeded by large base64 images; fixed with client-side JPEG compression + resize to 2048px max
+
+## GOD MODE Admin Banner
+- [x] Add "GOD MODE" banner at top of screen when user is signed in as admin role
+- [x] Make it visually distinct so admin knows they see a different view than public

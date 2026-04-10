@@ -107,6 +107,44 @@ export default function PpeiHeader() {
     : '?';
 
   return (
+    <>
+    {isAdmin && (
+      <div style={{
+        background: 'linear-gradient(90deg, oklch(0.65 0.28 30) 0%, oklch(0.55 0.25 25) 50%, oklch(0.65 0.28 30) 100%)',
+        padding: '6px 0',
+        textAlign: 'center',
+        position: 'relative',
+        zIndex: 100,
+        borderBottom: '2px solid oklch(0.75 0.3 50)',
+        boxShadow: '0 2px 12px oklch(0.65 0.28 30 / 0.4)',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+        }}>
+          <span style={{
+            fontFamily: sFont.heading,
+            fontSize: '0.85rem',
+            fontWeight: 900,
+            letterSpacing: '0.25em',
+            color: 'white',
+            textShadow: '0 1px 4px oklch(0 0 0 / 0.5)',
+          }}>
+            ⚡ GOD MODE ⚡
+          </span>
+          <span style={{
+            fontFamily: sFont.mono,
+            fontSize: '0.6rem',
+            color: 'oklch(1 0 0 / 0.75)',
+            letterSpacing: '0.05em',
+          }}>
+            ADMIN ALL-ACCESS — PUBLIC VIEW DIFFERS
+          </span>
+        </div>
+      </div>
+    )}
     <header style={{
       background: sColor.bg,
       borderBottom: `1px solid ${sColor.border}`,
@@ -496,5 +534,6 @@ export default function PpeiHeader() {
         </div>
       </div>
     </header>
+    </>
   );
 }

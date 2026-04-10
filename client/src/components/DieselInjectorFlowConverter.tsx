@@ -118,16 +118,41 @@ function formatDelta(stockVal: number, correctedVal: number): string {
   return `${sign}${delta.toFixed(1)} (${sign}${pct.toFixed(1)}%)`;
 }
 
-function fileToBase64(file: File): Promise<string> {
+/**
+ * Compress and resize image to stay under Express 2MB JSON body limit.
+ * Max dimension: 2048px. Output: JPEG at quality 0.8.
+ * Returns { base64, mimeType }.
+ */
+function compressImageToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.includes(',') ? result.split(',')[1] : result;
-      resolve(base64);
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const MAX_DIM = 2048;
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+      if (w > MAX_DIM || h > MAX_DIM) {
+        const scale = MAX_DIM / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      // Use JPEG for smaller payload
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const base64 = dataUrl.split(',')[1];
+      resolve({ base64, mimeType: 'image/jpeg' });
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image for compression'));
+    };
+    img.src = url;
   });
 }
 
@@ -442,10 +467,10 @@ export default function DieselInjectorFlowConverter() {
     if (!imageFile) return;
     setOcrError(null);
     try {
-      const base64 = await fileToBase64(imageFile);
+      const { base64, mimeType } = await compressImageToBase64(imageFile);
       const res = await ocrMutation.mutateAsync({
         imageBase64: base64,
-        mimeType: imageFile.type,
+        mimeType,
       });
 
       if (res.success && res.data) {

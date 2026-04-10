@@ -4,12 +4,15 @@
  * Accepts a base64-encoded photo/scan of an injector flow sheet (e.g., S&S Diesel, Exergy, etc.),
  * uploads it to S3, sends it to LLM vision with a structured JSON schema, and returns
  * the parsed test point data ready for the duration table correction engine.
+ *
+ * Image is compressed client-side to stay under the 2MB JSON body limit.
  */
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { storagePut } from "../storage";
+import { TRPCError } from "@trpc/server";
 
 function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -28,12 +31,14 @@ CRITICAL RULES:
   - Duration in µSec (microseconds)
   - Injected quantity for EACH injector in mm³/stroke
 - Extract the average injected quantity across all injectors for each test point
-- Extract return flow data if present
-- Extract test conditions (fluid type, temperature, speed, bench info)
+- Extract return flow data if present (set to null if not present)
+- Extract test conditions if present (set empty strings for missing fields)
 - Extract serial numbers and date codes for each injector
 - Read numbers EXACTLY as printed — do not round or estimate
 - If variance percentages are shown, extract those too
-- The flow sheet typically has 4 test points but may have more or fewer`;
+- The flow sheet typically has 4 test points but may have more or fewer
+- If return flow data is not present on the sheet, set returnFlow to null
+- If test conditions are not visible, use empty strings`;
 
 const EXTRACTION_SCHEMA = {
   type: "json_schema" as const,
@@ -45,15 +50,18 @@ const EXTRACTION_SCHEMA = {
       properties: {
         brand: {
           type: "string",
-          description: "Company/brand name (e.g., 'S&S Diesel Motorsport', 'Exergy Performance')",
+          description:
+            "Company/brand name (e.g., 'S&S Diesel Motorsport', 'Exergy Performance')",
         },
         injectorModel: {
           type: "string",
-          description: "Injector model/size name (e.g., 'SAC00', '60% Over', 'LBZ 200%')",
+          description:
+            "Injector model/size name (e.g., 'SAC00', '60% Over', 'LBZ 200%')",
         },
         baseEngine: {
           type: "string",
-          description: "Base engine the injectors are for (e.g., 'Duramax LB7', 'Cummins 5.9', 'Powerstroke 6.0')",
+          description:
+            "Base engine the injectors are for (e.g., 'Duramax LB7', 'Cummins 5.9', 'Powerstroke 6.0')",
         },
         injectorType: {
           type: "string",
@@ -72,35 +80,70 @@ const EXTRACTION_SCHEMA = {
           items: {
             type: "object",
             properties: {
-              testPointNumber: { type: "number", description: "Test point number (1, 2, 3, 4, etc.)" },
-              pressureMPa: { type: "number", description: "Rail pressure in MPa" },
-              durationMicroseconds: { type: "number", description: "Injector pulse duration in µSec" },
-              averageQuantityMm3: { type: "number", description: "Average injected quantity across all injectors in mm³/stroke" },
-              variancePercent: { type: "number", description: "Variance percentage if shown, otherwise 0" },
+              testPointNumber: {
+                type: "number",
+                description: "Test point number (1, 2, 3, 4, etc.)",
+              },
+              pressureMPa: {
+                type: "number",
+                description: "Rail pressure in MPa",
+              },
+              durationMicroseconds: {
+                type: "number",
+                description: "Injector pulse duration in µSec",
+              },
+              averageQuantityMm3: {
+                type: "number",
+                description:
+                  "Average injected quantity across all injectors in mm³/stroke",
+              },
+              variancePercent: {
+                type: "number",
+                description:
+                  "Variance percentage if shown, otherwise 0",
+              },
               perInjectorQuantities: {
                 type: "array",
                 items: { type: "number" },
-                description: "Individual injected quantity for each injector in mm³/stroke, in order",
+                description:
+                  "Individual injected quantity for each injector in mm³/stroke, in order",
               },
             },
-            required: ["testPointNumber", "pressureMPa", "durationMicroseconds", "averageQuantityMm3", "variancePercent", "perInjectorQuantities"],
+            required: [
+              "testPointNumber",
+              "pressureMPa",
+              "durationMicroseconds",
+              "averageQuantityMm3",
+              "variancePercent",
+              "perInjectorQuantities",
+            ],
             additionalProperties: false,
           },
           description: "All test points from the flow sheet",
         },
         returnFlow: {
-          type: "object",
-          properties: {
-            pressureMPa: { type: "number" },
-            durationMicroseconds: { type: "number" },
-            perInjectorQuantities: {
-              type: "array",
-              items: { type: "number" },
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                pressureMPa: { type: "number" },
+                durationMicroseconds: { type: "number" },
+                perInjectorQuantities: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+              },
+              required: [
+                "pressureMPa",
+                "durationMicroseconds",
+                "perInjectorQuantities",
+              ],
+              additionalProperties: false,
             },
-          },
-          required: ["pressureMPa", "durationMicroseconds", "perInjectorQuantities"],
-          additionalProperties: false,
-          description: "Return flow test data if present",
+            { type: "null" },
+          ],
+          description:
+            "Return flow test data if present, null if not on the sheet",
         },
         testConditions: {
           type: "object",
@@ -112,10 +155,21 @@ const EXTRACTION_SCHEMA = {
           },
           required: ["fluid", "temperature", "speed", "bench"],
           additionalProperties: false,
-          description: "Test conditions from the flow sheet",
+          description:
+            "Test conditions from the flow sheet (use empty strings for missing fields)",
         },
       },
-      required: ["brand", "injectorModel", "baseEngine", "injectorType", "date", "injectorCount", "testPoints", "returnFlow", "testConditions"],
+      required: [
+        "brand",
+        "injectorModel",
+        "baseEngine",
+        "injectorType",
+        "date",
+        "injectorCount",
+        "testPoints",
+        "returnFlow",
+        "testConditions",
+      ],
       additionalProperties: false,
     },
   },
@@ -124,33 +178,47 @@ const EXTRACTION_SCHEMA = {
 export const injectorOcrRouter = router({
   /**
    * Extract injector flow data from a flow sheet image
-   * Input: base64 image data + mime type
+   * Input: base64 image data + mime type (image should be compressed client-side)
    * Output: parsed test point data with per-injector quantities
    */
   extractFlowSheet: protectedProcedure
     .input(
       z.object({
         imageBase64: z.string().min(100),
-        mimeType: z.string().default("image/png"),
+        mimeType: z.string().default("image/jpeg"),
       })
     )
     .mutation(async ({ input, ctx }) => {
+      let imageUrl: string;
+
       // 1. Upload image to S3 for a public URL
-      const buf = Buffer.from(input.imageBase64, "base64");
-      const ext = input.mimeType.includes("png") ? "png" : "jpg";
-      const fileKey = `injector-ocr/${ctx.user.id}-${randomSuffix()}.${ext}`;
-      const { url: imageUrl } = await storagePut(fileKey, buf, input.mimeType);
+      try {
+        const buf = Buffer.from(input.imageBase64, "base64");
+        const ext = input.mimeType.includes("png") ? "png" : "jpg";
+        const fileKey = `injector-ocr/${ctx.user.id}-${randomSuffix()}.${ext}`;
+        const result = await storagePut(fileKey, buf, input.mimeType);
+        imageUrl = result.url;
+      } catch (err) {
+        console.error("[InjectorOCR] S3 upload failed:", err);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "Failed to upload flow sheet image. Please try again or use a smaller image.",
+        });
+      }
 
       // 2. Extract flow sheet data via LLM vision
-      const response = await invokeLLM({
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text" as const,
-                text: `Extract ALL test point data from this diesel injector flow sheet image.
+      let response;
+      try {
+        response = await invokeLLM({
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Extract ALL test point data from this diesel injector flow sheet image.
 
 Read every test point row carefully:
 - The test point number, pressure (MPa), duration (µSec)
@@ -165,23 +233,31 @@ Also extract:
 - New vs remanufactured
 - Date
 - Number of injectors
-- Return flow data if present
-- Test conditions (fluid, temp, speed, bench)
+- Return flow data if present (null if not on the sheet)
+- Test conditions (fluid, temp, speed, bench — empty strings if not visible)
 
 Return as structured JSON.`,
-              },
-              {
-                type: "image_url" as const,
-                image_url: {
-                  url: imageUrl,
-                  detail: "high" as const,
                 },
-              },
-            ],
-          },
-        ],
-        response_format: EXTRACTION_SCHEMA,
-      });
+                {
+                  type: "image_url" as const,
+                  image_url: {
+                    url: imageUrl,
+                    detail: "high" as const,
+                  },
+                },
+              ],
+            },
+          ],
+          response_format: EXTRACTION_SCHEMA,
+        });
+      } catch (err) {
+        console.error("[InjectorOCR] LLM extraction failed:", err);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "AI extraction failed. The image may be unclear or in an unsupported format. Try a clearer photo or use Manual Entry instead.",
+        });
+      }
 
       // 3. Parse the structured response
       const rawContent = response.choices?.[0]?.message?.content;
@@ -198,12 +274,40 @@ Return as structured JSON.`,
           : "";
 
       if (!contentStr) {
-        throw new Error(
-          "LLM returned empty response for injector flow sheet extraction"
-        );
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "AI returned empty response. Try a clearer image or use Manual Entry.",
+        });
       }
 
-      const parsed = JSON.parse(contentStr);
+      let parsed;
+      try {
+        parsed = JSON.parse(contentStr);
+      } catch {
+        console.error(
+          "[InjectorOCR] Failed to parse LLM JSON:",
+          contentStr.slice(0, 500)
+        );
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            "AI response was not valid JSON. Try again or use Manual Entry.",
+        });
+      }
+
+      // Validate we got at least one test point
+      if (
+        !parsed.testPoints ||
+        !Array.isArray(parsed.testPoints) ||
+        parsed.testPoints.length === 0
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "No test points found in the flow sheet. Make sure the image clearly shows the test data table.",
+        });
+      }
 
       return {
         success: true,
