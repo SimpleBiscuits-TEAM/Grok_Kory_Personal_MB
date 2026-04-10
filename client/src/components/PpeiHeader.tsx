@@ -11,6 +11,7 @@ import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { APP_VERSION } from '@/lib/version';
 import { getLoginUrl } from '@/const';
 import { toast } from 'sonner';
+import { useAccessTier } from '@/hooks/useAccessTier';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -80,6 +81,7 @@ export default function PpeiHeader() {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isGuest = user?.openId === GUEST_OPEN_ID;
   const oauthLoginUrl = getLoginUrl();
+  const { isGodMode, tier } = useAccessTier();
 
   useEffect(() => {
     if (!import.meta.env.DEV || oauthLoginUrl) return;
@@ -108,7 +110,7 @@ export default function PpeiHeader() {
 
   return (
     <>
-    {isAdmin && (
+    {isGodMode && (
       <div style={{
         background: 'linear-gradient(90deg, oklch(0.65 0.28 30) 0%, oklch(0.55 0.25 25) 50%, oklch(0.65 0.28 30) 100%)',
         padding: '6px 0',
@@ -140,7 +142,7 @@ export default function PpeiHeader() {
             color: 'oklch(1 0 0 / 0.75)',
             letterSpacing: '0.05em',
           }}>
-            ADMIN ALL-ACCESS — PUBLIC VIEW DIFFERS
+            VOP PRO — FULL ACCESS
           </span>
         </div>
       </div>
@@ -308,47 +310,7 @@ export default function PpeiHeader() {
             }}>{APP_VERSION}</span>
             {isAuthenticated && <NotificationBell />}
 
-            {/* Guest: use assign() so OAuth always does a full navigation (reliable vs SPA + <a>). */}
-            {!isAuthenticated && (
-              <button
-                type="button"
-                className="ppei-btn-hover"
-                title={
-                  oauthLoginUrl
-                    ? "Open Manus sign-in in this window"
-                    : "VITE_APP_ID missing — see toast or browser console (F12)"
-                }
-                onClick={() => {
-                  if (oauthLoginUrl) {
-                    window.location.assign(oauthLoginUrl);
-                    return;
-                  }
-                  toast.error("App sign-in is not wired yet on this machine", {
-                    description:
-                      "Create a file named .env in the same folder as package.json (project root). Add: VITE_APP_ID=your-id-from-Manus and JWT_SECRET=any-long-random-string. Save, stop the dev server (Ctrl+C), run pnpm dev again. " +
-                      "If your terminal shows github.com/login/device — that is only for Git pushes, not V-OP.",
-                    duration: 16000,
-                  });
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 14px',
-                  borderRadius: '3px',
-                  border: `1px solid ${oauthLoginUrl ? sColor.red : "oklch(0.35 0.02 260)"}`,
-                  background: oauthLoginUrl ? `${sColor.red}18` : "oklch(0.14 0.006 260)",
-                  fontFamily: sFont.heading,
-                  fontSize: '0.78rem',
-                  letterSpacing: '0.08em',
-                  color: oauthLoginUrl ? sColor.red : sColor.textMuted,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                SIGN IN
-              </button>
-            )}
+            {/* SIGN IN button removed — MAIN branch uses access code gate only, no OAuth sign-in */}
 
             {/* User menu */}
             {isAuthenticated && (

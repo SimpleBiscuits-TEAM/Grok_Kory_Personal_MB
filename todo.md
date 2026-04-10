@@ -1268,3 +1268,14 @@
 - [x] Updated getGitHubToken() priority: GH_TOKEN > GITHUB_API_TOKEN > gh CLI fallback
 - [x] Added length check (>10 chars) to skip obviously truncated/invalid tokens
 - [x] Updated vitest tests to use GH_TOKEN || GITHUB_API_TOKEN — both tests pass
+
+## MAIN Branch Only: Tiered Access Gates — DO NOT push to grok
+- [x] Remove Manus OAuth sign-in requirement — hide SIGN IN button, no login needed
+- [x] KINGKONG access code → grants VOP LITE only (Home page: analyzer, basic editor, datalogger)
+- [x] KINGKONG1 access code → grants full access (VOP LITE + VOP PRO) + GOD MODE banner
+- [x] Access gate on Home page: prompt for code before showing any content
+- [x] VOP PRO (/advanced) requires KINGKONG1 tier — redirect KINGKONG users back or show upgrade prompt
+- [x] GOD MODE banner shows for KINGKONG1 users (no admin role check needed)
+- [x] Store access tier in cookie (vop_access=lite vs vop_access=pro) to persist across pages
+- [x] Re-enable access gate on Editor/Tasks (currently dev-bypassed with useState(true))
+- [x] NOTE: These changes are MAIN-only — grok branch keeps current auth settings unchanged

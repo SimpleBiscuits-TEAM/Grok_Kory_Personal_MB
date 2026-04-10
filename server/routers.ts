@@ -60,28 +60,56 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const isDev = process.env.NODE_ENV === "development";
         const isDevBypassCode = input.code.trim() === "1234";
+        const trimmedCode = input.code.trim().toUpperCase();
 
-        const result = isDev && isDevBypassCode
-          ? ({ label: "Local Dev Bypass" } as const)
-          : await verifyAccessCode(input.code);
+        // ── Tiered access: KINGKONG = lite, KINGKONG1 = pro (full + GOD MODE) ──
+        // Check hardcoded tier codes first, then fall back to DB
+        let tier: "lite" | "pro" = "lite";
+        let label = "";
 
-        if (!result) {
-          return { success: false, message: "Invalid or expired access code" } as const;
+        if (trimmedCode === "KINGKONG1") {
+          tier = "pro";
+          label = "VOP PRO — Full Access";
+        } else if (trimmedCode === "KINGKONG") {
+          tier = "lite";
+          label = "VOP LITE";
+        } else if (isDev && isDevBypassCode) {
+          tier = "pro";
+          label = "Local Dev Bypass";
+        } else {
+          // Fall back to DB-stored access codes
+          const result = await verifyAccessCode(input.code);
+          if (!result) {
+            return { success: false, message: "Invalid or expired access code" } as const;
+          }
+          label = result.label ?? "Access Granted";
+          // DB codes default to lite unless label contains "pro"
+          tier = (result.label ?? "").toLowerCase().includes("pro") ? "pro" : "lite";
         }
-        // Set a session cookie to mark the user as having access-code entry
+
+        // Set tiered cookie: "lite" or "pro"
         const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie("vop_access", "granted", {
+        ctx.res.cookie("vop_access", tier, {
           ...cookieOptions,
           maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
-        return { success: true, label: result.label } as const;
+        return { success: true, label, tier } as const;
       }),
     checkAccess: publicProcedure.query(({ ctx }) => {
       // Parse cookies from raw header (no cookie-parser middleware)
       const cookieHeader = ctx.req.headers.cookie || "";
-      const hasAccessCode = cookieHeader.split(";").some(c => c.trim() === "vop_access=granted");
+      const cookies = Object.fromEntries(
+        cookieHeader.split(";").map(c => {
+          const [k, ...v] = c.trim().split("=");
+          return [k, v.join("=")];
+        })
+      );
+      const accessValue = cookies["vop_access"] || "";
+      // Support old "granted" value as "lite" for backward compat
+      const hasAccess = accessValue === "lite" || accessValue === "pro" || accessValue === "granted";
+      const tier = accessValue === "pro" ? "pro" : (hasAccess ? "lite" : "none");
       const hasOAuth = Boolean(ctx.user);
-      return { authenticated: hasAccessCode, method: hasAccessCode ? "access_code" : "none", hasOAuth } as const;
+      return { authenticated: hasAccess, tier, method: hasAccess ? "access_code" : "none", hasOAuth } as const;
     }),
 
     // ── Share Token (single-session, single-page guest links) ──

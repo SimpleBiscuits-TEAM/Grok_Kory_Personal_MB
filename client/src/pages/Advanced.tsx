@@ -1170,13 +1170,12 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
 // ─── Editor Passcode Gate ───────────────────────────────────────────────────
 
-const EDITOR_CODE = 'KINGKONG';
+const EDITOR_CODE = 'KINGKONG1';
 const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
   const [editorSubTab, setEditorSubTab] = useState<'calibration' | 'diesel'>('calibration');
-  // DEV BYPASS: skip access code gate for faster development
-  const [unlocked, setUnlocked] = useState(true /* was: () => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true' */);
+  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true');
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
@@ -1731,11 +1730,10 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
 // ─── Tasks Access Gate ──────────────────────────────────────────────────────
 
-const TASKS_CODE = 'KINGKONG';
+const TASKS_CODE = 'KINGKONG1';
 
 function TasksGate() {
-  // DEV BYPASS: skip access code gate for faster development
-  const [unlocked, setUnlocked] = useState(true /* was: false */);
+  const [unlocked, setUnlocked] = useState(false);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
