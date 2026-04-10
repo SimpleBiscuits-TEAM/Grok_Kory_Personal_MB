@@ -1131,3 +1131,20 @@
 - [x] Add copy/paste export for corrected table (paste into calibration software)
 - [x] Wire tab into Advanced.tsx navigation under editor section
 - [x] Smooth interpolation across all pressure/quantity breakpoints
+
+## Diesel Injector Flow Converter — Rework
+- [ ] Fix tab visibility: ensure INJECTOR FLOW tab appears in Advanced nav (check if gated behind admin/role)
+- [ ] Rework UX: user selects engine (LB7), then uploads their flow chart (image or manual entry)
+- [ ] Parse uploaded flow sheet data (image OCR via LLM or manual 4-test-point entry form)
+- [ ] Generate corrected table from user-provided flow data (not hardcoded S&S data)
+- [ ] Show corrected table with copy/paste button and CSV download export
+- [ ] Remove hardcoded S&S data as default — make it upload-driven
+
+## Navigation Rename — VOP LITE / VOP PRO
+- [x] Rename "ANALYZE" tab/page to "VOP LITE" in App.tsx top nav (PpeiHeader updated)
+- [x] Add sub-tabs inside VOP LITE: Analyze, Basic Editor (VehicleCoding), Datalogger (Tobi's DataloggerPanel)
+- [x] Datalogger in VOP LITE uses Tobi's DataloggerPanel (protected rules apply)
+- [x] Rename "ADVANCED" tab/page to "VOP PRO" in App.tsx top nav (already done in PpeiHeader)
+- [x] Rename "CODING" to "BASIC EDITS" in VOP PRO devTabs
+- [x] Update Home.tsx references to match new naming
+- [x] Update any breadcrumbs or internal links referencing old names

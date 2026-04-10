@@ -39,6 +39,9 @@ import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import PpeiHeader from '@/components/PpeiHeader';
 import GitHubCommitHistory from '@/components/GitHubCommitHistory';
+import VehicleCoding from '@/components/VehicleCoding';
+import DataloggerPanel from '@/components/DataloggerPanel';
+import { Settings } from 'lucide-react';
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -58,6 +61,7 @@ export default function Home() {
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
   const [showProTeaser, setShowProTeaser] = useState(false);
+  const [liteTab, setLiteTab] = useState<'analyze' | 'basic-editor' | 'datalogger'>('analyze');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -287,13 +291,62 @@ export default function Home() {
       {/* ── PPEI Header (shared across all pages) ── */}
       <PpeiHeader />
 
+      {/* ── VOP LITE Sub-Tab Bar ── */}
+      <div style={{
+        background: 'oklch(0.12 0.005 260)',
+        borderBottom: '1px solid oklch(0.20 0.008 260)',
+      }}>
+        <div className="container mx-auto px-4">
+          <div style={{ display: 'flex', gap: '2px', overflowX: 'auto' }}>
+            {[
+              { id: 'analyze' as const, label: 'ANALYZE', icon: <BarChart3 style={{ width: 15, height: 15 }} /> },
+              { id: 'basic-editor' as const, label: 'BASIC EDITOR', icon: <Settings style={{ width: 15, height: 15 }} /> },
+              { id: 'datalogger' as const, label: 'DATALOGGER', icon: <Gauge style={{ width: 15, height: 15 }} /> },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setLiteTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '10px 16px',
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '0.85rem', letterSpacing: '0.06em',
+                  color: liteTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
+                  background: liteTab === tab.id ? 'oklch(0.16 0.008 260)' : 'transparent',
+                  border: 'none',
+                  borderBottom: liteTab === tab.id ? '2px solid oklch(0.52 0.22 25)' : '2px solid transparent',
+                  cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
+                }}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <main className="container mx-auto px-4 py-8">
         {/* What's New Panel */}
         {isAuthenticated && showWhatsNew && (
           <WhatsNewPanel onClose={() => setShowWhatsNew(false)} autoHide={false} />
         )}
 
-        {!data ? (
+        {/* ── BASIC EDITOR Tab ── */}
+        {liteTab === 'basic-editor' && (
+          <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}>
+            <VehicleCoding />
+          </div>
+        )}
+
+        {/* ── DATALOGGER Tab ── */}
+        {liteTab === 'datalogger' && (
+          <div className="ppei-anim-fade-up">
+            <DataloggerPanel />
+          </div>
+        )}
+
+        {/* ── ANALYZE Tab (original content) ── */}
+        {liteTab === 'analyze' && !data ? (
           /* ── Upload Section ── */
           <div className="max-w-3xl mx-auto">
 
@@ -660,7 +713,7 @@ export default function Home() {
             </div>
             </>
           </div>
-        ) : (
+        ) : liteTab === 'analyze' && data ? (
           /* ── Dashboard Section ── */
           <div className="space-y-6 ppei-anim-fade-in">
 
@@ -1028,7 +1081,7 @@ export default function Home() {
               <EcuReferencePanel />
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Recent commits — always at bottom (upload view + after analyze) */}
         <div className="max-w-3xl mx-auto w-full">

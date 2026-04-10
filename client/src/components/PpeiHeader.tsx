@@ -50,8 +50,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'ANALYZE', path: '/' },
-  { label: 'ADVANCED', path: '/advanced' },
+  { label: 'VOP LITE', path: '/' },
+  { label: 'VOP PRO', path: '/advanced' },
   { label: 'SHOP', path: '/shop', external: 'https://ppei.com/' },
   { label: 'SUPPORT', path: '/support', external: 'https://ppei.com/' },
   { label: 'COMMUNITY', path: '/community' },
