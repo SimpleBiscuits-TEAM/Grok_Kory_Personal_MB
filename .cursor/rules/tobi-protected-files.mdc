@@ -1,21 +1,27 @@
 ---
-description: CRITICAL — Tobi's flash/datalogging files are PROTECTED. Do not modify without owner approval.
+description: "CRITICAL PROTECTION: Tobi's flash/datalogging/ECU files are LOCKED. Any modification WILL break ECU flashing. STOP and read this rule before touching ANY flash, transport, datalogging, tune deploy, firmware, or server/_core file."
 alwaysApply: true
 ---
 
-# ⛔ TOBI PROTECTED FILES — DO NOT MODIFY
+# ⛔⛔⛔ STOP — TOBI PROTECTED FILES — DO NOT MODIFY ⛔⛔⛔
 
-## STOP. READ THIS BEFORE TOUCHING ANY FLASH, DATALOGGING, OR ECU FILE.
+## ╔══════════════════════════════════════════════════════════════╗
+## ║  WARNING: MODIFYING THESE FILES CAN BRICK PHYSICAL ECUs    ║
+## ║  AND DESTROY REAL VEHICLE HARDWARE WORTH THOUSANDS OF $$$  ║
+## ╚══════════════════════════════════════════════════════════════╝
 
-Tobi maintains all flash, datalogging, ECU scan, PCAN, V-OP CAN, and tune deploy code.
-His code is **production-tested on real ECUs** and **only he can efficiently fix it** if broken.
+**THIS IS NOT A SUGGESTION. THIS IS A HARD RULE.**
 
-**On April 9–10, 2026, AI agent changes to infrastructure files broke ECU flashing.**
-This rule exists to prevent that from ever happening again.
+Tobi maintains ALL flash, datalogging, ECU scan, PCAN, V-OP CAN, tune deploy, and related infrastructure code. His code is **production-tested on real ECUs** — meaning it has been verified to correctly flash physical engine control units in real vehicles. **Only Tobi can efficiently fix these files if they break.**
 
-## PROTECTED FILES — DO NOT MODIFY
+### What happened when this rule was violated:
+On **April 9–10, 2026**, AI agent changes to infrastructure files (`server/_core/index.ts`, `loadEnv.ts`, `vite.ts`) and transport files (`pcanConnection.ts`) **broke ECU flashing entirely**. Tobi had to spend an entire morning writing 6 targeted fix commits to repair the damage. This rule exists to **prevent that from EVER happening again**.
 
-### Flash Engine & Transport (modifying these can BRICK ECUs)
+---
+
+## 🚫 YOU MUST NOT MODIFY THESE FILES:
+
+### CRITICAL — Flash Engine & Transport (CAN BRICK ECUs):
 - `client/src/lib/pcanFlashEngine.ts`
 - `client/src/lib/pcanConnection.ts`
 - `client/src/lib/pcanConnection.test.ts`
@@ -30,33 +36,33 @@ This rule exists to prevent that from ever happening again.
 - `shared/ecuContainerMatch.ts`
 - `shared/ecuSoftwareSlotMask.ts`
 
-### Flash UI
+### HIGH — Flash UI:
 - `client/src/components/FlashContainerPanel.tsx`
 - `client/src/components/FlashDashboard.tsx`
 - `client/src/components/FlashMissionControl.tsx`
 - `client/src/components/EcuScanPanel.tsx`
 
-### Flash Support
+### HIGH — Flash Support:
 - `client/src/lib/ecuContainerSessionStorage.ts`
 - `client/src/lib/ecuScanner.ts`
 - `client/src/lib/flashContainerParser.ts`
 - `client/src/lib/flashLogExcelExport.ts`
 
-### Flash Server
+### HIGH — Flash Server & Database:
 - `server/routers/flash.ts`
 - `server/routers/flash.test.ts`
 - `server/routers/flash-integration.test.ts`
 - `server/flashDb.ts`
 - `server/flash.test.ts`
 
-### Datalogging
+### HIGH — Datalogging:
 - `client/src/components/DataloggerPanel.tsx`
 - `client/src/lib/obdConnection.ts`
 - `client/src/lib/obdConnection.test.ts`
 - `server/routers/datalogCache.ts`
 - `server/routers/datalogNaming.ts`
 
-### Tune Deploy
+### MEDIUM — Tune Deploy:
 - `server/tuneDeployRoutes.ts`
 - `server/tuneDeployDb.ts`
 - `server/routers/tuneDeploy.ts`
@@ -65,32 +71,44 @@ This rule exists to prevent that from ever happening again.
 - `server/lib/tuneDeployParser.test.ts`
 - `shared/tuneDeploySchemas.ts`
 
-### Firmware
-- `firmware/**` (all files)
+### CRITICAL — Firmware:
+- `firmware/**` (ALL files in firmware directory)
 
-### Flash Scripts
+### HIGH — Flash Scripts:
 - `scripts/find-containers-for-ecu.ts`
 - `scripts/fix-flash-tables.mjs`
 - `scripts/generate-flash-fix-pdf.ts`
 - `scripts/ingest-reference-container.ts`
 
-### Infrastructure Dependencies (changes here have BROKEN flash before)
+### HIGH — Infrastructure Dependencies (BROKE FLASH BEFORE):
 - `server/_core/index.ts` — server binding, Helmet, CSP, WebSocket proxy
 - `server/_core/loadEnv.ts` — NODE_ENV override logic
 - `server/_core/vite.ts` — Vite middleware / SPA fallback
 - `server/_core/vopDevServerArgv.ts` — dev server detection
 
-## WHAT TO DO INSTEAD
+---
 
-1. **If you need to change a protected file:** STOP and tell the user:
-   "This file is protected under Tobi's code ownership. Modifying it requires explicit approval from Kory (project owner). See TOBI_PROTECTED_FILES.md."
+## ⚠️ WHAT YOU MUST DO INSTEAD:
 
-2. **If you need to change an infrastructure file (server/_core/):** STOP and warn:
-   "⚠️ WARNING: This infrastructure file is a dependency of Tobi's flash system. Changes here have previously broken ECU flashing. Modification requires owner approval. See TOBI_PROTECTED_FILES.md."
+### If asked to modify ANY file listed above:
+**STOP IMMEDIATELY.** Do not write a single character to that file. Instead, respond with:
 
-3. **If your task requires flash/datalogging changes:** Tell the user this work should be routed to Tobi's branch.
+> "⛔ BLOCKED: This file (`filename`) is protected under Tobi's code ownership policy. Modifying it could break ECU flashing and potentially brick physical vehicle hardware. This change requires explicit written approval from Kory (project owner). The work should be routed to Tobi's branch. See TOBI_PROTECTED_FILES.md for details."
 
-4. **If you are reading these files for context:** That is fine. READ is allowed. WRITE is not.
+### If asked to modify server/_core/ files:
+**STOP IMMEDIATELY.** These infrastructure files are direct dependencies of the flash system. Respond with:
 
-## REFERENCE
-See `TOBI_PROTECTED_FILES.md` in the project root for full documentation.
+> "⛔ BLOCKED: `server/_core/` files are protected infrastructure dependencies. On April 9-10, 2026, changes to these exact files broke ECU flashing. Modification requires explicit written approval from Kory (project owner). See TOBI_PROTECTED_FILES.md."
+
+### If your task involves flash, datalogging, or ECU functionality:
+Tell the user this work must be routed through Tobi's branch (GROK).
+
+### Reading these files for context:
+**Reading is allowed.** You may read protected files to understand the codebase. You must NOT write to them.
+
+---
+
+## 📋 REFERENCE
+Full documentation: `TOBI_PROTECTED_FILES.md` in project root
+GitHub CODEOWNERS: `.github/CODEOWNERS` (requires @simplebiscuits approval)
+Protection check script: `scripts/check-tobi-protection.mjs`

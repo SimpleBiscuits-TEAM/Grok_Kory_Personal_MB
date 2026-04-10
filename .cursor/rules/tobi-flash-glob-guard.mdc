@@ -1,0 +1,28 @@
+---
+description: "STOP — You are viewing a TOBI PROTECTED FILE. Do NOT modify it. ECU flashing will break."
+globs: "**/pcanFlashEngine*,**/pcanConnection*,**/vopCan2UsbConnection*,**/flashBridgeConnection*,**/pcanFlashOrchestrator*,**/flashFileValidator*,**/flashVerify*,**/flashLogRecommendations*,**/ecuContainerMatch*,**/ecuSoftwareSlotMask*,**/FlashContainerPanel*,**/FlashDashboard*,**/FlashMissionControl*,**/EcuScanPanel*,**/ecuContainerSessionStorage*,**/ecuScanner*,**/flashContainerParser*,**/flashLogExcelExport*,**/DataloggerPanel*,**/obdConnection*,**/datalogCache*,**/datalogNaming*,**/tuneDeploy*,**/tuneDeployParser*,**/tuneDeploySchemas*,**/tuneDeployDb*,**/tuneDeployRoutes*,**/flash.ts,**/flash.test.ts,**/flash-integration*,**/flashDb*,**/firmware/**,**/find-containers-for-ecu*,**/fix-flash-tables*,**/generate-flash-fix-pdf*,**/ingest-reference-container*,server/_core/index.ts,server/_core/loadEnv.ts,server/_core/vite.ts,server/_core/vopDevServerArgv.ts"
+alwaysApply: false
+---
+
+# ⛔⛔⛔ THIS FILE IS TOBI-PROTECTED — DO NOT MODIFY ⛔⛔⛔
+
+## ╔══════════════════════════════════════════════════════════════╗
+## ║  YOU ARE LOOKING AT A PROTECTED FILE.                      ║
+## ║  DO NOT EDIT IT. DO NOT REFACTOR IT. DO NOT "FIX" IT.      ║
+## ║  MODIFYING THIS FILE CAN BRICK PHYSICAL ECU HARDWARE.      ║
+## ╚══════════════════════════════════════════════════════════════╝
+
+**The file you are currently viewing is owned by Tobi and is protected under the V-OP code protection policy.**
+
+This file is part of the ECU flash, datalogging, tune deploy, or server infrastructure system. It has been **tested on real physical ECUs** and is known to work correctly. On April 9-10, 2026, AI agent modifications to files in this category **broke ECU flashing entirely**.
+
+## YOU MUST:
+1. **NOT** write, edit, refactor, rename, move, or delete this file
+2. **NOT** change imports, exports, function signatures, or types in this file
+3. **NOT** "improve", "optimize", or "clean up" this file
+4. **NOT** modify any file that this file imports from or exports to
+5. **IMMEDIATELY** tell the user if you are being asked to change this file:
+
+> "⛔ BLOCKED: This file is protected under Tobi's code ownership. Modifying it requires explicit approval from Kory (project owner). This work should be routed to Tobi's branch (GROK). See TOBI_PROTECTED_FILES.md."
+
+## Reading is OK. Writing is NOT.

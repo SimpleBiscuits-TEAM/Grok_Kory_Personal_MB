@@ -1,0 +1,76 @@
+# ============================================================================
+# TOBI PROTECTED FILES — HARD BLOCK
+# ============================================================================
+# These files are owned by Tobi and must NOT be read or modified by any AI
+# agent without explicit written approval from Kory (project owner).
+#
+# On April 9-10, 2026, AI agent changes broke ECU flashing. This block
+# prevents that from happening again.
+#
+# See TOBI_PROTECTED_FILES.md for full documentation.
+# ============================================================================
+
+# --- Flash Engine & Transport (CAN BRICK ECUs) ---
+client/src/lib/pcanFlashEngine.ts
+client/src/lib/pcanConnection.ts
+client/src/lib/pcanConnection.test.ts
+client/src/lib/vopCan2UsbConnection.ts
+client/src/lib/flashBridgeConnection.ts
+shared/pcanFlashOrchestrator.ts
+shared/flashFileValidator.ts
+shared/flashVerify.ts
+shared/flashVerify.test.ts
+shared/flashLogRecommendations.ts
+shared/flashLogRecommendations.test.ts
+shared/ecuContainerMatch.ts
+shared/ecuSoftwareSlotMask.ts
+
+# --- Flash UI ---
+client/src/components/FlashContainerPanel.tsx
+client/src/components/FlashDashboard.tsx
+client/src/components/FlashMissionControl.tsx
+client/src/components/EcuScanPanel.tsx
+
+# --- Flash Support ---
+client/src/lib/ecuContainerSessionStorage.ts
+client/src/lib/ecuScanner.ts
+client/src/lib/flashContainerParser.ts
+client/src/lib/flashLogExcelExport.ts
+
+# --- Flash Server ---
+server/routers/flash.ts
+server/routers/flash.test.ts
+server/routers/flash-integration.test.ts
+server/flashDb.ts
+server/flash.test.ts
+
+# --- Datalogging ---
+client/src/components/DataloggerPanel.tsx
+client/src/lib/obdConnection.ts
+client/src/lib/obdConnection.test.ts
+server/routers/datalogCache.ts
+server/routers/datalogNaming.ts
+
+# --- Tune Deploy ---
+server/tuneDeployRoutes.ts
+server/tuneDeployDb.ts
+server/routers/tuneDeploy.ts
+server/routers/tuneDeploy.test.ts
+server/lib/tuneDeployParser.ts
+server/lib/tuneDeployParser.test.ts
+shared/tuneDeploySchemas.ts
+
+# --- Firmware ---
+firmware/**
+
+# --- Flash Scripts ---
+scripts/find-containers-for-ecu.ts
+scripts/fix-flash-tables.mjs
+scripts/generate-flash-fix-pdf.ts
+scripts/ingest-reference-container.ts
+
+# --- Infrastructure Dependencies (changes here BROKE flash before) ---
+server/_core/index.ts
+server/_core/loadEnv.ts
+server/_core/vite.ts
+server/_core/vopDevServerArgv.ts
