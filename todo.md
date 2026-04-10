@@ -1204,3 +1204,8 @@
 
 ## Remove "Upgrade to V-OP Pro" Inside VOP PRO
 - [x] Remove or hide any "Upgrade to V-OP Pro" prompts/messaging when user is already inside VOP PRO (they already unlocked it)
+
+## Move DIESEL Into EDITOR Sub-Tab
+- [x] Remove DIESEL from top-level VOP PRO tab bar
+- [x] Add DIESEL as sub-tab inside EDITOR (alongside CALIBRATION EDITOR)
+- [x] DIESEL sub-tab contains DURAMAX / POWERSTROKE / CUMMINS nested sub-tabs

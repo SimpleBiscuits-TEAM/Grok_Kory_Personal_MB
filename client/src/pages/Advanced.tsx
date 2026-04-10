@@ -1174,7 +1174,7 @@ const EDITOR_CODE = 'KINGKONG';
 const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
-  const [editorSubTab, setEditorSubTab] = useState<'calibration'>('calibration');
+  const [editorSubTab, setEditorSubTab] = useState<'calibration' | 'diesel'>('calibration');
   // DEV BYPASS: skip access code gate for faster development
   const [unlocked, setUnlocked] = useState(true /* was: () => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true' */);
   const [code, setCode] = useState('');
@@ -1216,6 +1216,7 @@ function EditorGate() {
         <div style={{ display: 'flex', gap: '0', borderBottom: `1px solid ${sColor.border}`, background: sColor.bgDark, flexShrink: 0 }}>
           {[
             { id: 'calibration' as const, label: 'CALIBRATION EDITOR' },
+            { id: 'diesel' as const, label: 'DIESEL' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -1238,6 +1239,7 @@ function EditorGate() {
           ))}
         </div>
         {editorSubTab === 'calibration' && <CalibrationEditor />}
+        {editorSubTab === 'diesel' && <DieselPanel />}
       </div>
     );
   }
@@ -1404,7 +1406,7 @@ function DieselPanel() {
 
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger' | 'diesel';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1412,7 +1414,6 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'datalogger', label: 'DATALOGGER', icon: <Gauge style={{ width: 16, height: 16 }} /> },
   { id: 'ai', label: 'AI CHAT', icon: <Brain style={{ width: 16, height: 16 }} /> },
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  { id: 'diesel', label: 'DIESEL', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'ppei-flash' as TabId, label: 'PPEI FLASHER', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 280)' }} /> },
@@ -1693,11 +1694,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             <EditorGate />
           </div>
         )}
-        {activeTab === 'diesel' && (
-          <div className="ppei-anim-fade-up">
-            <DieselPanel />
-          </div>
-        )}
+
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
