@@ -4,6 +4,8 @@
 
 **Before modifying ANY file, check if it is on the protected list below. If it is, STOP and do not modify it.**
 
+**Reading is allowed.** You may read any protected file for context, understanding imports, and suggesting correct interfaces. You must NOT write to, edit, refactor, rename, move, or delete protected files.
+
 On April 9-10, 2026, AI agent changes to infrastructure and transport files broke ECU flashing. The following policy is now in effect:
 
 ### Protected File Categories
@@ -17,6 +19,7 @@ This includes but is not limited to:
 - All files matching `**/obdConnection*`, `**/DataloggerPanel*`, `**/datalogCache*`, `**/datalogNaming*`
 - All files matching `**/tuneDeploy*`, `**/tuneDeployParser*`, `**/tuneDeploySchemas*`
 - All files matching `**/flashDb*`, `**/flash.ts`, `**/flash.test*`, `**/flashVerify*`
+- All files matching `**/computeSecurityKeyClient*`, `**/ecuChecksums*`, `**/ecuDetection*`, `**/ecuReference*`, `**/ecuDatabase*`
 - All files in `firmware/`
 - All files in `scripts/` related to flash or containers
 - `server/_core/index.ts`, `server/_core/loadEnv.ts`, `server/_core/vite.ts`, `server/_core/vopDevServerArgv.ts`

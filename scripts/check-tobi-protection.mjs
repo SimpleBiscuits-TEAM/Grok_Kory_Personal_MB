@@ -50,6 +50,11 @@ const PROTECTED_FILES = [
   'client/src/lib/ecuScanner.ts',
   'client/src/lib/flashContainerParser.ts',
   'client/src/lib/flashLogExcelExport.ts',
+  'client/src/lib/computeSecurityKeyClient.ts',
+  'client/src/lib/ecuChecksums.ts',
+  'client/src/lib/ecuDetection.ts',
+  'client/src/lib/ecuReference.ts',
+  'shared/ecuDatabase.ts',
 
   // Category 4: Flash Server/Database
   'server/routers/flash.ts',

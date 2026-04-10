@@ -61,6 +61,11 @@ These files implement ECU flashing. Unauthorized changes can brick ECUs.
 | `client/src/lib/ecuScanner.ts` | ECU scanner logic |
 | `client/src/lib/flashContainerParser.ts` | Flash container file parser |
 | `client/src/lib/flashLogExcelExport.ts` | Flash log Excel export |
+| `client/src/lib/computeSecurityKeyClient.ts` | Seed/key computation for ECU security access (imported by pcanFlashEngine) |
+| `client/src/lib/ecuChecksums.ts` | ECU checksum utility |
+| `client/src/lib/ecuDetection.ts` | ECU detection logic |
+| `client/src/lib/ecuReference.ts` | ECU reference data |
+| `shared/ecuDatabase.ts` | ECU type definitions and container headers (imported by pcanFlashEngine, FlashContainerPanel, EcuScanPanel) |
 
 ## Category 4: Flash Server/Database
 

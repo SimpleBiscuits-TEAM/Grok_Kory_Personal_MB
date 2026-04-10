@@ -33,6 +33,11 @@ client/src/lib/ecuContainerSessionStorage.ts    @simplebiscuits
 client/src/lib/ecuScanner.ts                     @simplebiscuits
 client/src/lib/flashContainerParser.ts           @simplebiscuits
 client/src/lib/flashLogExcelExport.ts            @simplebiscuits
+client/src/lib/computeSecurityKeyClient.ts      @simplebiscuits
+client/src/lib/ecuChecksums.ts                  @simplebiscuits
+client/src/lib/ecuDetection.ts                  @simplebiscuits
+client/src/lib/ecuReference.ts                  @simplebiscuits
+shared/ecuDatabase.ts                           @simplebiscuits
 
 # ── Category 4: Flash Server/Database ──
 server/routers/flash.ts                     @simplebiscuits

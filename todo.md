@@ -1113,3 +1113,11 @@
 - [x] Update TOBI_PROTECTED_FILES.md to document PPEI sandbox directories as team-editable
 - [x] Update AGENTS.md with PPEI sandbox guidance
 - [x] Update .cursorignore to NOT ignore ppei-flash/ and ppei-datalogger/ directories
+
+## Protection List Update — 5 New Files
+- [x] Add computeSecurityKeyClient.ts to all protection layers (flash-critical: imported by pcanFlashEngine)
+- [x] Add ecuDatabase.ts to all protection layers (flash-critical: imported by pcanFlashEngine, FlashContainerPanel, EcuScanPanel)
+- [x] Add ecuChecksums.ts to all protection layers (ECU checksum utility)
+- [x] Add ecuDetection.ts to all protection layers (ECU detection logic)
+- [x] Add ecuReference.ts to all protection layers (ECU reference data)
+- [ ] Push updated protection to GitHub

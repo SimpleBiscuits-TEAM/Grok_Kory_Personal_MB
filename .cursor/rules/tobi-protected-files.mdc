@@ -47,6 +47,11 @@ On **April 9–10, 2026**, AI agent changes to infrastructure files (`server/_co
 - `client/src/lib/ecuScanner.ts`
 - `client/src/lib/flashContainerParser.ts`
 - `client/src/lib/flashLogExcelExport.ts`
+- `client/src/lib/computeSecurityKeyClient.ts`
+- `client/src/lib/ecuChecksums.ts`
+- `client/src/lib/ecuDetection.ts`
+- `client/src/lib/ecuReference.ts`
+- `shared/ecuDatabase.ts`
 
 ### HIGH — Flash Server & Database:
 - `server/routers/flash.ts`
