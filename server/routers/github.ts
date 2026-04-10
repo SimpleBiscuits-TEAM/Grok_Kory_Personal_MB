@@ -2,12 +2,14 @@
  * GitHub Router — Recent Commit History
  *
  * Fetches the latest commits from the simplebiscuits/Good-Gravy-2 repository
- * using the GitHub REST API with an authenticated token. Supports pagination
- * for up to 200 commits. Results are cached in memory for 5 minutes.
+ * using the GitHub REST API. Supports pagination for up to 200 commits.
+ * Results are cached in memory for 5 minutes.
  *
  * Token resolution order:
  * 1. process.env.GITHUB_API_TOKEN (platform-injected)
  * 2. `gh auth token` CLI fallback (dev sandbox)
+ *
+ * If no token works, falls back to the public API (stricter rate limits).
  */
 import { z } from "zod";
 import { execSync } from "child_process";
@@ -80,7 +82,7 @@ async function getGitHubToken(): Promise<string> {
     // gh CLI not available or not authenticated
   }
 
-  console.warn("[GitHub] No working GitHub token found");
+  console.warn("[GitHub] No working GitHub token — will try unauthenticated API");
   return "";
 }
 
@@ -110,9 +112,12 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
   }
 
   const token = await getGitHubToken();
-  if (!token) {
-    console.warn("[GitHub] No GITHUB_API_TOKEN configured — cannot fetch commits");
-    return cachedCommits?.slice(0, count) ?? [];
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "VOP-Platform",
+  };
+  if (token) {
+    headers.Authorization = `token ${token}`;
   }
 
   const capped = Math.min(count, MAX_COMMITS);
@@ -123,27 +128,29 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
     for (let page = 1; page <= pages; page++) {
       const perPage = Math.min(MAX_PER_PAGE, capped - allCommits.length);
       const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/commits?per_page=${perPage}&page=${page}`;
-      const res = await fetch(url, {
-        headers: {
-          Accept: "application/vnd.github.v3+json",
-          "User-Agent": "VOP-Platform",
-          Authorization: `token ${token}`,
-        },
-      });
+      const res = await fetch(url, { headers });
 
       if (!res.ok) {
-        if (res.status === 401) {
+        if (res.status === 401 && token) {
           resolvedToken = null;
         }
-        console.warn(`[GitHub] API returned ${res.status}: ${res.statusText} (page ${page})`);
+        const errBody = await res.text();
+        console.warn(
+          `[GitHub] API returned ${res.status}: ${res.statusText} (page ${page})`,
+          errBody.slice(0, 200)
+        );
         break;
       }
 
-      const data = (await res.json()) as any[];
-      if (data.length === 0) break; // No more commits
+      const raw = (await res.json()) as unknown;
+      if (!Array.isArray(raw)) {
+        console.warn("[GitHub] Expected JSON array of commits, got:", typeof raw);
+        break;
+      }
+      if (raw.length === 0) break;
 
-      allCommits.push(...data.map(parseCommit));
-      if (data.length < perPage) break; // Last page
+      allCommits.push(...raw.map(parseCommit));
+      if (raw.length < perPage) break;
     }
 
     if (allCommits.length > 0) {
@@ -151,7 +158,6 @@ async function fetchCommitsFromGitHub(count: number): Promise<CommitEntry[]> {
       cachedCount = allCommits.length;
       cacheTimestamp = now;
     }
-
     return allCommits.slice(0, capped);
   } catch (err) {
     console.warn("[GitHub] Failed to fetch commits:", (err as Error).message);

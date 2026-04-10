@@ -647,9 +647,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* GitHub Commit History */}
-            <GitHubCommitHistory />
-
             {/* Bottom brand tagline */}
             <div className="mt-6 text-center ppei-anim-fade-in ppei-delay-600">
               <p style={{
@@ -1032,6 +1029,11 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Recent commits — always at bottom (upload view + after analyze) */}
+        <div className="max-w-3xl mx-auto w-full">
+          <GitHubCommitHistory />
+        </div>
 
         {/* Error toast — positioned above the feedback button */}
         {(unsupportedFile || exportError) && (

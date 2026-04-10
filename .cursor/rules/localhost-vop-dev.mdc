@@ -7,15 +7,17 @@ alwaysApply: true
 
 This repo is **Express + Vite on one port** (default **3000**, or next free port). It is **not** Create React App on :3000 with a separate API on :5000 unless the user is in a different project.
 
-When the user reports **localhost not working**, **connection refused**, **site can’t be reached**, or **dev won’t start**, **execute** (yourself, in the project root):
+When the user reports **localhost not working**, **connection refused**, **site can’t be reached**, **blank page**, or **dev won’t start**, **execute** (yourself, in the project root):
 
 1. **`npm run dev:doctor`** — prints Node/tsx/port/script checks and the exact URLs to use.
 2. **`npm run dev`** — capture the **first** error. If the shell has no `tsx`/`npx` on PATH, `package.json` must use **`node ./node_modules/tsx/dist/cli.mjs watch server/_core/index.ts`** (not bare `tsx`).
-3. **Esbuild / TransformError in `shared/knoxKnowledge.ts`** — the string `KNOX_KNOWLEDGE_BASE_SANITIZED` is a template literal; any markdown **code** backticks inside it must be **escaped** as `` \` `` or the server never starts.
-4. **Port busy** — log says “using port 3001”; or free **3000** (Windows: `netstat -ano | findstr :3000` then `taskkill /PID … /F`).
-5. **Verify** — open **`http://127.0.0.1:<port>/__vop_ping`** — response must be plain **`ok`**. If not, nothing is listening on that port.
-6. **Do not** tell the user to rely on **`http://localhost:5173/`** alone for this app — Vite middleware shares the Express port; `scripts/dev-hint.mjs` explains this.
-7. **`server/routers/github.ts`** — `gh auth token` must not use bash-only `2>/dev/null`; use `stdio: ['ignore','pipe','ignore']` on Windows.
+3. **Blank UI but `__vop_ping` returns ok** — often **`NODE_ENV=production`** in `.env` while Vite is skipped. **`server/_core/loadEnv.ts`** must force `NODE_ENV=development` when **`npm_lifecycle_event === "dev"`** OR when argv shows **any** `tsx` run of **`server/_core/index`** (with **or without** `watch`). **Do not** narrow this back to watch-only — IDE “Run” and one-shot `tsx server/_core/index.ts` would stay production and look “broken”. Regression coverage: **`server/_core/loadEnv.test.ts`** → **`vopDevServerArgv.ts`** (`isTsxVopServerEntryFromArgv`).
+4. **Esbuild / TransformError in `shared/knoxKnowledge.ts`** — the string `KNOX_KNOWLEDGE_BASE_SANITIZED` is a template literal; any markdown **code** backticks inside it must be **escaped** as `` \` `` or the server never starts.
+5. **Port busy** — log says “using port 3001”; or free **3000** (Windows: `netstat -ano | findstr :3000` then `taskkill /PID … /F`).
+6. **Verify** — open **`http://127.0.0.1:<port>/__vop_ping`** — response must be plain **`ok`**. If not, nothing is listening on that port.
+7. **Do not** tell the user to rely on **`http://localhost:5173/`** alone for this app — Vite middleware shares the Express port; `scripts/dev-hint.mjs` explains this.
+8. **`server/routers/github.ts`** — `gh auth token` must not use bash-only `2>/dev/null`; use `stdio: ['ignore','pipe','ignore']` on Windows.
+9. **Touch handlers** — never destructure **`end: e`** (or any binding named **`e`**) in the same block as a parameter **`e: React.TouchEvent`**; it causes TDZ / `ReferenceError` on **`e.touches`** (see fix in `ZoomableChart.tsx`).
 
 After fixes, **`npm run dev`** again and confirm **`__vop_ping`** before closing the task.
 
