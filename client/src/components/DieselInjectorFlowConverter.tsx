@@ -26,6 +26,7 @@ import {
   type CorrectedTableResult,
 } from '@/lib/injectorFlowConverter';
 import { trpc } from '@/lib/trpc';
+import InjectorTableComparison from '@/components/InjectorTableComparison';
 import {
   ChevronDown,
   ChevronRight,
@@ -390,7 +391,7 @@ export default function DieselInjectorFlowConverter() {
 
   // Results state
   const [copied, setCopied] = useState(false);
-  const [activeView, setActiveView] = useState<'corrected' | 'oemMatched' | 'stock' | 'delta'>('corrected');
+  const [activeView, setActiveView] = useState<'corrected' | 'oemMatched' | 'stock' | 'delta' | 'compare'>('corrected');
 
   // ── tRPC mutation ──
   const ocrMutation = trpc.injectorOcr.extractFlowSheet.useMutation();
@@ -1237,6 +1238,7 @@ export default function DieselInjectorFlowConverter() {
                 ...(result.targetFueling ? [{ id: 'oemMatched' as const, label: 'OEM-MATCHED', color: sColor.blue }] : []),
                 { id: 'stock' as const, label: `STOCK OEM ${selectedEngine.name}`, color: sColor.textMuted },
                 { id: 'delta' as const, label: 'DELTA VIEW', color: sColor.yellow },
+                { id: 'compare' as const, label: 'COMPARE', color: sColor.purple },
               ]).map((tab) => (
                 <button
                   key={tab.id}
@@ -1341,14 +1343,28 @@ export default function DieselInjectorFlowConverter() {
               </div>
             )}
 
-            <div style={{ marginTop: '8px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.red }}>
-                ■ Red cells = Duration increased (needs longer pulse)
-              </span>
-              <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.green }}>
-                ■ Green cells = Duration decreased (needs shorter pulse)
-              </span>
-            </div>
+            {activeView === 'compare' && (
+              <InjectorTableComparison
+                stockTable={selectedEngine.durationTable}
+                modifiedTable={result.table}
+                oemMatchedTable={result.oemMatchedTable}
+                engine={selectedEngine}
+                displayUnit={displayUnit}
+                injectorLabel={injectorLabel || 'AFTERMARKET'}
+                targetMm3={result.targetFueling?.targetMaxMm3}
+              />
+            )}
+
+            {activeView !== 'compare' && (
+              <div style={{ marginTop: '8px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.red }}>
+                  ■ Red cells = Duration increased (needs longer pulse)
+                </span>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.green }}>
+                  ■ Green cells = Duration decreased (needs shorter pulse)
+                </span>
+              </div>
+            )}
           </Section>
 
           {/* Export Section */}

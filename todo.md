@@ -1209,3 +1209,9 @@
 - [x] Remove DIESEL from top-level VOP PRO tab bar
 - [x] Add DIESEL as sub-tab inside EDITOR (alongside CALIBRATION EDITOR)
 - [x] DIESEL sub-tab contains DURAMAX / POWERSTROKE / CUMMINS nested sub-tabs
+
+## Injection Duration Table Comparison Visualization
+- [x] Build InjectorTableComparison component with side-by-side stock vs. modified heatmaps
+- [x] Add delta view showing difference between stock and modified tables with color coding
+- [x] Integrate comparison visualization into DieselInjectorFlowConverter results section
+- [x] Support all 7 Duramax engines in the comparison view
