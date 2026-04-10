@@ -1120,4 +1120,14 @@
 - [x] Add ecuChecksums.ts to all protection layers (ECU checksum utility)
 - [x] Add ecuDetection.ts to all protection layers (ECU detection logic)
 - [x] Add ecuReference.ts to all protection layers (ECU reference data)
-- [ ] Push updated protection to GitHub
+- [x] Push updated protection to GitHub
+
+## Diesel Injector Flow Converter Tab
+- [x] Extract LB7 stock OEM Main Injection Pulse duration table data from image
+- [x] Extract S&S SAC00 injector flow sheet test point data from image
+- [x] Build mathematical model: stock flow rate vs aftermarket flow rate ratio → duration correction
+- [x] Create DieselInjectorFlowConverter.tsx component with Duramax > LB7 selector
+- [x] Display stock OEM table, S&S flow data, and corrected output table
+- [x] Add copy/paste export for corrected table (paste into calibration software)
+- [x] Wire tab into Advanced.tsx navigation under editor section
+- [x] Smooth interpolation across all pressure/quantity breakpoints
