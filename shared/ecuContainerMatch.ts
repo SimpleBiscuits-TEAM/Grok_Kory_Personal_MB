@@ -1,9 +1,13 @@
 /**
  * Match live ECU scan data to DevProg / header calibration fields (sw_c1..sw_c9).
  * Search uses **container-provided** parameters only — the ECU may expose more DIDs than the envelope stores.
+ *
+ * Per-controller **software slot masks** (`ecuSoftwareSlotMask.ts`): only C-slots listed in the DevProg
+ * table (non-`xff`) participate in the match % — not VIN/HW bonuses.
  */
 import { tryParseDevProgContainerRecord } from './devProgContainerJson';
 import type { ContainerFileHeader } from './ecuDatabase';
+import { activeSoftwareSlotIndices } from './ecuSoftwareSlotMask';
 
 const SW_KEYS = ['sw_c1', 'sw_c2', 'sw_c3', 'sw_c4', 'sw_c5', 'sw_c6', 'sw_c7', 'sw_c8', 'sw_c9'] as const;
 
@@ -40,11 +44,12 @@ export interface VehicleScanSnapshotV1 {
 export interface MatchScoreResult {
   /** How many non-empty container slots equal the scan slot (same index) */
   slotMatches: number;
+  /** Denominator for %: profile-relevant container slots compared, or all non-empty slots in fallback mode */
   nonEmptyContainerSlots: number;
   ecuTypeMatch: boolean | null;
   hardwareMatch: boolean | null;
   vinMatch: boolean | null;
-  /** 0–1 rough confidence */
+  /** 0–1 — ratio of matching software part numbers on compared slots (identity), not VIN/HW-weighted */
   confidence: number;
   notes: string[];
 }
@@ -129,27 +134,52 @@ export function extractFilenameCalibrationTokens(fileName: string): string[] {
   return [...new Set(matches.map(normalizeCalPartToken))];
 }
 
+/**
+ * Which ECU key drives `ecuSoftwareSlotMask` when scoring a **file** vs a **scan**.
+ * Prefer the **container’s** `ecu_type` (the tune declares what C-slots mean). Using the scan’s
+ * guess first caused wrong masks / false `ecuTypeMatch` when auto-detection disagreed with the file.
+ */
+export function ecuTypeKeyForSlotProfile(container: ContainerMatchParams, scan: VehicleScanSnapshotV1): string {
+  const fromFile = container.ecu_type?.trim();
+  if (fromFile) return fromFile;
+  return scan.ecuTypeKey?.trim() ?? '';
+}
+
 /** Score container params against a live scan snapshot. */
 export function scoreContainerAgainstScan(
   container: ContainerMatchParams,
   scan: VehicleScanSnapshotV1,
 ): MatchScoreResult {
   const notes: string[] = [];
+  const ecuKey = ecuTypeKeyForSlotProfile(container, scan);
+  const profileIx = activeSoftwareSlotIndices(ecuKey.length > 0 ? ecuKey : null);
+
   let slotMatches = 0;
-  let nonEmpty = 0;
-  for (let i = 0; i < 9; i++) {
+  let compared = 0;
+
+  const runSlot = (i: number) => {
     const c = container.swSlots[i];
     const s = scan.calibrationSlots[i]?.trim();
-    if (c == null || c === '') continue;
-    nonEmpty++;
+    if (c == null || c === '') return;
+    compared++;
     if (!s) {
       notes.push(`sw_c${i + 1}=${c} in container; scan slot empty`);
-      continue;
+      return;
     }
     if (normalizeCalPartToken(c) === normalizeCalPartToken(s)) {
       slotMatches++;
     } else {
       notes.push(`sw_c${i + 1} container ${c} vs scan ${s}`);
+    }
+  };
+
+  if (profileIx && profileIx.length > 0) {
+    for (const i of profileIx) {
+      runSlot(i);
+    }
+  } else {
+    for (let i = 0; i < 9; i++) {
+      runSlot(i);
     }
   }
 
@@ -172,22 +202,32 @@ export function scoreContainerAgainstScan(
     vinMatch = container.vin === scan.vin.toUpperCase();
   }
 
-  let confidence = 0;
-  if (nonEmpty > 0) confidence += 0.65 * (slotMatches / nonEmpty);
-  if (ecuTypeMatch === true) confidence += 0.15;
-  if (hardwareMatch === true) confidence += 0.12;
-  if (vinMatch === true) confidence += 0.08;
-  confidence = Math.min(1, confidence);
+  const confidence = compared > 0 ? slotMatches / compared : 0;
 
   return {
     slotMatches,
-    nonEmptyContainerSlots: nonEmpty,
+    nonEmptyContainerSlots: compared,
     ecuTypeMatch,
     hardwareMatch,
     vinMatch,
-    confidence,
+    confidence: Math.min(1, confidence),
     notes,
   };
+}
+
+/**
+ * True when every **compared** calibration slot matches the scan (identity on software part numbers).
+ * ECU-type line in the header is informational: auto-detected `ecuTypeKey` can disagree with the file;
+ * use {@link hasEcuTypeConflict} for a separate warning in the UI.
+ */
+export function isContainerMatchAcceptable(score: MatchScoreResult): boolean {
+  if (score.nonEmptyContainerSlots === 0) return false;
+  return score.slotMatches === score.nonEmptyContainerSlots;
+}
+
+/** Scan vs file `ecu_type` disagree — show as a warning, not a hard fail, when slots match. */
+export function hasEcuTypeConflict(score: MatchScoreResult): boolean {
+  return score.ecuTypeMatch === false;
 }
 
 /** Rank candidate files by score (higher first). Uses only container header params vs scan. */

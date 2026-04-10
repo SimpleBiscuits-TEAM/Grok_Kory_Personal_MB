@@ -277,6 +277,19 @@ function buildGmlanTransferDataHeader(
 
 // ── Flash Engine Class ─────────────────────────────────────────────────────
 
+class FlashAbortError extends Error {
+  override readonly name = 'FlashAbortError';
+  constructor(message = 'Flash aborted by user') {
+    super(message);
+    Object.setPrototypeOf(this, FlashAbortError.prototype);
+  }
+}
+
+function isUserAbort(err: unknown): boolean {
+  return err instanceof FlashAbortError
+    || (err instanceof Error && (err.message === 'Aborted' || err.message === 'Aborted by user'));
+}
+
 export class PCANFlashEngine {
   private conn: FlashBridgeConnection;
   private skipConnect: boolean;
@@ -365,10 +378,14 @@ export class PCANFlashEngine {
     }
   }
 
-  /** Abort the flash — sets flag that will be checked between commands */
+  /**
+   * Abort the flash — stops TesterPresent keepalive, cancels in-flight UDS / raw-CAN
+   * response waits on the bridge, and unblocks {@link delay} so execution exits quickly.
+   */
   abort(): void {
     this.aborted = true;
     this.stopKeepalive();
+    this.conn.cancelInFlightDiagnostics?.();
   }
 
   /** Security key bytes via injected callback or default tRPC `flash.computeSecurityKey` (server-held material). */
@@ -477,6 +494,7 @@ export class PCANFlashEngine {
    */
   private async reconnectBridge(phase: FlashPhase): Promise<boolean> {
     if (this.isFlashTransportOpen()) return true;
+    if (this.aborted) throw new FlashAbortError();
 
     this.log('warning', phase, '🔌 CAN bridge disconnected — attempting reconnect...');
     this.state.statusMessage = 'Reconnecting to PCAN bridge...';
@@ -487,6 +505,7 @@ export class PCANFlashEngine {
     // initialization (VIN read, PID scan) which fails during flash session.
     // reconnectForFlash() also resets UDS monitor state so listeners get re-attached.
     for (let attempt = 1; attempt <= 3; attempt++) {
+      if (this.aborted) throw new FlashAbortError();
       try {
         const reconnected = await this.conn.reconnectForFlash();
         if (reconnected && this.isFlashTransportOpen()) {
@@ -538,6 +557,7 @@ export class PCANFlashEngine {
     let sessionOk = false;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (this.aborted) throw new FlashAbortError();
       // Check WebSocket before each attempt — bridge can drop during key-off period
       // Log #14 showed attempts 2-5 all failing with "WebSocket not connected" because
       // the bridge dropped during key-off and wasn't reconnected inside the loop.
@@ -576,6 +596,7 @@ export class PCANFlashEngine {
           }
         }
       } catch (err) {
+        if (isUserAbort(err)) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         this.log('info', 'KEY_CYCLE', `Session switch attempt ${attempt}: ${msg}`);
       }
@@ -597,6 +618,7 @@ export class PCANFlashEngine {
         // Retry loop for NRC 0x37 (requiredTimeDelayNotExpired) — security lockout after boot
         let seedResp: UDSResponse | null = null;
         for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
+          if (this.aborted) throw new FlashAbortError();
           seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
           if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
             const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
@@ -683,6 +705,7 @@ export class PCANFlashEngine {
           this.log('info', 'KEY_CYCLE', 'Post-boot seed request: no response');
         }
       } catch (err) {
+        if (isUserAbort(err)) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         this.log('warning', 'KEY_CYCLE', `Post-boot security access error: ${msg}`);
       }
@@ -736,7 +759,10 @@ export class PCANFlashEngine {
         this.state.statusMessage = 'Connecting to CAN bridge...';
         this.emitState();
 
-        const connected = await this.conn.connect();
+        // Flash must not run PCANConnection.initialize() — that performs J1979 Mode 09/01 PID scans
+        // (VIN + supported-PIDs) which are irrelevant for GMLAN programming and waste time on the bus.
+        // Session opening follows the flash plan (GMLAN UUDT on 0x101, UDS 0x10 0x02 on physical, etc.).
+        const connected = await this.conn.connect({ skipVehicleInit: true });
         if (!connected) {
           this.log('error', 'PRE_CHECK', 'FAILED: Could not connect to CAN bridge — start the PCAN WebSocket bridge or connect the USB adapter.');
           this.state.result = 'FAILED';
@@ -913,6 +939,7 @@ export class PCANFlashEngine {
           this.log('warning', this.state.currentPhase, 'Flash aborted by user');
           this.state.result = 'ABORTED';
           this.state.statusMessage = 'Flash aborted by user';
+          this.state.isRunning = false;
           this.emitState();
           this.callbacks.onComplete('ABORTED');
           return 'ABORTED';
@@ -940,6 +967,15 @@ export class PCANFlashEngine {
             await this.executeCommand(cmd);
           }
         } catch (err) {
+          if (isUserAbort(err)) {
+            this.stopKeepalive();
+            this.state.result = 'ABORTED';
+            this.state.statusMessage = 'Flash aborted by user';
+            this.state.isRunning = false;
+            this.emitState();
+            this.callbacks.onComplete('ABORTED');
+            return 'ABORTED';
+          }
           this.stopKeepalive();
           const msg = err instanceof Error ? err.message : String(err);
           this.log('error', cmd.phase, `FAILED: ${cmd.label} — ${msg}`);
@@ -965,6 +1001,15 @@ export class PCANFlashEngine {
       return 'SUCCESS';
 
     } catch (err) {
+      if (isUserAbort(err)) {
+        this.stopKeepalive();
+        this.state.result = 'ABORTED';
+        this.state.statusMessage = 'Flash aborted by user';
+        this.state.isRunning = false;
+        this.emitState();
+        this.callbacks.onComplete('ABORTED');
+        return 'ABORTED';
+      }
       this.stopKeepalive();
       const msg = err instanceof Error ? err.message : String(err);
       this.log('error', this.state.currentPhase, `Unexpected error: ${msg}`);
@@ -1044,6 +1089,7 @@ export class PCANFlashEngine {
               this.log('info', 'PRE_CHECK', `GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}): NRC 0x${nrc.toString(16)} (${nrcName}) — ECU responded`);
             }
           } catch (err) {
+            if (isUserAbort(err)) throw err;
             const msg = err instanceof Error ? err.message : String(err);
             this.log('info', 'PRE_CHECK', `GMLAN ${name} (DID 0x${did.toString(16).toUpperCase()}): ${msg}`);
           }
@@ -1089,6 +1135,7 @@ export class PCANFlashEngine {
             }
           }
         } catch (err) {
+          if (isUserAbort(err)) throw err;
           const msg = err instanceof Error ? err.message : String(err);
           this.log('info', 'PRE_CHECK', `TesterPresent error: ${msg}`);
         }
@@ -1100,6 +1147,7 @@ export class PCANFlashEngine {
         this.log('warning', 'PRE_CHECK', 'No response from ECU to any command — ECU may not be powered or connected');
       }
     } catch (err) {
+      if (isUserAbort(err)) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       this.log('warning', 'PRE_CHECK', `ECU communication test error: ${msg} — continuing with dry run...`);
     }
@@ -1133,6 +1181,7 @@ export class PCANFlashEngine {
           return true; // NRC = ECU is communicating
         }
       } catch (err) {
+        if (isUserAbort(err)) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         this.log('info', 'PRE_CHECK', `${name} (${label}): ${msg}`);
       }
@@ -1290,10 +1339,9 @@ export class PCANFlashEngine {
     // UUDT messages (GMLAN functional broadcast): fire-and-forget, no response expected.
     // Send the raw CAN frame directly and return immediately.
     if (isUUDT) {
-      // Special handling: if this is a TesterPresent UUDT (FE 01 3E), start the
-      // cyclic keepalive timer. Per E88 procedure, TesterPresent cyclic starts
-      // EARLY in the SESSION_OPEN sequence (right after ReturnToNormal) and runs
-      // continuously throughout the entire flash operation.
+      // TesterPresent UUDT (FE 01 3E): if keepalive is not yet running (e.g. plan has no
+      // FE 02 10 02 before this step), start the cyclic timer. Usually keepalive already
+      // started right after programming session broadcast — see below.
       const isTesterPresentUUDT = serviceId === UDS.TESTER_PRESENT;
       if (isTesterPresentUUDT && !this.keepaliveActive) {
         this.startKeepalive();
@@ -1304,6 +1352,7 @@ export class PCANFlashEngine {
       }
 
       try {
+        if (this.aborted) throw new FlashAbortError();
         // Check WebSocket and attempt reconnect if needed
         if (!this.isFlashTransportOpen()) {
           await this.reconnectBridge(cmd.phase);
@@ -1313,10 +1362,22 @@ export class PCANFlashEngine {
           while (frame.length < 8) frame.push(0x00);
           void this.conn.sendRawCanFrame(cmdTxAddr, frame.slice(0, 8));
           this.log('success', cmd.phase, `\u2713 ${cmd.label} (UUDT \u2014 no response expected)`);
+          // GMLAN: start TesterPresent cyclic immediately after programming session is opened
+          // on the functional broadcast (FE 02 10 02 on 0x101) — before 0x28 / A5 / later steps.
+          if (
+            this.isGMLAN
+            && serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL
+            && subFunction === 0x02
+            && !this.keepaliveActive
+          ) {
+            this.startKeepalive();
+            this.log('success', cmd.phase, '💓 TesterPresent cyclic started (after programming session UUDT 0x10 0x02)');
+          }
         } else {
           this.log('warning', cmd.phase, `${cmd.label} \u2014 CAN bridge not open, skipping UUDT`);
         }
       } catch (err) {
+        if (isUserAbort(err)) throw err;
         const msg = err instanceof Error ? err.message : String(err);
         this.log('warning', cmd.phase, `UUDT send error: ${msg} — continuing...`);
       }
@@ -1336,6 +1397,7 @@ export class PCANFlashEngine {
     let lastError = '';
 
     while (retries >= 0) {
+      if (this.aborted) throw new FlashAbortError();
       try {
         // Pause keepalive during UDS exchange to prevent NRC interference.
         // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12), and these
@@ -1371,6 +1433,16 @@ export class PCANFlashEngine {
           const rxHex = (response.data || []).map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
           this.log('can_rx', cmd.phase, `RX: 0x${this.rxAddr.toString(16).toUpperCase()} ${rxHex}`);
           this.log('success', cmd.phase, `✓ ${cmd.label}`);
+          // GMLAN PRE_CHECK: physical DiagnosticSessionControl 0x10 0x02 on 0x7E0 — start cyclic TP here too.
+          if (
+            this.isGMLAN
+            && serviceId === UDS.DIAGNOSTIC_SESSION_CONTROL
+            && subFunction === 0x02
+            && !this.keepaliveActive
+          ) {
+            this.startKeepalive();
+            this.log('success', cmd.phase, '💓 TesterPresent cyclic started (after programming session 0x10 0x02)');
+          }
           this.state.statusMessage = cmd.label;
           this.emitState();
           return;
@@ -1428,6 +1500,7 @@ export class PCANFlashEngine {
           }
         }
       } catch (err) {
+        if (isUserAbort(err)) throw err;
         this.resumeKeepalive(); // Ensure keepalive resumes even on error
         lastError = err instanceof Error ? err.message : String(err);
         this.log('warning', cmd.phase, `Error: ${lastError} \u2014 retrying...`);
@@ -1543,6 +1616,7 @@ export class PCANFlashEngine {
       const maxLockoutRetries = 3;
 
       for (let pollAttempt = 0; pollAttempt < maxPollAttempts; pollAttempt++) {
+        if (this.aborted) throw new FlashAbortError();
         // CRITICAL: Resume keepalive DURING bootloader polling.
         // BUSMASTER reference: TesterPresent (FE 01 3E on 0x101) runs continuously
         // during the bootloader wait — 7 keepalive frames in the 4.0s window.
@@ -1552,6 +1626,7 @@ export class PCANFlashEngine {
 
         // Inner loop: handle NRC 0x37 lockout retries for each poll attempt
         for (let lockoutAttempt = 0; lockoutAttempt <= maxLockoutRetries; lockoutAttempt++) {
+          if (this.aborted) throw new FlashAbortError();
           // BUSMASTER FIX: Do NOT pause keepalive during seed probes.
           // Keepalive is on UUDT 0x101 (broadcast), seed request is on USDT 0x7E0 (physical).
           // They use different CAN IDs and don't interfere with each other.
@@ -1561,6 +1636,7 @@ export class PCANFlashEngine {
               UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
             );
           } catch (err) {
+            if (isUserAbort(err)) throw err;
             // Timeout or transport error — ECU not ready yet
             seedResponse = null;
           }
@@ -1932,7 +2008,7 @@ export class PCANFlashEngine {
     let chunkIndex = 0;
 
     while (bytesSent < blockData.length) {
-      if (this.aborted) throw new Error('Aborted by user');
+      if (this.aborted) throw new FlashAbortError();
 
       const chunkSize = Math.min(maxFilePerTd, blockData.length - bytesSent);
       const chunk = blockData.slice(bytesSent, bytesSent + chunkSize);
@@ -2042,8 +2118,15 @@ export class PCANFlashEngine {
     this.callbacks.onStateUpdate({ ...this.state, log: [...this.state.log] });
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  private async delay(ms: number): Promise<void> {
+    const stepMs = 50;
+    let remaining = ms;
+    while (remaining > 0) {
+      if (this.aborted) throw new FlashAbortError();
+      const chunk = Math.min(stepMs, remaining);
+      await new Promise<void>(resolve => setTimeout(resolve, chunk));
+      remaining -= chunk;
+    }
   }
 }
 

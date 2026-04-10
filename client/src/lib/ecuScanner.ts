@@ -28,6 +28,8 @@ import {
   type Manufacturer,
   type ContainerFileHeader,
 } from '../../../shared/ecuDatabase';
+import { calibrationSlotsFromEcuScanLike, normalizeCalPartToken } from '../../../shared/ecuContainerMatch';
+import { softwareSlotMaskForEcuType } from '../../../shared/ecuSoftwareSlotMask';
 import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
 import { getSecurityProfileMeta, type EcuSecurityProfileMeta } from '../../../shared/seedKeyMeta';
 
@@ -143,6 +145,7 @@ export interface ContainerComparison {
     ecuPart: string;
     match: boolean;
     changed: boolean;
+    profileRelevant: boolean;
   }[];
   /** Overall match status */
   allMatch: boolean;
@@ -1261,47 +1264,68 @@ function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
  * Compare scanned ECU calibration data against a loaded container file.
  * Container slots `sw_c1`..`sw_c9` on `ContainerFileHeader` must be set — historically manual;
  * FlashContainerPanel now maps DevProg/PPEI header data + Tune Deploy analyze into these fields.
+ *
+ * Matching is **positional**: container `sw_c{i}` vs ECU calibration slot **i** (GM C1…C9).
+ * Uses {@link calibrationSlotsFromEcuScanLike} so GMLAN ReadDID C-slots map by **label** (C1→index 0),
+ * not merely the order of `calibrationPartNumbers[]` (that array can be a loose list on non-GM paths).
  */
 export function compareWithContainer(
   scanResult: EcuScanResult,
   container: ContainerFileHeader,
 ): ContainerComparison {
-  // Extract container part numbers from sw_c1-sw_c9
-  const containerParts: string[] = [];
+  const containerSlots: string[] = [];
   for (let i = 1; i <= 9; i++) {
     const key = `sw_c${i}` as keyof ContainerFileHeader;
     const val = container[key];
-    if (typeof val === 'string' && val.trim().length > 0) {
-      containerParts.push(val.trim());
-    }
+    containerSlots.push(typeof val === 'string' && val.trim().length > 0 ? val.trim() : '');
   }
 
-  const ecuParts = scanResult.calibrationPartNumbers;
+  const ecuSlots = calibrationSlotsFromEcuScanLike({
+    gmSoftwarePartSlots: scanResult.gmSoftwarePartSlots,
+    calibrationPartNumbers: scanResult.calibrationPartNumbers,
+  });
 
-  // Build per-slot comparison
-  const maxSlots = Math.max(containerParts.length, ecuParts.length);
+  const mask = softwareSlotMaskForEcuType(scanResult.ecuConfig?.ecuType);
   const slots: ContainerComparison['slots'] = [];
 
-  for (let i = 0; i < maxSlots; i++) {
-    const containerPart = containerParts[i] || '';
-    const ecuPart = ecuParts[i] || '';
-    const match = containerPart.length > 0 && ecuPart.length > 0 && containerPart === ecuPart;
-    const changed = containerPart.length > 0 && ecuPart.length > 0 && containerPart !== ecuPart;
+  for (let i = 0; i < 9; i++) {
+    const containerPart = containerSlots[i] ?? '';
+    const ecuPart = ecuSlots[i] ?? '';
+    const profileRelevant = mask ? Boolean(mask[i]) : true;
+
+    const both =
+      profileRelevant
+      && containerPart.length > 0
+      && ecuPart.length > 0;
+    const match =
+      both && normalizeCalPartToken(containerPart) === normalizeCalPartToken(ecuPart);
+    const changed =
+      both && normalizeCalPartToken(containerPart) !== normalizeCalPartToken(ecuPart);
+
     slots.push({
       index: i + 1,
       containerPart,
       ecuPart,
       match,
       changed,
+      profileRelevant,
     });
   }
 
-  const changedCount = slots.filter(s => s.changed).length;
-  const allMatch = changedCount === 0 && containerParts.length > 0 && ecuParts.length > 0;
+  const relevant = slots.filter(s => s.profileRelevant);
+  const changedCount = relevant.filter(s => s.changed).length;
+  const toVerify = relevant.filter(s => s.containerPart.length > 0);
+  const allMatch =
+    toVerify.length > 0
+    && toVerify.every(
+      s =>
+        s.ecuPart.length > 0
+        && normalizeCalPartToken(s.containerPart) === normalizeCalPartToken(s.ecuPart),
+    );
 
   return {
-    containerPartNumbers: containerParts,
-    ecuPartNumbers: ecuParts,
+    containerPartNumbers: containerSlots.filter(p => p.length > 0),
+    ecuPartNumbers: ecuSlots,
     slots,
     allMatch,
     changedCount,

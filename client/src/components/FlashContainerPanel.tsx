@@ -15,8 +15,8 @@
  *
  * Vehicle / cloud matching:
  * - ECU Scan compares live ECU cal part numbers to ContainerFileHeader `sw_c1`..`sw_c9` (see `compareWithContainer`).
- * - DevProg `softwareNumbers` / PPEI `partNumbers` are copied into those slots; Tune Deploy analyze fills gaps + OS hint.
- * - **Tune Deploy** tab: same parser + team library (R2) for cal binaries — use both together for auto-match vs manual sw_c entry.
+ * - DevProg `softwareNumbers` / PPEI `partNumbers` map into those slots as parsed — empty slots stay empty (no Tune Deploy backfill into the header).
+ * - **Tune Deploy** tab: same parser + team library (R2) for cal binaries — optional analyze still reports detected tokens in the UI only.
  */
 
 import { useState, useCallback, useRef, useMemo, useEffect, type MutableRefObject } from 'react';
@@ -35,14 +35,10 @@ import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '../lib/vopC
 import type { FlashBridgeConnection } from '../lib/flashBridgeConnection';
 import {
   parsePpeiContainer,
-  isPpeiContainer,
   type FlashContainerAnalysis,
   type FlashType,
 } from '../lib/flashContainerParser';
-import {
-  calibrationListToSwFields,
-  mergeDetectedCalibrationIntoHeader,
-} from '@shared/containerCalibrationSlots';
+import { calibrationListToSwFields } from '@shared/containerCalibrationSlots';
 import type { TuneDeployParsedMetadata } from '@shared/tuneDeploySchemas';
 import { GUEST_OPEN_ID } from '@shared/guestUser';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -50,11 +46,10 @@ import {
   Upload, FileCheck, Shield, Cpu, Zap, AlertTriangle,
   CheckCircle2, XCircle, Info, ChevronDown, ChevronRight,
   HardDrive, Binary, Wifi, Bluetooth, RotateCcw, Eye,
-  Database, Clock, Lock, Radio, Activity, BarChart3, Search,
-  Layers, Usb,
+  Database, Clock, Lock, Activity, BarChart3, Search,
+  Layers,
 } from 'lucide-react';
 import TuneDeployWorkspace from '@/components/tune-deploy/TuneDeployWorkspace';
-import { ingestReferenceContainerFromBuffer } from '../lib/ecuContainerSessionStorage';
 
 type FlashConnectionMode = 'simulator' | 'pcan' | 'vop_usb';
 
@@ -184,7 +179,7 @@ export default function FlashContainerPanel() {
   /** Tune Deploy = calibration library / R2 pipeline; ECU Scan = connect to vehicle first, then open container */
   const [flashWorkspace, setFlashWorkspace] = useState<'ecuScan' | 'tuneDeploy'>('ecuScan');
   const [analysis, setAnalysis] = useState<FlashContainerAnalysis | null>(null);
-  /** Server-side Tune Deploy parse — fills sw_c1..9 + file_id for ECU scan / cloud match when the container omits them */
+  /** Tune Deploy analyze — informational only (UI); not merged into ContainerFileHeader */
   const [autoIdentifiedMeta, setAutoIdentifiedMeta] = useState<TuneDeployParsedMetadata | null>(null);
   const [rawData, setRawData] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState<string>('');
@@ -239,29 +234,36 @@ export default function FlashContainerPanel() {
     }
   }, []);
 
-  // Check bridge when ECU Scan workspace or PCAN-backed sections are shown
+  // Check bridge when ECU Scan workspace is shown or a container is loaded (Flash now)
   useEffect(() => {
     if (
-      (flashWorkspace === 'ecuScan' || activeSection === 'hardware_flash' || activeSection === 'ecuscan')
+      (flashWorkspace === 'ecuScan' || analysis)
       && pcanBridgeAvailable === null
     ) {
       checkPcanBridge();
     }
-  }, [flashWorkspace, activeSection, pcanBridgeAvailable, checkPcanBridge]);
+  }, [flashWorkspace, analysis, pcanBridgeAvailable, checkPcanBridge]);
 
-  // Lazily allocate V-OP USB transport for Hardware Flash or ECU Scan (Web Serial — Chrome/Edge desktop)
+  // Lazily allocate V-OP USB transport for ECU Scan workspace or post-load flash (Web Serial)
   useEffect(() => {
     if (
-      (activeSection === 'hardware_flash' || flashWorkspace === 'ecuScan')
+      (flashWorkspace === 'ecuScan' || analysis)
       && !vopConnectionRef.current
     ) {
       vopConnectionRef.current = getSharedVopCan2UsbConnection();
     }
-  }, [activeSection, flashWorkspace]);
+  }, [flashWorkspace, analysis]);
+
+  // Removed tabs: migrate stale section ids from older UI state
+  useEffect(() => {
+    if (activeSection === 'ecuscan' || activeSection === 'hardware_flash') {
+      setActiveSection('overview');
+    }
+  }, [activeSection]);
 
   /**
    * Tune Deploy analyze API — same heuristics as the library uploader.
-   * Feeds sw_c1..9 / file_id so ECU Scan compare + cloud transfer matching work without hand-typed cal IDs.
+   * Does not modify the parsed container header — see Auto-ID line in Overview.
    */
   useEffect(() => {
     if (!rawData || !canRunTuneDeployAnalyze || !fileName) {
@@ -283,6 +285,7 @@ export default function FlashContainerPanel() {
           signal: ac.signal,
         });
         const j = (await res.json()) as { ok?: boolean; meta?: TuneDeployParsedMetadata };
+        if (ac.signal.aborted) return;
         if (j.ok && j.meta) setAutoIdentifiedMeta(j.meta);
         else setAutoIdentifiedMeta(null);
       } catch {
@@ -319,11 +322,6 @@ export default function FlashContainerPanel() {
           rxprefix: dp.verify.rxprefix,
         } : undefined,
       };
-      if (autoIdentifiedMeta?.calibrationPartNumbers?.length) {
-        h = mergeDetectedCalibrationIntoHeader(h, autoIdentifiedMeta.calibrationPartNumbers, {
-          osHintForEmptyFileId: autoIdentifiedMeta.osVersion,
-        });
-      }
       return h;
     }
     const hHdr = analysis.header;
@@ -338,15 +336,10 @@ export default function FlashContainerPanel() {
         ecu_type: hHdr.ecuType || analysis.ecuFamily, hardware_number: '',
         ...calibrationListToSwFields(hHdr.partNumbers),
       };
-      if (autoIdentifiedMeta?.calibrationPartNumbers?.length) {
-        h = mergeDetectedCalibrationIntoHeader(h, autoIdentifiedMeta.calibrationPartNumbers, {
-          osHintForEmptyFileId: autoIdentifiedMeta.osVersion,
-        });
-      }
       return h;
     }
     return null;
-  }, [analysis, autoIdentifiedMeta]);
+  }, [analysis]);
 
   // Generate flash plan from analysis
   const flashPlan = useMemo((): FlashPlan | null => {
@@ -367,6 +360,16 @@ export default function FlashContainerPanel() {
     setDryRunMode(isDryRun);
     setShowPreFlight(true);
   }, []);
+
+  /** Prefer PCAN bridge when available; otherwise V-OP USB if Web Serial is supported. */
+  const handleFlashNow = useCallback(() => {
+    if (!flashPlan || flashPlan.validationErrors.length > 0) return;
+    if (pcanBridgeAvailable === true) {
+      handleLaunch('pcan', false);
+    } else if (vopUsbSupported) {
+      handleLaunch('vop_usb', false);
+    }
+  }, [flashPlan, pcanBridgeAvailable, vopUsbSupported, handleLaunch]);
 
   // After pre-flight passes, create session and launch MissionControl
   const handlePreFlightPassed = useCallback(async () => {
@@ -405,6 +408,8 @@ export default function FlashContainerPanel() {
     setIsLoading(true);
     setFileError(null);
     setFileName(file.name);
+    // Prevent Tune Deploy metadata / merged headers from the previous file affecting this parse
+    setAutoIdentifiedMeta(null);
     try {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
@@ -413,32 +418,13 @@ export default function FlashContainerPanel() {
       // Compute file hash
       computeFileHash(bytes).then(h => setFileHash(h));
 
-      if (isPpeiContainer(buffer, file.name)) {
-        const result = parsePpeiContainer(buffer, file.name);
-        setAnalysis(result);
-        setFlashTypeOverride(null);
-        setUploadStatus('ready');
-        if (result.devProgHeader) {
-          ingestReferenceContainerFromBuffer(`(browser) ${file.name}`, file.name, buffer);
-        }
-      } else {
-        setAnalysis({
-          valid: false, containerFormat: 'UNKNOWN',
-          header: null, devProgHeader: null, ecuFamily: 'UNKNOWN', ecuConfig: null,
-          flashType: 'unknown', dataOffset: 0, dataSize: 0,
-          totalSize: bytes.length,
-          readinessChecks: [{
-            id: 'format', label: 'Container Format',
-            status: 'fail',
-            detail:
-              'Not a V-OP / PPEI / DevProg flash container (PPEI IPF, DevProg JSON @ 0x1004, or supported GM raw). '
-              + 'EFI Live / HP Tuners / raw cal segments need export or conversion to PPEI IPF or DevProg V2 .bin.',
-          }],
-          securityInfo: { seedKeyAlgorithm: 'UNKNOWN', requiresUnlockBox: false, protocol: 'UNKNOWN', seedLevel: 0, canTxAddr: 0, canRxAddr: 0 },
-          flashSequence: [], errors: ['Unrecognized file format — not a V-OP container envelope'],
-        });
-        setUploadStatus('idle');
-      }
+      // Always run the full parser — `isPpeiContainer()` was a separate gate and could disagree
+      // with `parsePpeiContainer()` (same bytes, different accept/reject).
+      const result = parsePpeiContainer(buffer, file.name);
+      setAnalysis(result);
+      setFlashTypeOverride(null);
+      setUploadStatus(result.valid ? 'ready' : 'idle');
+      setActiveSection(result.valid ? 'overview' : 'readiness');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('Failed to parse container:', err);
@@ -460,6 +446,23 @@ export default function FlashContainerPanel() {
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
+  }, []);
+
+  const onContainerFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleFile(file);
+    e.target.value = '';
+  }, [handleFile]);
+
+  /** Pick another container file and re-run parse — keeps ECU Scan workspace (no full reset). */
+  const openReplaceFilePicker = useCallback(() => {
+    setMissionControlMode(null);
+    setShowPreFlight(false);
+    setPendingMode(null);
+    setDryRunMode(false);
+    setSessionUuid('');
+    setFileError(null);
+    fileInputRef.current?.click();
   }, []);
 
   const workspaceToggle = (
@@ -528,6 +531,13 @@ export default function FlashContainerPanel() {
     return (
       <div className="h-full flex flex-col min-h-0">
         {workspaceToggle}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".bin,.hex,.cal,.Bin,.BIN"
+          className="hidden"
+          onChange={onContainerFileInputChange}
+        />
         <div className="flex-1 min-h-0 overflow-y-auto space-y-8 pr-1">
           <EcuScanPanel
             pcanConnection={pcanConnectionRef.current}
@@ -536,6 +546,7 @@ export default function FlashContainerPanel() {
             containerHeader={null}
             bridgeAvailable={pcanBridgeAvailable === true}
             bridgeUrl={pcanBridgeUrl}
+            onVerifiedContainerLoad={handleFile}
           />
 
           <div className="border-t border-zinc-800 pt-6">
@@ -574,22 +585,24 @@ export default function FlashContainerPanel() {
                   <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
                   <p className="text-zinc-600 text-xs mt-3">.bin, .hex, .cal — PPEI / DevProg container</p>
                   {fileError && (
-                    <p className="text-red-400 text-xs mt-4 max-w-md text-center px-2">
-                      Error: {fileError}
-                    </p>
+                    <div className="mt-4 flex flex-col items-center gap-3 max-w-md px-2">
+                      <p className="text-red-400 text-xs text-center">
+                        Error: {fileError}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation();
+                          openReplaceFilePicker();
+                        }}
+                        className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium border border-zinc-600 hover:border-zinc-500 hover:bg-zinc-700"
+                      >
+                        Choose a different file
+                      </button>
+                    </div>
                   )}
                 </>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".bin,.hex,.cal,.Bin,.BIN"
-                className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFile(file);
-                }}
-              />
             </div>
           </div>
         </div>
@@ -609,11 +622,23 @@ export default function FlashContainerPanel() {
     { id: 'sequence', label: 'Flash Sequence', icon: Zap },
     { id: 'hex', label: 'Hex Viewer', icon: Binary },
     { id: 'upload', label: 'Upload to Flasher', icon: Wifi },
-    { id: 'ecuscan', label: 'ECU Scan', icon: Search },
-    { id: 'hardware_flash', label: 'Hardware Flash', icon: Layers },
     { id: 'simulator', label: 'Simulator', icon: Activity },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   ];
+
+  const flashNowDisabled =
+    !flashPlan ||
+    flashPlan.validationErrors.length > 0 ||
+    (pcanBridgeAvailable !== true && !vopUsbSupported);
+  const flashNowTitle = !flashPlan
+    ? 'Build flash plan first'
+    : flashPlan.validationErrors.length > 0
+      ? flashPlan.validationErrors.join('; ')
+      : pcanBridgeAvailable !== true && !vopUsbSupported
+        ? 'No PCAN bridge and Web Serial unavailable — use Chrome/Edge desktop or run the PCAN bridge'
+        : pcanBridgeAvailable === true
+          ? 'Start live flash via PCAN-USB (bridge)'
+          : 'Start live flash via V-OP USB2CAN (Web Serial)';
 
   // ── MissionControl overlay ──────────────────────────────────────────────
   if (missionControlMode && flashPlan && sessionUuid) {
@@ -678,6 +703,13 @@ export default function FlashContainerPanel() {
   return (
     <div className="h-full flex flex-col">
       {workspaceToggle}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".bin,.hex,.cal,.Bin,.BIN"
+        className="hidden"
+        onChange={onContainerFileInputChange}
+      />
       {analysis.errors.length > 0 && (
         <div className="mb-3 p-3 rounded-lg bg-red-950/50 border border-red-500/35 text-xs text-red-100/95 space-y-1">
           {analysis.errors.map((e) => (
@@ -703,41 +735,79 @@ export default function FlashContainerPanel() {
             </p>
           </div>
         </div>
-        <button onClick={resetAll} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-lg border border-zinc-700 hover:border-zinc-600 transition-colors">
-          <RotateCcw className="w-3 h-3" /> New File
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={openReplaceFilePicker}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 rounded-lg border border-orange-500/50 shadow-sm transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" /> Load different file
+          </button>
+          <button
+            type="button"
+            onClick={resetAll}
+            title="Clear container and return to ECU Scan + file drop"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-lg border border-zinc-700 hover:border-zinc-600 transition-colors"
+          >
+            <RotateCcw className="w-3 h-3" /> Reset workspace
+          </button>
+        </div>
       </div>
 
-      {/* Flash Type Toggle */}
-      <div className="flex items-center gap-2 mb-4 p-3 bg-zinc-900/80 rounded-lg border border-zinc-800">
-        <HardDrive className="w-4 h-4 text-zinc-400" />
-        <span className="text-sm text-zinc-400 mr-2">Flash Type:</span>
-        <button
-          onClick={() => setFlashTypeOverride('calibration')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-            effectiveFlashType === 'calibration'
-              ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-              : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
-          }`}
-        >
-          CALIBRATION FLASH
-        </button>
-        <button
-          onClick={() => setFlashTypeOverride('fullflash')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
-            effectiveFlashType === 'fullflash'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-              : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
-          }`}
-        >
-          FULL FLASH
-        </button>
+      {/* Flash type + Flash now — only for recognized containers */}
+      {analysis.valid && (
+      <div className="mb-4 p-3 bg-zinc-900/80 rounded-lg border border-zinc-800 space-y-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <HardDrive className="w-4 h-4 text-zinc-400 shrink-0" />
+            <span className="text-sm text-zinc-400 shrink-0">Flash type</span>
+            <button
+              type="button"
+              onClick={() => setFlashTypeOverride('calibration')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                effectiveFlashType === 'calibration'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                  : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
+              }`}
+            >
+              CALIBRATION FLASH
+            </button>
+            <button
+              type="button"
+              onClick={() => setFlashTypeOverride('fullflash')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                effectiveFlashType === 'fullflash'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  : 'bg-zinc-800 text-zinc-500 border border-zinc-700 hover:text-zinc-300'
+              }`}
+            >
+              FULL FLASH
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={handleFlashNow}
+            disabled={flashNowDisabled}
+            title={flashNowTitle}
+            className="shrink-0 px-5 py-2.5 rounded-lg bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white text-sm font-bold shadow-lg shadow-orange-900/40 border border-orange-400/50 hover:from-red-500 hover:via-orange-400 hover:to-amber-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+          >
+            Flash now
+          </button>
+        </div>
         {flashTypeOverride && flashTypeOverride !== analysis.flashType && (
-          <span className="text-[10px] text-amber-400 ml-2">
-            ⚠ Override — container tagged as {analysis.flashType === 'fullflash' ? 'Full Flash' : 'Calibration'}
-          </span>
+          <div className="text-[10px] text-amber-400">
+            Override — container tagged as {analysis.flashType === 'fullflash' ? 'Full Flash' : 'Calibration'}
+          </div>
         )}
+        <p className="text-[10px] text-zinc-500 leading-relaxed">
+          {pcanBridgeAvailable === true
+            ? 'Flash now uses PCAN-USB (bridge). Dry run: Simulator tab.'
+            : vopUsbSupported
+              ? 'Flash now uses V-OP USB2CAN (Web Serial). Run the PCAN bridge to prefer PCAN.'
+              : 'No PCAN bridge and no Web Serial — use Simulator or connect hardware (bridge or Chrome/Edge).'}
+        </p>
       </div>
+      )}
 
       {/* Section Tabs */}
       <div className="flex gap-1 mb-4 bg-zinc-900/50 p-1 rounded-lg border border-zinc-800">
@@ -759,7 +829,40 @@ export default function FlashContainerPanel() {
 
       {/* Section Content */}
       <div className="flex-1 overflow-y-auto">
-        {activeSection === 'overview' && (h || analysis.devProgHeader) && (
+        {activeSection === 'overview' && !analysis.valid && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl border border-red-500/40 bg-red-950/25">
+              <div className="flex items-start gap-3">
+                <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-2 min-w-0">
+                  <h3 className="text-sm font-semibold text-red-100">Container not recognized</h3>
+                  <p className="text-xs text-red-200/85 leading-relaxed">
+                    This file is not a supported V-OP / PPEI / DevProg flash container. Load a PPEI IPF, DevProg JSON @ 0x1004, or supported GM raw container.
+                  </p>
+                  {analysis.errors.length > 0 && (
+                    <ul className="text-xs text-red-300/90 list-disc pl-4 space-y-1">
+                      {analysis.errors.map((err) => (
+                        <li key={err}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    onClick={openReplaceFilePicker}
+                    className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 border border-orange-500/50"
+                  >
+                    <Upload className="w-4 h-4" /> Load a different file
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs text-zinc-500">
+              Readiness tab lists the failed checks. Hex viewer can still inspect raw bytes if you need to confirm the file type.
+            </div>
+          </div>
+        )}
+
+        {activeSection === 'overview' && analysis.valid && (h || analysis.devProgHeader) && (
           <div className="space-y-4">
             {/* Container Info Grid */}
             <div className="grid grid-cols-2 gap-3">
@@ -804,10 +907,9 @@ export default function FlashContainerPanel() {
                     <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">sw_c1</code>
                     …
                     <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">sw_c9</code>
-                    {' (same fields the old workflow required you to type by hand). Those slots are now filled from the container header and, when you’re signed in, '}
+                    {' (same fields the old workflow required you to type by hand). Values come only from the parsed container; empty slots stay empty. When signed in, '}
                     <span className="text-cyan-200">Tune Deploy binary analysis</span>
-                    {' fills any gaps + OS hint for empty '}
-                    <code className="text-cyan-200/90 bg-zinc-900/80 px-1 rounded">file_id</code>.
+                    {' may report extra tokens below for reference — they are not written into the header.'}
                   </p>
                   {!canRunTuneDeployAnalyze && (
                     <p className="text-amber-200/90">Sign in to run automatic binary analysis on this upload.</p>
@@ -854,10 +956,14 @@ export default function FlashContainerPanel() {
               </div>
             )}
 
-            {/* Part Numbers */}
+            {/* Part Numbers — PPEI header extraction; not the same as slot-by-slot sw_c match */}
             {h && h.partNumbers.length > 0 && (
               <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
                 <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Part Numbers</div>
+                <p className="text-[10px] text-zinc-500 mb-2 leading-relaxed">
+                  From the PPEI header (unique 7–8 digit IDs). Vehicle match uses{' '}
+                  <span className="text-zinc-400">sw_c1…sw_c9</span> above — same index as ECU C1…C9, not “number appears anywhere”.
+                </p>
                 <div className="flex flex-wrap gap-2">
                     {h?.partNumbers.map((pn, i) => (
                     <span key={i} className="px-2.5 py-1 bg-zinc-800 rounded-md text-sm font-mono text-zinc-300 border border-zinc-700">
@@ -1145,148 +1251,6 @@ export default function FlashContainerPanel() {
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* ── ECU Scan Section ── */}
-        {activeSection === 'ecuscan' && (
-          <EcuScanPanel
-            pcanConnection={pcanConnectionRef.current}
-            vopConnection={vopConnectionRef.current}
-            vopSupported={vopUsbSupported}
-            containerHeader={containerFileHeader}
-            bridgeAvailable={pcanBridgeAvailable === true}
-            bridgeUrl={pcanBridgeUrl}
-          />
-        )}
-
-        {/* ── Hardware flash: PCAN-USB (bridge) + V-OP USB2CAN (Web Serial) — same engine, pick adapter ── */}
-        {activeSection === 'hardware_flash' && (
-          <div className="space-y-4">
-            <div className="p-4 bg-zinc-900/60 rounded-lg border border-zinc-800">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
-                  <Layers className="w-5 h-5 text-amber-400" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-zinc-100">Hardware CAN flash</h3>
-                  <p className="text-[10px] text-zinc-500">
-                    One flash procedure for both adapters: <span className="text-zinc-400">PCAN-USB</span> via the local WebSocket bridge, or{' '}
-                    <span className="text-zinc-400">V-OP USB2CAN</span> via Web Serial. Connect to the vehicle CAN bus (OBD-II), then use the column for your hardware.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 text-xs mb-4">
-                {[
-                  { status: analysis.ecuConfig ? 'ok' : 'warn', text: analysis.ecuConfig ? `Target: ${analysis.ecuConfig.name} (${analysis.ecuConfig.protocol})` : 'ECU config not found — default CAN addresses' },
-                  { status: analysis.valid ? 'ok' : 'fail', text: 'Container validated and CRC32 verified' },
-                  { status: !flashPlan ? 'fail' : flashPlan.validationErrors.length > 0 ? 'fail' : 'ok', text: flashPlan ? `Flash plan: ${flashPlan.totalBlocks} blocks, ${formatBytes(flashPlan.totalBytes)}` : 'Flash plan generation failed' },
-                ].map((req, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    {req.status === 'ok' ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : req.status === 'warn' ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
-                    <span className={req.status === 'ok' ? 'text-zinc-300' : req.status === 'warn' ? 'text-amber-400/80' : 'text-zinc-500'}>{req.text}</span>
-                  </div>
-                ))}
-                {flashPlan && flashPlan.warnings.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {flashPlan.warnings.map((w, i) => (
-                      <div key={i} className="flex items-center gap-2 pl-5">
-                        <Info className="w-3 h-3 text-amber-400/60" />
-                        <span className="text-amber-400/60 text-[10px]">{w}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* PCAN */}
-                <div className="rounded-lg border border-zinc-700/80 bg-black/20 p-3 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-red-400 shrink-0" />
-                    <span className="text-xs font-bold text-zinc-200">PCAN-USB</span>
-                    <span className="text-[10px] text-zinc-500">WebSocket bridge (pcan_bridge.py)</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-[11px]">
-                    {pcanBridgeAvailable === true ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" /> : checkingBridge ? <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />}
-                    <span className="text-zinc-400">
-                      {checkingBridge ? 'Checking bridge…' : pcanBridgeAvailable === true ? `Bridge OK${pcanBridgeUrl ? ` (${pcanBridgeUrl.startsWith('wss') ? 'wss' : 'ws'})` : ''}` : 'Bridge not detected — run pcan_bridge.py with the PEAK adapter connected'}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleLaunch('pcan', true)}
-                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
-                      title="Run the full sequence without writing ECU flash"
-                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-xs hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Dry Run
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleLaunch('pcan', false)}
-                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !pcanBridgeAvailable}
-                      title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
-                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white font-bold text-xs hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Launch
-                    </button>
-                  </div>
-                  {pcanBridgeAvailable === false && (
-                    <button
-                      type="button"
-                      onClick={checkPcanBridge}
-                      disabled={checkingBridge}
-                      className="w-full py-1.5 rounded border border-zinc-600 text-zinc-400 text-[10px] hover:border-zinc-500 hover:text-zinc-300 disabled:opacity-40"
-                    >
-                      {checkingBridge ? 'Checking…' : 'Re-check bridge'}
-                    </button>
-                  )}
-                </div>
-
-                {/* V-OP USB2CAN */}
-                <div className="rounded-lg border border-zinc-700/80 bg-black/20 p-3 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Usb className="w-4 h-4 text-violet-400 shrink-0" />
-                    <span className="text-xs font-bold text-zinc-200">V-OP USB2CAN</span>
-                    <span className="text-[10px] text-zinc-500">Web Serial (Chrome / Edge)</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-[11px]">
-                    {vopUsbSupported ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" /> : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />}
-                    <span className="text-zinc-400">
-                      {vopUsbSupported ? 'Web Serial available — you will pick the COM port when flash starts' : 'Web Serial unavailable — use Chrome or Edge on desktop (HTTPS or localhost)'}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleLaunch('vop_usb', true)}
-                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !vopUsbSupported}
-                      title="Run the full sequence without writing ECU flash"
-                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-yellow-600 to-amber-600 text-white font-bold text-xs hover:from-yellow-500 hover:to-amber-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Dry Run
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleLaunch('vop_usb', false)}
-                      disabled={!flashPlan || flashPlan.validationErrors.length > 0 || !vopUsbSupported}
-                      title={flashPlan?.validationErrors.length ? flashPlan.validationErrors.join(', ') : undefined}
-                      className="flex-1 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold text-xs hover:from-violet-500 hover:to-fuchsia-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Launch
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 bg-amber-500/5 rounded-lg border border-amber-500/20 text-xs text-amber-200/90">
-              <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5 align-text-bottom" />
-              Vehicle: ignition ON, stable battery, OBD-II connected. Stay on this tab during a live flash. V-OP: select the correct USB serial port when prompted.
-            </div>
           </div>
         )}
 

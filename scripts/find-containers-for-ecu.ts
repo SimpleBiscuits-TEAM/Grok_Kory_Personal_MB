@@ -4,7 +4,7 @@
  * Usage:
  *   npx tsx scripts/find-containers-for-ecu.ts <scanDir> [.data/ecu-container-session.json]
  *
- * Session JSON may include `lastVehicleScan` from the app (localStorage export) or only reference container.
+ * Session JSON must include `lastVehicleScan` (export localStorage key `goodGravy.ecuContainerSession.v1` or minimal JSON with that field).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
