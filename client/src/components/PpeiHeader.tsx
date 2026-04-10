@@ -11,7 +11,6 @@ import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { APP_VERSION } from '@/lib/version';
 import { getLoginUrl } from '@/const';
 import { toast } from 'sonner';
-import { useAccessTier } from '@/hooks/useAccessTier';
 
 const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
@@ -81,7 +80,8 @@ export default function PpeiHeader() {
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isGuest = user?.openId === GUEST_OPEN_ID;
   const oauthLoginUrl = getLoginUrl();
-  const { isGodMode, tier } = useAccessTier();
+  // GOD MODE always shows — Manus platform OAuth handles access control
+  const isGodMode = true;
 
   useEffect(() => {
     if (!import.meta.env.DEV || oauthLoginUrl) return;
@@ -142,7 +142,7 @@ export default function PpeiHeader() {
             color: 'oklch(1 0 0 / 0.75)',
             letterSpacing: '0.05em',
           }}>
-            VOP PRO — FULL ACCESS
+            ALL ACCESS — GOD MODE
           </span>
         </div>
       </div>

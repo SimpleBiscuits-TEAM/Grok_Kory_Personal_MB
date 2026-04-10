@@ -1279,3 +1279,11 @@
 - [x] Store access tier in cookie (vop_access=lite vs vop_access=pro) to persist across pages
 - [x] Re-enable access gate on Editor/Tasks (currently dev-bypassed with useState(true))
 - [x] NOTE: These changes are MAIN-only — grok branch keeps current auth settings unchanged
+
+## Remove Access Code Gates (Manus OAuth handles access control)
+- [x] Remove AccessGate from App.tsx — no access code prompt on entry
+- [x] Remove ProGuard from App.tsx — all routes accessible to everyone
+- [x] Remove EditorGate access code in Advanced.tsx — auto-unlock
+- [x] Remove TasksGate access code in Advanced.tsx — auto-unlock
+- [x] Show GOD MODE banner for everyone (Manus OAuth = trusted)
+- [x] Keep SIGN IN button hidden (Manus platform handles auth)

@@ -1175,7 +1175,8 @@ const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
   const [editorSubTab, setEditorSubTab] = useState<'calibration' | 'diesel'>('calibration');
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true');
+  // Access code gates removed — Manus platform OAuth handles access control
+  const [unlocked, setUnlocked] = useState(true);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
@@ -1733,7 +1734,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 const TASKS_CODE = 'KINGKONG1';
 
 function TasksGate() {
-  const [unlocked, setUnlocked] = useState(false);
+  // Access code gates removed — Manus platform OAuth handles access control
+  const [unlocked, setUnlocked] = useState(true);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
