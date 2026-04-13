@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
-import { type Task, type Status, type Priority, type Week, defaultTasks } from "@/lib/taskData";
+import { type Task, type Status, type Priority, defaultTasks } from "@/lib/taskData";
 
-const STORAGE_KEY = "vop-task-tracker-v2";
+const STORAGE_KEY = "vop-task-tracker-v3";
 
 function loadTasks(): Task[] {
   try {
@@ -10,7 +10,7 @@ function loadTasks(): Task[] {
     const saved: Record<string, Status> = JSON.parse(raw);
     return defaultTasks.map((task) => ({
       ...task,
-      status: saved[task.id] ?? "not_started",
+      status: saved[task.id] ?? task.status,
     }));
   } catch {
     return defaultTasks;
@@ -31,7 +31,7 @@ export interface Filters {
   search: string;
   module: number | null;
   priority: Priority | null;
-  week: Week | null;
+  week: number | null; // kept for interface compat but unused
   status: Status | null;
 }
 
@@ -74,7 +74,6 @@ export function useTaskStore() {
     }
     if (filters.module !== null && t.module !== filters.module) return false;
     if (filters.priority !== null && t.priority !== filters.priority) return false;
-    if (filters.week !== null && t.week !== filters.week) return false;
     if (filters.status !== null && t.status !== filters.status) return false;
     return true;
   });

@@ -1,6 +1,6 @@
 /*
- * ModuleSidebar — Left panel listing all 18 modules with completion indicators.
- * Each module shows a mini progress bar and task count.
+ * ModuleSidebar — Left panel listing all functional sections with completion indicators.
+ * Each section shows a mini progress bar and task count.
  * On mobile, shows as an overlay panel.
  */
 
@@ -36,7 +36,7 @@ export function ModuleSidebar({ open, tasks, activeModule, onSelectModule, onClo
         <div className="p-3">
           {/* Header with close button */}
           <div className="flex items-center gap-2 mb-3">
-            <span className="font-mono text-[10px] text-muted-foreground tracking-widest">MODULES</span>
+            <span className="font-mono text-[10px] text-muted-foreground tracking-widest">SECTIONS</span>
             <div className="flex-1 h-px bg-border" />
             <button onClick={onClose} className="lg:hidden p-1 hover:bg-muted rounded-sm">
               <X className="w-4 h-4 text-muted-foreground" />

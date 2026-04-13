@@ -183,11 +183,6 @@ function TaskRow({
       {/* Task name */}
       <span className="text-sm text-foreground/90 truncate flex-1 min-w-0">{task.name}</span>
 
-      {/* Week badge */}
-      <span className="font-mono text-[10px] text-muted-foreground shrink-0 hidden sm:block">
-        W{task.week}
-      </span>
-
       {/* Status dropdown for direct selection */}
       <select
         value={task.status}

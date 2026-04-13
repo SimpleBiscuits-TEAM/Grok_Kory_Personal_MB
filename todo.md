@@ -1291,3 +1291,8 @@
 ## Update Tasks Tab with QA Completion Status
 - [x] Update Tasks panel to reflect completed items from QA status report (256 passed, 57 in_progress, 3 not_started)
 - [x] No changes to any other tabs or components — only taskData.ts and useTaskStore.ts touched
+
+## Reorganize Tasks Tab into Functional Sections
+- [x] Replace priority/week grouping with 35 logical functional sections (Analyzer File Parsing, Data Processing, Charts, Diagnostics, Health Reports, Vehicle Support, Live Datalogging, Calibration Editor, Reverse Engineering, Knox AI, ECU Scanner, Drag Racing, Fleet, Community, Tune Management, Can-Am, Auth, Admin, UI/UX, Knowledge Base, Notifications, Data Persistence)
+- [x] Preserve all task completion statuses during reorganization (256 passed, 57 in_progress, 3 not_started)
+- [x] Only changed taskData.ts, useTaskStore.ts, Tasks.tsx, FilterBar.tsx, ModuleSidebar.tsx, TaskTable.tsx — no other tabs or Tobi's code touched

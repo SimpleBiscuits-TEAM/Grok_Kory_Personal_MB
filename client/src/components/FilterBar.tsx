@@ -1,10 +1,10 @@
 /*
- * FilterBar — Horizontal filter strip with search, priority, week, and status filters.
+ * FilterBar — Horizontal filter strip with search, priority, and status filters.
  * Styled like tuning controls: instant response, monospaced labels.
  */
 
 import { type Filters } from "@/hooks/useTaskStore";
-import { type Priority, type Week, type Status } from "@/lib/taskData";
+import { type Priority, type Status } from "@/lib/taskData";
 import { Search, X } from "lucide-react";
 
 interface FilterBarProps {
@@ -14,7 +14,6 @@ interface FilterBarProps {
 
 export function FilterBar({ filters, setFilters }: FilterBarProps) {
   const priorities: Priority[] = ["P1", "P2", "P3"];
-  const weeks: Week[] = [1, 2, 3, 4];
   const statuses: { value: Status; label: string }[] = [
     { value: "not_started", label: "NOT STARTED" },
     { value: "in_progress", label: "IN PROGRESS" },
@@ -30,7 +29,7 @@ export function FilterBar({ filters, setFilters }: FilterBarProps) {
     P4: "bg-muted text-muted-foreground",
   };
 
-  const hasFilters = filters.search || filters.priority || filters.week || filters.status;
+  const hasFilters = filters.search || filters.priority || filters.status;
 
   return (
     <div className="border-b border-border bg-card/30 px-4 py-2.5">
@@ -40,7 +39,7 @@ export function FilterBar({ filters, setFilters }: FilterBarProps) {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search tasks, IDs, modules..."
+            placeholder="Search tasks, IDs, sections..."
             value={filters.search}
             onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
             className="w-full bg-input border border-border rounded-sm pl-8 pr-3 py-1.5 text-sm font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
@@ -69,31 +68,6 @@ export function FilterBar({ filters, setFilters }: FilterBarProps) {
               }`}
             >
               {p}
-            </button>
-          ))}
-        </div>
-
-        <div className="w-px h-6 bg-border hidden sm:block" />
-
-        {/* Week filters */}
-        <div className="flex items-center gap-1">
-          <span className="font-mono text-[10px] text-muted-foreground mr-1 hidden sm:inline">WK:</span>
-          {weeks.map((w) => (
-            <button
-              key={w}
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  week: prev.week === w ? null : w,
-                }))
-              }
-              className={`font-mono text-[11px] px-2 py-0.5 rounded-sm transition-all ${
-                filters.week === w
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              W{w}
             </button>
           ))}
         </div>
