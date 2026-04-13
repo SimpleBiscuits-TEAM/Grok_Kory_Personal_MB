@@ -1,6 +1,7 @@
 /**
  * Tasks Page — V-OP QA Task Tracker
- * Organized by functional sections (Analyzer, Flash, Calibration, Dyno, etc.)
+ * Organized by 6 top-level sections: Analyzer, Vehicle Support, Live Datalogging,
+ * Calibration Editor, Reverse Engineering, MISC
  */
 
 import { useState } from 'react';
@@ -11,6 +12,7 @@ import { StatsBar } from '@/components/StatsBar';
 import { FilterBar } from '@/components/FilterBar';
 import { TaskTable } from '@/components/TaskTable';
 import { ModuleSidebar } from '@/components/ModuleSidebar';
+import type { TopSection } from '@/lib/taskData';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +25,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, PanelLeftOpen, PanelLeftClose, ShieldAlert } from 'lucide-react';
+import { RotateCcw, PanelLeftOpen, PanelLeftClose } from 'lucide-react';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
@@ -42,7 +44,7 @@ const sColor = {
  * TasksContent — Embeddable version for use inside Advanced tabs (no header/wrapper)
  */
 export function TasksContent() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { loading } = useAuth();
   const store = useTaskStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   if (loading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
@@ -72,7 +74,7 @@ export function TasksContent() {
               <AlertDialogContent className="bg-card border-border">
                 <AlertDialogHeader>
                   <AlertDialogTitle style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em' }}>RESET ALL PROGRESS?</AlertDialogTitle>
-                  <AlertDialogDescription className="text-muted-foreground">This will reset all task statuses back to defaults. This action cannot be undone.</AlertDialogDescription>
+                  <AlertDialogDescription className="text-muted-foreground">This will reset all task statuses and section moves back to defaults. This action cannot be undone.</AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel style={{ fontFamily: sFont.mono, fontSize: '0.7rem' }}>CANCEL</AlertDialogCancel>
@@ -85,10 +87,16 @@ export function TasksContent() {
       </div>
       <StatsBar stats={store.stats} />
       <div className="flex-1 flex overflow-hidden">
-        <ModuleSidebar open={sidebarOpen} tasks={store.tasks} activeModule={store.filters.module} onSelectModule={(m: number) => store.setFilters((prev) => ({ ...prev, module: prev.module === m ? null : m }))} onClose={() => setSidebarOpen(false)} />
+        <ModuleSidebar
+          open={sidebarOpen}
+          tasks={store.tasks}
+          activeSection={store.filters.topSection}
+          onSelectSection={(s: TopSection | null) => store.setFilters((prev) => ({ ...prev, topSection: s }))}
+          onClose={() => setSidebarOpen(false)}
+        />
         <main className="flex-1 min-w-0 flex flex-col">
           <FilterBar filters={store.filters} setFilters={store.setFilters} />
-          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} />
+          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} />
         </main>
       </div>
     </div>
@@ -96,7 +104,7 @@ export function TasksContent() {
 }
 
 export default function Tasks() {
-  const { user, isAuthenticated, loading } = useAuth();
+  const { loading } = useAuth();
   const store = useTaskStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -111,7 +119,6 @@ export default function Tasks() {
       }}>
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* Sidebar toggle */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded-sm transition-colors"
@@ -120,11 +127,7 @@ export default function Tasks() {
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               aria-label="Toggle sidebar"
             >
-              {sidebarOpen ? (
-                <PanelLeftClose className="w-4 h-4" />
-              ) : (
-                <PanelLeftOpen className="w-4 h-4" />
-              )}
+              {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
             </button>
             <div className="flex items-center gap-2">
               <div style={{ width: '3px', height: '24px', background: sColor.red }} />
@@ -170,7 +173,7 @@ export default function Tasks() {
                 <AlertDialogHeader>
                   <AlertDialogTitle style={{ fontFamily: sFont.heading, fontSize: '1.2rem', letterSpacing: '0.06em' }}>RESET ALL PROGRESS?</AlertDialogTitle>
                   <AlertDialogDescription className="text-muted-foreground">
-                    This will reset all task statuses back to defaults. This action cannot be undone.
+                    This will reset all task statuses and section moves back to defaults. This action cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -198,20 +201,15 @@ export default function Tasks() {
         <ModuleSidebar
           open={sidebarOpen}
           tasks={store.tasks}
-          activeModule={store.filters.module}
-          onSelectModule={(m: number) =>
-            store.setFilters((prev) => ({
-              ...prev,
-              module: prev.module === m ? null : m,
-            }))
-          }
+          activeSection={store.filters.topSection}
+          onSelectSection={(s: TopSection | null) => store.setFilters((prev) => ({ ...prev, topSection: s }))}
           onClose={() => setSidebarOpen(false)}
         />
 
         {/* Task List */}
         <main className="flex-1 min-w-0 flex flex-col">
           <FilterBar filters={store.filters} setFilters={store.setFilters} />
-          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} />
+          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} />
         </main>
       </div>
     </div>

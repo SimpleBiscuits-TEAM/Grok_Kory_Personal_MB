@@ -1,10 +1,10 @@
 /*
- * TaskTable — Dense task list grouped by module/section with click-to-cycle status.
- * Automotive warning indicator style for priority badges.
+ * TaskTable — Dense task list grouped by top section / subsection with click-to-cycle status.
+ * Includes a "Move to..." dropdown on each row to reassign tasks between sections.
  */
 
 import { useState, useMemo } from "react";
-import { type Task, type Status, type Priority } from "@/lib/taskData";
+import { type Task, type Status, type Priority, type TopSection, TOP_SECTIONS } from "@/lib/taskData";
 import {
   CircleDot,
   CheckCircle2,
@@ -13,6 +13,7 @@ import {
   Ban,
   ChevronDown,
   ChevronRight,
+  ArrowRightLeft,
 } from "lucide-react";
 import {
   Tooltip,
@@ -23,6 +24,7 @@ import {
 interface TaskTableProps {
   tasks: Task[];
   onStatusChange: (taskId: string, status: Status) => void;
+  onMoveTask?: (taskId: string, newSection: TopSection) => void;
 }
 
 const statusCycle: Status[] = ["not_started", "in_progress", "passed", "failed", "blocked"];
@@ -47,20 +49,26 @@ const priorityConfig: Record<Priority, { color: string }> = {
   P4: { color: "bg-muted text-muted-foreground" },
 };
 
-export function TaskTable({ tasks, onStatusChange }: TaskTableProps) {
+export function TaskTable({ tasks, onStatusChange, onMoveTask }: TaskTableProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  // Group tasks by module then section
+  // Group tasks by topSection then subsection
   const grouped = useMemo(() => {
-    const map = new Map<string, { moduleName: string; moduleId: number; section: string; tasks: Task[] }>();
+    const map = new Map<string, { topSection: TopSection; subsection: string; tasks: Task[] }>();
     for (const task of tasks) {
-      const key = `${task.module}-${task.section}`;
+      const key = `${task.topSection}::${task.subsection}`;
       if (!map.has(key)) {
-        map.set(key, { moduleName: task.moduleName, moduleId: task.module, section: task.section, tasks: [] });
+        map.set(key, { topSection: task.topSection, subsection: task.subsection, tasks: [] });
       }
       map.get(key)!.tasks.push(task);
     }
-    return Array.from(map.values());
+    // Sort by TOP_SECTIONS order, then by subsection name
+    return Array.from(map.values()).sort((a, b) => {
+      const ai = TOP_SECTIONS.indexOf(a.topSection);
+      const bi = TOP_SECTIONS.indexOf(b.topSection);
+      if (ai !== bi) return ai - bi;
+      return a.subsection.localeCompare(b.subsection);
+    });
   }, [tasks]);
 
   const toggleGroup = (key: string) => {
@@ -84,7 +92,7 @@ export function TaskTable({ tasks, onStatusChange }: TaskTableProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       {grouped.map((group) => {
-        const key = `${group.moduleId}-${group.section}`;
+        const key = `${group.topSection}::${group.subsection}`;
         const isCollapsed = collapsedGroups.has(key);
         const passed = group.tasks.filter((t) => t.status === "passed").length;
         const total = group.tasks.length;
@@ -101,12 +109,9 @@ export function TaskTable({ tasks, onStatusChange }: TaskTableProps) {
               ) : (
                 <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
               )}
-              <span className="font-mono text-[10px] text-primary shrink-0">M{group.moduleId}</span>
               <span className="text-xs font-semibold text-foreground/90 truncate">
-                {group.moduleName}
+                {group.subsection}
               </span>
-              <span className="text-[10px] text-muted-foreground hidden sm:inline">—</span>
-              <span className="text-xs text-muted-foreground truncate hidden sm:inline">{group.section}</span>
               <div className="flex-1" />
               <span className="font-mono text-[10px] text-muted-foreground shrink-0">
                 {passed}/{total}
@@ -126,7 +131,7 @@ export function TaskTable({ tasks, onStatusChange }: TaskTableProps) {
             {!isCollapsed && (
               <div>
                 {group.tasks.map((task) => (
-                  <TaskRow key={task.id} task={task} onStatusChange={onStatusChange} />
+                  <TaskRow key={task.id} task={task} onStatusChange={onStatusChange} onMoveTask={onMoveTask} />
                 ))}
               </div>
             )}
@@ -143,9 +148,11 @@ export function TaskTable({ tasks, onStatusChange }: TaskTableProps) {
 function TaskRow({
   task,
   onStatusChange,
+  onMoveTask,
 }: {
   task: Task;
   onStatusChange: (id: string, status: Status) => void;
+  onMoveTask?: (id: string, newSection: TopSection) => void;
 }) {
   const sc = statusConfig[task.status];
   const pc = priorityConfig[task.priority];
@@ -182,6 +189,28 @@ function TaskRow({
 
       {/* Task name */}
       <span className="text-sm text-foreground/90 truncate flex-1 min-w-0">{task.name}</span>
+
+      {/* Move to section dropdown */}
+      {onMoveTask && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <select
+              value={task.topSection}
+              onChange={(e) => onMoveTask(task.id, e.target.value as TopSection)}
+              className="font-mono text-[9px] bg-transparent border border-border/30 rounded-sm px-1 py-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 shrink-0 max-w-[100px] cursor-pointer"
+            >
+              {TOP_SECTIONS.map((s) => (
+                <option key={s} value={s} className="bg-card text-foreground text-[10px]">
+                  {s}
+                </option>
+              ))}
+            </select>
+          </TooltipTrigger>
+          <TooltipContent side="left" className="font-mono text-xs">
+            Move to another section
+          </TooltipContent>
+        </Tooltip>
+      )}
 
       {/* Status dropdown for direct selection */}
       <select

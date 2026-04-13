@@ -101,7 +101,7 @@ export function FilterBar({ filters, setFilters }: FilterBarProps) {
         {hasFilters && (
           <button
             onClick={() =>
-              setFilters({ search: "", module: null, priority: null, week: null, status: null })
+              setFilters({ search: "", topSection: null, priority: null, status: null })
             }
             className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground hover:text-destructive transition-colors ml-auto"
           >

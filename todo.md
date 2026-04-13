@@ -1296,3 +1296,11 @@
 - [x] Replace priority/week grouping with 35 logical functional sections (Analyzer File Parsing, Data Processing, Charts, Diagnostics, Health Reports, Vehicle Support, Live Datalogging, Calibration Editor, Reverse Engineering, Knox AI, ECU Scanner, Drag Racing, Fleet, Community, Tune Management, Can-Am, Auth, Admin, UI/UX, Knowledge Base, Notifications, Data Persistence)
 - [x] Preserve all task completion statuses during reorganization (256 passed, 57 in_progress, 3 not_started)
 - [x] Only changed taskData.ts, useTaskStore.ts, Tasks.tsx, FilterBar.tsx, ModuleSidebar.tsx, TaskTable.tsx — no other tabs or Tobi's code touched
+
+## Consolidate Tasks Tab into 6 Main Sections + Move Feature
+- [x] Consolidate 35 sections into 6 tabs: Analyzer, Vehicle Support, Live Datalogging, Calibration Editor, Reverse Engineering, MISC
+- [x] Add move-task dropdown on each task row to reassign between sections (persisted to localStorage)
+- [x] Persist section overrides so user changes survive page reload (localStorage v3)
+- [x] Update sidebar to show 6 sections with progress bars
+- [x] Remove SprintTimeline and Week filters (no longer applicable)
+- [x] Only changed: taskData.ts, useTaskStore.ts, Tasks.tsx, ModuleSidebar.tsx, TaskTable.tsx, FilterBar.tsx
