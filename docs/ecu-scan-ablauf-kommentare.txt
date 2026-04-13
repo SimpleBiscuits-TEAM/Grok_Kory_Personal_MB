@@ -1,0 +1,133 @@
+================================================================================
+ECU-Scan Ablauf (Flash-Tab) — Zusammenfassung zum Kommentieren
+================================================================================
+Code-Referenz: client/src/lib/ecuScanner.ts, client/src/components/EcuScanPanel.tsx
+Stand: für Review / Änderungswünsche — bitte Kommentare unten oder inline mit [KOMMENTAR: ...]
+
+--------------------------------------------------------------------------------
+1. UI / Kontext
+--------------------------------------------------------------------------------
+- Flash-Workspace: ECU Scan (neben Tune Deploy).
+- Transportwahl: PCAN (WebSocket-Bridge → PEAK) oder V-OP USB2CAN (Web Serial).
+- Hinweis: "COM" betrifft nur V-OP im Browser; PCAN spricht die Bridge an, nicht COM.
+
+- Automatik: Wenn bridgeAvailable == false aber vopSupported → UI schaltet Vorschlag auf V-OP (useEffect in EcuScanPanel).
+
+--------------------------------------------------------------------------------
+2. Vor Start (EcuScanPanel)
+--------------------------------------------------------------------------------
+PCAN:
+  - pcanConnection ODER neue PCANConnection(bridgeUrl) wenn nur URL bekannt
+  - connect({ skipVehicleInit: true })
+
+V-OP:
+  - vopConnection oder getSharedVopCan2UsbConnection()
+  - connect({ skipVehicleInit: true }) → ggf. COM-Auswahl
+
+Timeouts (EcuScanner-Optionen):
+  PCAN: scanUdsTimeoutMs=2800, postGmlanUudtDelayMs=120
+  V-OP:  scanUdsTimeoutMs=1200, postGmlanUudtDelayMs=60
+  Default im Scanner ohne Override: 1200 ms pro UDS
+
+  benutze generell immer die Timings vom V-OP!
+
+--------------------------------------------------------------------------------
+3. scanVehicle (Gesamt)
+--------------------------------------------------------------------------------
+- Verbindung bei disconnected/error: connect
+- delay 400 ms
+- Feste Reihenfolge, nacheinander (kein Parallel-Scan):
+    0x7E0 → 0x7E8  (ECM Primary)
+    0x7E1 → 0x7E9  (Label: TCU Ford)
+    0x7E2 → 0x7EA  (Label: TCM Allison)
+- Nach jedem ECU: onProgress
+- Ende: VIN-Konsens (häufigster VIN unter ECUs mit gültiger VIN)
+- abort() bricht Schleife ab
+
+hier ist zunächst eine größere änderung nötig.
+als ersten fragst du obd-2 die vin per 0x7df 02 09 02 ab.
+primär benötigen wir die VIN vom ECU, aber auch das TCU sollte hier antworten 0x7e1 bei ford, 0x7e2 bei gm.
+hiernoch weitere fallbacks zum holen der VIN: 
+                (tx: 0x241, data: new byte[]{0x1a, 0x90},withres:true, rx: 0x641),
+                (tx: 0x7e0, data: new byte[]{0x1a, 0x90},withres:true, rx: 0x7e8),
+                (tx: 0x7e0, data: new byte[]{0x22, 0xF1, 0x90},withres:true, rx: 0x7e8),
+                (tx: 0x7e1, data: new byte[]{0x1a, 0x90},withres:true, rx: 0x7e9),
+                (tx: 0x7e1, data: new byte[]{0x22, 0xF1, 0x90},withres:true, rx: 0x7e9),
+                (tx: 0x7e2, data: new byte[]{0x1a, 0x90},withres:true, rx: 0x7ea)
+
+
+erst jetzt stellst du anhand der VIN fest mit welchem fahrzeug wir vebunden sind und enstcheidest damit welches protokoll weiterhin zu verwenden ist.
+
+
+--------------------------------------------------------------------------------
+4. scanAddress (pro CAN-Adresse)
+--------------------------------------------------------------------------------
+
+4.1 Schritt 1 — Präsenz / Transport
+Heuristik isGmStylePhysicalTx(tx): true für 0x7E0 … 0x7E7
+
+  Wenn GM-Stil:
+    - KEIN USDT TesterPresent 0x3E 00 auf physikalisch (NRC-Risiko)
+    - Stattdessen GMLAN UUDT: FE 01 3E auf funktional 0x101 via sendRawCanFrame
+    - postGmlanUudtDelayMs Pause
+    - probeResp absichtlich null → nächster Schritt nutzt Programmiersession
+    - Fallback: kein sendRawCanFrame → Notiz, nur Session-Probe
+
+  Wenn NICHT GM-Stil (aktuell selten, alle SCAN_ADDRESSES liegen in 7E0–7E2):
+    - USDT 0x3E 00 auf txAddr
+
+4.2 Schritt 2 — Programmiersession
+  - Wenn !probeResp:
+      sendAndRecord 0x10 0x02 (nie 0x10 0x01 im Fallback)
+      keine Antwort → responding false, status timeout, return
+      programmingSessionFromFallback = positiveResponse bei 0x10 0x02
+
+  - responding = true
+
+  - Zweites 0x10 0x02 nur wenn noch nicht positiv im Fallback
+    (programmingSessionFromFallback → kein zweites 0x10 0x02)
+
+  - delay 100 ms
+
+4.3 Schritt 3 — Security Access
+  - attemptSecurityAccess vor geschützten Reads (GM: oft nötig)
+
+4.4 Schritt 4 — Protokoll / DIDs
+  - Zuerst GMLAN VIN: 0x1A + DID 0x90
+      positiv → GMLAN → scanGmlanEcu
+  - Sonst UDS VIN: 0x22 + F190
+      positiv → UDS → OEM: Ford / Cummins / generic
+
+4.5 Schritt 5–6
+  - matchEcuConfig wenn noch leer
+  - Notizen bei leeren Kalibrierdaten / Security fehlgeschlagen
+
+--------------------------------------------------------------------------------
+5. Flash-Tab Nutzung der Daten
+--------------------------------------------------------------------------------
+- Mit geladenem Container: compareWithContainer; Fokus erstes responding ECU
+- Optional lokale .bin pro Zeile: Scoring + onVerifiedContainerLoad
+
+--------------------------------------------------------------------------------
+6. Entscheidungsbaum (kurz)
+--------------------------------------------------------------------------------
+GM-TX (7E0–7E7)?
+  ja  → UUDT @ 101 → Delay → erster physischer Test 0x10 0x02
+  nein → 0x3E 00 → bei Bedarf 0x10 0x02
+
+0x10 0x02 ohne Antwort → ECU nicht da, Ende Adresse
+
+Dann Security → GMLAN-VIN? → UDS-VIN / Ford / Cummins / generic
+
+================================================================================
+DEINE KOMMENTARE / ÄNDERUNGEN — bitte hier eintragen
+================================================================================
+
+[ wenn das containerfile geöffnet wurde zeigst du 2 buttons an, live flash pcan und live flash vop...
+hier ist keine unterscheidung mehr nötug wir brauchen nur einen "start Flash" button, die entscheidung welche hardware benutzt wird, wurde ja bereits vor dem scan getroffen] 
+
+[ ] 
+
+[ ] 
+
+================================================================================

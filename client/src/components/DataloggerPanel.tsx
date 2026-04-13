@@ -992,8 +992,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
 
-  const handleCheckBridge = useCallback(async () => {
-    setCheckingBridge(true);
+  /** Probe local WebSocket bridge; returns URL when available (same discovery CONNECT uses). */
+  const probePcanBridge = useCallback(async (): Promise<string | null> => {
     try {
       const result = await PCANConnection.isBridgeAvailable();
       setBridgeAvailable(result.available);
@@ -1001,25 +1001,51 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setDetectedBridgeUrl(result.url);
         const proto = result.url.startsWith('wss') ? 'wss (secure)' : 'ws';
         addLog(`PCAN-USB bridge detected via ${proto}: ${result.url}`);
-      } else {
-        setDetectedBridgeUrl(null);
-        addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
-        addLog('If bridge IS running, you may need to accept the TLS certificate:');
-        addLog('  Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome → Advanced → Proceed');
+        return result.url;
       }
+      setDetectedBridgeUrl(null);
+      addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
+      addLog('If bridge IS running, you may need to accept the TLS certificate:');
+      addLog('  Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome → Advanced → Proceed');
+      return null;
     } catch {
       setBridgeAvailable(false);
       setDetectedBridgeUrl(null);
+      return null;
+    }
+  }, [addLog]);
+
+  const handleCheckBridge = useCallback(async () => {
+    setCheckingBridge(true);
+    try {
+      await probePcanBridge();
     } finally {
       setCheckingBridge(false);
     }
-  }, [addLog]);
+  }, [probePcanBridge]);
+
+  /** While on PCAN and idle, refresh bridge status (CONNECT also probes if needed — same flow as V-OP: one action). */
+  useEffect(() => {
+    if (adapterType !== 'pcan') return;
+    if (connectionState !== 'disconnected' && connectionState !== 'error') return;
+    void probePcanBridge();
+  }, [adapterType, connectionState, probePcanBridge]);
 
   const handleConnect = useCallback(async () => {
     let conn: OBDConnection | PCANConnection | VopCan2UsbConnection;
 
     if (adapterType === 'pcan') {
-      conn = new PCANConnection(detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {});
+      let bridgeUrl = detectedBridgeUrl;
+      if (!bridgeUrl) {
+        setCheckingBridge(true);
+        try {
+          bridgeUrl = await probePcanBridge();
+        } finally {
+          setCheckingBridge(false);
+        }
+        if (!bridgeUrl) return;
+      }
+      conn = new PCANConnection({ bridgeUrl });
       addLog('Connecting via PCAN-USB WebSocket bridge...');
     } else if (adapterType === 'can2usb') {
       conn = getSharedVopCan2UsbConnection();
@@ -1095,7 +1121,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             : 'ELM327 WebSerial';
       addLog(`Connected via ${via}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
-  }, [addLog, adapterType, detectedBridgeUrl]);
+  }, [addLog, adapterType, detectedBridgeUrl, probePcanBridge]);
 
   const handleDisconnect = useCallback(async () => {
     if (isLogging) {
@@ -2623,14 +2649,19 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                           {checkingBridge ? 'CHECKING...' : 'CHECK'}
                         </button>
                       </div>
+                      <div style={{ fontFamily: sFont.body, fontSize: '0.68rem', color: sColor.textDim, marginTop: '6px' }}>
+                        <strong style={{ color: sColor.text }}>CONNECT</strong> finds the bridge automatically (same as V-OP — no separate step required).{' '}
+                        <strong>CHECK</strong> only refreshes status.
+                      </div>
                       {bridgeAvailable === true && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.green, marginTop: '6px' }}>
-                          Bridge detected and ready. Click <strong>CONNECT</strong> above to start.
+                          Bridge reachable. Click <strong>CONNECT</strong> above to start (VIN + PID init runs after connect).
                         </div>
                       )}
                       {bridgeAvailable === false && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '6px' }}>
-                          Bridge not found. <strong style={{ color: sColor.text }}>Download the VOP Bridge installer below</strong> to get started.
+                          Bridge not found — install or run the bridge, then use <strong>CONNECT</strong> (it will retry discovery).{' '}
+                          <strong style={{ color: sColor.text }}>Download the VOP Bridge installer below</strong> or run <code style={{ fontSize: '0.75em' }}>pcan_bridge.py</code>.
                         </div>
                       )}
                     </div>
@@ -2711,8 +2742,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
                         <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
-                          <strong>Click CHECK</strong> above, then <strong>CONNECT</strong> — you're live!
-                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time? Accept the certificate at <strong style={{ color: sColor.text }}>https://127.0.0.1:8766</strong> (or localhost)</div>
+                          <strong>Click CONNECT</strong> in the header — same flow as V-OP Can2USB (bridge is discovered automatically).
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time with TLS? Accept the certificate at <strong style={{ color: sColor.text }}>https://127.0.0.1:8766</strong> (or localhost)</div>
                         </div>
                       </div>
                     </div>
@@ -2747,7 +2778,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         <div style={{ color: sColor.green }}>pip install python-can websockets</div>
                         <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in USB-CAN adapter, then run the bridge</div>
                         <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
-                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CONNECT in the app — bridge discovery runs automatically</div>
                       </div>
                     </details>
                   </div>

@@ -31,13 +31,21 @@ import {
   type PIDManufacturer,
 } from './obdConnection';
 import { parseOBDResponse } from 'obd-utils';
-import { getMode01ProbePidOrder, getStandardPidsMatchingElmCatalog } from './obdElmCorePids';
 import { decodeVinLocal, decodeVinNhtsa } from './universalVinDecoder';
+import {
+  DATALOGGER_CONNECT_MODE01_TIMEOUT_MS,
+  DATALOGGER_CONNECT_VIN_TIMEOUT_MS,
+  DATALOGGER_OBD_PHYSICAL_TX,
+  DATALOGGER_STANDARD_BITMASK_PIDS,
+  ISO_TP_FLOW_CONTROL_CTS_PADDED,
+} from './dataloggerVehicleScanProtocol';
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
 import {
   CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS,
   CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
   CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_UDS_POST_SESSION_SETTLE_MS,
+  CAN_UDS_PRE_TX_SETTLE_MS,
 } from './canTransportTiming';
 
 type EventCallback = (event: ConnectionEvent) => void;
@@ -205,18 +213,6 @@ const NON_GM_FOR_GMLAN_SESSION = new Set<PIDManufacturer>([
   'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
   'canam', 'seadoo', 'polaris', 'kawasaki',
 ]);
-
-/** True when vehicle metadata points at a GM ECM (L5P / Duramax / Chevy GMC truck). */
-function isVehicleInfoGmLikely(info: VehicleInfo): boolean {
-  if (info.manufacturer === 'gm') return true;
-  if (info.vin && info.vin.length === 17 && decodeVinLocal(info.vin).manufacturer === 'gm') return true;
-  const t = `${info.make ?? ''} ${info.model ?? ''} ${info.engineType ?? ''}`.toLowerCase();
-  if (/chev|gmc|buick|cadillac|silverado|sierra|duramax|\bl5p\b|\blml\b|2500|3500|\bl87\b|\bl86\b/.test(t)) {
-    return true;
-  }
-  // NHTSA/VIN decode can miss make but still describe the diesel (E41 / 6.6L).
-  return /\be41\b|6\.6.*diesel|duramax|l5p/.test(t);
-}
 
 // ─── PCAN Connection Class ──────────────────────────────────────────────────
 
@@ -766,16 +762,29 @@ export class PCANConnection {
   // ─── Vehicle Initialization ───────────────────────────────────────────────
 
   private async initialize(): Promise<void> {
-    // 1. Read VIN
-    this.emit('log', null, 'Reading VIN...');
+    // 1. VIN — same ISO-TP / PDU as V-OP (`09 02` on 0x7E0); no TesterPresent / session before bitmask scan.
+    this.emit('log', null, 'Reading VIN (ISO-TP 7E0/7E8)…');
     try {
-      const vinResponse = await this.sendRequest({
-        type: 'obd_request',
-        mode: 0x09,
-        pid: 0x02,
-      }) as unknown as BridgeOBDResponse;
-
-      const vin = this.parseVinFromMode0902(vinResponse.data);
+      const vinUds = await this.sendUDSRequest(
+        0x09,
+        0x02,
+        undefined,
+        DATALOGGER_OBD_PHYSICAL_TX,
+        DATALOGGER_CONNECT_VIN_TIMEOUT_MS,
+      );
+      let vin: string | null = null;
+      if (vinUds?.positiveResponse && vinUds.data?.length) {
+        const full = [0x49, ...vinUds.data];
+        if (full.length >= 3 + 17 && full[0] === 0x49 && full[1] === 0x02) {
+          const vinChars = full.slice(3, 3 + 17);
+          if (vinChars.length >= 17) {
+            vin = String.fromCharCode(...vinChars);
+          }
+        }
+        if (!vin) {
+          vin = this.parseVinFromMode0902(vinUds.data);
+        }
+      }
       if (vin) {
         this.vehicleInfo.vin = vin;
         this.emit('log', null, `VIN: ${vin}`);
@@ -812,12 +821,6 @@ export class PCANConnection {
         }
 
         applyPcanDieselFuelReconciliation(this.vehicleInfo);
-
-        // E41 / L5P: UDS 0x22 live data typically needs extended session (0x10 0x03) on 0x7E0.
-        if (isVehicleInfoGmLikely(this.vehicleInfo)) {
-          this.emit('log', null, 'GM vehicle — opening extended diagnostic session on ECM (0x7E0) for live DIDs...');
-          await this.ensureGmLiveDataSessionForTx(0x7e0);
-        }
       }
     } catch (e) {
       this.emit('log', null, 'VIN read failed — vehicle may not support Mode 09. Continuing...');
@@ -827,10 +830,9 @@ export class PCANConnection {
     this.vehicleInfo.protocolNumber = '6';
     this.emit('vehicleInfo', this.vehicleInfo);
 
-    // 2. Scan supported standard PIDs using Mode 01 PID 00/20/40/60
-    this.emit('log', null, 'Scanning supported PIDs...');
+    // 2. Mode 01 bitmasks only — same order / PDUs as V-OP (no ELM probe sweep, no 0x7DF here).
+    this.emit('log', null, 'Scanning supported PIDs…');
     await this.scanSupportedStandardPids();
-    this.seedChevroletGmCatalogPids();
 
     const stdCount = this.getAvailablePids().length;
     const extCount = this.getAvailableExtendedPids().length;
@@ -842,38 +844,32 @@ export class PCANConnection {
   }
 
   private async scanSupportedStandardPids(): Promise<void> {
-    // Read the PID support bitmasks: PIDs 0x00, 0x20, 0x40, 0x60
-    const bitmaskPids = [0x00, 0x20, 0x40, 0x60];
-
-    for (const bitmaskPid of bitmaskPids) {
+    for (const bitmaskPid of DATALOGGER_STANDARD_BITMASK_PIDS) {
       try {
-        const response = await this.sendRequest({
-          type: 'obd_request',
-          mode: 0x01,
-          pid: bitmaskPid,
-        }) as unknown as BridgeOBDResponse;
-
-        if (response.data && response.data.length >= 4) {
-          // Decode 4-byte bitmask
-          const bytes = response.data;
+        const uds = await this.sendUDSRequest(
+          0x01,
+          bitmaskPid,
+          undefined,
+          DATALOGGER_OBD_PHYSICAL_TX,
+          DATALOGGER_CONNECT_MODE01_TIMEOUT_MS,
+        );
+        if (uds?.positiveResponse && uds.data && uds.data.length >= 2) {
+          if (uds.data[0] !== bitmaskPid) continue;
+          const bytes = uds.data.slice(1);
+          if (bytes.length < 4) continue;
           for (let byteIdx = 0; byteIdx < 4; byteIdx++) {
             for (let bit = 7; bit >= 0; bit--) {
               if (bytes[byteIdx] & (1 << bit)) {
-                const pid = bitmaskPid + (byteIdx * 8) + (7 - bit) + 1;
+                const pid = bitmaskPid + byteIdx * 8 + (7 - bit) + 1;
                 this.supportedPids.add(pid);
               }
             }
           }
         }
       } catch {
-        // Try remaining bitmask PIDs — some ECUs NACK $00 but answer $20/$40/$60
-        continue;
+        break;
       }
     }
-
-    // Always probe common live PIDs and merge — bitmasks are often wrong/empty on EU gateways
-    // while RPM/speed/etc. still respond (matches ELM parseVin skipping non-printable count byte).
-    await this.probeGenericMode01Pids();
   }
 
   /**
@@ -888,53 +884,6 @@ export class PCANConnection {
     }
     if (data.length - i < 17) return null;
     return String.fromCharCode(...data.slice(i, i + 17));
-  }
-
-  /**
-   * Chevrolet / GM: pre-enable Mode 01 PIDs that exist in both our STANDARD_PIDS and the
-   * `obd-utils` ELM catalog so datalogging can start even when bitmask/probes miss (common on some CAN setups).
-   */
-  private seedChevroletGmCatalogPids(): void {
-    const vin = this.vehicleInfo.vin;
-    if (!vin || vin.length !== 17) return;
-    const { manufacturer } = decodeVinLocal(vin);
-    if (manufacturer !== 'gm') return;
-
-    const defs = getStandardPidsMatchingElmCatalog();
-    let added = 0;
-    for (const p of defs) {
-      if (!this.supportedPids.has(p.pid)) {
-        this.supportedPids.add(p.pid);
-        added++;
-      }
-    }
-    if (added > 0) {
-      this.emit(
-        'log',
-        null,
-        `Chevrolet/GM: pre-enabled ${added} Mode 01 PIDs from ELM/OBD-II catalog — start logging and the bus will skip any the ECU NACKs.`
-      );
-    }
-  }
-
-  /** Discover Mode 01 PIDs using `obd-utils` ELM catalog order; merge successes into supportedPids. */
-  private async probeGenericMode01Pids(): Promise<void> {
-    this.emit('log', null, 'Probing Mode 01 PIDs (obd-utils / ELM327 catalog)...');
-    const probes = getMode01ProbePidOrder(48);
-    for (const pid of probes) {
-      try {
-        const response = (await this.sendRequest({
-          type: 'obd_request',
-          mode: 0x01,
-          pid,
-        })) as unknown as BridgeOBDResponse;
-        if (response.data && response.data.length > 0) {
-          this.supportedPids.add(pid);
-        }
-      } catch {
-        // ignore
-      }
-    }
   }
 
   /**
@@ -969,7 +918,7 @@ export class PCANConnection {
       }
     }
     this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
-    await new Promise(r => setTimeout(r, 60));
+    await new Promise(r => setTimeout(r, CAN_UDS_POST_SESSION_SETTLE_MS));
   }
 
   // ─── PID Reading ──────────────────────────────────────────────────────────
@@ -1037,6 +986,59 @@ export class PCANConnection {
           rawBytes: payload,
           timestamp: Date.now(),
         };
+      }
+
+      // SAE J1979 Mode 01 — same ISO-TP path as V-OP (`01 xx` on physical TX), not `obd_request`.
+      if (mode === 0x01) {
+        const tx = parsePidEcuTxId(pid.ecuHeader);
+        const uds = await this.sendUDSRequest(
+          0x01,
+          pid.pid,
+          undefined,
+          tx,
+          CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+        );
+        if (!uds?.positiveResponse || !uds.data?.length) return null;
+        if (uds.data[0] !== pid.pid) return null;
+        const raw = uds.data.slice(1);
+        if (raw.length === 0) return null;
+        try {
+          const value = pid.formula(raw);
+          if (typeof value === 'number' && !Number.isFinite(value)) {
+            const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+            if (alt === null) return null;
+            return {
+              pid: pid.pid,
+              name: pid.name,
+              shortName: pid.shortName,
+              value: alt,
+              unit: pid.unit,
+              rawBytes: raw,
+              timestamp: Date.now(),
+            };
+          }
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        } catch {
+          const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+          if (alt === null) return null;
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value: alt,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        }
       }
 
       const response = await this.sendRequest(
@@ -1600,7 +1602,7 @@ export class PCANConnection {
 
     const deadline = Date.now() + timeoutMs;
     let expectedSeq = 1;
-    const fc = [0x30, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    const fc = [...ISO_TP_FLOW_CONTROL_CTS_PADDED];
     let sendFcWithCanSend = true;
 
     while (out.length < totalLen) {
@@ -1734,9 +1736,9 @@ export class PCANConnection {
       ? responseArbIdOverride
       : (isFunctional ? -1 : (targetAddress + 0x08));
 
-    // Align with V-OP `vopSendUdsSingleFrame`: clear listener, 150 ms settle (drain stale RX).
+    // Clear listener, brief settle so a queued stale 0x7E8 frame cannot pair with this TX.
     this.udsResponseListener = null;
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
 
     // Set up response capture via udsResponseListener (see openWebSocket onmessage).
     let userAbortedWait = false;
@@ -1900,7 +1902,7 @@ export class PCANConnection {
 
     // Drain stale frames
     this.udsResponseListener = null;
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
 
     // Step 1: Build and send First Frame (FF)
     // FF format: [0x1H, 0xLL, data0..data5] where 0x1HLL = total length

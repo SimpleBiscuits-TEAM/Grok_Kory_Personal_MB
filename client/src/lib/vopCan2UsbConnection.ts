@@ -40,7 +40,9 @@ import {
   CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
   CAN_LIVE_UDS_DID_TIMEOUT_MS,
   CAN_USB_BRIDGE_ACK_TIMEOUT_MS,
+  CAN_USB_SERIAL_BRIDGE_SETTLE_MS,
 } from './canTransportTiming';
+import { DATALOGGER_STANDARD_BITMASK_PIDS } from './dataloggerVehicleScanProtocol';
 
 type EventCallback = (event: ConnectionEvent) => void;
 
@@ -293,7 +295,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         const hit = this.rxFrames.splice(idx, 1)[0];
         return hit.data;
       }
-      await new Promise(r => setTimeout(r, 2));
+      await new Promise(r => setTimeout(r, 1));
     }
     return null;
   }
@@ -445,7 +447,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       this.readActive = true;
       void this.pumpReader();
 
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, CAN_USB_SERIAL_BRIDGE_SETTLE_MS));
 
       this.emit('log', null, 'Bridge ready (binary 55 AA protocol, @Firmware USBCanBridge).');
 
@@ -523,8 +525,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   private async scanSupportedStandardPids(): Promise<void> {
-    const bitmaskPids = [0x00, 0x20, 0x40, 0x60];
-    for (const bitmaskPid of bitmaskPids) {
+    for (const bitmaskPid of DATALOGGER_STANDARD_BITMASK_PIDS) {
       try {
         const resp = await this.isoTpRequest([0x01, bitmaskPid]);
         if (resp && resp.length >= 2 && resp[0] === 0x41) {
@@ -893,7 +894,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       this.ackWaiters.length = 0;
       this.readActive = true;
       void this.pumpReader();
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, CAN_USB_SERIAL_BRIDGE_SETTLE_MS));
       this.setState('ready');
       return true;
     } catch {

@@ -2,7 +2,6 @@
  * FlashContainerPanel — ECU Flash Container Analysis & Upload Tool
  *
  * Features:
- * - Drag-and-drop binary upload (.bin, .hex, .cal)
  * - PPEI and DevProg V2 container header parsing and display
  * - Calibration Flash / Full Flash toggle
  * - Flash readiness checklist with pass/fail/warn indicators
@@ -190,7 +189,6 @@ export default function FlashContainerPanel() {
   const [fileName, setFileName] = useState<string>('');
   const [flashTypeOverride, setFlashTypeOverride] = useState<FlashType | null>(null);
   const [activeSection, setActiveSection] = useState<string>('overview');
-  const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'ready' | 'uploading' | 'done'>('idle');
@@ -485,18 +483,6 @@ export default function FlashContainerPanel() {
     }
   }, [computeFileHash]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
   const onContainerFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) void handleFile(file);
@@ -583,14 +569,7 @@ export default function FlashContainerPanel() {
     return (
       <div className="h-full flex flex-col min-h-0">
         {workspaceToggle}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".bin,.hex,.cal,.Bin,.BIN"
-          className="hidden"
-          onChange={onContainerFileInputChange}
-        />
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-8 pr-1">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
           <EcuScanPanel
             wsBridgeConnection={wsBridgeConnectionRef.current}
             vopConnection={vopConnectionRef.current}
@@ -601,62 +580,14 @@ export default function FlashContainerPanel() {
             onVerifiedContainerLoad={handleFile}
           />
 
-          <div className="border-t border-zinc-800 pt-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-zinc-100">Open flash container</h2>
-                <p className="text-xs text-zinc-500">
-                  After the scan shows which calibrations are on the ECU, open the matching PPEI / DevProg container here for analysis and flash prep.
-                </p>
-              </div>
-            </div>
-
-            <div
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={() => setIsDragOver(false)}
-              onClick={() => fileInputRef.current?.click()}
-              className={`min-h-[220px] border-2 border-dashed rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all ${
-                isDragOver
-                  ? 'border-amber-400 bg-amber-500/10'
-                  : 'border-zinc-700 hover:border-zinc-500 bg-zinc-900/50'
-              }`}
-            >
-              {isLoading ? (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-12 h-12 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-                  <span className="text-zinc-400">Parsing container...</span>
-                </div>
-              ) : (
-                <>
-                  <Upload className={`w-10 h-10 mb-3 ${isDragOver ? 'text-amber-400' : 'text-zinc-600'}`} />
-                  <p className="text-zinc-300 font-medium">Drop ECU binary here</p>
-                  <p className="text-zinc-500 text-sm mt-1">or click to browse</p>
-                  <p className="text-zinc-600 text-xs mt-3">.bin, .hex, .cal — PPEI / DevProg container</p>
-                  {fileError && (
-                    <div className="mt-4 flex flex-col items-center gap-3 max-w-md px-2">
-                      <p className="text-red-400 text-xs text-center">
-                        Error: {fileError}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          openReplaceFilePicker();
-                        }}
-                        className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium border border-zinc-600 hover:border-zinc-500 hover:bg-zinc-700"
-                      >
-                        Choose a different file
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          <p className="text-[11px] text-zinc-500 leading-relaxed border border-zinc-800/80 rounded-lg px-3 py-2 bg-zinc-900/40">
+            Open a matching PPEI / DevProg container when the scan reports a good match — use{' '}
+            <span className="text-zinc-400">Load verified match</span> on the scan results. After a container is loaded, use{' '}
+            <span className="text-zinc-400">Load different file</span> in the header to replace it.
+          </p>
+          {fileError && (
+            <p className="text-[11px] text-red-400/95 mt-2">{fileError}</p>
+          )}
         </div>
       </div>
     );
@@ -800,7 +731,7 @@ export default function FlashContainerPanel() {
           <button
             type="button"
             onClick={resetAll}
-            title="Clear container and return to ECU Scan + file drop"
+            title="Clear container and return to ECU Scan"
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-lg border border-zinc-700 hover:border-zinc-600 transition-colors"
           >
             <RotateCcw className="w-3 h-3" /> Reset workspace

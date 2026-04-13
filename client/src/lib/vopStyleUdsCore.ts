@@ -9,6 +9,8 @@ import {
   parseIsoTpDataToUdsResponse,
   parseUdsDiagnosticPayload,
 } from './pcanConnection';
+import { CAN_UDS_PRE_TX_SETTLE_MS } from './canTransportTiming';
+import { ISO_TP_FLOW_CONTROL_CTS_PADDED } from './dataloggerVehicleScanProtocol';
 
 export interface VopStyleUdsDeps {
   sendCanTx(canId: number, ext: boolean, data: Uint8Array, waitAck: boolean): Promise<boolean>;
@@ -64,7 +66,7 @@ export function createVopStyleUdsLayer(deps: VopStyleUdsDeps): VopStyleUdsLayer 
     const deadline = Date.now() + timeoutMs;
     let expectedSeq = 1;
     let flowControlSent = false;
-    const fc = new Uint8Array([0x30, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    const fc = Uint8Array.from(ISO_TP_FLOW_CONTROL_CTS_PADDED);
 
     while (out.length < totalLen) {
       if (Date.now() > deadline) return null;
@@ -135,7 +137,7 @@ export function createVopStyleUdsLayer(deps: VopStyleUdsDeps): VopStyleUdsLayer 
     while (frame.length < 8) frame.push(0x00);
 
     setFlashUdsListener(null);
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
 
     const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
       setUdsInFlightReject(reject);
@@ -233,7 +235,7 @@ export function createVopStyleUdsLayer(deps: VopStyleUdsDeps): VopStyleUdsLayer 
       responseArbIdOverride !== undefined ? responseArbIdOverride : targetAddress + 0x08;
 
     setFlashUdsListener(null);
-    await new Promise(r => setTimeout(r, 150));
+    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
 
     const firstFrame: number[] = [
       0x10 | ((totalLength >> 8) & 0x0f),

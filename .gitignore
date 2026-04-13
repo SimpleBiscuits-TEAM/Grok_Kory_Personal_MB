@@ -126,3 +126,4 @@ docs/git-repository-map.html
 # Local bridge / Python artifacts (do not commit)
 docs/.certs/
 docs/__pycache__/
+client/public/__pycache__/
