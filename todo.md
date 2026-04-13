@@ -1287,3 +1287,7 @@
 - [x] Remove TasksGate access code in Advanced.tsx — auto-unlock
 - [x] Show GOD MODE banner for everyone (Manus OAuth = trusted)
 - [x] Keep SIGN IN button hidden (Manus platform handles auth)
+
+## Update Tasks Tab with QA Completion Status
+- [x] Update Tasks panel to reflect completed items from QA status report (256 passed, 57 in_progress, 3 not_started)
+- [x] No changes to any other tabs or components — only taskData.ts and useTaskStore.ts touched

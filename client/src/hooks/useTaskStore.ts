@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { type Task, type Status, type Priority, type Week, defaultTasks } from "@/lib/taskData";
 
-const STORAGE_KEY = "vop-task-tracker-v1";
+const STORAGE_KEY = "vop-task-tracker-v2";
 
 function loadTasks(): Task[] {
   try {
