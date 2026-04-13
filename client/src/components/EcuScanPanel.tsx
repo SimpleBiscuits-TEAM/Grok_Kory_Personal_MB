@@ -3,11 +3,11 @@
  *
  * Scans all known CAN addresses, reads identifying DIDs,
  * calibration data from the ECU (GMLAN ReadDID / UDS as applicable). Per-ECU file/folder match; Flash-tab container vs first ECU.
- * Supports PCAN-USB (WebSocket bridge) and V-OP USB2CAN (Web Serial).
+ * Supports local WebSocket bridge (python-can) and V-OP USB2CAN (Web Serial).
  */
 
 import { useState, useCallback, useRef, useEffect, useMemo, type ChangeEvent } from 'react';
-import { PCANConnection } from '../lib/pcanConnection';
+import { WebsocketCanBridgeConnection } from '../lib/websocketCanBridgeConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '../lib/vopCan2UsbConnection';
 import {
   EcuScanner,
@@ -19,7 +19,13 @@ import {
 import { type ContainerFileHeader } from '../../../shared/ecuDatabase';
 import { gmCan2000DidShortName } from '../lib/gmCan2000DidReference';
 import {
+  PCAN_BRIDGE_PY_DOWNLOAD_FILENAME,
+  PCAN_BRIDGE_PY_DOWNLOAD_HREF,
+  PCAN_BRIDGE_PY_DOWNLOAD_TITLE,
+} from '../lib/bridgeDownload';
+import {
   persistLastVehicleScan,
+  persistEcuScanTransport,
   buildVehicleScanSnapshotV1,
 } from '../lib/ecuContainerSessionStorage';
 import {
@@ -33,13 +39,13 @@ import {
   Search, CheckCircle2, XCircle, AlertTriangle,
   ChevronDown, ChevronRight, Cpu, Radio, Clock,
   Shield, Hash, FileCheck, Loader2, StopCircle,
-  Usb, Cloud, Upload,
+  Usb, Cloud, Upload, FileDown,
 } from 'lucide-react';
 
-export type EcuScanTransportChoice = 'pcan' | 'vop';
+export type EcuScanTransportChoice = 'bridge' | 'vop';
 
 interface EcuScanPanelProps {
-  pcanConnection: PCANConnection | null;
+  wsBridgeConnection: WebsocketCanBridgeConnection | null;
   vopConnection: VopCan2UsbConnection | null;
   vopSupported: boolean;
   containerHeader: ContainerFileHeader | null;
@@ -50,7 +56,7 @@ interface EcuScanPanelProps {
 }
 
 export default function EcuScanPanel({
-  pcanConnection,
+  wsBridgeConnection,
   vopConnection,
   vopSupported,
   containerHeader,
@@ -62,7 +68,7 @@ export default function EcuScanPanel({
   const [report, setReport] = useState<VehicleScanReport | null>(null);
   const [expandedEcu, setExpandedEcu] = useState<number | null>(null);
   const scannerRef = useRef<EcuScanner | null>(null);
-  const [scanTransport, setScanTransport] = useState<EcuScanTransportChoice>('pcan');
+  const [scanTransport, setScanTransport] = useState<EcuScanTransportChoice>('bridge');
   type EcuLocalOpenState = {
     loading: boolean;
     probe: {
@@ -188,24 +194,25 @@ export default function EcuScanPanel({
     }
   }, [bridgeAvailable, vopSupported]);
 
-  const canStartPcan = bridgeAvailable && Boolean(pcanConnection || bridgeUrl);
+  const canStartBridge = bridgeAvailable && Boolean(wsBridgeConnection || bridgeUrl);
   const canStartVop = vopSupported;
   const scanEnabled =
-    scanTransport === 'pcan' ? canStartPcan : canStartVop;
+    scanTransport === 'bridge' ? canStartBridge : canStartVop;
 
   const startScan = useCallback(async () => {
-    if (scanTransport === 'pcan' && !canStartPcan) return;
+    if (scanTransport === 'bridge' && !canStartBridge) return;
     if (scanTransport === 'vop' && !canStartVop) return;
 
     setScanning(true);
     setReport(null);
     setLocalOpenByEcu({});
+    persistEcuScanTransport(scanTransport === 'bridge' ? 'bridge' : 'vop');
 
     try {
-      if (scanTransport === 'pcan') {
-        let conn = pcanConnection;
+      if (scanTransport === 'bridge') {
+        let conn = wsBridgeConnection;
         if (!conn && bridgeUrl) {
-          conn = new PCANConnection({ bridgeUrl, requestTimeout: 10000 });
+          conn = new WebsocketCanBridgeConnection({ bridgeUrl, requestTimeout: 10000 });
         }
         if (!conn) return;
 
@@ -216,13 +223,14 @@ export default function EcuScanPanel({
 
         const scanner = new EcuScanner(conn, containerHeader ?? undefined, {
           skipVehicleInit: true,
-          // WebSocket + bridge + PCAN driver: allow enough time per UDS (not COM — browser talks to bridge only).
-          scanUdsTimeoutMs: 2800,
-          postGmlanUudtDelayMs: 120,
+          scanUdsTimeoutMs: 650,
+          postGmlanUudtDelayMs: 50,
+          obdMode9UdsTimeoutMs: 4000,
+          postObdMode9VinSettleMs: 500,
         });
         scannerRef.current = scanner;
 
-        const result = await scanner.scanVehicle((progress) => {
+        const result = await scanner.scanVehicle(progress => {
           setReport({ ...progress });
         });
 
@@ -245,12 +253,14 @@ export default function EcuScanPanel({
 
       const scanner = new EcuScanner(v, containerHeader ?? undefined, {
         skipVehicleInit: true,
-        scanUdsTimeoutMs: 1200,
-        postGmlanUudtDelayMs: 60,
+        scanUdsTimeoutMs: 650,
+        postGmlanUudtDelayMs: 50,
+        obdMode9UdsTimeoutMs: 4000,
+        postObdMode9VinSettleMs: 500,
       });
       scannerRef.current = scanner;
 
-      const result = await scanner.scanVehicle((progress) => {
+      const result = await scanner.scanVehicle(progress => {
         setReport({ ...progress });
       });
 
@@ -269,9 +279,9 @@ export default function EcuScanPanel({
     }
   }, [
     scanTransport,
-    canStartPcan,
+    canStartBridge,
     canStartVop,
-    pcanConnection,
+    wsBridgeConnection,
     bridgeUrl,
     vopConnection,
     containerHeader,
@@ -279,6 +289,7 @@ export default function EcuScanPanel({
 
   const abortScan = useCallback(() => {
     scannerRef.current?.abort();
+    setScanning(false);
   }, []);
 
   return (
@@ -319,19 +330,19 @@ export default function EcuScanPanel({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <button
             type="button"
-            onClick={() => setScanTransport('pcan')}
+            onClick={() => setScanTransport('bridge')}
             className={`text-left rounded-lg border p-3 transition-colors ${
-              scanTransport === 'pcan'
+              scanTransport === 'bridge'
                 ? 'border-red-500/50 bg-red-500/10'
                 : 'border-zinc-700/80 bg-black/20 hover:border-zinc-600'
             }`}
           >
             <div className="flex items-center gap-2 mb-1">
               <Radio className="w-4 h-4 text-red-400 shrink-0" />
-              <span className="text-xs font-bold text-zinc-200">PCAN-USB</span>
+              <span className="text-xs font-bold text-zinc-200">Local bridge</span>
             </div>
             <p className="text-[10px] text-zinc-500">
-              Local WebSocket bridge (pcan_bridge.py). ECU Scan skips full VIN/PID init for speed.
+              Python WebSocket bridge to your CAN adapter. ECU Scan skips full VIN/PID init for speed.
             </p>
             <div className="mt-2 flex items-center gap-1.5 text-[10px]">
               {bridgeAvailable ? (
@@ -346,6 +357,16 @@ export default function EcuScanPanel({
                 </>
               )}
             </div>
+            <a
+              href={PCAN_BRIDGE_PY_DOWNLOAD_HREF}
+              download={PCAN_BRIDGE_PY_DOWNLOAD_FILENAME}
+              title={PCAN_BRIDGE_PY_DOWNLOAD_TITLE}
+              className="mt-2 inline-flex flex-wrap items-center gap-1 rounded border border-zinc-700/80 bg-zinc-900/40 px-2 py-1 text-[10px] text-cyan-400/95 hover:bg-zinc-800/60 hover:text-cyan-300"
+            >
+              <FileDown className="w-3 h-3 shrink-0" />
+              Download <span className="font-mono">pcan_bridge.py</span>
+              <span className="text-zinc-600 font-normal">· Datalogger uses the same file</span>
+            </a>
           </button>
 
           <button
@@ -442,6 +463,11 @@ export default function EcuScanPanel({
                 </div>
               )}
             </div>
+            {report.preflightVinDecodeSummary && (
+              <p className="text-[10px] text-zinc-600 mt-2 font-mono leading-snug">
+                {report.preflightVinDecodeSummary}
+              </p>
+            )}
           </div>
 
           {flashContainerComparison && containerHeader && (
@@ -503,7 +529,7 @@ export default function EcuScanPanel({
       {!report && !scanning && (
         <div className="p-6 text-center text-zinc-600 text-xs">
           <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
-          <p>Choose PCAN-USB or V-OP USB2CAN above, then click &quot;Scan ECUs&quot;</p>
+          <p>Choose local bridge or V-OP USB2CAN above, then click &quot;Scan ECUs&quot;</p>
           <p className="mt-1 text-[10px] text-zinc-700">
             Reads VIN, calibration slots, programming state, and tuning lock (where supported)
           </p>

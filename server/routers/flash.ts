@@ -558,16 +558,16 @@ export const flashRouter = router({
       if (input.connectionMode === 'pcan' || input.connectionMode === 'vop_usb') {
         checks.push({
           id: 'hw_connection',
-          label: input.connectionMode === 'vop_usb' ? 'USB CAN Bridge' : 'PCAN Connection',
+          label: input.connectionMode === 'vop_usb' ? 'USB CAN Bridge' : 'Local WebSocket bridge',
           status: 'warning',
           message: input.connectionMode === 'vop_usb'
             ? 'USB CAN bridge — connect the adapter, ignition ON, grant Web Serial when prompted'
-            : 'PCAN hardware check requires physical connection — verify before proceeding',
+            : 'WebSocket bridge — run the Python bridge with your CAN adapter and verify the vehicle link before proceeding',
           required: false,
         });
       } else {
         checks.push({
-          id: 'hw_connection', label: 'PCAN Connection',
+          id: 'hw_connection', label: 'Hardware connection',
           status: 'skipped',
           message: 'Simulator mode — no hardware required',
           required: false,

@@ -9,10 +9,15 @@ import {
 
 const STORAGE_KEY = 'goodGravy.ecuContainerSession.v1';
 
+/** ECU Scan adapter: local WebSocket bridge vs V-OP USB (Flash tab follows last scan). */
+export type StoredEcuScanTransport = 'bridge' | 'vop';
+
 export interface EcuContainerSessionV1 {
   version: 1;
   updatedAt: number;
   lastVehicleScan?: VehicleScanSnapshotV1;
+  /** Last transport used for a successful ECU Scan (drives live flash hardware). */
+  lastScanTransport?: StoredEcuScanTransport;
 }
 
 export function buildVehicleScanSnapshotV1(ecu: EcuScanResult): VehicleScanSnapshotV1 {
@@ -34,9 +39,12 @@ export function loadEcuContainerSession(): EcuContainerSessionV1 | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const o = JSON.parse(raw) as EcuContainerSessionV1;
+    const o = JSON.parse(raw) as EcuContainerSessionV1 & { lastScanTransport?: string };
     if (o?.version !== 1) return null;
-    return o;
+    if (o.lastScanTransport === 'pcan') {
+      (o as EcuContainerSessionV1).lastScanTransport = 'bridge';
+    }
+    return o as EcuContainerSessionV1;
   } catch {
     return null;
   }
@@ -67,4 +75,16 @@ export function persistLastVehicleScan(ecu: EcuScanResult): void {
   const session = ensureEcuContainerSession();
   session.lastVehicleScan = buildVehicleScanSnapshotV1(ecu);
   saveEcuContainerSession(session);
+}
+
+/** Persist which adapter was used for ECU Scan so Flash uses the same transport. */
+export function persistEcuScanTransport(choice: StoredEcuScanTransport): void {
+  const session = ensureEcuContainerSession();
+  session.lastScanTransport = choice;
+  saveEcuContainerSession(session);
+  try {
+    window.dispatchEvent(new CustomEvent('goodGravy:ecuScanTransport', { detail: choice }));
+  } catch {
+    /* ignore */
+  }
 }

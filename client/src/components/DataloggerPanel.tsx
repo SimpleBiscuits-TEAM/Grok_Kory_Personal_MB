@@ -23,6 +23,11 @@ import {
   Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
+import {
+  PCAN_BRIDGE_PY_DOWNLOAD_FILENAME,
+  PCAN_BRIDGE_PY_DOWNLOAD_HREF,
+  PCAN_BRIDGE_PY_DOWNLOAD_TITLE,
+} from '@/lib/bridgeDownload';
 import { PCANConnection } from '@/lib/pcanConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
@@ -2671,8 +2676,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                           ⬇ DOWNLOAD BRIDGE
                         </a>
                         <a
-                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663499288273/VRRqdUTMemLPozZ853E4Du/pcan_bridge_v2.1_a588f943.py"
-                          download="pcan_bridge.py"
+                          href={PCAN_BRIDGE_PY_DOWNLOAD_HREF}
+                          download={PCAN_BRIDGE_PY_DOWNLOAD_FILENAME}
+                          title={PCAN_BRIDGE_PY_DOWNLOAD_TITLE}
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: '6px',
                             padding: '8px 14px', background: 'transparent',
@@ -2681,9 +2687,11 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                             textDecoration: 'none', cursor: 'pointer',
                           }}
                         >
-                          .py only
+                          pcan_bridge.py
                         </a>
-                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim }}>ZIP: bridge + quickstart + installer · 17 KB</span>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim, lineHeight: 1.4 }}>
+                          ZIP: installer bundle (~17 KB) · .py: same protocol as this web app (~75 KB, served locally)
+                        </span>
                       </div>
                     </div>
 

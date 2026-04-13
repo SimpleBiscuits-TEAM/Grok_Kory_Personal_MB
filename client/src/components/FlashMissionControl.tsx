@@ -1,6 +1,6 @@
 /**
  * FlashMissionControl — Full-screen flash execution UI with real-time
- * simulation OR real PCAN flash, animated progress, CAN bus log stream,
+ * simulation OR real hardware flash (WebSocket bridge / V-OP), animated progress, CAN bus log stream,
  * countdown timer, section names, and server session recording.
  */
 import { useState, useEffect, useRef, useCallback, useMemo, type RefObject } from 'react';
@@ -39,13 +39,13 @@ interface FlashMissionControlProps {
   sessionUuid: string;
   onComplete: (result: 'SUCCESS' | 'FAILED' | 'ABORTED') => void;
   onBack: () => void;
-  /** PCAN WebSocket or V-OP USB — optional snapshot (may be stale on first paint). */
+  /** WebSocket bridge or V-OP USB — optional snapshot (may be stale on first paint). */
   flashBridge?: FlashBridgeConnection | null;
   /** Read at Start click — parent refs do not trigger re-renders; this fixes intermittent null snapshot. */
   flashBridgeRef?: RefObject<FlashBridgeConnection | null>;
-  /** Raw container file data — required for real PCAN flash */
+  /** Raw container file data — required for real hardware flash */
   containerData?: ArrayBuffer | null;
-  /** Parsed container header — required for real PCAN flash */
+  /** Parsed container header — required for real hardware flash */
   containerHeader?: ContainerFileHeader | null;
   /** Dry run mode — skips destructive commands (erase/transfer/write) */
   dryRun?: boolean;
@@ -264,7 +264,7 @@ export default function FlashMissionControl({
   const isDryRun = dryRun && isRealFlash;
   /** Active run with no final result yet (simulator or hardware). */
   const flashLocked = sim.isRunning && !sim.result;
-  /** Real hardware flash (PCAN / V-OP): lock UI so side interactions do not disturb CAN timing. */
+  /** Real hardware flash: lock UI so side interactions do not disturb CAN timing. */
   const hardwareFlashLocked = flashLocked && isRealFlash;
   /** User switched away or blurred — show high-visibility warning (timers/USB may throttle). */
   const [flashBackgroundWarning, setFlashBackgroundWarning] = useState(false);
@@ -500,7 +500,7 @@ export default function FlashMissionControl({
     } else if (isRealFlash) {
       updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
       const reason = !bridge
-        ? 'CAN adapter not ready. Return to Hardware Flash, confirm the PCAN bridge or V-OP USB, then launch again.'
+        ? 'CAN adapter not ready. Return to Hardware Flash, confirm the local bridge or V-OP USB, then launch again.'
         : !containerData || !containerHeader
           ? 'Container data is missing. Reload the file and try again.'
           : 'Cannot start real flash.';
@@ -770,7 +770,7 @@ export default function FlashMissionControl({
                 {isDryRun
                   ? 'DRY RUN — Non-destructive test'
                   : connectionMode === 'pcan'
-                    ? 'Real PCAN Bridge Flash'
+                    ? 'Real bridge (WebSocket) flash'
                     : connectionMode === 'vop_usb'
                       ? 'V-OP USB2CAN Bridge Flash'
                       : 'Simulator Mode'}{' '}
@@ -914,7 +914,7 @@ export default function FlashMissionControl({
             <div className="text-[10px] font-mono text-zinc-600">
               Session <span className="text-zinc-400">{sessionUuid.slice(0, 8)}…</span>
               {' · '}
-              {isDryRun ? 'Dry run' : connectionMode === 'pcan' ? 'PCAN' : connectionMode === 'vop_usb' ? 'V-OP USB' : 'Simulator'}
+              {isDryRun ? 'Dry run' : connectionMode === 'pcan' ? 'Local bridge' : connectionMode === 'vop_usb' ? 'V-OP USB' : 'Simulator'}
               {' · '}
               {sim.log.length} entries
               {sim.result && ` · ${sim.result}`}

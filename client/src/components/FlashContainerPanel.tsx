@@ -30,7 +30,7 @@ import {
   generateFlashPlan, formatBytes,
 } from '../../../shared/pcanFlashOrchestrator';
 import { type ContainerFileHeader as EcuContainerFileHeader } from '../../../shared/ecuDatabase';
-import { PCANConnection } from '../lib/pcanConnection';
+import { WebsocketCanBridgeConnection } from '../lib/websocketCanBridgeConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '../lib/vopCan2UsbConnection';
 import type { FlashBridgeConnection } from '../lib/flashBridgeConnection';
 import {
@@ -51,6 +51,10 @@ import {
   Layers, Radio, Usb,
 } from 'lucide-react';
 import TuneDeployWorkspace from '@/components/tune-deploy/TuneDeployWorkspace';
+import {
+  loadEcuContainerSession,
+  type StoredEcuScanTransport,
+} from '../lib/ecuContainerSessionStorage';
 
 type FlashConnectionMode = 'simulator' | 'pcan' | 'vop_usb';
 
@@ -196,12 +200,12 @@ export default function FlashContainerPanel() {
   const [dryRunMode, setDryRunMode] = useState(false);
   const [fileHash, setFileHash] = useState<string>('');
   const [sessionUuid, setSessionUuid] = useState<string>('');
-  const [pcanBridgeAvailable, setPcanBridgeAvailable] = useState<boolean | null>(null);
-  const [pcanBridgeUrl, setPcanBridgeUrl] = useState<string | null>(null);
+  const [localBridgeAvailable, setLocalBridgeAvailable] = useState<boolean | null>(null);
+  const [localBridgeUrl, setLocalBridgeUrl] = useState<string | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
-  const pcanConnectionRef = useRef<PCANConnection | null>(null);
-  /** URL used for `pcanConnectionRef` — reuse instance when unchanged, avoid stale sockets. */
-  const lastPcanFlashUrlRef = useRef<string | null>(null);
+  const wsBridgeConnectionRef = useRef<WebsocketCanBridgeConnection | null>(null);
+  /** URL used for `wsBridgeConnectionRef` — reuse instance when unchanged, avoid stale sockets. */
+  const lastWsBridgeFlashUrlRef = useRef<string | null>(null);
   const vopConnectionRef = useRef<VopCan2UsbConnection | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -210,49 +214,79 @@ export default function FlashContainerPanel() {
     [],
   );
 
+  /** Transport last chosen on ECU Scan (local bridge vs V-OP) — drives live flash hardware. */
+  const [flashScanTransport, setFlashScanTransport] = useState<StoredEcuScanTransport | null>(null);
+
+  useEffect(() => {
+    const read = () => {
+      const t = loadEcuContainerSession()?.lastScanTransport;
+      setFlashScanTransport(t === 'bridge' || t === 'vop' ? t : null);
+    };
+    read();
+    const onTransport = (e: Event) => {
+      const d = (e as CustomEvent<StoredEcuScanTransport>).detail;
+      if (d === 'bridge' || d === 'vop') setFlashScanTransport(d);
+    };
+    window.addEventListener('goodGravy:ecuScanTransport', onTransport);
+    return () => window.removeEventListener('goodGravy:ecuScanTransport', onTransport);
+  }, []);
+
+  useEffect(() => {
+    const t = loadEcuContainerSession()?.lastScanTransport;
+    setFlashScanTransport(t === 'bridge' || t === 'vop' ? t : null);
+  }, [analysis, flashWorkspace]);
+
+  const resolvedLiveFlashMode = useMemo((): FlashConnectionMode => {
+    if (flashScanTransport === 'vop') return 'vop_usb';
+    if (flashScanTransport === 'bridge') return 'pcan';
+    if (localBridgeAvailable === true) return 'pcan';
+    if (vopUsbSupported) return 'vop_usb';
+    return 'pcan';
+  }, [flashScanTransport, localBridgeAvailable, vopUsbSupported]);
+
   const createSession = trpc.flash.createSession.useMutation();
 
   const effectiveFlashType: FlashType = flashTypeOverride ?? analysis?.flashType ?? 'unknown';
 
-  // Probe PCAN bridge (UI only). Does not allocate a PCANConnection — availability must not imply transport selection.
-  const checkPcanBridge = useCallback(async () => {
+  // Probe local python WebSocket bridge (UI only). Does not open a transport — availability must not imply selection.
+  const checkLocalBridge = useCallback(async () => {
     setCheckingBridge(true);
     try {
-      const result = await PCANConnection.isBridgeAvailable();
-      setPcanBridgeAvailable(result.available);
+      const result = await WebsocketCanBridgeConnection.isBridgeAvailable();
+      setLocalBridgeAvailable(result.available);
       if (result.available && result.url) {
-        setPcanBridgeUrl(result.url);
+        setLocalBridgeUrl(result.url);
       } else {
-        setPcanBridgeUrl(null);
+        setLocalBridgeUrl(null);
       }
     } catch {
-      setPcanBridgeAvailable(false);
-      setPcanBridgeUrl(null);
+      setLocalBridgeAvailable(false);
+      setLocalBridgeUrl(null);
     } finally {
       setCheckingBridge(false);
     }
   }, []);
 
-  /** Create/reuse PCAN client only when the user commits to a PCAN flash (after pre-flight). */
-  const ensurePcanConnectionForFlash = useCallback(async () => {
+  /** Create/reuse WebSocket bridge client when the user commits to live flash after pre-flight (session API still uses connectionMode `pcan`). */
+  const ensureWsBridgeForFlash = useCallback(async () => {
     setCheckingBridge(true);
     try {
-      const result = await PCANConnection.isBridgeAvailable();
-      setPcanBridgeAvailable(result.available);
-      setPcanBridgeUrl(result.available ? result.url : null);
+      const result = await WebsocketCanBridgeConnection.isBridgeAvailable();
+      setLocalBridgeAvailable(result.available);
+      setLocalBridgeUrl(result.available ? result.url : null);
       if (!result.available || !result.url) {
-        throw new Error('PCAN bridge not detected — run pcan_bridge.py with the PEAK adapter connected.');
+        throw new Error('Local CAN bridge not detected — run the Python bridge with your adapter connected.');
       }
       const url = result.url;
-      if (pcanConnectionRef.current && lastPcanFlashUrlRef.current === url) {
+      if (wsBridgeConnectionRef.current && lastWsBridgeFlashUrlRef.current === url) {
         return;
       }
-      if (pcanConnectionRef.current) {
-        await pcanConnectionRef.current.disconnect();
-        pcanConnectionRef.current = null;
+      if (wsBridgeConnectionRef.current) {
+        await wsBridgeConnectionRef.current.disconnect();
+        wsBridgeConnectionRef.current = null;
       }
-      pcanConnectionRef.current = new PCANConnection({ bridgeUrl: url, requestTimeout: 30000 });
-      lastPcanFlashUrlRef.current = url;
+      wsBridgeConnectionRef.current = new WebsocketCanBridgeConnection({ bridgeUrl: url, requestTimeout: 30000 });
+      lastWsBridgeFlashUrlRef.current = url;
     } finally {
       setCheckingBridge(false);
     }
@@ -262,11 +296,11 @@ export default function FlashContainerPanel() {
   useEffect(() => {
     if (
       (flashWorkspace === 'ecuScan' || analysis)
-      && pcanBridgeAvailable === null
+      && localBridgeAvailable === null
     ) {
-      checkPcanBridge();
+      checkLocalBridge();
     }
-  }, [flashWorkspace, analysis, pcanBridgeAvailable, checkPcanBridge]);
+  }, [flashWorkspace, analysis, localBridgeAvailable, checkLocalBridge]);
 
   // Removed tabs: migrate stale section ids from older UI state
   useEffect(() => {
@@ -381,15 +415,15 @@ export default function FlashContainerPanel() {
     setShowPreFlight(false);
     try {
       if (pendingMode === 'pcan') {
-        await ensurePcanConnectionForFlash();
+        await ensureWsBridgeForFlash();
         void vopConnectionRef.current?.disconnect();
         vopConnectionRef.current = null;
       } else if (pendingMode === 'vop_usb') {
-        if (pcanConnectionRef.current) {
-          await pcanConnectionRef.current.disconnect();
-          pcanConnectionRef.current = null;
+        if (wsBridgeConnectionRef.current) {
+          await wsBridgeConnectionRef.current.disconnect();
+          wsBridgeConnectionRef.current = null;
         }
-        lastPcanFlashUrlRef.current = null;
+        lastWsBridgeFlashUrlRef.current = null;
         if (!vopConnectionRef.current) {
           vopConnectionRef.current = getSharedVopCan2UsbConnection();
         }
@@ -410,7 +444,7 @@ export default function FlashContainerPanel() {
       toast.error(msg);
       setShowPreFlight(true);
     }
-  }, [pendingMode, analysis, flashPlan, fileName, fileHash, effectiveFlashType, createSession, ensurePcanConnectionForFlash]);
+  }, [pendingMode, analysis, flashPlan, fileName, fileHash, effectiveFlashType, createSession, ensureWsBridgeForFlash]);
 
   // Handle MissionControl completion
   const handleFlashComplete = useCallback((result: 'SUCCESS' | 'FAILED' | 'ABORTED') => {
@@ -534,11 +568,11 @@ export default function FlashContainerPanel() {
     setPendingMode(null);
     setFileHash('');
     setSessionUuid('');
-    setPcanBridgeAvailable(null);
-    setPcanBridgeUrl(null);
-    void pcanConnectionRef.current?.disconnect();
-    pcanConnectionRef.current = null;
-    lastPcanFlashUrlRef.current = null;
+    setLocalBridgeAvailable(null);
+    setLocalBridgeUrl(null);
+    void wsBridgeConnectionRef.current?.disconnect();
+    wsBridgeConnectionRef.current = null;
+    lastWsBridgeFlashUrlRef.current = null;
     void vopConnectionRef.current?.disconnect();
     vopConnectionRef.current = null;
   };
@@ -558,12 +592,12 @@ export default function FlashContainerPanel() {
         />
         <div className="flex-1 min-h-0 overflow-y-auto space-y-8 pr-1">
           <EcuScanPanel
-            pcanConnection={pcanConnectionRef.current}
+            wsBridgeConnection={wsBridgeConnectionRef.current}
             vopConnection={vopConnectionRef.current}
             vopSupported={vopUsbSupported}
             containerHeader={null}
-            bridgeAvailable={pcanBridgeAvailable === true}
-            bridgeUrl={pcanBridgeUrl}
+            bridgeAvailable={localBridgeAvailable === true}
+            bridgeUrl={localBridgeUrl}
             onVerifiedContainerLoad={handleFile}
           />
 
@@ -644,14 +678,16 @@ export default function FlashContainerPanel() {
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   ];
 
-  const liveFlashPcanDisabled =
+  const liveFlashBridgeDisabled =
     !flashPlan ||
     flashPlan.validationErrors.length > 0 ||
-    pcanBridgeAvailable !== true;
+    localBridgeAvailable !== true;
   const liveFlashVopDisabled =
     !flashPlan ||
     flashPlan.validationErrors.length > 0 ||
     !vopUsbSupported;
+  const liveFlashStartDisabled =
+    resolvedLiveFlashMode === 'pcan' ? liveFlashBridgeDisabled : liveFlashVopDisabled;
   const liveFlashPlanTitle = !flashPlan
     ? 'Build flash plan first'
     : flashPlan.validationErrors.length > 0
@@ -669,15 +705,15 @@ export default function FlashContainerPanel() {
           onComplete={handleFlashComplete}
           onBack={() => { setMissionControlMode(null); setSessionUuid(''); setDryRunMode(false); }}
           flashBridge={
-            missionControlMode === 'pcan' && pcanConnectionRef.current
-              ? (pcanConnectionRef.current as unknown as FlashBridgeConnection)
+            missionControlMode === 'pcan' && wsBridgeConnectionRef.current
+              ? (wsBridgeConnectionRef.current as unknown as FlashBridgeConnection)
               : missionControlMode === 'vop_usb' && vopConnectionRef.current
                 ? (vopConnectionRef.current as FlashBridgeConnection)
                 : null
           }
           flashBridgeRef={
             missionControlMode === 'pcan'
-              ? (pcanConnectionRef as MutableRefObject<FlashBridgeConnection | null>)
+              ? (wsBridgeConnectionRef as MutableRefObject<FlashBridgeConnection | null>)
               : missionControlMode === 'vop_usb'
                 ? (vopConnectionRef as MutableRefObject<FlashBridgeConnection | null>)
                 : undefined
@@ -703,7 +739,7 @@ export default function FlashContainerPanel() {
             <h2 className="text-lg font-bold text-zinc-100">Pre-Flight Diagnostics</h2>
             <p className="text-xs text-zinc-500">
               Validating ECU and container before{' '}
-              {pendingMode === 'vop_usb' ? 'V-OP USB2CAN' : pendingMode === 'pcan' ? 'PCAN' : pendingMode.toUpperCase()} flash
+              {pendingMode === 'vop_usb' ? 'V-OP USB2CAN' : pendingMode === 'pcan' ? 'Local WebSocket bridge' : pendingMode.toUpperCase()} flash
             </p>
           </div>
         </div>
@@ -806,27 +842,30 @@ export default function FlashContainerPanel() {
             <div className="flex flex-wrap gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => handleLaunch('pcan', false)}
-                disabled={liveFlashPcanDisabled}
-                title={liveFlashPlanTitle ?? 'Live flash via PCAN-USB WebSocket bridge'}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-gradient-to-r from-red-600 to-orange-600 text-white text-xs font-bold border border-orange-500/50 hover:from-red-500 hover:to-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={() => handleLaunch(resolvedLiveFlashMode, false)}
+                disabled={liveFlashStartDisabled}
+                title={
+                  liveFlashPlanTitle
+                  ?? (resolvedLiveFlashMode === 'pcan'
+                    ? 'Live flash via local WebSocket bridge (same transport as ECU Scan when the bridge was selected)'
+                    : 'Live flash via V-OP USB2CAN (same transport as ECU Scan when V-OP was selected)')
+                }
+                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-white text-xs font-bold border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                  resolvedLiveFlashMode === 'pcan'
+                    ? 'bg-gradient-to-r from-red-600 to-orange-600 border-orange-500/50 hover:from-red-500 hover:to-orange-500'
+                    : 'bg-gradient-to-r from-violet-600 to-fuchsia-600 border-violet-500/40 hover:from-violet-500 hover:to-fuchsia-500'
+                }`}
               >
-                <Radio className="w-3.5 h-3.5 shrink-0" />
-                Live flash · PCAN
-              </button>
-              <button
-                type="button"
-                onClick={() => handleLaunch('vop_usb', false)}
-                disabled={liveFlashVopDisabled}
-                title={liveFlashPlanTitle ?? 'Live flash via V-OP USB2CAN (Web Serial)'}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-xs font-bold border border-violet-500/40 hover:from-violet-500 hover:to-fuchsia-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Usb className="w-3.5 h-3.5 shrink-0" />
-                Live flash · V-OP USB
+                {resolvedLiveFlashMode === 'pcan'
+                  ? <Radio className="w-3.5 h-3.5 shrink-0" />
+                  : <Usb className="w-3.5 h-3.5 shrink-0" />}
+                Start flash
               </button>
             </div>
             <p className="text-[10px] text-zinc-500 text-right leading-snug">
-              Only the adapter you click is used for this flash. Bridge status does not switch transports automatically.
+              {flashScanTransport
+                ? `Uses the same hardware as your last ECU Scan (${flashScanTransport === 'bridge' ? 'local bridge' : 'V-OP USB'}).`
+                : 'Run ECU Scan and pick the local bridge or V-OP — that choice is used here. If none saved, the bridge is preferred when it is running, otherwise V-OP.'}
             </p>
           </div>
         </div>
@@ -836,9 +875,9 @@ export default function FlashContainerPanel() {
           </div>
         )}
         <p className="text-[10px] text-zinc-500 leading-relaxed">
-          {pcanBridgeAvailable !== true && !vopUsbSupported
-            ? 'No PCAN bridge detected and Web Serial unavailable — use Simulator or run the bridge / Chrome (desktop).'
-            : 'Dry run without hardware: Simulator tab. ECU Scan uses its own PCAN / V-OP toggle — independent of Live flash here.'}
+          {localBridgeAvailable !== true && !vopUsbSupported
+            ? 'No local WebSocket bridge detected and Web Serial unavailable — use Simulator or run the Python bridge / Chrome (desktop).'
+            : 'Dry run without hardware: Simulator tab. ECU Scan has its own adapter toggle — independent of Live flash here.'}
         </p>
       </div>
       )}

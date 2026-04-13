@@ -32,8 +32,9 @@ import {
   buildPersistedScanAutoPreset,
 } from './obdConnection';
 import { decodeVinNhtsa } from './universalVinDecoder';
-import { type UDSResponse, parseIsoTpDataToUdsResponse, parseUdsDiagnosticPayload } from './pcanConnection';
+import { type UDSResponse } from './pcanConnection';
 import type { FlashBridgeConnection } from './flashBridgeConnection';
+import { createVopStyleUdsLayer, type VopStyleUdsLayer } from './vopStyleUdsCore';
 import {
   CAN_ISO_TP_DEFAULT_TIMEOUT_MS,
   CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
@@ -128,6 +129,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private obdTxId: number;
   private obdRxId: number;
 
+  private readonly udsLayer: VopStyleUdsLayer;
+
   private ackWaiters: Array<{ resolve: (ok: boolean) => void }> = [];
   private rxFrames: Array<{ id: number; data: Uint8Array }> = [];
 
@@ -136,6 +139,21 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.filters = config.filters;
     this.obdTxId = config.txId ?? OBD_TX_ID;
     this.obdRxId = config.rxId ?? OBD_RX_ID;
+    this.udsLayer = createVopStyleUdsLayer({
+      sendCanTx: (a, e, d, w) => this.sendCanTx(a, e, d, w),
+      setFlashUdsListener: cb => {
+        this.vopFlashUdsListener = cb;
+      },
+      setUdsInFlightReject: r => {
+        this.vopUdsInFlightReject = r;
+      },
+      isTransportReady: () => this.writer !== null,
+      abortAckWaiters: () => {
+        for (const w of this.ackWaiters) w.resolve(false);
+        this.ackWaiters.length = 0;
+      },
+      transportNotReadyMessage: 'USB CAN bridge not connected',
+    });
   }
 
   static isSupported(): boolean {
@@ -848,7 +866,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   /**
-   * Fire-and-forget CAN TX (flash keepalive / GMLAN UUDT). Matches {@link PCANConnection.sendRawCanFrame}:
+   * Fire-and-forget CAN TX (flash keepalive / GMLAN UUDT). Matches {@link FlashBridgeConnection.sendRawCanFrame}:
    * do **not** wait for a USB ACK — the bridge still transmits; ACK-wait would stack delays (~800ms+ each)
    * when the host fires many frames quickly (SESSION_OPEN + 500ms TesterPresent).
    */
@@ -886,14 +904,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
   /** Stops UDS listeners and rejects the active {@link sendUDSRequest} wait (emergency user abort). */
   cancelInFlightDiagnostics(): void {
-    this.vopFlashUdsListener = null;
-    for (const w of this.ackWaiters) w.resolve(false);
-    this.ackWaiters.length = 0;
-    if (this.vopUdsInFlightReject) {
-      const r = this.vopUdsInFlightReject;
-      this.vopUdsInFlightReject = null;
-      r(new Error('Aborted'));
-    }
+    this.udsLayer.cancelInFlightDiagnostics();
   }
 
   async setUDSSession(sessionType: 'default' | 'programming' | 'extended'): Promise<boolean> {
@@ -912,348 +923,17 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     data?: number[],
     targetAddress = 0x7e0,
     timeoutMs = 5000,
+    responseArbIdOverride?: number,
   ): Promise<UDSResponse | null> {
     if (!this.writer) throw new Error('USB CAN bridge not connected');
-    const udsPayload: number[] = [service];
-    if (subFunction !== undefined) udsPayload.push(subFunction);
-    if (data) udsPayload.push(...data);
-    if (udsPayload.length > 7) {
-      return this.vopSendUdsMultiFrame(service, subFunction, udsPayload, targetAddress, timeoutMs);
-    }
-    return this.vopSendUdsSingleFrame(service, subFunction, udsPayload, targetAddress, timeoutMs);
-  }
-
-  /** ISO-TP FF from ECU → Flow Control + consecutive frames (same as PCAN raw path). */
-  private async vopReceiveIsoTpMultiFrameFromEcu(
-    targetAddress: number,
-    responseArbId: number,
-    firstFrame: number[],
-    timeoutMs: number,
-  ): Promise<number[] | null> {
-    const totalLen = ((firstFrame[0] & 0x0f) << 8) | firstFrame[1];
-    if (totalLen < 1 || totalLen > 4095) return null;
-
-    const out: number[] = [];
-    for (let i = 2; i < 8 && out.length < totalLen; i++) {
-      out.push(firstFrame[i] ?? 0);
-    }
-    if (out.length >= totalLen) {
-      return out.slice(0, totalLen);
-    }
-
-    const deadline = Date.now() + timeoutMs;
-    let expectedSeq = 1;
-
-    const waitCf = (): Promise<number[] | null> =>
-      new Promise((resolve) => {
-        const t = setTimeout(() => {
-          this.vopFlashUdsListener = null;
-          resolve(null);
-        }, Math.max(30, deadline - Date.now()));
-
-        this.vopFlashUdsListener = (arbId, dataU8) => {
-          if (arbId !== responseArbId) return;
-          const fd = [...dataU8];
-          if (fd.length === 0) return;
-          const pci = (fd[0] >> 4) & 0x0f;
-          if (pci !== 2) return;
-          const seq = fd[0] & 0x0f;
-          if (seq !== expectedSeq) return;
-          clearTimeout(t);
-          this.vopFlashUdsListener = null;
-          resolve(fd);
-        };
-      });
-
-    const fc = new Uint8Array([0x30, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-    const fcOk = await this.sendCanTx(targetAddress, false, fc, true);
-    if (!fcOk) return null;
-
-    while (out.length < totalLen) {
-      if (Date.now() > deadline) return null;
-      const cf = await waitCf();
-      if (!cf) return null;
-      for (let j = 1; j < 8 && out.length < totalLen; j++) {
-        out.push(cf[j] ?? 0);
-      }
-      expectedSeq = (expectedSeq + 1) & 0x0f;
-    }
-
-    return out.slice(0, totalLen);
-  }
-
-  private async vopSendUdsSingleFrame(
-    service: number,
-    subFunction: number | undefined,
-    udsPayload: number[],
-    targetAddress: number,
-    timeoutMs: number,
-  ): Promise<UDSResponse | null> {
-    const isFunctional = targetAddress === 0x7df;
-    const responseArbId = isFunctional ? -1 : targetAddress + 0x08;
-
-    const pciLength = udsPayload.length;
-    const frame: number[] = [pciLength, ...udsPayload];
-    while (frame.length < 8) frame.push(0x00);
-
-    this.vopFlashUdsListener = null;
-    await new Promise(r => setTimeout(r, 150));
-
-    const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
-      this.vopUdsInFlightReject = reject;
-      const timeout = setTimeout(() => {
-        this.vopUdsInFlightReject = null;
-        this.vopFlashUdsListener = null;
-        resolve(null);
-      }, timeoutMs);
-
-      this.vopFlashUdsListener = (arbId, dataU8) => {
-        const frameData = [...dataU8];
-        if (frameData.length === 0) return;
-
-        const isMatch = isFunctional
-          ? arbId >= 0x7e8 && arbId <= 0x7ef
-          : arbId === responseArbId;
-
-        if (!isMatch) return;
-
-        const pciType = (frameData[0] >> 4) & 0x0f;
-
-        if (pciType === 1) {
-          if (responseArbId < 0) return;
-          clearTimeout(timeout);
-          this.vopFlashUdsListener = null;
-          void (async () => {
-            const assembled = await this.vopReceiveIsoTpMultiFrameFromEcu(
-              targetAddress,
-              responseArbId,
-              frameData,
-              timeoutMs,
-            );
-            this.vopUdsInFlightReject = null;
-            if (!assembled || assembled.length === 0) {
-              resolve(null);
-              return;
-            }
-            resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
-          })();
-          return;
-        }
-
-        if (pciType !== 0) return;
-
-        const respSvcId = frameData.length > 1 ? frameData[1] : 0;
-        const expectedPositive = service + 0x40;
-        const isNegative = respSvcId === 0x7f;
-        const isPositiveMatch = respSvcId === expectedPositive;
-        const isNegativeForUs = isNegative && frameData.length > 2 && frameData[2] === service;
-        const isNegativeUnknown = isNegative && frameData.length <= 2;
-
-        if (isPositiveMatch) {
-          clearTimeout(timeout);
-          this.vopFlashUdsListener = null;
-          this.vopUdsInFlightReject = null;
-          resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
-        } else if (isNegativeForUs || isNegativeUnknown) {
-          const nrc = frameData.length > 3 ? frameData[3] : 0;
-          if (nrc === 0x78) return;
-          clearTimeout(timeout);
-          this.vopFlashUdsListener = null;
-          this.vopUdsInFlightReject = null;
-          resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
-        }
-      };
-    });
-
-    const u8 = new Uint8Array(frame.slice(0, 8));
-    const ok = await this.sendCanTx(targetAddress, false, u8, true);
-    if (!ok) {
-      this.vopFlashUdsListener = null;
-      throw new Error('CAN TX rejected by USB bridge');
-    }
-
-    const udsResult = await responsePromise;
-    if (!udsResult) {
-      throw new Error('Timeout waiting for CAN response');
-    }
-    return udsResult;
-  }
-
-  private async vopSendUdsMultiFrame(
-    service: number,
-    subFunction: number | undefined,
-    udsPayload: number[],
-    targetAddress: number,
-    timeoutMs: number,
-  ): Promise<UDSResponse | null> {
-    if (!this.writer) throw new Error('USB CAN bridge not connected');
-
-    const totalLength = udsPayload.length;
-    const responseArbId = targetAddress + 0x08;
-
-    this.vopFlashUdsListener = null;
-    await new Promise(r => setTimeout(r, 150));
-
-    const firstFrame: number[] = [
-      0x10 | ((totalLength >> 8) & 0x0f),
-      totalLength & 0xff,
-      ...udsPayload.slice(0, 6),
-    ];
-    while (firstFrame.length < 8) firstFrame.push(0x00);
-
-    const fcPromise = new Promise<{ blockSize: number; stMin: number } | null>((resolve) => {
-      const fcTimeout = setTimeout(() => {
-        this.vopFlashUdsListener = null;
-        resolve(null);
-      }, 5000);
-
-      this.vopFlashUdsListener = (arbId, dataU8) => {
-        if (arbId !== responseArbId) return;
-        const frameData = [...dataU8];
-        if (frameData.length === 0) return;
-        const pciType = (frameData[0] >> 4) & 0x0f;
-        if (pciType === 3) {
-          const blockSize = frameData[1] || 0;
-          const stMin = frameData[2] || 0;
-          clearTimeout(fcTimeout);
-          this.vopFlashUdsListener = null;
-          resolve({ blockSize, stMin });
-        } else if (pciType === 0) {
-          const respSvc = frameData[1];
-          if (respSvc === 0x7f) {
-            clearTimeout(fcTimeout);
-            this.vopFlashUdsListener = null;
-            resolve(null);
-          }
-        }
-      };
-    });
-
-    const ffOk = await this.sendCanTx(targetAddress, false, new Uint8Array(firstFrame.slice(0, 8)), true);
-    if (!ffOk) {
-      this.vopFlashUdsListener = null;
-      throw new Error('CAN TX rejected by USB bridge');
-    }
-
-    const fc = await fcPromise;
-    if (!fc) {
-      throw new Error('No Flow Control received from ECU after First Frame');
-    }
-
-    let stMinMs = 0;
-    if (fc.stMin <= 0x7f) {
-      stMinMs = fc.stMin;
-    } else if (fc.stMin >= 0xf1 && fc.stMin <= 0xf9) {
-      stMinMs = 1;
-    }
-    stMinMs = Math.max(stMinMs, 1);
-
-    let offset = 6;
-    let seqNum = 1;
-    let framesSentSinceFC = 0;
-
-    while (offset < udsPayload.length) {
-      if (fc.blockSize > 0 && framesSentSinceFC >= fc.blockSize) {
-        const nextFcPromise = new Promise<boolean>((resolve) => {
-          const fcTimeout = setTimeout(() => {
-            this.vopFlashUdsListener = null;
-            resolve(false);
-          }, 5000);
-
-          this.vopFlashUdsListener = (arbId, dataU8) => {
-            if (arbId !== responseArbId) return;
-            const frameData = [...dataU8];
-            if (frameData.length > 0 && ((frameData[0] >> 4) & 0x0f) === 3) {
-              clearTimeout(fcTimeout);
-              this.vopFlashUdsListener = null;
-              resolve(true);
-            }
-          };
-        });
-        const gotFC = await nextFcPromise;
-        if (!gotFC) throw new Error('Flow Control timeout during consecutive frames');
-        framesSentSinceFC = 0;
-      }
-
-      const chunk = udsPayload.slice(offset, offset + 7);
-      const cf: number[] = [0x20 | (seqNum & 0x0f), ...chunk];
-      while (cf.length < 8) cf.push(0x00);
-
-      const cfOk = await this.sendCanTx(targetAddress, false, new Uint8Array(cf.slice(0, 8)), true);
-      if (!cfOk) throw new Error('CAN TX rejected by USB bridge');
-
-      offset += 7;
-      seqNum++;
-      framesSentSinceFC++;
-
-      if (stMinMs > 0 && offset < udsPayload.length) {
-        await new Promise(r => setTimeout(r, stMinMs));
-      }
-    }
-
-    const mfTimeout = Math.min(Math.max(timeoutMs * 6, 30_000), 120_000);
-    const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
-      this.vopUdsInFlightReject = reject;
-      const respTimeout = setTimeout(() => {
-        this.vopUdsInFlightReject = null;
-        this.vopFlashUdsListener = null;
-        resolve(null);
-      }, mfTimeout);
-
-      this.vopFlashUdsListener = (arbId, dataU8) => {
-        if (arbId !== responseArbId) return;
-        const frameData = [...dataU8];
-        if (frameData.length === 0) return;
-        const pciType = (frameData[0] >> 4) & 0x0f;
-
-        if (pciType === 1) {
-          clearTimeout(respTimeout);
-          this.vopFlashUdsListener = null;
-          void (async () => {
-            const assembled = await this.vopReceiveIsoTpMultiFrameFromEcu(
-              targetAddress,
-              responseArbId,
-              frameData,
-              mfTimeout,
-            );
-            this.vopUdsInFlightReject = null;
-            if (!assembled || assembled.length === 0) {
-              resolve(null);
-              return;
-            }
-            resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
-          })();
-          return;
-        }
-
-        if (pciType === 0) {
-          const respSvc = frameData.length > 1 ? frameData[1] : 0;
-          const expectedPositive = service + 0x40;
-          const isNegativeForUs = respSvc === 0x7f && frameData.length > 2 && frameData[2] === service;
-          const isPositiveMatch = respSvc === expectedPositive;
-
-          if (isPositiveMatch) {
-            clearTimeout(respTimeout);
-            this.vopFlashUdsListener = null;
-            this.vopUdsInFlightReject = null;
-            resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
-          } else if (isNegativeForUs) {
-            const nrc = frameData.length > 3 ? frameData[3] : 0;
-            if (nrc === 0x78) return;
-            clearTimeout(respTimeout);
-            this.vopFlashUdsListener = null;
-            this.vopUdsInFlightReject = null;
-            resolve(parseIsoTpDataToUdsResponse(service, subFunction, frameData));
-          }
-        }
-      };
-    });
-
-    const udsResult = await responsePromise;
-    if (!udsResult) {
-      throw new Error('Timeout waiting for CAN response after multi-frame send');
-    }
-    return udsResult;
+    return this.udsLayer.sendUDSRequest(
+      service,
+      subFunction,
+      data,
+      targetAddress,
+      timeoutMs,
+      responseArbIdOverride,
+    );
   }
 
   private async cleanupPort(): Promise<void> {

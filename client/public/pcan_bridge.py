@@ -87,7 +87,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 # ─── Immediate startup banner ────────────────────────────────────────────────
 print(flush=True)
@@ -276,8 +276,13 @@ def generate_self_signed_cert():
 class OBDProtocol:
     """Handles OBD-II over CAN (ISO 15765-4) with ISO-TP for multi-frame."""
 
-    def __init__(self, bus: can.Bus):
+    def __init__(
+        self,
+        bus: can.Bus,
+        rx_broadcast: Optional[Callable[[can.Message], Awaitable[Any]]] = None,
+    ):
         self.bus = bus
+        self._rx_broadcast = rx_broadcast
         self._response_queue: asyncio.Queue = asyncio.Queue()
         self._listener_task: Optional[asyncio.Task] = None
         self._running = False
@@ -309,6 +314,13 @@ class OBDProtocol:
                     None, lambda: self.bus.recv(timeout=0.1)
                 )
                 if msg and msg.arbitration_id in self._filter_ids:
+                    # Push every RX to WebSocket clients first (V-OP–style single stream), then queue
+                    # for can_recv / send_raw_frame synchronization.
+                    if self._rx_broadcast:
+                        try:
+                            await self._rx_broadcast(msg)
+                        except Exception as ex:
+                            log.warning("RX WebSocket broadcast failed: %s", ex)
                     await self._response_queue.put(msg)
             except can.CanError as e:
                 log.warning(f"CAN read error: {e}")
@@ -485,7 +497,14 @@ class OBDProtocol:
                 continue
 
     async def send_raw_frame(self, arb_id: int, data: list, req_id: str, extended: bool = False) -> dict:
-        """Send a raw CAN frame. RX is delivered via rx_stream + queue; do not block on first RX (see client/public/pcan_bridge.py)."""
+        """Send a raw CAN frame.
+
+        Returns tx_ack immediately after a successful bus send. ECU RX is **not** waited on here: the
+        listener pushes every filtered frame to WebSocket (rx_stream) and to `_response_queue` for
+        `can_recv`. Waiting for one RX per TX would (1) block the single WebSocket handler for up to
+        OBD_RESPONSE_TIMEOUT when no ECU answers that frame (e.g. GMLAN UUDT @ 0x101), and (2) consume
+        the first RX from the queue so `can_recv` / multi-segment flows see the wrong stream.
+        """
         self._drain_queue()
         msg = can.Message(
             arbitration_id=arb_id,
@@ -1074,6 +1093,33 @@ class PCANBridge:
         self._monitor_clients: dict = {}
         self._monitor_running = False
 
+    async def _broadcast_rx_stream(self, msg: can.Message) -> None:
+        """Push each filtered CAN RX to all WebSocket clients (same idea as V-OP USB RX stream)."""
+        if not self.clients:
+            return
+        try:
+            payload = json.dumps({
+                "type": "can_frame",
+                "arb_id": msg.arbitration_id,
+                "data": list(msg.data),
+                "timestamp": getattr(msg, "timestamp", None) or time.time(),
+                "rx_stream": True,
+            })
+        except Exception as e:
+            log.warning("RX stream serialize failed: %s", e)
+            return
+        dead = []
+        for ws in list(self.clients):
+            try:
+                await ws.send(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            try:
+                self.clients.discard(ws)
+            except Exception:
+                pass
+
     def _init_can_bus(self, bitrate: int = None, fd: bool = False) -> bool:
         """Try to open the CAN bus. Returns True on success."""
         if self.can_initialized:
@@ -1140,7 +1186,7 @@ class PCANBridge:
         await self._stop_all_protocols()
 
         if proto == 'obd2' or proto == 'raw':
-            self.protocol = OBDProtocol(self.bus)
+            self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
             await self.protocol.start()
         elif proto == 'j1939':
             self.j1939_protocol = J1939Protocol(self.bus)
@@ -1150,7 +1196,7 @@ class PCANBridge:
             await self.uds_protocol.start()
         elif proto == 'canfd':
             # CAN FD uses OBD protocol handler but with FD frames
-            self.protocol = OBDProtocol(self.bus)
+            self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
             await self.protocol.start()
 
         self.active_protocol = proto
@@ -1369,7 +1415,7 @@ class PCANBridge:
                     }
                 await self._start_protocol('obd2')
             if not self.protocol:
-                self.protocol = OBDProtocol(self.bus)
+                self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
                 await self.protocol.start()
             mode = msg.get("mode", 1)
             pid = msg.get("pid", 0)
@@ -1442,7 +1488,7 @@ class PCANBridge:
                         "message": f"CAN bus not available: {self.can_error}"
                     }
                 if not self.protocol:
-                    self.protocol = OBDProtocol(self.bus)
+                    self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
                     await self.protocol.start()
             arb_id = msg.get("arb_id", 0)
             data = msg.get("data", [])
@@ -1460,7 +1506,7 @@ class PCANBridge:
                         "message": f"CAN bus not available: {self.can_error}",
                     }
                 if not self.protocol:
-                    self.protocol = OBDProtocol(self.bus)
+                    self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
                     await self.protocol.start()
             timeout_ms = int(msg.get("timeout_ms", 5000))
             timeout_sec = max(0.001, float(timeout_ms) / 1000.0)
@@ -1508,7 +1554,7 @@ class PCANBridge:
                         "message": f"CAN bus not available: {self.can_error}"
                     }
                 if not self.protocol:
-                    self.protocol = OBDProtocol(self.bus)
+                    self.protocol = OBDProtocol(self.bus, rx_broadcast=self._broadcast_rx_stream)
                     await self.protocol.start()
 
             # Clients differ: IntelliSpy / PCANConnection may send arb_ids or filter_ids

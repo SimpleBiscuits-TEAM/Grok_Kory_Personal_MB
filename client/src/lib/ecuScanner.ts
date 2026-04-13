@@ -32,10 +32,11 @@ import { calibrationSlotsFromEcuScanLike, normalizeCalPartToken } from '../../..
 import { softwareSlotMaskForEcuType } from '../../../shared/ecuSoftwareSlotMask';
 import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
 import { getSecurityProfileMeta, type EcuSecurityProfileMeta } from '../../../shared/seedKeyMeta';
+import { decodeVinLocal, type DecodedVehicle } from './universalVinDecoder';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-/** Minimal CAN transport for {@link EcuScanner} — {@link PCANConnection} or {@link VopCan2UsbConnection}. */
+/** Minimal CAN transport for {@link EcuScanner} — WebSocket bridge or {@link VopCan2UsbConnection}. */
 export interface EcuScanTransport {
   getState(): ConnectionState;
   connect(options?: { skipVehicleInit?: boolean }): Promise<boolean>;
@@ -45,9 +46,13 @@ export interface EcuScanTransport {
     data?: number[],
     targetAddress?: number,
     timeoutMs?: number,
+    /** When ECU RX ID ≠ tx+8 (e.g. GM 0x241 → 0x641). */
+    responseArbIdOverride?: number,
   ): Promise<UDSResponse | null>;
-  /** GMLAN UUDT TesterPresent on functional 0x101 — implemented by PCAN / V-OP bridges. */
+  /** GMLAN UUDT TesterPresent on functional 0x101 — implemented by WebSocket bridge / V-OP. */
   sendRawCanFrame?(arbId: number, data: number[]): Promise<void>;
+  /** End in-flight UDS wait immediately (used when user stops ECU scan). */
+  cancelInFlightDiagnostics?: () => void;
 }
 
 export interface EcuScanResult {
@@ -131,6 +136,18 @@ export interface VehicleScanReport {
   respondingCount: number;
   /** VIN consensus (most common VIN across ECUs) */
   vehicleVin?: string;
+  /** VIN from preflight (before per-address loop), if any */
+  preflightVin?: string;
+  /** Which query produced {@link preflightVin} */
+  preflightVinSource?: string;
+  /** OEM hint from {@link preflightVin} WMI */
+  oemHint?: ScanOemHint;
+  /** One-line decode of {@link preflightVin} for UI (WMI + make + protocol order). */
+  preflightVinDecodeSummary?: string;
+  /** Last Mode 9 payload bytes (space-separated hex) — for debugging incomplete ISO‑TP. */
+  preflightMode9RawHex?: string;
+  /** Set when Mode 9 did not yield a usable VIN (timeout, transport, parse). */
+  preflightMode9Error?: string;
   /** Whether scan is still in progress */
   scanning: boolean;
 }
@@ -178,20 +195,29 @@ const GMLAN_DIDS = {
   CAL_SLOT_9: 0xCC,
 } as const;
 
-/**
- * Default per-request UDS timeout during ECU scan.
- * PCAN goes through WebSocket + `pcan_bridge` + driver — 450ms was too tight and looked like “scan broken”
- * (V-OP USB2CAN is direct serial and often responds within that window).
- */
-const DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS = 1200;
+/** Default per-request UDS timeout during ECU scan (same for WebSocket bridge and V-OP USB). */
+const DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS = 650;
+
+/** Hint from preflight VIN WMI — affects GMLAN-first vs UDS-first in {@link EcuScanner.scanAddress}. */
+export type ScanOemHint = 'gm' | 'ford' | 'other';
 
 /** Options for {@link EcuScanner} — third constructor argument. */
 export type EcuScannerOptions = {
   skipVehicleInit?: boolean;
-  /** Override {@link DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS} — use ~2500 for PCAN bridge if needed. */
+  /** Override {@link DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS} (same default for bridge and V-OP). */
   scanUdsTimeoutMs?: number;
   /** Delay after GMLAN UUDT @ 0x101 before first physical UDS (bus / bridge settle). */
   postGmlanUudtDelayMs?: number;
+  /**
+   * Timeout for OBD Mode 9 PID 0x02 @ 0x7DF only — ISO‑TP multi-frame often needs longer than normal UDS on the bridge.
+   * Default: max({@link scanUdsTimeoutMs}, 3000).
+   */
+  obdMode9UdsTimeoutMs?: number;
+  /**
+   * Pause after Mode 9 response is fully assembled — lets the bridge / bus drain before the per-address scan.
+   * Default: 500 ms.
+   */
+  postObdMode9VinSettleMs?: number;
 };
 
 /** GM cal/software DID payload → unsigned integer (big-endian), display as decimal */
@@ -258,10 +284,16 @@ export class EcuScanner {
   private abortController: AbortController | null = null;
   /** Optional container header for key computation during security access */
   private containerHeader?: ContainerFileHeader;
-  /** Passed to {@link EcuScanTransport.connect} — skip slow VIN/PID init when scanning (V-OP / PCAN). */
+  /** Passed to {@link EcuScanTransport.connect} — skip slow VIN/PID init when scanning (V-OP / bridge). */
   private readonly connectOptions?: { skipVehicleInit?: boolean };
   private readonly scanUdsTimeoutMs: number;
   private readonly postGmlanUudtDelayMs: number;
+  /** Mode 9 @ 0x7DF — longer timeout for ISO‑TP multi-frame (bridge `can_recv` per CF). */
+  private readonly obdMode9TimeoutMs: number;
+  /** Pause after Mode 9 completes before scanning physical addresses. */
+  private readonly postObdMode9VinSettleMs: number;
+  /** Set by {@link runPreflightVin} before address loop */
+  private scanOemHint: ScanOemHint = 'other';
 
   constructor(
     connection: EcuScanTransport,
@@ -274,7 +306,10 @@ export class EcuScanner {
       ? { skipVehicleInit: options.skipVehicleInit }
       : undefined;
     this.scanUdsTimeoutMs = options?.scanUdsTimeoutMs ?? DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS;
-    this.postGmlanUudtDelayMs = options?.postGmlanUudtDelayMs ?? 80;
+    this.postGmlanUudtDelayMs = options?.postGmlanUudtDelayMs ?? 50;
+    this.obdMode9TimeoutMs =
+      options?.obdMode9UdsTimeoutMs ?? Math.max(this.scanUdsTimeoutMs, 3000);
+    this.postObdMode9VinSettleMs = options?.postObdMode9VinSettleMs ?? 500;
   }
 
   /**
@@ -308,7 +343,25 @@ export class EcuScanner {
       }
     }
 
-    await this.delay(400);
+    await this.delay(200);
+    if (this.abortController?.signal.aborted) {
+      report.scanning = false;
+      report.endTime = Date.now();
+      report.totalDurationMs = report.endTime - startTime;
+      onProgress?.(report);
+      return report;
+    }
+
+    this.scanOemHint = 'other';
+    await this.runPreflightVin(report);
+    onProgress?.(report);
+    if (this.abortController?.signal.aborted) {
+      report.scanning = false;
+      report.endTime = Date.now();
+      report.totalDurationMs = report.endTime - startTime;
+      onProgress?.(report);
+      return report;
+    }
 
     // Scan each address group sequentially
     for (const addr of SCAN_ADDRESSES) {
@@ -319,6 +372,17 @@ export class EcuScanner {
 
       if (ecuResult.responding) {
         report.respondingCount++;
+      }
+
+      // Preflight Mode 9 may fail on some transports; first physical ECU VIN in the loop still counts.
+      if (ecuResult.vin && ecuResult.vin.length >= 17) {
+        if (!report.preflightVin) {
+          report.preflightVin = ecuResult.vin;
+          report.preflightVinSource = `ECU 0x${addr.tx.toString(16)} (${addr.label})`;
+        }
+        const dec = decodeVinLocal(ecuResult.vin);
+        this.scanOemHint = this.scanOemHintFromDecodedVin(dec);
+        report.oemHint = this.scanOemHint;
       }
 
       // Update progress
@@ -337,6 +401,8 @@ export class EcuScanner {
         vinCounts.set(v, (vinCounts.get(v) || 0) + 1);
       }
       report.vehicleVin = [...vinCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    } else if (report.preflightVin && report.preflightVin.length === 17) {
+      report.vehicleVin = report.preflightVin;
     }
 
     report.scanning = false;
@@ -350,6 +416,151 @@ export class EcuScanner {
   /** Abort an in-progress scan. */
   abort(): void {
     this.abortController?.abort();
+    this.connection.cancelInFlightDiagnostics?.();
+  }
+
+  /**
+   * Read VIN once before the per-address loop — **OBD Mode 9 PID 0x02 @ 0x7DF only**.
+   * GMLAN / UDS VIN on 0x7E0+ belongs after TesterPresent + programming session in {@link scanAddress};
+   * doing it here caused bus traces unlike V-OP (e.g. 0x22 F190 NRC 0x31 before 0x101 / 0x10 02).
+   * Sets {@link VehicleScanReport.preflightVin}, {@link scanOemHint}, and report fields.
+   */
+  private async runPreflightVin(report: VehicleScanReport): Promise<void> {
+    if (this.abortController?.signal.aborted) return;
+    const label = 'OBD Mode9 PID0x02 @0x7DF';
+    try {
+      const vin = await this.tryPreflightVinMode9(report);
+      // Let bridge RX queue / bus settle after ISO‑TP before per-address probes.
+      await this.delay(this.postObdMode9VinSettleMs);
+      const normalized = this.normalizeVin17(vin);
+      if (normalized) {
+        report.preflightVin = normalized;
+        report.preflightVinSource = label;
+        const dec = decodeVinLocal(normalized);
+        this.scanOemHint = this.scanOemHintFromDecodedVin(dec);
+        report.oemHint = this.scanOemHint;
+        report.preflightVinDecodeSummary = this.preflightVinSummaryLine(normalized, dec);
+      } else if (!report.preflightMode9RawHex) {
+        if (!report.preflightMode9Error) {
+          report.preflightMode9Error =
+            'No Mode 9 payload (timeout, bridge RX, or transport not ready).';
+        }
+      } else if (!report.preflightMode9Error) {
+        report.preflightMode9Error = 'Mode 9 payload present but VIN could not be decoded.';
+      }
+    } catch (e) {
+      report.preflightMode9Error = e instanceof Error ? e.message : String(e);
+      console.warn('[ECU Scanner] Preflight Mode 9 VIN failed:', e);
+    }
+  }
+
+  /** WMI → {@link scanOemHint}; drives GMLAN-first vs UDS-first in {@link scanAddress}. */
+  private scanOemHintFromDecodedVin(dec: DecodedVehicle): ScanOemHint {
+    const m = dec.manufacturer;
+    if (m === 'gm') return 'gm';
+    if (m === 'ford') return 'ford';
+    return 'other';
+  }
+
+  private preflightVinSummaryLine(vin17: string, dec: DecodedVehicle): string {
+    const wmi = vin17.slice(0, 3);
+    const order = this.scanOemHint === 'ford' ? 'UDS-first' : 'GMLAN-first';
+    return `WMI ${wmi} → ${dec.make} (${dec.manufacturer}) · ${order}`;
+  }
+
+  /** Valid 17-char VIN only — used so a partial/garbled string does not skip fallbacks. */
+  private normalizeVin17(v: string | null | undefined): string | null {
+    if (!v) return null;
+    const t = v.trim().toUpperCase();
+    return /^[A-HJ-NPR-Z0-9]{17}$/.test(t) ? t : null;
+  }
+
+  private async tryPreflightVinMode9(report: VehicleScanReport): Promise<string | null> {
+    let resp: UDSResponse | null = null;
+    try {
+      resp = await this.connection.sendUDSRequest(
+        0x09,
+        undefined,
+        [0x02],
+        0x7df,
+        this.obdMode9TimeoutMs,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      report.preflightMode9Error = msg;
+      console.warn('[ECU Scanner] Preflight Mode9: request failed:', e);
+      return null;
+    }
+    if (!resp?.data?.length) {
+      report.preflightMode9Error =
+        resp == null
+          ? 'Mode 9: no UDS response (timeout or ISO-TP reassembly failed on the bridge).'
+          : 'Mode 9: response had no payload bytes.';
+      console.log(
+        `[ECU Scanner] Preflight Mode9: empty payload (positive=${String(resp?.positiveResponse)} n=${resp?.data?.length ?? 0})`,
+      );
+      return null;
+    }
+    const data = resp.data;
+    const hex = data.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    report.preflightMode9RawHex = hex;
+    // Do not require positiveResponse: ISO-TP payload may still parse as Mode 9 VIN even if flags disagree.
+    const j1979 = this.extractVinFromObdMode9Pid02(data);
+    const loose =
+      this.extractVin17FromAscii(data) ?? this.extractVin17FromBytes(data);
+    const out = j1979 ?? this.normalizeVin17(loose);
+    console.log(
+      `[ECU Scanner] Preflight Mode9: n=${data.length} pos=${String(resp.positiveResponse)} hex=[${hex}] j1979=${j1979 ?? '—'} out=${out ?? '—'}`,
+    );
+    if (out) {
+      const dec = decodeVinLocal(out);
+      const hint = this.scanOemHintFromDecodedVin(dec);
+      console.log(
+        `[ECU Scanner] Preflight Mode9: WMI ${out.slice(0, 3)} → ${dec.make} (${dec.manufacturer}) · scan will use ${hint === 'ford' ? 'UDS-first' : 'GMLAN-first'}`,
+      );
+    }
+    return out;
+  }
+
+  /**
+   * SAE J1979 Mode 09 PID 0x02 — positive response body after 0x49:
+   * `[0x02][0x01][17 VIN bytes]` (some stacks still include leading 0x49 in `data` — strip it).
+   */
+  private extractVinFromObdMode9Pid02(data: number[]): string | null {
+    if (data.length < 3) return null;
+    let i = 0;
+    if (data[0] === 0x49) i = 1;
+    if (data.length < i + 3) return null;
+    if (data[i] === 0x02 && data[i + 1] === 0x01 && data.length >= i + 2 + 17) {
+      const raw = data.slice(i + 2, i + 2 + 17);
+      const s = raw.map(b => String.fromCharCode(b)).join('');
+      return this.normalizeVin17(s);
+    }
+    if (data[i] === 0x02 && data.length >= i + 1 + 17) {
+      const raw = data.slice(i + 1, i + 1 + 17);
+      const s = raw.map(b => String.fromCharCode(b)).join('');
+      return this.normalizeVin17(s);
+    }
+    return null;
+  }
+
+  /** 17-char VIN pattern in printable payload */
+  private extractVin17FromBytes(data: number[]): string | null {
+    const s = data
+      .filter(b => b >= 0x20 && b <= 0x7e)
+      .map(b => String.fromCharCode(b))
+      .join('');
+    const m = s.match(/[A-HJ-NPR-Z0-9]{17}/i);
+    return m ? m[0].toUpperCase() : null;
+  }
+
+  private extractVin17FromAscii(data: number[]): string | null {
+    const ascii = this.extractAscii(data).trim();
+    if (ascii.length >= 17) {
+      const sub = ascii.slice(0, 17);
+      if (/^[A-HJ-NPR-Z0-9]{17}$/i.test(sub)) return sub.toUpperCase();
+    }
+    return this.extractVin17FromBytes(data);
   }
 
   /**
@@ -376,6 +587,13 @@ export class EcuScanner {
     };
 
     console.log(`[ECU Scanner] Probing ${label} (TX: 0x${txAddr.toString(16)}, RX: 0x${rxAddr.toString(16)})...`);
+
+    if (this.abortController?.signal.aborted) {
+      result.status = 'complete';
+      result.scanDurationMs = Date.now() - startMs;
+      result.notes.push('Scan aborted by user');
+      return result;
+    }
 
     // Step 1: Presence / transport probe
     // GMLAN: USDT TesterPresent (0x3E 0x00 on physical) is wrong — ECUs answer with NRC 0x12. Use UUDT
@@ -439,24 +657,22 @@ export class EcuScanner {
     }
     await this.delay(100);
 
-    // Step 4: Detect protocol and read DIDs
-    // Try GMLAN ReadDID first (0x1A 0x90 for VIN)
-    const gmlanVinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
-    const isGmlan = gmlanVinResp?.positiveResponse === true;
+    // Step 4: Detect protocol and read DIDs — Ford WMI: UDS VIN first; GM / unknown: GMLAN first (matches DevProg bench).
+    const preferUdsFirst = this.scanOemHint === 'ford';
+    console.log(
+      `[ECU Scanner] ${label}: protocol order (WMI hint=${this.scanOemHint}) → ${preferUdsFirst ? 'UDS-first' : 'GMLAN-first'}`,
+    );
 
-    if (isGmlan) {
-      result.detectedProtocol = 'GMLAN';
-      await this.scanGmlanEcu(result, txAddr);
-    } else {
-      // Try UDS ReadDID (0x22 0xF190)
+    if (preferUdsFirst) {
       const udsVinResp = await this.sendAndRecord(
-        result, 0x22, undefined,
-        [(UDS_DIDS.VIN >> 8) & 0xFF, UDS_DIDS.VIN & 0xFF],
+        result,
+        0x22,
+        undefined,
+        [(UDS_DIDS.VIN >> 8) & 0xff, UDS_DIDS.VIN & 0xff],
         txAddr,
       );
       if (udsVinResp?.positiveResponse) {
         result.detectedProtocol = 'UDS';
-        // Determine manufacturer for OEM-specific DID reads
         const ecuConfig = this.matchEcuConfig(result);
         result.ecuConfig = ecuConfig;
         const manufacturer = ecuConfig?.oem;
@@ -468,10 +684,50 @@ export class EcuScanner {
           await this.scanGenericUdsEcu(result, txAddr);
         }
       } else {
-        // ECU responds but doesn't support standard ReadDID
-        result.detectedProtocol = 'unknown';
-        if (gmlanVinResp && gmlanVinResp.data?.length > 0) {
-          result.vin = this.extractAscii(gmlanVinResp.data);
+        const gmlanVinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
+        const isGmlan = gmlanVinResp?.positiveResponse === true;
+        if (isGmlan) {
+          result.detectedProtocol = 'GMLAN';
+          await this.scanGmlanEcu(result, txAddr);
+        } else {
+          result.detectedProtocol = 'unknown';
+          if (gmlanVinResp && gmlanVinResp.data?.length > 0) {
+            result.vin = this.extractAscii(gmlanVinResp.data);
+          }
+        }
+      }
+    } else {
+      const gmlanVinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
+      const isGmlan = gmlanVinResp?.positiveResponse === true;
+
+      if (isGmlan) {
+        result.detectedProtocol = 'GMLAN';
+        await this.scanGmlanEcu(result, txAddr);
+      } else {
+        const udsVinResp = await this.sendAndRecord(
+          result,
+          0x22,
+          undefined,
+          [(UDS_DIDS.VIN >> 8) & 0xff, UDS_DIDS.VIN & 0xff],
+          txAddr,
+        );
+        if (udsVinResp?.positiveResponse) {
+          result.detectedProtocol = 'UDS';
+          const ecuConfig = this.matchEcuConfig(result);
+          result.ecuConfig = ecuConfig;
+          const manufacturer = ecuConfig?.oem;
+          if (manufacturer === 'FORD') {
+            await this.scanFordEcu(result, txAddr);
+          } else if (manufacturer === 'DODGE') {
+            await this.scanCumminsEcu(result, txAddr);
+          } else {
+            await this.scanGenericUdsEcu(result, txAddr);
+          }
+        } else {
+          result.detectedProtocol = 'unknown';
+          if (gmlanVinResp && gmlanVinResp.data?.length > 0) {
+            result.vin = this.extractAscii(gmlanVinResp.data);
+          }
         }
       }
     }
@@ -1127,7 +1383,11 @@ export class EcuScanner {
     subFunction: number | undefined,
     data: number[],
     txAddr: number,
+    responseArbIdOverride?: number,
   ): Promise<UDSResponse | null> {
+    if (this.abortController?.signal.aborted) {
+      return null;
+    }
     try {
       const resp = await this.connection.sendUDSRequest(
         service,
@@ -1135,6 +1395,7 @@ export class EcuScanner {
         data,
         txAddr,
         this.scanUdsTimeoutMs,
+        responseArbIdOverride,
       );
       if (resp) {
         let payload = resp.data || [];
@@ -1263,6 +1524,8 @@ export class EcuScanner {
     const candidates = Object.values(ECU_DATABASE).filter(ecu => {
       if (ecu.txAddr !== result.txAddr) return false;
       if (result.detectedProtocol !== 'unknown' && ecu.protocol !== result.detectedProtocol) return false;
+      if (this.scanOemHint === 'gm' && ecu.oem !== 'GM') return false;
+      if (this.scanOemHint === 'ford' && ecu.oem !== 'FORD') return false;
       return true;
     });
 
