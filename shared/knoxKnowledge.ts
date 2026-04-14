@@ -54,6 +54,7 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - **1475°F sustained > 14 seconds** = WARNING — back off throttle, investigate fueling/boost. Accelerates turbo wear and reduces injector life.
 - **1800-2000°F for < 12 seconds** = ACCEPTABLE in racing conditions (drag pulls, dyno pulls). Do NOT flag as a fault. Brief spikes during WOT racing pulls are normal if airflow is insufficient to cool things off.
 - **1800-2000°F sustained > 12 seconds** = CRITICAL — even for racing, this is too long. Immediate risk of component damage.
+- **Flatlined at 1832°F (999.9°C)** = Open circuit / disconnected sensor. This is the ECM's default reading when the EGT sensor circuit is open. Very common on vehicles with emissions equipment removed and a tune that disables the EGT DTC. Report as likely open circuit — the customer disconnected the sensor for the type of tuning they are running. Skip all EGT-based diagnostics for this log.
 - **> 2100°F** = Likely sensor fault (disconnected/open circuit) — flag as EGT_SENSOR_FAULT, not a real temperature reading.
 - **During DPF regen**: EGTs of 1000-1200°F at DPF inlet are normal. Do not flag regen-related EGT elevation.
 - **Solenoid injectors (LB7, LBZ, LMM)**: Injector duration is not a concern until approaching 2500+ µs. 3000 µs is considered basically maxed out on a solenoid injector. Do not flag normal duration values (e.g. 2100 µs) as high — that is well within normal operating range.

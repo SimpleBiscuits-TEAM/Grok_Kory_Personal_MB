@@ -1336,3 +1336,8 @@
 - [x] Fix injector duration threshold — 2.1ms (2100µs) should NOT trigger warning for solenoid injectors
 - [x] Solenoid injector thresholds: warning at 2500µs, maxed out at 3000µs
 - [x] Update all files: reasoningEngine.ts, advancedHealthPdf.ts, l5pEcuReference.ts, Knox KB
+
+## Boost / EGT Chart Fixes (V0.12.3)
+- [x] Fix boost desired PID — subtract barometric pressure so desired matches actual gauge pressure (currently looks like underboost because baro not subtracted)
+- [x] Add RPM reference trace to the boost deviation chart
+- [x] Handle EGT stuck at 1832°F — this means sensor is disconnected/open circuit (emissions delete + tuned out). Report as likely open circuit, not real temp reading.

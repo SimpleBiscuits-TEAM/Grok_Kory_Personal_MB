@@ -2032,6 +2032,9 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
                 <YAxis yAxisId="maf" orientation="right" stroke="#22d3ee" tick={{ fontSize: 10, fill: '#22d3ee' }}
                   label={{ value: 'lb/min', angle: 90, position: 'insideRight', offset: hasVane ? 40 : 0, style: { fill: '#22d3ee', fontSize: 10 } }} />
               )}
+              <YAxis yAxisId="rpm" orientation="right" stroke="#4ade80" tick={{ fontSize: 10, fill: '#4ade80' }}
+                domain={[0, 'auto']}
+                label={{ value: 'RPM', angle: 90, position: 'insideRight', offset: (hasVane ? 40 : 0) + (hasMaf ? 40 : 0), style: { fill: '#4ade80', fontSize: 10 } }} />
               <Tooltip
                 contentStyle={{ background: '#0d0f14', border: '1px solid #333', borderRadius: 8, fontSize: 11, fontFamily: 'monospace' }}
                 labelStyle={{ color: '#888' }}
@@ -2039,7 +2042,7 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
                   const labels: Record<string, string> = {
                     boost: 'Boost Actual', boostDesired: 'Boost Desired',
                     vanePos: 'Vane Actual', vaneDesired: 'Vane Desired',
-                    maf: 'MAF',
+                    maf: 'MAF', rpm: 'RPM',
                   };
                   return [typeof value === 'number' ? value.toFixed(1) : value, labels[name] || name];
                 }}
@@ -2060,6 +2063,7 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
                   isAnimationActive={false}
                 />
               )}
+              <Line yAxisId="rpm" type="monotone" dataKey="rpm" stroke="#4ade8080" dot={false} strokeWidth={1} strokeDasharray="6 3" name="rpm" isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
         )}

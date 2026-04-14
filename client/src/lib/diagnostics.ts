@@ -809,14 +809,30 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   // AND for a very long time (150+ samples = 15+ seconds at 10Hz).
   // Short runs with slowly-changing EGT are normal, not a sensor fault.
   if (maxStuck > 150 && stuckValue > 400) {
-    issues.push({
-      code: 'EGT-SENSOR-STUCK',
-      severity: 'warning',
-      title: 'EGT Sensor Stuck/Frozen',
-      description: `EGT sensor reading was frozen at ${stuckValue.toFixed(0)}F (< 1F change) for ${maxStuck} consecutive samples (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). A stuck sensor cannot protect the DPF from overtemperature events.`,
-      recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
-    });
-    sensorFaulty = true;
+    // Special case: 1832°F (999.9°C) is the open-circuit default reading.
+    // When someone removes emissions equipment and tunes the sensor out to
+    // avoid a DTC, the ECM reports ~1832°F as if the circuit is open.
+    // This is NOT a real temperature — it's a disconnected/tuned-out sensor.
+    const isOpenCircuit = Math.abs(stuckValue - 1832) < 5; // within 5°F of 1832
+    if (isOpenCircuit) {
+      issues.push({
+        code: 'EGT-SENSOR-OPEN-CIRCUIT',
+        severity: 'info',
+        title: 'EGT Sensor Disconnected — Open Circuit (1832°F)',
+        description: `EGT sensor is flatlined at ${stuckValue.toFixed(0)}°F for the entire log (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). 1832°F (999.9°C) is the open-circuit default value — this indicates the EGT sensor is disconnected or the circuit has been tuned out. This is common on vehicles with emissions equipment removed and a tune that disables the EGT DTC.`,
+        recommendation: 'This is not a real temperature reading. The EGT sensor is disconnected or open circuit. If the vehicle has had emissions equipment removed, this is expected behavior with the current tune. EGT-based diagnostics will be skipped for this log.',
+      });
+      sensorFaulty = true;
+    } else {
+      issues.push({
+        code: 'EGT-SENSOR-STUCK',
+        severity: 'warning',
+        title: 'EGT Sensor Stuck/Frozen',
+        description: `EGT sensor reading was frozen at ${stuckValue.toFixed(0)}°F (< 1°F change) for ${maxStuck} consecutive samples (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). A stuck sensor cannot protect the DPF from overtemperature events.`,
+        recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
+      });
+      sensorFaulty = true;
+    }
   }
 
   let erraticCount = 0;

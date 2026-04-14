@@ -1154,7 +1154,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
     railPressureActual.push(railActualIdx !== -1 ? hptConvert(railActualIdx, values[railActualIdx]) : 0);
     railPressureDesired.push(railDesiredIdx !== -1 ? hptConvert(railDesiredIdx, values[railDesiredIdx]) : 0);
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
-    boostDesired.push(boostDesiredIdx !== -1 ? hptConvert(boostDesiredIdx, values[boostDesiredIdx]) : 0);
+    // Desired Boost: subtract baro to get gauge pressure (same as actual boost calculation)
+    const rawDesiredBoost = boostDesiredIdx !== -1 ? hptConvert(boostDesiredIdx, values[boostDesiredIdx]) : 0;
+    boostDesired.push(rawDesiredBoost > 0 ? Math.max(0, rawDesiredBoost - baroVal) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? hptConvert(egtIdx, values[egtIdx]) : 0);
