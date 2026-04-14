@@ -40,6 +40,7 @@ import { streamingRouter } from "./routers/streaming";
 import { lauraRouter } from "./routers/laura";
 import { stratRouter } from "./routers/strat";
 import { githubRouter } from "./routers/github";
+import { tasksRouter } from "./routers/tasks";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -322,6 +323,9 @@ export const appRouter = router({
 
   // GitHub Commit History
   github: githubRouter,
+
+  // Task Override Persistence (Tasks tab status, notes, section moves)
+  tasks: tasksRouter,
 
   // Feedback / Error Reports
   feedback: router({

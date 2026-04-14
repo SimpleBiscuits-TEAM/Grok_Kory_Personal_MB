@@ -96,7 +96,7 @@ export function TasksContent() {
         />
         <main className="flex-1 min-w-0 flex flex-col">
           <FilterBar filters={store.filters} setFilters={store.setFilters} />
-          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} />
+          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} onUpdateNotes={store.updateNotes} getNotes={store.getNotes} />
         </main>
       </div>
     </div>
@@ -209,7 +209,7 @@ export default function Tasks() {
         {/* Task List */}
         <main className="flex-1 min-w-0 flex flex-col">
           <FilterBar filters={store.filters} setFilters={store.setFilters} />
-          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} />
+          <TaskTable tasks={store.filteredTasks} onStatusChange={store.updateStatus} onMoveTask={store.moveTask} onUpdateNotes={store.updateNotes} getNotes={store.getNotes} />
         </main>
       </div>
     </div>

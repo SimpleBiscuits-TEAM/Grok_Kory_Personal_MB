@@ -1304,3 +1304,11 @@
 - [x] Update sidebar to show 6 sections with progress bars
 - [x] Remove SprintTimeline and Week filters (no longer applicable)
 - [x] Only changed: taskData.ts, useTaskStore.ts, Tasks.tsx, ModuleSidebar.tsx, TaskTable.tsx, FilterBar.tsx
+
+## Task Tab: Debugging Notes + Database Persistence
+- [x] Add click-to-expand row on each task with debugging notes textarea
+- [x] Create database table for task state (status, notes, section overrides)
+- [x] Add tRPC procedures for reading/writing task state
+- [x] Migrate useTaskStore from localStorage to database-backed persistence
+- [x] Ensure changes survive publishes and work across devices
+- [x] Only change Tasks-related files — no other tabs or Tobi's code

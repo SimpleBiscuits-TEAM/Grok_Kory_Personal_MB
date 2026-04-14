@@ -2105,3 +2105,20 @@ export const stratFeedback = mysqlTable("strat_feedback", {
 
 export type StratFeedback = typeof stratFeedback.$inferSelect;
 export type InsertStratFeedback = typeof stratFeedback.$inferInsert;
+
+
+// ── Task Overrides (persists task status, notes, section moves) ────────────
+export const taskOverrides = mysqlTable("task_overrides", {
+  /** The task ID from taskData.ts (e.g. "analyzer-parse-efilive") */
+  taskId: varchar("taskId", { length: 128 }).primaryKey(),
+  /** Override status: not_started, in_progress, passed */
+  status: varchar("status", { length: 32 }),
+  /** Debugging / progress notes written by the user */
+  notes: text("notes"),
+  /** Section override if user moved the task to a different top section */
+  sectionOverride: varchar("sectionOverride", { length: 64 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TaskOverride = typeof taskOverrides.$inferSelect;
+export type InsertTaskOverride = typeof taskOverrides.$inferInsert;
