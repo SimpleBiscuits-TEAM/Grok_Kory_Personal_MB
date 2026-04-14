@@ -448,7 +448,7 @@ export function getCalibrationContext(
     },
     injector_pulse_high: {
       title: 'High Injector Pulse Width — FULC ET_InjTbl',
-      context: 'Injector pulse width comes from the FULC ET_InjTbl (22×20 RPM × fuel quantity). The L5P uses piezo injectors — pulse widths above 1.5ms are race territory with high EGT risk. The FADC subsystem monitors per-cylinder fuel delivery via crankshaft acceleration patterns and adapts individual injector trims. If injector learning (FSA_LrnMap) is hitting its limits, the injectors may be worn or mismatched for the fuel demand. OEM duration or lower for desired horsepower is the rule of thumb for injector sizing.',
+      context: 'Injector pulse width comes from the FULC ET_InjTbl (22×20 RPM × fuel quantity). The L5P uses piezo injectors — pulse widths above 1.5ms are race territory with high EGT risk. For solenoid injectors (LB7/LBZ/LMM), 2500+ µs is where you start paying attention and 3000 µs is basically maxed out — 2100 µs is well within normal range. The FADC subsystem monitors per-cylinder fuel delivery via crankshaft acceleration patterns and adapts individual injector trims. If injector learning (FSA_LrnMap) is hitting its limits, the injectors may be worn or mismatched for the fuel demand. OEM duration or lower for desired horsepower is the rule of thumb for injector sizing.',
       subsystem: 'FULC/FADC',
       relevance: 'high',
     },

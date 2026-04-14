@@ -1331,3 +1331,8 @@
 - [x] Add Knox KB knowledge: VGT too much position without enough heat/RPM = pressure ratio (boost-to-drive) out of hand, hurts HP, potential turbo overspeed
 - [x] Remove subsystem display from analyzer page
 - [x] Remove "delta" line from fuel pressure fault error chart
+
+## Injector Pulse Width Threshold Fix
+- [x] Fix injector duration threshold — 2.1ms (2100µs) should NOT trigger warning for solenoid injectors
+- [x] Solenoid injector thresholds: warning at 2500µs, maxed out at 3000µs
+- [x] Update all files: reasoningEngine.ts, advancedHealthPdf.ts, l5pEcuReference.ts, Knox KB

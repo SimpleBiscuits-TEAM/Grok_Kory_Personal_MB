@@ -1114,11 +1114,11 @@ function generatePerformanceRecommendations(
   const maxIpw = ipwNonZero.length > 0 ? Math.max(...ipwNonZero) : 0;
   const avgIpw = ipwNonZero.length > 0 ? ipwNonZero.reduce((a, b) => a + b, 0) / ipwNonZero.length : 0;
 
-  // Solenoid injectors: > 2500 uS is race-level
+  // Solenoid injectors: 3000 µs is basically maxed out, 2500+ is where you start paying attention
   // Piezo injectors: > 1.5 ms is race-level
   const isPiezo = dieselRules && (ctx.platform === 'LML' || ctx.platform === 'L5P');
-  const raceThreshold = isPiezo ? 1.5 : 2.5;
-  const highThreshold = isPiezo ? 1.2 : 2.0;
+  const raceThreshold = isPiezo ? 1.5 : 3.0;
+  const highThreshold = isPiezo ? 1.2 : 2.5;
 
   if (maxIpw > raceThreshold) {
     findings.push({
@@ -1139,7 +1139,7 @@ function generatePerformanceRecommendations(
       ],
       suggestion: isPiezo
         ? 'For builds over 600 HP, consider aftermarket piezo injectors with higher flow rates to reduce pulse width and EGTs.'
-        : 'For builds over 500 HP, consider larger solenoid injectors (e.g., SAC nozzles) to reduce pulse width below 2000 µs.',
+        : 'For builds over 500 HP, consider larger solenoid injectors (e.g., SAC nozzles) to reduce pulse width below 2500 µs. 3000 µs is considered basically maxed out on a solenoid injector.',
     });
   } else if (maxIpw > highThreshold) {
     findings.push({

@@ -56,7 +56,7 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - **1800-2000°F sustained > 12 seconds** = CRITICAL — even for racing, this is too long. Immediate risk of component damage.
 - **> 2100°F** = Likely sensor fault (disconnected/open circuit) — flag as EGT_SENSOR_FAULT, not a real temperature reading.
 - **During DPF regen**: EGTs of 1000-1200°F at DPF inlet are normal. Do not flag regen-related EGT elevation.
-- **Solenoid injectors (LB7, LBZ, LMM)**: Injector duration is not a concern until approaching 2500+ µs. Do not flag normal duration values as high.
+- **Solenoid injectors (LB7, LBZ, LMM)**: Injector duration is not a concern until approaching 2500+ µs. 3000 µs is considered basically maxed out on a solenoid injector. Do not flag normal duration values (e.g. 2100 µs) as high — that is well within normal operating range.
 - **Rail pressure surge detection**: A rapid actual-vs-desired divergence of > 3 kPSI for 3+ consecutive points, or a rate of change > 50 kPSI/s, indicates a fuel pressure surge event. This is NOT typical fuel pump behavior — it indicates the FPR control loop cannot stabilize. Flag as FUEL_PRESSURE_SURGE.
 
 ### NOx Raw Emission Model (from exhmod_rawnoxmdl)
