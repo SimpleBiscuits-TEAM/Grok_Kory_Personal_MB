@@ -1,18 +1,19 @@
 @echo off
 setlocal
-rem Runs docs\pcan_bridge_current.py from repo root.
+rem Runs the bundled bridge script from repo root.
+rem Single source of truth: client\public\pcan_bridge.py
 rem Prefer py -3 (Windows launcher). Plain "python" is often missing or a Store stub.
 cd /d "%~dp0\.."
 
 where py >nul 2>&1
 if errorlevel 1 goto trypython
-py -3 docs\pcan_bridge_current.py %*
+py -3 client\public\pcan_bridge.py %*
 exit /b %ERRORLEVEL%
 
 :trypython
 where python >nul 2>&1
 if errorlevel 1 goto nopython
-python docs\pcan_bridge_current.py %*
+python client\public\pcan_bridge.py %*
 exit /b %ERRORLEVEL%
 
 :nopython

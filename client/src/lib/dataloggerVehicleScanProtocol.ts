@@ -14,13 +14,20 @@
  * - Kein UDS `0x3E 0x00` (TesterPresent) auf 0x7E0 vor den Bitmasken (GM liefert oft NRC 0x12).
  * - Kein `0x10 0x03` / Extended Session **vor** dem Mode-01-Bitmask-Scan — Session nur bei Bedarf für Mode 22.
  * - Kein „ELM-Katalog-Probe“-Sweep über dutzende Mode-01-PIDs während CONNECT.
+ *
+ * Connect-Timeouts: siehe **gleiche** Konstanten in `canTransportTiming.ts` (Re-Export unten).
  */
 
-/** ISO-TP Mode 09 VIN (meist Multi-Frame) */
-export const DATALOGGER_CONNECT_VIN_TIMEOUT_MS = 10_000;
+import {
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
+} from './canTransportTiming';
 
-/** Mode 01 Bitmask / später Live-Mode 01 */
-export const DATALOGGER_CONNECT_MODE01_TIMEOUT_MS = 2_500;
+/** Re-Export — identisch {@link CAN_DATALOGGER_VIN_TIMEOUT_MS} */
+export const DATALOGGER_CONNECT_VIN_TIMEOUT_MS = CAN_DATALOGGER_VIN_TIMEOUT_MS;
+
+/** Re-Export — identisch {@link CAN_DATALOGGER_BITMASK_TIMEOUT_MS} */
+export const DATALOGGER_CONNECT_MODE01_TIMEOUT_MS = CAN_DATALOGGER_BITMASK_TIMEOUT_MS;
 
 /** GM / ISO-15765 OBD-II physikalische Tester-Adresse */
 export const DATALOGGER_OBD_PHYSICAL_TX = 0x7e0;

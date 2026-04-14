@@ -933,8 +933,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [isAutoNaming, setIsAutoNaming] = useState(false);
   const autoNameMutation = trpc.datalogNaming.autoName.useMutation();
 
-  // Sample rate
-  const [sampleRateMs, setSampleRateMs] = useState(200);
+  // Sample rate (0 = no pacing between poll rounds — next loop starts immediately after last response)
+  const [sampleRateMs, setSampleRateMs] = useState(0);
 
   // Console logs
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
@@ -1181,7 +1181,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
     const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
     const mode01Count = pidsToLog.length - mode22Count;
-    addLog(`Starting live monitor: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms`);
+    addLog(
+      `Starting live monitor: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs > 0 ? `${sampleRateMs}ms` : 'max rate'}`,
+    );
 
     // Reset live data
     setLiveReadings(new Map());
@@ -1648,6 +1650,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 borderRadius: '2px', color: sColor.text,
               }}
             >
+              <option value={0}>Max (no pacing)</option>
               <option value={100}>100ms (10Hz)</option>
               <option value={200}>200ms (5Hz)</option>
               <option value={500}>500ms (2Hz)</option>

@@ -1,0 +1,31 @@
+---
+description: Datalogger timing and OBD protocol changes must stay aligned across ELM327, PCAN, and V-OP transports.
+alwaysApply: true
+---
+
+# Datalogger transport parity (ELM327 · PCAN · V-OP)
+
+## Single source of truth
+
+- **Timing** (timeouts, pre-TX settle, logging interval defaults, connect-scan budgets, ISO-TP RX floor/poll where applicable): define and adjust in `client/src/lib/canTransportTiming.ts` only.
+- **Connect scan prescription** (VIN + Mode 01 bitmasks, physical `0x7E0`, no mixed paths): `client/src/lib/dataloggerVehicleScanProtocol.ts` and shared constants from `canTransportTiming.ts`.
+
+## Mandatory rule
+
+Whenever you change **datalogger-related timing** or **OBD/ISO-TP behaviour** that affects how we talk to the vehicle during connect, live read, or logging:
+
+1. **Update all three implementations** (or explicitly document a hardware limitation in code comments next to the exception):
+   - **ELM327** — `client/src/lib/obdConnection.ts` (`OBDConnection`: `initialize`, `readPid`, `readPids`, `startLogging`, DID scan loops, etc.).
+   - **PCAN** — `client/src/lib/pcanConnection.ts` (WebSocket / `sendUDSRequest`, `startLogging`, connect scan).
+   - **V-OP USB** — `client/src/lib/vopCan2UsbConnection.ts` (`isoTpRequest`, `startLogging`, connect scan) and **`vopStyleUdsCore.ts`** if UDS helpers share timing.
+
+2. **Import shared constants** from `canTransportTiming.ts` instead of introducing new magic millisecond numbers in one transport only.
+
+3. **Do not** tune one adapter in isolation unless the difference is unavoidable (e.g. WebSocket round-trip vs USB) — in that case, keep **timeouts and protocol steps** identical; only document transport-specific overhead.
+
+## Quick checklist before finishing a PR
+
+- [ ] `canTransportTiming.ts` updated if any shared number changed  
+- [ ] `obdConnection.ts` uses the same constants for the same logical operation  
+- [ ] `pcanConnection.ts` / `vopCan2UsbConnection.ts` (and `vopStyleUdsCore.ts` if relevant) updated in the same commit  
+- [ ] `DataloggerPanel` sample-rate / UX still consistent if defaults changed  

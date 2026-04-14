@@ -90,3 +90,23 @@ export function normalizeDevProgContainerBlock(raw: unknown): ContainerBlockStru
 
   return o as unknown as ContainerBlockStruct;
 }
+
+/**
+ * DevProg / container JSON may mark a block with `delay` (varying casings) when a long
+ * intentional wait (erase, etc.) is expected — flash policy may skip short global ECU-silence limits.
+ */
+export function isContainerBlockDelayActive(block: ContainerBlockStruct): boolean {
+  const o = block as unknown as Record<string, unknown>;
+  for (const key of Object.keys(o)) {
+    if (normalizeDevProgJsonKey(key) !== 'delay') continue;
+    const v = o[key];
+    if (v === true) return true;
+    if (v === false || v == null) return false;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+    }
+  }
+  return false;
+}

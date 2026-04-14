@@ -10,6 +10,15 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { analyzeFlashLogForRecommendations } from '@shared/flashLogRecommendations';
@@ -258,6 +267,9 @@ export default function FlashMissionControl({
   const completedRef = useRef(false);
   const flashEngineRef = useRef<PCANFlashEngine | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  /** When true, closing the rescue dialog must not release USB (user chose automatic retry). */
+  const rescueRetryChosenRef = useRef(false);
+  const [rescueDialogOpen, setRescueDialogOpen] = useState(false);
 
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
   const isRealFlash = connectionMode === 'pcan' || connectionMode === 'vop_usb';
@@ -396,6 +408,151 @@ export default function FlashMissionControl({
     }
   }, [sessionUuid, sim.log.length, sim.progress, flushLogs, updateSession]);
 
+  const disconnectVopIfNeeded = useCallback(() => {
+    const bridge = flashBridgeRef?.current ?? flashBridge ?? null;
+    if (connectionMode === 'vop_usb' && bridge) {
+      void (bridge as VopCan2UsbConnection).disconnect();
+    }
+  }, [connectionMode, flashBridge, flashBridgeRef]);
+
+  /** Real hardware flash only — creates a new {@link PCANFlashEngine} and runs it. */
+  const runHardwareFlashEngine = useCallback(async (): Promise<boolean> => {
+    const bridge = flashBridgeRef?.current ?? flashBridge ?? null;
+    if (!bridge || !containerData || !containerHeader) return false;
+
+    let skipConnect = false;
+    if (connectionMode === 'vop_usb') {
+      const vop = bridge as VopCan2UsbConnection;
+      const usbOk = await vop.connect({ skipVehicleInit: true });
+      if (!usbOk) {
+        updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
+        setSim(prev => ({
+          ...prev,
+          isRunning: false,
+          result: null,
+          statusMessage: 'USB CAN bridge connect failed — grant serial access and press Start again.',
+        }));
+        return false;
+      }
+      skipConnect = true;
+    }
+
+    const callbacks: FlashEngineCallbacks = {
+      onStateUpdate: (newState) => {
+        setSim(newState);
+        syncToServer(newState);
+      },
+      onComplete: (result) => {
+        if (!completedRef.current) {
+          completedRef.current = true;
+          flushLogs();
+          const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
+          completeSession.mutate({
+            uuid: sessionUuid,
+            status: result === 'SUCCESS' ? 'success' : result === 'ABORTED' ? 'aborted' : 'failed',
+            progress: result === 'SUCCESS' ? 100 : Math.round(sim.progress),
+            durationMs: duration,
+            errorMessage: result === 'FAILED' ? sim.statusMessage : undefined,
+          });
+        }
+        const offerRescue = result === 'FAILED' && isRealFlash && !isDryRun;
+        if (offerRescue) {
+          toast.error('Flash failed', {
+            description: 'You can run an automatic rescue attempt that restarts the full procedure from the beginning.',
+            duration: 8000,
+          });
+          setRescueDialogOpen(true);
+          return;
+        }
+        disconnectVopIfNeeded();
+      },
+      onUserAction: async (action, waitMs) => {
+        setKeyCycleState(action);
+        setKeyCycleCountdown(waitMs);
+
+        if (action.autoConfirm) {
+          const interval = setInterval(() => {
+            setKeyCycleCountdown(prev => {
+              if (prev <= 1000) {
+                clearInterval(interval);
+                setKeyCycleState(null);
+                return 0;
+              }
+              return prev - 1000;
+            });
+          }, 1000);
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          clearInterval(interval);
+          setKeyCycleState(null);
+          setKeyCycleCountdown(0);
+        } else {
+          await new Promise<void>(resolve => {
+            keyCycleResolveRef.current = resolve;
+          });
+          setKeyCycleState(null);
+          setKeyCycleCountdown(0);
+        }
+      },
+    };
+
+    const engine = new PCANFlashEngine({
+      connection: bridge,
+      skipConnect,
+      plan,
+      containerData,
+      header: containerHeader,
+      callbacks,
+      dryRun,
+      computeSecurityKey: async ({ ecuType, seed }) => {
+        const seedHex = Array.from(seed)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        const r = await computeSecurityKeyMutation.mutateAsync({ ecuType, seedHex });
+        if (r.ok && 'keyHex' in r && r.keyHex) {
+          return hexToBytes(r.keyHex);
+        }
+        return null;
+      },
+    });
+    flashEngineRef.current = engine;
+    setSim(prev => ({ ...prev, isRunning: true }));
+    engine.execute();
+    return true;
+  }, [
+    flashBridgeRef,
+    flashBridge,
+    containerData,
+    containerHeader,
+    connectionMode,
+    sessionUuid,
+    updateSession,
+    syncToServer,
+    flushLogs,
+    completeSession,
+    sim.progress,
+    sim.statusMessage,
+    plan,
+    dryRun,
+    isRealFlash,
+    isDryRun,
+    computeSecurityKeyMutation,
+    disconnectVopIfNeeded,
+  ]);
+
+  const handleRescueRetryConfirm = useCallback(() => {
+    rescueRetryChosenRef.current = true;
+    setRescueDialogOpen(false);
+    completedRef.current = false;
+    flashEngineRef.current = null;
+    pendingLogsRef.current = [];
+    lastFlushRef.current = 0;
+    startTimeRef.current = Date.now();
+    setSim(createSimulatorState(plan));
+    updateSession.mutate({ uuid: sessionUuid, status: 'running', progress: 0 });
+    toast.info('Starting automatic rescue — full flash from the beginning.');
+    void runHardwareFlashEngine();
+  }, [plan, sessionUuid, updateSession, runHardwareFlashEngine]);
+
   // ── Start flash (simulator or real) ────────────────────────────────────
   const handleStart = useCallback(async () => {
     startTimeRef.current = Date.now();
@@ -404,99 +561,7 @@ export default function FlashMissionControl({
     const bridge = flashBridgeRef?.current ?? flashBridge ?? null;
 
     if (isRealFlash && bridge && containerData && containerHeader) {
-      let skipConnect = false;
-      if (connectionMode === 'vop_usb') {
-        const vop = bridge as VopCan2UsbConnection;
-        const usbOk = await vop.connect({ skipVehicleInit: true });
-        if (!usbOk) {
-          updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
-          setSim(prev => ({
-            ...prev,
-            isRunning: false,
-            result: null,
-            statusMessage: 'USB CAN bridge connect failed — grant serial access and press Start again.',
-          }));
-          return;
-        }
-        skipConnect = true;
-      }
-
-      const callbacks: FlashEngineCallbacks = {
-        onStateUpdate: (newState) => {
-          setSim(newState);
-          syncToServer(newState);
-        },
-        onComplete: (result) => {
-          if (!completedRef.current) {
-            completedRef.current = true;
-            flushLogs();
-            const duration = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
-            completeSession.mutate({
-              uuid: sessionUuid,
-              status: result === 'SUCCESS' ? 'success' : result === 'ABORTED' ? 'aborted' : 'failed',
-              progress: result === 'SUCCESS' ? 100 : Math.round(sim.progress),
-              durationMs: duration,
-              errorMessage: result === 'FAILED' ? sim.statusMessage : undefined,
-            });
-          }
-          // Release Web Serial port so Datalogger / OS can reopen the adapter without unplugging USB.
-          if (connectionMode === 'vop_usb' && bridge) {
-            void (bridge as VopCan2UsbConnection).disconnect();
-          }
-        },
-        onUserAction: async (action, waitMs) => {
-          setKeyCycleState(action);
-          setKeyCycleCountdown(waitMs);
-
-          if (action.autoConfirm) {
-            // WAIT_BOOT: auto-countdown and resolve
-            const interval = setInterval(() => {
-              setKeyCycleCountdown(prev => {
-                if (prev <= 1000) {
-                  clearInterval(interval);
-                  setKeyCycleState(null);
-                  return 0;
-                }
-                return prev - 1000;
-              });
-            }, 1000);
-            await new Promise(resolve => setTimeout(resolve, waitMs));
-            clearInterval(interval);
-            setKeyCycleState(null);
-            setKeyCycleCountdown(0);
-          } else {
-            // KEY_OFF / KEY_ON: block until user clicks confirm
-            await new Promise<void>(resolve => {
-              keyCycleResolveRef.current = resolve;
-            });
-            setKeyCycleState(null);
-            setKeyCycleCountdown(0);
-          }
-        },
-      };
-
-      const engine = new PCANFlashEngine({
-        connection: bridge,
-        skipConnect,
-        plan,
-        containerData,
-        header: containerHeader,
-        callbacks,
-        dryRun,
-        computeSecurityKey: async ({ ecuType, seed }) => {
-          const seedHex = Array.from(seed)
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
-          const r = await computeSecurityKeyMutation.mutateAsync({ ecuType, seedHex });
-          if (r.ok && "keyHex" in r && r.keyHex) {
-            return hexToBytes(r.keyHex);
-          }
-          return null;
-        },
-      });
-      flashEngineRef.current = engine;
-      setSim(prev => ({ ...prev, isRunning: true }));
-      engine.execute(); // Fire and forget — callbacks handle state updates
+      await runHardwareFlashEngine();
     } else if (isRealFlash) {
       updateSession.mutate({ uuid: sessionUuid, status: 'pending', progress: 0 });
       const reason = !bridge
@@ -512,10 +577,9 @@ export default function FlashMissionControl({
         statusMessage: reason,
       }));
     } else {
-      // Simulator mode
       setSim(prev => ({ ...prev, isRunning: true }));
     }
-  }, [sessionUuid, updateSession, isRealFlash, connectionMode, flashBridge, flashBridgeRef, containerData, containerHeader, plan, flushLogs, completeSession, syncToServer, sim.progress, sim.statusMessage, dryRun, computeSecurityKeyMutation]);
+  }, [sessionUuid, updateSession, isRealFlash, flashBridge, flashBridgeRef, containerData, containerHeader, runHardwareFlashEngine]);
 
   const handlePause = useCallback(() => {
     setSim(prev => ({ ...prev, isPaused: !prev.isPaused }));
@@ -582,8 +646,13 @@ export default function FlashMissionControl({
     return () => clearInterval(timer);
   }, [sim.isRunning, sim.result, funFacts.length]);
 
-  // Auto-scroll log
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [sim.log.length]);
+  // Auto-scroll log — only when the panel is open and there are entries. Running scrollIntoView
+  // on an empty expanded log (first paint) scrolls ancestor layouts and makes the Mission Control
+  // header/progress look shifted up until the user toggles the log closed.
+  useEffect(() => {
+    if (!showLog || sim.log.length === 0) return;
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, [sim.log.length, showLog]);
 
   // Auto-expand log when flash completes
   useEffect(() => {
@@ -1193,6 +1262,47 @@ export default function FlashMissionControl({
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={rescueDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (rescueRetryChosenRef.current) {
+              rescueRetryChosenRef.current = false;
+              return;
+            }
+            disconnectVopIfNeeded();
+          }
+        }}
+      >
+        <AlertDialogContent className="border-zinc-700 bg-zinc-950 text-zinc-100 sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono text-base">Run automatic rescue?</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400 text-xs leading-relaxed space-y-2">
+              <span>
+                The flash attempt failed. You can restart the full procedure from the beginning using the same container
+                (same USB/bridge connection stays open for V-OP).
+              </span>
+              <span className="block text-amber-200/90">
+                Stabilize ignition and wiring first. A partially programmed controller may need a complete flash file from
+                your supplier.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel type="button" className="font-mono text-xs border-zinc-600 bg-zinc-900 text-zinc-200">
+              No
+            </AlertDialogCancel>
+            <Button
+              type="button"
+              className="font-mono text-xs bg-emerald-700 hover:bg-emerald-600 text-white"
+              onClick={handleRescueRetryConfirm}
+            >
+              Yes — retry from start
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

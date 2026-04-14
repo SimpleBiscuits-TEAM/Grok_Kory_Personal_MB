@@ -1,80 +1,34 @@
 #!/usr/bin/env python3
 """
-PCAN-USB WebSocket Bridge for PPEI Performance Analyzer
-========================================================
+Compatibility wrapper.
 
-Multi-protocol CAN bridge supporting:
-  - OBD-II over CAN (ISO 15765-4) — standard 11-bit, 500kbps
-  - J1939 (SAE J1939) — 29-bit extended IDs, 250kbps, PGN-based
-  - UDS (ISO 14229) — Unified Diagnostic Services over ISO-TP
-  - CAN FD — Flexible Data Rate, up to 64-byte payloads
-  - Raw CAN — direct frame send/receive
-  - Bus Monitor — IntelliSpy real-time frame capture
+Single source of truth for the bundled PCAN WebSocket bridge is:
+  `client/public/pcan_bridge.py`
 
-Requirements:
-    pip install python-can websockets
-
-Optional (for TLS/wss support):
-    pip install cryptography
-
-Usage:
-    python pcan_bridge.py                          # Auto-detect PCAN-USB
-    python pcan_bridge.py --channel PCAN_USBBUS1   # Specific channel
-    python pcan_bridge.py --bitrate 500000          # Custom bitrate
-    python pcan_bridge.py --interface socketcan --channel can0  # Linux socketcan
-    python pcan_bridge.py --no-tls                  # Disable TLS (ws:// only)
-
-The bridge starts the WebSocket server(s) IMMEDIATELY, then connects to
-the CAN bus when the browser sends its first request. This means you can
-verify the browser-to-bridge connection works even without a vehicle.
-
-A self-signed TLS certificate is auto-generated on first run.
-You must accept it in your browser once: visit https://localhost:8766
-and click "Advanced" -> "Proceed" to trust it.
-
-Protocol:
-    Browser -> Bridge:
-        # OBD-II
-        {"type": "obd_request", "id": <req_id>, "mode": 1, "pid": 12}
-        {"type": "obd_request", "id": <req_id>, "mode": 9, "pid": 2}   # VIN
-        {"type": "obd_request", "id": <req_id>, "mode": 34, "pid": 4912}  # GM Mode 22
-
-        # Protocol switching
-        {"type": "set_protocol", "id": <req_id>, "protocol": "obd2|j1939|uds|canfd", "bitrate": 500000}
-
-        # J1939
-        {"type": "j1939_request", "id": <req_id>, "pgn": 65262, "dest": 0, "priority": 6}
-
-        # UDS (ISO 14229)
-        {"type": "uds_request", "id": <req_id>, "service": 34, "sub": null, "data": [19, 48], "target": 1760}
-
-        # Raw CAN
-        {"type": "can_send", "id": <req_id>, "arb_id": 2016, "data": [3, 34, 19, 48, 0, 0, 0, 0], "extended": false}
-        # Pop next RX from OBD queue without TX (ISO-TP consecutive frames after FC)
-        {"type": "can_recv", "id": <req_id>, "timeout_ms": 5000}
-
-        # Filters & Monitor
-        {"type": "set_filter", "arb_ids": [2024]}
-        {"type": "clear_filter"}
-        {"type": "start_monitor"}                    # IntelliSpy: sniff ALL frames
-        {"type": "start_monitor", "arb_ids": [0x7E8]} # IntelliSpy: sniff filtered
-        {"type": "stop_monitor"}
-
-        {"type": "ping"}
-
-    Bridge -> Browser:
-        {"type": "obd_response", "id": <req_id>, "mode": 1, "pid": 12, "data": [18, 52]}
-        {"type": "j1939_response", "id": <req_id>, "pgn": 65262, "source": 0, "data": [...]}
-        {"type": "uds_response", "id": <req_id>, "service": 98, "data": [...]}
-        {"type": "can_frame", "arb_id": 2024, "data": [...], "timestamp": 1234567.89}
-        {"type": "bus_frame", "arb_id": 1824, "data": [...], "dlc": 8, "timestamp": ..., "frame_number": 42}
-        {"type": "protocol_changed", "id": <req_id>, "protocol": "j1939", "bitrate": 250000}
-        {"type": "monitor_started", "id": <req_id>, "filter": "all" | [0x7E8]}
-        {"type": "monitor_stopped", "id": <req_id>}
-        {"type": "error", "id": <req_id>, "message": "..."}
-        {"type": "pong", "adapter": "pcan", "channel": "PCAN_USBBUS1", "status": "ready|bus_active|bus_error", "protocol": "obd2"}
-        {"type": "connected", "adapter": "pcan", "channel": "PCAN_USBBUS1", "bitrate": 500000, "protocols": [...]}
+This file exists so older docs/scripts that reference `docs/pcan_bridge_current.py`
+continue to work. It forwards execution to the bundled script.
 """
+
+from __future__ import annotations
+
+import runpy
+from pathlib import Path
+import sys
+
+
+def main() -> None:
+  repo_root = Path(__file__).resolve().parents[1]
+  bundled = repo_root / "client" / "public" / "pcan_bridge.py"
+  if not bundled.exists():
+    raise SystemExit(f"Bundled bridge not found: {bundled}")
+
+  # Preserve CLI args for the real script.
+  sys.argv[0] = str(bundled)
+  runpy.run_path(str(bundled), run_name="__main__")
+
+
+if __name__ == "__main__":
+  main()
 
 import argparse
 import asyncio

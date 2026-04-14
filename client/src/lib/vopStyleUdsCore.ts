@@ -137,7 +137,9 @@ export function createVopStyleUdsLayer(deps: VopStyleUdsDeps): VopStyleUdsLayer 
     while (frame.length < 8) frame.push(0x00);
 
     setFlashUdsListener(null);
-    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
 
     const responsePromise = new Promise<UDSResponse | null>((resolve, reject) => {
       setUdsInFlightReject(reject);
@@ -235,7 +237,9 @@ export function createVopStyleUdsLayer(deps: VopStyleUdsDeps): VopStyleUdsLayer 
       responseArbIdOverride !== undefined ? responseArbIdOverride : targetAddress + 0x08;
 
     setFlashUdsListener(null);
-    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
 
     const firstFrame: number[] = [
       0x10 | ((totalLength >> 8) & 0x0f),

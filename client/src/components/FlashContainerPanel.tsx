@@ -54,6 +54,7 @@ import {
   loadEcuContainerSession,
   type StoredEcuScanTransport,
 } from '../lib/ecuContainerSessionStorage';
+import { saveFlashRescueMeta, loadFlashRescueMeta } from '../lib/flashRescueMeta';
 
 type FlashConnectionMode = 'simulator' | 'pcan' | 'vop_usb';
 
@@ -434,6 +435,9 @@ export default function FlashContainerPanel() {
         flashMode: effectiveFlashType === 'fullflash' ? 'full_flash' : 'calibration',
         totalBlocks: flashPlan.totalBlocks, totalBytes: flashPlan.totalBytes,
       });
+      if (fileHash) {
+        saveFlashRescueMeta({ fileName, fileHash, ecuType });
+      }
       setSessionUuid(result.uuid);
       setMissionControlMode(pendingMode);
     } catch (err) {
@@ -472,6 +476,15 @@ export default function FlashContainerPanel() {
       setFlashTypeOverride(null);
       setUploadStatus(result.valid ? 'ready' : 'idle');
       setActiveSection(result.valid ? 'overview' : 'readiness');
+      if (result.valid) {
+        toast.success('Container loaded', {
+          description: 'Review Readiness and Hardware Flash when you are ready to program.',
+        });
+      } else {
+        toast.message('Container parsed with issues', {
+          description: 'Open the Readiness tab for details before flashing.',
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('Failed to parse container:', err);
@@ -489,6 +502,25 @@ export default function FlashContainerPanel() {
     e.target.value = '';
   }, [handleFile]);
 
+  /** Opens the OS file picker after the current frame (works after closing Radix dialogs). */
+  const triggerPickContainerFile = useCallback(() => {
+    requestAnimationFrame(() => {
+      fileInputRef.current?.click();
+    });
+  }, []);
+
+  /** Hidden file input — mounted on every Flash-tab branch so the ref works from ECU Scan / overlays. */
+  const containerFileInputEl = (
+    <input
+      key="flash-container-file"
+      ref={fileInputRef}
+      type="file"
+      accept=".bin,.hex,.cal,.Bin,.BIN"
+      className="hidden"
+      onChange={onContainerFileInputChange}
+    />
+  );
+
   /** Pick another container file and re-run parse — keeps ECU Scan workspace (no full reset). */
   const openReplaceFilePicker = useCallback(() => {
     setMissionControlMode(null);
@@ -497,8 +529,8 @@ export default function FlashContainerPanel() {
     setDryRunMode(false);
     setSessionUuid('');
     setFileError(null);
-    fileInputRef.current?.click();
-  }, []);
+    triggerPickContainerFile();
+  }, [triggerPickContainerFile]);
 
   const workspaceToggle = (
     <div className="flex flex-wrap gap-2 mb-4 p-1 rounded-xl bg-zinc-900/60 border border-zinc-800">
@@ -531,12 +563,15 @@ export default function FlashContainerPanel() {
 
   if (flashWorkspace === 'tuneDeploy') {
     return (
-      <div className="h-full flex flex-col min-h-0">
-        {workspaceToggle}
-        <div className="flex-1 min-h-0 overflow-auto">
-          <TuneDeployWorkspace />
+      <>
+        {containerFileInputEl}
+        <div className="h-full flex flex-col min-h-0">
+          {workspaceToggle}
+          <div className="flex-1 min-h-0 overflow-auto">
+            <TuneDeployWorkspace />
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -567,29 +602,44 @@ export default function FlashContainerPanel() {
 
   if (!analysis) {
     return (
-      <div className="h-full flex flex-col min-h-0">
-        {workspaceToggle}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
-          <EcuScanPanel
-            wsBridgeConnection={wsBridgeConnectionRef.current}
-            vopConnection={vopConnectionRef.current}
-            vopSupported={vopUsbSupported}
-            containerHeader={null}
-            bridgeAvailable={localBridgeAvailable === true}
-            bridgeUrl={localBridgeUrl}
-            onVerifiedContainerLoad={handleFile}
-          />
+      <>
+        {containerFileInputEl}
+        <div className="h-full flex flex-col min-h-0 relative">
+          {isLoading && (
+            <div
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/70 backdrop-blur-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <Cpu className="w-8 h-8 text-cyan-400 animate-pulse" />
+              <p className="text-xs font-mono text-zinc-200">Reading container…</p>
+            </div>
+          )}
+          {workspaceToggle}
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-6 pr-1">
+            <EcuScanPanel
+              wsBridgeConnection={wsBridgeConnectionRef.current}
+              vopConnection={vopConnectionRef.current}
+              vopSupported={vopUsbSupported}
+              containerHeader={null}
+              bridgeAvailable={localBridgeAvailable === true}
+              bridgeUrl={localBridgeUrl}
+              onVerifiedContainerLoad={handleFile}
+              onRequestPickContainer={triggerPickContainerFile}
+              lastFlashRescueMeta={loadFlashRescueMeta()}
+            />
 
-          <p className="text-[11px] text-zinc-500 leading-relaxed border border-zinc-800/80 rounded-lg px-3 py-2 bg-zinc-900/40">
+            <p className="text-[11px] text-zinc-500 leading-relaxed border border-zinc-800/80 rounded-lg px-3 py-2 bg-zinc-900/40">
             Open a matching PPEI / DevProg container when the scan reports a good match — use{' '}
             <span className="text-zinc-400">Load verified match</span> on the scan results. After a container is loaded, use{' '}
             <span className="text-zinc-400">Load different file</span> in the header to replace it.
           </p>
-          {fileError && (
-            <p className="text-[11px] text-red-400/95 mt-2">{fileError}</p>
-          )}
+            {fileError && (
+              <p className="text-[11px] text-red-400/95 mt-2">{fileError}</p>
+            )}
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -628,8 +678,10 @@ export default function FlashContainerPanel() {
   // ── MissionControl overlay ──────────────────────────────────────────────
   if (missionControlMode && flashPlan && sessionUuid) {
     return (
-      <div className="h-full flex flex-col">
-        <FlashMissionControl
+      <>
+        {containerFileInputEl}
+        <div className="h-full flex flex-col">
+          <FlashMissionControl
           plan={flashPlan}
           connectionMode={missionControlMode}
           sessionUuid={sessionUuid}
@@ -653,7 +705,8 @@ export default function FlashContainerPanel() {
           containerHeader={containerFileHeader}
           dryRun={dryRunMode}
         />
-      </div>
+        </div>
+      </>
     );
   }
 
@@ -661,7 +714,9 @@ export default function FlashContainerPanel() {
   if (showPreFlight && pendingMode && analysis) {
     const ecuType = analysis.ecuConfig?.ecuType || analysis.devProgHeader?.ecuType || analysis.ecuFamily;
     return (
-      <div className="h-full flex flex-col">
+      <>
+        {containerFileInputEl}
+        <div className="h-full flex flex-col">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
             <Shield className="w-5 h-5 text-cyan-400" />
@@ -681,20 +736,15 @@ export default function FlashContainerPanel() {
           onAllPassed={handlePreFlightPassed}
           onCancel={() => { setShowPreFlight(false); setPendingMode(null); }}
         />
-      </div>
+        </div>
+      </>
     );
   }
 
   return (
     <div className="h-full flex flex-col">
       {workspaceToggle}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".bin,.hex,.cal,.Bin,.BIN"
-        className="hidden"
-        onChange={onContainerFileInputChange}
-      />
+      {containerFileInputEl}
       {analysis.errors.length > 0 && (
         <div className="mb-3 p-3 rounded-lg bg-red-950/50 border border-red-500/35 text-xs text-red-100/95 space-y-1">
           {analysis.errors.map((e) => (

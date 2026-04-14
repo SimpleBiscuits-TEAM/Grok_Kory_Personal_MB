@@ -36,9 +36,14 @@ import { type UDSResponse } from './pcanConnection';
 import type { FlashBridgeConnection } from './flashBridgeConnection';
 import { createVopStyleUdsLayer, type VopStyleUdsLayer } from './vopStyleUdsCore';
 import {
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
   CAN_ISO_TP_DEFAULT_TIMEOUT_MS,
+  CAN_ISO_TP_RX_POLL_MS,
+  CAN_ISO_TP_RX_WAIT_FLOOR_MS,
   CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
   CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_UDS_PRE_TX_SETTLE_MS,
   CAN_USB_BRIDGE_ACK_TIMEOUT_MS,
   CAN_USB_SERIAL_BRIDGE_SETTLE_MS,
 } from './canTransportTiming';
@@ -295,7 +300,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         const hit = this.rxFrames.splice(idx, 1)[0];
         return hit.data;
       }
-      await new Promise(r => setTimeout(r, 1));
+      await new Promise(r => setTimeout(r, CAN_ISO_TP_RX_POLL_MS));
     }
     return null;
   }
@@ -327,6 +332,9 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
 
     this.drainObdRxFrames();
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
 
     const used = 1 + pdu.length;
     const canPdu = new Uint8Array(used);
@@ -350,7 +358,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     let seq = 0;
 
     while (Date.now() < end) {
-      const data = await this.waitRxMatch(Math.max(5, end - Date.now()), (id, d) => id === this.obdRxId && d.length >= 1);
+      const data = await this.waitRxMatch(
+        Math.max(CAN_ISO_TP_RX_WAIT_FLOOR_MS, end - Date.now()),
+        (id, d) => id === this.obdRxId && d.length >= 1,
+      );
       if (!data || data.length < 1) return out.length ? out : null;
 
       const pci = data[0];
@@ -370,7 +381,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         if (!fcOk) return null;
         seq = 1;
         while (out.length < need && Date.now() < end) {
-          const cf = await this.waitRxMatch(Math.max(5, end - Date.now()), (id, d) => id === this.obdRxId && d.length >= 1);
+          const cf = await this.waitRxMatch(
+            Math.max(CAN_ISO_TP_RX_WAIT_FLOOR_MS, end - Date.now()),
+            (id, d) => id === this.obdRxId && d.length >= 1,
+          );
           if (!cf) break;
           if ((cf[0] & 0xf0) !== 0x20) continue;
           const sn = cf[0] & 0x0f;
@@ -475,7 +489,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private async initialize(): Promise<void> {
     this.emit('log', null, 'Reading VIN (ISO-TP 7E0/7E8)…');
     try {
-      const vinRaw = await this.isoTpRequest([0x09, 0x02]);
+      const vinRaw = await this.isoTpRequest([0x09, 0x02], CAN_DATALOGGER_VIN_TIMEOUT_MS);
       if (vinRaw && vinRaw.length >= 3 + 17 && vinRaw[0] === 0x49 && vinRaw[1] === 0x02) {
         const vinChars = vinRaw.slice(3, 3 + 17);
         if (vinChars.length >= 17) {
@@ -527,7 +541,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private async scanSupportedStandardPids(): Promise<void> {
     for (const bitmaskPid of DATALOGGER_STANDARD_BITMASK_PIDS) {
       try {
-        const resp = await this.isoTpRequest([0x01, bitmaskPid]);
+        const resp = await this.isoTpRequest([0x01, bitmaskPid], CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         if (resp && resp.length >= 2 && resp[0] === 0x41) {
           const pidByte = resp[1];
           if (pidByte !== bitmaskPid) continue;
@@ -655,7 +669,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
   async startLogging(
     pids: PIDDefinition[],
-    intervalMs = 200,
+    intervalMs = 0,
     onData?: (readings: PIDReading[]) => void
   ): Promise<LogSession> {
     if (this.state !== 'ready') throw new Error('Device must be ready');

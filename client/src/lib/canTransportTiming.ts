@@ -1,24 +1,23 @@
 /**
- * Shared ISO-TP / bridge timing for PCAN (WebSocket) and V-OP USB CAN bridges.
- * Live OBD/UDS polling: a responsive ECU typically answers in well under 200ms.
+ * Shared OBD/datalogger timing: **ELM327 (WebSerial)**, **PCAN (WebSocket)**, **V-OP USB** — eine Quelle.
+ * Live OBD/UDS: typisch unter 200 ms Antwort; Konstanten in `obdConnection`, `pcanConnection`, `vopCan2UsbConnection` importieren.
  *
  * -----------------------------------------------------------------------------
- * Gegenüberstellung V-OP vs PCAN (relevant fürs Datalogger-Tempo)
+ * Kurzüberblick Transports (Datalogger-relevant)
  * -----------------------------------------------------------------------------
  *
- * | Aspekt | V-OP Datalogger (`isoTpRequest` → `readIsoTpResponse`) | PCAN (`sendUDSviaRawCAN` / WebSocket) |
- * |--------|--------------------------------------------------------|----------------------------------------|
- * | Vorbedingung vor TX | `drainObdRxFrames()` — kein festes Delay | RX-Listener löschen + **CAN_UDS_PRE_TX_SETTLE_MS** (stale RX) |
- * | Pro Request (Hot Path) | Nur Bus + USB-ACK (~ms bis **CAN_USB_BRIDGE_ACK_TIMEOUT_MS**) | JSON round-trip **+** gleiche Settle-Zeit **+** `timeout` als Obergrenze |
- * | Live-Timeouts (Mode 01) | `CAN_LIVE_OBD_MODE01_TIMEOUT_MS` | identisch |
- * | Live-Timeouts (0x22) | `CAN_LIVE_UDS_DID_TIMEOUT_MS` | identisch |
- * | Connect-Scan VIN | `CAN_ISO_TP_DEFAULT_TIMEOUT_MS` (V-OP) | `DATALOGGER_CONNECT_VIN_TIMEOUT_MS` (10s) |
- * | Connect-Scan Bitmasken | `CAN_ISO_TP_DEFAULT_TIMEOUT_MS` | `DATALOGGER_CONNECT_MODE01_TIMEOUT_MS` |
- * | Logging-Intervall | `startLogging(..., intervalMs = 200)` | gleich (`intervalMs - elapsed` nach jeder Runde) |
+ * | Aspekt | V-OP (`isoTpRequest`) | PCAN (`sendUDSviaRawCAN`) | ELM327 (`OBDConnection.sendCommand`) |
+ * |--------|------------------------|---------------------------|--------------------------------------|
+ * | Vorbedingung vor TX | `drain` + **CAN_UDS_PRE_TX_SETTLE_MS** | RX-Listener + gleiche **CAN_UDS_PRE_TX_SETTLE_MS** | optional gleiche Pause (z. B. DID-Scan) |
+ * | Live Mode 01 / 0x22 | **CAN_LIVE_OBD_MODE01** / **CAN_LIVE_UDS_DID** | identisch | identisch (`readPid`) |
+ * | Connect VIN / Bitmasken | **CAN_DATALOGGER_VIN_** / **BITMASK_** | identisch | identisch (`0902`, `0100`/`0120`/`0140`/`0160`) |
+ * | Logging-Intervall | `startLogging(..., 0)` | identisch | identisch |
+ * | ISO-TP RX-Floor (MF) | **CAN_ISO_TP_RX_WAIT_FLOOR_MS** | identisch | — |
  *
- * PCAN wirkt langsamer, weil pro PID **WebSocket-Latenz** und **Pre-TX-Settle** addieren; V-OP hat direkten
- * USB-Pfad und **kein** 150ms-Settle in `isoTpRequest`. `vopStyleUdsCore` (Flash/`sendUDSRequest` auf V-OP)
- * nutzte dieselbe Settle-Zeit wie PCAN — jetzt gemeinsam **CAN_UDS_PRE_TX_SETTLE_MS**.
+ * **CAN_UDS_PRE_TX_SETTLE_MS** ist typischerweise **0**; Erhöhung gilt für **alle** Transports gleichermaßen.
+ *
+ * Regel (Projekt): Änderungen an Timing oder Datalogger-OBD-Protokoll **immer** für ELM, PCAN und V-OP
+ * umsetzen — siehe `.cursor/rules/datalogger-transport-parity.mdc`.
  */
 
 /** Mode 01/09-style single-frame OBD requests during live logging (max wait, kein künstliches Minimum) */
@@ -28,10 +27,29 @@ export const CAN_LIVE_OBD_MODE01_TIMEOUT_MS = 175;
 export const CAN_LIVE_UDS_DID_TIMEOUT_MS = 200;
 
 /**
- * Default ISO-TP budget for VIN, bitmask PID scan, DTCs, and other non-hot-path requests
- * (still bounded so stuck buses fail fast).
+ * Default ISO-TP budget for DTCs and generic `isoTpRequest` calls without an explicit timeout.
  */
 export const CAN_ISO_TP_DEFAULT_TIMEOUT_MS = 2000;
+
+/** Connect-Scan: Mode 09 PID 02 (VIN, oft Multi-Frame) — gleich PCAN + V-OP */
+export const CAN_DATALOGGER_VIN_TIMEOUT_MS = 8000;
+
+/** Connect-Scan: Mode 01 Bitmasken 0x00/0x20/0x40/0x60 — gleich PCAN + V-OP + ELM (`0100`/`0120`/…) */
+export const CAN_DATALOGGER_BITMASK_TIMEOUT_MS = 2000;
+
+/**
+ * ELM327/STN `sendCommand` Timeout für Mehrfach-Mode-01 in einem String (z. B. `010C0D05…`).
+ * Gleiches Budget wie einzelne ISO-TP-Non-hot-path-Anfragen.
+ */
+export const CAN_ELM_MODE01_BATCH_COMMAND_TIMEOUT_MS = CAN_ISO_TP_DEFAULT_TIMEOUT_MS;
+
+/**
+ * Untergrenze für „noch X ms bis Deadline“-Warten auf ein ISO-TP-RX-Fragment (V-OP `waitRxMatch`, PCAN MF-RX).
+ */
+export const CAN_ISO_TP_RX_WAIT_FLOOR_MS = 5;
+
+/** Schrittweite beim Pollen auf passendes RX (nur V-OP `waitRxMatch`) */
+export const CAN_ISO_TP_RX_POLL_MS = 1;
 
 /** PCAN WebSocket `sendRequest` when no per-call override (connect / init / monitor) */
 export const CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS = 2500;
@@ -40,10 +58,10 @@ export const CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS = 2500;
 export const CAN_USB_BRIDGE_ACK_TIMEOUT_MS = 800;
 
 /**
- * Pause after arming the ISO-TP RX listener and before CAN TX — drains stale frames on the
- * WebSocket/USB side. Historically 150ms (very conservative); hot path (live logging / UDS).
+ * Pause after arming the ISO-TP RX listener and before CAN TX. **0** for datalogging: send the next
+ * request as soon as the previous response is handled (no artificial gap between PIDs or loops).
  */
-export const CAN_UDS_PRE_TX_SETTLE_MS = 30;
+export const CAN_UDS_PRE_TX_SETTLE_MS = 0;
 
 /**
  * After successful UDS diagnostic session change on GM ECM — short bus settle before 0x22 reads.
@@ -52,5 +70,6 @@ export const CAN_UDS_POST_SESSION_SETTLE_MS = 40;
 
 /**
  * After opening the V-OP USB serial bridge — device/parser ready before first frame.
+ * (PCAN hat kein USB-Open; gleicher Wert dient nur als Referenz, falls später ergänzt.)
  */
-export const CAN_USB_SERIAL_BRIDGE_SETTLE_MS = 75;
+export const CAN_USB_SERIAL_BRIDGE_SETTLE_MS = 50;

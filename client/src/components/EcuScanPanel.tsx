@@ -28,6 +28,7 @@ import {
   persistEcuScanTransport,
   buildVehicleScanSnapshotV1,
 } from '../lib/ecuContainerSessionStorage';
+import type { FlashRescueMetaV1 } from '../lib/flashRescueMeta';
 import {
   extractContainerMatchParamsFromBin,
   scoreContainerAgainstScan,
@@ -35,6 +36,16 @@ import {
   hasEcuTypeConflict,
   type MatchScoreResult,
 } from '../../../shared/ecuContainerMatch';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import {
   Search, CheckCircle2, XCircle, AlertTriangle,
   ChevronDown, ChevronRight, Cpu, Radio, Clock,
@@ -53,6 +64,10 @@ interface EcuScanPanelProps {
   bridgeUrl: string | null;
   /** After a successful match check, load this file into the Flash workspace (same as Open container). */
   onVerifiedContainerLoad?: (file: File) => void | Promise<void>;
+  /** Open the hidden container file picker (Flash tab parent owns the input). */
+  onRequestPickContainer?: () => void;
+  /** Last successful flash session file hint for rescue / reuse. */
+  lastFlashRescueMeta?: FlashRescueMetaV1 | null;
 }
 
 export default function EcuScanPanel({
@@ -63,6 +78,8 @@ export default function EcuScanPanel({
   bridgeAvailable,
   bridgeUrl,
   onVerifiedContainerLoad,
+  onRequestPickContainer,
+  lastFlashRescueMeta,
 }: EcuScanPanelProps) {
   const [scanning, setScanning] = useState(false);
   const [report, setReport] = useState<VehicleScanReport | null>(null);
@@ -85,6 +102,8 @@ export default function EcuScanPanel({
     error: null,
   });
   const [localOpenByEcu, setLocalOpenByEcu] = useState<Record<number, EcuLocalOpenState>>({});
+  /** Shown after a completed scan where no controller answered (rescue container may be required). */
+  const [noResponseRescueDialogOpen, setNoResponseRescueDialogOpen] = useState(false);
   const fileInputEcuIdxRef = useRef<number | null>(null);
   const containerFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,6 +119,21 @@ export default function EcuScanPanel({
     const idx = report.ecus.findIndex(e => e.responding);
     return idx >= 0 ? comparisonsWithFlashContainer[idx] : null;
   }, [comparisonsWithFlashContainer, report]);
+
+  /** Preflight / other ECUs may still expose VIN while a bricked ECM returns none — prompts rescue. */
+  const incompleteFlashWarning = useMemo(() => {
+    if (!report || report.respondingCount === 0) return null;
+    const consensusVin = report.vehicleVin?.trim() || report.preflightVin?.trim();
+    if (!consensusVin) return null;
+    const ecmNoVin = report.ecus.some(
+      e =>
+        e.responding &&
+        (e.txAddr === 0x7e0 || e.ecuConfig?.controllerType === 'ecu') &&
+        !e.vin?.trim(),
+    );
+    if (!ecmNoVin) return null;
+    return { consensusVin };
+  }, [report]);
 
   const processLocalContainerFileForEcu = useCallback(
     (ecuIdx: number, file: File) => {
@@ -240,6 +274,8 @@ export default function EcuScanPanel({
         if (firstResponding >= 0) {
           setExpandedEcu(firstResponding);
           persistLastVehicleScan(result.ecus[firstResponding]!);
+        } else if (result.respondingCount === 0) {
+          setNoResponseRescueDialogOpen(true);
         }
         return;
       }
@@ -270,6 +306,8 @@ export default function EcuScanPanel({
       if (firstResponding >= 0) {
         setExpandedEcu(firstResponding);
         persistLastVehicleScan(result.ecus[firstResponding]!);
+      } else if (result.respondingCount === 0) {
+        setNoResponseRescueDialogOpen(true);
       }
     } catch (err) {
       console.error('[ECU Scan] Error:', err);
@@ -325,6 +363,52 @@ export default function EcuScanPanel({
             </div>
           )}
         </div>
+
+        {lastFlashRescueMeta && (
+          <div className="mb-4 rounded-lg border border-zinc-700/80 bg-zinc-900/50 px-3 py-2.5 text-[11px] text-zinc-400 leading-relaxed">
+            <span className="text-zinc-300 font-semibold">Last flash container: </span>
+            <span className="font-mono text-zinc-200">{lastFlashRescueMeta.fileName}</span>
+            {' '}
+            <span className="text-zinc-500">({lastFlashRescueMeta.ecuType})</span>
+            {' — '}
+            For rescue, open the same file again or choose a new complete container.
+            {onRequestPickContainer && (
+              <button
+                type="button"
+                onClick={onRequestPickContainer}
+                className="ml-2 text-cyan-400 hover:text-cyan-300 underline-offset-2 hover:underline font-mono"
+              >
+                Open container…
+              </button>
+            )}
+          </div>
+        )}
+
+        {incompleteFlashWarning && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-amber-500/40 bg-amber-950/35 px-3 py-2.5 text-[11px] text-amber-100/95 flex gap-2"
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" aria-hidden />
+            <div>
+              <p className="font-semibold text-amber-200">Possible incomplete flash on engine controller</p>
+              <p className="text-amber-100/85 mt-1 leading-relaxed">
+                A vehicle VIN was obtained (e.g. from preflight or another module), but the ECM at 0x7E0 did not return a
+                VIN. The controller may be inoperable or partially programmed. A full rescue flash with a valid container
+                is required.
+              </p>
+              {onRequestPickContainer && (
+                <button
+                  type="button"
+                  onClick={onRequestPickContainer}
+                  className="mt-2 text-cyan-300 hover:text-cyan-200 underline-offset-2 hover:underline font-mono"
+                >
+                  Open container for rescue…
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Adapter selection — same hardware options as Hardware Flash */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
@@ -535,6 +619,41 @@ export default function EcuScanPanel({
           </p>
         </div>
       )}
+
+      <AlertDialog open={noResponseRescueDialogOpen} onOpenChange={setNoResponseRescueDialogOpen}>
+        <AlertDialogContent className="border-zinc-700 bg-zinc-950 text-zinc-100 sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-mono text-base">No ECU responded</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400 text-xs leading-relaxed space-y-2 text-left">
+              <span>
+                The scan finished, but no controller answered on the probed addresses. Check ignition, termination, the
+                correct bus, and that the bridge or V-OP USB adapter is connected.
+              </span>
+              <span className="block text-amber-200/90">
+                If the vehicle may be in a bad state after a failed flash, open a complete rescue container from your
+                supplier and load it here to continue in the Flash tab.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel type="button" className="font-mono text-xs border-zinc-600 bg-zinc-900 text-zinc-200">
+              Close
+            </AlertDialogCancel>
+            {onRequestPickContainer ? (
+              <Button
+                type="button"
+                className="font-mono text-xs bg-cyan-700 hover:bg-cyan-600 text-white"
+                onClick={() => {
+                  setNoResponseRescueDialogOpen(false);
+                  onRequestPickContainer();
+                }}
+              >
+                Open rescue container…
+              </Button>
+            ) : null}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

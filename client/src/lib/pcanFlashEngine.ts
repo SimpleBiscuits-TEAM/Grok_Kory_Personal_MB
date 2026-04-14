@@ -36,6 +36,7 @@ import {
 import {
   getHexTemplateFromDevProgBlock,
   getPrgByAdrRawFromDevProgBlock,
+  isContainerBlockDelayActive,
   resolveRc36TemplateForBlock,
 } from '../../../shared/containerBlockJson';
 import { hexToBytes } from '../../../shared/seedKeyAlgorithms';
@@ -327,6 +328,12 @@ export class PCANFlashEngine {
    */
   private gmBootloaderPriRcDone = false;
 
+  /** Last time we saw any diagnostic response from the ECU (positive or NRC). */
+  private lastEcuResponseAt = Date.now();
+  /** Nested: suppress 20s silence abort while waiting for bootloader, user prompts, etc. */
+  private ecuSilenceWatchdogSuppressDepth = 0;
+  private static readonly ECU_SILENCE_ABORT_MS = 20_000;
+
   /** Destructive UDS services that are skipped in dry run mode */
   private static readonly DESTRUCTIVE_SERVICES = new Set([
     0x31, // RoutineControl (EraseMemory)
@@ -549,6 +556,8 @@ export class PCANFlashEngine {
    *   4. Restarts TesterPresent keepalive
    */
   private async reEstablishSession(): Promise<void> {
+    this.ecuSilenceWatchdogSuppressDepth++;
+    try {
     this.log('info', 'KEY_CYCLE', '🔄 Re-establishing diagnostic session after key cycle...');
     this.state.statusMessage = 'Re-establishing ECU session after boot...';
     this.emitState();
@@ -584,7 +593,7 @@ export class PCANFlashEngine {
       try {
         if (this.isGMLAN) {
           // Try programming session (0x10 0x02) — confirmed working from dry runs
-          const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
+          const response = await this.flashConnSendUds(0x10, 0x02, undefined, this.txAddr);
           if (response && response.positiveResponse) {
             this.log('success', 'KEY_CYCLE', `✓ Programming session re-established (attempt ${attempt}/${maxRetries})`);
             sessionOk = true;
@@ -630,7 +639,7 @@ export class PCANFlashEngine {
         let seedResp: UDSResponse | null = null;
         for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
           if (this.aborted) throw new FlashAbortError();
-          seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+          seedResp = await this.flashConnSendUds(0x27, 0x01, undefined, this.txAddr);
           if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
             const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
             this.log('warning', 'KEY_CYCLE', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout (retry ${lockoutRetry + 1}/3)`);
@@ -665,7 +674,7 @@ export class PCANFlashEngine {
               this.log('info', 'KEY_CYCLE', `Known seed matched: ${kcKnown.label}`);
               this.log('info', 'KEY_CYCLE', `Key from lookup: ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
               await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(keyBytes), this.txAddr);
+              const keyResp = await this.flashConnSendUds(0x27, 0x02, Array.from(keyBytes), this.txAddr);
               if (keyResp && keyResp.positiveResponse) {
                 this.log('success', 'KEY_CYCLE', '🔓 Security re-granted (lookup key)');
                 this.lastSecurityAccessGranted = true;
@@ -681,7 +690,7 @@ export class PCANFlashEngine {
             if (kcKeyBytes) {
               this.log('info', 'KEY_CYCLE', `🔑 Key from server: ${Array.from(kcKeyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
               await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(kcKeyBytes), this.txAddr);
+              const keyResp = await this.flashConnSendUds(0x27, 0x02, Array.from(kcKeyBytes), this.txAddr);
               if (keyResp && keyResp.positiveResponse) {
                 this.log('success', 'KEY_CYCLE', '🔓 Security access re-granted after key cycle');
                 this.lastSecurityAccessGranted = true;
@@ -694,7 +703,7 @@ export class PCANFlashEngine {
               this.log('info', 'KEY_CYCLE', `No server key for ${kcEcuType} — sending dummy key`);
               const dummyKey = new Uint8Array(5).fill(0x00);
               await this.delay(100);
-              const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(dummyKey), this.txAddr);
+              const keyResp = await this.flashConnSendUds(0x27, 0x02, Array.from(dummyKey), this.txAddr);
               if (keyResp && keyResp.positiveResponse) {
                 this.log('success', 'KEY_CYCLE', '🔓 Security re-granted with dummy key — ECU is unlocked');
                 this.lastSecurityAccessGranted = true;
@@ -725,6 +734,10 @@ export class PCANFlashEngine {
     // Step 3: Restart keepalive now that session is re-established
     this.startKeepalive();
     this.log('info', 'KEY_CYCLE', '✓ Post-key-cycle session re-establishment complete');
+    } finally {
+      this.ecuSilenceWatchdogSuppressDepth--;
+      this.markEcuResponded();
+    }
   }
 
   /** Execute the full flash plan */
@@ -743,16 +756,21 @@ export class PCANFlashEngine {
       this.emitState();
 
       if (this.callbacks.onUserAction) {
-        await this.callbacks.onUserAction(
-          {
-            type: 'KEY_ON_START',
-            prompt: this.dryRun
-              ? 'Turn ignition ON (key on / engine off) before starting DRY RUN. ECU must be powered for CAN communication.'
-              : '⚠️ Turn ignition ON (key on / engine off) before starting FLASH. ECU must be powered. Do NOT start engine.',
-            autoConfirm: false,
-          },
-          0 // No timeout — wait indefinitely for user confirmation
-        );
+        this.ecuSilenceWatchdogSuppressDepth++;
+        try {
+          await this.callbacks.onUserAction(
+            {
+              type: 'KEY_ON_START',
+              prompt: this.dryRun
+                ? 'Turn ignition ON (key on / engine off) before starting DRY RUN. ECU must be powered for CAN communication.'
+                : '⚠️ Turn ignition ON (key on / engine off) before starting FLASH. ECU must be powered. Do NOT start engine.',
+              autoConfirm: false,
+            },
+            0 // No timeout — wait indefinitely for user confirmation
+          );
+        } finally {
+          this.ecuSilenceWatchdogSuppressDepth--;
+        }
       }
       this.log('success', 'PRE_CHECK', '✓ Ignition ON confirmed — proceeding');
 
@@ -823,7 +841,7 @@ export class PCANFlashEngine {
           let sessionEstablished = false;
           for (let sessionAttempt = 1; sessionAttempt <= 3 && !sessionEstablished; sessionAttempt++) {
             try {
-              const response = await this.conn.sendUDSRequest(0x10, 0x02, undefined, this.txAddr);
+              const response = await this.flashConnSendUds(0x10, 0x02, undefined, this.txAddr);
               if (response && response.positiveResponse) {
                 this.log('success', 'PRE_CHECK', `✓ Programming session active (0x10 0x02) — attempt ${sessionAttempt}/3`);
                 sessionEstablished = true;
@@ -851,7 +869,7 @@ export class PCANFlashEngine {
             await this.delay(200);
             let seedResp: UDSResponse | null = null;
             for (let lockoutRetry = 0; lockoutRetry < 3; lockoutRetry++) {
-              seedResp = await this.conn.sendUDSRequest(0x27, 0x01, undefined, this.txAddr);
+              seedResp = await this.flashConnSendUds(0x27, 0x01, undefined, this.txAddr);
               if (seedResp && !seedResp.positiveResponse && (seedResp.nrc === 0x37 || seedResp.nrc === 0x36)) {
                 const nrcName = seedResp.nrc === 0x37 ? 'requiredTimeDelayNotExpired' : 'exceededNumberOfAttempts';
                 this.log('warning', 'PRE_CHECK', `NRC 0x${seedResp.nrc.toString(16)} (${nrcName}) — waiting 10s for lockout to expire (retry ${lockoutRetry + 1}/3)`);
@@ -867,14 +885,19 @@ export class PCANFlashEngine {
               this.log('info', 'PRE_CHECK', `Seed received (level 0x01): ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
               this.seedReceivedInPreCheck = true;
 
-              const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
-              const preKeyBytes = await this.computeKeyBytesFromServer(preEcuType, seedBytes);
-              if (preKeyBytes) {
-                await this.delay(100);
-                const keyResp = await this.conn.sendUDSRequest(0x27, 0x02, Array.from(preKeyBytes), this.txAddr);
-                if (keyResp && keyResp.positiveResponse) {
-                  this.log('success', 'PRE_CHECK', '🔓 Security access granted');
-                  this.lastSecurityAccessGranted = true;
+              if (seedBytes.length > 0 && seedBytes.every(b => b === 0)) {
+                this.log('success', 'PRE_CHECK', '🔓 Zero seed — ECU already unlocked; skipping key (dry run)');
+                this.lastSecurityAccessGranted = true;
+              } else {
+                const preEcuType = this.plan.ecuType || this.header.ecu_type || '';
+                const preKeyBytes = await this.computeKeyBytesFromServer(preEcuType, seedBytes);
+                if (preKeyBytes) {
+                  await this.delay(100);
+                  const keyResp = await this.flashConnSendUds(0x27, 0x02, Array.from(preKeyBytes), this.txAddr);
+                  if (keyResp && keyResp.positiveResponse) {
+                    this.log('success', 'PRE_CHECK', '🔓 Security access granted');
+                    this.lastSecurityAccessGranted = true;
+                  }
                 }
               }
             }
@@ -944,6 +967,9 @@ export class PCANFlashEngine {
           return 'FAILED';
         }
       }
+
+      // Fresh silence window for the programmed sequence (ignition/bridge setup may take minutes).
+      this.lastEcuResponseAt = Date.now();
 
       for (let i = 0; i < this.plan.commands.length; i++) {
         if (this.aborted) {
@@ -1068,7 +1094,7 @@ export class PCANFlashEngine {
           // Inter-command delay to avoid flooding the ECU bus
           await this.delay(200);
           try {
-            const response = await this.conn.sendUDSRequest(
+            const response = await this.flashConnSendUds(
               UDS.READ_DID_GMLAN, did, undefined, this.txAddr
             );
 
@@ -1132,7 +1158,7 @@ export class PCANFlashEngine {
       if (!gotAnyResponse && !this.isGMLAN) {
         this.log('info', 'PRE_CHECK', 'Trying TesterPresent (0x3E 0x00)...');
         try {
-          const tpResponse = await this.conn.sendUDSRequest(
+          const tpResponse = await this.flashConnSendUds(
             UDS.TESTER_PRESENT, 0x00, undefined, this.txAddr
           );
           if (tpResponse) {
@@ -1176,7 +1202,7 @@ export class PCANFlashEngine {
 
     for (const { did, name, label } of testDIDs) {
       try {
-        const response = await this.conn.sendUDSRequest(
+        const response = await this.flashConnSendUds(
           UDS.READ_DID, undefined, did, this.txAddr
         );
         if (response && response.positiveResponse) {
@@ -1200,6 +1226,84 @@ export class PCANFlashEngine {
     return false;
   }
 
+  private markEcuResponded(): void {
+    this.lastEcuResponseAt = Date.now();
+  }
+
+  private async runWithSilenceWatchdogSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+    this.ecuSilenceWatchdogSuppressDepth++;
+    try {
+      return await fn();
+    } finally {
+      this.ecuSilenceWatchdogSuppressDepth--;
+    }
+  }
+
+  /**
+   * Live flash: abort if the ECU has not sent any UDS response (incl. NRC) for too long.
+   * Skipped in dry run, during intentional long waits (see suppress), and for container blocks
+   * with `delay` set (long erase / vendor-defined pause).
+   */
+  private assertEcuNotSilentTooLong(delayExemptBlock?: ContainerBlockStruct | null): void {
+    if (this.dryRun) return;
+    if (this.ecuSilenceWatchdogSuppressDepth > 0) return;
+    if (delayExemptBlock && isContainerBlockDelayActive(delayExemptBlock)) return;
+    const elapsed = Date.now() - this.lastEcuResponseAt;
+    if (elapsed > PCANFlashEngine.ECU_SILENCE_ABORT_MS) {
+      throw new Error(
+        `No ECU response for ${(elapsed / 1000).toFixed(0)}s (limit ${PCANFlashEngine.ECU_SILENCE_ABORT_MS / 1000}s) — aborting flash`,
+      );
+    }
+  }
+
+  /**
+   * Same as {@link FlashBridgeConnection.sendUDSRequest}, but live flash also races a hard
+   * 20s cap and calls {@link FlashBridgeConnection.cancelInFlightDiagnostics}
+   * so a stuck ISO-TP wait (e.g. ECU unplugged mid-transfer) cannot outlive the silence policy.
+   * Skipped in dry run, while the silence watchdog is suppressed, or for `delay`-marked blocks.
+   */
+  private async flashConnSendUds(
+    service: number,
+    subFunction: number | undefined,
+    data: number[] | undefined,
+    targetAddress: number,
+    timeoutMs?: number,
+    responseArbIdOverride?: number,
+    delayExemptBlock?: ContainerBlockStruct | null,
+  ): Promise<UDSResponse | null> {
+    if (
+      this.dryRun
+      || this.ecuSilenceWatchdogSuppressDepth > 0
+      || (delayExemptBlock && isContainerBlockDelayActive(delayExemptBlock))
+    ) {
+      return this.conn.sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
+    }
+    const capMs = PCANFlashEngine.ECU_SILENCE_ABORT_MS;
+    let capTimer: ReturnType<typeof setTimeout> | undefined;
+    const silenceCap = new Promise<never>((_, reject) => {
+      capTimer = setTimeout(() => {
+        try {
+          this.conn.cancelInFlightDiagnostics?.();
+        } catch {
+          /* ignore */
+        }
+        reject(
+          new Error(
+            `No ECU response for more than ${capMs / 1000}s (in-flight UDS wait) — aborting flash`,
+          ),
+        );
+      }, capMs);
+    });
+    try {
+      return await Promise.race([
+        this.conn.sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride),
+        silenceCap,
+      ]);
+    } finally {
+      if (capTimer) clearTimeout(capTimer);
+    }
+  }
+
   // ── Command Execution ──────────────────────────────────────────────────
 
   private async executeCommand(cmd: FlashCommand): Promise<void> {
@@ -1217,32 +1321,37 @@ export class PCANFlashEngine {
       if (type === 'KEY_OFF') {
         this.stopKeepalive();
       }
-      
-      if (this.callbacks.onUserAction) {
-        // The callback must block until user confirms (KEY_OFF/KEY_ON)
-        // or auto-resolve after timeout (WAIT_BOOT)
-        await this.callbacks.onUserAction(
-          { type, prompt, autoConfirm: autoConfirm ?? false },
-          cmd.timeoutMs
-        );
-      } else if (autoConfirm) {
-        // No callback provided, auto-wait for boot
-        await this.delay(cmd.timeoutMs);
-      } else {
-        // No callback and requires user action — log warning and wait
-        this.log('warning', cmd.phase, `⚠️ User action required but no prompt handler: ${prompt}`);
-        await this.delay(cmd.timeoutMs);
-      }
-      
-      this.log('success', cmd.phase, `✓ ${cmd.label} — confirmed`);
-      this.state.statusMessage = `${cmd.label} — done`;
-      this.emitState();
 
-      // After WAIT_BOOT completes, re-establish diagnostic session and security access.
-      // The key cycle causes the ECU to reboot, dropping all sessions. We must
-      // re-enter programming session and re-authenticate before any further commands.
-      if (type === 'WAIT_BOOT') {
-        await this.reEstablishSession();
+      this.ecuSilenceWatchdogSuppressDepth++;
+      try {
+        if (this.callbacks.onUserAction) {
+          // The callback must block until user confirms (KEY_OFF/KEY_ON)
+          // or auto-resolve after timeout (WAIT_BOOT)
+          await this.callbacks.onUserAction(
+            { type, prompt, autoConfirm: autoConfirm ?? false },
+            cmd.timeoutMs
+          );
+        } else if (autoConfirm) {
+          // No callback provided, auto-wait for boot
+          await this.delay(cmd.timeoutMs);
+        } else {
+          // No callback and requires user action — log warning and wait
+          this.log('warning', cmd.phase, `⚠️ User action required but no prompt handler: ${prompt}`);
+          await this.delay(cmd.timeoutMs);
+        }
+
+        this.log('success', cmd.phase, `✓ ${cmd.label} — confirmed`);
+        this.state.statusMessage = `${cmd.label} — done`;
+        this.emitState();
+
+        // After WAIT_BOOT completes, re-establish diagnostic session and security access.
+        // The key cycle causes the ECU to reboot, dropping all sessions. We must
+        // re-enter programming session and re-authenticate before any further commands.
+        if (type === 'WAIT_BOOT') {
+          await this.reEstablishSession();
+        }
+      } finally {
+        this.ecuSilenceWatchdogSuppressDepth--;
       }
 
       return;
@@ -1251,7 +1360,12 @@ export class PCANFlashEngine {
     // KEY_CYCLE commands without userAction but also no CAN TX (legacy fallback)
     if (cmd.phase === 'KEY_CYCLE' && !cmd.canTx) {
       this.log('info', cmd.phase, `⏳ ${cmd.label}`);
-      await this.delay(cmd.timeoutMs);
+      this.ecuSilenceWatchdogSuppressDepth++;
+      try {
+        await this.delay(cmd.timeoutMs);
+      } finally {
+        this.ecuSilenceWatchdogSuppressDepth--;
+      }
       this.log('success', cmd.phase, `✓ ${cmd.label}`);
       this.state.statusMessage = cmd.label;
       this.emitState();
@@ -1398,6 +1512,12 @@ export class PCANFlashEngine {
 
     while (retries >= 0) {
       if (this.aborted) throw new FlashAbortError();
+      // Security access runs inside {@link handleSecurityAccess} with its own long bootloader
+      // waits — do not apply the global 20s silence check before entering it.
+      const securityHandledHere = serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined;
+      if (!securityHandledHere) {
+        this.assertEcuNotSilentTooLong();
+      }
       try {
         // Pause keepalive during UDS exchange to prevent NRC interference.
         // Some ECUs respond to 0x3E 0x80 with NRC (7F 3E 12), and these
@@ -1405,7 +1525,7 @@ export class PCANFlashEngine {
         // EXCEPTION: Security access does NOT pause keepalive at all.
          // BUSMASTER reference: keepalive (UUDT 0x101) runs continuously during
          // the entire seed/key exchange (USDT 0x7E0). Different CAN IDs, no interference.
-         if (serviceId === UDS.SECURITY_ACCESS && subFunction !== undefined) {
+         if (securityHandledHere) {
            // handleSecurityAccess keeps keepalive running throughout.
            // The bootloader REQUIRES continuous keepalive to stay responsive.
           response = await this.handleSecurityAccess(cmd, subFunction);
@@ -1416,18 +1536,22 @@ export class PCANFlashEngine {
             // GMLAN: service 0x04 on functional 0x7DF (per E88 procedure)
             // Standard UDS: service 0x14 on functional 0x7DF
             // The orchestrator now sets the correct address in canTx
-            response = await this.conn.sendUDSRequest(serviceId, undefined, additionalData, cmdTxAddr);
+            response = await this.flashConnSendUds(serviceId, undefined, additionalData, cmdTxAddr);
           } else if (isFunctionalBroadcast) {
             // Functional broadcast (0x101 or 0x7DF): send on broadcast address
             // Accept any response — multiple ECUs may reply, we just need one positive
-            response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, cmdTxAddr);
+            response = await this.flashConnSendUds(serviceId, subFunction, additionalData, cmdTxAddr);
           } else {
-            response = await this.conn.sendUDSRequest(serviceId, subFunction, additionalData, this.txAddr);
+            response = await this.flashConnSendUds(serviceId, subFunction, additionalData, this.txAddr);
           }
         }
 
         // Resume keepalive after response received
         this.resumeKeepalive();
+
+        if (response) {
+          this.markEcuResponded();
+        }
 
         if (response && response.positiveResponse) {
           const rxHex = (response.data || []).map((b: number) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
@@ -1583,6 +1707,7 @@ export class PCANFlashEngine {
   // ── Security Access (Seed/Key) ─────────────────────────────────────────
 
   private async handleSecurityAccess(cmd: FlashCommand, subFunction: number): Promise<UDSResponse | null> {
+    return this.runWithSilenceWatchdogSuppressed(async () => {
     // Sub-function odd = request seed, even = send key
     const isRequestSeed = (subFunction % 2) === 1;
 
@@ -1634,7 +1759,7 @@ export class PCANFlashEngine {
           // They use different CAN IDs and don't interfere with each other.
           // BUSMASTER shows keepalive running continuously during the entire seed/key exchange.
           try {
-            seedResponse = await this.conn.sendUDSRequest(
+            seedResponse = await this.flashConnSendUds(
               UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr
             );
           } catch (err) {
@@ -1724,6 +1849,21 @@ export class PCANFlashEngine {
       const seedBytes = new Uint8Array(rawSeedData);
       this.log('info', cmd.phase, `Seed received: ${Array.from(seedBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')} (${seedBytes.length} bytes)`);
 
+      // All-zero seed (any length): ECU already unlocked — do not send a key; proceed.
+      if (seedBytes.length > 0 && seedBytes.every(b => b === 0)) {
+        this.log('success', cmd.phase, '🔓 Zero seed — ECU already unlocked; skipping SecurityAccess send key');
+        this.lastSecurityAccessGranted = true;
+        return {
+          service: UDS.SECURITY_ACCESS,
+          serviceName: 'SecurityAccess',
+          subFunction,
+          data: [subFunction, ...Array.from(seedBytes)],
+          positiveResponse: true,
+          isFlashRelated: true,
+          timestamp: Date.now(),
+        };
+      }
+
       // Step 2: Compute key from seed
       let keyBytes: Uint8Array;
 
@@ -1747,9 +1887,6 @@ export class PCANFlashEngine {
         if (keyFromServer) {
           keyBytes = keyFromServer;
           this.log('info', cmd.phase, `🔑 Key from server (${ecuType}): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-        } else if (seedBytes.length === 5 && seedBytes.every(b => b === 0)) {
-          this.log('success', cmd.phase, '🔓 Zero seed — ECU is already unlocked');
-          keyBytes = new Uint8Array(5).fill(0x00);
         } else if (seedBytes.length === 5) {
           this.log('warning', cmd.phase, `No server key for ${ecuType} — trying dummy key (unlocked ECU only)`);
           keyBytes = new Uint8Array(5).fill(0x00);
@@ -1766,7 +1903,7 @@ export class PCANFlashEngine {
       // E88 procedure specifies 1000ms post-delay after seed before key send.
       // Add a small delay to let the ECU prepare for the key.
       await this.delay(200);
-      const keyResponse = await this.conn.sendUDSRequest(
+      const keyResponse = await this.flashConnSendUds(
         UDS.SECURITY_ACCESS, subFunction + 1, Array.from(keyBytes), this.txAddr
       );
 
@@ -1814,7 +1951,8 @@ export class PCANFlashEngine {
     }
 
     // Live mode: try sending the key command (shouldn't normally reach here)
-    return await this.conn.sendUDSRequest(UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr);
+    return await this.flashConnSendUds(UDS.SECURITY_ACCESS, subFunction, undefined, this.txAddr);
+    });
   }
 
   /**
@@ -1825,12 +1963,18 @@ export class PCANFlashEngine {
     rc34Bytes: number[],
     phase: FlashPhase,
     logPrefix: string,
+    delayExemptBlock?: ContainerBlockStruct,
   ): Promise<void> {
+    this.assertEcuNotSilentTooLong(delayExemptBlock);
     this.log('can_tx', phase,
       `TX: ${logPrefix} — ${rc34Bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
-    let dlResponse = await this.conn.sendUDSRequest(
-      UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr, 30000,
+    let dlResponse = await this.flashConnSendUds(
+      UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr, 30000, undefined, delayExemptBlock,
     );
+
+    if (dlResponse) {
+      this.markEcuResponded();
+    }
 
     if (dlResponse?.positiveResponse) {
       this.log('can_rx', phase, `RX: ${logPrefix} accepted`);
@@ -1854,9 +1998,13 @@ export class PCANFlashEngine {
         const elapsed = ((Date.now() - nrc78Start) / 1000).toFixed(0);
         this.log('info', phase, `${logPrefix}: retry RequestDownload (${elapsed}s)...`);
         try {
-          const pollResponse = await this.conn.sendUDSRequest(
-            UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr, 30000,
+          this.assertEcuNotSilentTooLong(delayExemptBlock);
+          const pollResponse = await this.flashConnSendUds(
+            UDS.REQUEST_DOWNLOAD, undefined, rc34Bytes, this.txAddr, 30000, undefined, delayExemptBlock,
           );
+          if (pollResponse) {
+            this.markEcuResponded();
+          }
           if (pollResponse?.positiveResponse) {
             this.log('success', phase, `${logPrefix}: positive after NRC 0x78`);
             eraseComplete = true;
@@ -1984,7 +2132,7 @@ export class PCANFlashEngine {
     }
 
     // GMLAN: PriRC (34 00 00 0F FE) runs once above; per-block 0x34 is separate (rc34 or 34 10…).
-    await this.sendRequestDownloadWithNrc78Handling(rc34Bytes, cmd.phase, 'Block RequestDownload');
+    await this.sendRequestDownloadWithNrc78Handling(rc34Bytes, cmd.phase, 'Block RequestDownload', block);
 
     // Step 2: TransferData (0x36) — send block data in chunks
     const blockData = new Uint8Array(this.containerData, blockOffset, Math.min(blockLength, this.containerData.byteLength - blockOffset));
@@ -2011,6 +2159,7 @@ export class PCANFlashEngine {
 
     while (bytesSent < blockData.length) {
       if (this.aborted) throw new FlashAbortError();
+      this.assertEcuNotSilentTooLong(block);
 
       const chunkSize = Math.min(maxFilePerTd, blockData.length - bytesSent);
       const chunk = blockData.slice(bytesSent, bytesSent + chunkSize);
@@ -2023,9 +2172,13 @@ export class PCANFlashEngine {
       payload.set(tdPrefix, 0);
       payload.set(chunk, tdPrefix.length);
 
-      const tdResponse = await this.conn.sendUDSRequest(
-        UDS.TRANSFER_DATA, undefined, Array.from(payload), this.txAddr, 30000,
+      const tdResponse = await this.flashConnSendUds(
+        UDS.TRANSFER_DATA, undefined, Array.from(payload), this.txAddr, 30000, undefined, block,
       );
+
+      if (tdResponse) {
+        this.markEcuResponded();
+      }
 
       if (!tdResponse || !tdResponse.positiveResponse) {
         const nrc = tdResponse?.nrc || 0;

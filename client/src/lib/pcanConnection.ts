@@ -33,8 +33,6 @@ import {
 import { parseOBDResponse } from 'obd-utils';
 import { decodeVinLocal, decodeVinNhtsa } from './universalVinDecoder';
 import {
-  DATALOGGER_CONNECT_MODE01_TIMEOUT_MS,
-  DATALOGGER_CONNECT_VIN_TIMEOUT_MS,
   DATALOGGER_OBD_PHYSICAL_TX,
   DATALOGGER_STANDARD_BITMASK_PIDS,
   ISO_TP_FLOW_CONTROL_CTS_PADDED,
@@ -42,6 +40,9 @@ import {
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
 import {
   CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS,
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
+  CAN_ISO_TP_RX_WAIT_FLOOR_MS,
   CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
   CAN_LIVE_UDS_DID_TIMEOUT_MS,
   CAN_UDS_POST_SESSION_SETTLE_MS,
@@ -770,7 +771,7 @@ export class PCANConnection {
         0x02,
         undefined,
         DATALOGGER_OBD_PHYSICAL_TX,
-        DATALOGGER_CONNECT_VIN_TIMEOUT_MS,
+        CAN_DATALOGGER_VIN_TIMEOUT_MS,
       );
       let vin: string | null = null;
       if (vinUds?.positiveResponse && vinUds.data?.length) {
@@ -851,7 +852,7 @@ export class PCANConnection {
           bitmaskPid,
           undefined,
           DATALOGGER_OBD_PHYSICAL_TX,
-          DATALOGGER_CONNECT_MODE01_TIMEOUT_MS,
+          CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
         );
         if (uds?.positiveResponse && uds.data && uds.data.length >= 2) {
           if (uds.data[0] !== bitmaskPid) continue;
@@ -1192,7 +1193,7 @@ export class PCANConnection {
 
   async startLogging(
     pids: PIDDefinition[],
-    intervalMs = 200,
+    intervalMs = 0,
     onData?: (readings: PIDReading[]) => void
   ): Promise<LogSession> {
     if (this.state !== 'ready') {
@@ -1232,7 +1233,11 @@ export class PCANConnection {
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${filteredPids.length}/${pids.length} PIDs)`);
+    this.emit(
+      'log',
+      null,
+      `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs > 0 ? `${intervalMs}ms` : 'max rate'} (${filteredPids.length}/${pids.length} PIDs)`,
+    );
 
     // Failure tracking with soft-disable
     const pidFailCount = new Map<number, number>();
@@ -1355,19 +1360,8 @@ export class PCANConnection {
     if (includeStandard) {
       allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
     }
-    let extPids: PIDDefinition[] = [];
     if (includeExtended) {
-      extPids = extendedMode22PidsForPcanVehicle(this.vehicleInfo);
-      allPids.push(...extPids);
-    }
-
-    // Open GM ECM session(s) before scanning Mode 22 so the first DID does not time out cold.
-    if (extPids.length > 0) {
-      const addrs = new Set(extPids.map(p => parsePidEcuTxId(p.ecuHeader)));
-      for (const addr of addrs) {
-        if (options?.abortSignal?.aborted) break;
-        await this.ensureGmLiveDataSessionForTx(addr);
-      }
+      allPids.push(...extendedMode22PidsForPcanVehicle(this.vehicleInfo));
     }
 
     let current = 0;
@@ -1607,7 +1601,7 @@ export class PCANConnection {
 
     while (out.length < totalLen) {
       if (this.isoTpRxAbortRequested) return null;
-      const waitMs = Math.max(30, deadline - Date.now());
+      const waitMs = Math.max(CAN_ISO_TP_RX_WAIT_FLOOR_MS, deadline - Date.now());
       if (waitMs <= 0) return null;
 
       let br: BridgeMessage;
@@ -1658,10 +1652,12 @@ export class PCANConnection {
       const fd = normalizeBridgeCanDataBytes(br.data);
       if (fd.length === 0) return null;
       const pci = (fd[0] >> 4) & 0x0f;
-      if (pci !== 2) return null;
+      if (pci !== 2) continue;
       const seq = fd[0] & 0x0f;
       if (seq !== expectedSeq) {
         console.log(`[ISO-TP RX] sequence mismatch: want ${expectedSeq}, got ${seq}`);
+        if(seq <expectedSeq) continue;
+        if(seq > expectedSeq) return null;
         return null;
       }
 
@@ -1736,9 +1732,10 @@ export class PCANConnection {
       ? responseArbIdOverride
       : (isFunctional ? -1 : (targetAddress + 0x08));
 
-    // Clear listener, brief settle so a queued stale 0x7E8 frame cannot pair with this TX.
     this.udsResponseListener = null;
-    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
 
     // Set up response capture via udsResponseListener (see openWebSocket onmessage).
     let userAbortedWait = false;
@@ -1900,9 +1897,10 @@ export class PCANConnection {
 
     console.log(`[UDS-MF] Multi-frame TX: svc=0x${service.toString(16)} total=${totalLength} bytes on 0x${targetAddress.toString(16)}`);
 
-    // Drain stale frames
     this.udsResponseListener = null;
-    await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
 
     // Step 1: Build and send First Frame (FF)
     // FF format: [0x1H, 0xLL, data0..data5] where 0x1HLL = total length

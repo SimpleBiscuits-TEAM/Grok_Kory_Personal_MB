@@ -2747,6 +2747,14 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
 // ─── Manufacturer PID Collections ─────────────────────────────────────
 
 import { CANAM_EXTENDED_PIDS, SEADOO_EXTENDED_PIDS, POLARIS_EXTENDED_PIDS, KAWASAKI_EXTENDED_PIDS } from './powersportsPids';
+import {
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
+  CAN_ELM_MODE01_BATCH_COMMAND_TIMEOUT_MS,
+  CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+  CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_UDS_PRE_TX_SETTLE_MS,
+} from './canTransportTiming';
 
 export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
   universal: [],  // Standard PIDs are universal
@@ -3517,7 +3525,7 @@ export class OBDConnection {
 
       // Step 10: Test connection - request supported PIDs
       this.emit('log', null, 'Testing vehicle connection...');
-      const pidResponse = await this.sendCommand('0100', 10000);
+      const pidResponse = await this.sendCommand('0100', CAN_DATALOGGER_VIN_TIMEOUT_MS);
       
       if (pidResponse.includes('UNABLE TO CONNECT') || pidResponse.includes('NO DATA')) {
         this.emit('error', null, 'Unable to connect to vehicle. Check ignition is ON.');
@@ -3533,15 +3541,15 @@ export class OBDConnection {
 
       // Request additional PID ranges if supported
       if (this.supportedPids.has(0x20)) {
-        const resp20 = await this.sendCommand('0120', 5000);
+        const resp20 = await this.sendCommand('0120', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp20, 0x20);
       }
       if (this.supportedPids.has(0x40)) {
-        const resp40 = await this.sendCommand('0140', 5000);
+        const resp40 = await this.sendCommand('0140', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp40, 0x40);
       }
       if (this.supportedPids.has(0x60)) {
-        const resp60 = await this.sendCommand('0160', 5000);
+        const resp60 = await this.sendCommand('0160', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp60, 0x60);
       }
 
@@ -3558,7 +3566,7 @@ export class OBDConnection {
 
       // Try to get VIN and decode vehicle identity
       try {
-        const vinResp = await this.sendCommand('0902', 8000);
+        const vinResp = await this.sendCommand('0902', CAN_DATALOGGER_VIN_TIMEOUT_MS);
         if (vinResp && !vinResp.includes('NO DATA') && !vinResp.includes('ERROR')) {
           const parsedVin = this.parseVin(vinResp);
           vehicleInfo.vin = parsedVin;
@@ -3751,7 +3759,8 @@ export class OBDConnection {
         // Reset to broadcast for standard Mode 01 PIDs
         await this.setEcuHeader(undefined);
       }
-      const response = await this.sendCommand(command, 3000);
+      const cmdTimeout = service === 0x22 ? CAN_LIVE_UDS_DID_TIMEOUT_MS : CAN_LIVE_OBD_MODE01_TIMEOUT_MS;
+      const response = await this.sendCommand(command, cmdTimeout);
       return this.parsePidResponse(pid, response);
     } catch {
       return null;
@@ -3822,7 +3831,7 @@ export class OBDConnection {
         // Multi-PID request: "01 0C 0D 05 ..."
         const command = '01' + batch.map(p => p.pid.toString(16).padStart(2, '0')).join('');
         try {
-          const response = await this.sendCommand(command, 5000);
+          const response = await this.sendCommand(command, CAN_ELM_MODE01_BATCH_COMMAND_TIMEOUT_MS);
           const readings = this.parseMultiPidResponse(batch, response);
           results.push(...readings);
 
@@ -4040,7 +4049,7 @@ export class OBDConnection {
 
   async startLogging(
     pids: PIDDefinition[],
-    intervalMs = 200,
+    intervalMs = 0,
     onData?: (readings: PIDReading[]) => void
   ): Promise<LogSession> {
     if (this.state !== 'ready') {
@@ -4093,7 +4102,11 @@ export class OBDConnection {
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${pidsToUse.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${pidsToUse.length}/${pids.length} PIDs)`);
+    this.emit(
+      'log',
+      null,
+      `Logging started: ${pidsToUse.map(p => p.shortName).join(', ')} @ ${intervalMs > 0 ? `${intervalMs}ms` : 'max rate'} (${pidsToUse.length}/${pids.length} PIDs)`,
+    );
 
     // Track per-PID failures with soft-disable and periodic retry.
     // Instead of permanently removing PIDs after N failures, we "pause" them
@@ -4239,8 +4252,11 @@ export class OBDConnection {
     const includeExtended = options?.includeExtended ?? true;
     const startTime = Date.now();
 
-    const pidsToScan: PIDDefinition[] = [];
-    if (includeStandard) pidsToScan.push(...STANDARD_PIDS);
+    // Same Mode 01 PID set as PCAN / V-OP (no bitmask placeholder PIDs in the per-PID sweep).
+    const allPids: PIDDefinition[] = [];
+    if (includeStandard) {
+      allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
+    }
     if (includeExtended) {
       // Sort extended PIDs by ecuHeader so we minimize ATSH switches
       const extPids = [...GM_EXTENDED_PIDS].sort((a, b) => {
@@ -4248,7 +4264,7 @@ export class OBDConnection {
         const hB = b.ecuHeader ?? '7DF';
         return hA.localeCompare(hB);
       });
-      pidsToScan.push(...extPids);
+      allPids.push(...extPids);
     }
 
     const standardSupported: ScanResult[] = [];
@@ -4256,87 +4272,48 @@ export class OBDConnection {
     const standardUnsupported: ScanResult[] = [];
     const extendedUnsupported: ScanResult[] = [];
 
-    this.emit('log', null, `Starting DID discovery scan (${pidsToScan.length} PIDs)...`);
+    this.emit('log', null, `Starting DID discovery scan (${allPids.length} PIDs)...`);
 
-    for (let i = 0; i < pidsToScan.length; i++) {
-      // Check abort
+    let current = 0;
+    const total = allPids.length;
+
+    for (const pid of allPids) {
       if (options?.abortSignal?.aborted) {
         this.emit('log', null, 'Scan aborted by user.');
         break;
       }
 
-      const pid = pidsToScan[i];
+      current++;
+      // Parity with PCAN / V-OP: one read per PID, live timeouts (no 2 s ISO-TP default per Mode 01).
+      const reading = await this.readPid(pid);
       const service = pid.service ?? 0x01;
-      const pidHexLen = service === 0x22 ? 4 : 2;
-      const command = `${service.toString(16).padStart(2, '0')}${pid.pid.toString(16).padStart(pidHexLen, '0')}`;
+      const isExtended = service === 0x22;
+      const supported = !!reading;
 
-      let supported = false;
-      let sampleValue: number | undefined;
-      let rawResponse: string | undefined;
-      let error: string | undefined;
-
-      try {
-        // Switch ECU header for Mode 22 directed addressing
-        if (service === 0x22 && pid.ecuHeader) {
-          await this.setEcuHeader(pid.ecuHeader);
-        } else if (service === 0x01 && this.currentEcuHeader !== null) {
-          await this.setEcuHeader(undefined);
-        }
-
-        const response = await this.sendCommand(command, 3000);
-        rawResponse = response;
-
-        // Check for negative responses
-        const cleaned = response.replace(/[\r\n\s]/g, '').toUpperCase();
-        if (
-          cleaned.includes('NODATA') ||
-          cleaned.includes('ERROR') ||
-          cleaned.includes('UNABLE') ||
-          cleaned.includes('?') ||
-          cleaned.startsWith('7F')  // UDS negative response
-        ) {
-          supported = false;
-        } else {
-          // Try to parse a value
-          const reading = this.parsePidResponse(pid, response);
-          if (reading) {
-            supported = true;
-            sampleValue = reading.value;
-          } else {
-            // Got a response but couldn't parse — still might be supported
-            // Check if the response prefix matches expected (41 for Mode 01, 62 for Mode 22)
-            const expectedPrefix = service === 0x22 ? '62' : '41';
-            supported = cleaned.includes(expectedPrefix.toUpperCase());
-          }
-        }
-      } catch (err) {
-        supported = false;
-        error = err instanceof Error ? err.message : 'Timeout';
-      }
-
-      const result: ScanResult = { pid, supported, sampleValue, rawResponse, error };
-
-      if (service === 0x22) {
-        (supported ? extendedSupported : extendedUnsupported).push(result);
+      if (reading) {
+        const result: ScanResult = { pid, supported: true, sampleValue: reading.value };
+        if (isExtended) extendedSupported.push(result);
+        else standardSupported.push(result);
+        this.supportedPids.add(pid.pid);
       } else {
-        (supported ? standardSupported : standardUnsupported).push(result);
+        const result: ScanResult = { pid, supported: false };
+        if (isExtended) extendedUnsupported.push(result);
+        else standardUnsupported.push(result);
       }
 
-      // Emit progress
       const progress = {
-        current: i + 1,
-        total: pidsToScan.length,
+        current,
+        total,
         pid,
         supported,
-        sampleValue,
+        sampleValue: reading?.value,
       };
       this.emit('scanProgress', progress);
-      if (options?.onProgress) {
-        options.onProgress(i + 1, pidsToScan.length, pid, supported);
-      }
+      options?.onProgress?.(current, total, pid, supported);
 
-      // Small delay between requests to avoid overwhelming the ECU
-      await new Promise(r => setTimeout(r, 50));
+      if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+        await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+      }
     }
 
     // Reset ECU header back to broadcast after scan
@@ -4345,7 +4322,7 @@ export class OBDConnection {
     const duration = Date.now() - startTime;
     const totalSupported = standardSupported.length + extendedSupported.length;
 
-    this.emit('log', null, `Scan complete: ${totalSupported}/${pidsToScan.length} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
+    this.emit('log', null, `Scan complete: ${totalSupported}/${current} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
 
     const autoPreset = buildPersistedScanAutoPreset(
       this.vehicleInfo,
@@ -4364,7 +4341,7 @@ export class OBDConnection {
       extendedSupported,
       standardUnsupported,
       extendedUnsupported,
-      totalScanned: pidsToScan.length,
+      totalScanned: current,
       totalSupported,
       autoPreset,
     };
