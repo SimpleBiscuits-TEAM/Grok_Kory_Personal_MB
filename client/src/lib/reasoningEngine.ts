@@ -643,12 +643,16 @@ function analyzeBoostSystem(
   // VGT-EGT correlation analysis
   // VGT position semantics: Higher % = more CLOSED = more boost.
   // Lower % = more OPEN = less boost = potentially HIGHER EGTs.
-  // When VGT opens up (low %), exhaust energy bypasses the turbine wheel,
-  // meaning less energy is extracted from exhaust gas. This can lead to:
-  //   1. Higher EGTs downstream because the exhaust retains more heat
-  //   2. Less boost because less exhaust energy drives the compressor
-  // This is OPPOSITE to what you might intuitively think -- opening VGT
-  // does NOT cool the exhaust, it actually means hotter exhaust exits.
+  // CRITICAL NUANCE: The relationship is NOT linear or simple.
+  //   - Opening VGT: less energy extracted → hotter exhaust downstream, less boost.
+  //   - Closing VGT: more backpressure (drive pressure). If the engine doesn't have
+  //     enough heat/RPM to push through that backpressure, exhaust dwells longer and
+  //     EGTs can ALSO rise. Closing VGT does NOT always mean cooler EGTs.
+  //   - More boost does NOT always mean more power. If VGT is too closed for the
+  //     operating conditions, the pressure ratio (boost-to-drive) gets out of hand,
+  //     hurting horsepower and risking turbo overspeed.
+  //   - Healthy boost-to-drive ratio: 1.5:1 to 2:1. Ratios approaching 1:1 or worse
+  //     (drive > boost) = turbo is choking the engine.
   const egtVals = data.exhaustGasTemp.filter(v => v > 0);
   if (vane.length > 20 && egtVals.length > 20) {
     // Find periods where VGT is relatively open (< 40%) under load
@@ -675,15 +679,16 @@ function analyzeBoostSystem(
           `When the VGT vanes are more open (< 40% closed), less exhaust energy is ` +
           `extracted by the turbine, which means the exhaust gas retains more heat. ` +
           `This log shows ${openVgtHighEgt} samples where VGT was open and EGT exceeded 1200F. ` +
-          `This is expected behavior -- an open VGT produces less boost but allows hotter ` +
-          `exhaust to pass through. If EGTs are a concern, a more closed VGT position ` +
-          `(higher boost target) can actually help cool exhaust by extracting more energy.`,
+          `Note: closing the VGT does NOT always fix high EGTs — if the VGT is too closed ` +
+          `without enough heat or RPM, the boost-to-drive pressure ratio gets out of hand, ` +
+          `which can hurt horsepower and risk turbo overspeed. The fix depends on the ` +
+          `operating conditions and whether the VGT position makes sense for the current RPM/load.`,
         evidence: [
           `Open VGT + high EGT samples: ${openVgtHighEgt}`,
           `Closed VGT + normal EGT samples: ${closedVgtNormalEgt}`,
           `Max boost: ${maxBoost.toFixed(1)} psi`,
         ],
-        suggestion: 'This is normal VGT behavior. If sustained high EGTs are a concern, discuss boost targets with your tuner.',
+        suggestion: 'Evaluate VGT position relative to RPM and load. Closing the VGT more is not always the answer — if the boost-to-drive pressure ratio is already poor, more VGT closure can hurt power and risk turbo overspeed. Discuss VGT mapping and boost targets with your tuner.',
       });
     }
   }

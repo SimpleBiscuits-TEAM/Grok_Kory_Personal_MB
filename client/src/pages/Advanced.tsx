@@ -1142,7 +1142,6 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
       )}
 
       <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><DtcSearch /></div>
-      <div><SectionHeader icon={<Cpu style={{ width: 18, height: 18, color: sColor.red }} />} title="ENGINE REFERENCE DATABASE" /><EcuReferencePanel /></div>
 
       {/* Compare section — shown when compare mode is active, data already loaded above */}
       {analyzerMode === 'compare' && (

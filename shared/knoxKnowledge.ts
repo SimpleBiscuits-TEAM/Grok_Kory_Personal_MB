@@ -36,6 +36,13 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - Trajectory calculator sets charger speed targets for smooth boost build
 - Anti-surge: disturbance controller monitors crankshaft speed oscillation
 
+### VGT / Boost / EGT Relationship (CRITICAL — Common Misconceptions)
+- **Closing the VGT does NOT always mean cooler EGTs.** A more closed VGT increases exhaust backpressure (drive pressure). If the engine doesn't have enough heat energy or RPM to push through that backpressure efficiently, the exhaust gas dwells longer and temps can actually rise.
+- **More boost does NOT always mean more power.** If the VGT is commanding too much position (too closed) without sufficient exhaust energy or RPM to support it, the **pressure ratio (boost-to-drive ratio)** gets out of hand. The turbo is working harder than it needs to, the engine is pumping against excessive backpressure, and net power drops.
+- **Turbo overspeed risk:** When VGT position is too aggressive for the operating conditions (low RPM, low exhaust energy), the compressor can be driven beyond its efficient operating range. This creates a potential **turbo overspeed condition** — the turbo is spinning fast but not doing useful work, and the shaft speed can exceed design limits.
+- **Diagnostic rule:** When analyzing boost and EGT together, do NOT assume "more boost = good" or "VGT closing = EGTs will drop." Always evaluate the **boost-to-drive pressure ratio** and whether the VGT position makes sense for the current RPM and load. A healthy ratio is typically 1.5:1 to 2:1 (boost:drive). Ratios approaching 1:1 or worse (drive > boost) indicate the turbo is choking the engine.
+- **Tuning implication:** Aggressive VGT maps that close the vanes too early at low RPM can hurt spool-up feel (feels like boost but no power), increase EGTs, and risk turbo damage. The fix is usually opening the VGT slightly at low RPM/load and letting exhaust energy build before commanding aggressive vane positions.
+
 ### Engine Protection Systems
 - **Overspeed**: Hard RPM cut (fuel cut, not spark cut on diesel)
 - **Overheating**: Progressive torque reduction based on coolant temp

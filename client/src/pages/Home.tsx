@@ -1104,11 +1104,6 @@ export default function Home() {
               <DtcSearch />
             </div>
 
-            {/* Subsystem Reference */}
-            <div>
-              <SectionHeader icon={<Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="SUBSYSTEM REFERENCE" />
-              <EcuReferencePanel />
-            </div>
           </div>
         ) : null}
 

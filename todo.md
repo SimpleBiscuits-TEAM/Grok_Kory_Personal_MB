@@ -1325,3 +1325,9 @@
 - [x] Add racing EGT context: 1800-2000°F for <12 seconds is acceptable in racing (don't flag), but >12 seconds sustained at those temps = problem
 - [x] Train Knox on updated diagnostic thresholds (EGT 1475°F/14s, racing 1800°F/12s, boost loosened, rail surge detection)
 - [x] Train Knox on Tobi's latest code changes (flash rescue, E41 procedure, datalogger parity, containerBlockJson)
+
+## VGT / Boost / EGT Relationship Knowledge
+- [x] Add Knox KB knowledge: closing VGT doesn't always mean cooler EGTs, more boost doesn't always mean more power
+- [x] Add Knox KB knowledge: VGT too much position without enough heat/RPM = pressure ratio (boost-to-drive) out of hand, hurts HP, potential turbo overspeed
+- [x] Remove subsystem display from analyzer page
+- [x] Remove "delta" line from fuel pressure fault error chart

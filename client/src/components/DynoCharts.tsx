@@ -1379,14 +1379,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
                 dot={false} isAnimationActive={false} name="Desired PSI" />
               <Line type="monotone" dataKey="actual" stroke="#f97316" strokeWidth={2.5}
                 dot={false} isAnimationActive={false} name="Actual PSI" />
-              {isLow && (
-                <Area type="monotone" dataKey="deltaLow" stroke="none"
-                  fill="url(#deltaLowGrad)" isAnimationActive={false} name="Δ Deficit (fault)" />
-              )}
-              {!isLow && (
-                <Area type="monotone" dataKey="deltaHigh" stroke="none"
-                  fill="url(#deltaHighGrad)" isAnimationActive={false} name="Δ Excess (fault)" />
-              )}
+
             </ComposedChart>
           </ResponsiveContainer>
           )}
