@@ -1341,3 +1341,8 @@
 - [x] Fix boost desired PID — subtract barometric pressure so desired matches actual gauge pressure (currently looks like underboost because baro not subtracted)
 - [x] Add RPM reference trace to the boost deviation chart
 - [x] Handle EGT stuck at 1832°F — this means sensor is disconnected/open circuit (emissions delete + tuned out). Report as likely open circuit, not real temp reading.
+
+## Strat Support Bot — No Assumptions
+- [x] Fix Strat to NEVER assume customer's tuning platform or hardware — must ask first
+- [x] When customer asks about tune loading/flashing without specifying platform, Strat must ask what platform/hardware they are using before providing instructions
+- [x] PPEI offers multiple platforms and hardware options — Strat needs to identify which one before giving steps
