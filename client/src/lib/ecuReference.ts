@@ -149,7 +149,7 @@ export const ECU_PARAMETERS: Record<string, EcuParameter> = {
     internalName: 'VeEGTR_T_SnsrTurbDwn',
     displayName: 'Exhaust Gas Temp — Turbine Downstream',
     unit: '°F',
-    description: 'Temperature downstream of the turbine, entering the aftertreatment system (DPF, SCR). Values above 1,300°F downstream indicate potential DPF regeneration or excessive load.',
+    description: 'Temperature downstream of the turbine, entering the aftertreatment system (DPF, SCR). Values above 1,300°F downstream indicate potential DPF regeneration or heavy load. Sustained temps above 1,475°F for >14 seconds warrant backing off throttle. Racing pulls may briefly hit 1,800-2,000°F but should not sustain >12 seconds.',
     normalMin: 150,
     normalMax: 1100,
     warnMax: 1300,

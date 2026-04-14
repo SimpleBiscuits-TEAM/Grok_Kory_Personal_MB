@@ -1233,10 +1233,10 @@ export function renderAdvancedAnalytics(
   let heatWarnings: string[] = [];
 
   if (egtValid.length > 50) {
-    const highEgtCount = egtValid.filter(v => v > 1200).length;
+    const highEgtCount = egtValid.filter(v => v > 1475).length;
     const highEgtPct = (highEgtCount / egtValid.length) * 100;
     if (highEgtPct > 15) {
-      heatWarnings.push(`EGTs were above 1200°F for ${highEgtPct.toFixed(1)}% of the log.`);
+      heatWarnings.push(`EGTs were above 1475°F for ${highEgtPct.toFixed(1)}% of the log.`);
     }
   }
   if (coolantValid.length > 50) {

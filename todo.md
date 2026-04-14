@@ -1312,3 +1312,16 @@
 - [x] Migrate useTaskStore from localStorage to database-backed persistence
 - [x] Ensure changes survive publishes and work across devices
 - [x] Only change Tasks-related files — no other tabs or Tobi's code
+
+## Diagnostic Engine Threshold Fixes (Fuel Surge, Boost, Injector Duration)
+- [x] Fix rail pressure surge detection — flag rapid actual-vs-desired deviation (24-26k surging to 30k while desired holds 29k)
+- [x] Loosen low boost deviation threshold — current threshold too tight, triggering false positives
+- [x] Raise injector duration high-limit to ~2500us for solenoid injectors (current limit too low)
+- [x] Re-test with L5P fuel surge datalog to verify correct fault detection
+- [x] Update vitest tests for changed thresholds
+- [x] Set EGT sustained max threshold to 1475°F — flag if EGTs sustain above this
+- [x] Fix EGT threshold — raise from 1300°F to 1475°F sustained max (analyzer was recommending 1300 which is too aggressive)
+- [x] Change EGT sustained high-temp duration from 5 seconds to 14 seconds (user wants to see if EGTs sustained more than 14 seconds)
+- [x] Add racing EGT context: 1800-2000°F for <12 seconds is acceptable in racing (don't flag), but >12 seconds sustained at those temps = problem
+- [x] Train Knox on updated diagnostic thresholds (EGT 1475°F/14s, racing 1800°F/12s, boost loosened, rail surge detection)
+- [x] Train Knox on Tobi's latest code changes (flash rescue, E41 procedure, datalogger parity, containerBlockJson)

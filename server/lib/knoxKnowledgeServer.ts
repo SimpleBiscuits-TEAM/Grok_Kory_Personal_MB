@@ -1297,12 +1297,57 @@ contribute anonymized performance data and receive real-world fleet averages in 
 - Cloud network weather data feeds into Laura's predictions and Knox's performance analysis
 `;
 
+const FLASH_RESCUE_AND_E41_KNOWLEDGE = `
+## Flash Rescue Feature (Tobi — Apr 2026)
+
+### Flash Rescue UX
+When a flash operation FAILS on real hardware (PCAN or VOP USB), the system now offers an automatic rescue dialog:
+- Stores last successful flash container metadata (fileName, fileHash, ecuType) in localStorage via flashRescueMeta.ts
+- On failure, presents AlertDialog with option to automatically retry with the same container
+- rescueRetryChosenRef prevents USB disconnect when user chooses automatic retry
+- The rescue flow reuses the existing PCANFlashEngine instance and container data
+
+### GM E41 (L5P Duramax) Flash Procedure
+The E41 is the primary engine control module for GM L5P Duramax (6.6L diesel).
+
+**Protocol:** GMLAN (not standard UDS) — uses functional broadcast on 0x101 (UUDT) for session entry.
+**Addresses:** TX 0x7E0 / RX 0x7E8 (physical ECM request/response).
+**Transfer size:** 0xFFE — matches BUSMASTER RequestDownload form.
+**No TransferExit:** usesTransferExit = false — no service 0x37 between blocks. Next block's 0x34 implicitly continues.
+
+**Session Open Sequence (UUDT on 0x101):**
+1. ReturnToNormal (FE 01 20)
+2. ReadDID 0xB0 — SW versions (FE 02 1A B0, ~1000ms delay)
+3. DiagnosticSessionControl programming (FE 02 10 02)
+4. DisableNormalCommunication (FE 01 28)
+5. ReportProgrammedState (FE 01 A2)
+6. ProgrammingMode enable (FE 02 A5 01, ~1000ms delay)
+7. ProgrammingMode complete (FE 02 A5 03) — ECU transitions to bootloader
+8. Start cyclic UUDT TesterPresent (FE 01 3E, every 500ms)
+
+**Critical E41 differences from standard UDS:**
+- TesterPresent 0x3E 0x00 on physical address yields NRC 0x12 — use UUDT keepalive instead
+- No standalone RoutineControl erase (0x31) — erase is implicit in 0x34 with NRC 0x78 pending
+- PriRC (bootloader entry): single frame 05 34 00 00 0F FE after security, before first per-block 0x34
+- ECUReset 0x11 often NRC 0x11 — ignition cycle does the reset
+- Post-flash verification: ReturnToNormal, then 0xAE 0x28 0x80 on 0x7E0 (ECU may stay silent ~12s during reboot)
+
+### Container Block JSON Normalization
+DevProg container block_struct JSON uses inconsistent property casings (rc36 vs Rc_36, block_id vs Block_id).
+The containerBlockJson.ts module normalizes these with case-insensitive key lookup and canonical field copying.
+GMLAN containers often repeat the same rc36 on every block — resolveRc36TemplateForBlock() falls back to any block's rc36.
+
+### Datalogger Transport Parity
+The datalogger now shares the same CAN transport layer as the flash engine (canTransportTiming.ts).
+This ensures consistent timing behavior between datalogging and flashing operations.
+`;
+
 /**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE;
 }
 
 /**

@@ -702,7 +702,7 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
   }
 
   // ── EGT Warning ─────────────────────────────────────────────────────────────────
-  // >1475°F for >5 seconds, or stuck >2100°F
+  // >1475°F for >14 seconds, or stuck >2100°F
   let egtStatus = '[PASS]';
   const egtVals = validValues(data.exhaustGasTemp);
   if (egtVals.length > 0) {
@@ -711,8 +711,8 @@ function evaluateDiagnostics(data: ProcessedMetrics): DiagnosticSummarySection {
     if (sensorFaultCount > 0) {
       egtStatus = '[DETECTED] EGT Sensor Fault (>2100F, likely disconnected)';
       detectedCodes.push('EGT_SENSOR_FAULT');
-    } else if (highEgtCount >= 125) {
-      egtStatus = '[WARNING] EGT exceeded 1475F for >5 seconds';
+    } else if (highEgtCount >= 350) {
+      egtStatus = '[WARNING] EGT exceeded 1475F for >14 seconds';
       detectedCodes.push('EGT_HIGH');
     }
   } else {

@@ -43,6 +43,15 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - **Rail Pressure Protection**: If actual rail pressure exceeds limit, the ECM reduces **FPR/PCV solenoid command (mA)** immediately — this is current control, not a PWM "duty %" display
 - **DPF Overtemp**: If exhaust temp exceeds threshold during regen, regen aborted
 
+### EGT Diagnostic Thresholds (CRITICAL — V-OP Analyzer Rules)
+- **1475°F sustained > 14 seconds** = WARNING — back off throttle, investigate fueling/boost. Accelerates turbo wear and reduces injector life.
+- **1800-2000°F for < 12 seconds** = ACCEPTABLE in racing conditions (drag pulls, dyno pulls). Do NOT flag as a fault. Brief spikes during WOT racing pulls are normal if airflow is insufficient to cool things off.
+- **1800-2000°F sustained > 12 seconds** = CRITICAL — even for racing, this is too long. Immediate risk of component damage.
+- **> 2100°F** = Likely sensor fault (disconnected/open circuit) — flag as EGT_SENSOR_FAULT, not a real temperature reading.
+- **During DPF regen**: EGTs of 1000-1200°F at DPF inlet are normal. Do not flag regen-related EGT elevation.
+- **Solenoid injectors (LB7, LBZ, LMM)**: Injector duration is not a concern until approaching 2500+ µs. Do not flag normal duration values as high.
+- **Rail pressure surge detection**: A rapid actual-vs-desired divergence of > 3 kPSI for 3+ consecutive points, or a rate of change > 50 kPSI/s, indicates a fuel pressure surge event. This is NOT typical fuel pump behavior — it indicates the FPR control loop cannot stabilize. Flag as FUEL_PRESSURE_SURGE.
+
 ### NOx Raw Emission Model (from exhmod_rawnoxmdl)
 The ECM predicts engine-out NOx using this algorithm:
 1. Base NOx = f(RPM, fuel quantity) from ExhMod_ratNoxBas_MAP
@@ -1159,7 +1168,7 @@ When analyzing datalogs and the MAF readings appear lower than expected for the 
 2. **High-pressure fuel (GDI)**: Mode 01 **0x23** (fuel rail gauge pressure) may appear; do **not** frame it as CP3/CP4 common-rail diesel diagnostics unless the user confirmed diesel.
 3. **Transmission**: On 2019+ Global B trucks (E90/T93), the TCM responds on **7E2/7EA** (NOT 7E1/7E9). 7E1/7E9 is the Allison/6L80 address used on older GMT900/K2XX platforms. The T93 10-speed (10L80/10L90) uses GM Mode 22 DIDs for TFT, TCC slip, gear, turbine speed, shift timing, solenoid pressure control, and clutch diagnostics — align explanations with EFI Live **TCM.*** naming when present.
 4. **Boosted gas (e.g. turbo V6/V8)**: Use **MAP + MAF + load + spark/knock** together; avoid **diesel smoke-limiter / MAF-vs-boost leak** narratives unless the log clearly shows turbocharged operation and the question is charge-air related.
-5. **Exhaust temperature**: If a gas truck logs an EGT-like channel, **do not assume diesel pyro limits (e.g. 1300°F sustained)** without knowing sensor location and OEM intent — gasoline turbo exhaust can read differently than Duramax towing pyro.
+5. **Exhaust temperature**: If a gas truck logs an EGT-like channel, **do not assume diesel pyro limits (e.g. 1475°F sustained >14 seconds)** without knowing sensor location and OEM intent — gasoline turbo exhaust can read differently than Duramax towing pyro.
 
 ### External research vectors (for agents + future live web search)
 When **GM_GAS_ANALYZER** or **ANALYZER_COMBUSTION_FAMILY: spark** is in module context, corroboration should prefer **current, model-year-specific** sources in this order:

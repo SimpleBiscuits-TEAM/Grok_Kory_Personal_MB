@@ -412,8 +412,9 @@ const TEST_CONDITIONS: Record<string, {
     ],
     duration: '20-30 minutes',
     warnings: [
-      'EGT above 1300°F sustained = danger zone, back off throttle',
-      'EGT above 1500°F = immediate risk of turbo/manifold damage',
+      'EGT above 1475°F sustained (>14 seconds) = back off throttle',
+      'EGT 1800-2000°F is acceptable for short racing pulls (<12 seconds)',
+      'EGT above 1800°F sustained (>12 seconds) = immediate risk, reduce load',
       'During DPF regen, EGT will be elevated — this is normal',
     ],
   },

@@ -442,7 +442,7 @@ export function getCalibrationContext(
     },
     high_egt: {
       title: 'Elevated EGT — EGTC/FULC Interaction',
-      context: 'The L5P monitors 5 EGT positions (B1S1 pre-turbo through B1S5 tailpipe). High EGT is primarily driven by fuel quantity and timing. The FULC subsystem\'s injection timing tables control when fuel enters the cylinder — more advance = more cylinder pressure but potentially higher EGT. The EGTC subsystem has protection thresholds that will reduce torque if EGT exceeds limits. During DPF regen (DPFC), target EGT is 1100-1200°F — this is normal. Sustained EGT above 1300°F under load is getting aggressive.',
+      context: 'The L5P monitors 5 EGT positions (B1S1 pre-turbo through B1S5 tailpipe). High EGT is primarily driven by fuel quantity and timing. The FULC subsystem\'s injection timing tables control when fuel enters the cylinder — more advance = more cylinder pressure but potentially higher EGT. The EGTC subsystem has protection thresholds that will reduce torque if EGT exceeds limits. During DPF regen (DPFC), target EGT is 1100-1200°F — this is normal. Sustained EGT above 1475°F under load for more than 14 seconds is getting aggressive. Brief spikes to 1800-2000°F are acceptable during racing pulls (<12 seconds).',
       subsystem: 'EGTC/FULC',
       relevance: 'high',
     },

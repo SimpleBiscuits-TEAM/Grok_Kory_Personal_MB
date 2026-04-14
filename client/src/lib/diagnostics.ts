@@ -225,8 +225,13 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     });
   }
 
+  // Check for Rail Pressure Surge (rapid actual overshoot vs desired) — diesel only
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
+    issues.push(...checkRailPressureSurge(railPressureActual, railPressureDesired, rpm, decelMask, throttleTransientMask));
+  }
+
   // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)
-  // Diesel EGT thresholds (1300°F+) are NOT applicable to gasoline engines.
+  // Diesel EGT thresholds (1475°F sustained) are NOT applicable to gasoline engines.
   // Gasoline EGT is typically 1400-1600°F under load — normal for gas, critical for diesel.
   // GUARD: Only run EGT checks if the channel has actual observed data (non-zero values).
   // An all-zero array means the EGT channel was not logged or not populated.
@@ -643,9 +648,9 @@ function checkLowBoostPressure(
   throttleTransientMask: boolean[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const ABS_THRESHOLD = 10;     // psi absolute offset (raised from 8)
-  const PCT_THRESHOLD = 0.30;   // 30% relative deviation required
-  const minDuration = 15;       // seconds sustained (raised from 10)
+  const ABS_THRESHOLD = 15;     // psi absolute offset (raised from 10 — loosened to reduce false positives)
+  const PCT_THRESHOLD = 0.40;   // 40% relative deviation required (raised from 30% — loosened per user feedback)
+  const minDuration = 20;       // seconds sustained (raised from 15 — more time for turbo to respond)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
   const MIN_RPM = 1500;         // turbo needs RPM to spool
@@ -757,11 +762,14 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   if (!egt.length) return issues;
 
-  const HIGH_THRESHOLD = 1750;
+  const HIGH_THRESHOLD = 1475;     // Sustained street/towing limit — flag if EGTs stay above this
+  const RACING_THRESHOLD = 1800;   // Racing conditions — brief spikes OK, sustained = problem
   const CRITICAL_THRESHOLD = 2100;  // Raised from 1900 -- aftermarket sensors can read higher
-  const MIN_DURATION_SEC = 5;
+  const MIN_DURATION_SEC = 14;     // User requirement: flag if sustained more than 14 seconds
+  const RACING_DURATION_SEC = 12;  // Racing: 1800-2000°F for <12s is acceptable, >12s = problem
   const SAMPLE_RATE = 10;
   const MIN_SAMPLES = MIN_DURATION_SEC * SAMPLE_RATE;
+  const RACING_SAMPLES = RACING_DURATION_SEC * SAMPLE_RATE;
 
   let sensorFaulty = false;
 
@@ -827,6 +835,28 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   }
 
   if (!sensorFaulty) {
+    // ── Racing EGT check (1800-2000°F sustained >12s) ──
+    let consecutiveRacing = 0;
+    let racingReported = false;
+    for (let i = 0; i < egt.length; i++) {
+      if (egt[i] > RACING_THRESHOLD) {
+        consecutiveRacing++;
+        if (consecutiveRacing >= RACING_SAMPLES && !racingReported) {
+          issues.push({
+            code: 'EGT-RACING-SUSTAINED',
+            severity: 'warning',
+            title: 'Sustained Racing-Level EGT',
+            description: `EGT exceeded ${RACING_THRESHOLD}°F for more than ${RACING_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}°F). Brief spikes to 1800-2000°F are normal during racing pulls, but sustained temps at this level indicate insufficient airflow or excessive fueling.`,
+            recommendation: 'Reduce pull duration or increase airflow (larger turbo, better intercooler). Consider water-methanol injection for sustained high-load use. These temps are acceptable for short drag passes (<12 seconds) but not for extended pulls.',
+          });
+          racingReported = true;
+        }
+      } else {
+        consecutiveRacing = 0;
+      }
+    }
+
+    // ── Street/towing EGT check (>1475°F sustained >14s) ──
     let consecutiveHighTemp = 0;
     let egtHighReported = false;
     for (let i = 0; i < egt.length; i++) {
@@ -837,8 +867,8 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
             code: 'EGT-HIGH',
             severity: 'warning',
             title: 'High Exhaust Gas Temperature',
-            description: `EGT exceeded ${HIGH_THRESHOLD}F for more than ${MIN_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}F).`,
-            recommendation: 'High EGT indicates aggressive tuning or fuel issues. Contact your tuner. Ensure fuel quality and check for engine knock.',
+            description: `EGT exceeded ${HIGH_THRESHOLD}°F for more than ${MIN_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}°F). Sustained temps above 1475°F accelerate component wear.`,
+            recommendation: 'Monitor EGTs during towing or sustained pulls. If EGTs are consistently above 1475°F, discuss fueling and boost targets with your tuner. Ensure intercooler is not heat-soaked.',
           });
           egtHighReported = true;
         }
@@ -1656,6 +1686,90 @@ export function checkTurboSurge(
         recommendation: 'Inspect VGT vanes for carbon buildup or sticking. Check unison ring for wear. Test VGT actuator movement. If the vehicle has a tow tune, verify turbo braking settings with the tuner.',
       });
     }
+  }
+
+  return issues;
+}
+
+
+// ── RAIL PRESSURE SURGE DETECTION ──────────────────────────────────────────
+/**
+ * Detects rapid fuel rail pressure surges where actual pressure spikes
+ * significantly above desired pressure in a short time window.
+ *
+ * Pattern: actual jumps from ~24-26k to 30k+ while desired holds at ~29k.
+ * This is NOT the same as the sustained high-rail check (P0088) — this catches
+ * rapid transient spikes that indicate fuel pump overshoot or regulator issues.
+ *
+ * Detection strategy:
+ *   1. Compute rate of change of actual rail pressure (psi/sec)
+ *   2. Flag when actual surges >2000 psi above desired in a short window
+ *   3. Exclude decel and throttle transients
+ */
+function checkRailPressureSurge(
+  actual: number[],
+  desired: number[],
+  rpm: number[],
+  decelMask: boolean[],
+  throttleTransientMask: boolean[]
+): DiagnosticIssue[] {
+  const issues: DiagnosticIssue[] = [];
+  if (actual.length < 20) return issues;
+
+  const SAMPLE_RATE = 10; // 10 Hz
+  const MIN_RPM = 1200;
+  const SURGE_OVERSHOOT = 2000;    // psi above desired = surge
+  const RATE_THRESHOLD = 30000;    // psi/sec rate of rise = rapid surge
+  const RATE_LOOKBACK = 5;         // 0.5 seconds lookback for rate calc
+  const MIN_SURGE_EVENTS = 2;      // need at least 2 surge events to flag
+  const MIN_DESIRED_PRESSURE = 10000; // only check when desired is meaningful
+
+  let surgeEvents = 0;
+  let maxOvershoot = 0;
+  let maxRate = 0;
+  let worstActual = 0;
+  let worstDesired = 0;
+  // Cooldown: don't count multiple samples from the same surge event
+  let cooldown = 0;
+
+  for (let i = RATE_LOOKBACK; i < actual.length; i++) {
+    if (cooldown > 0) { cooldown--; continue; }
+    if (decelMask[i] || throttleTransientMask[i]) continue;
+    if (rpm[i] < MIN_RPM) continue;
+    if (desired[i] < MIN_DESIRED_PRESSURE) continue;
+    if (actual[i] <= 0 || desired[i] <= 0) continue;
+
+    const overshoot = actual[i] - desired[i];
+    const rateOfRise = (actual[i] - actual[i - RATE_LOOKBACK]) * (SAMPLE_RATE / RATE_LOOKBACK);
+
+    if (overshoot > SURGE_OVERSHOOT && rateOfRise > RATE_THRESHOLD) {
+      surgeEvents++;
+      if (overshoot > maxOvershoot) {
+        maxOvershoot = overshoot;
+        worstActual = actual[i];
+        worstDesired = desired[i];
+      }
+      if (rateOfRise > maxRate) maxRate = rateOfRise;
+      cooldown = 20; // 2 seconds cooldown between events
+    }
+  }
+
+  if (surgeEvents >= MIN_SURGE_EVENTS) {
+    issues.push({
+      code: 'RAIL-PRESSURE-SURGE',
+      severity: 'warning',
+      title: 'Fuel Rail Pressure Surge Detected',
+      description: `Detected ${surgeEvents} rapid rail pressure surge event(s) where actual pressure spiked ${maxOvershoot.toFixed(0)} psi above desired (actual: ${worstActual.toFixed(0)} psi, desired: ${worstDesired.toFixed(0)} psi). Rate of pressure rise reached ${maxRate.toFixed(0)} psi/sec. This indicates the high-pressure fuel pump is overshooting the target — the pressure regulator is not responding fast enough to control the surge.`,
+      recommendation: 'Contact your tuner to review fuel pressure regulator PID gains (proportional/integral response). The pump is building pressure faster than the regulator can bleed it off. This can also indicate a mechanical issue with the pressure control valve (PCV/FPR solenoid) or a fuel system that is over-pressurizing during rapid load changes.',
+    });
+  } else if (surgeEvents === 1) {
+    issues.push({
+      code: 'RAIL-PRESSURE-SURGE',
+      severity: 'info',
+      title: 'Minor Rail Pressure Surge',
+      description: `Detected 1 rail pressure surge event where actual spiked ${maxOvershoot.toFixed(0)} psi above desired (actual: ${worstActual.toFixed(0)} psi, desired: ${worstDesired.toFixed(0)} psi). Rate: ${maxRate.toFixed(0)} psi/sec. A single event may be transient, but monitor for recurrence.`,
+      recommendation: 'Monitor for recurrence. If surges happen consistently, have the tuner review fuel pressure regulator calibration.',
+    });
   }
 
   return issues;

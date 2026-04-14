@@ -1151,7 +1151,7 @@ function generatePerformanceRecommendations(
         `Peak injector pulse width: ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
         `Average pulse width: ${avgIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
       ],
-      suggestion: 'Keep EGTs below 1300°F sustained. If EGTs are consistently high, discuss injector sizing with your tuner.',
+      suggestion: 'Keep EGTs below 1475°F sustained. If EGTs are consistently above 1475°F for more than 14 seconds, discuss injector sizing and boost targets with your tuner.',
     });
   }
 
@@ -1220,7 +1220,7 @@ function generatePerformanceRecommendations(
     ? egtNonZero.reduce((a, b) => a + b, 0) / egtNonZero.length
     : 0;
 
-  if (dieselRules && maxEgt > 1400 && avgEgt > 900) {
+  if (dieselRules && maxEgt > 1475 && avgEgt > 900) {
     findings.push({
       id: 'perf-high-egt',
       category: 'thermal',
@@ -1229,11 +1229,11 @@ function generatePerformanceRecommendations(
       title: 'Elevated Exhaust Gas Temperatures',
       reasoning:
         `Peak EGT of ${maxEgt.toFixed(0)}°F with an average of ${avgEgt.toFixed(0)}°F indicates ` +
-        `significant thermal loading. Sustained EGTs above 1300°F accelerate turbo wear, can crack ` +
-        `exhaust manifolds, and reduce injector life. ` +
-        (maxEgt > 1500
-          ? `At ${maxEgt.toFixed(0)}°F, piston/head damage becomes a risk on extended pulls.`
-          : `Current levels are manageable for short bursts but should not be sustained.`),
+        `significant thermal loading. Sustained EGTs above 1475°F accelerate turbo wear and reduce injector life. ` +
+        `Brief spikes to 1800-2000°F are acceptable during racing pulls (<12 seconds), but sustained temps at this level indicate a problem. ` +
+        (maxEgt > 1800
+          ? `At ${maxEgt.toFixed(0)}°F, this is racing-level heat — acceptable for short drag passes but not for sustained pulls.`
+          : `Current levels should be monitored during towing or sustained pulls.`),
       evidence: [
         `Peak EGT: ${maxEgt.toFixed(0)}°F`,
         `Average EGT: ${avgEgt.toFixed(0)}°F`,
