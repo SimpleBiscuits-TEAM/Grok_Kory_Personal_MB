@@ -1319,8 +1319,8 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
   const ruleText = isLow
-    ? `Low Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDeltaLow.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
-    : `High Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds (decel/transients excluded). Max observed delta: ${maxDeltaHigh.toFixed(0)} psi. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
+    ? `Low Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`
+    : `High Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds (decel/transients excluded). Fault zone: ${faultTimeMin.toFixed(2)}–${faultTimeMax.toFixed(2)} min.`;
 
   return (
     <FaultChartWrapper
@@ -1332,27 +1332,14 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
       description={issue?.description || 'A rail pressure concern was detected. See the PPEI AI Reasoning section for details.'}
       recommendation={issue?.recommendation || 'Review the PPEI AI Reasoning findings for specific recommendations.'}
       ruleEvaluated={ruleText}
-      badges={<>
-        <DeltaBadge label="Peak Rail Pressure" actual={peakActual.toFixed(0)} expected={peakDesired.toFixed(0)} delta={(isLow ? peakDesired - peakActual : peakActual - peakDesired).toFixed(0)} unit=" psi" isCritical={true} />
-        <DeltaBadge label="Avg Rail Pressure" actual={avgActual.toFixed(0)} expected={avgDesired.toFixed(0)} delta={(isLow ? avgDesired - avgActual : avgActual - avgDesired).toFixed(0)} unit=" psi" isCritical={false} />
-        <DeltaBadge label="Max Fault Delta" actual="Detected" expected={isLow ? '<3,000' : '<1,500'} delta={(isLow ? maxDeltaLow : maxDeltaHigh).toFixed(0)} unit=" psi" isCritical={true} />
-      </>}
+      badges={undefined}
     >
       {hasRailData && chartData.length > 0 ? (
         <ZoomableChart data={chartData} height={300}>
           {(visibleData) => (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={visibleData} margin={{ top: 10, right: 20, bottom: 30, left: 10 }}>
-              <defs>
-                <linearGradient id="deltaLowGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ff2222" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#ff2222" stopOpacity={0.05} />
-                </linearGradient>
-                <linearGradient id="deltaHighGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#ff9900" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="#ff9900" stopOpacity={0.05} />
-                </linearGradient>
-              </defs>
+
               <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
               <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
                 tickFormatter={(v) => `${Number(v).toFixed(1)}m`}
@@ -1389,16 +1376,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
           Rail pressure channels not logged — fault detected via other indicators.
         </div>
       )}
-      <FaultEventList
-        isCritical={issue?.severity === 'critical'}
-        events={computeFaultEvents(
-          chartData,
-          d => isLow ? (d.deltaLow ?? 0) > CHART_THRESHOLD_LOW : (d.deltaHigh ?? 0) > CHART_THRESHOLD_HIGH,
-          d => isLow ? (d.deltaLow ?? 0) : (d.deltaHigh ?? 0),
-          'psi'
-        )}
-        onJumpToTime={onJumpToTime}
-      />
+
     </FaultChartWrapper>
   );
 });
@@ -2300,17 +2278,13 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
             label={{ value: 'Time (min)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis yAxisId="psi" stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 10 }}
             label={{ value: 'Rail Pressure (psi)', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} domain={['auto', 'auto']} />
-          <YAxis yAxisId="delta" orientation="right" stroke="#ff4444" tick={{ fill: '#ff4444', fontSize: 10 }}
-            label={{ value: 'Delta (psi)', angle: 90, position: 'insideRight', fill: '#ff4444', fontSize: 10 }} />
+
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#aaa' }} />
-          <ReferenceLine yAxisId="delta" y={2600} stroke="#ff4444" strokeDasharray="4 2"
-            label={{ value: '+2600 psi', fill: '#ff4444', fontSize: 9 }} />
-          <ReferenceLine yAxisId="delta" y={-2600} stroke="#ff4444" strokeDasharray="4 2"
-            label={{ value: '-2600 psi', fill: '#ff4444', fontSize: 9 }} />
+
           <Line yAxisId="psi" type="monotone" dataKey="actual" stroke="#f97316" dot={false} strokeWidth={2} name="Rail Actual (psi)" />
           <Line yAxisId="psi" type="monotone" dataKey="desired" stroke="#22d3ee" dot={false} strokeWidth={1.5} strokeDasharray="5 3" name="Rail Desired (psi)" />
-          <Line yAxisId="delta" type="monotone" dataKey="delta" stroke="#ff4444" dot={false} strokeWidth={1} name="Delta (psi)" />
+
         </ComposedChart>
       </ResponsiveContainer>
         )}
