@@ -1990,7 +1990,7 @@ export const liveWeatherStreams = mysqlTable("live_weather_streams", {
   /** Vehicle identifier / callsign */
   callsign: varchar("callsign", { length: 64 }),
   /** Stream status */
-  status: mysqlEnum("status", ["live", "paused", "ended"]).default("live").notNull(),
+  status: mysqlEnum("status", ["testing", "live", "paused", "ended"]).default("testing").notNull(),
   /** Current latitude */
   latitude: decimal("latitude", { precision: 10, scale: 7 }),
   /** Current longitude */
@@ -2025,6 +2025,21 @@ export const liveWeatherStreams = mysqlTable("live_weather_streams", {
   intakeAirTemp: decimal("intakeAirTemp", { precision: 6, scale: 1 }),
   /** Latest vehicle: fuel rate (gal/hr) */
   fuelRateGph: decimal("fuelRateGph", { precision: 6, scale: 2 }),
+  /** Whether storm chase active mode is engaged */
+  stormChaseActive: boolean("stormChaseActive").default(false).notNull(),
+  /** Emergency override: DTC clear every 7s for 10 min */
+  emergencyOverrideActive: boolean("emergencyOverrideActive").default(false).notNull(),
+  emergencyOverrideStartedAt: timestamp("emergencyOverrideStartedAt"),
+  /** User toggle preferences — JSON: { peakGauges, healthPulse, viewerCount, audioAlert } */
+  streamSettings: json("streamSettings"),
+  /** Post-session summary — JSON: { totalDistance, maxSpeed, maxGForce, dtcsEncountered, overridesUsed, duration, ... } */
+  sessionSummary: json("sessionSummary"),
+  /** Vehicle health status: green, yellow, red */
+  healthStatus: mysqlEnum("healthStatus", ["green", "yellow", "red"]).default("green"),
+  /** Peak values during session — JSON: { maxMph, maxRpm, maxGForce, maxBoost } */
+  peakValues: json("peakValues"),
+  /** Viewer count */
+  peakViewerCount: int("peakViewerCount").default(0).notNull(),
   /** Viewer count */
   viewerCount: int("viewerCount").default(0).notNull(),
   /** Total data points received */
@@ -2122,3 +2137,87 @@ export const taskOverrides = mysqlTable("task_overrides", {
 
 export type TaskOverride = typeof taskOverrides.$inferSelect;
 export type InsertTaskOverride = typeof taskOverrides.$inferInsert;
+
+
+// ── Storm Chaser Live Stream ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Stream sessions — each storm chase session creates one record.
+ * Tracks connection state, settings (toggle prefs), and post-session summary.
+ */
+export const streamSessions = mysqlTable("stream_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the driver/streamer */
+  userId: int("userId").notNull(),
+  /** Unique share key for viewer/overlay URLs */
+  shareKey: varchar("shareKey", { length: 64 }).notNull().unique(),
+  /** Session status */
+  status: mysqlEnum("streamStatus", ["connecting", "scanning", "live", "paused", "ended"]).default("connecting").notNull(),
+  /** Whether storm chase active mode is engaged */
+  stormChaseActive: boolean("stormChaseActive").default(false).notNull(),
+  /** User toggle preferences — JSON: { peakGauges, healthPulse, viewerCount, audioAlert } */
+  settings: json("settings"),
+  /** Post-session summary — JSON: { totalDistance, maxSpeed, maxGForce, dtcsEncountered, overridesUsed, duration, ... } */
+  summary: json("summary"),
+  /** Emergency override state */
+  emergencyOverrideActive: boolean("emergencyOverrideActive").default(false).notNull(),
+  emergencyOverrideStartedAt: timestamp("emergencyOverrideStartedAt"),
+  /** Total viewers who connected during this session */
+  peakViewerCount: int("peakViewerCount").default(0).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  endedAt: timestamp("endedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StreamSession = typeof streamSessions.$inferSelect;
+export type InsertStreamSession = typeof streamSessions.$inferInsert;
+
+/**
+ * Stream events — timestamped log of everything that happens during a chase.
+ * Types: event_marker, code_clear, code_read, override_start, override_end, connection, error
+ */
+export const streamEvents = mysqlTable("stream_events", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to stream_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Event type */
+  type: mysqlEnum("eventType", [
+    "event_marker",     // Driver-tagged moment (tornado spotted, hail impact, etc.)
+    "code_clear",       // DTC code clear attempt
+    "code_read",        // DTC read — codes broadcast to viewers
+    "override_start",   // Emergency override activated
+    "override_end",     // Emergency override ended (timer expired or manual stop)
+    "connection",       // Vehicle connected/disconnected
+    "error",            // OBD error or connection issue
+  ]).notNull(),
+  /** Event-specific data — JSON */
+  data: json("data"),
+  /** Optional label (for event markers) */
+  label: varchar("label", { length: 255 }),
+  /** Whether this event was successful (for code_clear attempts) */
+  success: boolean("success"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export type StreamEvent = typeof streamEvents.$inferSelect;
+export type InsertStreamEvent = typeof streamEvents.$inferInsert;
+
+/**
+ * Stream telemetry snapshots — periodic snapshots of PID data for replay.
+ * Stored at ~1Hz for replay (live data streams via WebSocket at higher rate).
+ */
+export const streamTelemetry = mysqlTable("stream_telemetry", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to stream_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** PID snapshot — JSON: { rpm, mph, throttlePct, brakePct, gForceX, gForceY, ... } */
+  data: json("data"),
+  /** Vehicle health status at this moment: green, yellow, red */
+  healthStatus: mysqlEnum("healthStatus", ["green", "yellow", "red"]).default("green"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export type StreamTelemetry = typeof streamTelemetry.$inferSelect;
+export type InsertStreamTelemetry = typeof streamTelemetry.$inferInsert;

@@ -1346,3 +1346,44 @@
 - [x] Fix Strat to NEVER assume customer's tuning platform or hardware — must ask first
 - [x] When customer asks about tune loading/flashing without specifying platform, Strat must ask what platform/hardware they are using before providing instructions
 - [x] PPEI offers multiple platforms and hardware options — Strat needs to identify which one before giving steps
+
+## Storm Chaser Live Telemetry Stream Feature
+
+### Core Stream Infrastructure
+- [x] DB schema: stream_sessions table (id, userId, status, startedAt, endedAt, settings JSON, summary JSON)
+- [x] DB schema: stream_events table (id, sessionId, type, data JSON, timestamp) for event markers, code clears, DTC reads
+- [ ] WebSocket relay server for real-time telemetry broadcast (driver → server → viewers)
+- [x] tRPC procedures: startTestSession, goLive, activateStormChase, deactivateStormChase, endSession, getSession, getMyChases, getSessionEvents, getOverlayUrl, updateSettings, updatePeaks, updateHealthStatus, startEmergencyOverride, stopEmergencyOverride, logCodeClear, readCodes, addEventMarker
+
+### Driver-Side (Storm Chase Dashboard)
+- [x] Vehicle connection flow: connect → auto scan → confirm scan good → ready to stream
+- [x] Storm Chase Active mode toggle with distinct visual state
+- [x] Live telemetry gauges: brake %, throttle %, RPM %, G-force, MPH (placeholder PIDs until available)
+- [x] Vehicle health pulse indicator (green/yellow/red) based on live data
+- [x] Peak gauges showing session max values (toggle on/off by user)
+- [x] Event marker button — driver taps to timestamp key moments with optional label
+- [x] Viewer count display (toggle on/off by user)
+- [x] Emergency Override button — triggers DTC clear every 7 seconds for 10 minutes
+- [x] Emergency Override countdown timer visible on screen
+- [x] Emergency Override audio alert on activate/deactivate (toggle on/off by user)
+- [x] Read Codes button — reads DTCs and broadcasts to viewers
+- [x] Override log — record every code clear attempt and result
+
+### Viewer-Side (Stream Overlay & Viewer Page)
+- [x] Embeddable OBS overlay URL (browser source) with transparent background
+- [x] OBS overlay customizable theme: position, size, transparency, color scheme
+- [x] Standalone V-OP stream viewer page for non-OBS viewers
+- [x] Viewer sees: live telemetry gauges, vehicle health pulse, event markers
+- [x] Viewer sees: emergency override active status + countdown
+- [x] Viewer sees: DTC codes when driver initiates Read Codes
+
+### Session Summary & Replay
+- [x] Auto-generate session summary on chase end: total distance, max speed, max G-force, DTCs encountered, emergency overrides used, duration
+- [ ] Shareable session replay link with timestamped telemetry data
+
+### Integration
+- [ ] Wire datalogger PID hooks with placeholder data for unavailable PIDs
+- [x] Add /weather route and /storm-chase route
+- [x] Register stream viewer route (/stream/:streamKey)
+- [x] Register OBS overlay route (/stream/overlay?key=...)
+- [x] Test Mode: users can run full connection/overlay flow without going live — verify OBS overlay, gauge layout, connection stability before broadcasting

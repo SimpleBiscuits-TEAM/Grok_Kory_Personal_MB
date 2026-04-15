@@ -41,6 +41,7 @@ import { lauraRouter } from "./routers/laura";
 import { stratRouter } from "./routers/strat";
 import { githubRouter } from "./routers/github";
 import { tasksRouter } from "./routers/tasks";
+import { stormChaseRouter } from "./routers/stormChase";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -314,6 +315,7 @@ export const appRouter = router({
 
   // Live Weather Streams & Storm Chaser Telemetry
   streaming: streamingRouter,
+  stormChase: stormChaseRouter,
 
   // Laura — Weather AI Agent
   laura: lauraRouter,

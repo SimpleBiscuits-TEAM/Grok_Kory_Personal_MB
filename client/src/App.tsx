@@ -21,6 +21,9 @@ const Calibrations = lazy(() => import("./pages/Calibrations"));
 const TuneDeployPage = lazy(() => import("./pages/TuneDeploy"));
 const GitMapPage = lazy(() => import("./pages/GitMap"));
 const Strat = lazy(() => import("./pages/Strat"));
+const StormChase = lazy(() => import("./pages/StormChase"));
+const StormChaseOverlay = lazy(() => import("./pages/StormChaseOverlay"));
+const StormChaseViewer = lazy(() => import("./pages/StormChaseViewer"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -72,7 +75,10 @@ function Router() {
         <Route path={"/fleet"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/drag"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/competition"}>{() => <Redirect to="/advanced" />}</Route>
-        <Route path={"/weather"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/weather"} component={StormChase} />
+        <Route path={"/storm-chase"} component={StormChase} />
+        <Route path="/stream/overlay" component={StormChaseOverlay} />
+        <Route path="/stream/:streamKey" component={StormChaseViewer} />
         <Route path={"/community"} component={Community} />
         <Route path={"/pitch"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>
