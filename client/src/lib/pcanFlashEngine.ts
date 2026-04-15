@@ -1257,10 +1257,14 @@ export class PCANFlashEngine {
   }
 
   /**
-   * Same as {@link FlashBridgeConnection.sendUDSRequest}, but live flash also races a hard
-   * 20s cap and calls {@link FlashBridgeConnection.cancelInFlightDiagnostics}
-   * so a stuck ISO-TP wait (e.g. ECU unplugged mid-transfer) cannot outlive the silence policy.
-   * Skipped in dry run, while the silence watchdog is suppressed, or for `delay`-marked blocks.
+   * Delegates to {@link FlashBridgeConnection.sendUDSRequest}.
+   *
+   * We intentionally do **not** wrap the call in an extra wall-clock race (e.g. 20s): during
+   * full-flash erase/programming the E41 may stream **NRC 0x78** on TransferData (0x36) for well
+   * over 20s while still communicating. A fixed outer timeout would abort despite valid ECU traffic.
+   * Silence is enforced only via {@link assertEcuNotSilentTooLong} **between** completed UDS calls
+   * (where {@link markEcuResponded} reflects the last finished exchange) and the transport’s own
+   * per-request timeout (e.g. 30s on long ISO-TP waits).
    */
   private async flashConnSendUds(
     service: number,
@@ -1269,39 +1273,10 @@ export class PCANFlashEngine {
     targetAddress: number,
     timeoutMs?: number,
     responseArbIdOverride?: number,
-    delayExemptBlock?: ContainerBlockStruct | null,
+    _delayExemptBlock?: ContainerBlockStruct | null,
   ): Promise<UDSResponse | null> {
-    if (
-      this.dryRun
-      || this.ecuSilenceWatchdogSuppressDepth > 0
-      || (delayExemptBlock && isContainerBlockDelayActive(delayExemptBlock))
-    ) {
-      return this.conn.sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
-    }
-    const capMs = PCANFlashEngine.ECU_SILENCE_ABORT_MS;
-    let capTimer: ReturnType<typeof setTimeout> | undefined;
-    const silenceCap = new Promise<never>((_, reject) => {
-      capTimer = setTimeout(() => {
-        try {
-          this.conn.cancelInFlightDiagnostics?.();
-        } catch {
-          /* ignore */
-        }
-        reject(
-          new Error(
-            `No ECU response for more than ${capMs / 1000}s (in-flight UDS wait) — aborting flash`,
-          ),
-        );
-      }, capMs);
-    });
-    try {
-      return await Promise.race([
-        this.conn.sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride),
-        silenceCap,
-      ]);
-    } finally {
-      if (capTimer) clearTimeout(capTimer);
-    }
+    void _delayExemptBlock;
+    return this.conn.sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
   }
 
   // ── Command Execution ──────────────────────────────────────────────────
