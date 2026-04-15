@@ -16,8 +16,10 @@ import {
   Loader2, CloudSun, Thermometer, Wind, Droplets, Mountain,
   Gauge, Activity, MapPin, Truck, BarChart3, Clock, Radio,
   Calculator, ChevronDown, ChevronUp, Signal, Database,
-  MessageCircle, Video, Send, Zap, Eye, Users,
+  MessageCircle, Video, Send, Zap, Eye, Users, ArrowRight,
+  Shield, Bookmark,
 } from 'lucide-react';
+import { useLocation } from 'wouter';
 import { Streamdown } from 'streamdown';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -584,6 +586,89 @@ function LauraChat() {
   );
 }
 
+// ── Storm Chase CTA ──
+function StormChaseCTA() {
+  const [, navigate] = useLocation();
+
+  return (
+    <div
+      onClick={() => navigate('/storm-chase')}
+      style={{
+        background: 'linear-gradient(135deg, oklch(0.14 0.030 210) 0%, oklch(0.12 0.020 260) 50%, oklch(0.14 0.025 25) 100%)',
+        border: `1px solid oklch(0.35 0.15 210)`,
+        borderRadius: '4px',
+        padding: '1.25rem 1.5rem',
+        marginBottom: '1.5rem',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+      className="hover:scale-[1.01] active:scale-[0.99]"
+    >
+      {/* Glow accent */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: '2px',
+        background: `linear-gradient(90deg, ${sColor.cyan}, ${sColor.red}, ${sColor.amber})`,
+      }} />
+
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div style={{
+            width: 44, height: 44, borderRadius: '8px',
+            background: 'oklch(0.20 0.04 210)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Radio className="h-6 w-6" style={{ color: sColor.cyan }} />
+          </div>
+          <div>
+            <h3 style={{
+              fontFamily: sFont.heading,
+              fontSize: '1.15rem',
+              letterSpacing: '0.06em',
+              color: 'white',
+              margin: 0,
+              lineHeight: 1.2,
+            }}>
+              STORM CHASE DASHBOARD
+            </h3>
+            <p style={{
+              fontFamily: sFont.body,
+              fontSize: '0.82rem',
+              color: sColor.textDim,
+              margin: '2px 0 0 0',
+            }}>
+              Start a test session, verify your OBS overlay, then go live with vehicle telemetry
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div style={{
+            display: 'flex', gap: '6px', marginRight: '8px',
+          }}>
+            <span style={{
+              fontFamily: sFont.mono, fontSize: '0.58rem', letterSpacing: '0.06em',
+              color: sColor.cyan, background: 'oklch(0.15 0.02 210)', padding: '3px 8px',
+              borderRadius: '2px', border: '1px solid oklch(0.25 0.04 210)',
+            }}>TEST MODE</span>
+            <span style={{
+              fontFamily: sFont.mono, fontSize: '0.58rem', letterSpacing: '0.06em',
+              color: sColor.amber, background: 'oklch(0.15 0.02 60)', padding: '3px 8px',
+              borderRadius: '2px', border: '1px solid oklch(0.25 0.04 60)',
+            }}>OBS OVERLAY</span>
+            <span style={{
+              fontFamily: sFont.mono, fontSize: '0.58rem', letterSpacing: '0.06em',
+              color: sColor.red, background: 'oklch(0.15 0.02 25)', padding: '3px 8px',
+              borderRadius: '2px', border: '1px solid oklch(0.25 0.04 25)',
+            }}>EMERGENCY</span>
+          </div>
+          <ArrowRight className="h-5 w-5" style={{ color: sColor.cyan }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Live Streams Panel ──
 function LiveStreamsPanel() {
   const { isAuthenticated } = useAuth();
@@ -654,6 +739,9 @@ function LiveStreamsPanel() {
           reports atmospheric conditions from the field.
         </p>
       </div>
+
+      {/* Storm Chase CTA */}
+      <StormChaseCTA />
 
       {/* Start Stream button / form */}
       {isAuthenticated && !showStartForm && (
@@ -790,13 +878,13 @@ function LiveStreamsPanel() {
             <Loader2 className="h-6 w-6 animate-spin" style={{ color: sColor.cyan }} />
           </div>
         ) : streams.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center' }}>
-            <Video className="h-12 w-12 mx-auto mb-3" style={{ color: sColor.textDim, opacity: 0.3 }} />
-            <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', marginBottom: '4px' }}>
-              No active streams right now.
+          <div style={{ padding: '2rem', textAlign: 'center' }}>
+            <Radio className="h-10 w-10 mx-auto mb-3" style={{ color: sColor.textDim, opacity: 0.25 }} />
+            <p style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.88rem', marginBottom: '4px' }}>
+              No active weather streams right now.
             </p>
-            <p style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.7rem' }}>
-              Start a stream to broadcast your vehicle's weather data live.
+            <p style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.68rem', marginBottom: '12px' }}>
+              Streams will appear here when a VOP user goes live.
             </p>
           </div>
         ) : (

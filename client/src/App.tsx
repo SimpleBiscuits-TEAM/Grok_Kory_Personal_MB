@@ -21,6 +21,7 @@ const Calibrations = lazy(() => import("./pages/Calibrations"));
 const TuneDeployPage = lazy(() => import("./pages/TuneDeploy"));
 const GitMapPage = lazy(() => import("./pages/GitMap"));
 const Strat = lazy(() => import("./pages/Strat"));
+const Weather = lazy(() => import("./pages/Weather"));
 const StormChase = lazy(() => import("./pages/StormChase"));
 const StormChaseOverlay = lazy(() => import("./pages/StormChaseOverlay"));
 const StormChaseViewer = lazy(() => import("./pages/StormChaseViewer"));
@@ -75,7 +76,7 @@ function Router() {
         <Route path={"/fleet"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/drag"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/competition"}>{() => <Redirect to="/advanced" />}</Route>
-        <Route path={"/weather"} component={StormChase} />
+        <Route path={"/weather"}>{() => <Weather />}</Route>
         <Route path={"/storm-chase"} component={StormChase} />
         <Route path="/stream/overlay" component={StormChaseOverlay} />
         <Route path="/stream/:streamKey" component={StormChaseViewer} />

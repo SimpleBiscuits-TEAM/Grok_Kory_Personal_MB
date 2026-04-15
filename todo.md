@@ -1387,3 +1387,9 @@
 - [x] Register stream viewer route (/stream/:streamKey)
 - [x] Register OBS overlay route (/stream/overlay?key=...)
 - [x] Test Mode: users can run full connection/overlay flow without going live — verify OBS overlay, gauge layout, connection stability before broadcasting
+
+## Weather Tab — Storm Chase Entry Point & Empty State Fix
+- [x] Add clear "Storm Chase Dashboard" CTA card in the Weather tab's Live Streams panel — links to /storm-chase with TEST MODE / OBS OVERLAY / EMERGENCY badges
+- [x] Improve empty "Active Streams" state — shows "0 LIVE" with helpful message "Streams will appear here when a VOP user goes live"
+- [x] Restore /weather route to original Weather page (was incorrectly replaced with StormChase dashboard)
+- [x] Clean up 14 stale test stream records from database (left over from vitest)
