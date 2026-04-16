@@ -1393,3 +1393,11 @@
 - [x] Improve empty "Active Streams" state — shows "0 LIVE" with helpful message "Streams will appear here when a VOP user goes live"
 - [x] Restore /weather route to original Weather page (was incorrectly replaced with StormChase dashboard)
 - [x] Clean up 14 stale test stream records from database (left over from vitest)
+
+## Analyzer Tab — Charts & Visualization Bugs (Apr 16, 2026)
+- [x] Fix time axis showing minutes (e.g. 970.3m) instead of seconds — convert to seconds display
+- [x] Fix Clear PIDs button in Log Details — clicking "Clear All" now removes HP/Torque default curves + all overlay PIDs, with "+ HP/TQ" button to restore defaults
+- [x] Add (+) button at bottom of Log Details to create additional graph panels with independent PID selection, each with own Y-axes and time-series chart
+- [x] Fix graph distortion when more than 2 PIDs are plotted — limited visible Y-axes to 2 (rest use hidden axes), capped right margin, supports up to 5+ PIDs cleanly
+- [x] Dyno chart HP/TQ estimation fallback — fixed binnedData path to use correct HP source (torque > accel > MAF > none), added 'none' hpSource state with descriptive warning, acceleration-based HP (vehicle weight + speed delta) already computed by dataProcessor as first-class fallback
+- [x] CONSTRAINT: Did NOT modify any of Tobi's PCAN, flash, bridge, datalogger, or EDS code — all changes in DynoCharts.tsx only
