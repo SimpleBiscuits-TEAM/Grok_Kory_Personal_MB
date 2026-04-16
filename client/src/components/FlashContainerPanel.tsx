@@ -206,12 +206,35 @@ export default function FlashContainerPanel() {
   /** URL used for `wsBridgeConnectionRef` — reuse instance when unchanged, avoid stale sockets. */
   const lastWsBridgeFlashUrlRef = useRef<string | null>(null);
   const vopConnectionRef = useRef<VopCan2UsbConnection | null>(null);
+  const [vopUsbIdentity, setVopUsbIdentity] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const vopUsbSupported = useMemo(
     () => typeof window !== 'undefined' && VopCan2UsbConnection.isSupported(),
     [],
   );
+
+  // Keep a live snapshot of the V-OP USB bridge identity for header UI (ref changes do not re-render).
+  useEffect(() => {
+    const v = getSharedVopCan2UsbConnection();
+    const sync = () => {
+      const vi = v.getVehicleInfo();
+      const id = [vi.vopDeviceName, vi.vopDeviceSerial].filter(Boolean).join(' · ') || vi.vopDeviceIdentity || '';
+      setVopUsbIdentity(id || null);
+    };
+    const onVehicle = () => sync();
+    const onState = (e: unknown) => {
+      // `stateChange` emits the raw state string as data; clear on disconnect.
+      if (e === 'disconnected') setVopUsbIdentity(null);
+    };
+    v.on('vehicleInfo', onVehicle);
+    v.on('stateChange', onState as any);
+    sync();
+    return () => {
+      v.off('vehicleInfo', onVehicle);
+      v.off('stateChange', onState as any);
+    };
+  }, []);
 
   /** Transport last chosen on ECU Scan (local bridge vs V-OP) — drives live flash hardware. */
   const [flashScanTransport, setFlashScanTransport] = useState<StoredEcuScanTransport | null>(null);
@@ -533,31 +556,42 @@ export default function FlashContainerPanel() {
   }, [triggerPickContainerFile]);
 
   const workspaceToggle = (
-    <div className="flex flex-wrap gap-2 mb-4 p-1 rounded-xl bg-zinc-900/60 border border-zinc-800">
-      <button
-        type="button"
-        onClick={() => setFlashWorkspace('ecuScan')}
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
-          flashWorkspace === 'ecuScan'
-            ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
-            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-        }`}
-      >
-        <Search className="w-3.5 h-3.5" />
-        ECU SCAN
-      </button>
-      <button
-        type="button"
-        onClick={() => setFlashWorkspace('tuneDeploy')}
-        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
-          flashWorkspace === 'tuneDeploy'
-            ? 'bg-red-500/20 text-red-200 border border-red-500/40'
-            : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-        }`}
-      >
-        <Layers className="w-3.5 h-3.5" />
-        TUNE DEPLOY
-      </button>
+    <div className="flex items-center justify-between gap-2 mb-4 p-1 rounded-xl bg-zinc-900/60 border border-zinc-800">
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setFlashWorkspace('ecuScan')}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
+            flashWorkspace === 'ecuScan'
+              ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
+              : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+          }`}
+        >
+          <Search className="w-3.5 h-3.5" />
+          ECU SCAN
+        </button>
+        <button
+          type="button"
+          onClick={() => setFlashWorkspace('tuneDeploy')}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold tracking-wide transition-colors ${
+            flashWorkspace === 'tuneDeploy'
+              ? 'bg-red-500/20 text-red-200 border border-red-500/40'
+              : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          TUNE DEPLOY
+        </button>
+      </div>
+      {vopUsbIdentity && (
+        <div
+          className="hidden sm:flex items-center gap-1.5 pr-2 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-500 max-w-[40%] truncate"
+          title={vopUsbIdentity}
+        >
+          <Usb className="w-3.5 h-3.5 text-violet-300/70" />
+          <span className="truncate">{vopUsbIdentity}</span>
+        </div>
+      )}
     </div>
   );
 

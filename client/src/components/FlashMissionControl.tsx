@@ -274,6 +274,7 @@ export default function FlashMissionControl({
   const funFacts = useMemo(() => getAllFunFacts(plan.ecuType), [plan.ecuType]);
   const isRealFlash = connectionMode === 'pcan' || connectionMode === 'vop_usb';
   const isDryRun = dryRun && isRealFlash;
+  const [vopBridgeIdentity, setVopBridgeIdentity] = useState<string | null>(null);
   /** Active run with no final result yet (simulator or hardware). */
   const flashLocked = sim.isRunning && !sim.result;
   /** Real hardware flash: lock UI so side interactions do not disturb CAN timing. */
@@ -413,6 +414,7 @@ export default function FlashMissionControl({
     if (connectionMode === 'vop_usb' && bridge) {
       void (bridge as VopCan2UsbConnection).disconnect();
     }
+    setVopBridgeIdentity(null);
   }, [connectionMode, flashBridge, flashBridgeRef]);
 
   /** Real hardware flash only — creates a new {@link PCANFlashEngine} and runs it. */
@@ -433,6 +435,13 @@ export default function FlashMissionControl({
           statusMessage: 'USB CAN bridge connect failed — grant serial access and press Start again.',
         }));
         return false;
+      }
+      try {
+        const vi = vop.getVehicleInfo();
+        const id = [vi.vopDeviceName, vi.vopDeviceSerial].filter(Boolean).join(' · ') || vi.vopDeviceIdentity || null;
+        setVopBridgeIdentity(id);
+      } catch {
+        setVopBridgeIdentity(null);
       }
       skipConnect = true;
     }
@@ -845,6 +854,11 @@ export default function FlashMissionControl({
                       : 'Simulator Mode'}{' '}
                 — {plan.ecuName}
               </p>
+              {connectionMode === 'vop_usb' && vopBridgeIdentity && (
+                <p className="text-[10px] font-mono text-zinc-600 mt-1">
+                  USB bridge: <span className="text-zinc-400">{vopBridgeIdentity}</span>
+                </p>
+              )}
             </div>
           </div>
           <Badge variant="outline" className={`font-mono text-xs ${
