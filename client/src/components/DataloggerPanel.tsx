@@ -2353,6 +2353,18 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Protocol</span>
             <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{vehicleInfo.protocol || 'Auto'}</div>
           </div>
+          {(vehicleInfo.vopDeviceName || vehicleInfo.vopDeviceSerial) && (
+            <div style={{ opacity: 0.85 }}>
+              <span style={{ fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>USB bridge</span>
+              <div
+                style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, maxWidth: '280px', wordBreak: 'break-all' }}
+                title={[vehicleInfo.vopDeviceName, vehicleInfo.vopDeviceSerial].filter(Boolean).join(' · ')}
+              >
+                {vehicleInfo.vopDeviceName ? `Device: ${vehicleInfo.vopDeviceName}` : 'Device: —'}
+                {vehicleInfo.vopDeviceSerial ? ` · Serial: ${vehicleInfo.vopDeviceSerial}` : ''}
+              </div>
+            </div>
+          )}
           <div>
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Voltage</span>
             <div style={{

@@ -554,6 +554,7 @@ export default function IntelliSpy() {
   const vopConnRef = useRef<VopCan2UsbConnection | null>(null);
   const vopUnsubRef = useRef<(() => void) | null>(null);
   const vopFrameSeqRef = useRef(0);
+  const [vopAdapterIdentity, setVopAdapterIdentity] = useState<string | null>(null);
   const handleBridgeMessageRef = useRef<(msg: Record<string, unknown>) => void>(() => {});
 
   // Bridge check state (matches DataloggerPanel pattern)
@@ -817,8 +818,13 @@ export default function IntelliSpy() {
         const ok = await v.connect({ skipVehicleInit: true });
         if (!ok) {
           setStatus('error');
+          setVopAdapterIdentity(null);
           return;
         }
+        const vi = v.getVehicleInfo();
+        setVopAdapterIdentity(
+          [vi.vopDeviceName, vi.vopDeviceSerial].filter(Boolean).join(' · ') || vi.vopDeviceIdentity || null
+        );
         vopUnsubRef.current?.();
         vopFrameSeqRef.current = 0;
         const unsub = v.subscribeCanMonitor((arbId, flags, data) => {
@@ -846,6 +852,7 @@ export default function IntelliSpy() {
         armEcuLostTimer();
       } catch {
         setStatus('error');
+        setVopAdapterIdentity(null);
       }
       return;
     }
@@ -951,6 +958,7 @@ export default function IntelliSpy() {
       vopUnsubRef.current = null;
       void vopConnRef.current?.disconnect();
       vopConnRef.current = null;
+      setVopAdapterIdentity(null);
       setStatus('disconnected');
       stopStatsTimer();
       if (ecuLostTimerRef.current) {
@@ -1589,7 +1597,11 @@ export default function IntelliSpy() {
           <span className="text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-500">ADAPTER</span>
           <select
             value={spyTransport}
-            onChange={e => setSpyTransport(e.target.value as 'ws' | 'vop')}
+            onChange={e => {
+              const next = e.target.value as 'ws' | 'vop';
+              if (next === 'ws') setVopAdapterIdentity(null);
+              setSpyTransport(next);
+            }}
             disabled={status === 'monitoring' || status === 'connecting' || status === 'connected'}
             className={`rounded border border-zinc-700 bg-zinc-900/80 py-1 pl-2 pr-6 text-[10px] font-['Share_Tech_Mono',monospace] ${
               spyTransport === 'vop' ? 'text-violet-300' : 'text-red-300'
@@ -1598,6 +1610,14 @@ export default function IntelliSpy() {
             <option value="ws">PCAN-USB (WS bridge)</option>
             <option value="vop" disabled={!VopCan2UsbConnection.isSupported()}>V-OP Can2USB</option>
           </select>
+          {spyTransport === 'vop' && vopAdapterIdentity && (
+            <span
+              className="ml-2 max-w-[min(220px,28vw)] truncate text-[9px] font-['Share_Tech_Mono',monospace] text-zinc-500"
+              title={vopAdapterIdentity}
+            >
+              {vopAdapterIdentity}
+            </span>
+          )}
         </div>
 
         {/* Bridge Check */}

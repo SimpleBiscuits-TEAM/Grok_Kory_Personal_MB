@@ -1,15 +1,14 @@
 /**
  * V-OP Can2USB — Web Serial transport for **@Firmware** (`fimware-v3.0`) USB↔CAN bridge.
  *
- * Wire format matches:
- * - `fimware-v3.0/main/USBCanBridge/USBCanBridge.c`
- * - `fimware-v3.0/host_tools/can_usb_bridge_cli.py` / `can_usb_bridge_gui.py`
+ * Wire format is the single source documented in **`bridge/bridge_protocol.py`** (same as legacy
+ * `fimware-v3.0/host_tools` references where applicable).
  *
  * **Binary frame (little-endian CAN id, CRC over type..data):**
  * `55 AA | type | flags | can_id u32 | dlc | data[0..dlc] | crc16`
  *
- * - `type`: CAN_TX=0x01, CAN_RX=0x02, CMD=0x10, ACK=0x11, NACK=0x12
- * - `flags`: bit0=EXT, bit1=RTR
+ * - `type`: CAN_TX=0x01, CAN_RX=0x02, CMD=0x10, ACK=0x11, NACK=0x12; identity/efuse 0x30–0x35
+ * - `flags`: EXT, RTR, EFUSE_SIMULATE, IDENTITY_WINBOND, IDENTITY_CRC_OK (see `bridge_protocol.py`)
  *
  * Host sends **CAN_TX** and waits **ACK/NACK**. Device pushes **CAN_RX** for bus traffic.
  * OBD-II is built in this file as **ISO-TP** on **0x7E0 / 0x7E8** (11-bit), same as typical GM ECU.
@@ -60,8 +59,18 @@ const TYPE_CMD = 0x10;
 const TYPE_ACK = 0x11;
 const TYPE_NACK = 0x12;
 
+const TYPE_IDENTITY_READ_REQ = 0x32;
+const TYPE_IDENTITY_READ_DATA = 0x33;
+
 const FLAG_EXTD = 1 << 0;
 const FLAG_RTR = 1 << 1;
+const FLAG_IDENTITY_WINBOND = 1 << 3;
+const FLAG_IDENTITY_CRC_OK = 1 << 4;
+
+/** Winbond-style identity blob size from `bridge/bridge_protocol.py`. */
+const W25_IDENTITY_STRUCT_BYTES = 68;
+/** Device-name field size from `bridge/bridge_protocol.py` (EFUSE_NAME_BYTES). */
+const EFUSE_NAME_BYTES = 24;
 
 /** Default addresses for physical OBD on ISO 15765 (GM / many ECUs). */
 const OBD_TX_ID = 0x7e0;
@@ -140,6 +149,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
   private ackWaiters: Array<{ resolve: (ok: boolean) => void }> = [];
   private rxFrames: Array<{ id: number; data: Uint8Array }> = [];
+
+  /** In-flight reassembly for TYPE_IDENTITY_READ_DATA (0x33) frames from the device. */
+  private bridgeIdentityAccumulator = new Uint8Array(0);
+  private bridgeIdentityLastFlags = 0;
 
   constructor(config: VopCan2UsbConnectionConfig = {}) {
     this.baudRate = config.baudRate ?? 115200;
@@ -244,6 +257,14 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   private dispatchParsed(f: ParsedFrame): void {
+    if (f.type === TYPE_IDENTITY_READ_DATA) {
+      const n = new Uint8Array(this.bridgeIdentityAccumulator.length + f.data.length);
+      n.set(this.bridgeIdentityAccumulator, 0);
+      n.set(f.data, this.bridgeIdentityAccumulator.length);
+      this.bridgeIdentityAccumulator = n;
+      this.bridgeIdentityLastFlags = f.flags;
+      return;
+    }
     if (f.type === TYPE_ACK) {
       const w = this.ackWaiters.shift();
       if (w) w.resolve(true);
@@ -303,6 +324,123 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       await new Promise(r => setTimeout(r, CAN_ISO_TP_RX_POLL_MS));
     }
     return null;
+  }
+
+  private parseBridgeDeviceIdentity(raw: Uint8Array, flags: number): { name?: string; serial?: string; summary?: string } {
+    // The identity payload is device-oriented (name + serial), not a flash chip JEDEC ID.
+    // Firmware may include extra binary fields, so we extract printable ASCII tokens.
+    const decodeAsciiField = (bytes: Uint8Array): string => {
+      const out: number[] = [];
+      let started = false;
+      for (const b of bytes) {
+        if (!started) {
+          // Skip leading padding / non-ASCII until we hit the first printable char.
+          if (b < 0x20 || b > 0x7e) continue;
+          started = true;
+        }
+        // After we started, treat NUL as terminator.
+        if (b === 0x00) break;
+        if (b < 0x20 || b > 0x7e) continue;
+        out.push(b);
+      }
+      return String.fromCharCode(...out).trim().replace(/\s+/g, ' ');
+    };
+
+    // First try fixed-field parsing: [name(24)] [serial(?) ...]
+    // This matches the protocol constant EFUSE_NAME_BYTES and yields stable UI.
+    const fixedName = decodeAsciiField(raw.subarray(0, Math.min(EFUSE_NAME_BYTES, raw.length)));
+    const fixedTail = raw.length > EFUSE_NAME_BYTES ? raw.subarray(EFUSE_NAME_BYTES) : new Uint8Array(0);
+    const fixedSerial = decodeAsciiField(fixedTail);
+
+    const strings: string[] = [];
+    let cur: number[] = [];
+    const flush = () => {
+      if (cur.length >= 3) strings.push(String.fromCharCode(...cur));
+      cur = [];
+    };
+    for (const b of raw) {
+      if (b >= 0x20 && b <= 0x7e) cur.push(b);
+      else flush();
+    }
+    flush();
+
+    const norm = (s: string) => s.trim().replace(/\s+/g, ' ');
+    const tokens = strings.map(norm).filter(Boolean);
+
+    const looksLikeSerial = (s: string) =>
+      /^[A-Z0-9][A-Z0-9\-_.:]{5,}$/i.test(s) && !/^[A-F0-9]{6,}$/i.test(s); // avoid treating pure hex dumps as serials
+
+    let name: string | undefined = fixedName || undefined;
+    let serial: string | undefined = fixedSerial || undefined;
+
+    // Prefer explicit patterns if firmware prints them.
+    for (const t of tokens) {
+      const mName = t.match(/^(?:device|name)\s*[:=]\s*(.+)$/i);
+      if (mName && !name) name = norm(mName[1]);
+      const mSer = t.match(/^(?:serial|sn)\s*[:=]\s*(.+)$/i);
+      if (mSer && !serial) serial = norm(mSer[1]);
+    }
+
+    if (!name) name = tokens.find(t => !looksLikeSerial(t));
+    if (!serial) serial = tokens.find(t => looksLikeSerial(t) && t !== name);
+
+    // If we only got one token, decide if it's a name or serial.
+    if (!serial && tokens.length === 1 && looksLikeSerial(tokens[0])) {
+      serial = tokens[0];
+      name = undefined;
+    }
+
+    const hints: string[] = [];
+    if (flags & FLAG_IDENTITY_WINBOND) hints.push('flash');
+    if (flags & FLAG_IDENTITY_CRC_OK) hints.push('crc ok');
+
+    const core = [name, serial].filter(Boolean).join(' · ');
+    const summary = hints.length && core ? `${core} (${hints.join(', ')})` : core || undefined;
+    return { name, serial, summary };
+  }
+
+  /**
+   * Reads optional flash identity from the bridge (TYPE_IDENTITY_READ_REQ → TYPE_IDENTITY_READ_DATA).
+   * No-op if the firmware does not implement the command.
+   */
+  private async readBridgeDeviceIdentityIfSupported(): Promise<void> {
+    if (!this.writer) return;
+    delete this.vehicleInfo.vopDeviceName;
+    delete this.vehicleInfo.vopDeviceSerial;
+    delete this.vehicleInfo.vopDeviceIdentity;
+    this.bridgeIdentityAccumulator = new Uint8Array(0);
+    this.bridgeIdentityLastFlags = 0;
+    try {
+      const pkt = buildBridgePacket(TYPE_IDENTITY_READ_REQ, 0, 0, new Uint8Array(0));
+      await this.writer.write(pkt);
+      const t0 = Date.now();
+      const deadline = t0 + 2500;
+      let lastLen = 0;
+      let idleMs = 0;
+      while (Date.now() < deadline) {
+        const len = this.bridgeIdentityAccumulator.length;
+        if (len >= W25_IDENTITY_STRUCT_BYTES) break;
+        if (len === 0 && Date.now() - t0 > 450) break;
+        if (len === lastLen) idleMs += 12;
+        else {
+          lastLen = len;
+          idleMs = 0;
+        }
+        if (len > 0 && idleMs >= 400) break;
+        await new Promise(r => setTimeout(r, 12));
+      }
+      if (this.bridgeIdentityAccumulator.length === 0) return;
+      const raw =
+        this.bridgeIdentityAccumulator.length > W25_IDENTITY_STRUCT_BYTES
+          ? this.bridgeIdentityAccumulator.slice(0, W25_IDENTITY_STRUCT_BYTES)
+          : this.bridgeIdentityAccumulator;
+      const parsed = this.parseBridgeDeviceIdentity(raw, this.bridgeIdentityLastFlags);
+      if (parsed.name) this.vehicleInfo.vopDeviceName = parsed.name;
+      if (parsed.serial) this.vehicleInfo.vopDeviceSerial = parsed.serial;
+      if (parsed.summary) this.vehicleInfo.vopDeviceIdentity = parsed.summary;
+    } catch {
+      /* Older bridge / firmware without identity */
+    }
   }
 
   private async sendCanTx(canId: number, ext: boolean, data: Uint8Array, waitAck: boolean): Promise<boolean> {
@@ -429,6 +567,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         this.emit('log', null, 'USB CAN bridge already open — reusing connection.');
         if (options?.skipVehicleInit) {
           this.setState('ready');
+          await this.readBridgeDeviceIdentityIfSupported();
+          this.emit('vehicleInfo', this.vehicleInfo);
           return true;
         }
         if (this.supportedPids.size > 0) {
@@ -463,10 +603,13 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
       await new Promise(r => setTimeout(r, CAN_USB_SERIAL_BRIDGE_SETTLE_MS));
 
+      await this.readBridgeDeviceIdentityIfSupported();
+
       this.emit('log', null, 'Bridge ready (binary 55 AA protocol, @Firmware USBCanBridge).');
 
       if (options?.skipVehicleInit) {
         this.setState('ready');
+        this.emit('vehicleInfo', this.vehicleInfo);
         this.emit('log', null, 'USB CAN bridge ready.');
         return true;
       }
@@ -909,6 +1052,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       this.readActive = true;
       void this.pumpReader();
       await new Promise(r => setTimeout(r, CAN_USB_SERIAL_BRIDGE_SETTLE_MS));
+      await this.readBridgeDeviceIdentityIfSupported();
       this.setState('ready');
       return true;
     } catch {

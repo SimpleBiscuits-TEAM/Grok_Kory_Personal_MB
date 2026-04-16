@@ -152,6 +152,12 @@ export interface VehicleInfo {
   vin?: string;
   protocol?: string;
   protocolNumber?: string;
+  /** V-OP USB bridge: device name from binary bridge protocol (see `bridge/bridge_protocol.py`). */
+  vopDeviceName?: string;
+  /** V-OP USB bridge: serial number from binary bridge protocol (see `bridge/bridge_protocol.py`). */
+  vopDeviceSerial?: string;
+  /** V-OP USB bridge: compact identity summary (e.g. `${name} · ${serial}`). */
+  vopDeviceIdentity?: string;
   voltage?: string;
   ecuCount?: number;
   // Decoded VIN data
