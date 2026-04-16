@@ -1407,3 +1407,11 @@
 - [x] BUG: Time format changed from raw seconds to M:SS — fmtTimeTick for axis ticks, fmtTime for tooltips/labels/ruleText, all fault event times updated
 - [x] BUG: Dyno HP/TQ curve smoothed with 3-pass Gaussian 5-point kernel (1-4-6-4-1) — applied to RPM-binned path, binnedData fallback path, and time-series path (2-pass)
 - [x] INFO: HP/TQ fallback chain explained to user (see delivery message)
+
+## Tasks System — Persistence Bug (Apr 16, 2026)
+- [x] BUG: Task status changes lost on page refresh — rewrote useTaskStore.ts with DB-first approach, DB always wins over localStorage
+- [x] BUG: Debug notes lost on page refresh — fixed ExpandedNotesPanel stale prop sync, DB notes persist correctly
+- [x] Task state changes survive: page refresh, new tab, new publishes — verified DB has 25 rows, UI renders correctly with correct status icons
+- [x] Server-side endpoints already existed (getOverrides, upsertOverride, bulkUpsert, resetAll) — verified working via curl
+- [x] Fixed useTaskStore.ts: DB data replaces state on mount, localStorage is fallback cache only, one-time migration from localStorage to DB for first-time users
+- [x] Fixed ExpandedNotesPanel: added useEffect to sync localNotes when DB prop changes

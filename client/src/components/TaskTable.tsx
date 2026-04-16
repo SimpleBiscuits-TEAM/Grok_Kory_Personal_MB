@@ -7,7 +7,7 @@
  *   - Notes indicator dot on rows that have notes
  */
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import {
   type Task,
   type Status,
@@ -400,6 +400,11 @@ function ExpandedNotesPanel({
   const [localNotes, setLocalNotes] = useState(notes);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync with prop changes (e.g., when DB data arrives after panel is expanded)
+  useEffect(() => {
+    setLocalNotes(notes);
+  }, [notes]);
 
   const handleChange = (value: string) => {
     setLocalNotes(value);

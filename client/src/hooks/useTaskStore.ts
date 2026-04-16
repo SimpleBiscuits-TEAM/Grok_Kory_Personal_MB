@@ -23,7 +23,7 @@ interface SavedState {
   notes: Record<string, string>;
 }
 
-// ── localStorage helpers (fallback / cache) ─────────────────────────────
+// ── localStorage helpers (cache only — DB is source of truth) ───────────
 
 function loadSavedLocal(): SavedState {
   try {
@@ -88,13 +88,13 @@ function buildOverridesFromLocal(): Record<string, TaskOverride> {
     const status = saved.statuses[task.id];
     const section = saved.sectionMoves[task.id];
     const note = saved.notes[task.id];
-    if (status || section || note) {
-      overrides[task.id] = {};
-      if (status && status !== task.status)
-        overrides[task.id].status = status;
-      if (section && section !== task.topSection)
-        overrides[task.id].sectionOverride = section;
-      if (note) overrides[task.id].notes = note;
+    const ov: TaskOverride = {};
+    // Always keep status if it differs from default
+    if (status && status !== task.status) ov.status = status;
+    if (section && section !== task.topSection) ov.sectionOverride = section;
+    if (note) ov.notes = note;
+    if (Object.keys(ov).length > 0) {
+      overrides[task.id] = ov;
     }
   }
 
@@ -131,21 +131,31 @@ export function useTaskStore() {
   // ── DB: fetch overrides on mount ──────────────────────────────────────
   const { data: dbOverrides, isSuccess: dbLoaded } =
     trpc.tasks.getOverrides.useQuery(undefined, {
-      staleTime: 30_000,
+      staleTime: 0, // Always fetch fresh data on mount
       retry: 2,
     });
 
-  const upsertMutation = trpc.tasks.upsertOverride.useMutation();
-  const bulkUpsertMutation = trpc.tasks.bulkUpsert.useMutation();
+  const upsertMutation = trpc.tasks.upsertOverride.useMutation({
+    onError: (err) => {
+      console.error("[Tasks] Failed to save override:", err.message);
+    },
+  });
+  const bulkUpsertMutation = trpc.tasks.bulkUpsert.useMutation({
+    onError: (err) => {
+      console.error("[Tasks] Failed to bulk save:", err.message);
+    },
+  });
   const resetMutation = trpc.tasks.resetAll.useMutation();
 
-  // When DB data arrives, merge it into state (DB wins over localStorage)
+  // When DB data arrives, it is the source of truth — always use it
   useEffect(() => {
     if (!dbLoaded || !dbOverrides) return;
 
     const dbMap: Record<string, TaskOverride> = {};
     for (const row of dbOverrides) {
       const ov: TaskOverride = {};
+      // Always keep status from DB — even if it matches the default,
+      // because the user explicitly set it
       if (row.status) ov.status = row.status as Status;
       if (row.notes) ov.notes = row.notes;
       if (row.sectionOverride)
@@ -156,12 +166,12 @@ export function useTaskStore() {
     }
 
     if (Object.keys(dbMap).length > 0) {
-      // DB has data — use it as source of truth
+      // DB has data — use it as the single source of truth
       setOverrides(dbMap);
       saveLocal(dbMap);
       setDbReady(true);
     } else if (!migrationDone.current) {
-      // DB is empty — migrate localStorage data to DB
+      // DB is empty — migrate localStorage data to DB (one-time)
       const localOverrides = buildOverridesFromLocal();
       if (Object.keys(localOverrides).length > 0) {
         migrationDone.current = true;
@@ -192,40 +202,20 @@ export function useTaskStore() {
 
   const updateStatus = useCallback(
     (id: string, status: Status) => {
+      // Always persist the status to DB — even if it matches the default.
+      // This ensures the user's explicit choice survives refresh.
       setOverrides((prev) => {
-        const def = defaultTasks.find((t) => t.id === id);
         const next = { ...prev };
         const existing = next[id] || {};
-
-        if (
-          def &&
-          status === def.status &&
-          !existing.notes &&
-          !existing.sectionOverride
-        ) {
-          delete next[id];
-        } else {
-          next[id] = {
-            ...existing,
-            status: status === def?.status ? undefined : status,
-          };
-          if (
-            !next[id].status &&
-            !next[id].notes &&
-            !next[id].sectionOverride
-          ) {
-            delete next[id];
-          }
-        }
-
+        next[id] = { ...existing, status };
         saveLocal(next);
         return next;
       });
 
-      const def = defaultTasks.find((t) => t.id === id);
+      // Always send the actual status to DB — never send null
       upsertMutation.mutate({
         taskId: id,
-        status: status === def?.status ? null : status,
+        status,
       });
     },
     [upsertMutation]
@@ -234,40 +224,16 @@ export function useTaskStore() {
   const moveTask = useCallback(
     (id: string, newSection: TopSection) => {
       setOverrides((prev) => {
-        const def = defaultTasks.find((t) => t.id === id);
         const next = { ...prev };
         const existing = next[id] || {};
-
-        if (
-          def &&
-          newSection === def.topSection &&
-          !existing.notes &&
-          !existing.status
-        ) {
-          delete next[id];
-        } else {
-          next[id] = {
-            ...existing,
-            sectionOverride:
-              newSection === def?.topSection ? undefined : newSection,
-          };
-          if (
-            !next[id].status &&
-            !next[id].notes &&
-            !next[id].sectionOverride
-          ) {
-            delete next[id];
-          }
-        }
-
+        next[id] = { ...existing, sectionOverride: newSection };
         saveLocal(next);
         return next;
       });
 
-      const def = defaultTasks.find((t) => t.id === id);
       upsertMutation.mutate({
         taskId: id,
-        sectionOverride: newSection === def?.topSection ? null : newSection,
+        sectionOverride: newSection,
       });
     },
     [upsertMutation]
@@ -278,18 +244,15 @@ export function useTaskStore() {
       setOverrides((prev) => {
         const next = { ...prev };
         const existing = next[id] || {};
+        next[id] = { ...existing, notes: notes.trim() || undefined };
 
-        if (!notes.trim() && !existing.status && !existing.sectionOverride) {
+        // Only delete the override if ALL fields are empty
+        if (
+          !next[id].status &&
+          !next[id].notes &&
+          !next[id].sectionOverride
+        ) {
           delete next[id];
-        } else {
-          next[id] = { ...existing, notes: notes.trim() || undefined };
-          if (
-            !next[id].status &&
-            !next[id].notes &&
-            !next[id].sectionOverride
-          ) {
-            delete next[id];
-          }
         }
 
         saveLocal(next);
