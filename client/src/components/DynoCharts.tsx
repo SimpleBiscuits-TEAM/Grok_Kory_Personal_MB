@@ -84,6 +84,20 @@ const DynoTooltip = ({ active, payload, label }: any) => {
   );
 };
 
+// ─── Shared time formatter: converts minutes-value to M:SS.s display ─────────
+const fmtTime = (minVal: number): string => {
+  const totalSec = minVal * 60;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec - m * 60;
+  return `${m}:${s < 10 ? '0' : ''}${s.toFixed(1)}`;
+};
+const fmtTimeTick = (minVal: number): string => {
+  const totalSec = Number(minVal) * 60;
+  const m = Math.floor(totalSec / 60);
+  const s = Math.floor(totalSec - m * 60);
+  return `${m}:${s < 10 ? '0' : ''}${s.toString().padStart(2, '0')}`;
+};
+
 // ─── Custom Fault Tooltip ─────────────────────────────────────────────────────
 const FaultTooltip = ({ active, payload, label, xLabel }: any) => {
   if (!active || !payload?.length) return null;
@@ -100,7 +114,7 @@ const FaultTooltip = ({ active, payload, label, xLabel }: any) => {
       maxWidth: 220,
     }}>
       <div style={{ color: '#ff8888', fontWeight: 'bold', marginBottom: 5 }}>
-        {xLabel || ''}: {typeof label === 'number' ? (label * 60).toFixed(1) + 's' : label}
+        {xLabel || ''}: {typeof label === 'number' ? fmtTime(label) : label}
       </div>
       {payload.map((p: any, i: number) => (
         p.value != null && p.value !== 0 && (
@@ -268,8 +282,8 @@ const FaultEventList = ({ events, isCritical, onJumpToTime }: { events: FaultEve
               borderBottom: '1px solid rgba(255,255,255,0.04)',
             }}>
               <td style={{ padding: '5px 10px', color: '#555', fontSize: 10 }}>{i + 1}</td>
-              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{(ev.start * 60).toFixed(1)}s</td>
-              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{(ev.end * 60).toFixed(1)}s</td>
+              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{fmtTime(ev.start)}</td>
+              <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{fmtTime(ev.end)}</td>
               <td style={{ padding: '5px 10px', color: '#ccc', fontSize: 10, fontWeight: 'bold' }}>
                 {ev.duration < 60 ? `${ev.duration}s` : `${(ev.duration / 60).toFixed(1)}m`}
               </td>
@@ -292,7 +306,7 @@ const FaultEventList = ({ events, isCritical, onJumpToTime }: { events: FaultEve
                       cursor: 'pointer',
                       letterSpacing: 0.5,
                     }}
-                    title={`Jump to ${(ev.start * 60).toFixed(1)}s–${(ev.end * 60).toFixed(1)}s in dyno chart`}
+                    title={`Jump to ${fmtTime(ev.start)}–${fmtTime(ev.end)} in dyno chart`}
                   >
                     ▶ JUMP
                   </button>
@@ -498,6 +512,9 @@ const ExtraGraphPanel = ({ panelId, data, availablePids, initialPids, onRemove, 
     });
   };
 
+  // Normalize time to start at 0
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
+
   // Build time-series data for this panel's PIDs
   const chartData = useMemo(() => {
     const n = data.rpm.length;
@@ -507,7 +524,7 @@ const ExtraGraphPanel = ({ panelId, data, availablePids, initialPids, onRemove, 
     const rows: Array<Record<string, number | null>> = [];
     for (let i = 0; i < n; i += step) {
       const row: Record<string, number | null> = {
-        time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
+        time: parseFloat(((data.timeMinutes[i] || 0) - tOff).toFixed(3)),
       };
       for (const pidDef of activePidDefs) {
         const pidArr = data[pidDef.key as keyof ProcessedMetrics] as number[];
@@ -517,7 +534,7 @@ const ExtraGraphPanel = ({ panelId, data, availablePids, initialPids, onRemove, 
       rows.push(row);
     }
     return rows;
-  }, [data, activePidDefs]);
+  }, [data, activePidDefs, tOff]);
 
   // Axis domains
   const pidAxisDomains = useMemo(() => {
@@ -667,8 +684,8 @@ const ExtraGraphPanel = ({ panelId, data, availablePids, initialPids, onRemove, 
               <ComposedChart data={visibleData} margin={{ top: 10, right: rightMargin, bottom: 30, left: 10 }}>
                 <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
                 <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                  tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
-                  label={{ value: 'TIME (sec)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+                  tickFormatter={fmtTimeTick}
+                  label={{ value: 'TIME (M:SS)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
                 {activePidDefs.map((pidDef, idx) => {
                   const isVisible = idx < 2;
                   return (
@@ -692,7 +709,7 @@ const ExtraGraphPanel = ({ panelId, data, availablePids, initialPids, onRemove, 
                     />
                   );
                 })}
-                <Tooltip content={<FaultTooltip xLabel="Time (sec)" />} />
+                <Tooltip content={<FaultTooltip xLabel="Time" />} />
                 <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }} />
                 {activePidDefs.map((pidDef, idx) => (
                   <Line
@@ -737,6 +754,12 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
   /** Max points for TIME x-axis (higher = finer oscillation detail; zoom uses +/− on chart). */
   const [timeChartDetail, setTimeChartDetail] = useState<'overview' | 'standard' | 'fine' | 'full'>('standard');
   const [brushIndices, setBrushIndices] = useState<{ startIndex?: number; endIndex?: number }>({});
+
+  // Normalize time to start at 0 — some log formats store absolute timestamps
+  const timeOffset = useMemo(() => {
+    if (data.timeMinutes.length === 0) return 0;
+    return data.timeMinutes[0];
+  }, [data.timeMinutes]);
 
   useImperativeHandle(ref, () => ({
     jumpToTime: (startMin: number, endMin: number) => {
@@ -833,18 +856,26 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
             torque: rpmBin > 100 ? Math.round((hpMean * 5252) / rpmBin) : 0,
           };
         });
-      // Light 3-point smoothing on HP (endpoints preserved)
-      base = sorted.map((row, i, arr) => {
-        if (i === 0 || i === arr.length - 1 || arr.length < 3) return row;
-        const prev = arr[i - 1].hp as number;
-        const next = arr[i + 1].hp as number;
-        const hpSm = Math.round((prev + 2 * (row.hp as number) + next) / 4);
-        return {
-          rpm: row.rpm,
-          hp: hpSm,
-          torque: row.rpm > 100 ? Math.round((hpSm * 5252) / row.rpm) : 0,
-        };
-      });
+      // Multi-pass Gaussian-style smoothing for dyno-quality curves
+      // 3 passes of weighted 5-point smoothing (kernel: 1-4-6-4-1)
+      const smoothPass = (arr: typeof sorted): typeof sorted => {
+        if (arr.length < 5) return arr;
+        return arr.map((row, i, a) => {
+          if (i < 2 || i >= a.length - 2) return row;
+          const hp0 = a[i - 2].hp as number;
+          const hp1 = a[i - 1].hp as number;
+          const hp2 = row.hp as number;
+          const hp3 = a[i + 1].hp as number;
+          const hp4 = a[i + 2].hp as number;
+          const hpSm = Math.round((hp0 + 4 * hp1 + 6 * hp2 + 4 * hp3 + hp4) / 16);
+          return {
+            rpm: row.rpm,
+            hp: hpSm,
+            torque: row.rpm > 100 ? Math.round((hpSm * 5252) / row.rpm) : 0,
+          };
+        });
+      };
+      base = smoothPass(smoothPass(smoothPass(sorted)));
     } else {
       // Use the correct HP source from binnedData based on fallback chain
       const getHpFromBin = (b: any): number => {
@@ -865,6 +896,25 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
           };
         })
         .filter(d => (d.torque as number) > 0 && (d.torque as number) < 2500);
+      // Apply same multi-pass smoothing to binnedData path
+      const smoothBin = (arr: typeof base): typeof base => {
+        if (arr.length < 5) return arr;
+        return arr.map((row, i, a) => {
+          if (i < 2 || i >= a.length - 2) return row;
+          const hp0 = a[i - 2].hp as number;
+          const hp1 = a[i - 1].hp as number;
+          const hp2 = row.hp as number;
+          const hp3 = a[i + 1].hp as number;
+          const hp4 = a[i + 2].hp as number;
+          const hpSm = Math.round((hp0 + 4 * hp1 + 6 * hp2 + 4 * hp3 + hp4) / 16);
+          return {
+            rpm: row.rpm,
+            hp: hpSm,
+            torque: (row.rpm ?? 0) > 100 ? Math.round((hpSm * 5252) / (row.rpm as number)) : 0,
+          };
+        });
+      };
+      base = smoothBin(smoothBin(smoothBin(base)));
     }
 
     // Build per-PID bucket maps for all selected PIDs
@@ -914,7 +964,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                    : data.hpAccel;
       const hpVal = hpArr2[i] || 0;
       const row: Record<string, number | null> = {
-        time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
+        time: parseFloat(((data.timeMinutes[i] || 0) - timeOffset).toFixed(3)),
         rpm,
         hp: Math.round(hpVal),
         torque: rpm > 100 ? Math.round(hpVal * 5252 / rpm) : 0,
@@ -926,8 +976,23 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
       }
       rows.push(row);
     }
+    // Smooth HP/TQ in time-series mode (5-point weighted, 2 passes)
+    if (rows.length >= 5) {
+      for (let pass = 0; pass < 2; pass++) {
+        for (let j = 2; j < rows.length - 2; j++) {
+          const h0 = rows[j - 2].hp as number;
+          const h1 = rows[j - 1].hp as number;
+          const h2 = rows[j].hp as number;
+          const h3 = rows[j + 1].hp as number;
+          const h4 = rows[j + 2].hp as number;
+          const hpSm = Math.round((h0 + 4 * h1 + 6 * h2 + 4 * h3 + h4) / 16);
+          const rpmVal = rows[j].rpm as number;
+          rows[j] = { ...rows[j], hp: hpSm, torque: rpmVal > 100 ? Math.round(hpSm * 5252 / rpmVal) : 0 };
+        }
+      }
+    }
     return rows;
-  }, [data, activePidDefs, hpSource, timeChartDetail]);
+  }, [data, activePidDefs, hpSource, timeChartDetail, timeOffset]);
 
   // Resolve pending jump-to-time sentinel into real brush indices
   useEffect(() => {
@@ -1376,10 +1441,10 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
               tick={{ fill: '#666', fontSize: 11, fontFamily: 'monospace' }}
               tickFormatter={xMode === 'rpm'
                 ? (v) => `${(v / 1000).toFixed(1)}k`
-                : (v) => `${(Number(v) * 60).toFixed(0)}s`
+                : fmtTimeTick
               }
               label={{
-                value: xMode === 'rpm' ? 'ENGINE RPM' : 'TIME (sec)',
+                value: xMode === 'rpm' ? 'ENGINE RPM' : 'TIME (M:SS)',
                 position: 'insideBottom',
                 offset: xMode === 'time' ? -36 : -12,
                 fill: '#555', fontSize: 10, fontFamily: 'monospace'
@@ -1439,7 +1504,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                   xMode === 'rpm'
                     ? (label != null ? `${Number(label).toFixed(0)} RPM` : '')
                     : (label != null
-                      ? `Time ${(Number(label) * 60).toFixed(1)}s`
+                      ? `Time ${fmtTime(Number(label))}`
                       : '');
                 return (
                   <div style={{
@@ -1534,7 +1599,7 @@ export const DynoHPChart = forwardRef<DynoChartHandle, DynoChartProps>(({ data, 
                 stroke="#ff4d00"
                 fill="#0d0f14"
                 travellerWidth={6}
-                tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
+                tickFormatter={fmtTimeTick}
               />
             )}
           </ComposedChart>
@@ -1609,6 +1674,7 @@ DynoHPChart.displayName = 'DynoHPChart';
 
 // ─── RAIL PRESSURE FAULT CHART ────────────────────────────────────────────────
 export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   // Match descriptive condition codes for rail pressure
   const lowRailIssue = diagnostics.issues.find(i => i.code.startsWith('LOW-RAIL-PRESSURE'));
   const highRailIssue = diagnostics.issues.find(i => i.code.startsWith('HIGH-RAIL') || i.code === 'RAIL-PRESSURE-OSCILLATION' || i.code === 'HIGH-IDLE-RAIL-PRESSURE');
@@ -1632,7 +1698,7 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
         const actual = data.railPressureActual?.[i] ?? 0;
         const desired = data.railPressureDesired?.[i] ?? 0;
         return {
-          time: parseFloat(t.toFixed(3)),
+          time: parseFloat((t - tOff).toFixed(3)),
           actual: actual > 0 ? actual : null,
           desired: desired > 0 ? desired : null,
           deltaLow: (desired > 0 && actual > 0 && desired > actual) ? desired - actual : 0,
@@ -1659,8 +1725,8 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
   const ruleText = isLow
-    ? `Low Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Fault zone: ${(faultTimeMin * 60).toFixed(1)}–${(faultTimeMax * 60).toFixed(1)}s.`
-    : `High Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds (decel/transients excluded). Fault zone: ${(faultTimeMin * 60).toFixed(1)}–${(faultTimeMax * 60).toFixed(1)}s.`;
+    ? `Low Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_LOW.toLocaleString()} psi BELOW desired for >10 consecutive seconds. Fault zone: ${fmtTime(faultTimeMin)}–${fmtTime(faultTimeMax)}.`
+    : `High Rail Pressure: Actual rail pressure is ≥${CHART_THRESHOLD_HIGH.toLocaleString()} psi ABOVE desired for >12 consecutive seconds (decel/transients excluded). Fault zone: ${fmtTime(faultTimeMin)}–${fmtTime(faultTimeMax)}.`;
 
   return (
     <FaultChartWrapper
@@ -1682,12 +1748,12 @@ export const RailPressureFaultChart = forwardRef<HTMLDivElement, FaultChartsProp
 
               <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
               <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
-                label={{ value: 'TIME (sec)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+                tickFormatter={fmtTimeTick}
+                label={{ value: 'TIME (M:SS)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
               <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
                 tickFormatter={(v) => `${(v/1000).toFixed(0)}k`}
                 label={{ value: 'RAIL PRESSURE (PSI)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip xLabel="Time (sec)" />} />
+              <Tooltip content={<FaultTooltip xLabel="Time" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
                 formatter={(v) => (
                   <span style={{
@@ -1724,6 +1790,7 @@ RailPressureFaultChart.displayName = 'RailPressureFaultChart';
 
 // ─── BOOST PRESSURE FAULT CHART ───────────────────────────────────────────────
 export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code.startsWith('LOW-BOOST'));
   // Also check reasoning engine for boost-related findings (warning or fault)
   const reasoningBoostFinding = reasoningReport?.findings?.find(
@@ -1741,7 +1808,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
         const actual = data.boost?.[i] ?? 0;
         const desired = data.boostDesired?.[i] ?? 0;
         return {
-          time: parseFloat(t.toFixed(3)),
+               time: parseFloat((t - tOff).toFixed(3)),
           actual: actual > 0 ? actual : null,
           desired: desired > 0 ? desired : null,
           delta: (desired > 0 && actual > 0 && desired > actual) ? desired - actual : 0,
@@ -1749,7 +1816,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
       })
       .filter((_, i) => i % step === 0)
       .filter(d => d.actual !== null);
-  }, [data, hasBoostData]);
+  }, [data, hasBoostData, tOff]);
 
   const peakActual = chartData.length ? Math.max(...chartData.map(d => d.actual ?? 0)) : 0;
   const peakDesired = chartData.length ? Math.max(...chartData.map(d => d.desired ?? 0)) : 0;
@@ -1760,7 +1827,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
   const faultTimeMin = faultPoints.length ? Math.min(...faultPoints.map(d => d.time)) : 0;
   const faultTimeMax = faultPoints.length ? Math.max(...faultPoints.map(d => d.time)) : 0;
 
-  const ruleText = `Low Boost: Actual boost is ≥${BOOST_FAULT_THRESHOLD} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${(faultTimeMin * 60).toFixed(1)}–${(faultTimeMax * 60).toFixed(1)}s. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
+  const ruleText = `Low Boost: Actual boost is ≥${BOOST_FAULT_THRESHOLD} psi BELOW desired for >10 consecutive seconds. Max observed delta: ${maxDelta.toFixed(1)} psi. Fault zone: ${fmtTime(faultTimeMin)}–${fmtTime(faultTimeMax)}. Turbo vane >45% at >2800 RPM triggers boost leak check.`;
 
   return (
     <FaultChartWrapper
@@ -1775,7 +1842,7 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
       badges={<>
         <DeltaBadge label="Peak Boost" actual={peakActual.toFixed(1)} expected={peakDesired > 0 ? peakDesired.toFixed(1) : '48.0'} delta={(peakDesired > 0 ? peakDesired - peakActual : 48 - peakActual).toFixed(1)} unit=" psi" isCritical={true} />
         <DeltaBadge label="Max Fault Delta" actual="Detected" expected={`<${BOOST_FAULT_THRESHOLD} psi gap`} delta={maxDelta.toFixed(1)} unit=" psi" isCritical={true} />
-        <DeltaBadge label="Fault Duration" actual={`${faultPoints.length} pts`} expected="0 pts" delta={`${(faultTimeMin * 60).toFixed(1)}–${(faultTimeMax * 60).toFixed(1)}s`} unit="" isCritical={false} />
+        <DeltaBadge label="Fault Duration" actual={`${faultPoints.length} pts`} expected="0 pts" delta={`${fmtTime(faultTimeMin)}–${fmtTime(faultTimeMax)}`} unit="" isCritical={false} />
       </>}
     >
       {hasBoostData && chartData.length > 0 ? (
@@ -1791,11 +1858,11 @@ export const BoostFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ d
               </defs>
               <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
               <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
-                label={{ value: 'TIME (sec)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+                tickFormatter={fmtTimeTick}
+                label={{ value: 'TIME (M:SS)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
               <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
                 label={{ value: 'BOOST PRESSURE (PSIG)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip xLabel="Time (sec)" />} />
+              <Tooltip content={<FaultTooltip xLabel="Time" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
                 formatter={(v) => <span style={{ color: v === 'Desired PSIG' ? '#44ff88' : v === 'Actual PSIG' ? '#00c8ff' : '#ff2222' }}>{v}</span>} />
               {faultTimeMin > 0 && (
@@ -1837,6 +1904,7 @@ BoostFaultChart.displayName = 'BoostFaultChart';
 
 // ─── EGT FAULT CHART ──────────────────────────────────────────────────────────
 export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   // Match all EGT condition codes: EGT-SENSOR-*, EGT-HIGH
   const issue = diagnostics.issues.find(i => i.code.startsWith('EGT-'));
   if (!issue) return null;
@@ -1850,7 +1918,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       .map((t, i) => {
         const egt = data.exhaustGasTemp?.[i] ?? 0;
         return {
-          time: parseFloat(t.toFixed(3)),
+          time: parseFloat((t - tOff).toFixed(3)),
           egt: egt > 0 ? egt : null,
           limit: 1475,
           delta: egt > 1475 ? egt - 1475 : 0,
@@ -1858,7 +1926,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       })
       .filter((_, i) => i % step === 0)
       .filter(d => d.egt !== null);
-  }, [data, hasEgtData]);
+  }, [data, hasEgtData, tOff]);
 
   const maxEgt = chartData.length ? Math.max(...chartData.map(d => d.egt ?? 0)) : 0;
   const avgEgt = chartData.length ? chartData.reduce((s, d) => s + (d.egt ?? 0), 0) / chartData.length : 0;
@@ -1873,7 +1941,7 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
     ? `EGT Sensor Out of Range: Reading above 1,800°F — sensor disconnected or out of service. Observed: ${maxEgt.toFixed(0)}°F.`
     : issue.code === 'EGT-SENSOR-STUCK'
     ? `EGT Sensor Stuck: Reading frozen (< 1°F change) for extended period.`
-    : `EGT Sensor Erratic: Temperature readings are unstable. Max observed: ${maxEgt.toFixed(0)}°F. Fault zone: ${(faultTimeMin * 60).toFixed(1)}–${(faultTimeMax * 60).toFixed(1)}s.`;
+    : `EGT Sensor Erratic: Temperature readings are unstable. Max observed: ${maxEgt.toFixed(0)}°F. Fault zone: ${fmtTime(faultTimeMin)}–${fmtTime(faultTimeMax)}.`;
 
   return (
     <FaultChartWrapper
@@ -1908,11 +1976,11 @@ export const EgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
               </defs>
               <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
               <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
-                label={{ value: 'TIME (sec)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+                tickFormatter={fmtTimeTick}
+                label={{ value: 'TIME (M:SS)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
               <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
                 label={{ value: 'EGT (°F)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip xLabel="Time (sec)" />} />
+              <Tooltip content={<FaultTooltip xLabel="Time" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
                 formatter={(v) => <span style={{ color: v === 'EGT Limit (1475°F)' ? '#44ff88' : v === 'EGT (°F)' ? '#ff9900' : '#ff2222' }}>{v}</span>} />
               <ReferenceLine y={1475} stroke="#ff6600" strokeDasharray="6 3"
@@ -1956,6 +2024,7 @@ EgtFaultChart.displayName = 'EgtFaultChart';
 
 // ─── MAF FAULT CHART ──────────────────────────────────────────────────────────
 export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code.endsWith('-IDLE-MAF'));
   if (!issue) return null;
 
@@ -1969,7 +2038,7 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
         const maf = data.maf?.[i] ?? 0;
         const rpm = data.rpm?.[i] ?? 0;
         return {
-          time: parseFloat(t.toFixed(3)),
+          time: parseFloat((t - tOff).toFixed(3)),
           maf: maf > 0 ? maf : null,
           rpm,
           maxIdle: 6,
@@ -1980,7 +2049,7 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
       })
       .filter((_, i) => i % step === 0)
       .filter(d => d.maf !== null && d.rpm < 1500);
-  }, [data, hasMafData]);
+  }, [data, hasMafData, tOff]);
 
   const idlePoints = chartData.filter(d => d.rpm > 400 && d.rpm < 900);
   const avgIdleMaf = idlePoints.length ? idlePoints.reduce((s, d) => s + (d.maf ?? 0), 0) / idlePoints.length : 0;
@@ -2023,11 +2092,11 @@ export const MafFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
               </defs>
               <CartesianGrid strokeDasharray="2 5" stroke="#1a1e2a" />
               <XAxis dataKey="time" stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
-                tickFormatter={(v) => `${(Number(v) * 60).toFixed(0)}s`}
-                label={{ value: 'TIME (sec)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
+                tickFormatter={fmtTimeTick}
+                label={{ value: 'TIME (M:SS)', position: 'insideBottom', offset: -12, fill: '#555', fontSize: 9, fontFamily: 'monospace' }} />
               <YAxis stroke="#333" tick={{ fill: '#666', fontSize: 10, fontFamily: 'monospace' }}
                 label={{ value: 'MAF (lb/min)', angle: -90, position: 'insideLeft', offset: 14, fill: '#888', fontSize: 9, fontFamily: 'monospace' }} />
-              <Tooltip content={<FaultTooltip xLabel="Time (sec)" />} />
+              <Tooltip content={<FaultTooltip xLabel="Time" />} />
               <Legend wrapperStyle={{ fontFamily: 'monospace', fontSize: 10, paddingTop: 8 }}
                 formatter={(v) => <span style={{ color: v === 'Max Idle (6)' ? '#44ff88' : v === 'Min Idle (2)' ? '#44ff88' : v === 'MAF (lb/min)' ? '#ffaa00' : '#ff2222' }}>{v}</span>} />
               <ReferenceArea y1={2} y2={6} fill="rgba(68,255,136,0.05)" stroke="none" />
@@ -2333,13 +2402,14 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
   hasDesiredBoost: boolean;
   hasDesiredVane: boolean;
 }) {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const graphData = useMemo(() => {
     const n = data.rpm.length;
     const step = Math.max(1, Math.ceil(n / 400));
     const rows: Array<Record<string, number | null>> = [];
     for (let i = 0; i < n; i += step) {
       const row: Record<string, number | null> = {
-        time: parseFloat((data.timeMinutes[i] || 0).toFixed(3)),
+        time: parseFloat(((data.timeMinutes[i] || 0) - tOff).toFixed(3)),
         rpm: data.rpm[i] || 0,
       };
       if (hasBoost) row.boost = data.boost[i] || 0;
@@ -2360,7 +2430,8 @@ function AirflowLineGraph({ data, hasBoost, hasVane, hasMaf, hasDesiredBoost, ha
             <ComposedChart data={visibleData} margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e2330" />
               <XAxis dataKey="time" stroke="#555" tick={{ fontSize: 10, fill: '#666' }}
-                label={{ value: 'Time (sec)', position: 'insideBottom', offset: -2, style: { fill: '#555', fontSize: 10 } }} />
+                tickFormatter={fmtTimeTick}
+                label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -2, style: { fill: '#555', fontSize: 10 } }} />
               <YAxis yAxisId="boost" stroke="#a78bfa" tick={{ fontSize: 10, fill: '#a78bfa' }}
                 label={{ value: 'PSIG', angle: -90, position: 'insideLeft', style: { fill: '#a78bfa', fontSize: 10 } }} />
               {hasVane && (
@@ -2417,6 +2488,7 @@ export const BoostEfficiencyChart = AirflowOutlookTable;
 
 // ─── TCC SLIP FAULT CHART ────────────────────────────────────────────────────
 export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   // Match all TCC/converter slip codes
   const issue = diagnostics.issues.find(i =>
     i.code === 'TCC-STUCK-OFF' || i.code === 'TCC-STUCK-ON' ||
@@ -2433,7 +2505,7 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
   const hasGear = data.currentGear && data.currentGear.some(v => v > 0);
 
   const chartData = data.timeMinutes.map((t, i) => ({
-    time: parseFloat(t.toFixed(3)),
+    time: parseFloat((t - tOff).toFixed(3)),
     slip: data.converterSlip[i] ?? 0,
     lockSignal: usePressure
       ? (data.converterPressure?.[i] ?? 0)
@@ -2477,7 +2549,8 @@ export const TccFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
         <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
-            label={{ value: 'Time (sec)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+            tickFormatter={fmtTimeTick}
+            label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis yAxisId="slip" stroke="#fb7185" tick={{ fill: '#fb7185', fontSize: 10 }}
             label={{ value: 'Slip (RPM)', angle: -90, position: 'insideLeft', fill: '#fb7185', fontSize: 10 }} />
           <YAxis yAxisId="lock" orientation="right" stroke={lockColor} tick={{ fill: lockColor, fontSize: 10 }}
@@ -2510,13 +2583,14 @@ TccFaultChart.displayName = 'TccFaultChart';
 
 // ─── VGT TRACKING FAULT CHART ────────────────────────────────────────────────
 export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code === 'VGT-TRACKING-ERROR');
   if (!issue) return null;
 
   const hasVaneDesired = data.turboVaneDesired.some(v => v > 0);
 
   const chartData = data.timeMinutes.map((t, i) => ({
-    time: parseFloat(t.toFixed(3)),
+    time: parseFloat((t - tOff).toFixed(3)),
     actual: data.turboVanePosition[i] ?? 0,
     desired: hasVaneDesired ? (data.turboVaneDesired[i] ?? 0) : null,
     delta: hasVaneDesired ? Math.abs((data.turboVaneDesired[i] ?? 0) - (data.turboVanePosition[i] ?? 0)) : null,
@@ -2554,7 +2628,8 @@ export const VgtFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ dat
         <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
-            label={{ value: 'Time (sec)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+            tickFormatter={fmtTimeTick}
+            label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis yAxisId="vane" stroke="#fb923c" tick={{ fill: '#fb923c', fontSize: 10 }}
             label={{ value: 'Vane (%)', angle: -90, position: 'insideLeft', fill: '#fb923c', fontSize: 10 }} domain={[0, 100]} />
           <YAxis yAxisId="delta" orientation="right" stroke="#ff4444" tick={{ fill: '#ff4444', fontSize: 10 }}
@@ -2581,11 +2656,12 @@ VgtFaultChart.displayName = 'VgtFaultChart';
 
 // ─── FUEL PRESSURE REGULATOR FAULT CHART (P0089) ─────────────────────────────
 export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code === 'FUEL-REGULATOR-HUNTING');
   if (!issue) return null;
 
   const chartData = data.timeMinutes.map((t, i) => ({
-    time: parseFloat(t.toFixed(3)),
+    time: parseFloat((t - tOff).toFixed(3)),
     actual: data.railPressureActual[i] ?? 0,
     desired: data.railPressureDesired[i] ?? 0,
     delta: (data.railPressureActual[i] ?? 0) - (data.railPressureDesired[i] ?? 0),
@@ -2619,7 +2695,8 @@ export const RegulatorFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(
         <ComposedChart data={visibleData} margin={{ top: 10, right: 70, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
-            label={{ value: 'Time (sec)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+            tickFormatter={fmtTimeTick}
+            label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis yAxisId="psi" stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 10 }}
             label={{ value: 'Rail Pressure (psi)', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} domain={['auto', 'auto']} />
 
@@ -2640,11 +2717,12 @@ RegulatorFaultChart.displayName = 'RegulatorFaultChart';
 
 // ─── COOLANT TEMP FAULT CHART (P0116 / P0128) ────────────────────────────────
 export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code === 'COOLANT-SENSOR-ERRATIC' || i.code === 'COOLANT-LOW-TEMP');
   if (!issue) return null;
 
   const chartData = data.timeMinutes.map((t, i) => ({
-    time: parseFloat(t.toFixed(3)),
+    time: parseFloat((t - tOff).toFixed(3)),
     coolant: data.coolantTemp[i] ?? 0,
   }));
 
@@ -2679,7 +2757,8 @@ export const CoolantFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
         <ComposedChart data={visibleData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
-            label={{ value: 'Time (sec)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+            tickFormatter={fmtTimeTick}
+            label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis stroke="#22d3ee" tick={{ fill: '#22d3ee', fontSize: 10 }}
             label={{ value: 'Coolant (°F)', angle: -90, position: 'insideLeft', fill: '#22d3ee', fontSize: 10 }} domain={['auto', 'auto']} />
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
@@ -2704,12 +2783,13 @@ CoolantFaultChart.displayName = 'CoolantFaultChart';
 
 // ─── IDLE RPM FAULT CHART (P0506 / P0507) ────────────────────────────────────
 export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   const issue = diagnostics.issues.find(i => i.code === 'IDLE-RPM-LOW' || i.code === 'IDLE-RPM-HIGH');
   if (!issue) return null;
 
   // Only show samples in the idle RPM range
   const chartData = data.timeMinutes
-    .map((t, i) => ({ time: parseFloat(t.toFixed(3)), rpm: data.rpm[i] ?? 0 }))
+    .map((t, i) => ({ time: parseFloat((t - tOff).toFixed(3)), rpm: data.rpm[i] ?? 0 }))
     .filter(d => d.rpm > 400 && d.rpm < 1400);
 
   const minRpm = chartData.length ? Math.min(...chartData.map(d => d.rpm)) : 0;
@@ -2743,7 +2823,8 @@ export const IdleRpmFaultChart = forwardRef<HTMLDivElement, FaultChartsProps>(({
         <ComposedChart data={visibleData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
           <XAxis dataKey="time" stroke="#555" tick={{ fill: '#888', fontSize: 10 }}
-            label={{ value: 'Time (sec)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
+            tickFormatter={fmtTimeTick}
+            label={{ value: 'Time (M:SS)', position: 'insideBottom', offset: -5, fill: '#888', fontSize: 10 }} />
           <YAxis stroke="#38bdf8" tick={{ fill: '#38bdf8', fontSize: 10 }}
             label={{ value: 'RPM', angle: -90, position: 'insideLeft', fill: '#38bdf8', fontSize: 10 }} domain={[400, 1400]} />
           <Tooltip content={<FaultTooltip xLabel="Time" />} />
@@ -2778,6 +2859,7 @@ IdleRpmFaultChart.displayName = 'IdleRpmFaultChart';
  * meaningful boost (>3 PSI).
  */
 export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(({ data, diagnostics, onJumpToTime, reasoningReport }, ref) => {
+  const tOff = useMemo(() => data.timeMinutes.length > 0 ? data.timeMinutes[0] : 0, [data.timeMinutes]);
   // Only render when reasoning engine detected converter stall / turbo spool mismatch
   const stallFinding = reasoningReport?.findings?.find(
     f => f.id === 'converter-stall-turbo-mismatch' && (f.type === 'warning' || f.type === 'fault')
@@ -3144,7 +3226,7 @@ export const ConverterStallChart = forwardRef<HTMLDivElement, FaultChartsProps>(
                     borderBottom: '1px solid rgba(255,255,255,0.04)',
                   }}>
                     <td style={{ padding: '5px 10px', color: '#555', fontSize: 10 }}>{i + 1}</td>
-                    <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{(launchTime * 60).toFixed(1)}s</td>
+                    <td style={{ padding: '5px 10px', color: '#aaa', fontSize: 10 }}>{fmtTime(launchTime)}</td>
                     <td style={{ padding: '5px 10px', color: stallRpm < 1500 ? '#ff6666' : '#ffcc44', fontSize: 10, fontWeight: 'bold' }}>
                       {stallRpm.toFixed(0)} RPM
                     </td>

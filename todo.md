@@ -1401,3 +1401,9 @@
 - [x] Fix graph distortion when more than 2 PIDs are plotted — limited visible Y-axes to 2 (rest use hidden axes), capped right margin, supports up to 5+ PIDs cleanly
 - [x] Dyno chart HP/TQ estimation fallback — fixed binnedData path to use correct HP source (torque > accel > MAF > none), added 'none' hpSource state with descriptive warning, acceleration-based HP (vehicle weight + speed delta) already computed by dataProcessor as first-class fallback
 - [x] CONSTRAINT: Did NOT modify any of Tobi's PCAN, flash, bridge, datalogger, or EDS code — all changes in DynoCharts.tsx only
+
+## Analyzer Tab — Follow-up Fixes (Apr 16, 2026)
+- [x] BUG: Time axis normalized to start at 0:00 — tOff subtraction applied to all 12 chart components, AirflowLineGraph, ExtraGraphPanel, and ConverterStallChart (already relative)
+- [x] BUG: Time format changed from raw seconds to M:SS — fmtTimeTick for axis ticks, fmtTime for tooltips/labels/ruleText, all fault event times updated
+- [x] BUG: Dyno HP/TQ curve smoothed with 3-pass Gaussian 5-point kernel (1-4-6-4-1) — applied to RPM-binned path, binnedData fallback path, and time-series path (2-pass)
+- [x] INFO: HP/TQ fallback chain explained to user (see delivery message)
