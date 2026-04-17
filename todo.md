@@ -1415,3 +1415,7 @@
 - [x] Server-side endpoints already existed (getOverrides, upsertOverride, bulkUpsert, resetAll) — verified working via curl
 - [x] Fixed useTaskStore.ts: DB data replaces state on mount, localStorage is fallback cache only, one-time migration from localStorage to DB for first-time users
 - [x] Fixed ExpandedNotesPanel: added useEffect to sync localNotes when DB prop changes
+
+## Strat RTD4/TDN Fix
+- [x] Fix Strat giving VCM Suite instructions for RTD4 — add explicit rule that RTD4 uses TDN App only, no VCM Suite, no laptop
+- [x] Add hptuners.com as fallback reference for HP Tuners device questions Strat cannot answer from KB
