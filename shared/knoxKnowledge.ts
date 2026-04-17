@@ -741,6 +741,37 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - If TCC is not commanded (duty cycle = 0 or low), any slip is normal converter operation
 - Do NOT confuse turbo spool lag with TCC apply lag — they are completely different issues
 
+### T93 10L1000 TCC Full Lockup Under High Throttle (CONFIRMED — from A2L 24048502226.6LT93)
+**Problem:** TCC achieves full lockup (LockOnMode / zero slip) at low throttle but stays in controlled slip (OnMode) under high throttle/torque demand. Lockup is allowed under lower torque request and load but inhibited under aggressive throttle.
+
+**Root Cause (CONFIRMED):** The T93 TCM uses a **TipIn Slip Profiling** system that activates when engine delta torque rate is high. This is NOT a simple RPM-based inhibit threshold like the T87/T87A. Do NOT apply T87/T87A or A50 calibration strategies to the T93.
+
+**Primary Tables (CONFIRMED FIX — modifying these resolved the issue):**
+- **KtTCCC_n_TipInSlipReference** (0x090ECF98) — 5x9 MAP (turbine speed x engine delta torque rate). Stock commands 4608–6400 RPM of slip at high dTorque. Reducing values toward 0 at high dTorque columns allows lockup.
+- **KtTCCC_n_MinTipInSlip** (0x090EC8CE) — CURVE (5 elements vs turbine speed). Sets minimum slip floor during TipIn. Zero this out to remove the floor.
+- **KtTCCC_dn_TipInSlipGradient** (0x090ECCA8) — 5x9 MAP. Controls how fast slip reference ramps down. Increase for faster convergence to zero.
+- **KtTCCC_n_TipInSlipRefAltA/B/C** — Alternate tables for pattern switch modes. Apply same treatment as primary table.
+- **KtTCCC_t_TipInTargetTimer** — Time limit for TipIn mode. Reduce to shorten TipIn duration.
+
+**Secondary Table (investigated, NOT the primary driver):**
+- **KtTCCC_n_OpenConverterMaxSlip** (0x090ECFF6 / WinOLS 0xECFFA) — 9x9 MAP (engine torque x turbine speed). Clips targeted slip to max open converter can physically produce. Acts as ceiling/sanity check, not the slip command source. Review but not the fix.
+
+**Supporting Tables:**
+- **KtTCCC_t_HighSlipEnergyLimit** (0x090ED09C) — 9x9 MAP. If slip persists too long at given torque, forces TCC to OFF Mode. Extend times if needed.
+- **KwTCCC_t_HiSlipLockOnReEntry** (0x090E8498) — Delay before re-entering LockOn after high slip exit. Stock ~102 sec. Reduce for faster recovery.
+- **KeSCAR_p_MaxPCA_TCC_Pressure** (0x09001374) — Max TCC solenoid pressure. Verify sufficient for full lockup under high torque.
+- **KaTCCC_M_TorqCap[Gear]** (0x090E0E3C+) — Per-gear TCC torque capacity. If engine torque exceeds capacity, clutch slips regardless.
+
+**TCC State Machine (T93-specific):**
+- Mode 6 (OnMode) = Controlled slip active. Mode 7 (LockOnMode) = Full lockup, zero slip.
+- The problem is the system staying in Mode 6 under high throttle instead of transitioning to Mode 7.
+- Log VeTCCC_e_OffModeRsn and VeTCCR_e_Mode to diagnose which inhibit is active.
+
+**CRITICAL RULES:**
+- The T93 is fundamentally different from T87/T87A/A50. NEVER reference those controllers for T93 TCC calibration.
+- The TipIn system triggers on engine delta torque RATE, not absolute torque or throttle position.
+- KtTCCC_n_OpenConverterMaxSlip is a ceiling clip, not a slip command source — do not confuse the two.
+
 ### Stall Speed Guidelines by Application
 - Stock Duramax: ~1800-2200 RPM stall (matched to stock turbo)
 - Mild performance (compound turbo, 500-600 HP): ~2400-2800 RPM stall
