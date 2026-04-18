@@ -8,6 +8,8 @@ import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
 import ScreenGuard from "./components/ScreenGuard";
 import { Redirect } from "wouter";
+import AccessGate from "./components/AccessGate";
+import { useAccessTier } from "./hooks/useAccessTier";
 // Lazy-load all heavy pages for code splitting
 const Home = lazy(() => import("./pages/Home"));
 const Advanced = lazy(() => import("./pages/Advanced"));
@@ -65,8 +67,17 @@ function PageLoader() {
   );
 }
 
-// Access code gates removed — Manus platform OAuth handles access control.
-// All routes are open to anyone who gets past the Manus sign-in.
+// Access-code gated router — shows AccessGate if user hasn't entered a valid code.
+// DEV_BYPASS_AUTH=1 on server auto-grants pro access (no gate shown).
+function GatedRouter() {
+  const { hasAccess, loading } = useAccessTier();
+
+  if (loading) return <PageLoader />;
+  if (!hasAccess) return <AccessGate />;
+
+  return <Router />;
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -106,7 +117,7 @@ function App() {
       >
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <GatedRouter />
           <ScreenGuard active={true} />
           <DebugReportButton />
         </TooltipProvider>

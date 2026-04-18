@@ -342,6 +342,11 @@ const TEST_CONDITIONS: Record<string, {
       'FPR current (mA) oscillating during steady cruise can indicate air in fuel or a failing lift pump',
       'If rail pressure drops during WOT, check fuel filter and lift pump',
       'CP3 conversion trucks may need a modified tune for more regulator control — low rail pressure from an aggressive tune that starves the pump increases wear due to lack of lubrication',
+      'mA is INVERSELY proportional to regulator opening: 400 mA ≈ 95% open (max delivery), ~1800 mA ≈ near-closed. This is NOT PWM duty cycle.',
+      'Rapid actual vs desired divergence (>2000 PSI overshoot at >30k PSI/sec) = pump overshoot / regulator lag — check Fuel Flow Base mA calibration',
+      'Rule of thumb: the average % that actual rail overshoots/undershoots desired = the approximate % that Fuel Flow Base mA needs adjustment',
+      'L5P piezo injectors: ~800µs shutoff delay, needle bottoms at 1400-1600µs. At 2500µs+ pulse width, timing should be 27°+ to burn efficiently',
+      'High pulse width is hard on PISTONS (wide spray patterns), not the injectors — fuel washes cylinder walls and dilutes oil',
     ],
   },
   injector_health: {
@@ -360,6 +365,10 @@ const TEST_CONDITIONS: Record<string, {
       'Cylinder balance deviation >5% from mean = injector wear',
       'Cylinder balance deviation >10% from mean = failing injector — replace soon',
       'Cold engine balance data is less reliable — wait for full warm-up',
+      'L5P/LML: ±4 mm³/st is normal, ±6+ is concerning, ±8+ = replacement territory',
+      'LBZ/LMM: ±3 mm³/st normal, ±5+ concerning',
+      'Balance rates shift with fuel temperature, altitude, and fuel quality — don\'t diagnose from a single snapshot',
+      'Positive balance = injector delivering less than average (ECM adding fuel), Negative = delivering more (ECM pulling fuel)',
     ],
   },
   tcc_transmission: {

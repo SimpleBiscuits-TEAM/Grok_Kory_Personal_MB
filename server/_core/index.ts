@@ -14,6 +14,7 @@ import { knoxShieldMiddleware } from "../lib/knoxShieldMiddleware";
 import { registerTuneDeployRoutes } from "../tuneDeployRoutes";
 import { registerDevObjectStorageRoute } from "../storage";
 import { registerGitMapRoute } from "../gitMapRoute";
+import { attachStormChaseRelay } from "../lib/stormChaseRelay";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -229,6 +230,9 @@ async function startServer() {
       createContext,
     })
   );
+
+  // ── Storm Chase WebSocket Relay ────────────────────────────────────────
+  attachStormChaseRelay(server);
 
   // ── Static / Vite ──────────────────────────────────────────────────────
   if (process.env.NODE_ENV === "development") {

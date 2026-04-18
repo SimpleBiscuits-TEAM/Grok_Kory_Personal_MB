@@ -14,7 +14,7 @@ import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { liveWeatherStreams, streamEvents } from "../../drizzle/schema";
+import { liveWeatherStreams, streamEvents, streamTelemetry } from "../../drizzle/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import crypto from "crypto";
 
@@ -625,6 +625,136 @@ export const stormChaseRouter = router({
    * Get the OBS overlay URL for a session.
    * Returns the URL that can be added as a Browser Source in OBS.
    */
+  /**
+   * Get session replay data — timestamped telemetry snapshots for playback.
+   * Returns telemetry points stored at ~1Hz during the session.
+   * Viewers can scrub through the timeline and replay the entire chase.
+   */
+  getSessionReplay: publicProcedure
+    .input(z.object({
+      streamKey: z.string(),
+      /** Optional time window (epoch ms) for partial replay */
+      startAfter: z.number().optional(),
+      endBefore: z.number().optional(),
+      limit: z.number().min(1).max(10000).default(3600), // 1hr at 1Hz
+    }))
+    .query(async ({ input }) => {
+      const db = (await getDb())!;
+      const [stream] = await db.select({
+        id: liveWeatherStreams.id,
+        status: liveWeatherStreams.status,
+        startedAt: liveWeatherStreams.startedAt,
+        endedAt: liveWeatherStreams.endedAt,
+        title: liveWeatherStreams.title,
+        sessionSummary: liveWeatherStreams.sessionSummary,
+        peakValues: liveWeatherStreams.peakValues,
+        streamSettings: liveWeatherStreams.streamSettings,
+      })
+        .from(liveWeatherStreams)
+        .where(eq(liveWeatherStreams.streamKey, input.streamKey))
+        .limit(1);
+
+      if (!stream) return null;
+
+      // Build conditions for telemetry query
+      const conditions = [eq(streamTelemetry.sessionId, stream.id)];
+      if (input.startAfter) {
+        conditions.push(sql`${streamTelemetry.timestamp} > ${new Date(input.startAfter)}`);
+      }
+      if (input.endBefore) {
+        conditions.push(sql`${streamTelemetry.timestamp} < ${new Date(input.endBefore)}`);
+      }
+
+      const telemetryPoints = await db.select({
+        id: streamTelemetry.id,
+        data: streamTelemetry.data,
+        healthStatus: streamTelemetry.healthStatus,
+        timestamp: streamTelemetry.timestamp,
+      })
+        .from(streamTelemetry)
+        .where(and(...conditions))
+        .orderBy(streamTelemetry.timestamp)
+        .limit(input.limit);
+
+      // Also get events for timeline overlay
+      const events = await db.select()
+        .from(streamEvents)
+        .where(eq(streamEvents.sessionId, stream.id))
+        .orderBy(streamEvents.timestamp);
+
+      return {
+        session: {
+          ...stream,
+          peakValues: (stream.peakValues as PeakValues | null) ?? DEFAULT_PEAKS,
+          sessionSummary: stream.sessionSummary as SessionSummary | null,
+        },
+        telemetry: telemetryPoints.map(t => ({
+          ts: t.timestamp.getTime(),
+          data: t.data as Record<string, number | string | boolean>,
+          healthStatus: t.healthStatus,
+        })),
+        events: events.map(e => ({
+          type: e.type,
+          label: e.label,
+          data: e.data,
+          success: e.success,
+          ts: e.timestamp.getTime(),
+        })),
+        totalPoints: telemetryPoints.length,
+        replayDurationMs: stream.endedAt && stream.startedAt
+          ? stream.endedAt.getTime() - stream.startedAt.getTime()
+          : null,
+      };
+    }),
+
+  /**
+   * Get shareable replay link info for a completed session.
+   * Returns the share key and metadata needed to construct the replay URL.
+   */
+  getReplayLink: publicProcedure
+    .input(z.object({ streamKey: z.string() }))
+    .query(async ({ input }) => {
+      const db = (await getDb())!;
+      const [stream] = await db.select({
+        id: liveWeatherStreams.id,
+        streamKey: liveWeatherStreams.streamKey,
+        title: liveWeatherStreams.title,
+        status: liveWeatherStreams.status,
+        startedAt: liveWeatherStreams.startedAt,
+        endedAt: liveWeatherStreams.endedAt,
+        sessionSummary: liveWeatherStreams.sessionSummary,
+        peakValues: liveWeatherStreams.peakValues,
+      })
+        .from(liveWeatherStreams)
+        .where(eq(liveWeatherStreams.streamKey, input.streamKey))
+        .limit(1);
+
+      if (!stream) return null;
+
+      // Count telemetry points for replay availability
+      const [countResult] = await db.select({ count: sql<number>`count(*)` })
+        .from(streamTelemetry)
+        .where(eq(streamTelemetry.sessionId, stream.id));
+
+      const telemetryCount = countResult?.count ?? 0;
+
+      return {
+        streamKey: stream.streamKey,
+        title: stream.title,
+        status: stream.status,
+        startedAt: stream.startedAt?.toISOString() ?? null,
+        endedAt: stream.endedAt?.toISOString() ?? null,
+        durationSec: stream.endedAt && stream.startedAt
+          ? Math.round((stream.endedAt.getTime() - stream.startedAt.getTime()) / 1000)
+          : null,
+        telemetryPointCount: telemetryCount,
+        hasReplayData: telemetryCount > 0,
+        replayPath: `/stream/${stream.streamKey}/replay`,
+        peaks: (stream.peakValues as PeakValues | null) ?? DEFAULT_PEAKS,
+        summary: stream.sessionSummary as SessionSummary | null,
+      };
+    }),
+
   getOverlayUrl: publicProcedure
     .input(z.object({
       streamKey: z.string(),

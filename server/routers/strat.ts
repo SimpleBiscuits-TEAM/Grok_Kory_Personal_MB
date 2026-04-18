@@ -2215,9 +2215,18 @@ export const stratRouter = router({
         bbxContext = `\n\n## BBX DOWNLOAD LINKS (include the correct one when the customer's vehicle is known)\nDuramax BBX File: ${DURAMAX_BBX_URL}\nCummins BBX File: ${CUMMINS_BBX_URL}\nIf you recommend a BBX file, format as a clickable markdown link.`;
       }
 
+      // ── History-aware context injection ──
+      const historyLen = history.length;
+      let historyContext = '';
+      if (historyLen >= 10) {
+        historyContext = `\n\n## CONVERSATION CONTEXT\nThis is a LONG conversation (${historyLen} messages). The customer is a returning user. DO NOT introduce yourself. DO NOT use pleasantries. Get STRAIGHT to the point. Reference prior messages casually ("like we discussed", "same deal as before"). You know each other by now.`;
+      } else if (historyLen >= 5) {
+        historyContext = `\n\n## CONVERSATION CONTEXT\nThis is an ongoing conversation (${historyLen} messages). Skip introductions — the customer already knows who you are. Be direct and efficient. If you've explained something before in this conversation, reference it briefly instead of re-explaining.`;
+      }
+
       // ── Simple path — Strat alone ──
       if (isSimpleQuestion || !needsKnox) {
-        let systemContent = STRAT_SYSTEM_PROMPT + bbxContext;
+        let systemContent = STRAT_SYSTEM_PROMPT + bbxContext + historyContext;
         if (customerPersists) {
           systemContent += `\n\n## PERSISTENCE ALERT\nThe customer is telling you that your previous suggestion DID NOT WORK. DO NOT repeat the same fix. Review the conversation history, acknowledge the issue persists, and try a COMPLETELY DIFFERENT approach or ask a specific diagnostic question. If you've already tried 2+ approaches, escalate to phone support at (337) 485-7070.`;
         }
@@ -2254,6 +2263,9 @@ export const stratRouter = router({
       const steps: ConversationStep[] = [];
 
       // Step 1: Strat acknowledges and hands off to Knox with personality
+      const knoxHistoryHint = historyLen >= 5
+        ? `\nIMPORTANT: This is message ${historyLen}+ in the conversation. The customer already knows Strat and Knox. Skip formal introductions. If Knox has appeared before, don't re-introduce him — just get to it. Vary your handoff style: sometimes a quick "Knox, your turn" is better than a full sentence.`
+        : '';
       try {
         const handoffResponse = await invokeLLM({
           messages: [
@@ -2263,7 +2275,7 @@ export const stratRouter = router({
 - "Ooh, that's a good one. Let me grab Knox — he lives for this stuff."
 - "Alright, I know just the guy for this. Hey Knox, you busy?"
 - "Classic error code territory. Let me get Knox on the line — he's the brain around here."
-Do NOT provide any technical answer yet. Just the handoff line.`,
+Do NOT provide any technical answer yet. Just the handoff line.${knoxHistoryHint}`,
             },
             { role: 'user', content: input.message },
           ],
@@ -2317,10 +2329,14 @@ Do NOT provide any technical answer yet. Just the handoff line.`,
             {
               role: 'system',
               content: `You are Knox, PPEI's AI diagnostic expert. Strat just pulled you into a tech support conversation. You need to:
-1. Write a SHORT humorous entrance line (1-2 sentences) — like you just walked into the room. Be witty, confident, maybe tease Strat a little. Examples:
+1. Write a SHORT humorous entrance line (1-2 sentences) — like you just walked into the room. Be witty, confident, maybe tease Strat a little. CRITICAL: NEVER repeat an entrance you've used before. Vary your style wildly — sometimes deadpan, sometimes excited, sometimes a one-word reaction, sometimes an analogy. Examples (use these as INSPIRATION, not templates):
 - "*cracks knuckles* Alright, somebody said there's an error code? That's my favorite kind of puzzle."
 - "Strat called me in? Must be serious. Just kidding — I was already eavesdropping."
 - "Did someone say $0502? That's practically my middle name."
+- "Oh this one's fun."
+- "I was hoping someone would ask about this."
+- "Right. Let's get into it."
+${historyLen >= 5 ? 'NOTE: This is a returning customer (message ' + historyLen + '+). Skip the grand entrance — just a quick quip or jump straight to the analysis. They know who you are.' : ''}
 
 2. Then provide your technical analysis/answer based on this Knox research:
 ${knoxAnswer.slice(0, 6000)}

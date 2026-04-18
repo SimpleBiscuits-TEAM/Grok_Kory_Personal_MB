@@ -1,5 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { LOCAL_GUEST_USER } from "./_core/guestUser";
+import { ENV } from "./_core/env";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -99,6 +100,10 @@ export const appRouter = router({
         return { success: true, label, tier } as const;
       }),
     checkAccess: publicProcedure.query(({ ctx }) => {
+      // DEV_BYPASS_AUTH=1 — auto-authenticates as pro (owner) on localhost, skips access code gate
+      if (ENV.devBypassAuth) {
+        return { authenticated: true, tier: "pro" as const, method: "dev_bypass" as const, hasOAuth: true };
+      }
       // Parse cookies from raw header (no cookie-parser middleware)
       const cookieHeader = ctx.req.headers.cookie || "";
       const cookies = Object.fromEntries(

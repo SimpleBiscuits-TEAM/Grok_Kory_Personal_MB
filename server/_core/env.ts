@@ -28,4 +28,6 @@ export const ENV = {
   llmModel: process.env.LLM_MODEL ?? "",
   /** GitHub API token for accessing the private repo to display commit history. */
   githubApiToken: process.env.GITHUB_API_TOKEN ?? "",
+  /** DEV_BYPASS_AUTH=1 — auto-authenticates as owner on localhost (skips OAuth + access code gate). */
+  devBypassAuth: process.env.DEV_BYPASS_AUTH === "1",
 };

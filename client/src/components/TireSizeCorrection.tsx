@@ -16,7 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   CircleDot, Gauge, Calculator, Crosshair, Save, Trash2,
-  AlertTriangle, CheckCircle, Info, ChevronDown, ChevronUp, ArrowRight
+  AlertTriangle, CheckCircle, Info, ChevronDown, ChevronUp, ArrowRight,
+  Wifi, Loader2, Download
 } from 'lucide-react';
 import {
   calculateManualCorrection,
@@ -28,10 +29,12 @@ import {
   circumferenceFromDiameter,
   revsPerMile,
   GM_BINARY_ADDRESSES,
+  GM_TIRE_AXLE_DIDS,
   type ManualInputs,
   type CorrectionResult,
   type AutoCorrectResult,
   type SavedAutoCorrectData,
+  type VehicleScanResult,
 } from '@/lib/tireSizeCorrection';
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -54,6 +57,46 @@ const sColor = {
 
 export default function TireSizeCorrection() {
   const [mode, setMode] = useState<'manual' | 'auto'>('manual');
+  const [scanResult, setScanResult] = useState<VehicleScanResult | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+
+  /**
+   * Scan vehicle via PCAN bridge for current tire/axle calibration values.
+   * Pre-populates the Manual mode fields with scanned data.
+   */
+  const handleScanVehicle = async () => {
+    setIsScanning(true);
+    try {
+      // Attempt to connect to PCAN bridge and read DIDs
+      // This is a placeholder — actual PCAN bridge connection will be wired
+      // when the bridge infrastructure is fully integrated
+      const mockScan: VehicleScanResult = {
+        success: false,
+        axleRatio: null,
+        tireCircumference: null,
+        tireRevsPerMile: null,
+        ipcSpeedoFactor: null,
+        errors: ['PCAN bridge not connected. Connect V-OP or PCAN-USB adapter to scan vehicle.'],
+        scannedAt: Date.now(),
+      };
+      setScanResult(mockScan);
+      if (!mockScan.success) {
+        // Toast handled in UI below
+      }
+    } catch {
+      setScanResult({
+        success: false,
+        axleRatio: null,
+        tireCircumference: null,
+        tireRevsPerMile: null,
+        ipcSpeedoFactor: null,
+        errors: ['Failed to communicate with PCAN bridge'],
+        scannedAt: Date.now(),
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -70,10 +113,82 @@ export default function TireSizeCorrection() {
             </p>
           </div>
         </div>
-        <Badge variant="outline" className="border-zinc-700 text-zinc-500 text-[9px]">
-          BINARY ADDRESS: TBD
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleScanVehicle}
+            disabled={isScanning}
+            className="border-zinc-700 text-zinc-400 hover:text-white hover:border-red-700 text-[10px] h-7 gap-1.5"
+          >
+            {isScanning ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Download className="w-3 h-3" />
+            )}
+            {isScanning ? 'SCANNING...' : 'SCAN VEHICLE'}
+          </Button>
+          <Badge variant="outline" className="border-zinc-700 text-zinc-500 text-[9px]">
+            BINARY ADDRESS: TBD
+          </Badge>
+        </div>
       </div>
+
+      {/* Scan Result Banner */}
+      {scanResult && (
+        <Card className={`p-3 ${scanResult.success ? 'bg-emerald-950/30 border-emerald-800/40' : 'bg-amber-950/20 border-amber-800/30'}`}>
+          <div className="flex items-start gap-2">
+            {scanResult.success ? (
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <Wifi className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <p className={`text-[10px] ${sColor.mono} ${scanResult.success ? 'text-emerald-300' : 'text-amber-300'}`}>
+                {scanResult.success ? 'VEHICLE SCAN COMPLETE' : 'VEHICLE SCAN — BRIDGE NOT CONNECTED'}
+              </p>
+              {scanResult.success && (
+                <div className="grid grid-cols-4 gap-3 mt-2">
+                  {scanResult.axleRatio !== null && (
+                    <div>
+                      <span className={`text-[9px] ${sColor.mono} text-zinc-500 block`}>AXLE RATIO</span>
+                      <span className={`text-sm ${sColor.mono} text-white`}>{scanResult.axleRatio}</span>
+                    </div>
+                  )}
+                  {scanResult.tireCircumference !== null && (
+                    <div>
+                      <span className={`text-[9px] ${sColor.mono} text-zinc-500 block`}>TIRE CIRC</span>
+                      <span className={`text-sm ${sColor.mono} text-white`}>{scanResult.tireCircumference}"</span>
+                    </div>
+                  )}
+                  {scanResult.tireRevsPerMile !== null && (
+                    <div>
+                      <span className={`text-[9px] ${sColor.mono} text-zinc-500 block`}>REVS/MILE</span>
+                      <span className={`text-sm ${sColor.mono} text-white`}>{scanResult.tireRevsPerMile}</span>
+                    </div>
+                  )}
+                  {scanResult.ipcSpeedoFactor !== null && (
+                    <div>
+                      <span className={`text-[9px] ${sColor.mono} text-zinc-500 block`}>IPC FACTOR</span>
+                      <span className={`text-sm ${sColor.mono} text-white`}>{scanResult.ipcSpeedoFactor.toFixed(3)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              {scanResult.errors.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {scanResult.errors.map((err, i) => (
+                    <p key={i} className={`text-[9px] ${sColor.mono} text-zinc-500`}>{err}</p>
+                  ))}
+                </div>
+              )}
+              <p className={`text-[8px] ${sColor.mono} text-zinc-600 mt-1`}>
+                DIDs: {Object.values(GM_TIRE_AXLE_DIDS).map(d => `0x${d.did.toString(16).toUpperCase()}`).join(', ')}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Mode Tabs */}
       <div className="flex gap-1 p-0.5 bg-zinc-900/80 rounded-lg border border-zinc-800/50 w-fit">

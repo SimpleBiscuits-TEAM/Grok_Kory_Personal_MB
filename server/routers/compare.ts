@@ -35,6 +35,8 @@ function buildCompareSystemPrompt(): string {
     `- On L5P with stroker pump: only bottom 3 cells of Fuel Flow Base need adjusting, and only if surge actually happens — stock HP4 curve often works fine even with stroker`,
     `- Calibration rule of thumb: the average % that actual rail overshoots/undershoots desired = the approximate % that Fuel Flow Base mA needs to be raised to fix the surge`,
     `- When comparing two logs with different mA at same RPM: check if Fuel Flow Base was revised (intentional tune correction, not a fault)`,
+    `- CRITICAL mA COMPARISON RULE: When two logs show different FPR/PCV mA at the same RPM and load, this is a KEY diagnostic finding. Explicitly call it out in the Fuel System section. Possible causes: (1) Fuel Flow Base mA table was revised between tunes (intentional), (2) Regulator is compensating for a mechanical change (injectors, pump, lines), (3) Regulator is drifting (wear/contamination). If mA is HIGHER in the newer log at same conditions, the regulator is closing more = less fuel delivery = possible restriction or intentional lean-out. If mA is LOWER, regulator is opening more = more fuel delivery = possible pump upgrade or intentional enrichment.`,
+    `- mA DELTA THRESHOLD: Flag any mA difference > 50 mA at the same RPM/load point between logs. This is significant enough to warrant investigation. Under 50 mA is normal variation.`,
     `- TCC slip > 100 RPM sustained = potential converter issue`,
     ``,
     `MAF & Intake Tube Knowledge (CRITICAL):`,

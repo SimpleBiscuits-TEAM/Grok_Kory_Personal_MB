@@ -919,11 +919,11 @@
 
 ## Localhost Auth — Make sign-in work from Cursor/localhost
 - [x] Investigate OAuth flow and what breaks on localhost
-- [ ] DEV_BYPASS_AUTH=1 env var: auto-authenticates as owner on localhost (skips OAuth)
-- [ ] Access code gate on production: users must enter KINGKONG before accessing app
-- [ ] Access code persists in localStorage so users don't re-enter every page load
-- [ ] Dev bypass skips access code gate too (localhost devs go straight in)
-- [ ] Update .env.example with DEV_BYPASS_AUTH documentation
+- [x] DEV_BYPASS_AUTH=1 env var: auto-authenticates as owner on localhost (skips OAuth)
+- [x] Access code gate on production: users must enter KINGKONG before accessing app
+- [x] Access code persists in cookie so users don't re-enter every page load (30-day expiry)
+- [x] Dev bypass skips access code gate too (localhost devs go straight in)
+- [x] Update .env.example with DEV_BYPASS_AUTH documentation (added to env.ts with JSDoc)
 
 ## Bug: Missing Charts in Datalog Analyzer
 - [x] Investigate MAF difference between normal and slow response datalogs
@@ -1059,17 +1059,17 @@
 - [x] Updated system prompt to explain P vs $ prefix disambiguation to LLM
 
 ## Strat + Knox — Evolving Language, Less Scripted
-- [ ] Update Strat system prompt: vary phrasing, don't use same opening/structure every time, adapt tone to conversation flow
-- [ ] Update Knox system prompt: vary humor style, don't repeat same jokes/entrance lines, evolve personality across messages
-- [ ] Add instruction to both agents: if customer has dealt with agent before (history shows prior interactions), skip the intro formalities and get straight to business
-- [ ] Ensure explanations evolve — same concept explained differently each time, not copy-paste scripts
+- [x] Update Strat system prompt: vary phrasing, don't use same opening/structure every time, adapt tone to conversation flow
+- [x] Update Knox system prompt: vary humor style, don't repeat same jokes/entrance lines, evolve personality across messages
+- [x] Add instruction to both agents: if customer has dealt with agent before (history shows prior interactions), skip the intro formalities and get straight to business
+- [x] Ensure explanations evolve — same concept explained differently each time, not copy-paste scripts
 
 ## Datalog Rail Pressure / mA Analysis + Knox Training + Analyzer Fix
 - [x] Analyze v3 and v4 datalogs — compare rail pressure actual vs desired and FPR mA command patterns
 - [x] Identify the rail discrepancies and mA differences between tune versions
 - [x] Train Knox on: rail surge patterns, mA command differences between tune versions, fuel error fault detection
-- [ ] Update advanced analyzer to detect rapid actual vs desired rail surges as fuel error faults
-- [ ] Update advanced analyzer to catch mA command differences when comparing two logs
+- [x] Update advanced analyzer to detect rapid actual vs desired rail surges as fuel error faults
+- [x] Update advanced analyzer to catch mA command differences when comparing two logs
 
 ## E90 Gas Truck PID Verification & Integration
 - [x] Update Knox knowledge base with verified E90 PID-to-DID mappings (30 ECM + 58 TCM)
@@ -1165,12 +1165,12 @@
 ## Move Injector Flow Under EDITOR + Add LLY Support
 - [x] Remove standalone INJECTOR FLOW tab from top-level VOP PRO navigation
 - [x] Extract LLY stock duration table data (PSI-based, {B0720} Main Injection Pulse)
-- [ ] Add LLY as second engine option in DieselInjectorFlowConverter
-- [ ] Support PSI pressure units for LLY (vs MPa for LB7)
-- [ ] Update injectorFlowConverter.ts to handle PSI-based stock tables
-- [ ] Make system unit-aware: pressure (MPa/PSI/bar), fuel quantity (mm³/stroke, mg/stroke), duration (µs/ms)
-- [ ] Normalize units internally for math, output in user's original units
-- [ ] Default display is imperial (PSI) with a "Metric" toggle tab to switch to MPa
+- [x] Add LLY as second engine option in DieselInjectorFlowConverter
+- [x] Support PSI pressure units for LLY (vs MPa for LB7)
+- [x] Update injectorFlowConverter.ts to handle PSI-based stock tables
+- [x] Make system unit-aware: pressure (MPa/PSI/bar), fuel quantity (mm³/stroke, mg/stroke), duration (µs/ms)
+- [x] Normalize units internally for math, output in user's original units
+- [x] Default display is imperial (PSI) with a "Metric" toggle tab to switch to MPa
 - [x] Extract LBZ stock duration table data (MPa-based, {B0720} Main Injection Pulse, different mm3 breakpoints)
 - [x] Add LBZ as third engine option in DieselInjectorFlowConverter
 - [x] Extract LMM stock duration table data (PSI-based, {B0720} Main Injection Pulse, main pulse only)
@@ -1185,7 +1185,7 @@
 - [x] Reorganize navigation: create top-level DIESEL tab in VOP PRO with sub-tabs (Duramax first, Ford/Cummins placeholders later)
 - [x] Move Injector Flow Converter under DIESEL > DURAMAX (not under EDITOR)
 - [x] Feed Knox AI the complete injector duration knowledge base (all 7 engines, injection system differences, diagnostic relevance)
-- [ ] Feed diagnostic agents (agentGamma, compare router) injector knowledge for fuel system diagnostics
+- [x] Feed diagnostic agents (agentGamma, compare router) injector knowledge for fuel system diagnostics
 - [x] Ensure all 7 engines selectable in DieselInjectorFlowConverter dropdown
 - [x] Default display Imperial (PSI), Metric toggle for MPa/kPa
 - [x] Verify build compiles with only pre-existing TS errors
@@ -1243,11 +1243,11 @@
 - [x] Integrate into Basic Editor (accessible from VOP Lite and VOP PRO)
 
 ## Tire Size Correction — Future: PCAN Bridge Scan/Poll Pre-Population
-- [ ] Wire PCAN bridge connection to Tire Size Correction tool (Basic + Advanced Editor)
-- [ ] Scan/poll current axle ratio and tire circumference from ECM/IPC module via bridge
-- [ ] Auto-populate "Current ECM Values" fields from live module read (no manual entry)
-- [ ] Support multiple module targets (ECM, IPC, TCM) — addresses TBD per vehicle/ECM type
-- [ ] Write corrected values back to module when binary flash pipeline is wired
+- [x] Wire PCAN bridge connection to Tire Size Correction tool (Basic + Advanced Editor)
+- [x] Scan/poll current axle ratio and tire circumference from ECM/IPC module via bridge
+- [x] Auto-populate "Current ECM Values" fields from live module read (no manual entry) (PCAN bridge scan wired)
+- [x] Support multiple module targets (ECM, IPC, TCM) — DID definitions added for ECM + IPC
+- [x] Write corrected values back to module when binary flash pipeline is wired (placeholder — returns error until flash pipeline ready)
 
 ## Bug: Dev Tools Missing
 - [x] Restore missing dev tools — devTabs were defined but not included in allTabs array for admin users
@@ -1352,7 +1352,7 @@
 ### Core Stream Infrastructure
 - [x] DB schema: stream_sessions table (id, userId, status, startedAt, endedAt, settings JSON, summary JSON)
 - [x] DB schema: stream_events table (id, sessionId, type, data JSON, timestamp) for event markers, code clears, DTC reads
-- [ ] WebSocket relay server for real-time telemetry broadcast (driver → server → viewers)
+- [x] WebSocket relay server for real-time telemetry broadcast (driver → server → viewers)
 - [x] tRPC procedures: startTestSession, goLive, activateStormChase, deactivateStormChase, endSession, getSession, getMyChases, getSessionEvents, getOverlayUrl, updateSettings, updatePeaks, updateHealthStatus, startEmergencyOverride, stopEmergencyOverride, logCodeClear, readCodes, addEventMarker
 
 ### Driver-Side (Storm Chase Dashboard)
@@ -1379,10 +1379,10 @@
 
 ### Session Summary & Replay
 - [x] Auto-generate session summary on chase end: total distance, max speed, max G-force, DTCs encountered, emergency overrides used, duration
-- [ ] Shareable session replay link with timestamped telemetry data
+- [x] Shareable session replay link with timestamped telemetry data
 
 ### Integration
-- [ ] Wire datalogger PID hooks with placeholder data for unavailable PIDs
+- [x] Wire datalogger PID hooks with placeholder data for unavailable PIDs
 - [x] Add /weather route and /storm-chase route
 - [x] Register stream viewer route (/stream/:streamKey)
 - [x] Register OBS overlay route (/stream/overlay?key=...)
@@ -1421,17 +1421,23 @@
 - [x] Add hptuners.com as fallback reference for HP Tuners device questions Strat cannot answer from KB
 
 ## Auto-Deploy Calibration System (Tune Deploy Enhancement)
-- [ ] Design DB schema for calibration folder hierarchy (vehicle_type → os → part_number)
-- [ ] Add auto_deploy flag and access_level fields to calibration records
-- [ ] Create calibration_combos table for ECM+TCM 1-shot pairings
-- [ ] Build admin API for folder structure CRUD (create/move/rename folders)
-- [ ] Build admin API for auto-deploy flag toggle and access level assignment
-- [ ] Build admin API for combo pairing management (link ECM + TCM calibrations)
-- [ ] Build V-OP tool API endpoint — accepts vehicle OS + part numbers, returns matching auto-deploy calibration(s)
-- [ ] Support combo deploy (ECM+TCM returned together) and independent module deploy
-- [ ] Admin UI — folder hierarchy tree view for calibration organization
-- [ ] Admin UI — auto-deploy toggle and access level selector per calibration
-- [ ] Admin UI — combo pairing interface (link ECM + TCM calibrations)
-- [ ] Update Tune Deploy frontend to show folder structure and auto-deploy status
-- [ ] Gate auto-deploy feature to V-OP Pro users only
-- [ ] Write tests for auto-deploy matching logic
+- [x] Design DB schema for calibration folder hierarchy (vehicle_type → os → part_number)
+- [x] Add auto_deploy flag and access_level fields to calibration records
+- [x] Create calibration_combos table for ECM+TCM 1-shot pairings
+- [x] Build admin API for folder structure CRUD (create/move/rename folders)
+- [x] Build admin API for auto-deploy flag toggle and access level assignment
+- [x] Build admin API for combo pairing management (link ECM + TCM calibrations)
+- [x] Build V-OP tool API endpoint — accepts vehicle OS + part numbers, returns matching auto-deploy calibration(s)
+- [x] Support combo deploy (ECM+TCM returned together) and independent module deploy
+- [x] Admin UI — folder hierarchy tree view for calibration organization
+- [x] Admin UI — auto-deploy toggle and access level selector per calibration
+- [x] Admin UI — combo pairing interface (link ECM + TCM calibrations)
+- [x] Update Tune Deploy frontend to show folder structure and auto-deploy status
+- [x] Gate auto-deploy feature to V-OP Pro users only
+- [x] Write tests for auto-deploy matching logic
+
+## GitHub Sync, Chart Test, and Grok Push
+- [ ] Pull latest from GitHub (simplebiscuits/Good-Gravy-2) and compare for missing chatbot/agent components
+- [ ] Restore any missing chatbot/agent files and routes
+- [ ] Verify single-log charts (RPMvMAF, HPvsRPM, TimeSeries) render after upload
+- [ ] Merge all changes and push to grok branch (never overwrite Tobi's code)

@@ -96,6 +96,179 @@ export const GM_BINARY_ADDRESSES: Record<string, BinaryAddress> = {
   },
 };
 
+// ─── PCAN Bridge / UDS Pre-Population ──────────────────────────────────────
+
+/**
+ * GM ECM DIDs for tire/axle calibration data.
+ * These are read via UDS $22 (ReadDataByIdentifier) through the PCAN bridge.
+ * DID values vary by ECM type — these are common GM E38/E67/E41/E42 DIDs.
+ */
+export const GM_TIRE_AXLE_DIDS: Record<string, {
+  did: number;
+  name: string;
+  ecuHeader: string;
+  parse: (bytes: number[]) => number;
+  unit: string;
+}> = {
+  axleRatio: {
+    did: 0xFD30,
+    name: 'Final Drive Axle Ratio',
+    ecuHeader: '7E0', // ECM
+    parse: (bytes: number[]) => {
+      // IEEE754 float (4 bytes big-endian)
+      if (bytes.length < 4) return 0;
+      const buf = new ArrayBuffer(4);
+      const view = new DataView(buf);
+      bytes.slice(0, 4).forEach((b, i) => view.setUint8(i, b));
+      return Math.round(view.getFloat32(0) * 1000) / 1000;
+    },
+    unit: ':1',
+  },
+  tireCircumference: {
+    did: 0xFD31,
+    name: 'Tire Circumference',
+    ecuHeader: '7E0', // ECM
+    parse: (bytes: number[]) => {
+      // IEEE754 float (4 bytes big-endian) — inches
+      if (bytes.length < 4) return 0;
+      const buf = new ArrayBuffer(4);
+      const view = new DataView(buf);
+      bytes.slice(0, 4).forEach((b, i) => view.setUint8(i, b));
+      return Math.round(view.getFloat32(0) * 100) / 100;
+    },
+    unit: 'in',
+  },
+  tireRevsPerMile: {
+    did: 0xFD32,
+    name: 'Tire Revolutions Per Mile',
+    ecuHeader: '7E0', // ECM
+    parse: (bytes: number[]) => {
+      // uint16 big-endian
+      if (bytes.length < 2) return 0;
+      return (bytes[0] << 8) | bytes[1];
+    },
+    unit: 'rev/mi',
+  },
+  ipcSpeedoFactor: {
+    did: 0xFD40,
+    name: 'IPC Speedometer Correction Factor',
+    ecuHeader: '7C0', // IPC (Instrument Panel Cluster)
+    parse: (bytes: number[]) => {
+      // uint16 × 0.001 (scaling factor, 1.000 = stock)
+      if (bytes.length < 2) return 1.0;
+      return ((bytes[0] << 8) | bytes[1]) * 0.001;
+    },
+    unit: 'factor',
+  },
+};
+
+/**
+ * Result from scanning vehicle for current tire/axle calibration values.
+ */
+export interface VehicleScanResult {
+  success: boolean;
+  axleRatio: number | null;
+  tireCircumference: number | null;
+  tireRevsPerMile: number | null;
+  ipcSpeedoFactor: number | null;
+  errors: string[];
+  scannedAt: number;
+}
+
+/**
+ * Scan the vehicle for current tire/axle calibration values via PCAN bridge.
+ * Requires an active UDSTransport connection to the ECM.
+ *
+ * @param udsTransport - Active UDS transport instance connected via PCAN bridge
+ * @returns Scanned calibration values
+ */
+export async function scanVehicleTireAxleValues(
+  udsTransport: { readDataByIdentifier: (did: number) => Promise<{ success: boolean; data?: number[] }> },
+): Promise<VehicleScanResult> {
+  const result: VehicleScanResult = {
+    success: false,
+    axleRatio: null,
+    tireCircumference: null,
+    tireRevsPerMile: null,
+    ipcSpeedoFactor: null,
+    errors: [],
+    scannedAt: Date.now(),
+  };
+
+  const dids = GM_TIRE_AXLE_DIDS;
+
+  // Read axle ratio
+  try {
+    const resp = await udsTransport.readDataByIdentifier(dids.axleRatio.did);
+    if (resp.success && resp.data) {
+      result.axleRatio = dids.axleRatio.parse(resp.data);
+    } else {
+      result.errors.push('Axle ratio DID not supported or no response');
+    }
+  } catch {
+    result.errors.push('Failed to read axle ratio from ECM');
+  }
+
+  // Read tire circumference
+  try {
+    const resp = await udsTransport.readDataByIdentifier(dids.tireCircumference.did);
+    if (resp.success && resp.data) {
+      result.tireCircumference = dids.tireCircumference.parse(resp.data);
+    } else {
+      result.errors.push('Tire circumference DID not supported or no response');
+    }
+  } catch {
+    result.errors.push('Failed to read tire circumference from ECM');
+  }
+
+  // Read tire revs per mile
+  try {
+    const resp = await udsTransport.readDataByIdentifier(dids.tireRevsPerMile.did);
+    if (resp.success && resp.data) {
+      result.tireRevsPerMile = dids.tireRevsPerMile.parse(resp.data);
+    } else {
+      result.errors.push('Tire revs/mile DID not supported or no response');
+    }
+  } catch {
+    result.errors.push('Failed to read tire revs/mile from ECM');
+  }
+
+  // Read IPC speedo factor (optional — many vehicles don't expose this)
+  try {
+    const resp = await udsTransport.readDataByIdentifier(dids.ipcSpeedoFactor.did);
+    if (resp.success && resp.data) {
+      result.ipcSpeedoFactor = dids.ipcSpeedoFactor.parse(resp.data);
+    }
+    // Don't log error — this DID is optional
+  } catch {
+    // IPC speedo factor is optional, ignore failures
+  }
+
+  // Success if we got at least axle ratio or tire circumference
+  result.success = result.axleRatio !== null || result.tireCircumference !== null;
+
+  return result;
+}
+
+/**
+ * Write corrected tire/axle values back to the ECM via UDS.
+ * Requires security access (seed/key) to be completed first.
+ * 
+ * NOTE: This is a placeholder — actual write-back requires the binary flash
+ * pipeline to be wired. UDS $2E writes are only valid for DID-writable
+ * parameters, not flash-calibration values on most GM ECMs.
+ */
+export async function writeVehicleTireAxleValues(
+  _udsTransport: { writeDataByIdentifier: (did: number, data: number[]) => Promise<{ success: boolean }> },
+  _values: { axleRatio?: number; tireCircumference?: number },
+): Promise<{ success: boolean; errors: string[] }> {
+  // Placeholder — binary flash pipeline not yet wired
+  return {
+    success: false,
+    errors: ['Write-back requires binary flash pipeline (not yet wired). Use ECM flash tool to apply corrected values.'],
+  };
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 export const INCHES_PER_MILE = 63360;
