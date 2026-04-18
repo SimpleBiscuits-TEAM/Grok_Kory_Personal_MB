@@ -1419,3 +1419,19 @@
 ## Strat RTD4/TDN Fix
 - [x] Fix Strat giving VCM Suite instructions for RTD4 — add explicit rule that RTD4 uses TDN App only, no VCM Suite, no laptop
 - [x] Add hptuners.com as fallback reference for HP Tuners device questions Strat cannot answer from KB
+
+## Auto-Deploy Calibration System (Tune Deploy Enhancement)
+- [ ] Design DB schema for calibration folder hierarchy (vehicle_type → os → part_number)
+- [ ] Add auto_deploy flag and access_level fields to calibration records
+- [ ] Create calibration_combos table for ECM+TCM 1-shot pairings
+- [ ] Build admin API for folder structure CRUD (create/move/rename folders)
+- [ ] Build admin API for auto-deploy flag toggle and access level assignment
+- [ ] Build admin API for combo pairing management (link ECM + TCM calibrations)
+- [ ] Build V-OP tool API endpoint — accepts vehicle OS + part numbers, returns matching auto-deploy calibration(s)
+- [ ] Support combo deploy (ECM+TCM returned together) and independent module deploy
+- [ ] Admin UI — folder hierarchy tree view for calibration organization
+- [ ] Admin UI — auto-deploy toggle and access level selector per calibration
+- [ ] Admin UI — combo pairing interface (link ECM + TCM calibrations)
+- [ ] Update Tune Deploy frontend to show folder structure and auto-deploy status
+- [ ] Gate auto-deploy feature to V-OP Pro users only
+- [ ] Write tests for auto-deploy matching logic

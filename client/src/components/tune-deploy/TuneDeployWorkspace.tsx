@@ -44,10 +44,12 @@ import {
   X,
   Send,
   Link2,
+  Settings2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { TRPCClientError } from "@trpc/client";
+import AutoDeployPanel from "./AutoDeployPanel";
 
 type TuneDeployUploadErrorJson = {
   ok?: boolean;
@@ -955,6 +957,27 @@ export default function TuneDeployWorkspace() {
       <DeviceManagementPanel
         libraryRows={libraryRows}
       />
+
+      {/* Auto-Deploy Management (Admin Only) */}
+      {isAdmin && (
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-zinc-950/60 rounded-2xl border border-cyan-500/20 p-4 backdrop-blur-sm"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+              <Settings2 className="w-4 h-4 text-cyan-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-100 tracking-tight">AUTO-DEPLOY MANAGEMENT</h3>
+              <p className="text-[10px] text-zinc-500">Folder hierarchy, auto-deploy flags, ECM+TCM combos, and audit log</p>
+            </div>
+          </div>
+          <AutoDeployPanel />
+        </motion.section>
+      )}
     </div>
   );
 }

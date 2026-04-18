@@ -2221,3 +2221,111 @@ export const streamTelemetry = mysqlTable("stream_telemetry", {
 
 export type StreamTelemetry = typeof streamTelemetry.$inferSelect;
 export type InsertStreamTelemetry = typeof streamTelemetry.$inferInsert;
+
+
+// ── Tune Deploy — Auto-Deploy Calibration Folder Hierarchy ──────────────────
+/**
+ * Hierarchical folder structure for organizing calibrations:
+ *   Vehicle Type (L5P) → OS → Part Number
+ * Admin-managed. parentId = null means root-level folder.
+ */
+export const calibrationFolders = mysqlTable("calibration_folders", {
+  id: int("id").autoincrement().primaryKey(),
+  parentId: int("parentId"), // FK to self — null = root
+  name: varchar("name", { length: 255 }).notNull(),
+  /** 'vehicle_type' | 'os' | 'part_number' | 'custom' */
+  folderType: mysqlEnum("folderType", ["vehicle_type", "os", "part_number", "custom"]).default("custom").notNull(),
+  /** Breadcrumb path for display, e.g. "L5P / E41 / 12709844" */
+  fullPath: text("fullPath"),
+  /** Sort order within parent */
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationFolder = typeof calibrationFolders.$inferSelect;
+export type InsertCalibrationFolder = typeof calibrationFolders.$inferInsert;
+
+// ── Tune Deploy — Auto-Deploy Metadata (extends tune_deploy_calibrations) ───
+/**
+ * Additional auto-deploy fields for calibrations. Stored in a separate table
+ * to avoid altering the existing tune_deploy_calibrations table.
+ * One-to-one with tune_deploy_calibrations.id.
+ */
+export const calibrationAutoDeployMeta = mysqlTable("calibration_auto_deploy_meta", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id */
+  calibrationId: int("calibrationId").notNull().unique(),
+  /** FK to calibration_folders.id — which folder this calibration lives in */
+  folderId: int("folderId"),
+  /** ECM or TCM — identifies which module this calibration targets */
+  moduleType: mysqlEnum("moduleType", ["ecm", "tcm"]).default("ecm").notNull(),
+  /** Whether this calibration is flagged for auto-deploy */
+  autoDeploy: boolean("autoDeploy").default(false).notNull(),
+  /** Minimum access level required (maps to users.accessLevel 0-3) */
+  autoDeployAccessLevel: int("autoDeployAccessLevel").default(1).notNull(),
+  /** Admin notes about this calibration's deployment */
+  notes: text("notes"),
+  /** Who last modified the auto-deploy settings */
+  updatedBy: int("updatedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationAutoDeployMeta = typeof calibrationAutoDeployMeta.$inferSelect;
+export type InsertCalibrationAutoDeployMeta = typeof calibrationAutoDeployMeta.$inferInsert;
+
+// ── Tune Deploy — ECM + TCM Combo Pairings ──────────────────────────────────
+/**
+ * Pairs an ECM calibration with a TCM calibration for 1-shot combo deploy.
+ * When the V-OP tool requests auto-deploy, if a combo exists for the matched
+ * ECM calibration, the TCM calibration is also returned (and vice versa).
+ */
+export const calibrationCombos = mysqlTable("calibration_combos", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id — the ECM calibration */
+  ecmCalibrationId: int("ecmCalibrationId").notNull(),
+  /** FK to tune_deploy_calibrations.id — the TCM calibration */
+  tcmCalibrationId: int("tcmCalibrationId").notNull(),
+  /** Label for this combo, e.g. "L5P Stage 2 — E41 + T93" */
+  label: varchar("label", { length: 512 }),
+  /** Whether this combo is active for auto-deploy */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationCombo = typeof calibrationCombos.$inferSelect;
+export type InsertCalibrationCombo = typeof calibrationCombos.$inferInsert;
+
+// ── Tune Deploy — Auto-Deploy Audit Log ─────────────────────────────────────
+/**
+ * Records every auto-deploy event for auditing.
+ */
+export const autoDeployLog = mysqlTable("auto_deploy_log", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the customer who received the deployment */
+  userId: int("userId"),
+  /** FK to tune_deploy_devices.id */
+  deviceId: int("deviceId"),
+  /** 'combo' | 'ecm_only' | 'tcm_only' */
+  deployType: mysqlEnum("deployType", ["combo", "ecm_only", "tcm_only"]).notNull(),
+  /** FK to calibration_combos.id (if combo deploy) */
+  comboId: int("comboId"),
+  /** FK to tune_deploy_calibrations.id — ECM calibration deployed */
+  ecmCalibrationId: int("ecmCalibrationId"),
+  /** FK to tune_deploy_calibrations.id — TCM calibration deployed */
+  tcmCalibrationId: int("tcmCalibrationId"),
+  /** Vehicle OS reported by tool */
+  vehicleEcmOs: varchar("vehicleEcmOs", { length: 256 }),
+  vehicleTcmOs: varchar("vehicleTcmOs", { length: 256 }),
+  /** Part numbers reported by tool (CSV) */
+  vehiclePartNumbers: text("vehiclePartNumbers"),
+  /** User's access level at time of deploy */
+  userAccessLevel: int("userAccessLevel"),
+  /** 'success' | 'no_match' | 'access_denied' | 'error' */
+  result: mysqlEnum("result", ["success", "no_match", "access_denied", "error"]).notNull(),
+  resultMessage: text("resultMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AutoDeployLog = typeof autoDeployLog.$inferSelect;
+export type InsertAutoDeployLog = typeof autoDeployLog.$inferInsert;

@@ -42,6 +42,7 @@ import { stratRouter } from "./routers/strat";
 import { githubRouter } from "./routers/github";
 import { tasksRouter } from "./routers/tasks";
 import { stormChaseRouter } from "./routers/stormChase";
+import { autoDeployRouter } from "./routers/autoDeploy";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -303,6 +304,7 @@ export const appRouter = router({
 
   // Tune Deploy — calibration library (R2 + metadata + future vehicle match)
   tuneDeploy: tuneDeployRouter,
+  autoDeploy: autoDeployRouter,
 
   // Vehicle-Reported Weather Network
   weather: weatherRouter,
