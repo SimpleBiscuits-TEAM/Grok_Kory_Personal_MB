@@ -369,4 +369,67 @@ When Knox analyses a datalog, the reasoning should follow this hierarchy:
 7. **Cross-reference everything** — no single parameter tells the whole story. Look for patterns across multiple channels that point to the same root cause.
 
 This hierarchy works because air is the foundation (you cannot burn fuel without air), fuel is the next requirement (you cannot make power without fuel), combustion quality determines how efficiently the air-fuel energy is converted to work, and mechanical output is the final result of the entire chain.
+
+### 15. Ethanol Fuels — E85, E90, and IGNITE RED
+
+Ethanol-based fuels are increasingly common in performance applications. Knox must understand their properties, advantages, and tuning implications because they fundamentally change the fuel system requirements and calibration strategy.
+
+**What Are These Fuels?**
+- **E85** = ~85% ethanol, ~15% gasoline by volume. Stoichiometric AFR: 9.8:1. Octane: ~108 RON. Density: 0.789 g/cc.
+- **E90** = ~90% ethanol, ~10% gasoline by volume. Stoichiometric AFR: 9.5:1. Octane: ~109 RON. Density: 0.793 g/cc.
+- **IGNITE RED** = a branded E90 race fuel. Identical properties to E90. In filenames it appears as "IgniteRed", "Ignite_Red", "IGNITE RED", or "ignite".
+- E85 and E90/IGNITE RED are functionally very similar — the 5% difference in ethanol content produces only minor differences in stoichiometry and energy density.
+
+**Why Ethanol Has Lower Energy Density But Can Make MORE Power:**
+Ethanol contains ~76,000 BTU/gallon vs gasoline's ~114,000 BTU/gallon — roughly 33% less energy per unit volume. This means the engine needs ~30-35% more fuel volume (longer injector pulse widths, larger injectors) to deliver the same energy. However, ethanol's primary advantage is NOT the fuel itself — it is the TIMING.
+
+Ethanol's extremely high octane rating (108-109 RON) means the engine can tolerate significantly more ignition advance without knock. On pump gas (91-93 octane), a turbo Talon might run 20-25° of timing advance. On E85/E90, the same engine can safely run 30-35° of timing advance. Each additional degree of timing advance (up to MBT — Minimum advance for Best Torque) produces roughly 1-2% more power because it positions the peak cylinder pressure closer to the optimal crank angle (~15° ATDC).
+
+The net result: the 33% energy density penalty is more than offset by the 10-15° of additional timing advance, producing 15-25% more wheel power on a properly tuned E85 setup compared to pump gas.
+
+**Lambda and AFR Targets on Ethanol:**
+- Stoichiometric lambda = 1.0 on any fuel (by definition)
+- WOT lambda target on E85/E90: 0.80-0.85 (richer than gasoline's 0.82-0.88)
+- WOT AFR target on E85: ~7.8-8.3 (stoich 9.8 × lambda 0.80-0.85)
+- WOT AFR target on E90/IGNITE RED: ~7.6-8.1 (stoich 9.5 × lambda 0.80-0.85)
+- Running rich on ethanol serves the same purpose as on gasoline: combustion chamber cooling and detonation margin. But because stoich AFR is so much lower, the absolute AFR numbers look very different from gasoline.
+
+**CRITICAL: Do NOT compare ethanol AFR numbers to gasoline AFR numbers directly.** An AFR of 10.0 on E85 is NOT dangerously lean — it is slightly richer than stoich (lambda ~0.98). An AFR of 10.0 on gasoline WOULD be dangerously lean (lambda ~0.68). Always convert to lambda for cross-fuel comparisons.
+
+**Injector Requirements:**
+- E85/E90 requires ~35% more fuel volume than gasoline for the same power output
+- Stock Talon injectors (310cc) are NOT sufficient for E85 on a turbo setup
+- ID1050X (1050cc) injectors provide adequate headroom for E85 turbo applications
+- Typical injector duty cycle on E85 turbo at WOT: 60-85% (vs 40-60% on pump gas)
+- A boost-referenced fuel pressure regulator (BRR) is recommended to maintain consistent fuel delivery under boost
+
+**Timing — The Key Tuning Lever on Ethanol:**
+- Optimal ignition timing on E85/E90 turbo: 30-35° (varies by RPM, boost, and engine condition)
+- Conservative/safe timing: 20-25° (leaves significant power on the table)
+- If a datalog shows flat timing at 20-23° on E85, the tune is very conservative — this is safe but not optimised
+- Each degree of timing advance from 20° to 35° produces measurable power gain
+- Beyond MBT (typically 35-38° on ethanol), additional timing produces NO more power and risks mechanical stress
+
+**Reference Data from Real Dyno Runs (Honda Talon, JR Turbo, ID1050):**
+
+| Parameter | E85 (23° timing) | IGNITE RED (20° timing) | Notes |
+|-----------|-------------------|-------------------------|-------|
+| Peak HP | 170.7 | 146.8 | Both with conservative timing |
+| Peak Torque | 119.2 ft-lb | 110.3 ft-lb | |
+| Avg WOT AFR | 11.4 | 10.0 | Both running rich for safety |
+| Avg WOT Lambda | 0.82 | 0.81 | Normal for ethanol turbo |
+| Avg Inj PW | 11.55 ms | 10.14 ms | |
+| Avg Inj Duty | 68.5% | 61.2% | Headroom remaining |
+| Peak MAP | 105 kPa | 96 kPa | E85 file making more boost |
+| Measured BSFC | 1.02 | 1.04 | Very consistent between fuels |
+
+The IGNITE RED file makes less power primarily because of 3° less timing (20° vs 23°) and lower boost (96 vs 105 kPa MAP). With both tuned to 30-35° timing, power would be significantly higher and the gap between them would narrow.
+
+**Diagnostic Implications:**
+- When analysing an E85/E90 datalog, expect AFR values in the 7-12 range at WOT — this is NORMAL
+- Injector duty cycles above 85% on ethanol are a concern (approaching injector capacity)
+- Timing below 25° on E85 indicates a conservative tune — not a problem, but not optimised
+- Fuel pressure stability is critical on ethanol — the higher fuel flow demands can expose weak fuel pumps
+- Cold start on E85 can be difficult because ethanol has poor vapourisation at low temperatures — this is a known limitation, not a fault
+- E85 content varies seasonally (summer blends may be E70-E75) — if power drops in summer, check actual ethanol content
 `;

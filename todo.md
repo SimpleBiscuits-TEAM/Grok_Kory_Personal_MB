@@ -1508,3 +1508,21 @@
 - [x] Integrate into knoxKnowledgeServer.ts (both full and sanitized exports)
 - [x] Write vitest tests (47 tests, all passing) — knox-engine-knowledge.test.ts
 - [x] Checkpoint and push to GitHub
+
+## E85/E90 Fuel Knowledge & Talon Reference File Analysis
+- [x] Parse and analyze Kory_Talon_e85_JR_3bar_BRR_ID1050_Rev_1_3_Run_3.wp8 reference file
+- [x] Parse and analyze Kory_JR_IgniteRed_ID1050_GravesSARemoved_Rev_1_8_Run_1.wp8 reference file
+- [x] Document E85 turbo data: RPM, MAP, timing, AFR, fuel flow, power characteristics
+- [x] Document IGNITE RED turbo data: RPM, MAP, timing, AFR, fuel flow, power characteristics
+- [x] Train Knox on E85/E90/IGNITE RED fuel knowledge (stoichiometry, octane, energy density, timing, AFR targets, diagnostics)
+- [x] Note low timing observation (20-23° vs optimal 30-35° for E85/E90) and power implications
+- [x] Fix IGNITE RED fuel profile — was incorrectly configured as gasoline (stoich 14.0), now correctly E90 (stoich 9.5)
+- [x] Add fuel-specific turbo BSFC factors: pump gas 1.40 (21 runs), ethanol 1.76 (2 runs, conservative timing)
+- [x] Update estimateHPWithBoost to accept fuelType parameter and use fuel-specific turbo factor
+- [x] Update DynoSheet.tsx and computeVirtualDyno to pass fuelType to estimateHPWithBoost
+- [x] Update detectFuelType to match additional IGNITE RED filename patterns
+- [x] Virtual dyno accuracy: E85 182.8 HP est vs 170.7 HP actual (7% error); IGNITE RED 150.2 HP est vs 146.8 HP actual (2% error)
+- [x] Write 25 boost tests (fuel-specific turbo factors, IGNITE RED profile, E85/IGNITE RED integration tests)
+- [x] Write 10 Knox ethanol fuel knowledge tests (E85, E90, IGNITE RED properties, AFR/lambda, timing, diagnostics)
+- [x] All 82 tests passing (25 boost + 57 Knox engine knowledge)
+- [x] Checkpoint and push to GitHub

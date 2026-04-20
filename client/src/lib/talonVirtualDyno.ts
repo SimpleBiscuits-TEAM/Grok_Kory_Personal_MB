@@ -45,9 +45,19 @@ export interface FuelProfile {
 }
 
 /**
- * BSFC values calibrated from 1,043 real Honda Talon dyno WP8 logs.
- * Median measured BSFC (cc/min per HP) = 0.3438 for pump gas.
- * Adjusted per fuel type based on energy density ratios.
+ * BSFC values calibrated from real Honda Talon dyno WP8 logs.
+ *
+ * Pump gas: 1,043 NA dyno logs, median measured BSFC = 0.3438, adjusted to 0.45
+ * E85:     1 turbo dyno run (Kory_Talon_e85_JR_3bar_BRR_ID1050), measured BSFC = 1.02
+ * E90:     1 turbo dyno run (Kory_JR_IgniteRed_ID1050_GravesSARemoved), measured BSFC = 1.04
+ *
+ * E85/E90/IGNITE RED are all ethanol fuels:
+ *   - E85 = ~85% ethanol, 15% gasoline (stoich 9.8:1, ~108 RON)
+ *   - E90 = ~90% ethanol, 10% gasoline (stoich 9.5:1, ~109 RON)
+ *   - IGNITE RED = branded E90 race fuel (same properties as E90)
+ *   - All require ~30-35% more fuel volume than gasoline for same energy
+ *   - Primary advantage: high octane allows 30-35° timing (vs 20-25° pump gas)
+ *   - Net power gain from timing advance exceeds energy density penalty
  */
 export const FUEL_PROFILES: Record<FuelType, FuelProfile> = {
   pump: {
@@ -79,11 +89,11 @@ export const FUEL_PROFILES: Record<FuelType, FuelProfile> = {
     energyDensity: 12400,
   },
   ignite_red: {
-    name: 'Ignite Red',
-    stoichAFR: 14.0,
-    density: 0.770,
-    bsfc: 0.43,       // premium race fuel — best BSFC
-    energyDensity: 18600,
+    name: 'Ignite Red (E90)',
+    stoichAFR: 9.5,   // IGNITE RED is E90 — same stoich as E90, NOT gasoline
+    density: 0.793,   // same density as E90 (ethanol-based)
+    bsfc: 0.60,       // same BSFC as E90 (same fuel chemistry)
+    energyDensity: 12400,  // same energy density as E90
   },
 };
 
@@ -97,23 +107,38 @@ const SECONDS_PER_HOUR = 3600;
 const ATM_KPA = 101.325;
 
 /**
- * Turbo BSFC multiplier — calibrated from 21 real Dynojet dyno runs
- * (58,351 data points) of a Jackson Racing turbo Honda Talon with ID1050
- * injectors on 93 octane pump gas.
+ * Turbo BSFC multipliers — fuel-specific, calibrated from real Dynojet dyno runs.
  *
- * Measured median BSFC = 0.905 vs NA BSFC = 0.45 → ratio = 2.01
+ * Pump gas: 21 runs (58,351 pts), median measured BSFC = 0.905 → factor = 1.40
+ * E85:     1 run (1,762 pts), median measured BSFC = 1.020 → factor = 1.76
+ * E90:     1 run (2,463 pts), median measured BSFC = 1.039 → factor = 1.76
  *
  * The higher BSFC for turbo reflects:
  *   - Rich AFR targets for combustion chamber cooling (lambda ~0.80)
  *   - Excess fuel that doesn't produce power (cooling duty)
  *   - Large injector oversizing (ID1050 vs stock 310cc)
  *
- * Calibrated by comparing buildDynoSheetData output (ID1050+turbo)
- * against real Dynojet roller readings from 21 Jackson Racing turbo runs.
- * NA BSFC (0.45) produces 218 HP; real dyno shows ~156 HP peak.
- * Factor = 218.4 / 156 = 1.40
+ * NOTE: E85/E90 reference files had conservative timing (20-23° vs optimal 30-35°).
+ * With properly advanced timing, E85/E90 turbo BSFC would be lower (better efficiency).
+ * These factors will be recalibrated when properly-timed E85 reference files are available.
+ *
+ * E85 and E90 share the same turbo factor because their measured BSFC was nearly
+ * identical (1.020 vs 1.039) — both are ethanol fuels with similar stoichiometry.
  */
-const TURBO_BSFC_FACTOR = 1.40;  // multiply NA BSFC by this for turbo
+const TURBO_BSFC_FACTOR_PUMP = 1.40;  // pump gas turbo (21 dyno runs)
+const TURBO_BSFC_FACTOR_ETHANOL = 1.76;  // E85/E90/IGNITE RED turbo (2 dyno runs, conservative timing)
+
+/** Helper to get fuel-specific turbo BSFC factor */
+function getTurboBsfcFactor(fuelType: FuelType): number {
+  switch (fuelType) {
+    case 'e85':
+    case 'e90':
+    case 'ignite_red':
+      return TURBO_BSFC_FACTOR_ETHANOL;
+    default:
+      return TURBO_BSFC_FACTOR_PUMP;
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,7 +218,8 @@ export function detectFuelType(
   // Check specific fuels first (more specific matches)
   if (combined.includes('e90')) return 'e90';
   if (combined.includes('e85')) return 'e85';
-  if (combined.includes('ignite red') || combined.includes('ignitered') || combined.includes('ignite_red')) {
+  // IGNITE RED is a branded E90 race fuel — match various filename patterns
+  if (combined.includes('ignite red') || combined.includes('ignitered') || combined.includes('ignite_red') || combined.includes('ignitred') || combined.includes('ignite')) {
     return 'ignite_red';
   }
   if (combined.includes('utv96') || combined.includes('utv 96')) return 'utv96';
@@ -280,10 +306,12 @@ export function estimateHPWithBoost(
   bsfc: number,
   isTurbo: boolean,
   _mapKpa: number,  // reserved for future RPM-dependent BSFC
+  fuelType: FuelType = 'pump',
 ): number {
   if (fuelFlowGPerSec <= 0 || bsfc <= 0) return 0;
 
-  const effectiveBsfc = isTurbo ? bsfc * TURBO_BSFC_FACTOR : bsfc;
+  const turboFactor = getTurboBsfcFactor(fuelType);
+  const effectiveBsfc = isTurbo ? bsfc * turboFactor : bsfc;
   return estimateHP(fuelFlowGPerSec, effectiveBsfc);
 }
 
@@ -375,7 +403,7 @@ export function computeVirtualDyno(
     );
 
     // Estimate HP (with boost correction for turbo setups)
-    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map);
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map, config.fuelType);
 
     // Apply dyno calibration factor
     estHP *= config.dynoCalibrationFactor;

@@ -327,3 +327,62 @@ describe('Knox Engine Fundamentals — Heat Management', () => {
     expect(KNOX_ENGINE_FUNDAMENTALS).toContain('viscosity');
   });
 });
+
+// ─── Section 15: Ethanol Fuels ─────────────────────────────────────────────
+
+describe('Knox Engine Fundamentals — Ethanol Fuels (E85/E90/IGNITE RED)', () => {
+  it('covers E85 fuel properties', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('E85');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('85% ethanol');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('9.8:1');
+  });
+
+  it('covers E90 fuel properties', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('E90');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('90% ethanol');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('9.5:1');
+  });
+
+  it('identifies IGNITE RED as branded E90', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('IGNITE RED');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('branded E90');
+  });
+
+  it('explains why ethanol makes more power despite lower energy density', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('energy density');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('TIMING');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('octane');
+  });
+
+  it('covers ethanol AFR and lambda targets', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Lambda and AFR Targets');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('0.80-0.85');
+  });
+
+  it('warns against comparing ethanol AFR to gasoline AFR directly', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Do NOT compare ethanol AFR numbers to gasoline AFR numbers');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('lambda for cross-fuel comparisons');
+  });
+
+  it('covers ethanol timing targets (30-35 degrees)', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('30-35');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('MBT');
+  });
+
+  it('includes real dyno reference data', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('170.7');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('146.8');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Reference Data from Real Dyno Runs');
+  });
+
+  it('covers injector requirements for ethanol', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('35% more fuel volume');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('ID1050X');
+  });
+
+  it('covers ethanol diagnostic implications', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Diagnostic Implications');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('cold start');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('seasonally');
+  });
+});

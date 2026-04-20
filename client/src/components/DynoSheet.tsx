@@ -456,7 +456,7 @@ function buildWOTRun(
       if (hp > 500) hp = 0;
       if (torque > 500) torque = 0;
     } else {
-      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map);
+      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map, config.fuelType);
       hp *= config.dynoCalibrationFactor;
       torque = calculateTorque(hp, rpm);
     }
