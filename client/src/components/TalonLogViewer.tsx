@@ -329,6 +329,47 @@ function ChartSection({
       ctx.stroke();
     }
 
+    // AFR reference lines — dashed lines at λ 1.0 (stoich) and λ 0.8 (rich target)
+    const hasAFR = channelIndices.some((ci) => {
+      const ch = channels[ci];
+      return ch && isAFRChannel(ch);
+    });
+    if (hasAFR) {
+      // Use the first AFR channel's range (they all share the fixed 0.68–1.25 range)
+      const afrSlot = channelIndices.findIndex((ci) => {
+        const ch = channels[ci];
+        return ch && isAFRChannel(ch);
+      });
+      if (afrSlot >= 0 && afrSlot < channelRanges.length) {
+        const { min: afrMin, max: afrMax } = channelRanges[afrSlot];
+        const afrRange = afrMax - afrMin;
+        const refLines = [
+          { value: 1.0, label: 'λ 1.0 stoich', color: 'rgba(100, 220, 100, 0.5)' },
+          { value: 0.8, label: 'λ 0.8 rich', color: 'rgba(255, 160, 60, 0.5)' },
+        ];
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1;
+        ctx.font = `9px ${FONT.mono}`;
+        for (const ref of refLines) {
+          if (ref.value >= afrMin && ref.value <= afrMax) {
+            const y = marginTop + plotH - ((ref.value - afrMin) / afrRange) * plotH;
+            ctx.strokeStyle = ref.color;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, y);
+            ctx.lineTo(W - marginRight, y);
+            ctx.stroke();
+            // Label on the right side
+            ctx.fillStyle = ref.color;
+            ctx.textAlign = 'right';
+            ctx.fillText(ref.label, W - marginRight - 4, y - 3);
+          }
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+
     // Draw traces (AFR channels auto-converted to Lambda)
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
@@ -829,7 +870,7 @@ export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8
   };
 
   // Section height — increased for better readability on modern monitors
-  const sectionHeight = 190;
+  const sectionHeight = 210;
 
   return (
     <div style={{

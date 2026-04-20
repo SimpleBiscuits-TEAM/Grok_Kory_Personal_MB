@@ -1456,3 +1456,8 @@
 
 ## Channel Readout Header Above Chart
 - [x] Add blank header space above chart plot area for channel name/value readouts so they don't overlap trace lines — marginTop increased to 22px with header band background and separator line
+
+## Taller Charts + AFR Reference Lines
+- [x] Increase chart section height from 190px to 210px
+- [x] Add dashed reference line at λ 1.0 (stoichiometric) on AFR sections — green dashed line with label
+- [x] Add dashed reference line at λ 0.8 (rich target) on AFR sections — orange dashed line with label
