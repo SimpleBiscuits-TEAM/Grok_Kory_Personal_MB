@@ -27,6 +27,7 @@ import {
   INJECTOR_FLOW_RATES,
   calculateFuelFlow,
   estimateHP,
+  estimateHPWithBoost,
   calculateTorque,
   smoothCurve,
 } from '@/lib/talonVirtualDyno';
@@ -455,7 +456,7 @@ function buildWOTRun(
       if (hp > 500) hp = 0;
       if (torque > 500) torque = 0;
     } else {
-      hp = estimateHP(fuelFlowGPerSec, fuel.bsfc);
+      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map);
       hp *= config.dynoCalibrationFactor;
       torque = calculateTorque(hp, rpm);
     }

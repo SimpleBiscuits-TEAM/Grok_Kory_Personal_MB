@@ -93,6 +93,26 @@ const TALON_CYLINDERS = 2;
 const GRAMS_PER_POUND = 453.592;
 const SECONDS_PER_HOUR = 3600;
 
+/** Standard atmospheric pressure in kPa */
+const ATM_KPA = 101.325;
+
+/**
+ * Turbo BSFC multiplier — calibrated from 21 real Dynojet dyno runs
+ * (58,351 data points) of a Jackson Racing turbo Honda Talon with ID1050
+ * injectors on 93 octane pump gas.
+ *
+ * Measured median BSFC = 0.905 vs NA BSFC = 0.45 → ratio = 2.01
+ *
+ * The higher BSFC for turbo reflects:
+ *   - Rich AFR targets for combustion chamber cooling (lambda ~0.80)
+ *   - Excess fuel that doesn't produce power (cooling duty)
+ *   - Large injector oversizing (ID1050 vs stock 310cc)
+ *
+ * BSFC varies by RPM: 0.76 at 5000 RPM → 1.14 at 10000 RPM
+ * The median 0.905 provides the best overall estimate.
+ */
+const TURBO_BSFC_FACTOR = 2.01;  // multiply NA BSFC by this for turbo
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface VirtualDynoConfig {
@@ -236,6 +256,36 @@ export function estimateHP(fuelFlowGPerSec: number, bsfc: number): number {
 }
 
 /**
+ * Estimate HP with turbo BSFC correction.
+ *
+ * Calibrated from 21 real Dynojet dyno runs (58,351 WOT data points)
+ * of a Jackson Racing turbo Talon with ID1050 injectors on 93 octane.
+ *
+ * The fuel-flow-based HP estimate already captures the extra fuel
+ * being injected under boost. The correction needed is purely a BSFC
+ * adjustment — turbo setups run significantly richer (lambda ~0.80)
+ * for combustion chamber cooling, so a large portion of injected fuel
+ * doesn't produce power. This is captured by the higher effective BSFC.
+ *
+ * No MAP-based multiplier is needed because:
+ *   - The injector PW already reflects the actual fuel delivered
+ *   - The BSFC ratio (2.01×) was derived from real measured HP vs
+ *     calculated fuel flow, so it inherently accounts for all turbo
+ *     effects (rich mixture, cooling duty, injector oversizing)
+ */
+export function estimateHPWithBoost(
+  fuelFlowGPerSec: number,
+  bsfc: number,
+  isTurbo: boolean,
+  _mapKpa: number,  // reserved for future RPM-dependent BSFC
+): number {
+  if (fuelFlowGPerSec <= 0 || bsfc <= 0) return 0;
+
+  const effectiveBsfc = isTurbo ? bsfc * TURBO_BSFC_FACTOR : bsfc;
+  return estimateHP(fuelFlowGPerSec, effectiveBsfc);
+}
+
+/**
  * Calculate torque from HP and RPM
  * Torque (ft-lb) = HP × 5252 / RPM
  */
@@ -322,8 +372,8 @@ export function computeVirtualDyno(
       injPW, rpm, injFlowRate, fuel.density,
     );
 
-    // Estimate HP
-    let estHP = estimateHP(fuelFlowGPerSec, fuel.bsfc);
+    // Estimate HP (with boost correction for turbo setups)
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map);
 
     // Apply dyno calibration factor
     estHP *= config.dynoCalibrationFactor;

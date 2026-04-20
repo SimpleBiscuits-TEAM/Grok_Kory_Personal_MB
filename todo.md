@@ -1470,3 +1470,11 @@
 
 ## Crosshair Label Overlap Fix
 - [x] Fix crosshair value labels overlapping each other — multi-pass overlap resolution with 18px min spacing, boundary clamping to keep labels on-screen
+
+## Virtual Dyno HP Calculation Fix (Turbo Talon + Large Injectors)
+- [x] Fix HP/torque calculation — calibrated turbo BSFC from 21 real Dynojet dyno runs (58,351 data points)
+- [x] Turbo BSFC = 0.905 (median), NA BSFC = 0.45, ratio = 2.01×
+- [x] Accuracy: 13/21 files within 20% of real dyno, avg error 15.4%
+- [x] Reference file peaks: 107-156 HP (Graves/HMF/Mod HMF exhausts)
+- [x] Removed MAP-based boost multiplier (fuel flow already captures boost effect)
+- [x] All 10 boost tests pass, accuracy test passes
