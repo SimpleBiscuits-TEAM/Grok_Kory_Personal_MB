@@ -721,11 +721,13 @@ export function wp8ToDuramaxData(result: WP8ParseResult): import('./dataProcesso
 
     rpm[i] = getVal(row, rpmI);
     throttlePosition[i] = getVal(row, tpI);
-    vehicleSpeed[i] = getVal(row, vsI);
+    // Vehicle Speed: WP8 stores in km/h — convert to mph
+    vehicleSpeed[i] = getVal(row, vsI) * 0.621371;
 
-    // Coolant temp — WP8 Honda Talon logs are typically in °F already
-    coolantTemp[i] = getVal(row, ectI);
-    intakeAirTemp[i] = getVal(row, iatI);
+    // Coolant temp — WP8 stores in °C, convert to °F
+    coolantTemp[i] = getVal(row, ectI) * 9 / 5 + 32;
+    // Intake Air Temp — WP8 stores in °C, convert to °F
+    intakeAirTemp[i] = getVal(row, iatI) * 9 / 5 + 32;
 
     // MAP: use corrected if available, otherwise raw
     const mapVal = mapCorrI !== -1 ? getVal(row, mapCorrI) : getVal(row, mapI);

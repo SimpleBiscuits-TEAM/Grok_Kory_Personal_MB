@@ -177,12 +177,29 @@ function drawLabelWithBg(
   return tw;
 }
 
-// ─── AFR→Lambda conversion for chart traces ────────────────────────────────
+// ─── Unit detection helpers ────────────────────────────────────────────────
 function isAFRChannel(ch: WP8Channel): boolean {
   return ch.name.toLowerCase().includes('air fuel ratio');
 }
-function convertAFRValue(v: number, ch: WP8Channel): number {
-  if (isAFRChannel(ch) && Number.isFinite(v) && v > 0) return v / 14.7;
+function isTemperatureChannel(ch: WP8Channel): boolean {
+  const n = ch.name.toLowerCase();
+  return n.includes('temperature') || n.includes('temp');
+}
+function isVehicleSpeedChannel(ch: WP8Channel): boolean {
+  return ch.name.toLowerCase() === 'vehicle speed';
+}
+
+// ─── Value conversion for chart display ────────────────────────────────────
+// WP8 binary stores temperatures in °C and vehicle speed in km/h.
+// Dynojet WinPEP displays in °F and mph, so we convert here for consistency.
+function convertDisplayValue(v: number, ch: WP8Channel): number {
+  if (!Number.isFinite(v)) return v;
+  // AFR → Lambda
+  if (isAFRChannel(ch) && v > 0) return v / 14.7;
+  // Temperature: °C → °F
+  if (isTemperatureChannel(ch)) return v * 9 / 5 + 32;
+  // Vehicle Speed: km/h → mph
+  if (isVehicleSpeedChannel(ch)) return v * 0.621371;
   return v;
 }
 
@@ -250,7 +267,7 @@ function ChartSection({
       let mn = Infinity, mx = -Infinity;
       for (let i = startIdx; i <= endIdx && i < rows.length; i++) {
         const raw = ci < rows[i].values.length ? rows[i].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         if (Number.isFinite(v)) {
           if (v < mn) mn = v;
           if (v > mx) mx = v;
@@ -385,7 +402,7 @@ function ChartSection({
         const rowIdx = startIdx + i;
         if (rowIdx >= rows.length) break;
         const raw = ci < rows[rowIdx].values.length ? rows[rowIdx].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         const x = marginLeft + (i / (visibleCount - 1)) * plotW;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         if (!started) {
@@ -454,7 +471,7 @@ function ChartSection({
         const range = max - min;
         const ch = channels[ci];
         const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         const color = getChannelColor(sectionIdx, slot);
         const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
@@ -482,7 +499,7 @@ function ChartSection({
         const range = max - min;
         const ch = channels[ci];
         const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         const origY = marginTop + plotH - ((v - min) / range) * plotH;
         const color = getChannelColor(sectionIdx, slot);
         // Draw dot at true data position
@@ -581,7 +598,7 @@ function ChartSection({
               </span>
               {cursorIdx !== null && cursorIdx < rows.length && (
                 <span style={{ color, fontFamily: FONT.mono, fontSize: '11px', fontWeight: 'bold' }}>
-                  {formatValue(ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0, ch?.name || '')}
+                  {formatValue(ch ? convertDisplayValue(ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0, ch) : (ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0), ch?.name || '')}
                 </span>
               )}
               <button
@@ -1061,17 +1078,16 @@ export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8
                     : undefined;
                   const isInActiveSection = assignment?.sectionIdx === activeSection;
 
-                  // Get value at cursor (convert AFR→Lambda for AFR channels)
+                  // Get value at cursor (apply unit conversions: AFR→Lambda, °C→°F, km/h→mph)
                   let val = '—';
                   let displayName = ch.name;
                   if (cursorIdx !== null && cursorIdx < wp8Data.rows.length) {
-                    let v = ch.index < wp8Data.rows[cursorIdx].values.length
+                    const raw = ch.index < wp8Data.rows[cursorIdx].values.length
                       ? wp8Data.rows[cursorIdx].values[ch.index]
                       : 0;
-                    // Convert AFR to Lambda (÷14.7)
+                    const v = convertDisplayValue(raw, ch);
                     const isAFR = ch.name.toLowerCase().includes('air fuel ratio');
-                    if (isAFR && Number.isFinite(v) && v > 0) {
-                      v = v / 14.7;
+                    if (isAFR) {
                       displayName = ch.name.replace(/Air Fuel Ratio/i, 'Lambda');
                     }
                     val = formatValue(v, isAFR ? 'lambda' : ch.name);
