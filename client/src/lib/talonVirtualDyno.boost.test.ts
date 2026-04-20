@@ -76,15 +76,17 @@ describe('estimateHPWithBoost', () => {
     expect(hpJR).toBeGreaterThan(hpFP);
   });
 
-  it('KW turbo factor falls between JR and FP', () => {
+  it('KW pump turbo factor is highest (1.73) — gives lowest HP per unit fuel flow on pump', () => {
     const fuelFlow = 5.0;
     const hpJR = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
     const hpKW = estimateHPWithBoost(fuelFlow, bsfc, 'kw', 150, 'pump');
     const hpFP = estimateHPWithBoost(fuelFlow, bsfc, 'fp', 150, 'pump');
     // Higher BSFC factor = lower HP per unit fuel flow
-    // JR (1.40) gives highest HP, FP (1.60) gives lowest HP, KW (1.50) in between
-    expect(hpKW).toBeLessThan(hpJR);    // KW less efficient than JR on pump
-    expect(hpKW).toBeGreaterThan(hpFP); // KW more efficient than FP on pump
+    // JR (1.40) gives highest HP, FP (1.60) middle, KW (1.73) lowest
+    // KW factor is highest because it was calibrated from 800cc injectors (not ID1050)
+    // — the factor absorbs injector × turbo × fuel systematic differences
+    expect(hpKW).toBeLessThan(hpJR);    // KW factor > JR factor
+    expect(hpKW).toBeLessThan(hpFP);    // KW factor > FP factor (on pump)
   });
 
   it('E85 turbo factor is higher than pump gas turbo factor', () => {

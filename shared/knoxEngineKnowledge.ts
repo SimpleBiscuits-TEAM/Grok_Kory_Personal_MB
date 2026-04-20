@@ -637,4 +637,53 @@ A common upgrade path is: JR turbo kit (with kit injectors) → add ID1050 injec
 
 **Diagnostic Implication:**
 If the virtual dyno estimates seem wrong, one of the first things to check is whether the injector detection matched the actual hardware. A mismatch between detected and actual injector flow rate directly scales the power estimate by the ratio of the flow rates.
+
+## Section 23: Kraftwerks (KW) Turbo Calibration Data — Pump Gas Reference
+
+Calibrated from 9 real Dynojet dyno runs of a Kraftwerks turbo Honda Talon with FIC 800cc injectors on 93 octane pump gas. These runs represent increasing boost levels, demonstrating the power-vs-MAP relationship.
+
+**Reference Data (KW_Rev_0_42 series):**
+
+| Run | Peak HP | Peak TQ | Avg MAP (kPa) | Avg Timing (°) | Avg AFR | Avg Inj PW (ms) | Avg IDC (%) |
+|-----|---------|---------|---------------|-----------------|---------|-----------------|-------------|
+| Run 2 | 153.6 | 117.6 | 150 | 23 | 12.4 | 10.5 | 67.8 |
+| Run 3 | 147.0 | 110.3 | 150 | 23 | 14.2 | 8.1 | 52.2 |
+| Run 4 | 165.1 | 122.1 | 155 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 5 | 161.0 | 118.3 | 155 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 6 | 169.6 | 125.1 | 155 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 7 | 188.3 | 137.1 | 162 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 8 | 182.8 | 135.2 | 162 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 9 | 170.7 | 127.0 | 155 | 23 | 12.1 | 10.6 | 68.4 |
+| Run 10 | 179.7 | 132.6 | 160 | 23 | 12.1 | 10.6 | 68.4 |
+
+**Key Observations:**
+1. **Power scales with MAP (boost):** From 150 kPa (147 HP) to 162 kPa (188 HP) — roughly 3.4 HP per kPa of additional boost.
+2. **Timing is conservative at 23°** for pump gas on the KW turbo. This is appropriate for 93 octane under boost.
+3. **AFR runs rich (12.1)** at WOT for safety margin — lambda ~0.82 on pump gas stoich.
+4. **Injector duty cycle ~68%** at peak — plenty of headroom on the 800cc injectors.
+5. **Run 3 is an outlier** — AFR 14.2 (much leaner) and lower PW (8.1 ms), suggesting a partial-throttle or aborted run.
+
+**Calibrated BSFC Factor:**
+KW pump turbo factor = 1.73 (calibrated from these 9 runs). This is higher than JR (1.40) and FP pump (1.60), which may seem counterintuitive since KW efficiency is between JR and FP. The difference is because:
+- These KW runs use 800cc injectors (not ID1050 like JR runs), so the fuel flow calculation is different
+- The BSFC factor compensates for the specific injector × turbo × fuel combination
+- The factor is not purely a measure of turbo efficiency — it's an empirical correction that absorbs all systematic differences
+
+**Power-vs-MAP Relationship:**
+For the Honda Talon with forced induction, power increases approximately linearly with MAP in the 150-165 kPa range. This relationship holds because:
+- Higher MAP = more air mass in the cylinder per cycle
+- More air mass requires more fuel to maintain target AFR
+- More fuel burned per cycle = more energy released = more power
+- The relationship is approximately linear in this narrow MAP range because volumetric efficiency and combustion efficiency don't change dramatically
+
+At higher MAP levels (>170 kPa), the relationship may become sub-linear as:
+- Charge temperature increases reduce air density
+- Knock limits require timing retard
+- Turbo compressor efficiency drops near the surge/choke boundaries
+
+## Section 24: dynoCalibrationFactor Default Behavior
+
+The virtual dyno's VirtualDynoConfig includes an optional dynoCalibrationFactor field. When not explicitly set, it defaults to 1.0 (no correction). This factor is a final multiplier applied to the estimated HP after all other calculations (fuel flow, BSFC, turbo factor). It allows users to fine-tune the virtual dyno output to match their specific dyno's correction factor or atmospheric conditions.
+
+If the virtual dyno consistently over- or under-estimates by a fixed percentage across all RPM points, adjusting dynoCalibrationFactor is the correct approach. If the error varies by RPM, the issue is more likely in the BSFC model or fuel flow calculation.
 `;

@@ -148,7 +148,7 @@ export type TurboType = 'na' | 'jr' | 'kw' | 'fp' | 'generic_turbo';
  */
 const TURBO_BSFC_MATRIX: Record<Exclude<TurboType, 'na'>, { pump: number; ethanol: number }> = {
   jr:            { pump: 1.40, ethanol: 1.76 },  // JR: 21 pump runs + 2 ethanol runs (conservative timing)
-  kw:            { pump: 1.50, ethanol: 1.80 },  // KW: placeholder — estimated between JR and FP (awaiting files)
+  kw:            { pump: 1.73, ethanol: 1.80 },  // KW: 9 pump runs (150-162 kPa MAP, 23° timing, 800cc inj)
   fp:            { pump: 1.60, ethanol: 1.64 },  // FP: 19 ethanol runs (proper timing 29.5°), pump estimated
   generic_turbo: { pump: 1.50, ethanol: 1.80 },  // Generic: average of JR and FP for unknown turbo kits
 };
@@ -556,8 +556,8 @@ export function computeVirtualDyno(
     const effectiveTurboType: TurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' : 'na');
     let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType);
 
-    // Apply dyno calibration factor
-    estHP *= config.dynoCalibrationFactor;
+    // Apply dyno calibration factor (default 1.0 if not set)
+    estHP *= config.dynoCalibrationFactor ?? 1.0;
 
     // Calculate torque
     const estTorque = calculateTorque(estHP, rpm);

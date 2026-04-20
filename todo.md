@@ -1567,3 +1567,14 @@
 - [x] Write vitest tests for injector priority detection (10 new tests, 140 total passing)
 - [x] Verified all existing reference files still detect correctly (explicit model wins)
 - [x] Checkpoint and push to GitHub
+
+## Kraftwerks (KW) Turbo Calibration — 800cc Injectors, Pump Gas
+- [x] Extract and parse KW_Rev_0_42.zip (9 WP8 files)
+- [x] Analyze power-vs-MAP relationship: ~3.4 HP per kPa in 150-162 kPa range
+- [x] Calibrate KW pump gas BSFC factor: 1.73 (from 9 runs, avg 6.3% error)
+- [x] Update TURBO_BSFC_MATRIX with calibrated KW pump factor
+- [x] Fix dynoCalibrationFactor NaN bug (config.dynoCalibrationFactor ?? 1.0)
+- [x] Verify all existing JR/FP files still produce correct estimates (unchanged)
+- [x] Train Knox on KW calibration data (Section 23) and dynoCalibrationFactor (Section 24)
+- [x] Write/update vitest tests — 184 tests passing
+- [x] Checkpoint and push to GitHub
