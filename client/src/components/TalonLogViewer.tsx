@@ -129,6 +129,54 @@ function getChannelColor(sectionIdx: number, channelSlot: number): string {
   return TRACE_COLORS[(sectionIdx * 4 + channelSlot) % TRACE_COLORS.length];
 }
 
+/**
+ * Draw text with a dark background pill for readability over chart lines.
+ * Returns the measured text width for layout purposes.
+ */
+function drawLabelWithBg(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  align: CanvasTextAlign = 'left',
+  fontSize = 11,
+  paddingH = 4,
+  paddingV = 3,
+): number {
+  ctx.font = `bold ${fontSize}px ${FONT.mono}`;
+  const metrics = ctx.measureText(text);
+  const tw = metrics.width;
+  const th = fontSize;
+  // Compute box x based on alignment
+  let bx = x - paddingH;
+  if (align === 'right') bx = x - tw - paddingH;
+  else if (align === 'center') bx = x - tw / 2 - paddingH;
+  const by = y - th + 1 - paddingV;
+  const bw = tw + paddingH * 2;
+  const bh = th + paddingV * 2;
+  // Dark background pill
+  ctx.fillStyle = 'rgba(8, 12, 24, 0.88)';
+  const r = 3;
+  ctx.beginPath();
+  ctx.moveTo(bx + r, by);
+  ctx.lineTo(bx + bw - r, by);
+  ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+  ctx.lineTo(bx + bw, by + bh - r);
+  ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+  ctx.lineTo(bx + r, by + bh);
+  ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+  ctx.lineTo(bx, by + r);
+  ctx.quadraticCurveTo(bx, by, bx + r, by);
+  ctx.closePath();
+  ctx.fill();
+  // Text
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.fillText(text, x, y);
+  return tw;
+}
+
 // ─── AFR→Lambda conversion for chart traces ────────────────────────────────
 function isAFRChannel(ch: WP8Channel): boolean {
   return ch.name.toLowerCase().includes('air fuel ratio');
@@ -302,22 +350,28 @@ function ChartSection({
       const fmtName = afrConv ? 'lambda' : (ch?.name || '');
       const unit = afrConv ? 'λ' : getUnit(ch?.name || '');
       const isRight = slot >= 2;
-      ctx.fillStyle = color;
-      ctx.font = `bold 10px ${FONT.mono}`;
-      ctx.textAlign = isRight ? 'left' : 'right';
+      const alignDir: CanvasTextAlign = isRight ? 'left' : 'right';
       const xBase = isRight ? W - marginRight + 4 : marginLeft - 4;
       const yOffset = slot % 2 === 0 ? 0 : (plotH / 2);
-      // Max value at top
-      ctx.fillText(
+      // Max value at top (with background)
+      drawLabelWithBg(
+        ctx,
         formatValue(max, fmtName) + (unit ? ' ' + unit : ''),
         xBase,
-        marginTop + 10 + yOffset
+        marginTop + 10 + yOffset,
+        color,
+        alignDir,
+        10,
       );
-      // Min value at bottom
-      ctx.fillText(
+      // Min value at bottom (with background)
+      drawLabelWithBg(
+        ctx,
         formatValue(min, fmtName),
         xBase,
-        marginTop + plotH / 2 - 2 + yOffset
+        marginTop + plotH / 2 - 2 + yOffset,
+        color,
+        alignDir,
+        10,
       );
     });
 
@@ -334,6 +388,8 @@ function ChartSection({
       ctx.setLineDash([]);
 
       // Value dots on crosshair (AFR→Lambda converted)
+      // Collect all labels first, then resolve overlaps before drawing
+      const dotLabels: { ci: number; slot: number; x: number; y: number; v: number; color: string; displayName: string }[] = [];
       channelIndices.forEach((ci, slot) => {
         if (slot >= channelRanges.length) return;
         const { min, max } = channelRanges[slot];
@@ -343,17 +399,64 @@ function ChartSection({
         const v = ch ? convertAFRValue(raw, ch) : raw;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         const color = getChannelColor(sectionIdx, slot);
+        const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
+        dotLabels.push({ ci, slot, x, y, v, color, displayName });
+      });
+
+      // Sort by Y so we can push overlapping labels apart
+      dotLabels.sort((a, b) => a.y - b.y);
+      const labelH = 16; // min vertical spacing between labels
+      for (let i = 1; i < dotLabels.length; i++) {
+        const prev = dotLabels[i - 1];
+        const curr = dotLabels[i];
+        if (curr.y - prev.y < labelH) {
+          // Push current label down to avoid overlap
+          const mid = (prev.y + curr.y) / 2;
+          dotLabels[i - 1] = { ...prev, y: mid - labelH / 2 };
+          dotLabels[i] = { ...curr, y: mid + labelH / 2 };
+        }
+      }
+
+      // Draw dots at original positions, labels at adjusted positions
+      channelIndices.forEach((ci, slot) => {
+        if (slot >= channelRanges.length) return;
+        const { min, max } = channelRanges[slot];
+        const range = max - min;
+        const ch = channels[ci];
+        const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
+        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const origY = marginTop + plotH - ((v - min) / range) * plotH;
+        const color = getChannelColor(sectionIdx, slot);
+        // Draw dot at true data position
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.arc(x, origY, 4, 0, Math.PI * 2);
         ctx.fill();
-        // Value label near dot
-        ctx.fillStyle = color;
-        ctx.font = `bold 11px ${FONT.mono}`;
-        ctx.textAlign = 'left';
-        const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
-        ctx.fillText(formatValue(v, displayName), x + 8, y + 4);
+        // Draw white ring around dot for visibility
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, origY, 5, 0, Math.PI * 2);
+        ctx.stroke();
       });
+
+      // Draw value labels with background at adjusted Y positions
+      for (const lbl of dotLabels) {
+        // Place label to the right of crosshair, or left if near right edge
+        const labelX = (lbl.x + 120 > W - marginRight) ? lbl.x - 10 : lbl.x + 10;
+        const labelAlign: CanvasTextAlign = (lbl.x + 120 > W - marginRight) ? 'right' : 'left';
+        drawLabelWithBg(
+          ctx,
+          formatValue(lbl.v, lbl.displayName),
+          labelX,
+          lbl.y + 4,
+          lbl.color,
+          labelAlign,
+          12,
+          5,
+          3,
+        );
+      }
     }
 
   }, [canvasSize, channelIndices, channelRanges, rows, startIdx, endIdx, cursorIdx, sectionIdx, channels]);

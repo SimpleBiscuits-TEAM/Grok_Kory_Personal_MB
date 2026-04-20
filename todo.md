@@ -1441,3 +1441,11 @@
 - [x] Restore any missing chatbot/agent files and routes (N/A — no files were missing)
 - [x] Verify single-log charts (RPMvMAF, HPvsRPM, TimeSeries) render after upload — Charts.tsx exports confirmed, fmtTime/fmtTimeTick helpers preserved in DynoCharts.tsx
 - [x] Merge all changes and push to grok branch (force-pushed to grok, cherry-picked Tobi's 2 new commits, never touched Tobi@EDS_Dev)
+
+## Chart Tooltip Readability — Honda Talon Tuner Datalog
+- [x] Improve cursor tooltip number readability — added drawLabelWithBg() helper with dark rounded-rect background pills behind all value labels
+- [x] Add dark background/contrast behind tooltip numbers so they stand out from the colored lines — rgba(8,12,24,0.88) background with 3px border radius
+- [x] Improve Y-axis label readability on left/right edges — Y-axis min/max labels now use same background pill treatment
+- [x] Added overlap prevention for crosshair value labels — labels sorted by Y and pushed apart when too close
+- [x] Added white ring around cursor dots for better visibility against colored lines
+- [x] Labels flip to left side of crosshair when near right edge of chart
