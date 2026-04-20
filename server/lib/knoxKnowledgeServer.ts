@@ -16,6 +16,7 @@
 
 // Re-export the sanitized base (safe for LLM context building)
 import { KNOX_KNOWLEDGE_BASE_SANITIZED } from '@shared/knoxKnowledge';
+import { KNOX_ENGINE_FUNDAMENTALS } from '@shared/knoxEngineKnowledge';
 
 /**
  * Server-only security access secrets.
@@ -1347,7 +1348,7 @@ This ensures consistent timing behavior between datalogging and flashing operati
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE;
 }
 
 /**
@@ -1355,5 +1356,5 @@ export function getFullKnoxKnowledge(): string {
  * Safe to use in any context, including client-facing responses.
  */
 export function getSanitizedKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS;
 }

@@ -1484,3 +1484,27 @@
 - [x] Changed from useEffect+useState(false) to useMemo for autoTurbo computation, initialized useState(autoTurbo)
 - [x] useEffect now syncs all three: injectorType, fuelType, AND isTurbo when auto-detected values change
 - [x] Removed debug console.log statements from DynoTabContent
+
+## Knox Engine Knowledge Training — Diesel & Petrol Fundamentals
+- [x] Audit existing Knox knowledge base structure and coverage
+- [x] Write comprehensive engine fundamentals knowledge module (shared/knoxEngineKnowledge.ts) covering:
+  - [x] Four-stroke cycle fundamentals for both diesel and petrol
+  - [x] Compression ratio differences and WHY they matter
+  - [x] Combustion: spark-initiated flame-front (petrol) vs compression-initiated diffusion (diesel)
+  - [x] Knock/detonation physics and WHY it's destructive (petrol)
+  - [x] NOx-vs-soot tradeoff and WHY it defines diesel calibration
+  - [x] AFR, Lambda, stoichiometry, fuel trims (STFT/LTFT)
+  - [x] Fuel systems: PFI, GDI, common rail, multiple injection events
+  - [x] Ignition: COP, dwell, spark plug gap, glow plugs
+  - [x] Forced induction: turbo, VGT, wastegate, supercharger, intercooling
+  - [x] Emissions: three-way cat, DOC, DPF, SCR, EGR
+  - [x] ECU fundamentals: open/closed loop, key maps for both engine types
+  - [x] Sensor diagnostics: all major sensors, cross-referencing methodology
+  - [x] Common failure modes: diesel-specific vs petrol-specific
+  - [x] Tuning principles: 3 petrol levers, 4 diesel levers, interactions
+  - [x] Heat management: combustion temp, coolant, oil, EGT
+  - [x] Diesel vs petrol diagnostic decision matrix
+  - [x] Diagnostic reasoning hierarchy (air → fuel → combustion → output)
+- [x] Integrate into knoxKnowledgeServer.ts (both full and sanitized exports)
+- [x] Write vitest tests (47 tests, all passing) — knox-engine-knowledge.test.ts
+- [x] Checkpoint and push to GitHub
