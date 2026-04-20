@@ -216,10 +216,10 @@ function ChartSection({
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: height });
 
-  // Margins for axis labels
+  // Margins for axis labels — marginTop creates a header band for channel readouts
   const marginLeft = 65;
   const marginRight = 65;
-  const marginTop = 4;
+  const marginTop = 22;
   const marginBottom = 2;
 
   // Resize observer
@@ -285,6 +285,17 @@ function ChartSection({
     // Background
     ctx.fillStyle = T.sectionBg;
     ctx.fillRect(0, 0, W, H);
+
+    // Header band background (slightly lighter) for channel readouts
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.95)';
+    ctx.fillRect(marginLeft, 0, plotW, marginTop);
+    // Subtle separator line below header
+    ctx.strokeStyle = T.borderLight;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, marginTop);
+    ctx.lineTo(W - marginRight, marginTop);
+    ctx.stroke();
 
     if (channelIndices.length === 0 || rows.length === 0) {
       ctx.fillStyle = T.textDim;
@@ -498,10 +509,10 @@ function ChartSection({
         overflow: 'hidden',
       }}
     >
-      {/* Channel labels overlay (top-left) */}
+      {/* Channel labels overlay — positioned in the header band above the plot area */}
       <div style={{
         position: 'absolute',
-        top: 2,
+        top: 3,
         left: marginLeft + 4,
         display: 'flex',
         gap: 8,
