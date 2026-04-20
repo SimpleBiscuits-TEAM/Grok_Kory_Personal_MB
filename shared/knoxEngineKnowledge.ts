@@ -686,4 +686,30 @@ At higher MAP levels (>170 kPa), the relationship may become sub-linear as:
 The virtual dyno's VirtualDynoConfig includes an optional dynoCalibrationFactor field. When not explicitly set, it defaults to 1.0 (no correction). This factor is a final multiplier applied to the estimated HP after all other calculations (fuel flow, BSFC, turbo factor). It allows users to fine-tune the virtual dyno output to match their specific dyno's correction factor or atmospheric conditions.
 
 If the virtual dyno consistently over- or under-estimates by a fixed percentage across all RPM points, adjusting dynoCalibrationFactor is the correct approach. If the error varies by RPM, the issue is more likely in the BSFC model or fuel flow calculation.
+
+## Section 25: KW Turbo + ID1300 Injectors — Cross-Validation (Pump Gas)
+
+Cross-validation of the KW turbo BSFC factor (1.73) using 16 dyno runs with ID1300 injectors on pump gas (KW_ID1300s_Rev_0_8 through Rev_0_14).
+
+**Key findings:**
+- High-boost runs (MAP 106-110 kPa): 3-5% error — excellent accuracy
+- Mid-boost runs (MAP 94-96 kPa): 10-16% error — overestimates
+- Low-boost runs (MAP 80-83 kPa): 13-24% error — significantly overestimates
+- Overall average: 9.0% absolute error (all overestimates)
+
+**Why the error is boost-dependent:**
+The BSFC turbo factor is calibrated at full boost (WOT, peak power conditions). At lower boost levels, the engine operates closer to naturally aspirated conditions where the turbo factor overshoot is larger. The turbo factor absorbs not just turbo efficiency but also the systematic difference between calculated fuel flow and actual combustion efficiency at boost.
+
+**Why ID1300 results differ from 800cc results:**
+The KW pump factor (1.73) was calibrated from 800cc injector files. With ID1300 injectors, the injector pulsewidth is shorter for the same fuel flow (larger injector = shorter PW for same fuel mass). The non-linear relationship between pulsewidth and actual fuel delivery (injector dead time, opening/closing dynamics) means the calculated fuel flow from PW × flow rate has different systematic errors for different injector sizes.
+
+**Practical implication:**
+When the virtual dyno detects KW turbo + ID1300 injectors, the estimates at peak power (full boost) are within 3-5% — accurate enough for tuning decisions. Lower-boost runs should be interpreted with the understanding that the estimate trends 10-20% high.
+
+**Observed data ranges across 16 runs:**
+- Peak power: 113.6 – 193.4 HP (varies with boost level)
+- MAP: 80 – 131 kPa (increasing boost across revisions)
+- Timing: 24.5 – 25.0° (very consistent)
+- AFR: 11.3 – 12.9 (richer at higher boost)
+- Injector PW: 5.2 – 7.3 ms
 `;

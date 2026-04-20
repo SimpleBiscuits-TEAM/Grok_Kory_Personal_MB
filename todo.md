@@ -1578,3 +1578,12 @@
 - [x] Train Knox on KW calibration data (Section 23) and dynoCalibrationFactor (Section 24)
 - [x] Write/update vitest tests — 184 tests passing
 - [x] Checkpoint and push to GitHub
+
+## KW Turbo + ID1300 Injectors — Pump Gas Cross-Validation
+- [x] Extract and parse KW_ID1300s.zip (16 WP8 files)
+- [x] Analyze power (113.6-193.4 HP), MAP (80-131 kPa), timing (24.5-25.0°), AFR (11.3-12.9), inj PW (5.2-7.3 ms)
+- [x] Cross-validate KW pump factor (1.73): high-boost 3-5% error, mid-boost 10-16%, low-boost 13-24%
+- [x] Decision: keep factor at 1.73 — accurate at full boost, error at low boost is expected (BSFC model assumes WOT)
+- [x] Train Knox on cross-validation findings (Section 25) — boost-dependent error and injector size effects
+- [x] 184 tests passing
+- [x] Checkpoint and push to GitHub
