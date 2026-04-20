@@ -1467,3 +1467,6 @@
 - [x] Fix Intake Air Temperature scaling — WP8 stores in °C, now converts to °F (41°C → 105.8°F)
 - [x] Fix Vehicle Speed scaling — WP8 stores in km/h, now converts to mph (104 km/h → 64.6 mph)
 - [x] Fixed in TalonLogViewer.tsx (chart display + sidebar), wp8Parser.ts (wp8ToDuramaxData for other chart consumers)
+
+## Crosshair Label Overlap Fix
+- [x] Fix crosshair value labels overlapping each other — multi-pass overlap resolution with 18px min spacing, boundary clamping to keep labels on-screen

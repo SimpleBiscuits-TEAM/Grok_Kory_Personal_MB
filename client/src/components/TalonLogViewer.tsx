@@ -480,16 +480,27 @@ function ChartSection({
 
       // Sort by Y so we can push overlapping labels apart
       dotLabels.sort((a, b) => a.y - b.y);
-      const labelH = 16; // min vertical spacing between labels
-      for (let i = 1; i < dotLabels.length; i++) {
-        const prev = dotLabels[i - 1];
-        const curr = dotLabels[i];
-        if (curr.y - prev.y < labelH) {
-          // Push current label down to avoid overlap
-          const mid = (prev.y + curr.y) / 2;
-          dotLabels[i - 1] = { ...prev, y: mid - labelH / 2 };
-          dotLabels[i] = { ...curr, y: mid + labelH / 2 };
+      const labelH = 18; // min vertical spacing between labels (px)
+      // Multiple passes to resolve cascading overlaps (e.g., 3-4 labels clustered together)
+      for (let pass = 0; pass < 5; pass++) {
+        let anyOverlap = false;
+        for (let i = 1; i < dotLabels.length; i++) {
+          const prev = dotLabels[i - 1];
+          const curr = dotLabels[i];
+          if (curr.y - prev.y < labelH) {
+            anyOverlap = true;
+            const mid = (prev.y + curr.y) / 2;
+            dotLabels[i - 1] = { ...prev, y: mid - labelH / 2 };
+            dotLabels[i] = { ...curr, y: mid + labelH / 2 };
+          }
         }
+        if (!anyOverlap) break;
+      }
+      // Clamp labels within the plot area so they don't go off-screen
+      for (let i = 0; i < dotLabels.length; i++) {
+        const lbl = dotLabels[i];
+        if (lbl.y < marginTop + 8) dotLabels[i] = { ...lbl, y: marginTop + 8 };
+        if (lbl.y > marginTop + plotH - 4) dotLabels[i] = { ...lbl, y: marginTop + plotH - 4 };
       }
 
       // Draw dots at original positions, labels at adjusted positions
