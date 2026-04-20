@@ -1478,3 +1478,9 @@
 - [x] Reference file peaks: 107-156 HP (Graves/HMF/Mod HMF exhausts)
 - [x] Removed MAP-based boost multiplier (fuel flow already captures boost effect)
 - [x] All 10 boost tests pass, accuracy test passes
+
+## Auto-Detection Bug Fix
+- [x] Fix injector type and turbo auto-detection not triggering on published site — CONFIG shows Stock/NA even though filename contains ID1050s and MAP > 100 kPa
+- [x] Changed from useEffect+useState(false) to useMemo for autoTurbo computation, initialized useState(autoTurbo)
+- [x] useEffect now syncs all three: injectorType, fuelType, AND isTurbo when auto-detected values change
+- [x] Removed debug console.log statements from DynoTabContent

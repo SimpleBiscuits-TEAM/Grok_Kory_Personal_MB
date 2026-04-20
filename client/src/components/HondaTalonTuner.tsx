@@ -1711,12 +1711,23 @@ const dynoSColor = {
 };
 
 function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null; fileName: string }) {
+  // Auto-detect injector type and fuel from filename
   const autoInjector = useMemo(() => detectInjectorType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
   const autoFuel = useMemo(() => detectFuelType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
 
+  // Auto-detect turbo from MAP data (computed once, not in useEffect)
+  const autoTurbo = useMemo(() => {
+    if (!wp8Data) return false;
+    const keys = getHondaTalonKeyChannels(wp8Data);
+    const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
+    if (mapIdx < 0) return false;
+    const maxMAP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[mapIdx]), 0);
+    return maxMAP > 100;
+  }, [wp8Data]);
+
   const [injectorType, setInjectorType] = useState<InjectorType>(autoInjector);
   const [fuelType, setFuelType] = useState<FuelType>(autoFuel);
-  const [isTurbo, setIsTurbo] = useState(false);
+  const [isTurbo, setIsTurbo] = useState(autoTurbo);
   const [calibrationFactor, setCalibrationFactor] = useState(1.0);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -1725,20 +1736,12 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
   const [compareFileName, setCompareFileName] = useState('');
   const compareFileRef = useRef<HTMLInputElement>(null);
 
+  // Sync auto-detected values when they change (e.g., new file uploaded while on dyno tab)
   useEffect(() => {
     setInjectorType(autoInjector);
     setFuelType(autoFuel);
-  }, [autoInjector, autoFuel]);
-
-  // Auto-detect turbo from MAP data
-  useEffect(() => {
-    if (!wp8Data) return;
-    const keys = getHondaTalonKeyChannels(wp8Data);
-    const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
-    if (mapIdx < 0) return;
-    const maxMAP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[mapIdx]), 0);
-    if (maxMAP > 100) setIsTurbo(true);
-  }, [wp8Data]);
+    setIsTurbo(autoTurbo);
+  }, [autoInjector, autoFuel, autoTurbo]);
 
   const config = useMemo<VirtualDynoConfig>(() => ({
     injectorType, fuelType, isTurbo, dynoCalibrationFactor: calibrationFactor,
