@@ -1449,3 +1449,7 @@
 - [x] Added overlap prevention for crosshair value labels — labels sorted by Y and pushed apart when too close
 - [x] Added white ring around cursor dots for better visibility against colored lines
 - [x] Labels flip to left side of crosshair when near right edge of chart
+
+## AFR Chart Fixed Range + Taller Charts
+- [x] Set AFR/Lambda chart sections to fixed Y-axis range: 0.68 min, 1.25 max (instead of auto-scaling)
+- [x] Increase chart section heights from 160px to 190px to use more vertical screen space

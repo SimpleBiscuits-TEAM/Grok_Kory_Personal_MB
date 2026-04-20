@@ -237,11 +237,17 @@ function ChartSection({
   }, [height]);
 
   // Compute min/max for each channel in visible range (AFR channels converted to Lambda)
+  // AFR/Lambda channels use a fixed range of 0.68–1.25 λ for consistent tuning reference
   const channelRanges = useMemo(() => {
     const ranges: { min: number; max: number }[] = [];
     for (const ci of channelIndices) {
-      let mn = Infinity, mx = -Infinity;
       const ch = channels[ci];
+      // Fixed range for AFR/Lambda channels
+      if (ch && isAFRChannel(ch)) {
+        ranges.push({ min: 0.68, max: 1.25 });
+        continue;
+      }
+      let mn = Infinity, mx = -Infinity;
       for (let i = startIdx; i <= endIdx && i < rows.length; i++) {
         const raw = ci < rows[i].values.length ? rows[i].values[ci] : 0;
         const v = ch ? convertAFRValue(raw, ch) : raw;
@@ -811,8 +817,8 @@ export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8
     return (ts / 1000).toFixed(3) + 's';
   };
 
-  // Section height
-  const sectionHeight = 160;
+  // Section height — increased for better readability on modern monitors
+  const sectionHeight = 190;
 
   return (
     <div style={{
