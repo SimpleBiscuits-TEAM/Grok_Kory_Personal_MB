@@ -1556,3 +1556,14 @@
 - [x] Mark previous turbo-kit todo items complete
 - [x] Write vitest tests for 3-bar MAP detection and KW injector type (164 total tests passing)
 - [x] Checkpoint and push to GitHub
+
+## Injector Detection Priority & JR Kit Injector
+- [x] Update detectInjectorType: explicit model in filename (ID1050, ID1300) always overrides turbo kit default
+- [x] Add JR kit injector type (~345 cc/min, ~15% more than stock 310 cc/min)
+- [x] JR kit injector is default for JR turbo when no explicit injector model in filename
+- [x] KW 800cc is default for KW turbo when no explicit injector model in filename
+- [x] FP turbo has no default injector — falls through to stock when no explicit model in filename
+- [x] Train Knox on injector priority logic (Sections 21-22) and JR kit injector specs
+- [x] Write vitest tests for injector priority detection (10 new tests, 140 total passing)
+- [x] Verified all existing reference files still detect correctly (explicit model wins)
+- [x] Checkpoint and push to GitHub

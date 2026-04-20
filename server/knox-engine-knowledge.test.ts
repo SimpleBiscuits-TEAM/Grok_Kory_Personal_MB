@@ -542,3 +542,105 @@ describe('Knox Engine Fundamentals — 3-Bar MAP Sensor Detection', () => {
     expect(KNOX_ENGINE_FUNDAMENTALS).toContain('approximately correct in relative terms');
   });
 });
+
+
+// ─── Section 21: JR Kit Injector ─────────────────────────────────────────────
+describe('Knox Engine Knowledge — JR Kit Injector', () => {
+  it('documents JR kit injector flow rate (~345cc, ~15% above stock)', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('345 cc/min');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('15% more than the stock');
+  });
+
+  it('notes JR kit injector is believed to be from Honda 700cc single-cylinder', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Honda 700cc single-cylinder');
+  });
+
+  it('explains why JR kit only needs 15% more flow', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('mild turbo setup');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('moderate boost levels');
+  });
+
+  it('notes upgrade path to ID1050/ID1300 for more power', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('upgrade to ID1050 or ID1300');
+  });
+});
+
+// ─── Section 22: Injector Detection Priority Logic ───────────────────────────
+describe('Knox Engine Knowledge — Injector Detection Priority', () => {
+  it('documents 3-tier priority: explicit model > turbo kit default > stock', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Priority 1: Explicit Aftermarket Injector Model');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Priority 2: Explicit FIC 800cc');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Priority 3: Turbo Kit Default Injectors');
+  });
+
+  it('explains explicit model always wins over turbo kit default', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('regardless of which turbo kit is installed');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('owners frequently upgrade injectors');
+  });
+
+  it('documents turbo kit default injectors', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('JR turbo');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('KW turbo');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('FP turbo');
+  });
+
+  it('provides concrete filename examples for priority logic', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('KW_ID1050_Run_1.wp8');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('JR_ID1300_Run_1.wp8');
+  });
+
+  it('explains the common upgrade path', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('common upgrade path');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('explicit model always takes precedence');
+  });
+
+  it('notes diagnostic implication of injector mismatch', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('injector detection matched the actual hardware');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('directly scales the power estimate');
+  });
+});
+
+// ─── Injector Detection Function Tests ───────────────────────────────────────
+import { detectInjectorType, INJECTOR_FLOW_RATES } from '../client/src/lib/talonVirtualDyno';
+
+describe('detectInjectorType — Priority Logic', () => {
+  it('explicit ID1050 overrides JR turbo default', () => {
+    expect(detectInjectorType('PPEI_JR_ID1050s_93oct.wp8', '')).toBe('id1050');
+  });
+
+  it('explicit ID1300 overrides JR turbo default', () => {
+    expect(detectInjectorType('JR_ID1300_Run_1.wp8', '')).toBe('id1300');
+  });
+
+  it('explicit ID1050 overrides KW turbo default', () => {
+    expect(detectInjectorType('KW_ID1050_Run_1.wp8', '')).toBe('id1050');
+  });
+
+  it('explicit ID1300 overrides KW turbo default', () => {
+    expect(detectInjectorType('KW_ID1300_Run_1.wp8', '')).toBe('id1300');
+  });
+
+  it('JR turbo without explicit model defaults to jr_kit', () => {
+    expect(detectInjectorType('JR_PumpGas_Run_1.wp8', '')).toBe('jr_kit');
+  });
+
+  it('KW turbo without explicit model defaults to kw800', () => {
+    expect(detectInjectorType('KW_IgniteRed_Run_1.wp8', '')).toBe('kw800');
+  });
+
+  it('FP turbo without explicit model defaults to stock', () => {
+    expect(detectInjectorType('FPTurbo_IgniteRed_Run_1.wp8', '')).toBe('stock');
+  });
+
+  it('no turbo returns stock', () => {
+    expect(detectInjectorType('Stock_Talon_Run_1.wp8', '')).toBe('stock');
+  });
+
+  it('explicit FIC 800cc overrides everything', () => {
+    expect(detectInjectorType('JR_FIC800_Run_1.wp8', '')).toBe('kw800');
+  });
+
+  it('JR kit injector has correct flow rate (345cc)', () => {
+    expect(INJECTOR_FLOW_RATES.jr_kit).toBe(345);
+  });
+});

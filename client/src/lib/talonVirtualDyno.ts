@@ -24,11 +24,14 @@ import { WP8ParseResult, getHondaTalonKeyChannels } from './wp8Parser';
 
 // ─── Injector Definitions ─────────────────────────────────────────────────────
 
-export type InjectorType = 'stock' | 'kw800' | 'id1050' | 'id1300';
+export type InjectorType = 'stock' | 'jr_kit' | 'kw800' | 'id1050' | 'id1300';
 
 /** Injector flow rates in cc/min at 3 bar (43.5 psi) base fuel pressure */
 export const INJECTOR_FLOW_RATES: Record<InjectorType, number> = {
   stock: 310,    // Honda Talon OEM injectors ~310cc
+  jr_kit: 345,   // Jackson Racing turbo kit injectors ~345cc (~15% more than stock)
+                 // Believed to be the same injector used in Honda 700cc single-cylinder engines
+                 // Default for JR turbo when no explicit injector model in filename
   kw800: 800,    // FIC (Fuel Injector Clinic) 800cc — Kraftwerks turbo kit injectors
                  // Flow-tested: #1 = 798 cc/min, #8 = 801 cc/min (0.5% match)
                  // Average flow: 800 cc/min at 43.5 psi / 76 lb/hr
@@ -220,7 +223,16 @@ export interface VirtualDynoResult {
 // ─── Metadata Detection ──────────────────────────────────────────────────────
 
 /**
- * Detect injector type from filename, part number, and channel names
+ * Detect injector type from filename, part number, and channel names.
+ *
+ * Priority order:
+ *   1. Explicit injector model in filename (ID1050, ID1300) — always wins
+ *   2. Explicit FIC 800cc mention
+ *   3. Turbo kit default injector (JR → jr_kit ~345cc, KW → kw800 800cc)
+ *   4. Stock (~310cc)
+ *
+ * This means a file like "KW_ID1050_Run_1.wp8" uses ID1050 (not KW 800cc),
+ * and "JR_ID1300_Run_1.wp8" uses ID1300 (not JR kit injector).
  */
 export function detectInjectorType(
   fileName: string,
@@ -228,20 +240,29 @@ export function detectInjectorType(
 ): InjectorType {
   const combined = `${fileName} ${partNumber}`.toLowerCase();
 
+  // Priority 1: Explicit aftermarket injector model always wins
   if (combined.includes('id1300') || combined.includes('1300x') || combined.includes('1300cc')) {
     return 'id1300';
   }
   if (combined.includes('id1050') || combined.includes('1050x') || combined.includes('1050cc')) {
     return 'id1050';
   }
-  // FIC 800cc injectors come with the Kraftwerks turbo kit
+
+  // Priority 2: Explicit FIC 800cc mention
   if (combined.includes('fic800') || combined.includes('800cc') || combined.includes('fic 800')) {
     return 'kw800';
   }
-  // If KW turbo detected but no specific injector mentioned, default to KW 800cc
-  // because the Kraftwerks kit ships with FIC 800cc injectors
+
+  // Priority 3: Turbo kit default injectors (only when no explicit model above)
+  // KW turbo kit ships with FIC 800cc injectors
   if (combined.includes('kraftwerks') || /(^|[^a-z])kw([^a-z]|$)/.test(combined)) {
     return 'kw800';
+  }
+  // JR turbo kit ships with its own ~345cc injectors (~15% more than stock)
+  // Believed to be the same injector from Honda 700cc single-cylinder engines
+  if (combined.includes('jackson') || combined.includes('jacksonracing')
+      || /(^|[^a-z])jr([^a-z]|$)/.test(combined)) {
+    return 'jr_kit';
   }
 
   return 'stock';

@@ -1887,6 +1887,7 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
               }}
             >
               <option value="stock">Stock (~310cc)</option>
+              <option value="jr_kit">JR Kit (~345cc)</option>
               <option value="kw800">FIC 800cc (KW)</option>
               <option value="id1050">ID1050X (1050cc)</option>
               <option value="id1300">ID1300X (1300cc)</option>

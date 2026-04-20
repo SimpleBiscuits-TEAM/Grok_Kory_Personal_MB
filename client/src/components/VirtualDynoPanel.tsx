@@ -368,6 +368,7 @@ export default function VirtualDynoPanel({
 
   const injectorLabel: Record<InjectorType, string> = {
     stock: 'Stock (~310cc)',
+    jr_kit: 'JR Kit (~345cc)',
     kw800: 'FIC 800cc (KW)',
     id1050: 'ID1050X (1050cc)',
     id1300: 'ID1300X (1300cc)',

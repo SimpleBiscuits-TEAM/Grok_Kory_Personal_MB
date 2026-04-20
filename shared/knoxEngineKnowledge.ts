@@ -593,4 +593,48 @@ When a 3-bar MAP sensor is detected, the MAP-based boost correction in the virtu
 5. If 3-bar MAP detected → turbo detection from MAP data alone is unreliable (use filename patterns instead)
 
 **Important:** The barometric pressure reading is also used to calculate boost (boost = MAP - baro). When a 3-bar sensor is installed, BOTH the MAP and baro readings are affected, so the boost calculation may still be approximately correct in relative terms, even though the absolute values are wrong.
+
+---
+
+## 21. Jackson Racing (JR) Kit Injector
+
+The Jackson Racing turbo kit for the Honda Talon ships with its own injector that flows approximately 15% more than the stock Talon injector. The estimated flow rate is ~345 cc/min at 3 bar (43.5 psi) base fuel pressure.
+
+**JR Kit Injector Specifications:**
+- Flow rate: ~345 cc/min at 3 bar (estimated, ~15% above stock 310cc)
+- Believed to be the same injector used in Honda 700cc single-cylinder engines
+- This is the default injector when a JR turbo is detected and no explicit aftermarket injector model (ID1050, ID1300) is specified in the filename
+
+**Why Only 15% More Than Stock:**
+The Jackson Racing turbo kit is a relatively mild turbo setup compared to the FP or Kraftwerks kits. It produces moderate boost levels, so the fuel demand increase is modest. A 15% increase in injector flow rate is sufficient for the JR kit's typical boost levels on pump gas. When owners want more power (especially on E85), they upgrade to ID1050 or ID1300 injectors — and those will appear in the filename.
+
+---
+
+## 22. Injector Detection Priority Logic
+
+When the virtual dyno analyzes a WP8 file, it must determine which injector is installed. The detection follows a strict priority order:
+
+**Priority 1: Explicit Aftermarket Injector Model (Always Wins)**
+If the filename contains "ID1050", "ID1300", "1050x", "1300x", "1050cc", or "1300cc", that injector is used regardless of which turbo kit is installed. This is because owners frequently upgrade injectors beyond what their turbo kit ships with.
+
+Examples:
+- "KW_ID1050_Run_1.wp8" → ID1050 (not KW 800cc)
+- "JR_ID1300_Run_1.wp8" → ID1300 (not JR kit 345cc)
+- "FPTurbo_IgniteRed_ID1300s_Rev_0_13.wp8" → ID1300
+
+**Priority 2: Explicit FIC 800cc Mention**
+If the filename contains "fic800", "800cc", or "fic 800", the KW 800cc injector is used.
+
+**Priority 3: Turbo Kit Default Injectors**
+When no explicit injector model is found in the filename, the turbo kit's default injector is used:
+- **JR turbo** → JR kit injector (~345cc)
+- **KW turbo** → FIC 800cc
+- **FP turbo** → No default (falls through to stock, since FP kits don't ship with a specific injector)
+- **No turbo / generic turbo** → Stock (~310cc)
+
+**Why This Priority Matters:**
+A common upgrade path is: JR turbo kit (with kit injectors) → add ID1050 injectors for E85 → upgrade to FP turbo → add ID1300 injectors for more power. At each stage, the filename reflects the current injector, so the explicit model always takes precedence over the turbo kit's default.
+
+**Diagnostic Implication:**
+If the virtual dyno estimates seem wrong, one of the first things to check is whether the injector detection matched the actual hardware. A mismatch between detected and actual injector flow rate directly scales the power estimate by the ratio of the flow rates.
 `;
