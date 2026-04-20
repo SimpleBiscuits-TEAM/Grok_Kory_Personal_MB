@@ -386,3 +386,159 @@ describe('Knox Engine Fundamentals — Ethanol Fuels (E85/E90/IGNITE RED)', () =
     expect(KNOX_ENGINE_FUNDAMENTALS).toContain('seasonally');
   });
 });
+
+describe('Knox Engine Fundamentals — Turbo Kit Knowledge', () => {
+  it('covers Honda Talon turbo kits section', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Honda Talon Turbo Kits');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('JR, FP, KW');
+  });
+
+  it('covers Jackson Racing (JR) turbo characteristics', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Jackson Racing (JR) Turbo Kit');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('entry-level turbo kit');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('1.40');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('1.83');
+  });
+
+  it('covers Full Performance (FP) turbo characteristics', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Full Performance (FP) Turbo Kit');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('larger, more efficient compressor');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('1.64');
+  });
+
+  it('covers Kraftwerks (KW) turbo characteristics', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Kraftwerks (KW) Turbo Kit');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('PENDING');
+  });
+
+  it('covers generic turbo fallback', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Generic Turbo');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('conservative default');
+  });
+
+  it('explains WHY turbo kit matters for BSFC', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Why Turbo Kit Matters');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('adiabatic efficiency');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('charge air temperature');
+  });
+
+  it('covers turbo kit filename patterns', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain("contains 'JR'");
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain("contains 'FP'");
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain("contains 'KW'");
+  });
+});
+
+describe('Knox Engine Fundamentals — Power Commander Knowledge', () => {
+  it('covers Power Commander section', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Power Commander Piggyback Controllers');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('piggyback controller');
+  });
+
+  it('explains how Power Commander works step by step', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('intercepts');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('multiplies the pulsewidth');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('MAP-referenced fuel map');
+  });
+
+  it('covers datalog channel implications', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Injector Pulsewidth Final');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Primary Injector Pulsewidth 1');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('BEFORE the Power Commander modifies it');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('AFTER the Power Commander multiplier');
+  });
+
+  it('covers diagnostic implications of Power Commander', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('roughly HALF of actual');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('multiplier above 2.5');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('multiplier below 1.2');
+  });
+
+  it('covers Power Commander identification in datalogs', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('definitive indicator');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Power Commander Fuel Trim');
+  });
+});
+
+describe('Knox Engine Fundamentals — ID1300 Injector Knowledge', () => {
+  it('covers ID1300 injector section', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('ID1300 Injectors');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('1300 cc/min');
+  });
+
+  it('covers when ID1300s are used', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('180+ HP on ethanol');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('85% duty cycle');
+  });
+
+  it('covers ID1300 diagnostic considerations', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('30% more than ID1050');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('massively oversized');
+  });
+});
+
+
+describe('Knox Engine Fundamentals — KW FIC 800cc Injectors', () => {
+  it('covers FIC 800cc injector specifications', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('FIC (Fuel Injector Clinic)');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('800 cc/min');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('43.5 psi');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('76 lb/hr');
+  });
+
+  it('covers flow test data from the data sheet', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('798 cc/min');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('801 cc/min');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('0.5%');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Isopar G');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('OEM Denso ECU');
+  });
+
+  it('covers HP support table at 80% duty cycle', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('244 HP');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('203 HP');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('2 Cylinders');
+  });
+
+  it('explains why 800cc is chosen for Kraftwerks', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('idle quality');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('moderate boost');
+  });
+
+  it('covers auto-detection logic', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('defaults to FIC 800cc');
+  });
+});
+
+describe('Knox Engine Fundamentals — 3-Bar MAP Sensor Detection', () => {
+  it('explains why a 3-bar MAP sensor is needed', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('3-bar MAP sensor');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('0-300 kPa');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('29 psi');
+  });
+
+  it('covers detection method via barometric pressure', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Barometric Pressure < 70 kPa');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('85-105 kPa');
+  });
+
+  it('covers detection method via baro sensor voltage', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('Baro Sensor Voltage < 1.8V');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('0.8-1.2V');
+  });
+
+  it('explains why MAP readings are inaccurate with 3-bar sensor', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('voltage-to-pressure');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('LOWER than the real manifold pressure');
+  });
+
+  it('covers the diagnostic decision tree', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('turbo detection from MAP data alone is unreliable');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('filename patterns instead');
+  });
+
+  it('notes that relative boost calculation may still be approximately correct', () => {
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('BOTH the MAP and baro readings are affected');
+    expect(KNOX_ENGINE_FUNDAMENTALS).toContain('approximately correct in relative terms');
+  });
+});

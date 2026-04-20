@@ -432,4 +432,165 @@ The IGNITE RED file makes less power primarily because of 3° less timing (20° 
 - Fuel pressure stability is critical on ethanol — the higher fuel flow demands can expose weak fuel pumps
 - Cold start on E85 can be difficult because ethanol has poor vapourisation at low temperatures — this is a known limitation, not a fault
 - E85 content varies seasonally (summer blends may be E70-E75) — if power drops in summer, check actual ethanol content
+
+### 16. Honda Talon Turbo Kits — JR, FP, KW Characteristics and Calibration
+
+Three aftermarket turbo kits are commonly installed on the Honda Talon. Each has different compressor efficiency, turbine sizing, and spool characteristics, which directly affects BSFC (Brake Specific Fuel Consumption) and therefore the relationship between fuel flow and actual power output.
+
+**Jackson Racing (JR) Turbo Kit:**
+- The most common entry-level turbo kit for the Talon
+- Uses a relatively small turbocharger optimised for low-to-mid RPM response
+- Typical boost levels: 5-8 psi (MAP 105-115 kPa at sea level)
+- Filename pattern: contains 'JR' or 'Jackson Racing' or 'JacksonRacing'
+- Calibrated BSFC factors (derived from 21+ dyno runs):
+  - Pump gas (93 octane): turbo BSFC factor 1.40× (effective BSFC = base 0.43 × 1.40 = 0.602)
+  - Ethanol (E85/E90/IGNITE RED): turbo BSFC factor 1.83× (effective BSFC = base 0.58 × 1.83 = 1.061)
+- The JR turbo is less efficient than the FP turbo, meaning more fuel energy is lost to heat and exhaust
+- WHY the JR factor is higher: smaller compressor runs closer to its surge/choke limits at higher RPM, reducing adiabatic efficiency; the turbine housing is restrictive, increasing backpressure and pumping losses
+
+**Full Performance (FP) Turbo Kit:**
+- A higher-performance turbo kit with a larger, more efficient compressor
+- Better compressor efficiency means less heat rejection into the charge air and lower BSFC
+- Typical boost levels: 6-10 psi (MAP 110-120 kPa at sea level)
+- Filename pattern: contains 'FP' or 'FPTurbo' or 'Full Performance'
+- Calibrated BSFC factors (derived from 19 dyno runs with IGNITE RED E90):
+  - Pump gas: turbo BSFC factor 1.40× (same as JR — limited pump gas data, using JR baseline)
+  - Ethanol (E85/E90/IGNITE RED): turbo BSFC factor 1.64× (effective BSFC = base 0.58 × 1.64 = 0.951)
+- The FP turbo produces more peak power than the JR (typically 190-205 HP vs 165-175 HP on similar fuels) because the larger compressor flows more air efficiently
+- WHY the FP factor is lower than JR: the larger compressor wheel operates in a more efficient region of its map, converting more fuel energy to shaft work rather than waste heat
+
+**Kraftwerks (KW) Turbo Kit:**
+- A mid-range turbo kit that falls between JR and FP in terms of compressor efficiency
+- Filename pattern: contains 'KW' or 'Kraftwerks'
+- Calibrated BSFC factors: PENDING — awaiting dyno data files for calibration
+- Expected to have turbo BSFC factors between JR and FP values
+- Until calibrated, uses the JR factors as a conservative estimate
+
+**Generic Turbo (MAP-detected, no kit identified):**
+- When MAP data shows boost (> 100 kPa) but no specific turbo kit is identified from the filename
+- Uses JR turbo factors as a conservative default (JR is the least efficient, so this avoids underestimating BSFC)
+- The user can manually select the correct turbo kit in the CONFIG panel to improve accuracy
+
+**Why Turbo Kit Matters for Virtual Dyno Accuracy:**
+The virtual dyno estimates power from fuel flow using HP = FuelFlow / BSFC. A turbo engine runs significantly richer than stoichiometric (lambda 0.78-0.85) for combustion chamber cooling, meaning a large portion of injected fuel does NOT produce power. The BSFC factor captures this — but the exact amount of ‘wasted’ fuel depends on how efficiently the turbo compresses the intake charge. A more efficient turbo (FP) wastes less fuel on cooling because the charge air temperature is lower, so the BSFC factor is lower. A less efficient turbo (JR) heats the charge more, requiring richer mixtures for detonation protection, so the BSFC factor is higher.
+
+### 17. Power Commander Piggyback Controllers
+
+A Power Commander (PC) is a fuel-injection piggyback controller that intercepts the ECU’s injector command signal and modifies the injector pulsewidth before it reaches the injectors. This is a critical concept for datalog interpretation because the ECU’s logged injector pulsewidth does NOT reflect the actual fuel delivered.
+
+**How the Power Commander Works:**
+1. The ECU calculates the desired injector pulsewidth based on its fuel maps (VE table, fuel trims, etc.)
+2. The ECU sends this command to the injectors via the injector driver circuit
+3. The Power Commander intercepts this signal BEFORE it reaches the injectors
+4. Based on its own MAP-referenced fuel map, the PC multiplies the pulsewidth by a factor (typically 1.5-2.5× under boost)
+5. The modified (longer) pulsewidth signal is sent to the injectors
+6. The injectors open for the PC-modified duration, delivering more fuel than the ECU intended
+
+**Datalog Channel Implications:**
+- 'Injector Pulsewidth Final' (or 'Injector Pulsewidth Desired') — this is the ECU’s COMMAND, BEFORE the Power Commander modifies it. Typically ~5 ms under boost. This is NOT the actual injector on-time.
+- 'Primary Injector Pulsewidth 1' — this is the ACTUAL injector on-time AFTER the Power Commander multiplier. Typically ~10 ms under boost. This IS the real fuel delivery.
+- When a Power Commander is detected (by the presence of 'Primary Injector Pulsewidth 1' channel in the datalog), the virtual dyno MUST use Primary Inj PW 1 for fuel flow calculation, NOT Inj PW Final.
+
+**Why This Matters for Diagnostics:**
+- If you use Inj PW Final on a PC-equipped vehicle, the calculated fuel flow will be roughly HALF of actual, and the estimated HP will be roughly HALF of actual
+- The ratio between Primary Inj PW 1 and Inj PW Final tells you the PC’s multiplier at that operating point
+- A PC multiplier above 2.5× suggests the base tune is too lean for the boost level — the PC is doing too much correction
+- A PC multiplier below 1.2× suggests the base tune already has adequate fuelling and the PC is barely active
+- PC-equipped vehicles often use larger injectors (ID1300, ID1700) because the PC can command longer pulsewidths that would exceed the ECU’s maximum command range
+
+**Identifying Power Commander in Datalogs:**
+- The presence of 'Primary Injector Pulsewidth 1' channel is the definitive indicator
+- Stock ECU logs do NOT have this channel — it only appears when a PC is installed and logging
+- Some PC setups also log 'Power Commander Fuel Trim %' which shows the percentage adjustment at each operating point
+
+### 18. ID1300 Injectors — Characteristics and Usage
+
+Injector Dynamics ID1300 injectors are high-flow aftermarket injectors rated at 1300 cc/min at 3 bar (43.5 psi) fuel pressure. They are commonly used on turbocharged Honda Talons, especially those with Power Commander piggyback controllers.
+
+**Key Specifications:**
+- Flow rate: 1300 cc/min at 3 bar (43.5 psi) base fuel pressure
+- Designed for ethanol compatibility (E85/E90)
+- Linear flow response across the operating range
+- Dead time (latency): approximately 0.8-1.0 ms depending on voltage
+
+**When ID1300s Are Used:**
+- Turbocharged Talons making 180+ HP on ethanol fuels
+- Setups where ID1050 injectors reach >85% duty cycle
+- Power Commander setups where the PC multiplier would push ID1050s beyond their flow capacity
+- FP turbo builds that flow more air than JR turbo builds
+
+**Diagnostic Considerations:**
+- At 3 bar fuel pressure, ID1300s flow 30% more than ID1050s per millisecond of pulsewidth
+- If the virtual dyno detects ID1300 injectors but the estimated power seems too low, check whether a Power Commander is present — the ECU’s Inj PW Final will be artificially low
+- ID1300 injectors on a naturally aspirated Talon would be massively oversized — this combination almost always indicates a turbo setup
+
+---
+
+## 19. Kraftwerks (KW) FIC 800cc Injectors
+
+The Kraftwerks turbo kit for the Honda Talon ships with FIC (Fuel Injector Clinic) 800 cc/min injectors. These are custom-matched injectors specifically sized for the Kraftwerks turbo kit's airflow characteristics.
+
+**FIC 800cc Injector Specifications:**
+- Flow rate: 800 cc/min at 43.5 psi (3 bar) base fuel pressure
+- Average flow: 76 lb/hr
+- Flow-tested data (from Fuel Injector Clinic data sheet):
+  - Injector #1: 798 cc/min
+  - Injector #8: 801 cc/min
+  - Matching: 0.5% (excellent match)
+- Leak test: Both passed
+- Spray pattern: Both rated "Good"
+- Test fluid: Isopar G
+- Test bench driver: OEM Denso ECU
+- Test fluid temperature: 88-91°F / 32°C
+
+**Estimated Horsepower Supported at 80% Duty Cycle (3 bar / 43.5 psi):**
+
+| Configuration | BSFC 0.50 (NA) | BSFC 0.55 (Supercharged) | BSFC 0.60 (Turbo) |
+|---|---|---|---|
+| 2 Cylinders | 244 HP | 222 HP | 203 HP |
+| 4 Cylinders | 487 HP | 443 HP | 406 HP |
+| 6 Cylinders | 731 HP | 665 HP | 609 HP |
+
+For the Honda Talon (2 cylinders), the FIC 800cc injectors support up to ~203 HP at turbo BSFC (0.60) at 80% duty cycle. This is well-matched to the Kraftwerks turbo kit's typical output of 150-200 HP.
+
+**Why 800cc for Kraftwerks:**
+The Kraftwerks turbo kit produces less boost than the FP turbo kit but more than stock. The 800cc injectors are sized to provide adequate fuel flow at moderate boost levels without being so oversized that the ECU struggles with fine fuel control at idle and light load. This is a deliberate engineering choice — the injectors are large enough for WOT turbo fueling but small enough for reasonable idle quality.
+
+**Auto-Detection:**
+When a filename contains "KW" or "Kraftwerks" but no specific injector model (ID1050, ID1300), the virtual dyno defaults to FIC 800cc injectors because the Kraftwerks kit ships with them.
+
+---
+
+## 20. 3-Bar MAP Sensor Detection and Diagnostics
+
+Some turbocharged Honda Talons replace the stock 1-bar MAP (Manifold Absolute Pressure) sensor with a 3-bar MAP sensor to measure higher boost pressures. This is critical diagnostic knowledge because it fundamentally changes how MAP data should be interpreted.
+
+**Why a 3-Bar MAP Sensor Is Needed:**
+The stock Talon MAP sensor measures 0-1 bar (0-100 kPa) of absolute pressure. At sea level, atmospheric pressure is ~101 kPa, so the stock sensor can only read up to atmospheric — it cannot measure positive boost pressure. A 3-bar sensor reads 0-300 kPa, allowing it to measure boost pressures up to ~200 kPa gauge (approximately 29 psi of boost).
+
+**How to Detect a 3-Bar MAP Sensor from Datalog Data:**
+The 3-bar sensor outputs a different voltage-to-pressure mapping than the stock sensor. Since the ECU is calibrated for the stock sensor, it misinterprets the 3-bar sensor's output. This manifests in the barometric pressure reading:
+
+1. **Barometric Pressure < 70 kPa** — Real atmospheric pressure is always between 85-105 kPa (depending on altitude and weather). If the barometric pressure channel reads below 70 kPa, the ECU is misinterpreting the 3-bar sensor's voltage as if it were a 1-bar sensor. This is the primary detection method.
+
+2. **Baro Sensor Voltage < 1.8V** — The stock 1-bar sensor outputs ~2.5-3.0V at sea level. A 3-bar sensor outputs ~0.8-1.2V at sea level (because atmospheric pressure is only 1/3 of its full range). If the baro sensor voltage is below 1.8V, a 3-bar sensor is installed.
+
+**Why MAP Readings Are Inaccurate with a 3-Bar Sensor:**
+The ECU's MAP lookup table is calibrated for the stock 1-bar sensor's voltage-to-pressure transfer function. When a 3-bar sensor is installed:
+- The sensor outputs a lower voltage for the same pressure (because its range is 3× wider)
+- The ECU interprets this lower voltage as a lower pressure than actual
+- The logged MAP value is therefore LOWER than the real manifold pressure
+- This means boost pressure appears lower than it actually is in the datalog
+
+**Impact on Virtual Dyno:**
+When a 3-bar MAP sensor is detected, the MAP-based boost correction in the virtual dyno may be inaccurate because the logged MAP values don't represent actual manifold pressure. A correction formula is needed to convert the logged (misinterpreted) MAP back to actual MAP. Until that formula is provided, the virtual dyno flags this condition as a warning.
+
+**Diagnostic Decision Tree:**
+1. Check barometric pressure channel → if < 70 kPa → 3-bar MAP sensor installed
+2. Check baro sensor voltage → if < 1.8V → 3-bar MAP sensor installed
+3. Check filename for "3bar" or "3 bar" → 3-bar MAP sensor installed
+4. If 3-bar MAP detected → flag all MAP readings as potentially inaccurate
+5. If 3-bar MAP detected → turbo detection from MAP data alone is unreliable (use filename patterns instead)
+
+**Important:** The barometric pressure reading is also used to calculate boost (boost = MAP - baro). When a 3-bar sensor is installed, BOTH the MAP and baro readings are affected, so the boost calculation may still be approximately correct in relative terms, even though the absolute values are wrong.
 `;

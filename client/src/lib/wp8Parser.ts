@@ -602,6 +602,18 @@ export function getHondaTalonKeyChannels(result: WP8ParseResult) {
     speed1: find('Speed 1'),
     speed2: find('Speed 2'),
     gearRatio: find('Gear Ratio'),
+    // Power Commander piggyback channels
+    // When a Power Commander is installed, it multiplies the ECU's injector pulsewidth
+    // based on manifold pressure. 'Injector Pulsewidth Final' shows the ECU's command
+    // (lower than actual), while 'Primary Injector Pulsewidth 1' shows the actual
+    // injector on-time after the PC multiplier. Virtual dyno MUST use Primary PW
+    // when these channels are present.
+    primaryInjPw1: find('Primary Injector Pulsewidth 1'),
+    primaryInjPw2: find('Primary Injector Pulsewidth 2'),
+    primaryInjDuty1: find('Primary Injector Duty 1'),
+    primaryInjDuty2: find('Primary Injector Duty 2'),
+    injAdjustment1: find('Injector Adjustment 1'),
+    injAdjustment2: find('Injector Adjustment 2'),
     // Talon-specific channels discovered from 2,792 dyno logs
     talonClutchSlip5th: find('Talon_HL6_Clutch Slip_5th Gear'),
     hondaAddPw1: find('Honda_Add PW_0801EB0402'),

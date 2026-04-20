@@ -1,10 +1,11 @@
 /**
- * Test: Virtual Dyno turbo BSFC correction for Honda Talon with ID1050 injectors
+ * Test: Virtual Dyno turbo BSFC correction for Honda Talon
  *
  * Calibrated from real Dynojet dyno runs:
- *   Pump gas: 21 runs → turbo factor = 1.40
- *   E85:      1 run  → turbo factor = 1.76
- *   E90:      1 run  → turbo factor = 1.76
+ *   JR pump gas:    21 runs → turbo factor = 1.40
+ *   JR ethanol:      2 runs → turbo factor = 1.83 (conservative timing)
+ *   FP ethanol:     19 runs → turbo factor = 1.64 (proper timing)
+ *   KW:             placeholder → estimated between JR and FP
  *
  * The correction is purely BSFC-based — no MAP multiplier needed because
  * the injector PW already reflects the actual fuel delivered under boost.
@@ -18,10 +19,12 @@ import {
   estimateHPWithBoost,
   calculateTorque,
   computeVirtualDyno,
+  detectTurboType,
   VirtualDynoConfig,
   FUEL_PROFILES,
   INJECTOR_FLOW_RATES,
   FuelType,
+  TurboType,
 } from './talonVirtualDyno';
 
 // ─── Unit tests for estimateHPWithBoost ────────────────────────────────────
@@ -29,35 +32,65 @@ import {
 describe('estimateHPWithBoost', () => {
   const bsfc = 0.45; // pump gas NA BSFC
 
-  it('returns same as estimateHP when isTurbo=false', () => {
+  it('returns same as estimateHP when turboType=na', () => {
     const fuelFlow = 5.0; // g/s
     const hpBase = estimateHP(fuelFlow, bsfc);
-    const hpBoost = estimateHPWithBoost(fuelFlow, bsfc, false, 150);
+    const hpBoost = estimateHPWithBoost(fuelFlow, bsfc, 'na', 150);
     expect(hpBoost).toBeCloseTo(hpBase, 1);
   });
 
-  it('returns LOWER HP when isTurbo=true for pump gas (factor 1.40)', () => {
+  it('returns LOWER HP when turboType=jr for pump gas (factor 1.40)', () => {
     const fuelFlow = 5.0;
-    const hpNA = estimateHPWithBoost(fuelFlow, bsfc, false, 95, 'pump');
-    const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, true, 170, 'pump');
+    const hpNA = estimateHPWithBoost(fuelFlow, bsfc, 'na', 95, 'pump');
+    const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 170, 'pump');
     // Turbo HP should be ~71% of NA HP (1/1.40 = 0.714)
     expect(hpTurbo).toBeLessThan(hpNA);
     expect(hpTurbo).toBeCloseTo(hpNA / 1.40, 0);
   });
 
-  it('returns LOWER HP when isTurbo=true for E85 (factor 1.76)', () => {
+  it('returns LOWER HP when turboType=jr for E85 (factor 1.76)', () => {
     const fuelFlow = 5.0;
     const e85Bsfc = FUEL_PROFILES.e85.bsfc;
-    const hpNA = estimateHPWithBoost(fuelFlow, e85Bsfc, false, 95, 'e85');
-    const hpTurbo = estimateHPWithBoost(fuelFlow, e85Bsfc, true, 170, 'e85');
+    const hpNA = estimateHPWithBoost(fuelFlow, e85Bsfc, 'na', 95, 'e85');
+    const hpTurbo = estimateHPWithBoost(fuelFlow, e85Bsfc, 'jr', 170, 'e85');
     expect(hpTurbo).toBeLessThan(hpNA);
     expect(hpTurbo).toBeCloseTo(hpNA / 1.76, 0);
   });
 
+  it('FP turbo has lower ethanol factor than JR (more efficient on ethanol)', () => {
+    const fuelFlow = 5.0;
+    const e85Bsfc = FUEL_PROFILES.e85.bsfc;
+    const hpJR = estimateHPWithBoost(fuelFlow, e85Bsfc, 'jr', 150, 'e85');
+    const hpFP = estimateHPWithBoost(fuelFlow, e85Bsfc, 'fp', 150, 'e85');
+    // FP ethanol factor (1.64) < JR ethanol factor (1.76)
+    // Lower factor = more HP per unit fuel flow = more efficient
+    expect(hpFP).toBeGreaterThan(hpJR);
+  });
+
+  it('on pump gas, JR is more efficient than FP (lower pump factor)', () => {
+    const fuelFlow = 5.0;
+    const hpJR = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
+    const hpFP = estimateHPWithBoost(fuelFlow, bsfc, 'fp', 150, 'pump');
+    // JR pump factor (1.40) < FP pump factor (1.60)
+    // This is because FP pump factor is estimated (no pump gas data yet)
+    expect(hpJR).toBeGreaterThan(hpFP);
+  });
+
+  it('KW turbo factor falls between JR and FP', () => {
+    const fuelFlow = 5.0;
+    const hpJR = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
+    const hpKW = estimateHPWithBoost(fuelFlow, bsfc, 'kw', 150, 'pump');
+    const hpFP = estimateHPWithBoost(fuelFlow, bsfc, 'fp', 150, 'pump');
+    // Higher BSFC factor = lower HP per unit fuel flow
+    // JR (1.40) gives highest HP, FP (1.60) gives lowest HP, KW (1.50) in between
+    expect(hpKW).toBeLessThan(hpJR);    // KW less efficient than JR on pump
+    expect(hpKW).toBeGreaterThan(hpFP); // KW more efficient than FP on pump
+  });
+
   it('E85 turbo factor is higher than pump gas turbo factor', () => {
     const fuelFlow = 5.0;
-    const hpPumpTurbo = estimateHPWithBoost(fuelFlow, bsfc, true, 150, 'pump');
-    const hpE85Turbo = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.e85.bsfc, true, 150, 'e85');
+    const hpPumpTurbo = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
+    const hpE85Turbo = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.e85.bsfc, 'jr', 150, 'e85');
     // E85 turbo should produce less HP per unit fuel flow than pump gas turbo
     // because E85 has lower energy density AND higher turbo factor
     expect(hpE85Turbo).toBeLessThan(hpPumpTurbo);
@@ -65,52 +98,98 @@ describe('estimateHPWithBoost', () => {
 
   it('IGNITE RED uses same turbo factor as E90 (both are ethanol)', () => {
     const fuelFlow = 5.0;
-    const hpE90 = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.e90.bsfc, true, 150, 'e90');
-    const hpIR = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.ignite_red.bsfc, true, 150, 'ignite_red');
+    const hpE90 = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.e90.bsfc, 'jr', 150, 'e90');
+    const hpIR = estimateHPWithBoost(fuelFlow, FUEL_PROFILES.ignite_red.bsfc, 'jr', 150, 'ignite_red');
     // IGNITE RED and E90 should produce identical results (same fuel profile + same turbo factor)
     expect(hpIR).toBeCloseTo(hpE90, 5);
   });
 
   it('turbo correction is independent of MAP (BSFC-only)', () => {
     const fuelFlow = 5.0;
-    const hpAt100 = estimateHPWithBoost(fuelFlow, bsfc, true, 100, 'pump');
-    const hpAt150 = estimateHPWithBoost(fuelFlow, bsfc, true, 150, 'pump');
-    const hpAt200 = estimateHPWithBoost(fuelFlow, bsfc, true, 200, 'pump');
+    const hpAt100 = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 100, 'pump');
+    const hpAt150 = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
+    const hpAt200 = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 200, 'pump');
     expect(hpAt100).toBeCloseTo(hpAt150, 2);
     expect(hpAt150).toBeCloseTo(hpAt200, 2);
   });
 
   it('returns 0 for zero fuel flow', () => {
-    expect(estimateHPWithBoost(0, bsfc, true, 200)).toBe(0);
+    expect(estimateHPWithBoost(0, bsfc, 'jr', 200)).toBe(0);
   });
 
   it('returns 0 for zero BSFC', () => {
-    expect(estimateHPWithBoost(5.0, 0, true, 200)).toBe(0);
+    expect(estimateHPWithBoost(5.0, 0, 'jr', 200)).toBe(0);
   });
 
-  it('pump gas turbo BSFC ratio matches calibration data (~1.40×)', () => {
+  it('JR pump gas turbo BSFC ratio matches calibration data (~1.40×)', () => {
     const fuelFlow = 5.0;
-    const hpNA = estimateHPWithBoost(fuelFlow, bsfc, false, 100, 'pump');
-    const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, true, 100, 'pump');
+    const hpNA = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump');
+    const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 100, 'pump');
     const ratio = hpNA / hpTurbo;
     expect(ratio).toBeCloseTo(1.40, 1);
   });
 
-  it('E85 turbo BSFC ratio matches calibration data (~1.76×)', () => {
+  it('JR E85 turbo BSFC ratio matches calibration data (~1.76×)', () => {
     const fuelFlow = 5.0;
     const e85Bsfc = FUEL_PROFILES.e85.bsfc;
-    const hpNA = estimateHPWithBoost(fuelFlow, e85Bsfc, false, 100, 'e85');
-    const hpTurbo = estimateHPWithBoost(fuelFlow, e85Bsfc, true, 100, 'e85');
+    const hpNA = estimateHPWithBoost(fuelFlow, e85Bsfc, 'na', 100, 'e85');
+    const hpTurbo = estimateHPWithBoost(fuelFlow, e85Bsfc, 'jr', 100, 'e85');
     const ratio = hpNA / hpTurbo;
     expect(ratio).toBeCloseTo(1.76, 1);
+  });
+
+  it('FP ethanol turbo BSFC ratio matches calibration data (~1.64×)', () => {
+    const fuelFlow = 5.0;
+    const e85Bsfc = FUEL_PROFILES.e85.bsfc;
+    const hpNA = estimateHPWithBoost(fuelFlow, e85Bsfc, 'na', 100, 'e85');
+    const hpTurbo = estimateHPWithBoost(fuelFlow, e85Bsfc, 'fp', 100, 'e85');
+    const ratio = hpNA / hpTurbo;
+    expect(ratio).toBeCloseTo(1.64, 1);
   });
 
   it('default fuelType parameter uses pump gas factor', () => {
     const fuelFlow = 5.0;
     // Call without fuelType param (should default to pump)
-    const hpDefault = estimateHPWithBoost(fuelFlow, bsfc, true, 150);
-    const hpPump = estimateHPWithBoost(fuelFlow, bsfc, true, 150, 'pump');
+    const hpDefault = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150);
+    const hpPump = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
     expect(hpDefault).toBeCloseTo(hpPump, 5);
+  });
+});
+
+// ─── detectTurboType tests ────────────────────────────────────────────────
+
+describe('detectTurboType', () => {
+  it('detects JR from filename with underscore separator', () => {
+    expect(detectTurboType('PPEI_JR_ID1050s_93oct.wp8', '')).toBe('jr');
+  });
+
+  it('detects JR from filename with mixed case', () => {
+    expect(detectTurboType('Kory_JR_IgniteRed.wp8', '')).toBe('jr');
+  });
+
+  it('detects JR from Jackson Racing in filename', () => {
+    expect(detectTurboType('JacksonRacing_turbo.wp8', '')).toBe('jr');
+  });
+
+  it('detects FP from FPTurbo in filename', () => {
+    expect(detectTurboType('FPTurbo_IgniteRed_ID1300s.wp8', '')).toBe('fp');
+  });
+
+  it('detects KW from Kraftwerks in filename', () => {
+    expect(detectTurboType('Kraftwerks_pump_ID1050.wp8', '')).toBe('kw');
+  });
+
+  it('detects KW from KW abbreviation', () => {
+    expect(detectTurboType('test_KW_turbo.wp8', '')).toBe('kw');
+  });
+
+  it('returns na for stock filename', () => {
+    expect(detectTurboType('stock_talon_log.wp8', '')).toBe('na');
+  });
+
+  it('does not false-positive on partial matches', () => {
+    // 'jr' inside a longer word should not match
+    expect(detectTurboType('major_update.wp8', '')).toBe('na');
   });
 });
 
@@ -173,13 +252,14 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
     expect(keys.map >= 0 || keys.mapCorrected >= 0).toBe(true);
   });
 
-  it('computes virtual dyno with turbo+ID1050 config and gets realistic HP', () => {
+  it('computes virtual dyno with JR turbo+ID1050 config and gets realistic HP', () => {
     expect(wp8).not.toBeNull();
 
     const config: VirtualDynoConfig = {
       injectorType: 'id1050',
       fuelType: 'pump',
       isTurbo: true,
+      turboType: 'jr',
       dynoCalibrationFactor: 1.0,
     };
 
@@ -187,18 +267,16 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
 
     console.log('Peak HP:', result.peakHP, '@ RPM:', result.peakHPRpm);
     console.log('Peak Torque:', result.peakTorque, '@ RPM:', result.peakTorqueRpm);
-    console.log('Warnings:', result.warnings);
-    console.log('Confidence:', result.confidence);
-    console.log('Data points:', result.dataPoints.length);
 
-    // A turbo Talon with ID1050s should make 130-200 HP
-    // Reference: 21 real dyno runs show 107-156 HP peak
-    // DynoSheet with factor 1.40 shows ~165 HP for this file
+    // A JR turbo Talon with ID1050s on pump gas should make 130-200 HP
     expect(result.peakHP).toBeGreaterThan(100);
     expect(result.peakHP).toBeLessThan(250);
+    // Specifically, this file makes ~165.8 HP on the dyno
+    expect(result.peakHP).toBeGreaterThan(165.8 * 0.85);
+    expect(result.peakHP).toBeLessThan(165.8 * 1.15);
   });
 
-  it('NA config produces HIGHER HP than turbo for same fuel flow', () => {
+  it('NA config produces HIGHER HP than JR turbo for same fuel flow', () => {
     expect(wp8).not.toBeNull();
 
     const naConfig: VirtualDynoConfig = {
@@ -212,18 +290,16 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
       injectorType: 'id1050',
       fuelType: 'pump',
       isTurbo: true,
+      turboType: 'jr',
       dynoCalibrationFactor: 1.0,
     };
 
     const naResult = computeVirtualDyno(wp8!, naConfig, 'test.wp8');
     const turboResult = computeVirtualDyno(wp8!, turboConfig, 'test.wp8');
 
-    console.log('NA Peak HP (uncorrected):', naResult.peakHP);
-    console.log('Turbo Peak HP (corrected):', turboResult.peakHP);
-
     // NA will show inflated numbers because it uses a lower BSFC
     expect(naResult.peakHP).toBeGreaterThan(turboResult.peakHP);
-    // Turbo result should be in realistic range (130-200 HP)
+    // Turbo result should be in realistic range
     expect(turboResult.peakHP).toBeGreaterThan(100);
     expect(turboResult.peakHP).toBeLessThan(250);
   });
@@ -248,6 +324,7 @@ describe.skipIf(!hasE85File)('E85 Turbo Talon - real WP8 file', () => {
       injectorType: 'id1050',
       fuelType: 'e85',
       isTurbo: true,
+      turboType: 'jr',
       dynoCalibrationFactor: 1.0,
     };
     const result = computeVirtualDyno(wp8, config, 'Kory_Talon_e85_JR_3bar_BRR_ID1050_Rev_1_3_Run_3.wp8');
@@ -277,6 +354,7 @@ describe.skipIf(!hasIRFile)('IGNITE RED Turbo Talon - real WP8 file', () => {
       injectorType: 'id1050',
       fuelType: 'ignite_red',
       isTurbo: true,
+      turboType: 'jr',
       dynoCalibrationFactor: 1.0,
     };
     const result = computeVirtualDyno(wp8, config, 'Kory_JR_IgniteRed_ID1050_GravesSARemoved_Rev_1_8_Run_1.wp8');

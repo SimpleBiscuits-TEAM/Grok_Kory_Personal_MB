@@ -404,7 +404,11 @@ function buildWOTRun(
 ): WOTRun {
   const rpmIdx = keys.engineSpeed;
   const tpsIdx = keys.throttlePosition;
-  const injPWIdx = keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired;
+  // Power Commander override: use Primary Inj PW 1 when PC channels are present
+  const hasPowerCommander = keys.primaryInjPw1 >= 0;
+  const injPWIdx = hasPowerCommander
+    ? keys.primaryInjPw1
+    : (keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired);
   const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected
     : keys.honda3BarMap >= 0 ? keys.honda3BarMap
     : keys.map;
@@ -456,7 +460,8 @@ function buildWOTRun(
       if (hp > 500) hp = 0;
       if (torque > 500) torque = 0;
     } else {
-      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map, config.fuelType);
+      const effectiveTurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' as const : 'na' as const);
+      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType);
       hp *= config.dynoCalibrationFactor;
       torque = calculateTorque(hp, rpm);
     }

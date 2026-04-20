@@ -159,12 +159,13 @@ describe('estimateHP', () => {
     expect(hp).toBeLessThan(80);
   });
 
-  it('lower BSFC (more efficient fuel) produces more HP per unit fuel', () => {
+  it('IGNITE RED (ethanol) has higher BSFC than pump gas', () => {
     const pumpHP = estimateHP(5, FUEL_PROFILES.pump.bsfc);
     const igniteHP = estimateHP(5, FUEL_PROFILES.ignite_red.bsfc);
 
-    // Ignite Red has lower BSFC (0.47 vs 0.50) = more efficient
-    expect(igniteHP).toBeGreaterThan(pumpHP);
+    // IGNITE RED is E90 ethanol (BSFC 0.58) — higher than pump gas (0.43)
+    // Ethanol needs more fuel per HP due to lower energy density
+    expect(igniteHP).toBeLessThan(pumpHP);
   });
 
   it('E85 requires more fuel for same HP (higher BSFC)', () => {

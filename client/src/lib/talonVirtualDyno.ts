@@ -15,7 +15,8 @@
  *   - ID1050X injectors (1050cc)
  *   - ID1300X injectors (1300cc)
  *   - Fuel types: Pump Gas, UTV96, E85, E90, Ignite Red
- *   - Turbo and NA configurations
+ *   - Turbo kits: Jackson Racing (JR), Full Performance (FP), Kraftwerks (KW)
+ *   - Power Commander piggyback detection (uses Primary Inj PW 1)
  *   - Dyno calibration learning from dyno WP8 logs
  */
 
@@ -23,11 +24,14 @@ import { WP8ParseResult, getHondaTalonKeyChannels } from './wp8Parser';
 
 // ─── Injector Definitions ─────────────────────────────────────────────────────
 
-export type InjectorType = 'stock' | 'id1050' | 'id1300';
+export type InjectorType = 'stock' | 'kw800' | 'id1050' | 'id1300';
 
 /** Injector flow rates in cc/min at 3 bar (43.5 psi) base fuel pressure */
 export const INJECTOR_FLOW_RATES: Record<InjectorType, number> = {
   stock: 310,    // Honda Talon OEM injectors ~310cc
+  kw800: 800,    // FIC (Fuel Injector Clinic) 800cc — Kraftwerks turbo kit injectors
+                 // Flow-tested: #1 = 798 cc/min, #8 = 801 cc/min (0.5% match)
+                 // Average flow: 800 cc/min at 43.5 psi / 76 lb/hr
   id1050: 1050,  // Injector Dynamics ID1050X
   id1300: 1300,  // Injector Dynamics ID1300X
 };
@@ -106,37 +110,57 @@ const SECONDS_PER_HOUR = 3600;
 /** Standard atmospheric pressure in kPa */
 const ATM_KPA = 101.325;
 
+// ─── Turbo Kit Definitions ──────────────────────────────────────────────────────────────
+
 /**
- * Turbo BSFC multipliers — fuel-specific, calibrated from real Dynojet dyno runs.
+ * Turbo kit type detected from filename.
  *
- * Pump gas: 21 runs (58,351 pts), median measured BSFC = 0.905 → factor = 1.40
- * E85:     1 run (1,762 pts), median measured BSFC = 1.020 → factor = 1.76
- * E90:     1 run (2,463 pts), median measured BSFC = 1.039 → factor = 1.76
+ * 'na'            — Naturally aspirated (no turbo)
+ * 'jr'            — Jackson Racing supercharger/turbo kit (least efficient of the three)
+ * 'kw'            — Kraftwerks turbo kit (mid-efficiency, between JR and FP)
+ * 'fp'            — Full Performance turbo kit (most efficient of the three)
+ * 'generic_turbo' — Turbo detected from MAP > 100 kPa but kit not identified from filename
+ */
+export type TurboType = 'na' | 'jr' | 'kw' | 'fp' | 'generic_turbo';
+
+/**
+ * Turbo BSFC multipliers — turbo-kit × fuel specific.
+ *
+ * Each turbo kit has different compressor efficiency, which affects how much
+ * excess fuel is needed for cooling and how much of the injected fuel actually
+ * produces power. More efficient turbos have lower BSFC factors.
+ *
+ * Calibration data:
+ *   JR pump:    21 runs (58,351 pts), ID1050, 93 octane → factor 1.40
+ *   JR ethanol:  2 runs (4,225 pts), ID1050, E85/IGNITE RED, conservative timing 20-23° → factor 1.76
+ *   FP ethanol: 19 runs (31,000+ pts), ID1300, IGNITE RED, proper timing 29.5°, Power Commander → factor 1.83
+ *   KW:         placeholder (awaiting reference files) — estimated between JR and FP
+ *   Generic:    average of JR and FP for unknown turbo kits
  *
  * The higher BSFC for turbo reflects:
  *   - Rich AFR targets for combustion chamber cooling (lambda ~0.80)
  *   - Excess fuel that doesn't produce power (cooling duty)
- *   - Large injector oversizing (ID1050 vs stock 310cc)
- *
- * NOTE: E85/E90 reference files had conservative timing (20-23° vs optimal 30-35°).
- * With properly advanced timing, E85/E90 turbo BSFC would be lower (better efficiency).
- * These factors will be recalibrated when properly-timed E85 reference files are available.
- *
- * E85 and E90 share the same turbo factor because their measured BSFC was nearly
- * identical (1.020 vs 1.039) — both are ethanol fuels with similar stoichiometry.
+ *   - Large injector oversizing (ID1050/ID1300 vs stock 310cc)
+ *   - Turbo compressor efficiency differences between kits
  */
-const TURBO_BSFC_FACTOR_PUMP = 1.40;  // pump gas turbo (21 dyno runs)
-const TURBO_BSFC_FACTOR_ETHANOL = 1.76;  // E85/E90/IGNITE RED turbo (2 dyno runs, conservative timing)
+const TURBO_BSFC_MATRIX: Record<Exclude<TurboType, 'na'>, { pump: number; ethanol: number }> = {
+  jr:            { pump: 1.40, ethanol: 1.76 },  // JR: 21 pump runs + 2 ethanol runs (conservative timing)
+  kw:            { pump: 1.50, ethanol: 1.80 },  // KW: placeholder — estimated between JR and FP (awaiting files)
+  fp:            { pump: 1.60, ethanol: 1.64 },  // FP: 19 ethanol runs (proper timing 29.5°), pump estimated
+  generic_turbo: { pump: 1.50, ethanol: 1.80 },  // Generic: average of JR and FP for unknown turbo kits
+};
 
-/** Helper to get fuel-specific turbo BSFC factor */
-function getTurboBsfcFactor(fuelType: FuelType): number {
+/** Helper to get turbo-kit × fuel BSFC factor */
+function getTurboBsfcFactor(turboType: TurboType, fuelType: FuelType): number {
+  if (turboType === 'na') return 1.0;  // NA = no turbo correction
+  const entry = TURBO_BSFC_MATRIX[turboType];
   switch (fuelType) {
     case 'e85':
     case 'e90':
     case 'ignite_red':
-      return TURBO_BSFC_FACTOR_ETHANOL;
+      return entry.ethanol;
     default:
-      return TURBO_BSFC_FACTOR_PUMP;
+      return entry.pump;
   }
 }
 
@@ -145,7 +169,10 @@ function getTurboBsfcFactor(fuelType: FuelType): number {
 export interface VirtualDynoConfig {
   injectorType: InjectorType;
   fuelType: FuelType;
+  /** @deprecated Use turboType instead. Kept for backward compatibility. */
   isTurbo: boolean;
+  /** Turbo kit type — determines kit-specific BSFC factor. Defaults to generic_turbo when isTurbo=true. */
+  turboType?: TurboType;
   /** Optional correction factor learned from dyno log (default 1.0) */
   dynoCalibrationFactor: number;
 }
@@ -176,11 +203,16 @@ export interface VirtualDynoResult {
   /** Detected configuration */
   detectedInjector: InjectorType;
   detectedFuel: FuelType;
+  detectedTurboType: TurboType;
   isDynoLog: boolean;
   /** Calibration factor (actual/estimated) from dyno log */
   calibrationFactor: number;
   /** Confidence level based on data quality */
   confidence: 'high' | 'medium' | 'low';
+  /** 3-bar MAP sensor detected: baro < 70 kPa OR baro voltage < 1.8V */
+  has3BarMapSensor: boolean;
+  /** When true, MAP readings are not accurate — awaiting correction formula */
+  mapReadingsInaccurate: boolean;
   /** Warnings */
   warnings: string[];
 }
@@ -201,6 +233,15 @@ export function detectInjectorType(
   }
   if (combined.includes('id1050') || combined.includes('1050x') || combined.includes('1050cc')) {
     return 'id1050';
+  }
+  // FIC 800cc injectors come with the Kraftwerks turbo kit
+  if (combined.includes('fic800') || combined.includes('800cc') || combined.includes('fic 800')) {
+    return 'kw800';
+  }
+  // If KW turbo detected but no specific injector mentioned, default to KW 800cc
+  // because the Kraftwerks kit ships with FIC 800cc injectors
+  if (combined.includes('kraftwerks') || /(^|[^a-z])kw([^a-z]|$)/.test(combined)) {
+    return 'kw800';
   }
 
   return 'stock';
@@ -225,6 +266,46 @@ export function detectFuelType(
   if (combined.includes('utv96') || combined.includes('utv 96')) return 'utv96';
 
   return 'pump';
+}
+
+/**
+ * Detect turbo kit type from filename.
+ *
+ * Returns 'na' if no turbo kit pattern is found in the filename.
+ * The caller should also check MAP data — if MAP > 100 kPa and this
+ * returns 'na', the caller should upgrade to 'generic_turbo'.
+ *
+ * Filename patterns:
+ *   JR, Jackson Racing, JacksonRacing → 'jr'
+ *   FP, FPTurbo, Full Performance    → 'fp'
+ *   KW, Kraftwerks                    → 'kw'
+ */
+export function detectTurboType(
+  fileName: string,
+  partNumber: string,
+): TurboType {
+  const combined = `${fileName} ${partNumber}`.toLowerCase();
+
+  // FP turbo — check before JR because some filenames may have both
+  // Use [^a-z] boundaries instead of \b because \b treats _ as a word char
+  if (combined.includes('fpturbo') || combined.includes('fp turbo') || combined.includes('fp_turbo')
+      || /(^|[^a-z])fp([^a-z]|$)/.test(combined) || combined.includes('full performance')) {
+    return 'fp';
+  }
+
+  // Jackson Racing
+  if (combined.includes('jacksonracing') || combined.includes('jackson racing') || combined.includes('jackson_racing')
+      || /(^|[^a-z])jr([^a-z]|$)/.test(combined)) {
+    return 'jr';
+  }
+
+  // Kraftwerks
+  if (combined.includes('kraftwerks') || combined.includes('kraft werks')
+      || /(^|[^a-z])kw([^a-z]|$)/.test(combined)) {
+    return 'kw';
+  }
+
+  return 'na';
 }
 
 /**
@@ -304,14 +385,14 @@ export function estimateHP(fuelFlowGPerSec: number, bsfc: number): number {
 export function estimateHPWithBoost(
   fuelFlowGPerSec: number,
   bsfc: number,
-  isTurbo: boolean,
+  turboType: TurboType,
   _mapKpa: number,  // reserved for future RPM-dependent BSFC
   fuelType: FuelType = 'pump',
 ): number {
   if (fuelFlowGPerSec <= 0 || bsfc <= 0) return 0;
 
-  const turboFactor = getTurboBsfcFactor(fuelType);
-  const effectiveBsfc = isTurbo ? bsfc * turboFactor : bsfc;
+  const turboFactor = getTurboBsfcFactor(turboType, fuelType);
+  const effectiveBsfc = turboType !== 'na' ? bsfc * turboFactor : bsfc;
   return estimateHP(fuelFlowGPerSec, effectiveBsfc);
 }
 
@@ -350,12 +431,59 @@ export function computeVirtualDyno(
   const hasAFR = keys.afr1 >= 0 || keys.lambda1 >= 0;
   const hasIgnition = keys.ignitionTiming >= 0;
 
+  // Power Commander detection: when a PC piggyback is installed, it multiplies
+  // the ECU's injector pulsewidth based on manifold pressure. The ECU's
+  // 'Injector Pulsewidth Final' is the un-multiplied command (~5 ms), while
+  // 'Primary Injector Pulsewidth 1' is the actual injector on-time after the
+  // PC multiplier (~10 ms). We MUST use Primary PW for fuel flow calculation.
+  const hasPowerCommander = keys.primaryInjPw1 >= 0;
+  const primaryInjPWIdx = keys.primaryInjPw1;
+
   if (!hasRPM) warnings.push('Missing Engine Speed channel — cannot estimate power');
-  if (!hasInjPW) warnings.push('Missing Injector Pulsewidth channel — using TPS-based estimation');
+  if (!hasInjPW && !hasPowerCommander) warnings.push('Missing Injector Pulsewidth channel — using TPS-based estimation');
+  if (hasPowerCommander) {
+    warnings.push('Power Commander detected — using Primary Injector Pulsewidth 1 for fuel flow calculation');
+  }
+
+  // ─── 3-bar MAP sensor detection ──────────────────────────────────────────
+  // If barometric pressure < 70 kPa OR baro sensor voltage < 1.8V,
+  // a 3-bar MAP sensor is installed and MAP readings are NOT accurate.
+  // The 3-bar sensor rescales the MAP voltage range, so the ECU's
+  // MAP interpretation (calibrated for the stock 1-bar sensor) is wrong.
+  let has3BarMapSensor = false;
+  const baroIdx = keys.baroPressure;
+  const baroVoltageIdx = keys.baroSensorVoltage;
+  if (baroIdx >= 0 || baroVoltageIdx >= 0) {
+    // Sample first 50 rows to check baro readings
+    for (let i = 0; i < Math.min(50, wp8.rows.length); i++) {
+      const row = wp8.rows[i];
+      if (baroIdx >= 0) {
+        const baro = row.values[baroIdx];
+        // Baro in kPa: if < 70, it's a 3-bar sensor reading
+        // (real atmospheric pressure is always > 85 kPa even at high altitude)
+        if (baro > 0 && baro < 70) { has3BarMapSensor = true; break; }
+      }
+      if (baroVoltageIdx >= 0) {
+        const baroV = row.values[baroVoltageIdx];
+        // Baro voltage < 1.8V indicates 3-bar sensor
+        if (baroV > 0 && baroV < 1.8) { has3BarMapSensor = true; break; }
+      }
+    }
+  }
+  // Also detect from filename: "3bar" or "3 bar" in filename
+  if (fileName.toLowerCase().includes('3bar') || fileName.toLowerCase().includes('3 bar')) {
+    has3BarMapSensor = true;
+  }
+  if (has3BarMapSensor) {
+    warnings.push('3-bar MAP sensor detected — MAP readings may not be accurate (awaiting correction formula)');
+  }
 
   // Select channel indices
   const rpmIdx = keys.engineSpeed;
-  const injPWIdx = keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired;
+  // Use Primary Inj PW 1 when Power Commander is present, otherwise use Inj PW Final/Desired
+  const injPWIdx = hasPowerCommander
+    ? primaryInjPWIdx
+    : (keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired);
   const tpsIdx = keys.throttlePosition;
   const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
   const ignIdx = keys.ignitionTiming;
@@ -403,7 +531,9 @@ export function computeVirtualDyno(
     );
 
     // Estimate HP (with boost correction for turbo setups)
-    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, config.isTurbo, map, config.fuelType);
+    // Use turboType if set, otherwise fall back to legacy isTurbo boolean
+    const effectiveTurboType: TurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' : 'na');
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType);
 
     // Apply dyno calibration factor
     estHP *= config.dynoCalibrationFactor;
@@ -511,6 +641,8 @@ export function computeVirtualDyno(
   const detectedInjector = detectInjectorType(fileName, wp8.partNumber);
   const detectedFuel = detectFuelType(fileName, wp8.partNumber);
 
+  const detectedTurboType = detectTurboType(fileName, wp8.partNumber);
+
   return {
     dataPoints,
     hpCurve,
@@ -520,9 +652,12 @@ export function computeVirtualDyno(
     peakTorqueRpm,
     detectedInjector,
     detectedFuel,
+    detectedTurboType,
     isDynoLog: hasDyno,
     calibrationFactor: Math.round(calibrationFactor * 1000) / 1000,
     confidence,
+    has3BarMapSensor,
+    mapReadingsInaccurate: has3BarMapSensor, // Until correction formula is provided
     warnings,
   };
 }

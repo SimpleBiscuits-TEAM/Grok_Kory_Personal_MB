@@ -1526,3 +1526,33 @@
 - [x] Write 10 Knox ethanol fuel knowledge tests (E85, E90, IGNITE RED properties, AFR/lambda, timing, diagnostics)
 - [x] All 82 tests passing (25 boost + 57 Knox engine knowledge)
 - [x] Checkpoint and push to GitHub
+
+## Turbo-Kit-Specific BSFC Calibration (JR, FP, KW)
+- [x] Add TurboType: 'na' | 'jr' | 'fp' | 'kw' | 'generic_turbo'
+- [x] Add detectTurboType() function from filename (JR, FP, KW patterns)
+- [x] Add turbo-kit × fuel BSFC matrix (JR pump, JR ethanol, FP pump, FP ethanol, KW placeholder)
+- [x] Update VirtualDynoConfig to include turboType instead of boolean isTurbo
+- [x] Update estimateHPWithBoost to use turbo-kit-specific factors
+- [x] Update DynoTabContent UI to show detected turbo type and allow manual override
+- [x] Fix IGNITE RED JR turbo MAP detection (MAP < 100 so not detected as turbo)
+- [x] Verify all existing files: pump gas JR turbo, E85 JR turbo, IGNITE RED JR turbo, FP turbo
+- [x] Add Power Commander detection to wp8Parser getHondaTalonKeyChannels
+- [x] Add Power Commander PW override in computeVirtualDyno and DynoSheet buildWOTRun
+- [x] Train Knox on turbo kit differences (JR vs FP vs KW efficiency, sizing, characteristics)
+- [x] Train Knox on Power Commander piggyback behavior and channel detection
+- [x] Prepare placeholder for KW turbo calibration (awaiting files)
+- [x] Write vitest tests for turbo type detection and kit-specific BSFC (37 tests)
+- [x] Checkpoint and push to GitHub
+
+## 3-Bar MAP Sensor Detection, KW Injectors, and Turbo Kit Completion
+- [x] Add 3-bar MAP sensor detection: baro < 70 kPa OR baro voltage < 1.8V
+- [x] Flag MAP readings as inaccurate when 3-bar MAP sensor detected
+- [x] Add placeholder for user-provided MAP correction formula (awaiting formula)
+- [x] Add KW 800cc (FIC) injector type — 800 cc/min at 3 bar (43.5 psi)
+- [x] Auto-detect KW injectors when KW turbo is identified from filename
+- [x] Train Knox on 3-bar MAP sensor behavior and baro pressure diagnostics (Section 20)
+- [x] Train Knox on KW FIC 800cc injector specs (Section 19 — flow-tested 798/801 cc/min, 0.5% match)
+- [x] Update Knox turbo kit knowledge with KW injector association
+- [x] Mark previous turbo-kit todo items complete
+- [x] Write vitest tests for 3-bar MAP detection and KW injector type (164 total tests passing)
+- [x] Checkpoint and push to GitHub

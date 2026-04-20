@@ -12,10 +12,10 @@ import {
 } from 'lucide-react';
 import { WP8ParseResult } from '@/lib/wp8Parser';
 import {
-  VirtualDynoConfig, VirtualDynoResult, InjectorType, FuelType,
+  VirtualDynoConfig, VirtualDynoResult, InjectorType, FuelType, TurboType,
   INJECTOR_FLOW_RATES, FUEL_PROFILES,
   computeVirtualDyno, smoothCurve, isDynoLog,
-  detectInjectorType, detectFuelType,
+  detectInjectorType, detectFuelType, detectTurboType,
 } from '@/lib/talonVirtualDyno';
 
 // ─── Style constants (matches PPEI motorsport dark) ─────────────────────────
@@ -280,10 +280,16 @@ export default function VirtualDynoPanel({
   // Auto-detect from filename
   const autoInjector = useMemo(() => detectInjectorType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
   const autoFuel = useMemo(() => detectFuelType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
+  const autoTurboType = useMemo((): TurboType => {
+    const fromName = detectTurboType(fileName, wp8Data?.partNumber || '');
+    if (fromName !== 'na') return fromName;
+    // No MAP-based fallback in this panel (no channel access here)
+    return 'na';
+  }, [fileName, wp8Data]);
 
   const [injectorType, setInjectorType] = useState<InjectorType>(autoInjector);
   const [fuelType, setFuelType] = useState<FuelType>(autoFuel);
-  const [isTurbo, setIsTurbo] = useState(false);
+  const [turboType, setTurboType] = useState<TurboType>(autoTurboType);
   const [calibrationFactor, setCalibrationFactor] = useState(1.0);
   const [smoothed, setSmoothed] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -293,7 +299,8 @@ export default function VirtualDynoPanel({
   useEffect(() => {
     setInjectorType(autoInjector);
     setFuelType(autoFuel);
-  }, [autoInjector, autoFuel]);
+    setTurboType(autoTurboType);
+  }, [autoInjector, autoFuel, autoTurboType]);
 
   // Compute virtual dyno
   const result = useMemo<VirtualDynoResult | null>(() => {
@@ -302,12 +309,13 @@ export default function VirtualDynoPanel({
     const config: VirtualDynoConfig = {
       injectorType,
       fuelType,
-      isTurbo,
+      isTurbo: turboType !== 'na',
+      turboType,
       dynoCalibrationFactor: calibrationFactor,
     };
 
     return computeVirtualDyno(wp8Data, config, fileName);
-  }, [wp8Data, injectorType, fuelType, isTurbo, calibrationFactor, fileName]);
+  }, [wp8Data, injectorType, fuelType, turboType, calibrationFactor, fileName]);
 
   // Learn calibration from dyno log
   useEffect(() => {
@@ -360,6 +368,7 @@ export default function VirtualDynoPanel({
 
   const injectorLabel: Record<InjectorType, string> = {
     stock: 'Stock (~310cc)',
+    kw800: 'FIC 800cc (KW)',
     id1050: 'ID1050X (1050cc)',
     id1300: 'ID1300X (1300cc)',
   };
@@ -462,37 +471,26 @@ export default function VirtualDynoPanel({
             </select>
           </div>
 
-          {/* Turbo Toggle */}
+          {/* Turbo Kit Selector */}
           <div>
             <label style={{ fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, display: 'block', marginBottom: '4px' }}>
-              CONFIGURATION
+              TURBO KIT {autoTurboType !== 'na' && <span style={{ color: sColor.green }}>(AUTO)</span>}
             </label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                onClick={() => setIsTurbo(false)}
-                style={{
-                  flex: 1, padding: '6px', fontFamily: sFont.mono, fontSize: '0.8rem',
-                  background: !isTurbo ? sColor.red : 'transparent',
-                  color: !isTurbo ? 'white' : sColor.textDim,
-                  border: `1px solid ${!isTurbo ? sColor.red : sColor.border}`,
-                  cursor: 'pointer', borderRadius: '2px',
-                }}
-              >
-                NA
-              </button>
-              <button
-                onClick={() => setIsTurbo(true)}
-                style={{
-                  flex: 1, padding: '6px', fontFamily: sFont.mono, fontSize: '0.8rem',
-                  background: isTurbo ? sColor.red : 'transparent',
-                  color: isTurbo ? 'white' : sColor.textDim,
-                  border: `1px solid ${isTurbo ? sColor.red : sColor.border}`,
-                  cursor: 'pointer', borderRadius: '2px',
-                }}
-              >
-                TURBO
-              </button>
-            </div>
+            <select
+              value={turboType}
+              onChange={e => setTurboType(e.target.value as TurboType)}
+              style={{
+                width: '100%', background: sColor.bg, color: sColor.textWhite,
+                border: `1px solid ${sColor.border}`, padding: '6px 8px',
+                fontFamily: sFont.mono, fontSize: '0.8rem', borderRadius: '2px',
+              }}
+            >
+              <option value="na">NA (No Turbo)</option>
+              <option value="jr">Jackson Racing (JR)</option>
+              <option value="kw">Kraftwerks (KW)</option>
+              <option value="fp">Full Performance (FP)</option>
+              <option value="generic_turbo">Turbo (Generic)</option>
+            </select>
           </div>
 
           {/* Calibration Factor */}
