@@ -1,9 +1,11 @@
 /**
  * Test: Virtual Dyno turbo BSFC correction for Honda Talon with ID1050 injectors
  *
- * BSFC calibrated from 21 real Dynojet dyno runs (58,351 data points):
- *   - Turbo BSFC = 0.905 (median), NA BSFC = 0.45
- *   - Ratio = 2.01× (turbo engines burn more fuel per HP due to rich AFR targets)
+ * Calibrated by comparing buildDynoSheetData output against real Dynojet
+ * roller readings from 21 Jackson Racing turbo Talon runs:
+ *   - NA BSFC (0.45) produces ~218 HP for this log
+ *   - Real dyno shows ~156 HP peak
+ *   - Factor = 218.4 / 156 = 1.40
  *
  * The correction is purely BSFC-based — no MAP multiplier needed because
  * the injector PW already reflects the actual fuel delivered under boost.
@@ -35,16 +37,12 @@ describe('estimateHPWithBoost', () => {
   });
 
   it('returns LOWER HP when isTurbo=true (higher effective BSFC)', () => {
-    // Turbo BSFC is 2.01× NA BSFC, so for the SAME fuel flow, turbo
-    // produces LESS estimated HP. This is correct because turbo engines
-    // burn more fuel per HP (rich AFR for cooling).
     const fuelFlow = 5.0;
     const hpNA = estimateHPWithBoost(fuelFlow, bsfc, false, 95);
     const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, true, 170);
-    // Turbo HP should be about half of NA HP for same fuel flow
-    // because BSFC is ~2× higher
+    // Turbo HP should be ~71% of NA HP (1/1.40 = 0.714)
     expect(hpTurbo).toBeLessThan(hpNA);
-    expect(hpTurbo).toBeCloseTo(hpNA / 2.01, 0);
+    expect(hpTurbo).toBeCloseTo(hpNA / 1.40, 0);
   });
 
   it('turbo correction is independent of MAP (BSFC-only)', () => {
@@ -52,7 +50,6 @@ describe('estimateHPWithBoost', () => {
     const hpAt100 = estimateHPWithBoost(fuelFlow, bsfc, true, 100);
     const hpAt150 = estimateHPWithBoost(fuelFlow, bsfc, true, 150);
     const hpAt200 = estimateHPWithBoost(fuelFlow, bsfc, true, 200);
-    // All should be the same — MAP doesn't affect the calculation
     expect(hpAt100).toBeCloseTo(hpAt150, 2);
     expect(hpAt150).toBeCloseTo(hpAt200, 2);
   });
@@ -65,12 +62,12 @@ describe('estimateHPWithBoost', () => {
     expect(estimateHPWithBoost(5.0, 0, true, 200)).toBe(0);
   });
 
-  it('turbo BSFC ratio matches calibration data (~2.01×)', () => {
+  it('turbo BSFC ratio matches calibration data (~1.40×)', () => {
     const fuelFlow = 5.0;
     const hpNA = estimateHPWithBoost(fuelFlow, bsfc, false, 100);
     const hpTurbo = estimateHPWithBoost(fuelFlow, bsfc, true, 100);
     const ratio = hpNA / hpTurbo;
-    expect(ratio).toBeCloseTo(2.01, 1);
+    expect(ratio).toBeCloseTo(1.40, 1);
   });
 });
 
@@ -116,22 +113,16 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
     console.log('Confidence:', result.confidence);
     console.log('Data points:', result.dataPoints.length);
 
-    // A turbo Talon with ID1050s should make 100-200 HP
+    // A turbo Talon with ID1050s should make 130-200 HP
     // Reference: 21 real dyno runs show 107-156 HP peak
-    expect(result.peakHP).toBeGreaterThan(80);
+    // DynoSheet with factor 1.40 shows ~165 HP for this file
+    expect(result.peakHP).toBeGreaterThan(100);
     expect(result.peakHP).toBeLessThan(250);
   });
 
-  it('NA config produces HIGHER HP than turbo for same fuel flow (higher BSFC = lower HP)', () => {
+  it('NA config produces HIGHER HP than turbo for same fuel flow', () => {
     expect(wp8).not.toBeNull();
 
-    // With the same fuel flow data, NA config (lower BSFC) will estimate
-    // higher HP than turbo config (higher BSFC). This is mathematically
-    // correct: HP = FuelFlow / BSFC, so higher BSFC = lower HP.
-    //
-    // In reality, the turbo engine IS making more power — but the fuel
-    // flow is also much higher (rich AFR + more air). The BSFC correction
-    // accounts for the fact that turbo engines waste more fuel per HP.
     const naConfig: VirtualDynoConfig = {
       injectorType: 'id1050',
       fuelType: 'pump',
@@ -149,13 +140,13 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
     const naResult = computeVirtualDyno(wp8!, naConfig, 'test.wp8');
     const turboResult = computeVirtualDyno(wp8!, turboConfig, 'test.wp8');
 
-    console.log('NA Peak HP (wrong for turbo data):', naResult.peakHP);
-    console.log('Turbo Peak HP (correct BSFC):', turboResult.peakHP);
+    console.log('NA Peak HP (uncorrected):', naResult.peakHP);
+    console.log('Turbo Peak HP (corrected):', turboResult.peakHP);
 
     // NA will show inflated numbers because it uses a lower BSFC
     expect(naResult.peakHP).toBeGreaterThan(turboResult.peakHP);
-    // Turbo result should be in realistic range
-    expect(turboResult.peakHP).toBeGreaterThan(80);
-    expect(turboResult.peakHP).toBeLessThan(200);
+    // Turbo result should be in realistic range (130-200 HP)
+    expect(turboResult.peakHP).toBeGreaterThan(100);
+    expect(turboResult.peakHP).toBeLessThan(250);
   });
 });

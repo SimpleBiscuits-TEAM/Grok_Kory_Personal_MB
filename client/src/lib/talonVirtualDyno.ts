@@ -108,10 +108,12 @@ const ATM_KPA = 101.325;
  *   - Excess fuel that doesn't produce power (cooling duty)
  *   - Large injector oversizing (ID1050 vs stock 310cc)
  *
- * BSFC varies by RPM: 0.76 at 5000 RPM → 1.14 at 10000 RPM
- * The median 0.905 provides the best overall estimate.
+ * Calibrated by comparing buildDynoSheetData output (ID1050+turbo)
+ * against real Dynojet roller readings from 21 Jackson Racing turbo runs.
+ * NA BSFC (0.45) produces 218 HP; real dyno shows ~156 HP peak.
+ * Factor = 218.4 / 156 = 1.40
  */
-const TURBO_BSFC_FACTOR = 2.01;  // multiply NA BSFC by this for turbo
+const TURBO_BSFC_FACTOR = 1.40;  // multiply NA BSFC by this for turbo
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
