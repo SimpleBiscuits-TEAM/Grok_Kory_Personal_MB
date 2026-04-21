@@ -1677,3 +1677,9 @@
 - [x] Fix: Increased JSON body limit from 2MB to 10MB in server/_core/index.ts
 - [x] Also optimized share PDF: JPEG instead of PNG, scale 2x instead of 2.5x, quality 0.85
 - [x] Checkpoint and push to GitHub
+
+## Bug Fix — Dyno Chart Tooltip Formatting
+- [x] HP and Torque labels were clipped/truncated in the Recharts tooltip box
+- [x] Increased minWidth from 160 to 200, added whiteSpace: nowrap, increased gap to 16
+- [x] Shortened labels: "Torque (ft-lb)" → "TQ (ft-lb)", "HP (Baseline)" → "HP (Base)"
+- [x] Checkpoint and push to GitHub

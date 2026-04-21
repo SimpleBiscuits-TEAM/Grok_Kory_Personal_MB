@@ -544,6 +544,13 @@ const COLORS = {
 // ─── Custom Dyno Tooltip ───────────────────────────────────────────────────────
 const DynoTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
+  // Shorten labels for cleaner tooltip display
+  const shortName = (name: string) => {
+    if (name === 'Torque (ft-lb)') return 'TQ (ft-lb)';
+    if (name === 'Torque (Baseline)') return 'TQ (Base)';
+    if (name === 'HP (Baseline)') return 'HP (Base)';
+    return name;
+  };
   return (
     <div style={{
       background: 'rgba(13,15,20,0.97)',
@@ -554,15 +561,16 @@ const DynoTooltip = ({ active, payload, label }: any) => {
       fontSize: '12px',
       color: '#e0e0e0',
       boxShadow: '0 0 12px rgba(255,77,0,0.3)',
-      minWidth: 160,
+      minWidth: 200,
+      whiteSpace: 'nowrap' as const,
     }}>
       <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>
         {label != null ? `${Number(label).toLocaleString()} RPM` : ''}
       </div>
       {payload.map((p: any, i: number) => (
         p.value != null && (
-          <div key={i} style={{ color: p.color || p.stroke, marginBottom: 3, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <span>{p.name}:</span>
+          <div key={i} style={{ color: p.color || p.stroke, marginBottom: 3, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span>{shortName(p.name)}</span>
             <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
           </div>
         )
