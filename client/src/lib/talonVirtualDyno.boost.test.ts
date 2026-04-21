@@ -156,6 +156,41 @@ describe('estimateHPWithBoost', () => {
     const hpPump = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump');
     expect(hpDefault).toBeCloseTo(hpPump, 5);
   });
+
+  // ─── NA oversized injector correction tests ────────────────────────────
+
+  it('NA with stock injectors (310cc) has no oversized correction', () => {
+    const fuelFlow = 5.0;
+    const hpNoInj = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 0);
+    const hpStock = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 310);
+    // Stock injectors (310 < 400 threshold) should not trigger correction
+    expect(hpStock).toBeCloseTo(hpNoInj, 1);
+  });
+
+  it('NA with ID1050 injectors applies sqrt(ratio) BSFC correction', () => {
+    const fuelFlow = 10.0;
+    const hpNoCorrection = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 0);
+    const hpWithCorrection = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 1050);
+    // sqrt(1050/310) = 1.84, so corrected HP should be ~54% of uncorrected
+    const expectedRatio = 1 / Math.sqrt(1050 / 310);
+    expect(hpWithCorrection / hpNoCorrection).toBeCloseTo(expectedRatio, 2);
+  });
+
+  it('NA with ID1300 injectors has stronger correction than ID1050', () => {
+    const fuelFlow = 10.0;
+    const hp1050 = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 1050);
+    const hp1300 = estimateHPWithBoost(fuelFlow, bsfc, 'na', 100, 'pump', 0, 1300);
+    // ID1300 has larger oversizing ratio, so stronger correction = lower HP
+    expect(hp1300).toBeLessThan(hp1050);
+  });
+
+  it('turbo with ID1050 does NOT apply oversized correction (uses turbo BSFC instead)', () => {
+    const fuelFlow = 10.0;
+    const hpTurboNoInj = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump', 0, 0);
+    const hpTurboWithInj = estimateHPWithBoost(fuelFlow, bsfc, 'jr', 150, 'pump', 0, 1050);
+    // Turbo path ignores injectorFlowRate — uses kit-specific BSFC factor
+    expect(hpTurboWithInj).toBeCloseTo(hpTurboNoInj, 1);
+  });
 });
 
 // ─── detectTurboType tests ────────────────────────────────────────────────
@@ -278,7 +313,7 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
     expect(result.peakHP).toBeLessThan(165.8 * 1.15);
   });
 
-  it('NA config produces HIGHER HP than JR turbo for same fuel flow', () => {
+  it('NA config with ID1050 produces LOWER HP than JR turbo (oversized injector correction)', () => {
     expect(wp8).not.toBeNull();
 
     const naConfig: VirtualDynoConfig = {
@@ -299,8 +334,13 @@ describe.skipIf(!hasTurboFile)('Turbo Talon ID1050 - real WP8 file', () => {
     const naResult = computeVirtualDyno(wp8!, naConfig, 'test.wp8');
     const turboResult = computeVirtualDyno(wp8!, turboConfig, 'test.wp8');
 
-    // NA will show inflated numbers because it uses a lower BSFC
-    expect(naResult.peakHP).toBeGreaterThan(turboResult.peakHP);
+    // With the NA oversized injector BSFC correction (sqrt(ratio)),
+    // NA HP is now properly corrected and LOWER than turbo HP.
+    // Turbo actually makes more power with the same injectors.
+    expect(naResult.peakHP).toBeLessThan(turboResult.peakHP);
+    // NA with oversized injectors should be in realistic NA range
+    expect(naResult.peakHP).toBeGreaterThan(50);
+    expect(naResult.peakHP).toBeLessThan(150);
     // Turbo result should be in realistic range
     expect(turboResult.peakHP).toBeGreaterThan(100);
     expect(turboResult.peakHP).toBeLessThan(250);

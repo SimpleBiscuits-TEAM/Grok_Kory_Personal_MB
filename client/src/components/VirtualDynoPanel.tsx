@@ -386,6 +386,17 @@ export default function VirtualDynoPanel({
         zIndex: 9999, background: sColor.bg, padding: '16px', overflow: 'auto',
       } : {}),
     }}>
+      {/* Filename */}
+      {fileName && (
+        <div style={{
+          fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim,
+          marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap', maxWidth: '100%',
+        }}>
+          FILE: <span style={{ color: sColor.textWhite }}>{fileName}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',

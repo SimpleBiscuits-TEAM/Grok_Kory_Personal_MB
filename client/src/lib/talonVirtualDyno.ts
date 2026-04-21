@@ -386,22 +386,36 @@ export function estimateHP(fuelFlowGPerSec: number, bsfc: number): number {
 }
 
 /**
- * Estimate HP with turbo BSFC correction.
+ * Estimate HP with BSFC corrections for turbo and NA oversized injector setups.
  *
- * Calibrated from 21 real Dynojet dyno runs (58,351 WOT data points)
- * of a Jackson Racing turbo Talon with ID1050 injectors on 93 octane.
+ * The base BSFC (0.45 for pump gas) was calibrated from 1,043 real Dynojet
+ * dyno runs with STOCK injectors (~310 cc/min). When the injector flow rate
+ * is significantly larger than stock, the fuel flow calculation is inflated
+ * because the oversized injectors deliver more fuel per ms of pulse width.
  *
- * The fuel-flow-based HP estimate already captures the extra fuel
- * being injected under boost. The correction needed is purely a BSFC
- * adjustment — turbo setups run significantly richer (lambda ~0.80)
- * for combustion chamber cooling, so a large portion of injected fuel
- * doesn't produce power. This is captured by the higher effective BSFC.
+ * Turbo correction:
+ *   Turbo setups use kit-specific BSFC multipliers calibrated from real dyno
+ *   data (JR=1.40, KW=1.73, FP=1.60). These factors account for rich running,
+ *   cooling duty, and injector oversizing inherent to each turbo kit.
  *
- * No MAP-based multiplier is needed because:
- *   - The injector PW already reflects the actual fuel delivered
- *   - The BSFC ratio (2.01×) was derived from real measured HP vs
- *     calculated fuel flow, so it inherently accounts for all turbo
- *     effects (rich mixture, cooling duty, injector oversizing)
+ * NA oversized injector correction:
+ *   For NA setups with oversized injectors (e.g., ID1050 on stock NA engine),
+ *   the ECU commands similar pulse widths as stock but the injectors deliver
+ *   2-4x more fuel. The engine can't burn the excess (runs rich, AFR 10.8-12.0).
+ *
+ *   The correction uses sqrt(injectorRatio) as the BSFC multiplier:
+ *     effectiveBSFC = baseBSFC × sqrt(injectorFlowRate / stockFlowRate)
+ *
+ *   The sqrt relationship accounts for two competing effects:
+ *   1. Larger injectors increase fuel flow per ms of PW (linear with flow rate)
+ *   2. The ECU tune reduces PW to partially compensate (roughly proportional
+ *      to sqrt of the flow rate increase)
+ *   The net fuel flow inflation is approximately sqrt(ratio), not the full ratio.
+ *
+ *   Validation: NA ID1050 (1050/310 = 3.39x ratio, sqrt = 1.84)
+ *   - Uncorrected peak: ~173 HP
+ *   - Corrected: 173 / 1.84 = 94 HP (matches expected ~95-100 HP for NA Talon)
+ *   - Physics check: 999cc @ 9000 RPM, 90% VE, stoich = 99 HP ✓
  */
 export function estimateHPWithBoost(
   fuelFlowGPerSec: number,
@@ -409,13 +423,29 @@ export function estimateHPWithBoost(
   turboType: TurboType,
   _mapKpa: number,  // reserved for future RPM-dependent BSFC
   fuelType: FuelType = 'pump',
+  _afr: number = 0,  // measured AFR — reserved for future per-point correction
+  injectorFlowRate: number = 0,  // cc/min — 0 means not provided
 ): number {
   if (fuelFlowGPerSec <= 0 || bsfc <= 0) return 0;
 
-  const turboFactor = getTurboBsfcFactor(turboType, fuelType);
-  const effectiveBsfc = turboType !== 'na' ? bsfc * turboFactor : bsfc;
+  let effectiveBsfc = bsfc;
+
+  if (turboType !== 'na') {
+    // Turbo: apply kit-specific BSFC factor (calibrated from real dyno data)
+    const turboFactor = getTurboBsfcFactor(turboType, fuelType);
+    effectiveBsfc = bsfc * turboFactor;
+  } else if (injectorFlowRate > STOCK_FLOW_RATE_THRESHOLD) {
+    // NA with oversized injectors: apply sqrt(ratio) BSFC correction
+    // sqrt accounts for ECU PW reduction partially offsetting larger injectors
+    const oversizingRatio = injectorFlowRate / INJECTOR_FLOW_RATES.stock;
+    effectiveBsfc = bsfc * Math.sqrt(oversizingRatio);
+  }
+
   return estimateHP(fuelFlowGPerSec, effectiveBsfc);
 }
+
+/** Stock injector flow rate threshold — injectors above this are considered "oversized" for NA */
+const STOCK_FLOW_RATE_THRESHOLD = 400;  // cc/min (stock = 310, JR kit = 345)
 
 /**
  * Calculate torque from HP and RPM
@@ -563,7 +593,7 @@ export function computeVirtualDyno(
     // Estimate HP (with boost correction for turbo setups)
     // Use turboType if set, otherwise fall back to legacy isTurbo boolean
     const effectiveTurboType: TurboType = config.turboType ?? detectedTurboType;
-    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, effectiveFuelType);
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, effectiveFuelType, afr, injFlowRate);
 
     // Apply dyno calibration factor (default 1.0 if not set)
     estHP *= config.dynoCalibrationFactor ?? 1.0;
@@ -592,11 +622,20 @@ export function computeVirtualDyno(
     dataPoints.push(point);
   }
 
-  // ─── Build RPM-binned HP/Torque curve ────────────────────────────────
+  // ─── Build RPM-binned HP/Torque curve ────────────────────────────────────
+  // Only use WOT points (TPS > 60°) for peak HP/Torque binning.
+  // Non-WOT points (cruise, decel, transient) produce inflated HP estimates
+  // because the AFR correction doesn't apply at stoich/lean AFR, but the
+  // fuel flow with oversized injectors is still enormously inflated.
+  // Honda Talon TPS is in degrees: full throttle ≈ 80-85°, WOT threshold = 60°
+  const WOT_BIN_THRESHOLD = 60; // degrees for Honda Talon TPS
   const RPM_BIN_SIZE = 250;
   const rpmBins = new Map<number, { hpSum: number; torqueSum: number; count: number; maxHP: number; maxTorque: number }>();
 
   for (const pt of dataPoints) {
+    // Only bin WOT points for peak power curve
+    if (pt.tps < WOT_BIN_THRESHOLD) continue;
+
     const bin = Math.round(pt.rpm / RPM_BIN_SIZE) * RPM_BIN_SIZE;
     const existing = rpmBins.get(bin) || { hpSum: 0, torqueSum: 0, count: 0, maxHP: 0, maxTorque: 0 };
 
@@ -610,6 +649,22 @@ export function computeVirtualDyno(
     existing.maxHP = Math.max(existing.maxHP, hp);
     existing.maxTorque = Math.max(existing.maxTorque, torque);
     rpmBins.set(bin, existing);
+  }
+
+  // Fallback: if no WOT points found, use all data points
+  if (rpmBins.size === 0) {
+    for (const pt of dataPoints) {
+      const bin = Math.round(pt.rpm / RPM_BIN_SIZE) * RPM_BIN_SIZE;
+      const existing = rpmBins.get(bin) || { hpSum: 0, torqueSum: 0, count: 0, maxHP: 0, maxTorque: 0 };
+      const hp = pt.actualHP ?? pt.estimatedHP;
+      const torque = pt.actualTorque ?? pt.estimatedTorque;
+      existing.hpSum += hp;
+      existing.torqueSum += torque;
+      existing.count++;
+      existing.maxHP = Math.max(existing.maxHP, hp);
+      existing.maxTorque = Math.max(existing.maxTorque, torque);
+      rpmBins.set(bin, existing);
+    }
   }
 
   // Build curve using peak values per bin (dyno-style — peak, not average)

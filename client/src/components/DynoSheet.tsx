@@ -478,7 +478,7 @@ function buildWOTRun(
       if (torque > 500) torque = 0;
     } else {
       const effectiveTurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' as const : 'na' as const);
-      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType);
+      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType, afr, injFlowRate);
       hp *= config.dynoCalibrationFactor;
       torque = calculateTorque(hp, rpm);
     }
@@ -745,6 +745,15 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       }
       configParts.push('CF: SAE', 'Smoothing: 5');
       doc.text(configParts.join('  |  '), margin, 21);
+
+      // Filename (row 2.5 — below config, above chart)
+      if (data.fileName) {
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.setFont('helvetica', 'normal');
+        const displayName = data.fileName.length > 80 ? data.fileName.slice(0, 77) + '...' : data.fileName;
+        doc.text(`File: ${displayName}`, margin, 25.5);
+      }
 
       // Watermark will be drawn AFTER the chart image so it overlays on top
 
@@ -1143,6 +1152,13 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
           </Button>
         </div>
       </div>
+
+      {/* Filename */}
+      {data.fileName && (
+        <div className="text-xs text-zinc-500 mb-2 font-mono truncate" title={data.fileName}>
+          FILE: <span className="text-zinc-300">{data.fileName}</span>
+        </div>
+      )}
 
       {/* Interactive Chart — wrapped in ref for PDF capture */}
       <div

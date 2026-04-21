@@ -1687,3 +1687,14 @@
 ## Remove Dyno Chart Tooltip
 - [x] Removed Tooltip component from the Recharts chart
 - [x] Checkpoint and push to GitHub
+
+## Bug Fix — NA ID1050 Virtual Dyno HP Too High (172 HP)
+- [x] Parse PPEI_NA_ID1050s_90oct file and trace virtual dyno calculation
+- [x] Identify why HP is inflated for NA (non-turbo) ID1050 setup — oversized injectors (1050/310 = 3.39x) deliver excess fuel that can't be burned by NA engine
+- [x] Fix the BSFC/power calculation for NA configurations — added sqrt(injectorRatio) BSFC correction in estimateHPWithBoost for NA setups with injFlowRate > 400cc
+- [x] Verify corrected numbers are reasonable for NA Honda Talon — peak HP 99.1 @ 8750 RPM (target 95-100), turbo unaffected (165.7 HP JR, 182.8 E85, 150.2 Ignite Red)
+
+## Feature — Display Filename on Dyno Page and PDF
+- [x] Show the WP8 filename on the dyno page (VirtualDynoPanel header + DynoSheet header)
+- [x] Include the filename in the DynoSheet PDF export header (below config line)
+- [x] Checkpoint and push to GitHub
