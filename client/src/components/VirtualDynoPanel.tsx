@@ -78,18 +78,24 @@ function DynoChart({
     ctx.fillStyle = sColor.bg;
     ctx.fillRect(0, 0, W, H);
 
-    // Data ranges
+    // Data ranges — unified scale for HP and Torque (auto-scaled like Dynojet)
     const rpms = curve.map(p => p.rpm);
     const hps = curve.map(p => p.hp);
     const torques = curve.map(p => p.torque);
     const minRPM = Math.min(...rpms);
     const maxRPM = Math.max(...rpms);
-    const maxHP = Math.max(...hps) * 1.1;
-    const maxTorque = Math.max(...torques) * 1.1;
+    const allValues = [...hps, ...torques].filter(v => v > 0);
+    const dataMin = allValues.length > 0 ? Math.min(...allValues) : 0;
+    const dataMax = allValues.length > 0 ? Math.max(...allValues) : 200;
+    const range = dataMax - dataMin;
+    const padding = Math.max(range * 0.10, 5);
+    const yAxisMin = Math.max(0, Math.floor((dataMin - padding) / 10) * 10);
+    const yAxisMax = Math.ceil((dataMax + padding) / 10) * 10;
+    const yRange = yAxisMax - yAxisMin;
 
     const xScale = (rpm: number) => PAD.left + ((rpm - minRPM) / (maxRPM - minRPM)) * plotW;
-    const yScaleHP = (hp: number) => PAD.top + plotH - (hp / maxHP) * plotH;
-    const yScaleTorque = (tq: number) => PAD.top + plotH - (tq / maxTorque) * plotH;
+    const yScaleHP = (hp: number) => PAD.top + plotH - ((hp - yAxisMin) / yRange) * plotH;
+    const yScaleTorque = (tq: number) => PAD.top + plotH - ((tq - yAxisMin) / yRange) * plotH;
 
     // Grid lines
     ctx.strokeStyle = 'oklch(0.20 0.006 260)';
@@ -118,19 +124,18 @@ function DynoChart({
       ctx.fillText(rpm.toString(), x, PAD.top + plotH + 20);
     }
 
-    // Y-axis labels — HP (left)
+    // Y-axis labels — unified scale (left = HP color, right = Torque color)
     ctx.textAlign = 'right';
     for (let i = 0; i <= 5; i++) {
-      const val = Math.round((maxHP / 5) * (5 - i));
+      const val = Math.round(yAxisMax - (yRange / 5) * i);
       const y = PAD.top + (plotH / 5) * i;
       ctx.fillStyle = sColor.redBright;
       ctx.fillText(val.toString(), PAD.left - 8, y + 4);
     }
 
-    // Y-axis labels — Torque (right)
     ctx.textAlign = 'left';
     for (let i = 0; i <= 5; i++) {
-      const val = Math.round((maxTorque / 5) * (5 - i));
+      const val = Math.round(yAxisMax - (yRange / 5) * i);
       const y = PAD.top + (plotH / 5) * i;
       ctx.fillStyle = sColor.blue;
       ctx.fillText(val.toString(), W - PAD.right + 8, y + 4);

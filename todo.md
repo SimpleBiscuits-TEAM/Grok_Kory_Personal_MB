@@ -1618,3 +1618,10 @@
 ## Bug Fix — Duplicate 'talon' Key in Tab List
 - [x] Fix "Encountered two children with the same key `talon`" error on /advanced page
 - [x] Removed talon from devTabs array (line 1444) since it's already dynamically added via showTalonTab logic
+
+## Dyno Chart Y-Axis Auto-Scaling
+- [x] Auto-scale Y-axis to fit data range (like Dynojet) instead of starting at 0
+- [x] Unify HP and Torque axes to use the same scale (same min/max range)
+- [x] Updated both DynoSheet (Recharts) and VirtualDynoPanel (canvas) charts
+- [x] 10% padding above/below data range, rounded to nearest 10 for clean ticks
+- [x] Checkpoint and push to GitHub

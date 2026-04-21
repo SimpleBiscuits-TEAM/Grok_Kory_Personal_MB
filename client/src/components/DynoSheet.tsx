@@ -708,17 +708,33 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  // Axis domain calculations
-  const maxHP = useMemo(() => {
-    let max = data.peakHP;
-    if (compareData?.qualified) max = Math.max(max, compareData.peakHP);
-    return Math.ceil((max * 1.15) / 20) * 20;
-  }, [data, compareData]);
+  // Axis domain calculations — unified scale for HP and Torque
+  // Auto-scale Y-axis to fit data range (like Dynojet) instead of starting at 0
+  const { yMin, yMax } = useMemo(() => {
+    // Collect all HP and torque values from main + comparison curves
+    let allValues: number[] = [];
+    for (const pt of data.hpCurve) {
+      allValues.push(pt.hp, pt.torque);
+    }
+    if (compareData?.qualified && compareData.hpCurve.length > 0) {
+      for (const pt of compareData.hpCurve) {
+        allValues.push(pt.hp, pt.torque);
+      }
+    }
+    allValues = allValues.filter(v => Number.isFinite(v) && v > 0);
+    if (allValues.length === 0) return { yMin: 0, yMax: 200 };
 
-  const maxTorque = useMemo(() => {
-    let max = data.peakTorque;
-    if (compareData?.qualified) max = Math.max(max, compareData.peakTorque);
-    return Math.ceil((max * 1.15) / 10) * 10;
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues);
+    const range = dataMax - dataMin;
+    // Add 10% padding above and below, then round to nice tick values
+    const padding = Math.max(range * 0.10, 5);
+    const rawMin = dataMin - padding;
+    const rawMax = dataMax + padding;
+    // Round to nearest 10 for clean axis ticks
+    const roundedMin = Math.max(0, Math.floor(rawMin / 10) * 10);
+    const roundedMax = Math.ceil(rawMax / 10) * 10;
+    return { yMin: roundedMin, yMax: roundedMax };
   }, [data, compareData]);
 
   // Best run stats
@@ -856,7 +872,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 <YAxis
                   yAxisId="hp"
                   orientation="left"
-                  domain={[0, maxHP]}
+                  domain={[yMin, yMax]}
                   tick={{ fill: COLORS.hpLine, fontSize: 11, fontFamily: 'monospace' }}
                   axisLine={{ stroke: COLORS.hpLine }}
                   tickLine={{ stroke: COLORS.hpLine }}
@@ -875,7 +891,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 <YAxis
                   yAxisId="torque"
                   orientation="right"
-                  domain={[0, maxTorque]}
+                  domain={[yMin, yMax]}
                   tick={{ fill: COLORS.torqueLine, fontSize: 11, fontFamily: 'monospace' }}
                   axisLine={{ stroke: COLORS.torqueLine }}
                   tickLine={{ stroke: COLORS.torqueLine }}
