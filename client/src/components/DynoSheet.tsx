@@ -651,53 +651,57 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       doc.setFillColor(10, 10, 10);
       doc.rect(0, 0, pageW, pageH, 'F');
 
-      // ── PPEI Logo watermark (behind everything) ──
-      if (logoDataUrl) {
-        // @ts-ignore — jsPDF supports opacity via GState
-        doc.setGState(new doc.GState({ opacity: 0.06 }));
-        const wmW = 140;
-        const wmH = 140;
-        doc.addImage(logoDataUrl, 'PNG', (pageW - wmW) / 2, (pageH - wmH) / 2, wmW, wmH);
-        // @ts-ignore
-        doc.setGState(new doc.GState({ opacity: 1 }));
-      } else {
-        // Fallback text watermark
-        doc.setFontSize(70);
-        doc.setTextColor(255, 255, 255);
-        // @ts-ignore
-        doc.setGState(new doc.GState({ opacity: 0.04 }));
-        doc.text('PPEI', pageW / 2, pageH / 2, { align: 'center', angle: 30 });
-        // @ts-ignore
-        doc.setGState(new doc.GState({ opacity: 1 }));
-      }
+      // ── PPEI Logo watermark (drawn FIRST so chart image overlays with transparency) ──
+      // The watermark must be placed before the chart image so it shows through
+      // the chart's dark background at reduced opacity
+      const drawWatermark = () => {
+        if (logoDataUrl) {
+          // @ts-ignore — jsPDF supports opacity via GState
+          doc.setGState(new doc.GState({ opacity: 0.06 }));
+          const wmW = 150;
+          const wmH = 150;
+          doc.addImage(logoDataUrl, 'PNG', (pageW - wmW) / 2, (pageH - wmH) / 2, wmW, wmH);
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 1 }));
+        } else {
+          doc.setFontSize(70);
+          doc.setTextColor(255, 255, 255);
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 0.04 }));
+          doc.text('PPEI', pageW / 2, pageH / 2, { align: 'center', angle: 30 });
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 1 }));
+        }
+      };
+      // We'll call drawWatermark() later, after the header but before the chart
 
-      // ── Header Row 1: "Virtual Dyno by" + PPEI Logo + Badge + Version ──
+      // ── Header Row 1: "Virtual Dyno by" + PPEI Logo (larger) + Badge + Version ──
       doc.setFontSize(14);
       doc.setTextColor(160, 160, 160);
       doc.setFont('helvetica', 'normal');
-      doc.text('Virtual Dyno by', margin, 14);
+      doc.text('Virtual Dyno by', margin, 15);
 
-      // PPEI Logo next to title
+      // PPEI Logo next to title — larger size
       if (logoDataUrl) {
-        const logoH = 10;
-        const logoW = 10;
-        doc.addImage(logoDataUrl, 'PNG', margin + 38, 5.5, logoW, logoH);
+        const logoH = 16;
+        const logoW = 16;
+        doc.addImage(logoDataUrl, 'PNG', margin + 38, 4, logoW, logoH);
       } else {
-        doc.setFontSize(14);
+        doc.setFontSize(16);
         doc.setTextColor(255, 77, 0);
         doc.setFont('helvetica', 'bold');
-        doc.text('PPEI', margin + 38, 14);
+        doc.text('PPEI', margin + 38, 15);
       }
 
-      // Badge
+      // Badge — shifted right to accommodate larger logo
       const badgeText = data.hasDynoData ? 'MEASURED' : 'ESTIMATED';
       const badgeColor: [number, number, number] = data.hasDynoData ? [34, 197, 94] : [245, 158, 11];
       doc.setFillColor(...badgeColor);
-      doc.roundedRect(margin + 52, 8, 26, 7, 2, 2, 'F');
+      doc.roundedRect(margin + 58, 8, 26, 7, 2, 2, 'F');
       doc.setFontSize(7);
       doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'bold');
-      doc.text(badgeText, margin + 54, 13.5);
+      doc.text(badgeText, margin + 60, 13.5);
 
       // Version + date (right-aligned)
       doc.setFontSize(8);
@@ -708,7 +712,14 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       // ── Header Row 2: Config details (Fuel, Injector, Turbo, MAP) ──
       const turboLabel = TURBO_LABELS[data.turboType] || data.turboType;
       const injectorLabel = INJECTOR_LABELS[config.injectorType] || config.injectorType;
-      const fuelLabel = config.fuelType.toUpperCase();
+      const fuelLabelMap: Record<string, string> = {
+        pump: 'Pump 91/93',
+        utv96: 'UTV96',
+        e85: 'E85',
+        e90: 'E90',
+        ignite_red: 'Ignite Red',
+      };
+      const fuelLabel = fuelLabelMap[config.fuelType] || config.fuelType.toUpperCase();
 
       doc.setFontSize(8);
       doc.setTextColor(140, 140, 140);
@@ -727,10 +738,12 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       configParts.push('CF: SAE', 'Smoothing: 5');
       doc.text(configParts.join('  |  '), margin, 21);
 
+      // Watermark will be drawn AFTER the chart image so it overlays on top
+
       // ── Chart Image (vertically centered in available space) ──
       const headerBottom = 24;
       const footerTop = pageH - 8;
-      const suggestionsHeight = 28; // reserved for suggestions section
+      const suggestionsHeight = 22; // reduced — no estimated HP numbers
       const statsHeight = 10;
       const availableH = footerTop - headerBottom - suggestionsHeight - statsHeight - 4;
 
@@ -739,9 +752,13 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       await new Promise<void>((resolve) => { img.onload = () => resolve(); });
       const imgAspect = img.width / img.height;
       const chartW = pageW - 2 * margin;
-      const chartH = Math.min(availableH, chartW / imgAspect);
-      const chartY = headerBottom + 1;
+      let chartH = Math.min(availableH, chartW / imgAspect);
+      // Vertically center the chart in the available space
+      const chartY = headerBottom + (availableH - chartH) / 2;
       doc.addImage(dataUrl, 'PNG', margin, chartY, chartW, chartH);
+
+      // ── Draw watermark ON TOP of the chart so it's visible through the graph ──
+      drawWatermark();
 
       // ── Peak Stats Row (below chart) ──
       const statsY = chartY + chartH + 5;
@@ -789,40 +806,23 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       const currentFuel = config.fuelType;
       const currentTurbo = data.turboType;
 
-      // Turbo BSFC factors for suggestions (mirrors talonVirtualDyno.ts TURBO_BSFC_MATRIX)
-      const turboBsfcLookup: Record<string, { pump: number; ethanol: number }> = {
-        jr: { pump: 1.40, ethanol: 1.76 },
-        kw: { pump: 1.73, ethanol: 1.80 },
-        fp: { pump: 1.60, ethanol: 1.64 },
-        generic_turbo: { pump: 1.50, ethanol: 1.80 },
-      };
-
-      // E85 fuel switch suggestion (only if currently on pump gas)
+      // E85 fuel switch suggestion (only if currently on pump gas) — no estimated HP numbers
       if (currentFuel === 'pump' || currentFuel === 'utv96') {
-        const pumpBsfc = FUEL_PROFILES.pump.bsfc;
-        const e85Bsfc = FUEL_PROFILES.e85.bsfc;
         if (currentTurbo !== 'na') {
-          // Turbo + E85: significant gains from timing advance headroom
-          const pumpFactor = turboBsfcLookup[currentTurbo]?.pump || 1.5;
-          const ethFactor = turboBsfcLookup[currentTurbo]?.ethanol || 1.8;
-          const e85EstHP = data.peakHP * (pumpBsfc * pumpFactor) / (e85Bsfc * ethFactor) * 1.12;
           suggestions.push(
-            `Switching to E85 with ${turboLabel} could yield ~${e85EstHP.toFixed(0)} HP (${((e85EstHP / data.peakHP - 1) * 100).toFixed(0)}% gain). E85 allows 30-35\u00b0 timing vs 20-25\u00b0 on pump gas.`
+            `Switching to E85 with ${turboLabel} could yield significant gains. E85 allows 30-35\u00b0 timing vs 20-25\u00b0 on pump gas, unlocking more power from forced induction.`
           );
         } else {
-          // NA + E85: modest gains from timing
-          const e85EstHP = data.peakHP * (pumpBsfc / e85Bsfc) * 1.05;
           suggestions.push(
-            `Switching to E85 could yield ~${e85EstHP.toFixed(0)} HP (${((e85EstHP / data.peakHP - 1) * 100).toFixed(0)}% gain) from increased timing advance headroom.`
+            'Switching to E85 could provide modest gains from increased timing advance headroom and improved combustion efficiency.'
           );
         }
       }
 
-      // Turbo upgrade suggestion (only if NA)
+      // Turbo upgrade suggestion (only if NA) — no estimated HP numbers
       if (currentTurbo === 'na') {
-        const jrEstHP = data.peakHP * 1.35;
         suggestions.push(
-          `Adding a Jackson Racing turbo kit could push estimated power to ~${jrEstHP.toFixed(0)} HP on pump gas (~35% gain over NA).`
+          'Adding a Jackson Racing turbo kit could provide significant power gains over the naturally aspirated setup on pump gas.'
         );
       }
 

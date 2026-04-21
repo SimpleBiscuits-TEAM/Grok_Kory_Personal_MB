@@ -1662,3 +1662,12 @@
 - [x] Write vitest tests for share procedure (7 tests passing)
 - [x] Database migration 0014_spotty_shard.sql applied
 - [x] Checkpoint and push to GitHub
+
+## PDF Export Fixes (Round 3)
+- [x] Fix PPEI watermark visibility — draw ON TOP of chart image at 6% opacity so it shows through the graph
+- [x] Remove estimated power numbers from Suggestions & Notes section (kept qualitative suggestions)
+- [x] Center dyno graph vertically on the page (using available space calculation)
+- [x] Make PPEI logo at top of PDF larger (10x10mm → 16x16mm)
+- [x] Change "PUMP" fuel label to "Pump 91/93" via fuelLabelMap
+- [x] Removed unused turboBsfcLookup from PDF export
+- [x] Checkpoint and push to GitHub
