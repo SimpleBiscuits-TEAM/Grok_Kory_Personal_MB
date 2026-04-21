@@ -134,10 +134,10 @@ async function startServer() {
   }
 
   // ── Body Parser ────────────────────────────────────────────────────────
-  // JSON limit reduced from 100mb to 2mb. Large file uploads should use
-  // direct-to-S3 presigned URLs, not base64-encoded JSON bodies.
+  // JSON limit set to 10mb to support PDF sharing (base64-encoded dyno PDFs
+  // can be 3-6MB). For very large files, use direct-to-S3 presigned URLs.
   // The urlencoded limit stays at 10mb for form submissions with file data.
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
   // ── Canonical Domain Redirect ──────────────────────────────────────────

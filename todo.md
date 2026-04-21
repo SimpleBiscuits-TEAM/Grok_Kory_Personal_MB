@@ -1671,3 +1671,9 @@
 - [x] Change "PUMP" fuel label to "Pump 91/93" via fuelLabelMap
 - [x] Removed unused turboBsfcLookup from PDF export
 - [x] Checkpoint and push to GitHub
+
+## Bug Fix — Share Button "Failed to share dyno result"
+- [x] Root cause: Express JSON body limit was 2MB, base64-encoded PDF exceeds that
+- [x] Fix: Increased JSON body limit from 2MB to 10MB in server/_core/index.ts
+- [x] Also optimized share PDF: JPEG instead of PNG, scale 2x instead of 2.5x, quality 0.85
+- [x] Checkpoint and push to GitHub

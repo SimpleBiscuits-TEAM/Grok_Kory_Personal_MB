@@ -1046,10 +1046,11 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 const { default: jsPDF } = await import('jspdf');
 
                 // Capture chart as image
-                const dataUrl = await domtoimage.toPng(chartAreaRef.current, {
-                  scale: 2.5,
+                const dataUrl = await domtoimage.toJpeg(chartAreaRef.current, {
+                  scale: 2,
                   bgcolor: '#0d0f14',
                   style: { background: '#0d0f14' },
+                  quality: 0.85,
                 });
 
                 // Build PDF in memory (same as export)
@@ -1075,7 +1076,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 const imgAspect = img.width / img.height;
                 const imgW = pageW - 10;
                 const imgH = imgW / imgAspect;
-                doc.addImage(dataUrl, 'PNG', 5, 22, imgW, Math.min(imgH, pageH - 35));
+                doc.addImage(dataUrl, 'JPEG', 5, 22, imgW, Math.min(imgH, pageH - 35));
 
                 // Disclaimer
                 doc.setFontSize(7);
