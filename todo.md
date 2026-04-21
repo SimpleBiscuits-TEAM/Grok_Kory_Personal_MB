@@ -1627,9 +1627,9 @@
 - [x] Checkpoint and push to GitHub
 
 ## Git Merge — Tobi's Branch → GROK → main
-- [ ] Fetch and checkout GROK branch locally
-- [ ] Merge Tobi@EDS_Dev into GROK (Tobi's work supersedes conflicts)
-- [ ] Push updated GROK to user_github
-- [ ] Merge GROK into local main
-- [ ] Push updated main to user_github
-- [ ] Save checkpoint
+- [x] Fetch and checkout GROK branch locally
+- [x] Merge Tobi@EDS_Dev into GROK — clean merge, no conflicts (85 files changed)
+- [x] Push updated GROK to user_github (225a2e5..2ae9caa)
+- [x] Merge GROK into local main — clean merge, no conflicts
+- [x] Push updated main to user_github (ed3453f..e9701c3)
+- [x] Save checkpoint
