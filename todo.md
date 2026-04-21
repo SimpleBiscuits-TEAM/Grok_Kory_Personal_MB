@@ -1625,3 +1625,11 @@
 - [x] Updated both DynoSheet (Recharts) and VirtualDynoPanel (canvas) charts
 - [x] 10% padding above/below data range, rounded to nearest 10 for clean ticks
 - [x] Checkpoint and push to GitHub
+
+## Git Merge — Tobi's Branch → GROK → main
+- [ ] Fetch and checkout GROK branch locally
+- [ ] Merge Tobi@EDS_Dev into GROK (Tobi's work supersedes conflicts)
+- [ ] Push updated GROK to user_github
+- [ ] Merge GROK into local main
+- [ ] Push updated main to user_github
+- [ ] Save checkpoint
