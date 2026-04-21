@@ -1642,3 +1642,12 @@
 - [x] Added turboType and has3BarMapSensor to DynoSheetData interface
 - [x] Config line now shows: Fuel | Injector | Turbo | MAP | CF: SAE | Smoothing: 5
 - [x] Checkpoint and push to GitHub
+
+## Virtual Dyno Chart & PDF Improvements (Round 2)
+- [x] Replace "PPEI VIRTUAL DYNO" text with PPEI logo + "Virtual Dyno by" in both chart and PDF header
+- [x] Fix PPEI logo watermark not visible in PDF — increased opacity from 0.04 to 0.06, size from 120mm to 140mm
+- [x] Center graph vertically in PDF — chart now fills available space between header and suggestions
+- [x] Clean up chart: removed Recharts Legend (redundant), removed peak ReferenceLine dashes, hide zoom toolbar during export
+- [x] Add "Suggestions & Notes" section: E85 fuel switch estimates, turbo upgrade suggestions, injector upgrade notes, boost tips
+- [x] Added hideControls prop to ZoomableChart to suppress toolbar/scrubbar during PDF capture
+- [x] Checkpoint and push to GitHub

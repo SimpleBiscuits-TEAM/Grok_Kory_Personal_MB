@@ -31,6 +31,7 @@ const ZOOM_BUTTON_FACTOR = 0.3;
 interface ZoomableChartProps<T> {
   data: T[];
   height?: number | string;
+  hideControls?: boolean;
   children: (visibleData: T[]) => React.ReactNode;
 }
 
@@ -41,7 +42,7 @@ function clientXToFrac(el: HTMLElement, clientX: number): number {
   return Math.max(0, Math.min(1, (clientX - rect.left) / w));
 }
 
-export function ZoomableChart<T>({ data, height = 300, children }: ZoomableChartProps<T>) {
+export function ZoomableChart<T>({ data, height = 300, hideControls = false, children }: ZoomableChartProps<T>) {
   const [startIndex, setStartIndex] = useState(0);
   const [endIndex, setEndIndex] = useState(Math.max(0, data.length - 1));
 
@@ -349,7 +350,7 @@ export function ZoomableChart<T>({ data, height = 300, children }: ZoomableChart
         position: 'absolute',
         top: 6,
         right: 6,
-        display: 'flex',
+        display: hideControls ? 'none' : 'flex',
         gap: 3,
         alignItems: 'center',
         zIndex: 20,
@@ -374,7 +375,7 @@ export function ZoomableChart<T>({ data, height = 300, children }: ZoomableChart
         </span>
       </div>
 
-      {isZoomed && data.length > 0 && (
+      {isZoomed && data.length > 0 && !hideControls && (
         <div style={{
           position: 'absolute',
           bottom: 2,
