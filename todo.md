@@ -1603,3 +1603,14 @@
 - [x] Train Knox on auto-detection fallback behavior (Section 27)
 - [x] Cleaned up temporary analyze_bc_stage4.mjs script
 - [x] 184 tests passing
+
+## Bug Fix — Dyno Graph Not Detecting Turbo Kit or Injectors from Filename
+- [x] Root cause: Analyzer→Talon tab path passes wp8Data but NOT filename; wp8FileName stays empty string
+- [x] 3-bar MAP sensor detected because it reads from WP8 channel data (baro pressure), not filename
+- [x] Fix: Added wp8FileName prop to HondaTalonTuner, pass filename through onWP8Detected callback
+- [x] Fixed Advanced.tsx: added injectedWP8FileName state, updated AnalyzerPanel callback signature
+- [x] Fixed HondaTalonTuner: accepts wp8FileName prop, syncs via useEffect when prop changes
+- [x] Fixed VirtualDynoPanel: added missing jr_kit and kw800 options to injector dropdown
+- [x] Fixed sessionStorage pendingWP8 path: also stores/restores filename
+- [x] All 44 virtual dyno tests + 21 WP8 parser tests pass
+- [x] Checkpoint and push to GitHub

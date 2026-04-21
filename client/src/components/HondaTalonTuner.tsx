@@ -1325,9 +1325,11 @@ function WP8DatalogViewer({ wp8Data, onCursorData }: { wp8Data: WP8ParseResult; 
 // ─── Main Honda Talon Tuner Component ───────────────────────────────────────
 export default function HondaTalonTuner({
   wp8Data,
+  wp8FileName: wp8FileNameProp,
   onBack,
 }: {
   wp8Data?: WP8ParseResult | null;
+  wp8FileName?: string;
   onBack?: () => void;
 }) {
   const [localWP8, setLocalWP8] = useState<WP8ParseResult | null>(wp8Data || null);
@@ -1338,7 +1340,7 @@ export default function HondaTalonTuner({
     speedDensity_cyl2: null,
   });
   const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct' | 'dyno'>('fuelmaps');
-  const [wp8FileName, setWp8FileName] = useState('');
+  const [wp8FileName, setWp8FileName] = useState(wp8FileNameProp || '');
   const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
 
   // Track which cells were corrected (for highlighting in fuel map editor)
@@ -1361,6 +1363,11 @@ export default function HondaTalonTuner({
   useEffect(() => {
     if (wp8Data) setLocalWP8(wp8Data);
   }, [wp8Data]);
+
+  // Sync filename from parent prop when it changes
+  useEffect(() => {
+    if (wp8FileNameProp) setWp8FileName(wp8FileNameProp);
+  }, [wp8FileNameProp]);
 
   const handleWP8Upload = useCallback(async (file: File) => {
     const { parseWP8 } = await import('@/lib/wp8Parser');

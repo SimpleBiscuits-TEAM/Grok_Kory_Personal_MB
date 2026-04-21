@@ -758,7 +758,7 @@ function VehiclePanel() {
 
 // ─── Analyzer Panel (Merged Normal Mode) ────────────────────────────────────
 
-function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult) => void }) {
+function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult, fileName: string) => void }) {
   const [analyzerMode, setAnalyzerMode] = useState<'analyze' | 'compare'>('analyze');
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
@@ -851,7 +851,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
         // If Honda Talon detected, switch to Talon tab
         if (wp8Result.vehicleType === 'HONDA_TALON' && onWP8Detected) {
-          onWP8Detected(wp8Result);
+          onWP8Detected(wp8Result, file.name);
           // Cache datalog (fire-and-forget)
           try {
             const reader = new FileReader();
@@ -1463,6 +1463,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
   const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const [injectedWP8, setInjectedWP8] = useState<WP8ParseResult | null>(null);
+  const [injectedWP8FileName, setInjectedWP8FileName] = useState('');
   const [diagnosticPids, setDiagnosticPids] = useState<{ pid: number; service: number; name: string; shortName: string }[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Dynamically add Honda Talon tab when WP8 data is loaded or activeTab is talon
@@ -1492,7 +1493,11 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             }));
           }
           setInjectedWP8(parsed as WP8ParseResult);
+          // Also restore the filename if stored
+          const storedFileName = sessionStorage.getItem('pendingWP8FileName') || '';
+          if (storedFileName) setInjectedWP8FileName(storedFileName);
           sessionStorage.removeItem('pendingWP8');
+          sessionStorage.removeItem('pendingWP8FileName');
         } catch { /* ignore parse errors */ }
       }
       // Clean URL params
@@ -1567,7 +1572,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         {/* Tab content */}
-        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8) => { setInjectedWP8(wp8); setActiveTab('talon'); }} /></div>}
+        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8, fileName) => { setInjectedWP8(wp8); setInjectedWP8FileName(fileName); setActiveTab('talon'); }} /></div>}
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
@@ -1677,7 +1682,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             {devSubTab === 'coding' && <div style={{ height: 'calc(100vh - 280px)' }}><VehicleCoding /></div>}
             {devSubTab === 'canam' && <div style={{ height: 'calc(100vh - 280px)' }}><CanAmVinChanger /></div>}
             {devSubTab === 'procedures' && <div style={{ height: 'calc(100vh - 280px)' }}><ServiceProcedures /></div>}
-            {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} />}
+            {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} wp8FileName={injectedWP8FileName} onBack={() => setActiveTab('analyzer')} />}
             {devSubTab === 'users' && <UserManagementPanel />}
             {devSubTab === 'geofence' && <GeofencePanel />}
             {devSubTab === 'qa' && <QAChecklistPanel />}
@@ -1701,7 +1706,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === ('ppei-flash' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><PpeiFlashContainerPanel /></div>}
 
         {activeTab === ('ppei-datalogger' as TabId) && <div className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
-        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} wp8FileName={injectedWP8FileName} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'notifications' && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
