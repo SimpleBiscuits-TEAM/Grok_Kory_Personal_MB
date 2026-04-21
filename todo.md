@@ -1683,3 +1683,7 @@
 - [x] Increased minWidth from 160 to 200, added whiteSpace: nowrap, increased gap to 16
 - [x] Shortened labels: "Torque (ft-lb)" → "TQ (ft-lb)", "HP (Baseline)" → "HP (Base)"
 - [x] Checkpoint and push to GitHub
+
+## Remove Dyno Chart Tooltip
+- [x] Removed Tooltip component from the Recharts chart
+- [x] Checkpoint and push to GitHub

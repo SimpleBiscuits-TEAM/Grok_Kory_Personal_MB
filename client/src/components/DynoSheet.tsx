@@ -1220,8 +1220,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                   }}
                 />
 
-                {/* Tooltip */}
-                <Tooltip content={<DynoTooltip />} />
+
 
                 {/* Peak HP cursor dot */}
                 <ReferenceDot
