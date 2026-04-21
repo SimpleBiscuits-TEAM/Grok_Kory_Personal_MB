@@ -1,0 +1,15 @@
+Current PDF Export Observations:
+- Title: "PPEI VIRTUAL DYNO" with orange "ESTIMATED" badge
+- Version: V-OP BETA V0.12.3 | 4/21/2026
+- Subtitle: Fuel: PUMP | Injector: id1050 | CF: SAE | Smoothing: 5
+- Chart shows HP (orange) and Torque (cyan) with dashed peak lines
+- Watermark: "V-OP BETA" in large diagonal text (needs to be PPEI logo instead)
+- Bottom stats: Peak HP: 165.8 @ 8,200 RPM | Peak Torque: 114.6 ft-lb @ 6,900 RPM | WOT Runs: 4
+- Footer: disclaimer text
+- Issues to fix:
+  1. No turbo kit or MAP sensor info shown
+  2. No peak power cursor/marker on the chart
+  3. Watermark is "V-OP BETA" text, needs to be PPEI logo
+  4. Bottom half of PDF is mostly empty space
+  5. Chart zoom controls (+/-) visible in export (should be hidden)
+  6. Legend is partially cut off at top

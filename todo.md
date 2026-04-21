@@ -1633,3 +1633,12 @@
 - [x] Merge GROK into local main — clean merge, no conflicts
 - [x] Push updated main to user_github (ed3453f..e9701c3)
 - [x] Save checkpoint
+
+## Virtual Dyno PDF Export Cleanup
+- [x] Add turbo kit details to PDF header (e.g., "Turbo: Jackson Racing (JR)")
+- [x] Add MAP sensor info to PDF header (e.g., "MAP: 3-Bar Detected")
+- [x] Add peak power cursor/marker on the chart (ReferenceDot at peak HP and peak Torque)
+- [x] Replace "V-OP BETA" watermark with PPEI logo (canvas-based with fallback)
+- [x] Added turboType and has3BarMapSensor to DynoSheetData interface
+- [x] Config line now shows: Fuel | Injector | Turbo | MAP | CF: SAE | Smoothing: 5
+- [x] Checkpoint and push to GitHub
