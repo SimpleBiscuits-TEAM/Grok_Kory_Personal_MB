@@ -1614,3 +1614,7 @@
 - [x] Fixed sessionStorage pendingWP8 path: also stores/restores filename
 - [x] All 44 virtual dyno tests + 21 WP8 parser tests pass
 - [x] Checkpoint and push to GitHub
+
+## Bug Fix — Duplicate 'talon' Key in Tab List
+- [x] Fix "Encountered two children with the same key `talon`" error on /advanced page
+- [x] Removed talon from devTabs array (line 1444) since it's already dynamically added via showTalonTab logic
