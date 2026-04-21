@@ -1651,3 +1651,14 @@
 - [x] Add "Suggestions & Notes" section: E85 fuel switch estimates, turbo upgrade suggestions, injector upgrade notes, boost tips
 - [x] Added hideControls prop to ZoomableChart to suppress toolbar/scrubbar during PDF capture
 - [x] Checkpoint and push to GitHub
+
+## Share Button — Upload PDF to S3 & Generate Shareable Link
+- [x] Create tRPC procedure (dyno.shareDyno) to accept PDF base64, upload to S3, return public URL
+- [x] Store shared dyno metadata in shared_dynos table (peak HP/TQ, turbo type, fuel, injector, 3-bar MAP, S3 URL, views)
+- [x] Add "Share" button next to "Export PDF" in DynoSheet header (changes to "Copy Link" after sharing)
+- [x] Generate PDF in-memory, upload via tRPC mutation, copy shareable link to clipboard
+- [x] Create public /shared/dyno/:token page with PDF embed, stats cards, download button, view counter
+- [x] Show toast notification with shareable link after successful upload
+- [x] Write vitest tests for share procedure (7 tests passing)
+- [x] Database migration 0014_spotty_shard.sql applied
+- [x] Checkpoint and push to GitHub

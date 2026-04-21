@@ -2329,3 +2329,41 @@ export const autoDeployLog = mysqlTable("auto_deploy_log", {
 });
 export type AutoDeployLog = typeof autoDeployLog.$inferSelect;
 export type InsertAutoDeployLog = typeof autoDeployLog.$inferInsert;
+
+// ── Shared Dyno Results ─────────────────────────────────────────────────
+/**
+ * Stores shared virtual dyno PDF results with metadata.
+ * Each record represents a shareable link to a dyno result PDF stored in S3.
+ */
+export const sharedDynos = mysqlTable("shared_dynos", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Unique share token used in the public URL */
+  shareToken: varchar("shareToken", { length: 32 }).notNull().unique(),
+  /** FK to users.id — who shared this dyno result */
+  userId: int("userId"),
+  /** S3 URL of the exported PDF */
+  pdfUrl: text("pdfUrl").notNull(),
+  /** Peak HP value for display */
+  peakHp: decimal("peakHp", { precision: 6, scale: 1 }),
+  /** Peak Torque value for display */
+  peakTorque: decimal("peakTorque", { precision: 6, scale: 1 }),
+  /** Peak HP RPM */
+  peakHpRpm: int("peakHpRpm"),
+  /** Peak Torque RPM */
+  peakTorqueRpm: int("peakTorqueRpm"),
+  /** Turbo type: na, jr, kw, fp, generic_turbo */
+  turboType: varchar("turboType", { length: 32 }),
+  /** Fuel type: pump, utv96, e85 */
+  fuelType: varchar("fuelType", { length: 32 }),
+  /** Injector type: stock, jr_kit, kw800, id1050, id1300 */
+  injectorType: varchar("injectorType", { length: 32 }),
+  /** Whether 3-bar MAP sensor was detected */
+  has3BarMap: boolean("has3BarMap").default(false),
+  /** Original WP8 filename */
+  fileName: varchar("fileName", { length: 512 }),
+  /** View count */
+  views: int("views").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SharedDyno = typeof sharedDynos.$inferSelect;
+export type InsertSharedDyno = typeof sharedDynos.$inferInsert;

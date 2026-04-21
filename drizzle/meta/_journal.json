@@ -99,6 +99,13 @@
       "when": 1776475209537,
       "tag": "0013_abnormal_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1776795300725,
+      "tag": "0014_spotty_shard",
+      "breakpoints": true
     }
   ]
 }

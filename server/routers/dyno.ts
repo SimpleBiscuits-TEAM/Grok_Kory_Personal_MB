@@ -9,7 +9,9 @@ import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
 import { protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { dynoSessions, dynoCompetitions, weatherReports } from "../../drizzle/schema";
+import { dynoSessions, dynoCompetitions, weatherReports, sharedDynos } from "../../drizzle/schema";
+import { storagePut } from "../storage";
+import crypto from "crypto";
 import { desc, eq, sql, and, gte, lte } from "drizzle-orm";
 
 /**
@@ -296,5 +298,74 @@ export const dynoRouter = router({
         .orderBy(desc(dynoSessions.peakHpCorrected));
 
       return { ...competition, runs };
+    }),
+
+  // ── Share Virtual Dyno ──────────────────────────────────────────────────
+
+  /** Upload a virtual dyno PDF to S3 and create a shareable link */
+  shareDyno: protectedProcedure
+    .input(z.object({
+      pdfBase64: z.string().min(1),
+      peakHp: z.number().optional(),
+      peakTorque: z.number().optional(),
+      peakHpRpm: z.number().optional(),
+      peakTorqueRpm: z.number().optional(),
+      turboType: z.string().optional(),
+      fuelType: z.string().optional(),
+      injectorType: z.string().optional(),
+      has3BarMap: z.boolean().optional(),
+      fileName: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      // Generate unique share token
+      const shareToken = crypto.randomBytes(12).toString('hex'); // 24 chars
+
+      // Decode base64 PDF and upload to S3
+      const pdfBuffer = Buffer.from(input.pdfBase64, 'base64');
+      const fileKey = `shared-dynos/${shareToken}.pdf`;
+      const { url: pdfUrl } = await storagePut(fileKey, pdfBuffer, 'application/pdf');
+
+      // Store metadata in database
+      await db.insert(sharedDynos).values({
+        shareToken,
+        userId: ctx.user.id,
+        pdfUrl,
+        peakHp: input.peakHp?.toFixed(1) ?? null,
+        peakTorque: input.peakTorque?.toFixed(1) ?? null,
+        peakHpRpm: input.peakHpRpm ?? null,
+        peakTorqueRpm: input.peakTorqueRpm ?? null,
+        turboType: input.turboType ?? null,
+        fuelType: input.fuelType ?? null,
+        injectorType: input.injectorType ?? null,
+        has3BarMap: input.has3BarMap ?? false,
+        fileName: input.fileName ?? null,
+      });
+
+      return { shareToken, pdfUrl };
+    }),
+
+  /** Get a shared dyno by token (public — no auth required) */
+  getSharedDyno: publicProcedure
+    .input(z.object({ token: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      const [result] = await db.select()
+        .from(sharedDynos)
+        .where(eq(sharedDynos.shareToken, input.token))
+        .limit(1);
+
+      if (!result) return null;
+
+      // Increment view count
+      await db.update(sharedDynos)
+        .set({ views: sql`${sharedDynos.views} + 1` })
+        .where(eq(sharedDynos.id, result.id));
+
+      return result;
     }),
 });

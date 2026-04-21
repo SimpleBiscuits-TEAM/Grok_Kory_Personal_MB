@@ -27,6 +27,7 @@ const Weather = lazy(() => import("./pages/Weather"));
 const StormChase = lazy(() => import("./pages/StormChase"));
 const StormChaseOverlay = lazy(() => import("./pages/StormChaseOverlay"));
 const StormChaseViewer = lazy(() => import("./pages/StormChaseViewer"));
+const SharedDyno = lazy(() => import("./pages/SharedDyno"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -99,6 +100,7 @@ function Router() {
         <Route path={"/tune-deploy"} component={TuneDeployPage} />
         <Route path={"/git-map"} component={GitMapPage} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
+        <Route path="/shared/dyno/:token" component={SharedDyno} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />
         {/* Final fallback route */}

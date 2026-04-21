@@ -18,7 +18,9 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, Maximize2, Minimize2, AlertTriangle, FileDown, Loader2 } from 'lucide-react';
+import { Download, Maximize2, Minimize2, AlertTriangle, FileDown, Loader2, Share2, Check, Link2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { trpc } from '@/lib/trpc';
 import { APP_VERSION } from '@/lib/version';
 import { WP8ParseResult, getHondaTalonKeyChannels } from '@/lib/wp8Parser';
 import {
@@ -576,6 +578,9 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const shareMutation = trpc.dyno.shareDyno.useMutation();
 
   // Human-readable labels for turbo types and injector types
   const TURBO_LABELS: Record<string, string> = {
@@ -1022,6 +1027,101 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
               <><Loader2 className="w-4 h-4 animate-spin mr-1" /> Exporting...</>
             ) : (
               <><FileDown className="w-4 h-4 mr-1" /> Export PDF</>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              if (shareUrl) {
+                await navigator.clipboard.writeText(shareUrl);
+                toast.success('Link copied to clipboard!');
+                return;
+              }
+              if (!chartAreaRef.current) return;
+              setIsSharing(true);
+              try {
+                // @ts-ignore
+                const domtoimage = (await import('dom-to-image-more')).default;
+                const { default: jsPDF } = await import('jspdf');
+
+                // Capture chart as image
+                const dataUrl = await domtoimage.toPng(chartAreaRef.current, {
+                  scale: 2.5,
+                  bgcolor: '#0d0f14',
+                  style: { background: '#0d0f14' },
+                });
+
+                // Build PDF in memory (same as export)
+                const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+                const pageW = doc.internal.pageSize.getWidth();
+                const pageH = doc.internal.pageSize.getHeight();
+                doc.setFillColor(13, 15, 20);
+                doc.rect(0, 0, pageW, pageH, 'F');
+
+                // Header
+                doc.setFontSize(16);
+                doc.setTextColor(255, 77, 0);
+                doc.text('PPEI Virtual Dyno', pageW / 2, 12, { align: 'center' });
+                doc.setFontSize(9);
+                doc.setTextColor(160, 160, 160);
+                const configLine = `${data.peakHP.toFixed(1)} HP @ ${data.peakHPRpm} RPM  |  ${data.peakTorque.toFixed(1)} ft-lb @ ${data.peakTorqueRpm} RPM`;
+                doc.text(configLine, pageW / 2, 18, { align: 'center' });
+
+                // Chart image
+                const img = new Image();
+                img.src = dataUrl;
+                await new Promise<void>((r) => { img.onload = () => r(); });
+                const imgAspect = img.width / img.height;
+                const imgW = pageW - 10;
+                const imgH = imgW / imgAspect;
+                doc.addImage(dataUrl, 'PNG', 5, 22, imgW, Math.min(imgH, pageH - 35));
+
+                // Disclaimer
+                doc.setFontSize(7);
+                doc.setTextColor(100, 100, 100);
+                doc.text('Virtual dyno estimates are dependent on tuning setup and conditions. Results serve as reference only.', pageW / 2, pageH - 4, { align: 'center' });
+
+                // Convert to base64
+                const pdfBase64 = doc.output('datauristring').split(',')[1];
+
+                // Upload via tRPC
+                const result = await shareMutation.mutateAsync({
+                  pdfBase64,
+                  peakHp: data.peakHP,
+                  peakTorque: data.peakTorque,
+                  peakHpRpm: data.peakHPRpm,
+                  peakTorqueRpm: data.peakTorqueRpm,
+                  turboType: data.turboType,
+                  fuelType: config.fuelType,
+                  injectorType: config.injectorType,
+                  has3BarMap: data.has3BarMapSensor,
+                  fileName: data.fileName,
+                });
+
+                const url = `${window.location.origin}/shared/dyno/${result.shareToken}`;
+                setShareUrl(url);
+                await navigator.clipboard.writeText(url);
+                toast.success('Shareable link copied to clipboard!', {
+                  description: url,
+                  duration: 6000,
+                });
+              } catch (err) {
+                console.error('Share failed:', err);
+                toast.error('Failed to share dyno result. Please try again.');
+              } finally {
+                setIsSharing(false);
+              }
+            }}
+            disabled={isSharing || !data.qualified}
+            className="text-zinc-300 border-zinc-600 hover:bg-zinc-800"
+          >
+            {isSharing ? (
+              <><Loader2 className="w-4 h-4 animate-spin mr-1" /> Sharing...</>
+            ) : shareUrl ? (
+              <><Link2 className="w-4 h-4 mr-1" /> Copy Link</>
+            ) : (
+              <><Share2 className="w-4 h-4 mr-1" /> Share</>
             )}
           </Button>
           <Button
