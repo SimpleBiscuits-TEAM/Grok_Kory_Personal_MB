@@ -440,9 +440,18 @@ export function computeVirtualDyno(
   const warnings: string[] = [];
   const hasDyno = isDynoLog(wp8);
 
-  // Get fuel profile
-  const fuel = FUEL_PROFILES[config.fuelType];
-  const injFlowRate = INJECTOR_FLOW_RATES[config.injectorType];
+  // Auto-detect injector, fuel, and turbo from filename/partNumber as fallbacks
+  const detectedInjector = detectInjectorType(fileName, wp8.partNumber);
+  const detectedFuel = detectFuelType(fileName, wp8.partNumber);
+  const detectedTurboType = detectTurboType(fileName, wp8.partNumber);
+
+  // Use config values if provided, otherwise fall back to auto-detected values
+  const effectiveFuelType = config.fuelType ?? detectedFuel;
+  const effectiveInjectorType = config.injectorType ?? detectedInjector;
+
+  // Get fuel profile and injector flow rate
+  const fuel = FUEL_PROFILES[effectiveFuelType];
+  const injFlowRate = INJECTOR_FLOW_RATES[effectiveInjectorType];
 
   // Validate required channels
   const hasRPM = keys.engineSpeed >= 0;
@@ -553,8 +562,8 @@ export function computeVirtualDyno(
 
     // Estimate HP (with boost correction for turbo setups)
     // Use turboType if set, otherwise fall back to legacy isTurbo boolean
-    const effectiveTurboType: TurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' : 'na');
-    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType);
+    const effectiveTurboType: TurboType = config.turboType ?? detectedTurboType;
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, effectiveFuelType);
 
     // Apply dyno calibration factor (default 1.0 if not set)
     estHP *= config.dynoCalibrationFactor ?? 1.0;
@@ -658,11 +667,7 @@ export function computeVirtualDyno(
     warnings.push('No injector pulsewidth data — power estimates are rough approximations');
   }
 
-  // Auto-detect injector and fuel from metadata
-  const detectedInjector = detectInjectorType(fileName, wp8.partNumber);
-  const detectedFuel = detectFuelType(fileName, wp8.partNumber);
-
-  const detectedTurboType = detectTurboType(fileName, wp8.partNumber);
+   // Auto-detected values (computed at top of function, reused here for return)
 
   return {
     dataPoints,

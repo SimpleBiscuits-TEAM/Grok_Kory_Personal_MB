@@ -1587,3 +1587,19 @@
 - [x] Train Knox on cross-validation findings (Section 25) — boost-dependent error and injector size effects
 - [x] 184 tests passing
 - [x] Checkpoint and push to GitHub
+
+## KW Turbo + BC Stage 4 Cam — Pump Gas Cross-Validation
+- [x] Extract and parse BradBuller_KW_BCStage4.zip WP8 files (12 WP8 files)
+- [x] Analyze power (134.1-145.9 HP), MAP (143.5-147.8 kPa), timing (19-25°), AFR (11.7-12.1), inj PW (5.2-6.2 ms)
+- [x] Compare power curve shape vs stock cam KW runs — cam shifts peak power ~500 RPM higher, similar torque
+- [x] Cross-validate KW turbo BSFC factor (1.73) with BC Stage 4 cam — 4.5% avg error, no recalibration needed
+- [x] Train Knox on BC Stage 4 cam effects on turbo power delivery (Section 26)
+- [x] Checkpoint and push to GitHub
+
+## computeVirtualDyno Auto-Detection Fallback Fix
+- [x] Fix computeVirtualDyno to auto-detect fuel/injector/turbo from filename when config values not provided
+- [x] Priority chain: explicit config → auto-detected from filename → default (pump/stock/na)
+- [x] Prevents crash with empty config object (e.g., programmatic calls without full config)
+- [x] Train Knox on auto-detection fallback behavior (Section 27)
+- [x] Cleaned up temporary analyze_bc_stage4.mjs script
+- [x] 184 tests passing

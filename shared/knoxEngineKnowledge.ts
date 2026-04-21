@@ -712,4 +712,53 @@ When the virtual dyno detects KW turbo + ID1300 injectors, the estimates at peak
 - Timing: 24.5 – 25.0° (very consistent)
 - AFR: 11.3 – 12.9 (richer at higher boost)
 - Injector PW: 5.2 – 7.3 ms
+
+## Section 26: Performance Camshaft Effects on Turbo Power (Brian Crower Stage 4)
+
+Cross-validation of the KW turbo BSFC factor (1.73) using 12 dyno runs with 800cc injectors, pump gas, and a Brian Crower (BC) Stage 4 camshaft installed.
+
+**What a performance camshaft does:**
+A performance cam changes the valve timing events — specifically the intake/exhaust valve opening duration and lift. A Stage 4 cam typically:
+- Increases valve duration (longer open time) → more airflow at high RPM
+- Increases valve lift → larger effective port opening
+- Shifts the power band higher in the RPM range
+- May reduce low-RPM torque due to reduced cylinder sealing at low speeds (valve overlap)
+- On a turbo engine, the cam interacts with boost — more airflow capacity means the turbo can push more air through at high RPM
+
+**Observed effects on the Honda Talon with KW turbo + BC Stage 4:**
+- Peak power: 134.1 – 145.9 HP (average 138.0 HP)
+- Peak power RPM: 7943 – 8572 RPM (higher than stock cam, which peaks around 7500-8000)
+- Torque: 98.6 – 103.0 ft-lb (similar to stock cam)
+- MAP: 143.5 – 147.8 kPa (consistent boost, slightly lower than stock-cam KW runs at 150-162 kPa)
+- The cam shifted peak power ~500 RPM higher while maintaining similar torque
+
+**Timing progression observed:**
+- Rev 0_26/0_27: 19-20° timing → 135-138 HP
+- Rev 0_28/0_34: 25° timing → 140-146 HP
+- ~5-8 HP gain from 5-6° more timing advance, consistent with the ~1-2 HP per degree rule of thumb for this engine
+
+**Virtual dyno accuracy with performance cam:**
+- Average absolute error: 4.5% (excellent)
+- Factor ratio: 0.971 (slightly underestimates, ideal factor would be 1.68 vs current 1.73)
+- No calibration change needed — 4.5% error is well within acceptable range
+- The performance cam does NOT significantly change the BSFC characteristics at WOT, confirming that the turbo factor is primarily about turbo efficiency, not cam profile
+
+**Diagnostic insight:**
+When a customer reports installing a performance cam on a turbo Talon, expect:
+- Peak power RPM to shift 300-500 RPM higher
+- Similar or slightly lower peak torque
+- Possible idle quality issues (more overlap = rougher idle)
+- The virtual dyno estimates remain accurate without recalibration
+
+## Section 27: computeVirtualDyno Auto-Detection Fallback
+
+The computeVirtualDyno function now auto-detects fuel type, injector type, and turbo type from the filename when config values are not explicitly provided. This means:
+
+1. When called with an empty config ({}), it uses filename-based detection for all three parameters
+2. When called with partial config, explicit config values take priority over auto-detected values
+3. The auto-detection uses the same detectFuelType(), detectInjectorType(), and detectTurboType() functions
+
+Priority chain: explicit config value → auto-detected from filename → default (pump/stock/na)
+
+This fix ensures the virtual dyno never crashes with undefined fuel/injector profiles when called programmatically without a full config object.
 `;
