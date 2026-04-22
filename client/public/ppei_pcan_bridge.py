@@ -397,23 +397,23 @@ async def _ppei_handle_message(self, msg: dict):
         )
         await self.protocol.start()
 
-    results = []
     proto = self.protocol
     start_all = time.time()
 
+    # ── Drain stale frames before the batch ──
+    while not proto._response_queue.empty():
+        try:
+            proto._response_queue.get_nowait()
+        except Exception:
+            break
+
+    # ── PHASE 1: Send ALL DID requests back-to-back (~1ms each) ──
+    sent_dids = []
+    send_errors = {}  # did -> error string
     for did in dids:
         did_hi = (did >> 8) & 0xFF
         did_lo = did & 0xFF
         data = [0x03, 0x22, did_hi, did_lo, 0x00, 0x00, 0x00, 0x00]
-
-        # Drain stale frames from the queue before each request
-        while not proto._response_queue.empty():
-            try:
-                proto._response_queue.get_nowait()
-            except Exception:
-                break
-
-        # Send Mode 22 request
         frame = can.Message(
             arbitration_id=tx_id,
             data=data,
@@ -421,36 +421,120 @@ async def _ppei_handle_message(self, msg: dict):
         )
         try:
             self.bus.send(frame)
+            sent_dids.append(did)
         except can.CanError as e:
-            results.append({"did": did, "ok": False, "error": f"CAN send: {e}"})
+            send_errors[did] = f"CAN send: {e}"
+
+    # ── PHASE 2: Collect ALL responses from the queue ──
+    # We expect one response per sent DID. Collect frames until we have
+    # all responses or hit a total timeout.
+    # Map: did -> value_bytes
+    collected = {}  # did -> list[int] (value bytes)
+    nrc_errors = {}  # did -> NRC code
+    pending = set(sent_dids)
+    total_timeout = max(per_did_timeout * len(sent_dids) * 1.5, 0.5)  # generous total
+    collect_deadline = time.time() + total_timeout
+    # Track multi-frame ISO-TP state per arbitration ID
+    isotp_state = {}  # arb_id -> {total_length, payload, expected_seq, mode, pid_hi, pid_lo}
+
+    while pending and time.time() < collect_deadline:
+        remaining = collect_deadline - time.time()
+        if remaining <= 0:
+            break
+        try:
+            msg = await asyncio.wait_for(
+                proto._response_queue.get(),
+                timeout=min(remaining, per_did_timeout)
+            )
+        except asyncio.TimeoutError:
+            # No more frames coming — exit collection
+            break
+
+        if msg.arbitration_id not in _tobi.RESPONSE_IDS:
             continue
 
-        # Wait for response — use _wait_for_response which handles ISO-TP
-        try:
-            resp_data = await asyncio.wait_for(
-                proto._wait_for_response(0x22, did),
-                timeout=per_did_timeout
+        frame_data = list(msg.data)
+        if not frame_data:
+            continue
+
+        pci_type = (frame_data[0] >> 4) & 0x0F
+
+        if pci_type == 0:  # Single frame
+            length = frame_data[0] & 0x0F
+            if length == 0 or len(frame_data) < 1 + length:
+                continue
+            payload = frame_data[1:1 + length]
+
+            # Negative response: 0x7F 0x22 NRC
+            if payload and payload[0] == 0x7F and len(payload) >= 3 and payload[1] == 0x22:
+                # Extract the DID from the original request context
+                # NRC doesn't contain the DID, but we know which DIDs are pending
+                nrc = payload[2]
+                # Can't determine which DID this NRC is for without more context
+                # Just log it and continue
+                log.debug(f"[PPEI] batch NRC 0x{nrc:02X} received")
+                continue
+
+            # Positive response: 0x62 DID_hi DID_lo data...
+            if payload and payload[0] == 0x62 and len(payload) >= 3:
+                resp_did = (payload[1] << 8) | payload[2]
+                if resp_did in pending:
+                    collected[resp_did] = payload[3:]
+                    pending.discard(resp_did)
+                continue
+
+        elif pci_type == 1:  # First frame (multi-frame ISO-TP)
+            total_length = ((frame_data[0] & 0x0F) << 8) | frame_data[1]
+            payload = frame_data[2:]
+            # Send flow control immediately
+            fc_msg = can.Message(
+                arbitration_id=tx_id,  # Use the same TX ID
+                data=[_tobi.ISOTP_FLOW_CONTROL, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                is_extended_id=False
             )
-            # _wait_for_response returns the data bytes (after service/DID prefix)
-            # For positive response: just the value bytes
-            # For negative response: [0x7F, 0x22, NRC]
-            if resp_data and len(resp_data) >= 1 and resp_data[0] == 0x7F:
-                nrc = resp_data[2] if len(resp_data) > 2 else 0
-                results.append({
-                    "did": did,
-                    "ok": False,
-                    "error": f"NRC 0x{nrc:02X}"
-                })
-            else:
-                results.append({
-                    "did": did,
-                    "ok": True,
-                    "data": list(resp_data) if resp_data else []
-                })
-        except asyncio.TimeoutError:
+            try:
+                self.bus.send(fc_msg)
+            except can.CanError:
+                pass
+            # Store ISO-TP state for this arb_id
+            isotp_state[msg.arbitration_id] = {
+                'total_length': total_length,
+                'payload': payload,
+                'expected_seq': 1,
+            }
+            continue
+
+        elif pci_type == 2:  # Consecutive frame
+            arb_id = msg.arbitration_id
+            if arb_id in isotp_state:
+                state = isotp_state[arb_id]
+                cf_seq = frame_data[0] & 0x0F
+                if cf_seq == (state['expected_seq'] & 0x0F):
+                    state['payload'].extend(frame_data[1:])
+                    state['expected_seq'] += 1
+                    # Check if complete
+                    if len(state['payload']) >= state['total_length']:
+                        full_payload = state['payload'][:state['total_length']]
+                        del isotp_state[arb_id]
+                        # Parse the completed multi-frame response
+                        if full_payload and full_payload[0] == 0x62 and len(full_payload) >= 3:
+                            resp_did = (full_payload[1] << 8) | full_payload[2]
+                            if resp_did in pending:
+                                collected[resp_did] = full_payload[3:]
+                                pending.discard(resp_did)
+            continue
+
+    # ── PHASE 3: Build results ──
+    results = []
+    for did in dids:
+        if did in send_errors:
+            results.append({"did": did, "ok": False, "error": send_errors[did]})
+        elif did in collected:
+            results.append({"did": did, "ok": True, "data": list(collected[did])})
+        elif did in nrc_errors:
+            results.append({"did": did, "ok": False, "error": f"NRC 0x{nrc_errors[did]:02X}"})
+        else:
             results.append({"did": did, "ok": False, "error": "timeout"})
-        except Exception as e:
-            results.append({"did": did, "ok": False, "error": str(e)})
 
     elapsed = (time.time() - start_all) * 1000
     ok_count = sum(1 for r in results if r.get("ok"))

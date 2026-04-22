@@ -1792,3 +1792,24 @@
 - [x] Converted 101 PIDs: 40 °C→°F, 26 kPa→PSI, 3 MPa→PSI, 8 bar→PSI, 5 km/h→MPH, 8 km→mi, 10 Nm→lb·ft, 1 kg/h→lb/min
 - [x] Converted standard Mode 01 PIDs: g/s→lb/min (MAF), L/h→gal/h (fuel rate), Pa→PSI (EVAP), kW→HP (BMW power)
 - [x] All min/max values updated for imperial ranges
+
+## Bug — FRP_CMD and FRP_ACT Frozen at 4706.6 PSI (and other PIDs frozen)
+- [x] Root cause: _wait_for_response discards frames for other DIDs while waiting for a specific one
+- [x] Fix: Rewrote batch_read_dids with send-all-collect-all pattern — no frames discarded
+- [x] Phase 1: Send ALL DID requests back-to-back (~1ms each)
+- [x] Phase 2: Collect ALL response frames, match by DID in 0x62 positive response header
+- [x] Phase 3: Build results — handles ISO-TP multi-frame per arb_id
+- [ ] Test and verify on truck
+
+## Bug — Recording Shows 0 Samples / No CSV Export
+- [x] Root cause: stale closure — isRecording state captured at monitoring start, never sees true when recording starts later
+- [x] Fix: Added isRecordingRef (useRef mirror) synced in handleStartRecording/handleStopRecording
+- [x] onData callback now checks isRecordingRef.current instead of isRecording state
+- [ ] Test and verify CSV export works on truck
+
+## Feature — CSV Format Compatibility with Eric's Editor Datalogger
+- [x] Verified: parseDataloggerCSV detects our format via 'Timestamp (ms)' or 'Elapsed (s)' header
+- [x] Verified: sessionToAnalyzerCSV outputs HP Tuners-compatible format with Time header + unit row
+- [x] Added 60+ GM extended PID shortNames to DATALOGGER_CHANNEL_MAP (BOOST_CMD/ACT, EGT_PRE/POST, FRP_DES/ACT2, VGT_CMD/ACT, DPF, DEF, NOx, IBR 1-8, etc.)
+- [x] Fixed 7 duplicate key errors in DATALOGGER_CHANNEL_MAP
+- [ ] Test CSV import in Eric's editor datalogger on truck

@@ -912,6 +912,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [isLogging, setIsLogging] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);  // Live view without recording
   const [isRecording, setIsRecording] = useState(false);    // Actively capturing data for saving
+  const isRecordingRef = useRef(false); // Ref mirror — avoids stale closure in onData callback
   const [liveReadings, setLiveReadings] = useState<Map<number, PIDReading>>(new Map());
   const [readingHistory, setReadingHistory] = useState<Map<number, PIDReading[]>>(new Map());
   const [recordedReadings, setRecordedReadings] = useState<Map<number, PIDReading[]>>(new Map()); // Only captured during recording
@@ -1241,7 +1242,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setSampleCount(prev => prev + 1);
 
         // If recording, also capture into recorded readings
-        if (isRecording) {
+        // Use ref (not state) to avoid stale closure — the onData callback
+        // is created when monitoring starts, but recording starts later.
+        if (isRecordingRef.current) {
           setRecordedReadings(prev => {
             const next = new Map(prev);
             for (const r of readings) {
@@ -1267,7 +1270,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         durationIntervalRef.current = null;
       }
     }
-  }, [connectionState, preparePidsForLogging, sampleRateMs, addLog, isRecording, ecuLostReason]);
+  }, [connectionState, preparePidsForLogging, sampleRateMs, addLog, ecuLostReason]);
 
   // ─── RECORD: Start capturing data for saving (while monitoring) ──────
   const handleStartRecording = useCallback(() => {
@@ -1279,12 +1282,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       setRecordDuration(Math.floor((Date.now() - recordStartRef.current) / 1000));
     }, 1000);
     setIsRecording(true);
+    isRecordingRef.current = true;
     addLog('⏺ RECORDING STARTED — capturing data for session save');
   }, [addLog]);
 
   // ─── STOP RECORD: Save session + AI auto-name ───────────────────────
   const handleStopRecording = useCallback(async () => {
     setIsRecording(false);
+    isRecordingRef.current = false;
     if (recordIntervalRef.current) {
       clearInterval(recordIntervalRef.current);
       recordIntervalRef.current = null;
