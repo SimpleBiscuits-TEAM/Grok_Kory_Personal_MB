@@ -1705,3 +1705,13 @@
 - [x] Parse and analyze .s file — 6 MB S-record (0x08FC0000-0x095C0000), cal area 0x09380000-0x095BFFFF (2304 KB), DEADBEEF header verified
 - [x] Train Knox — added MG1C400A to knoxKnowledgeServer.ts (ECU table + detailed analysis), shared/knoxKnowledge.ts (Polaris CAN section), and docs/polaris-pro-r/knox_knowledge_polaris_pro_r_mg1.md
 - [x] Checkpoint and push to GitHub
+
+## Feature — Polaris Pro R MG1C400A ECU Logic Flow Report (PDF)
+- [x] Study reference Can-Am MG1CA920 PDF for format/depth
+- [x] Deep-parse A2L for torque path, airflow, and all related parameters with addresses/scaling
+- [x] Disassemble .s binary to extract actual map values, axis breakpoints, calibration constants
+- [x] Trace ECU logic flow connecting torque and airflow paths
+- [x] Write comprehensive report with flowcharts, tables, and tuning guidance
+- [x] Render flowcharts and convert to PDF — 16-page PDF generated
+- [x] Add findings to Knox knowledge base — torque/airflow logic added to knoxKnowledgeServer.ts
+- [x] Checkpoint and push to GitHub

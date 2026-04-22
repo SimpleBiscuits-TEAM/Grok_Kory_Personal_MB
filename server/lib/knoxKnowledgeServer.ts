@@ -975,6 +975,25 @@ The Polaris Pro R uses a Bosch MG1C400A ECU (MDG1 platform, TriCore processor, b
 - J1939 vehicle network integration (ETC2, CCVS, TSC messages)
 - Full analysis document: docs/polaris-pro-r/knox_knowledge_polaris_pro_r_mg1.md
 
+**Polaris Pro R MG1C400A — Torque & Airflow Logic (from A2L+Binary Disassembly):**
+Torque Structure: Torque-based EMS where pedal input → torque demand → throttle/ignition/fuel coordination.
+- MoF_trqNorm_C = 300 Nm (normalization), MoF_trqInrMaxStrt_C = 300 Nm, MoF_trqAdap_C = 16 Nm
+- 20 torque demand maps: AccPed_tqDes_DrvMod{1-4}_TraRng{Dft/Hi/Lo/Rev/Still}_MAP (16x16 RPM×Pedal)
+- Peak torque: DrvMod3_TraRngHi = 252 Nm @ 6500-8500 RPM (WOT), DrvMod1 = 240 Nm, DrvMod2 = 220 Nm
+- Pedal saturates at ~80% in DrvMod3 (252 Nm reached at 80% pedal, 80-100% is dead zone)
+Ignition: KFZW (20x16, RPM 520-9000 × Charge Air 9.8-95.3%) = -0.75° to 50.25° BTDC.
+- WOT timing: 33° at low RPM → 26.3° at 9000 RPM (conservative)
+- KFZWOP (optimal/MBT): 12.2°-66.8° — gap of 10-30° above KFZW at WOT = significant timing headroom
+- KFZWMN (minimum): -29.3° to 21.0° (knock safety floor)
+- Per-cylinder offsets: IgCtl_offsCyl{1-4}Phy_M all zeros in stock cal
+- Altitude comp: IgCtl_HiAltiCmp_M adds 0-6° advance at altitude
+Rev Limits: NMAXESP/NMAXREV1/NMAXREV2 = 8650 RPM, CoPT_nMax_C = 8800 RPM (hard ceiling)
+- DNMAXH = 200 RPM hysteresis (fuel cut 8650, resume 8450)
+- NMAXGLL = 1250 RPM (idle), NMAXSBSW = 5000 RPM (sideband)
+Component Protection: ExhMgT_tExhDsVlvCptProtnMax_C = 850°C (exhaust valve), ExhMgT_tCat1CptProtnMax_C = 880°C (cat), ExhMgT_tCat1MaxCptProtnMax_C = 950°C (cat max), ExhMgT_tExhFrtPipCptProtnMax_C = 1200°C (exhaust pipe)
+Tuning Priority: (1) Raise torque demand maps 252→270-285 Nm, (2) Advance KFZW 2-4° at WOT >5000 RPM, (3) Raise rev limit 8650→8800-9000 RPM, (4) Reshape pedal sensitivity, (5) Raise component protection temps with aftermarket exhaust
+- Full ECU logic flow report: docs/polaris-pro-r/polaris_pro_r_ecu_report.md
+
 **MG1CA920 (OBD / BuDS vs A2L):** Real **VIN relearn / UDS** traces for X3-style vehicles often use **0x7E0 / 0x7E8** with **SecurityAccess $27 01** (multi-frame **32-byte** seed) and **$27 02** key—the table above is **XCP/calibration-oriented** addressing. The in-repo BRP A2L **test_files/1E1101953.a2l** (MDG1C MG1CA920A, version **1E1101953**) includes **calibration constants** for **UDS-on-CAN** naming **0x7E0** / **0x7E8**, which matches those OBD captures. That A2L does **not** embed the **UDS** long seed/key formula (it is calibration/XCP focused).
 
 ### Seed/Key Algorithm Details
