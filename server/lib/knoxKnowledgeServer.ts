@@ -957,6 +957,23 @@ The system supports these ECU families with full CAN configuration:
 | MG1CA920 | BRP MG1CA920 | 0x7A0 | 0x7A8 | 0x03 | 500 |
 | ME17CA1 | BRP ME17CA1 | 0x7A0 | 0x7A8 | 0x03 | 500 |
 | MG1CA007 | Polaris MG1CA007 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| MG1C400A | Polaris Pro R MG1C400A (MDG1) | 0x7E0 | 0x7E8 | TBD | 500 |
+
+**Polaris Pro R MG1C400A (MDG1) — A2L/S-Record Analysis:**
+The Polaris Pro R uses a Bosch MG1C400A ECU (MDG1 platform, TriCore processor, big-endian).
+- A2L Version: 425_MG1C400A1T2_00
+- XCP: Master 0x7F0, Slave 0x7F1 (calibration protocol)
+- OBD: Standard 0x7E0/0x7E8
+- Binary: 6 MB S-record (0x08FC0000-0x095C0000), cal area 0x09380000-0x095BFFFF (2304 KB)
+- 12,883 calibration parameters: 428 2D MAPs, 604 1D CURVEs, 10,676 VALUEs, 1,166 VAL_BLKs
+- 12,718 live measurements
+- Key ignition maps: KFZW (base timing @ 0x939BF3C), KFZWOP (optimized @ 0x939C2DE), KFZWMN (minimum/burning limit @ 0x939C1F2)
+- Torque-based fuel control: 4 drive modes x 5 transmission ranges = 20 torque request maps (AccPed_tqDes_DrvModX_TraRngY_MAP)
+- Component protection: ExhMgT_tqLimnCptProtn_M (torque limit @ 0x938F230), ExhMgT_ratLamCptProtn_GM (lambda vs RPM/load @ 0x938EA5E)
+- Rev limit: DNMAXH (fuel cutoff @ 0x939B1E0), TCD_nMaxGearOilTRnge_T (temp/gear dependent @ 0x939B316)
+- Per-cylinder knock control: IKCtl_FacKnockDetThdPhy1-4_GM, IKCtl_facKnkRtdt_M (retard step @ 0x9391FFC)
+- J1939 vehicle network integration (ETC2, CCVS, TSC messages)
+- Full analysis document: docs/polaris-pro-r/knox_knowledge_polaris_pro_r_mg1.md
 
 **MG1CA920 (OBD / BuDS vs A2L):** Real **VIN relearn / UDS** traces for X3-style vehicles often use **0x7E0 / 0x7E8** with **SecurityAccess $27 01** (multi-frame **32-byte** seed) and **$27 02** key—the table above is **XCP/calibration-oriented** addressing. The in-repo BRP A2L **test_files/1E1101953.a2l** (MDG1C MG1CA920A, version **1E1101953**) includes **calibration constants** for **UDS-on-CAN** naming **0x7E0** / **0x7E8**, which matches those OBD captures. That A2L does **not** embed the **UDS** long seed/key formula (it is calibration/XCP focused).
 

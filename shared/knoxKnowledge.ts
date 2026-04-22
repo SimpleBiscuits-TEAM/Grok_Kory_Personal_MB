@@ -673,6 +673,16 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - Extended PIDs: Fuel Pressure, Injector PW, Ignition Timing, Battery Voltage
 - AIM protocol channels available for data acquisition systems
 
+#### Polaris Pro R — Bosch MG1C400A (MDG1)
+- ECU: MG1C400A on MDG1 platform (TriCore, big-endian)
+- A2L: 425_MG1C400A1T2_00 — 12,883 calibration parameters, 12,718 measurements
+- OBD: 0x7E0/0x7E8, XCP: 0x7F0/0x7F1, CAN 500 kbps
+- Binary: 6 MB (0x08FC0000-0x095C0000), calibration area 0x09380000-0x095BFFFF (2304 KB)
+- Torque-based fuel control with 4 drive modes x 5 transmission ranges (20 torque maps)
+- Key maps: KFZW (ignition), KFZWOP (optimized), AccPed_tqDes (torque request), DNMAXH (rev limit)
+- Per-cylinder knock control (IKCtl), EGT component protection (ExhMgT)
+- J1939 integration for vehicle network (ETC2, CCVS, TSC)
+
 ### Kawasaki CAN Bus
 - Single CAN bus: 500 kbps
 - ECU at 0x7E0/0x7E8

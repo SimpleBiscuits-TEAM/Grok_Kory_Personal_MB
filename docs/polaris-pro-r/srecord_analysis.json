@@ -1,0 +1,30 @@
+{
+  "file": "MG1C4E0A1T2.s",
+  "format": "Motorola S-record (S3)",
+  "address_range": "0x08FC0000 - 0x095C0000",
+  "binary_size_bytes": 6291456,
+  "calibration_area": "0x09380000 - 0x095C0000 (2304 KB)",
+  "program_area": "0x08FC0000 - 0x0937FFFF (3840 KB)",
+  "header_marker": "DEADBEEF at 0x08FC0020",
+  "endianness": "Big-endian (Bosch TriCore)",
+  "key_maps_extracted": [
+    "KFZW (Base Ignition Map)",
+    "KFZWOP (Optimized Ignition)",
+    "KFZWMN (Min Ignition Angle)",
+    "KFZWMNBTS (Min Ign Component Prot)",
+    "KFZWMNKHLL (Min Ign Cat Warmup)",
+    "KFDZWKG (Knock Ign Correction)",
+    "ExhMgT_LamCptProtn_M (Lambda Comp Prot)",
+    "ExhMgT_ratLamCptProtn_GM (Lambda vs RPM/Load)",
+    "ExhMgT_ratLamRichCptProtn_M (Rich Lambda)",
+    "ExhMgT_IaCorrnCptProtn_M (Ign Correction)",
+    "ExhMgT_tqLimnCptProtn_M (Torque Limit)",
+    "AccPed_tqDes_DrvMod1_TraRngDft_MAP (Torque Mode1 Default)",
+    "AccPed_tqDes_DrvMod2_TraRngDft_MAP (Torque Mode2 Default)",
+    "AccPed_tqDes_DrvMod3_TraRngDft_MAP (Torque Mode3 Default)",
+    "AccPed_tqDes_DrvMod4_TraRngDft_MAP (Torque Mode4 Default)",
+    "IKCtl_facKnkRtdt_M (Knock Retard Step)",
+    "Chrset_ratMaxChrgCylFillgRng_MAP (Max Filling WOT)",
+    "DNMAXH (Rev Limit Fuel Cut)"
+  ]
+}

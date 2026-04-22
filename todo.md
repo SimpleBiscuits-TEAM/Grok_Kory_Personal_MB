@@ -1698,3 +1698,10 @@
 - [x] Show the WP8 filename on the dyno page (VirtualDynoPanel header + DynoSheet header)
 - [x] Include the filename in the DynoSheet PDF export header (below config line)
 - [x] Checkpoint and push to GitHub
+
+## Feature — Polaris Pro R MG1 ECU A2L/.s File Analysis
+- [x] Store A2L and .s files in docs/polaris-pro-r/
+- [x] Parse and analyze A2L file — 12,883 calibrations (428 MAPs, 604 CURVEs, 10,676 VALUEs), 12,718 measurements, 25 work package groups
+- [x] Parse and analyze .s file — 6 MB S-record (0x08FC0000-0x095C0000), cal area 0x09380000-0x095BFFFF (2304 KB), DEADBEEF header verified
+- [x] Train Knox — added MG1C400A to knoxKnowledgeServer.ts (ECU table + detailed analysis), shared/knoxKnowledge.ts (Polaris CAN section), and docs/polaris-pro-r/knox_knowledge_polaris_pro_r_mg1.md
+- [x] Checkpoint and push to GitHub
