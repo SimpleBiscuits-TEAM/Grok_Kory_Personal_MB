@@ -1724,3 +1724,16 @@
 - [x] Added 19 new DID definitions to GM_EXTENDED_PIDS + new 'L5P HPT Full Channel List' preset
 - [x] No incorrect scaling found on existing PIDs — all confirmed correct
 - [x] Checkpoint and push to GitHub
+
+## Bug Fix — IntelliSpy Zero Supported PIDs on 2019 L5P E41 (PCAN-USB)
+- [x] Trace full code path: readPid → sendUDSRequest → sendUDSviaRawCAN → ws.send(can_send) → bridge send_raw_frame
+- [x] Identify root cause: ensureGmLiveDataSessionForTx sends 0x10 0x03 (extended session) which 2019 E41 OS rejects — HP Tuners uses NO session control, just TesterPresent + direct Mode 22 reads
+- [x] Decode full HP Tuners BUSMASTER sequence (DDDI setup, TesterPresent, Mode 22 reads)
+- [x] Save BUSMASTER sequence analysis doc (docs/l5p-pid-sniff/hptuners_sequence_analysis.md)
+- [x] Monkey-patch PCANConnection.prototype.ensureGmLiveDataSessionForTx in PpeiDataloggerPanel wrapper
+- [x] New session approach: skip 0x10 0x03, use only TesterPresent (0x3E) like HP Tuners
+- [x] Tobi's DataloggerPanel and pcanConnection.ts remain completely untouched
+- [x] Original Datalogger tab continues to use Tobi's unmodified code as fallback (patch scoped to mount/unmount)
+- [x] Add console logging to patched method for debugging
+- [x] Run tests and verify no regressions (22 pre-existing failures, 0 from our change)
+- [ ] Checkpoint and push to GitHub

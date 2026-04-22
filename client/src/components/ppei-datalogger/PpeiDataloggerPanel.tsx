@@ -13,46 +13,142 @@
  * ║  Instead, add your customizations in this file.                     ║
  * ╚══════════════════════════════════════════════════════════════════════╝
  *
- * Architecture: Option A — Thin Wrapper
- * - Imports Tobi's original DataloggerPanel directly
- * - Renders it inside a sandbox frame with team branding
- * - Provides hook points for team overrides (see TEAM OVERRIDE sections)
- * - Breaking this wrapper does NOT break Tobi's production DATALOGGER tab
+ * ┌──────────────────────────────────────────────────────────────────────┐
+ * │  MONKEY-PATCH: ensureGmLiveDataSessionForTx                        │
+ * │                                                                      │
+ * │  Root cause: Tobi's code sends DiagnosticSessionControl 0x10 0x03   │
+ * │  (extended session) before Mode 22 reads. The 2019 L5P E41 OS       │
+ * │  rejects this, causing all subsequent DID reads to fail (zero PIDs).│
+ * │                                                                      │
+ * │  HP Tuners (proven via BUSMASTER capture) does NOT send 0x10 0x03.  │
+ * │  It uses only TesterPresent (0x3E) + direct Mode 22 reads.          │
+ * │                                                                      │
+ * │  The patch is SCOPED to this tab's lifecycle:                        │
+ * │  - Applied when PpeiDataloggerPanel mounts                          │
+ * │  - Reverted when PpeiDataloggerPanel unmounts                       │
+ * │  - Tobi's original Datalogger tab is NEVER affected                 │
+ * │                                                                      │
+ * │  To disable: remove the useEffect block with applyPpeiSessionPatch  │
+ * └──────────────────────────────────────────────────────────────────────┘
  *
  * @module ppei-datalogger
  * @team PPEI Development Team
  * @sandbox true
  */
-
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import DataloggerPanel, { type DataloggerPanelProps } from '@/components/DataloggerPanel';
-import { Beaker, Shield, Activity } from 'lucide-react';
+import { PCANConnection } from '@/lib/pcanConnection';
+import { Beaker, Shield } from 'lucide-react';
+
+// ══════════════════════════════════════════════════════════════════════════
+// MONKEY-PATCH: HP Tuners-style session management for 2019+ L5P E41
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Non-GM manufacturers that should skip GM-style session setup entirely.
+ * Mirrors the NON_GM_FOR_GMLAN_SESSION set in Tobi's pcanConnection.ts.
+ */
+const NON_GM_MANUFACTURERS = new Set([
+  'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
+  'canam', 'seadoo', 'polaris', 'kawasaki',
+]);
+
+/** Saved reference to Tobi's original method for clean revert. */
+let _originalMethod: Function | null = null;
+
+/**
+ * PPEI replacement for PCANConnection.ensureGmLiveDataSessionForTx.
+ *
+ * Matches HP Tuners' proven approach from BUSMASTER capture on 2019 L5P E41:
+ *   1. TesterPresent (0x3E) with sub-function 0x00 — keeps session alive
+ *   2. NO DiagnosticSessionControl (0x10 0x03) — avoids breaking the ECU state
+ *   3. Direct Mode 22 reads work immediately after TesterPresent
+ *
+ * The 12-second cache is preserved so we don't spam TesterPresent on every PID read.
+ *
+ * Context: `this` is the PCANConnection instance (called via prototype).
+ */
+async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<void> {
+  // Only applies to ECM physical addresses (0x7E0, 0x7E1)
+  if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
+
+  // Skip for non-GM vehicles
+  const mfr = this.vehicleInfo?.manufacturer;
+  if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
+
+  // 12-second cache — don't re-send TesterPresent if we just did
+  const now = Date.now();
+  const last = this.gmLiveSessionAtByTx?.get(ecmTx) ?? 0;
+  if (now - last < 12000) return;
+
+  console.log(
+    `[PPEI Patch] ensureGmLiveDataSession: sending TesterPresent (0x3E) to 0x${ecmTx.toString(16).toUpperCase()} — NO extended session (HP Tuners approach)`,
+  );
+
+  // ── TesterPresent (0x3E 0x00) — keeps default session alive ──
+  try {
+    await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
+    console.log(`[PPEI Patch] TesterPresent OK on 0x${ecmTx.toString(16).toUpperCase()}`);
+  } catch (e: any) {
+    // TesterPresent failure is non-fatal — some ECUs don't respond to it
+    // but still accept Mode 22 reads in default session
+    console.warn(
+      `[PPEI Patch] TesterPresent failed on 0x${ecmTx.toString(16).toUpperCase()}: ${e?.message ?? e}`,
+    );
+  }
+
+  // ── NO DiagnosticSessionControl (0x10 0x03) ──
+  // This is the critical difference from Tobi's original.
+  // HP Tuners does NOT send extended session control before Mode 22 reads.
+  // The 2019 E41 OS supports Mode 22 in the default diagnostic session.
+  // Sending 0x10 0x03 can put the ECU into a state that rejects subsequent reads.
+
+  // Update the cache timestamp
+  if (this.gmLiveSessionAtByTx) {
+    this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
+  }
+
+  // Short settle after TesterPresent (40ms, same as Tobi's post-session settle)
+  await new Promise(r => setTimeout(r, 40));
+}
+
+/**
+ * Apply the PPEI session patch to PCANConnection.prototype.
+ * Returns a cleanup function that reverts the patch.
+ */
+function applyPpeiSessionPatch(): () => void {
+  const proto = PCANConnection.prototype as any;
+
+  // Save original (only if not already saved from a previous mount)
+  if (!_originalMethod) {
+    _originalMethod = proto.ensureGmLiveDataSessionForTx;
+  }
+
+  // Apply the patch
+  proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
+
+  console.log(
+    '[PPEI Patch] ✅ ensureGmLiveDataSessionForTx APPLIED — HP Tuners approach (TesterPresent only, no 0x10 0x03)',
+  );
+
+  // Return cleanup function
+  return () => {
+    if (_originalMethod) {
+      proto.ensureGmLiveDataSessionForTx = _originalMethod;
+      console.log('[PPEI Patch] ⏪ ensureGmLiveDataSessionForTx REVERTED to Tobi\'s original');
+    }
+  };
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // TEAM OVERRIDE ZONE — Add your custom hooks, state, and logic here
 // ══════════════════════════════════════════════════════════════════════════
 
-/**
- * usePpeiDataloggerOverrides — Custom hook for team-specific datalogger behavior.
- *
- * Examples of what you can add here:
- * - Custom PID filtering or injection
- * - Additional data processing pipelines
- * - Team-specific logging / telemetry
- * - Custom adapter selection logic
- * - Pre/post recording hooks
- */
 function usePpeiDataloggerOverrides() {
   const [sandboxNotes, setSandboxNotes] = useState('');
-
-  // ── ADD YOUR CUSTOM HOOKS HERE ──
-  // const [customPidFilter, setCustomPidFilter] = useState<string[]>([]);
-  // const [customAdapterPreference, setCustomAdapterPreference] = useState<string>('auto');
-
   return {
     sandboxNotes,
     setSandboxNotes,
-    // ...spread your custom values here
   };
 }
 
@@ -62,8 +158,6 @@ function usePpeiDataloggerOverrides() {
 
 interface PpeiDataloggerPanelProps extends DataloggerPanelProps {
   // ── ADD PPEI-SPECIFIC PROPS HERE ──
-  // customPidPreset?: string;
-  // enableExperimentalFeatures?: boolean;
 }
 
 export default function PpeiDataloggerPanel({
@@ -75,34 +169,25 @@ export default function PpeiDataloggerPanel({
   const [showSandboxBanner, setShowSandboxBanner] = useState(true);
 
   // ══════════════════════════════════════════════════════════════════
-  // TEAM PROP INTERCEPTORS — Modify props before passing to Tobi's component
+  // SCOPED MONKEY-PATCH — applied on mount, reverted on unmount
+  // ══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    const revert = applyPpeiSessionPatch();
+    return revert; // cleanup on unmount → restores Tobi's original
+  }, []);
+
+  // ══════════════════════════════════════════════════════════════════
+  // TEAM PROP INTERCEPTORS
   // ══════════════════════════════════════════════════════════════════
 
-  /**
-   * Override the onOpenInAnalyzer callback to add team-specific behavior.
-   * Currently passes through to the original — add your logic here.
-   */
   const handleOpenInAnalyzer = useCallback(
     (csvData: string, filename: string) => {
-      // ── TEAM OVERRIDE: Add pre-processing before opening in analyzer ──
-      // Example: console.log('[PPEI Sandbox] Opening datalog in analyzer:', filename);
-      // Example: csvData = addCustomColumns(csvData);
-
       onOpenInAnalyzer?.(csvData, filename);
     },
     [onOpenInAnalyzer],
   );
 
-  /**
-   * Override injected PIDs to add team-specific PIDs.
-   * Currently passes through — add your custom PIDs here.
-   */
   const processedPids = injectedPids;
-  // ── TEAM OVERRIDE: Add custom PIDs ──
-  // const processedPids = useMemo(() => {
-  //   const teamPids = [{ pid: 0xFF01, service: 0x22, name: 'Custom PPEI PID', shortName: 'PPEI1' }];
-  //   return [...(injectedPids || []), ...teamPids];
-  // }, [injectedPids]);
 
   return (
     <div className="relative h-full w-full">
@@ -145,7 +230,6 @@ export default function PpeiDataloggerPanel({
 
       {/* ══════════════════════════════════════════════════════════════════
        * TEAM PRE-DATALOGGER ZONE — Add custom UI ABOVE the datalogger here
-       * Examples: custom PID presets, team recording profiles, experiment toggles
        * ══════════════════════════════════════════════════════════════════ */}
 
       {/* ── Tobi's Datalogger Panel (imported directly — auto-updates) ── */}
@@ -156,7 +240,6 @@ export default function PpeiDataloggerPanel({
 
       {/* ══════════════════════════════════════════════════════════════════
        * TEAM POST-DATALOGGER ZONE — Add custom UI BELOW the datalogger here
-       * Examples: custom data export, team analysis tools, experiment results
        * ══════════════════════════════════════════════════════════════════ */}
     </div>
   );
