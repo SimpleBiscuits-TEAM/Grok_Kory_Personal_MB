@@ -561,6 +561,21 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     unit: 'gal/h', min: 0, max: 865.5, bytes: 2, category: 'fuel',
     formula: ([a, b]) => ((a * 256) + b) * 0.05 * 0.264172,  // L/h→gal/h
   },
+  {
+    pid: 0x61, name: 'Driver Demand Engine Torque %', shortName: 'DEM_TQ',
+    unit: '%', min: -125, max: 130, bytes: 1, category: 'engine',
+    formula: ([a]) => a - 125,
+  },
+  {
+    pid: 0x62, name: 'Actual Engine Torque %', shortName: 'ACT_TQ',
+    unit: '%', min: -125, max: 130, bytes: 1, category: 'engine',
+    formula: ([a]) => a - 125,
+  },
+  {
+    pid: 0x63, name: 'Engine Reference Torque', shortName: 'REF_TQ',
+    unit: 'Nm', min: 0, max: 65535, bytes: 2, category: 'engine',
+    formula: ([a, b]) => (a * 256) + b,
+  },
 ];
 
 // ─── PID Preset Groups ──────────────────────────────────────────────────────
@@ -678,7 +693,7 @@ export const PID_PRESETS: PIDPreset[] = [
   },
   // ── Diesel Engine Presets ──
   {
-    name: 'Diesel Turbo/Boost',
+    name: 'Diesel Throttle/Sensors',
     description: 'RPM, MAP/Boost, IAT, MAF, Barometric',
     pids: [0x0C, 0x0B, 0x0F, 0x10, 0x33],
   },
@@ -699,25 +714,25 @@ export const PID_PRESETS: PIDPreset[] = [
   },
   {
     name: 'Full Duramax (Gen 2 / 2024+)',
-    description: 'RPM, Boost CMD/ACT, FRP CMD/ACT, VGT, EGT, TCC, TFT — E42 ECM',
+    description: 'RPM, FRP, Throttle, Injection, EGT, ECT, IAT, IPW — HPT-verified DIDs',
     pids: [
       0x0C,     // RPM (Mode 01)
-      0x0572,   // Commanded Boost (Mode 22 ECM)
-      0x0573,   // Actual Boost (Mode 22 ECM)
-      0x0564,   // Commanded FRP (Mode 22 ECM)
-      0x0565,   // Actual FRP (Mode 22 ECM)
-      0x0574,   // VGT Commanded (Mode 22 ECM)
-      0x0575,   // VGT Actual (Mode 22 ECM)
-      0x0580,   // EGT Pre-Turbo (Mode 22 ECM)
-      0x0576,   // Turbo Speed (Mode 22 ECM)
-      0x05A1,   // TCC Slip (Mode 22 TCM)
-      0x05A0,   // TFT (Mode 22 TCM)
-      0x05A3,   // Trans Output Speed (Mode 22 TCM)
+      0x30BC,   // FRP Desired (HPT kPa)
+      0x30C1,   // FRP Actual (HPT kPa)
+      0x208A,   // Fuel Pressure SAE (low-side)
+      0x1543,   // Diesel Throttle Position A
+      0x1540,   // Diesel Throttle Position B
+      0x12DA,   // Injection Timing (HPT)
+      0x0069,   // EGT Bank Extended (multi-frame)
+      0x13C8,   // Engine Coolant Temp HPT
+      0x114D,   // Intake Air Temp Diesel
+      0x20AC,   // IPW Cyl 1
+      0x20B4,   // IBR Cyl 1
     ],
   },
   {
     name: '2024-2026 L5P Banks iDash Full',
-    description: 'Complete Banks iDash layout: FRP, Boost, VGT, EGT, EGR, DPF, DEF, NOx, Oil, Trans, IAT — E42 ECM',
+    description: 'Complete Banks iDash layout: FRP, Throttle, EGT, EGR, DPF, DEF, NOx, IAT, ECT — HPT-verified DIDs',
     pids: [
       0x0C,     // Engine RPM (Mode 01)
       0x0D,     // Vehicle Speed (Mode 01)
@@ -726,61 +741,56 @@ export const PID_PRESETS: PIDPreset[] = [
       0x04,     // Calculated Engine Load (Mode 01)
       0x33,     // Barometric Pressure (Mode 01)
       0x42,     // ECU Battery Voltage (Mode 01)
-      0x0565,   // Fuel Rail Pressure Actual
-      0x0564,   // FRP Commanded
-      0x054A,   // FRP Deviation
-      0x056C,   // Injection Timing
-      0x056D,   // Injection Quantity
-      0x0572,   // Commanded Boost
-      0x0573,   // Actual Boost
-      0x0574,   // VGT Commanded
-      0x0575,   // VGT Actual
-      0x0576,   // Turbo Speed
-      0x0580,   // EGT Pre-Turbo
-      0x0581,   // EGT Post-Turbo
-      0x057A,   // Charge Air Cooler Outlet Temp
-      0x0590,   // EGR Mass Flow
-      0x05B0,   // Engine Oil Temp
-      0x05B1,   // Engine Oil Pressure
-      0x05A0,   // Transmission Fluid Temp
-      0x05A1,   // TCC Slip
-      0x05A2,   // TCC Commanded Pressure
-      0x05A3,   // Trans Output Speed
+      0x30C1,   // FRP Actual (HPT kPa)
+      0x30BC,   // FRP Desired (HPT kPa)
+      0x208A,   // Fuel Pressure SAE (low-side)
+      0x12DA,   // Injection Timing (HPT)
+      0x20E3,   // Main Fuel Rate (mm³)
+      0x1543,   // Diesel Throttle Position A
+      0x1540,   // Diesel Throttle Position B
+      0x0069,   // EGT Bank Extended (multi-frame)
+      0x114D,   // Intake Air Temp Diesel
+      0x13C8,   // Engine Coolant Temp HPT
+      0x232C,   // Ambient Air Temp Diesel
+      0x1502,   // EGR Pintle Position
       0x1A10,   // DPF Soot Load
       0x1A11,   // DPF Differential Pressure
       0x1A14,   // DPF Regen Status
-      0x1A20,   // DEF Tank Level
+      0x1A20,   // DEF Level
       0x1A21,   // DEF Tank Temperature
       0x1A22,   // DEF Dosing Rate
-      0x1A23,   // SCR Inlet NOx
-      0x1A24,   // SCR Outlet NOx
+      0x11F8,   // NOx Sensor 1
+      0x11FA,   // NOx Sensor 2
     ],
   },
   {
     name: 'L5P HPT Full Channel List (Confirmed)',
-    description: 'All 25 Mode 22 DIDs confirmed from HP Tuners BUSMASTER sniff — FRP, Boost, VGT, EGT, Torque, Throttle, DPF, DEF, NOx, BARO',
+    description: 'All HPT-verified Mode 22 DIDs from IntelliSpy capture — FRP, Throttle, EGT, Torque, DPF, DEF, NOx, BARO, IPW, IBR',
     pids: [
       0x0C,     // RPM (Mode 01)
       0x0D,     // Vehicle Speed (Mode 01)
       0x05,     // Engine Coolant Temp (Mode 01)
       0x10,     // Mass Air Flow (Mode 01)
       0x04,     // Calculated Engine Load (Mode 01)
-      // -- HPT-confirmed Mode 22 DIDs --
+      // -- HPT-verified Mode 22 DIDs --
       0x0062,   // Actual Engine Torque %
       0x0063,   // Engine Reference Torque (Nm)
       0x005D,   // Fuel Injection Timing (SAE)
-      0x0564,   // FRP Commanded
-      0x0565,   // FRP Actual
-      0x30BC,   // FRP Desired (HPT proprietary)
-      0x30C1,   // FRP Actual (HPT proprietary)
+      0x208A,   // Fuel Pressure SAE (low-side)
+      0x30BC,   // FRP Desired (HPT kPa)
+      0x30C1,   // FRP Actual (HPT kPa)
       0x30BE,   // Diesel Commanded Throttle
-      0x0572,   // Commanded Boost
-      0x0573,   // Actual Boost
-      0x0574,   // VGT Commanded
-      0x0575,   // VGT Actual
-      0x0576,   // Turbo Speed
-      0x0580,   // EGT Pre-Turbo
-      0x0581,   // EGT Post-Turbo
+      0x12DA,   // Injection Timing (HPT)
+      0x20E3,   // Main Fuel Rate
+      0x208B,   // Injection Timing Correction
+      0x1543,   // Diesel Throttle Position A
+      0x1540,   // Diesel Throttle Position B
+      0x114D,   // Intake Air Temp Diesel
+      0x13C8,   // Engine Coolant Temp HPT
+      0x232C,   // Ambient Air Temp Diesel
+      0x1502,   // EGR Pintle Position
+      0x11F8,   // NOx Sensor 1
+      0x11FA,   // NOx Sensor 2
       0x0069,   // EGT Bank Extended (multi-frame)
       0x0071,   // NOx Sensor Concentration
       0x007A,   // NOx Sensor O2
@@ -792,21 +802,29 @@ export const PID_PRESETS: PIDPreset[] = [
       0x308A,   // Barometric Pressure (Diesel)
       0x1141,   // Fuel Tank Level
       0x90D6,   // VIN Program Counter
+      // -- Injector Pulse Widths --
+      0x20AC, 0x20AD, 0x20AE, 0x20AF,
+      0x20B0, 0x20B1, 0x20B2, 0x20B3,
+      // -- Injector Balance Rates --
+      0x20B4, 0x20B5, 0x20B6, 0x20B7,
+      0x20B8, 0x20B9, 0x20BA, 0x20BB,
     ],
   },
   {
     name: 'Duramax Fuel System (Extended)',
-    description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, FPR current (mA), Injector Balance Rates',
+    description: 'FRP, Fuel Pressure SAE, Injection Timing, Fuel Rate, IPW 1-8, IBR 1-8 — HPT-verified',
     pids: [
       0x0C,     // RPM
-      0x0564,   // FRP Commanded
-      0x0565,   // FRP Actual
-      0x054A,   // FRP Deviation
-      0x056C,   // Injection Timing
-      0x056D,   // Injection Quantity
-      0x0549,   // FPR solenoid current (mA), not PWM duty
-      0x1940, 0x1941, 0x1942, 0x1943, // IBR Cyl 1-4
-      0x1944, 0x1945, 0x1946, 0x1947, // IBR Cyl 5-8
+      0x30BC,   // FRP Desired
+      0x30C1,   // FRP Actual
+      0x208A,   // Fuel Pressure SAE (low-side)
+      0x12DA,   // Injection Timing (HPT)
+      0x20E3,   // Main Fuel Rate
+      0x208B,   // Injection Timing Correction
+      0x20AC, 0x20AD, 0x20AE, 0x20AF, // IPW Cyl 1-4
+      0x20B0, 0x20B1, 0x20B2, 0x20B3, // IPW Cyl 5-8
+      0x20B4, 0x20B5, 0x20B6, 0x20B7, // IBR Cyl 1-4
+      0x20B8, 0x20B9, 0x20BA, 0x20BB, // IBR Cyl 5-8
     ],
   },
   {
@@ -823,7 +841,9 @@ export const PID_PRESETS: PIDPreset[] = [
       0x1A22,   // DEF Dosing Rate
       0x1A23,   // SCR Inlet NOx
       0x1A24,   // SCR Outlet NOx
-      0x0590,   // EGR Flow
+      0x1502,   // EGR Pintle Position
+      0x11F8,   // NOx Sensor 1
+      0x11FA,   // NOx Sensor 2
     ],
   },
   // ── Ford 6.2L Boss V8 (Raptor) Presets ──
@@ -908,29 +928,29 @@ export const PID_PRESETS: PIDPreset[] = [
       0x63,     // Engine Reference Torque
       0x2F,     // Fuel Tank Level
       0x5C,     // Engine Oil Temp
-      // ── Mode 22 Extended — Fuel System (confirmed) ──
-      0x0564,   // FRP Commanded (MPa)
-      0x0565,   // FRP Actual (MPa)
-      0x054A,   // FRP Deviation (MPa)
+      // ── Mode 22 Extended — Fuel System (HPT-verified) ──
+      0x208A,   // Fuel Pressure SAE (low-side, PSI)
       0x30BC,   // FRP Desired (HPT kPa)
       0x30C1,   // FRP Actual (HPT kPa)
-      0x056C,   // Injection Timing (°BTDC)
-      0x056D,   // Injection Quantity (mm³/stroke)
-      0x0549,   // FPR Solenoid Current (mA)
-      // ── Mode 22 Extended — Turbo / Boost (confirmed) ──
-      0x0572,   // Boost Commanded (kPa)
-      0x0573,   // Boost Actual (kPa)
-      0x0574,   // VGT Commanded (%)
-      0x0575,   // VGT Actual (%)
-      0x0576,   // Turbo Speed (RPM)
+      0x12DA,   // Injection Timing (HPT °BTDC)
+      0x20E3,   // Main Fuel Rate (mm³)
+      0x208B,   // Injection Timing Correction (°)
+      0x1141,   // Fuel Tank Level (gal)
+      // ── Mode 22 Extended — Turbo / Sensors (HPT-verified) ──
+      0x1543,   // Diesel Throttle Position A (%)
+      0x1540,   // Diesel Throttle Position B (%)
+      0x114D,   // Intake Air Temp Diesel (°F)
+      0x13C8,   // Engine Coolant Temp HPT (°F)
+      0x232C,   // Ambient Air Temp Diesel (°F)
       0x30BE,   // Diesel Commanded Throttle (%)
       // ── Mode 22 Extended — Exhaust / EGT (confirmed) ──
-      0x0580,   // EGT Pre-Turbo (°C)
-      0x0581,   // EGT Post-Turbo (°C)
       0x0069,   // EGT Bank Extended (multi-frame)
-      // ── Mode 22 Extended — Emissions / DPF / DEF (confirmed) ──
-      0x0071,   // NOx Sensor Concentration (ppm)
-      0x007A,   // NOx Sensor O2 (%)
+      // ── Mode 22 Extended — Emissions (HPT-verified) ──
+      0x1502,   // EGR Pintle Position (%)
+      0x11F8,   // NOx Sensor 1 (ppm)
+      0x11FA,   // NOx Sensor 2 (ppm)
+      0x0071,   // NOx Sensor Concentration (ppm, multi-frame)
+      0x007A,   // NOx Sensor O2 (%, multi-frame)
       0x006A,   // Exhaust Gas Pressure (kPa)
       0x008B,   // Diesel Particulate Matter (mg/m³)
       0x328A,   // DPF Regen Percentage (%)
@@ -942,15 +962,24 @@ export const PID_PRESETS: PIDPreset[] = [
       // ── Mode 22 Extended — Engine / Torque (confirmed) ──
       0x0062,   // Actual Engine Torque % (Mode 22)
       0x0063,   // Engine Reference Torque Nm (Mode 22)
-      // ── Injector Balance Rates ──
-      0x1940,   // IBR Cyl 1
-      0x1941,   // IBR Cyl 2
-      0x1942,   // IBR Cyl 3
-      0x1943,   // IBR Cyl 4
-      0x1944,   // IBR Cyl 5
-      0x1945,   // IBR Cyl 6
-      0x1946,   // IBR Cyl 7
-      0x1947,   // IBR Cyl 8
+      // ── Injector Pulse Widths (HPT-verified) ──
+      0x20AC,   // IPW Cyl 1
+      0x20AD,   // IPW Cyl 2
+      0x20AE,   // IPW Cyl 3
+      0x20AF,   // IPW Cyl 4
+      0x20B0,   // IPW Cyl 5
+      0x20B1,   // IPW Cyl 6
+      0x20B2,   // IPW Cyl 7
+      0x20B3,   // IPW Cyl 8
+      // ── Injector Balance Rates (HPT-verified) ──
+      0x20B4,   // IBR Cyl 1
+      0x20B5,   // IBR Cyl 2
+      0x20B6,   // IBR Cyl 3
+      0x20B7,   // IBR Cyl 4
+      0x20B8,   // IBR Cyl 5
+      0x20B9,   // IBR Cyl 6
+      0x20BA,   // IBR Cyl 7
+      0x20BB,   // IBR Cyl 8
     ],
   },
 ];
@@ -963,130 +992,208 @@ export const PID_PRESETS: PIDPreset[] = [
 // The 2024+ E42 ECM requires directed addressing (ATSH 7E0) for Mode 22.
 
 export const GM_EXTENDED_PIDS: PIDDefinition[] = [
-  // ── Fuel System (Diesel) ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // L5P E41 Diesel — Fuel System (HPT-verified DIDs from IntelliSpy capture)
+  // OLD 0x05xx DIDs removed — ECU does NOT support them (HPT never reads them)
+  // ══════════════════════════════════════════════════════════════════════════
   {
-    pid: 0x0564, name: 'Commanded Fuel Rail Pressure', shortName: 'FRP_CMD',
-    unit: 'PSI', min: 0.0, max: 29007.6, bytes: 2, service: 0x22, category: 'fuel',
+    // HPT "Fuel Pressure (SAE)" — low-side fuel pressure (CP4 inlet)
+    // IntelliSpy: DID 0x208A, raw 0x0C8E = 3214, HPT shows 60.05 PSI → scale 0.01868
+    pid: 0x208A, name: 'Fuel Pressure (SAE)', shortName: 'FP_SAE',
+    unit: 'PSI', min: 0.0, max: 120, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.00390625) * 145.038,
+    formula: ([a, b]) => ((a * 256) + b) * 0.01868,
   },
   {
-    pid: 0x0565, name: 'Actual Fuel Rail Pressure', shortName: 'FRP_ACT',
-    unit: 'PSI', min: 0.0, max: 29007.6, bytes: 2, service: 0x22, category: 'fuel',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.00390625) * 145.038,
-  },
-  {
-    pid: 0x054A, name: 'Fuel Rail Pressure Deviation', shortName: 'FRP_DEV',
-    unit: 'PSI', min: -7251.9, max: 7251.9, bytes: 2, service: 0x22, category: 'fuel',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((((a * 256) + b) - 32768) * 0.00390625) * 145.038,
-  },
-  {
-    pid: 0x056C, name: 'Fuel Injection Timing', shortName: 'INJ_TMG',
+    // HPT "Fuel Injection Timing" — DID 0x12DA
+    // IntelliSpy: raw 0x0F0B = 3851, HPT shows -1° at idle
+    // Signed 16-bit * 0.001 degrees (negative = BTDC)
+    pid: 0x12DA, name: 'Fuel Injection Timing', shortName: 'INJ_TMG',
     unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.0078125,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.001; },
   },
   {
-    pid: 0x056D, name: 'Fuel Injection Quantity', shortName: 'INJ_QTY',
-    unit: 'mm³/stroke', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    // HPT "Main Fuel Rate" — DID 0x20E3
+    // IntelliSpy: raw 0x003C = 60, HPT shows 7 mm³ → scale ~0.1167
+    // Using 0.1 as approximate (HPT may use slightly different scale)
+    pid: 0x20E3, name: 'Main Fuel Rate', shortName: 'FUEL_RATE',
+    unit: 'mm³', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
   },
   {
-    // GM CP3/CP4 inlet metering / FPR: ECM drives solenoid **current (mA)**, not a % duty cycle.
-    // Rule-of-thumb for many Duramax calibrations: ~400 mA ≈ high regulator opening (more flow toward rail),
-    // ~1800 mA ≈ low opening. Map UDS byte linearly to 400–1800 mA (adjust if your A2L disagrees).
-    pid: 0x0549, name: 'Fuel Pressure Regulator Current', shortName: 'FPR_I',
-    unit: 'mA', min: 400, max: 1800, bytes: 1, service: 0x22, category: 'fuel',
+    // HPT "Injection Timing Correction" — DID 0x208B
+    // IntelliSpy: raw 0xFFF9 = signed -7, HPT shows -1.109° at idle
+    // Signed 16-bit * 0.01 degrees
+    pid: 0x208B, name: 'Injection Timing Correction', shortName: 'INJ_COR',
+    unit: '°', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => 400 + (a / 255) * 1400,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
+  },
+  // ── Injector Pulse Widths (HPT-verified, DID 0x20AC-0x20B3) ──
+  {
+    pid: 0x20AC, name: 'Injector Pulse Width Cyl 1', shortName: 'IPW_1',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
   },
   {
-    pid: 0x1940, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
+    pid: 0x20AD, name: 'Injector Pulse Width Cyl 2', shortName: 'IPW_2',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20AE, name: 'Injector Pulse Width Cyl 3', shortName: 'IPW_3',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20AF, name: 'Injector Pulse Width Cyl 4', shortName: 'IPW_4',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20B0, name: 'Injector Pulse Width Cyl 5', shortName: 'IPW_5',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20B1, name: 'Injector Pulse Width Cyl 6', shortName: 'IPW_6',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20B2, name: 'Injector Pulse Width Cyl 7', shortName: 'IPW_7',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    pid: 0x20B3, name: 'Injector Pulse Width Cyl 8', shortName: 'IPW_8',
+    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  // ── Injector Balance Rates (HPT-verified, DID 0x20B4-0x20BB) ──
+  // IntelliSpy: raw 0xFFF6 = signed -10, scale * 0.01 → -0.10 mm³
+  {
+    pid: 0x20B4, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1941, name: 'Injector Balance Rate Cyl 2', shortName: 'IBR_2',
+    pid: 0x20B5, name: 'Injector Balance Rate Cyl 2', shortName: 'IBR_2',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1942, name: 'Injector Balance Rate Cyl 3', shortName: 'IBR_3',
+    pid: 0x20B6, name: 'Injector Balance Rate Cyl 3', shortName: 'IBR_3',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1943, name: 'Injector Balance Rate Cyl 4', shortName: 'IBR_4',
+    pid: 0x20B7, name: 'Injector Balance Rate Cyl 4', shortName: 'IBR_4',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1944, name: 'Injector Balance Rate Cyl 5', shortName: 'IBR_5',
+    pid: 0x20B8, name: 'Injector Balance Rate Cyl 5', shortName: 'IBR_5',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1945, name: 'Injector Balance Rate Cyl 6', shortName: 'IBR_6',
+    pid: 0x20B9, name: 'Injector Balance Rate Cyl 6', shortName: 'IBR_6',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1946, name: 'Injector Balance Rate Cyl 7', shortName: 'IBR_7',
+    pid: 0x20BA, name: 'Injector Balance Rate Cyl 7', shortName: 'IBR_7',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1947, name: 'Injector Balance Rate Cyl 8', shortName: 'IBR_8',
+    pid: 0x20BB, name: 'Injector Balance Rate Cyl 8', shortName: 'IBR_8',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
-  // ── Turbo / Boost ──
+  // ── Turbo / Boost (HPT-verified DIDs) ──
   {
-    pid: 0x0572, name: 'Commanded Boost Pressure', shortName: 'BOOST_CMD',
-    unit: 'PSI', min: 0.0, max: 58.0, bytes: 2, service: 0x22, category: 'turbo',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.0078125) * 0.145038,
-  },
-  {
-    pid: 0x0573, name: 'Actual Boost Pressure', shortName: 'BOOST_ACT',
-    unit: 'PSI', min: 0.0, max: 58.0, bytes: 2, service: 0x22, category: 'turbo',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.0078125) * 0.145038,
-  },
-  {
-    pid: 0x0574, name: 'VGT Turbo Vane Position Commanded', shortName: 'VGT_CMD',
+    // HPT "Diesel Throttle Position A" — DID 0x1543
+    // IntelliSpy: raw 0xA1 = 161, 161/255*100 = 63.14% → matches HPT "Turbo Vane Position"
+    pid: 0x1543, name: 'Diesel Throttle Position A', shortName: 'THRTL_A',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x0575, name: 'VGT Turbo Vane Position Actual', shortName: 'VGT_ACT',
+    // HPT "Diesel Throttle Position B" — DID 0x1540
+    pid: 0x1540, name: 'Diesel Throttle Position B', shortName: 'THRTL_B',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x0576, name: 'Turbo Speed', shortName: 'TURBO_RPM',
-    unit: 'rpm', min: 0, max: 300000, bytes: 2, service: 0x22, category: 'turbo',
+    // HPT "Intake Air Temp" — DID 0x114D
+    // IntelliSpy: raw 0x65 = 101, HPT shows 116.6°F (47°C)
+    // Formula: a * 0.46535 = °C, then °C → °F
+    pid: 0x114D, name: 'Intake Air Temp (Diesel)', shortName: 'IAT_DSL',
+    unit: '°F', min: -40, max: 300, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 4,
+    formula: ([a]) => (a * 0.46535) * 1.8 + 32,
   },
   {
-    pid: 0x057A, name: 'Charge Air Cooler Outlet Temp', shortName: 'CAC_OUT',
-    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'turbo',
+    // HPT "Engine Coolant Temp" — DID 0x13C8
+    // IntelliSpy: raw 0xB9 = 185, HPT shows 183.2°F (84°C)
+    // Formula: a * 0.454 = °C, then °C → °F
+    pid: 0x13C8, name: 'Engine Coolant Temp (Diesel HPT)', shortName: 'ECT_HPT',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a * 0.454) * 1.8 + 32,
+  },
+  {
+    // HPT "Ambient Air Temp" — DID 0x232C
+    // IntelliSpy: raw 0x45 = 69, (69-40) = 29°C → 84.2°F → EXACT MATCH
+    pid: 0x232C, name: 'Ambient Air Temp (Diesel)', shortName: 'AAT_DSL',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a - 40) * 1.8 + 32,
+  },
+  {
+    // HPT "EGR Pintle Position" — DID 0x1502
+    // IntelliSpy: raw 0x1F = 31, 31/255*100 = 12.16%
+    pid: 0x1502, name: 'EGR Pintle Position', shortName: 'EGR_PINTLE',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    // HPT "NOx Sensor 1" — DID 0x11F8
+    // IntelliSpy: raw 0x0000 = 0 at idle (sensors not warmed up)
+    pid: 0x11F8, name: 'NOx Sensor 1', shortName: 'NOX_1',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    // HPT "NOx Sensor 2" — DID 0x11FA
+    pid: 0x11FA, name: 'NOx Sensor 2', shortName: 'NOX_2',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b),
   },
   // ── Exhaust / DPF ──
   {
@@ -1131,18 +1238,8 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.621371,
   },
-  {
-    pid: 0x0580, name: 'EGT Bank 1 Sensor 1 (Pre-Turbo)', shortName: 'EGT_PRE',
-    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
-  },
-  {
-    pid: 0x0581, name: 'EGT Bank 1 Sensor 2 (Post-Turbo)', shortName: 'EGT_POST',
-    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
-  },
+  // NOTE: EGT Pre/Post-Turbo (old 0x0580/0x0581) removed — 0x05xx not supported on E41
+  // EGT data available via multi-frame DID 0x0069 (EGT Bank Extended) below
   // ── DEF / SCR ──
   {
     pid: 0x1A20, name: 'DEF Tank Level', shortName: 'DEF_LVL',
@@ -1186,19 +1283,8 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
-  // ── EGR Extended ──
-  {
-    pid: 0x0590, name: 'EGR Mass Flow Rate', shortName: 'EGR_FLOW',
-    unit: 'lb/min', min: 0.0, max: 18.37, bytes: 2, service: 0x22, category: 'emissions',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.0367437,
-  },
-  {
-    pid: 0x0591, name: 'EGR Cooler Bypass Position', shortName: 'EGR_BYP',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
-  },
+  // NOTE: EGR Mass Flow (old 0x0590) and EGR Cooler Bypass (old 0x0591) removed — 0x05xx not supported on E41
+  // EGR Pintle Position (0x1502) added above in HPT-verified section
   // ══════════════════════════════════════════════════════════════════════════
   // L5P E41 Diesel — Additional DIDs confirmed via HP Tuners + BUSMASTER sniff
   // Verified 2024-04-21 against BUSMASTERLogFile_FullPIDsChannelListHPT4.21.26
@@ -1320,7 +1406,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     pid: 0x1141, name: 'Fuel Tank Level (Diesel)', shortName: 'FUEL_LVL',
     unit: 'gal', min: 0, max: 40, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => a * 0.2275,  // Derived: 143 * 0.2275 = 32.53 gal
+    formula: ([a]) => a * 0.21832,  // HPT-verified: 143 * 0.21832 = 31.22 gal (matches HPT 31.2177)
   },
   {
     pid: 0x90D6, name: 'VIN Program Counter', shortName: 'VIN_CNT',
@@ -1328,62 +1414,8 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => a,
   },
-  // ── Transmission Extended ──
-  {
-    pid: 0x05A0, name: 'Transmission Fluid Temperature', shortName: 'TFT',
-    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a]) => (a - 40) * 1.8 + 32,
-  },
-  {
-    pid: 0x05A1, name: 'TCC Slip Speed', shortName: 'TCC_SLIP',
-    unit: 'rpm', min: -1000, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => (((a * 256) + b) - 32768),
-  },
-  {
-    pid: 0x05A2, name: 'Commanded TCC Pressure', shortName: 'TCC_CMD',
-    unit: 'PSI', min: 0.0, max: 362.6, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
-  },
-  {
-    pid: 0x05A3, name: 'Transmission Output Speed', shortName: 'TRANS_OUT',
-    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => ((a * 256) + b),
-  },
-  {
-    pid: 0x05A4, name: 'Transmission Input Speed', shortName: 'TRANS_IN',
-    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => ((a * 256) + b),
-  },
-  // ── Engine Extended ──
-  {
-    pid: 0x05B0, name: 'Engine Oil Temperature', shortName: 'EOT',
-    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a]) => (a - 40) * 1.8 + 32,
-  },
-  {
-    pid: 0x05B1, name: 'Engine Oil Pressure', shortName: 'EOP',
-    unit: 'PSI', min: 0.0, max: 145.0, bytes: 2, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
-  },
-  {
-    pid: 0x05B2, name: 'Engine Oil Life Remaining', shortName: 'OIL_LIFE',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
-  },
-  {
-    pid: 0x05B3, name: 'Fuel Filter Life Remaining', shortName: 'FUEL_FILT',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
-  },
+  // NOTE: Transmission (old 0x05A0-0x05A4) and Oil (old 0x05B0-0x05B3) removed — 0x05xx not supported on E41
+  // Transmission data available via T93 TCM DIDs (0x1940-0x1942 on 7E2) defined in E90 section
   // ══════════════════════════════════════════════════════════════════════════
   // GM E90 / Global B Gas Truck — ECM Extended DIDs (UDS $22 on 7E0→7E8)
   // Verified against BUSMASTER passive sniff + EFI Live V8 CSV export

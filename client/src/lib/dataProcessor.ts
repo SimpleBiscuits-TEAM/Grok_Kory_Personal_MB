@@ -451,7 +451,27 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'CLR_DIST': '_clr_dist',
   'INJ_TMG': '_inj_tmg',
   'EGR_FLOW': '_egr_flow',
-  // GM extended PIDs (Mode 22)
+  // GM extended PIDs (Mode 22) — HPT-verified replacements
+  'FP_SAE': '_fp_sae',           // 0x208A Fuel Pressure SAE (low-side)
+  'INJ_COR': '_inj_cor',         // 0x208B Injection Timing Correction
+  'THRTL_A': 'turboVanePosition',// 0x1543 Diesel Throttle Position A (HPT maps this to VGT)
+  'THRTL_B': 'turboVaneDesired', // 0x1540 Diesel Throttle Position B
+  'IAT_DSL': 'intakeAirTemp',    // 0x114D Intake Air Temp Diesel
+  'ECT_HPT': 'coolantTemp',      // 0x13C8 Engine Coolant Temp HPT
+  'AAT_DSL': '_aat_dsl',          // 0x232C Ambient Air Temp Diesel
+  'EGR_PINTLE': 'egrPosition',   // 0x1502 EGR Pintle Position
+  'NOX_1': '_nox_1',             // 0x11F8 NOx Sensor 1
+  'NOX_2': '_nox_2',             // 0x11FA NOx Sensor 2
+  // Injector Pulse Widths (HPT-verified 0x20AC-0x20B3)
+  'IPW_1': 'injectorPulseWidth', // Map Cyl 1 as primary
+  'IPW_2': '_ipw_2',
+  'IPW_3': '_ipw_3',
+  'IPW_4': '_ipw_4',
+  'IPW_5': '_ipw_5',
+  'IPW_6': '_ipw_6',
+  'IPW_7': '_ipw_7',
+  'IPW_8': '_ipw_8',
+  // Legacy aliases (old 0x05xx names — keep for backward compat with old CSV exports)
   'BOOST_CMD': 'boostDesired',
   'BOOST_ACT': 'boost',
   'VGT_CMD': 'turboVaneDesired',

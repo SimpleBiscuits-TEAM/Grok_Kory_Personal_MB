@@ -47,7 +47,7 @@ describe('combustionInference', () => {
   });
 
   it('infers diesel from Mode 22 PIDs', () => {
-    const r = inferCombustionFromObdPids([0x0564, 0x0565, 0x1a10]);
+    const r = inferCombustionFromObdPids([0x208A, 0x12DA, 0x1a10]);
     expect(r.family).toBe('diesel');
   });
 

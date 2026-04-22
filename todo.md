@@ -1832,3 +1832,17 @@
 - [x] Updated Patch 1 in frontend: sends dddi_setup to bridge instead of 0x10 0x03
 - [x] Fallback: if dddi_setup fails, tries TesterPresent + 0x10 0x03
 - [ ] Test and verify Mode 22 PIDs respond on truck with DDDI clear
+
+## DID Replacement — Remove broken 0x05xx, add correct HPT DIDs
+- [x] Remove all 0x05xx DIDs (not supported on L5P E41 ECU — HPT never reads them)
+- [x] Fix FUEL_LVL formula (0x1141): a*0.2275 → a*0.21832
+- [x] Fix IBR 1-8: move from 0x1940-0x1947 to 0x20B4-0x20BB with signed16 * 0.01
+- [x] Add IPW 1-8 (0x20AC-0x20B3): raw * 0.001 ms
+- [x] Add AAT_DSL (0x232C): (a-40)*1.8+32 °F
+- [x] Add ECT_DSL (0x13C8) and IAT_DSL (0x114D) with correct formulas
+- [x] Add Fuel Pressure SAE (0x208A): raw * 0.01868 PSI
+- [x] Add throttle positions (0x1543, 0x1540)
+- [x] Add EGR Pintle (0x1502), NOx sensors (0x11F8, 0x11FA)
+- [x] Add fuel injection timing (0x12DA), main fuel rate (0x20E3)
+- [x] Update PPEI Suggested preset with new working DIDs
+- [x] Update DATALOGGER_CHANNEL_MAP with new shortNames
