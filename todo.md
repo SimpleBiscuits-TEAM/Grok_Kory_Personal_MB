@@ -1866,3 +1866,12 @@
 - [x] Mark all 0x30xx/0x32xx DIDs as snapshot-only
 - [x] Update DATALOGGER_CHANNEL_MAP for renamed shortNames
 - [x] Add TesterPresent (0x3E 0x00) keepalive every ~4s in VopCan2UsbConnection during datalogging
+
+## DDDI Periodic Streaming — Replicate HPT's Live Data Method
+- [x] Decode exact DDDI define commands from IntelliSpy (IOCTL 0x2D + DDDI 0x2C + AA start)
+- [x] Decode periodic frame byte structure on 0x5E8 (FE b67_LE × 0.1338 = FRP_ACT, b56_BE × 0.01868 = FP_SAE)
+- [x] Implement startDddiPeriodicStreaming() in VopCan2UsbConnection (3-command sequence)
+- [x] Implement 0x5E8 periodic frame receiver via subscribeCanMonitor
+- [x] Route parsed periodic data into readPid via getDddiPeriodicReading
+- [x] Prevent DDDI clear from killing active periodic stream
+- [ ] Test on truck — FRP should show live rolling data matching HPT

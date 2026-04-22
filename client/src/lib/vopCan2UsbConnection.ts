@@ -95,6 +95,22 @@ const DDDI_CLEAR_INTERVAL_MS = 30_000;
 /** TesterPresent keepalive interval — HPT sends every ~4s. */
 const TESTER_PRESENT_INTERVAL_MS = 4_000;
 
+/** Arb ID where ECU pushes DDDI periodic frames. */
+const DDDI_PERIODIC_RX_ID = 0x5E8;
+
+/**
+ * DDDI periodic frame byte→channel mapping.
+ * From IntelliSpy correlation:
+ *   FE frame: [FE b1 b2 b3 b4 b5 b6 b7]
+ *     b1    = 0x42 constant (status)
+ *     b6-b7 = FRP_ACT (little-endian uint16 × 0.1338 → PSI)
+ *     b5-b6 = FP_SAE  (big-endian uint16 × 0.01868 → PSI)
+ *   FD frame: [FD b1 b2 b3 b4 0 0 0]
+ *     b2-b3-b4 = FRP_DES candidate (needs more correlation)
+ */
+const DDDI_FE_FRP_SCALE = 0.1338;
+const DDDI_FE_FP_SAE_SCALE = 0.01868;
+
 
 function crc16Ccitt(data: Uint8Array, off: number, len: number): number {
   let crc = 0xffff;
@@ -176,6 +192,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private dddiClearedAt = new Map<number, number>();
   /** TesterPresent keepalive interval handle. */
   private testerPresentTimer: ReturnType<typeof setInterval> | null = null;
+  /** DDDI periodic streaming state. */
+  private dddiPeriodicActive = false;
+  private dddiPeriodicUnsub: (() => void) | null = null;
+  /** Latest DDDI periodic readings keyed by shortName. */
+  private dddiPeriodicValues = new Map<string, PIDReading>();
 
   constructor(config: VopCan2UsbConnectionConfig = {}) {
     this.baudRate = config.baudRate ?? 115200;
@@ -737,6 +758,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private async ensureDddiClear(): Promise<void> {
     const mfr = this.vehicleInfo?.manufacturer;
     if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
+    // Don't re-clear while DDDI periodic streaming is active — it would kill the stream
+    if (this.dddiPeriodicActive) return;
     const now = Date.now();
     const last = this.dddiClearedAt.get(this.obdTxId) ?? 0;
     if (now - last < DDDI_CLEAR_INTERVAL_MS) return;
@@ -766,8 +789,16 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.emit('log', null, `DDDI clear done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK in ${elapsed}ms`);
   }
 
+  /** Short names of PIDs whose live data comes from DDDI periodic streaming, not direct Mode 22. */
+  private static readonly DDDI_PERIODIC_SHORTNAMES = new Set(['FRP_ACT', 'FP_SAE']);
+
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
+      // If this PID is served by DDDI periodic streaming, return the latest periodic value
+      if (this.dddiPeriodicActive && VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(pid.shortName)) {
+        return this.getDddiPeriodicReading(pid.shortName);
+      }
+
       const service = pid.service || 0x01;
 
       // Ensure DDDI clear before first Mode 22 read
@@ -918,6 +949,15 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       } catch { /* ignore — non-critical keepalive */ }
     }, TESTER_PRESENT_INTERVAL_MS);
 
+    // Start DDDI periodic streaming for fuel pressure if any DDDI PIDs are selected
+    const hasDddiPids = filteredPids.some(p => VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(p.shortName));
+    if (hasDddiPids) {
+      const dddiOk = await this.startDddiPeriodicStreaming();
+      if (!dddiOk) {
+        this.emit('log', null, 'DDDI periodic setup failed — FRP/FP_SAE will use snapshot Mode 22 reads');
+      }
+    }
+
     const fail = new Map<number, number>();
     const pause = new Map<number, number>();
     const MAXF = 8;
@@ -976,6 +1016,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   stopLogging(): LogSession | null {
     this.loggingActive = false;
     this.stopTesterPresent();
+    void this.stopDddiPeriodicStreaming();
     if (this.currentSession) {
       this.currentSession.endTime = Date.now();
       const s = this.currentSession;
@@ -992,6 +1033,121 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       clearInterval(this.testerPresentTimer);
       this.testerPresentTimer = null;
     }
+  }
+
+  /**
+   * Set up DDDI periodic streaming for fuel pressure (and later other channels).
+   * Replicates the exact HPT sequence from IntelliSpy:
+   *   1. 0x2D FE 00 40 01 4F  (IOCTL — configure periodic ID 0xFE)
+   *   2. 0x2C FD FE 01        (DDDI define FD from FE byte 1)
+   *   3. 0xAA 04 FE FD        (start periodic for FE + FD)
+   * ECU then pushes frames on 0x5E8 every ~25ms.
+   */
+  private async startDddiPeriodicStreaming(): Promise<boolean> {
+    const mfr = this.vehicleInfo?.manufacturer;
+    if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return false;
+    if (this.dddiPeriodicActive) return true;
+
+    this.emit('log', null, 'DDDI periodic: setting up fuel pressure streaming…');
+
+    try {
+      // Step 1: IOCTL — InputOutputControlByIdentifier (0x2D)
+      // Configures periodic ID 0xFE with fuel pressure source data
+      const ioctlResp = await this.isoTpRequest([0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F], 1000);
+      if (!ioctlResp || ioctlResp[0] !== 0x6D) {
+        this.emit('log', null, `DDDI periodic: IOCTL failed (resp=${ioctlResp ? ioctlResp.map(b => b.toString(16)).join(' ') : 'null'})`);
+        return false;
+      }
+      this.emit('log', null, 'DDDI periodic: IOCTL OK (0x6D FE)');
+      await new Promise(r => setTimeout(r, 10));
+
+      // Step 2: DDDI define FD from FE
+      const dddiResp = await this.isoTpRequest([0x2C, 0xFD, 0xFE, 0x01], 1000);
+      if (!dddiResp || dddiResp[0] !== 0x6C) {
+        this.emit('log', null, `DDDI periodic: define FD failed (resp=${dddiResp ? dddiResp.map(b => b.toString(16)).join(' ') : 'null'})`);
+        return false;
+      }
+      this.emit('log', null, 'DDDI periodic: define FD OK (0x6C FD)');
+      await new Promise(r => setTimeout(r, 10));
+
+      // Step 3: Start periodic for FE + FD
+      const startResp = await this.isoTpRequest([0xAA, 0x04, 0xFE, 0xFD], 1000);
+      if (!startResp) {
+        this.emit('log', null, 'DDDI periodic: start command no response (may still work)');
+      } else {
+        this.emit('log', null, `DDDI periodic: start resp=${startResp.map(b => b.toString(16)).join(' ')}`);
+      }
+
+      // Step 4: Subscribe to 0x5E8 periodic frames via CAN monitor
+      this.dddiPeriodicActive = true;
+      this.dddiPeriodicUnsub = this.subscribeCanMonitor((arbId, _flags, data) => {
+        if (arbId !== DDDI_PERIODIC_RX_ID || data.length < 7) return;
+        const periodicId = data[0];
+        const now = Date.now();
+
+        if (periodicId === 0xFE) {
+          // FRP_ACT: bytes 6-7 little-endian × 0.1338
+          const frpRaw = (data[7] << 8) | data[6];
+          const frpPsi = frpRaw * DDDI_FE_FRP_SCALE;
+          this.dddiPeriodicValues.set('FRP_ACT', {
+            pid: 0x328A,
+            name: 'Fuel Rail Pressure Actual',
+            shortName: 'FRP_ACT',
+            value: Math.round(frpPsi * 100) / 100,
+            unit: 'PSI',
+            rawBytes: [data[6], data[7]],
+            timestamp: now,
+          });
+
+          // FP_SAE: bytes 5-6 big-endian × 0.01868
+          const fpSaeRaw = (data[5] << 8) | data[6];
+          const fpSaePsi = fpSaeRaw * DDDI_FE_FP_SAE_SCALE;
+          this.dddiPeriodicValues.set('FP_SAE', {
+            pid: 0x208A,
+            name: 'Fuel Pressure SAE (Low Feed)',
+            shortName: 'FP_SAE',
+            value: Math.round(fpSaePsi * 100) / 100,
+            unit: 'PSI',
+            rawBytes: [data[5], data[6]],
+            timestamp: now,
+          });
+        }
+        // FD frames could carry FRP_DES but correlation is weak (109% CV)
+        // Skip FD parsing until we have better correlation data
+      });
+
+      this.emit('log', null, 'DDDI periodic: streaming active on 0x5E8');
+      return true;
+    } catch (e) {
+      this.emit('log', null, `DDDI periodic setup failed: ${e}`);
+      return false;
+    }
+  }
+
+  /** Stop DDDI periodic streaming and clean up. */
+  private async stopDddiPeriodicStreaming(): Promise<void> {
+    if (this.dddiPeriodicUnsub) {
+      this.dddiPeriodicUnsub();
+      this.dddiPeriodicUnsub = null;
+    }
+    this.dddiPeriodicActive = false;
+    this.dddiPeriodicValues.clear();
+    // Tell ECU to stop periodic reads
+    try {
+      await this.isoTpRequest([0xAA, 0x04, 0x00], 500);
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Get the latest DDDI periodic reading for a given shortName.
+   * Returns null if no periodic data available or data is stale (>500ms).
+   */
+  getDddiPeriodicReading(shortName: string): PIDReading | null {
+    const reading = this.dddiPeriodicValues.get(shortName);
+    if (!reading) return null;
+    // Stale check: periodic frames come every ~25ms, so 500ms means 20 missed frames
+    if (Date.now() - reading.timestamp > 500) return null;
+    return reading;
   }
 
   async scanSupportedDIDs(options?: {
