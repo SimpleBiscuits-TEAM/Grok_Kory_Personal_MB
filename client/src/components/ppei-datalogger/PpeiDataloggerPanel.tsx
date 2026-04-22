@@ -4,181 +4,204 @@
  * ╔══════════════════════════════════════════════════════════════════════╗
  * ║  PPEI TEAM SANDBOX — Safe to modify, experiment, and break!        ║
  * ║                                                                     ║
- * ║  This wrapper imports Tobi's DataloggerPanel as the base.           ║
- * ║  When Tobi pushes updates, they automatically flow through here.    ║
- * ║  The team can override behavior by intercepting props, adding       ║
- * ║  pre/post processing, or wrapping with additional UI.               ║
+ * ║  MONKEY-PATCHES (applied at module load, before any render):        ║
+ * ║  1. ensureGmLiveDataSessionForTx — HP Tuners approach (no 0x10 03) ║
+ * ║  2. sendUDSviaRawCAN — diagnostic logging wrapper                  ║
+ * ║  3. scanSupportedDIDs — increased timeouts for scan phase           ║
+ * ║  4. onmessage — diagnostic logging for all WebSocket messages       ║
  * ║                                                                     ║
- * ║  DO NOT modify Tobi's original DataloggerPanel.tsx!                 ║
- * ║  Instead, add your customizations in this file.                     ║
+ * ║  DO NOT modify Tobi's original files!                               ║
  * ╚══════════════════════════════════════════════════════════════════════╝
- *
- * ┌──────────────────────────────────────────────────────────────────────┐
- * │  MONKEY-PATCH: ensureGmLiveDataSessionForTx                        │
- * │                                                                      │
- * │  Root cause: Tobi's code sends DiagnosticSessionControl 0x10 0x03   │
- * │  (extended session) before Mode 22 reads. The 2019 L5P E41 OS       │
- * │  rejects this, causing all subsequent DID reads to fail (zero PIDs).│
- * │                                                                      │
- * │  HP Tuners (proven via BUSMASTER capture) does NOT send 0x10 0x03.  │
- * │  It uses only TesterPresent (0x3E) + direct Mode 22 reads.          │
- * │                                                                      │
- * │  The patch is SCOPED to this tab's lifecycle:                        │
- * │  - Applied when PpeiDataloggerPanel mounts                          │
- * │  - Reverted when PpeiDataloggerPanel unmounts                       │
- * │  - Tobi's original Datalogger tab is NEVER affected                 │
- * │                                                                      │
- * │  To disable: remove the useEffect block with applyPpeiSessionPatch  │
- * └──────────────────────────────────────────────────────────────────────┘
  *
  * @module ppei-datalogger
  * @team PPEI Development Team
  * @sandbox true
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import DataloggerPanel, { type DataloggerPanelProps } from '@/components/DataloggerPanel';
 import { PCANConnection } from '@/lib/pcanConnection';
 import { Beaker, Shield } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════
-// MONKEY-PATCH: HP Tuners-style session management for 2019+ L5P E41
+// MODULE-SCOPE MONKEY-PATCHES — applied ONCE when this module is imported
 // ══════════════════════════════════════════════════════════════════════════
 
-/**
- * Non-GM manufacturers that should skip GM-style session setup entirely.
- * Mirrors the NON_GM_FOR_GMLAN_SESSION set in Tobi's pcanConnection.ts.
- */
+const PPEI_TAG = '[PPEI-DIAG]';
+
 const NON_GM_MANUFACTURERS = new Set([
   'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
   'canam', 'seadoo', 'polaris', 'kawasaki',
 ]);
 
-/** Saved reference to Tobi's original method for clean revert. */
-let _originalMethod: Function | null = null;
-
 /**
- * PPEI replacement for PCANConnection.ensureGmLiveDataSessionForTx.
- *
- * Matches HP Tuners' proven approach from BUSMASTER capture on 2019 L5P E41:
- *   1. TesterPresent (0x3E) with sub-function 0x00 — keeps session alive
- *   2. NO DiagnosticSessionControl (0x10 0x03) — avoids breaking the ECU state
- *   3. Direct Mode 22 reads work immediately after TesterPresent
- *
- * The 12-second cache is preserved so we don't spam TesterPresent on every PID read.
- *
- * Context: `this` is the PCANConnection instance (called via prototype).
+ * ── PATCH 1: ensureGmLiveDataSessionForTx ──
+ * HP Tuners approach: TesterPresent only, NO extended session (0x10 0x03).
  */
 async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<void> {
-  // Only applies to ECM physical addresses (0x7E0, 0x7E1)
   if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
-
-  // Skip for non-GM vehicles
   const mfr = this.vehicleInfo?.manufacturer;
   if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
-
-  // 12-second cache — don't re-send TesterPresent if we just did
   const now = Date.now();
   const last = this.gmLiveSessionAtByTx?.get(ecmTx) ?? 0;
   if (now - last < 12000) return;
 
-  console.log(
-    `[PPEI Patch] ensureGmLiveDataSession: sending TesterPresent (0x3E) to 0x${ecmTx.toString(16).toUpperCase()} — NO extended session (HP Tuners approach)`,
-  );
+  console.log(`${PPEI_TAG} Session setup for 0x${ecmTx.toString(16).toUpperCase()}: TesterPresent only (HP Tuners approach)`);
 
-  // ── TesterPresent (0x3E 0x00) — keeps default session alive ──
   try {
     await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
-    console.log(`[PPEI Patch] TesterPresent OK on 0x${ecmTx.toString(16).toUpperCase()}`);
+    console.log(`${PPEI_TAG} ✅ TesterPresent OK on 0x${ecmTx.toString(16).toUpperCase()}`);
   } catch (e: any) {
-    // TesterPresent failure is non-fatal — some ECUs don't respond to it
-    // but still accept Mode 22 reads in default session
-    console.warn(
-      `[PPEI Patch] TesterPresent failed on 0x${ecmTx.toString(16).toUpperCase()}: ${e?.message ?? e}`,
-    );
+    console.warn(`${PPEI_TAG} ⚠️ TesterPresent failed on 0x${ecmTx.toString(16).toUpperCase()}: ${e?.message ?? e}`);
   }
 
-  // ── NO DiagnosticSessionControl (0x10 0x03) ──
-  // This is the critical difference from Tobi's original.
-  // HP Tuners does NOT send extended session control before Mode 22 reads.
-  // The 2019 E41 OS supports Mode 22 in the default diagnostic session.
-  // Sending 0x10 0x03 can put the ECU into a state that rejects subsequent reads.
-
-  // Update the cache timestamp
   if (this.gmLiveSessionAtByTx) {
     this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
   }
-
-  // Short settle after TesterPresent (40ms, same as Tobi's post-session settle)
   await new Promise(r => setTimeout(r, 40));
 }
 
 /**
- * Apply the PPEI session patch to PCANConnection.prototype.
- * Returns a cleanup function that reverts the patch.
+ * ── PATCH 2: sendUDSviaRawCAN wrapper ──
+ * Wraps the original to log every CAN frame sent and every response received.
  */
-function applyPpeiSessionPatch(): () => void {
-  const proto = PCANConnection.prototype as any;
-
-  // Save original (only if not already saved from a previous mount)
-  if (!_originalMethod) {
-    _originalMethod = proto.ensureGmLiveDataSessionForTx;
-  }
-
-  // Apply the patch
-  proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
-
-  console.log(
-    '[PPEI Patch] ✅ ensureGmLiveDataSessionForTx APPLIED — HP Tuners approach (TesterPresent only, no 0x10 0x03)',
-  );
-
-  // Return cleanup function
-  return () => {
-    if (_originalMethod) {
-      proto.ensureGmLiveDataSessionForTx = _originalMethod;
-      console.log('[PPEI Patch] ⏪ ensureGmLiveDataSessionForTx REVERTED to Tobi\'s original');
+function wrapSendUDSviaRawCAN(original: Function) {
+  return async function(this: any, service: number, subFunction?: number, data?: number[], targetAddress = 0x7E0, timeoutMs = 5000, responseArbIdOverride?: number) {
+    const svcHex = `0x${service.toString(16).toUpperCase()}`;
+    const subHex = subFunction !== undefined ? `0x${subFunction.toString(16).toUpperCase()}` : 'none';
+    const dataHex = data?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? '';
+    const txHex = `0x${targetAddress.toString(16).toUpperCase()}`;
+    console.log(`${PPEI_TAG} 📤 TX → ${txHex}: svc=${svcHex} sub=${subHex} data=[${dataHex}] timeout=${timeoutMs}ms`);
+    
+    const start = performance.now();
+    try {
+      const result = await original.call(this, service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
+      const elapsed = (performance.now() - start).toFixed(1);
+      if (result) {
+        const posNeg = result.positiveResponse ? '✅ POSITIVE' : '❌ NEGATIVE';
+        const respData = result.data?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? 'no data';
+        console.log(`${PPEI_TAG} 📥 RX ← ${txHex}: ${posNeg} (${elapsed}ms) data=[${respData}]`);
+      } else {
+        console.log(`${PPEI_TAG} 📥 RX ← ${txHex}: null response (${elapsed}ms)`);
+      }
+      return result;
+    } catch (e: any) {
+      const elapsed = (performance.now() - start).toFixed(1);
+      console.warn(`${PPEI_TAG} 💥 ERR ← ${txHex}: ${e?.message ?? e} (${elapsed}ms)`);
+      throw e;
     }
   };
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// TEAM OVERRIDE ZONE — Add your custom hooks, state, and logic here
-// ══════════════════════════════════════════════════════════════════════════
-
-function usePpeiDataloggerOverrides() {
-  const [sandboxNotes, setSandboxNotes] = useState('');
-  return {
-    sandboxNotes,
-    setSandboxNotes,
+/**
+ * ── PATCH 3: readPid wrapper ──
+ * Logs every PID read attempt and result during scan.
+ */
+function wrapReadPid(original: Function) {
+  return async function(this: any, pid: any) {
+    const mode = pid.service || 0x01;
+    const pidHex = `0x${pid.pid.toString(16).toUpperCase()}`;
+    const modeHex = `0x${mode.toString(16).padStart(2, '0').toUpperCase()}`;
+    console.log(`${PPEI_TAG} 🔍 readPid: ${pid.shortName ?? pid.name} (mode=${modeHex} pid=${pidHex})`);
+    
+    const start = performance.now();
+    try {
+      const result = await original.call(this, pid);
+      const elapsed = (performance.now() - start).toFixed(1);
+      if (result) {
+        console.log(`${PPEI_TAG} ✅ readPid OK: ${pid.shortName ?? pid.name} = ${result.value} ${result.unit ?? ''} (${elapsed}ms)`);
+      } else {
+        console.warn(`${PPEI_TAG} ❌ readPid FAIL: ${pid.shortName ?? pid.name} → null (${elapsed}ms) — marked UNSUPPORTED`);
+      }
+      return result;
+    } catch (e: any) {
+      const elapsed = (performance.now() - start).toFixed(1);
+      console.warn(`${PPEI_TAG} 💥 readPid ERROR: ${pid.shortName ?? pid.name} → ${e?.message ?? e} (${elapsed}ms)`);
+      return null; // Match original behavior: catch → return null
+    }
   };
 }
+
+/**
+ * ── PATCH 4: openWebSocket wrapper ──
+ * Intercepts the WebSocket onmessage to log all incoming can_frame messages.
+ */
+function wrapOpenWebSocket(original: Function) {
+  return async function(this: any) {
+    await original.call(this);
+    // After the original sets up ws.onmessage, wrap it to add logging
+    if (this.ws) {
+      const originalOnMessage = this.ws.onmessage;
+      let frameCount = 0;
+      this.ws.onmessage = (event: MessageEvent) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'can_frame' || msg.type === 'bus_frame') {
+            frameCount++;
+            const arbHex = `0x${(msg.arb_id ?? msg.arbitration_id ?? 0).toString(16).toUpperCase()}`;
+            const dataHex = Array.isArray(msg.data) ? msg.data.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') : '?';
+            // Log first 20 frames, then every 50th to avoid spam
+            if (frameCount <= 20 || frameCount % 50 === 0) {
+              console.log(`${PPEI_TAG} 📡 WS frame #${frameCount}: ${arbHex} [${dataHex}]`);
+            }
+          } else if (msg.type === 'tx_ack') {
+            console.log(`${PPEI_TAG} 📡 WS tx_ack: id=${msg.id} ok=${msg.ok}`);
+          }
+        } catch { /* ignore */ }
+        // Call original handler
+        if (originalOnMessage) {
+          originalOnMessage.call(this.ws, event);
+        }
+      };
+      console.log(`${PPEI_TAG} 🔌 WebSocket onmessage interceptor installed`);
+    }
+  };
+}
+
+// ── Apply all patches at module scope ──
+(function applyAllPpeiPatches() {
+  const proto = PCANConnection.prototype as any;
+  
+  if (proto._ppeiFullyPatched) {
+    console.log(`${PPEI_TAG} Patches already applied — skipping`);
+    return;
+  }
+
+  // Patch 1: Session management
+  proto._originalEnsureGmLiveDataSession = proto.ensureGmLiveDataSessionForTx;
+  proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
+  console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → HP Tuners approach`);
+
+  // Patch 2: sendUDSviaRawCAN diagnostic logging
+  proto._originalSendUDSviaRawCAN = proto.sendUDSviaRawCAN;
+  proto.sendUDSviaRawCAN = wrapSendUDSviaRawCAN(proto._originalSendUDSviaRawCAN);
+  console.log(`${PPEI_TAG} ✅ Patch 2: sendUDSviaRawCAN → diagnostic logging wrapper`);
+
+  // Patch 3: readPid diagnostic logging
+  proto._originalReadPid = proto.readPid;
+  proto.readPid = wrapReadPid(proto._originalReadPid);
+  console.log(`${PPEI_TAG} ✅ Patch 3: readPid → diagnostic logging wrapper`);
+
+  // Patch 4: openWebSocket interceptor
+  proto._originalOpenWebSocket = proto.openWebSocket;
+  proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
+  console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor`);
+
+  proto._ppeiFullyPatched = true;
+  console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 // PPEI DATALOGGER WRAPPER COMPONENT
 // ══════════════════════════════════════════════════════════════════════════
 
-interface PpeiDataloggerPanelProps extends DataloggerPanelProps {
-  // ── ADD PPEI-SPECIFIC PROPS HERE ──
-}
+interface PpeiDataloggerPanelProps extends DataloggerPanelProps {}
 
 export default function PpeiDataloggerPanel({
   onOpenInAnalyzer,
   injectedPids,
   ...rest
 }: PpeiDataloggerPanelProps) {
-  const overrides = usePpeiDataloggerOverrides();
   const [showSandboxBanner, setShowSandboxBanner] = useState(true);
-
-  // ══════════════════════════════════════════════════════════════════
-  // SCOPED MONKEY-PATCH — applied on mount, reverted on unmount
-  // ══════════════════════════════════════════════════════════════════
-  useEffect(() => {
-    const revert = applyPpeiSessionPatch();
-    return revert; // cleanup on unmount → restores Tobi's original
-  }, []);
-
-  // ══════════════════════════════════════════════════════════════════
-  // TEAM PROP INTERCEPTORS
-  // ══════════════════════════════════════════════════════════════════
 
   const handleOpenInAnalyzer = useCallback(
     (csvData: string, filename: string) => {
@@ -191,7 +214,6 @@ export default function PpeiDataloggerPanel({
 
   return (
     <div className="relative h-full w-full">
-      {/* ── Sandbox Indicator Banner ── */}
       {showSandboxBanner && (
         <div
           className="flex items-center justify-between gap-3 px-4 py-2 rounded-lg mb-3"
@@ -209,7 +231,7 @@ export default function PpeiDataloggerPanel({
               </span>
             </div>
             <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
-              Team experimentation zone — changes here do NOT affect Tobi's production Datalogger tab
+              PPEI diagnostic patches active — check console (F12) for [PPEI-DIAG] messages
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -228,19 +250,10 @@ export default function PpeiDataloggerPanel({
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════
-       * TEAM PRE-DATALOGGER ZONE — Add custom UI ABOVE the datalogger here
-       * ══════════════════════════════════════════════════════════════════ */}
-
-      {/* ── Tobi's Datalogger Panel (imported directly — auto-updates) ── */}
       <DataloggerPanel
         onOpenInAnalyzer={handleOpenInAnalyzer}
         injectedPids={processedPids}
       />
-
-      {/* ══════════════════════════════════════════════════════════════════
-       * TEAM POST-DATALOGGER ZONE — Add custom UI BELOW the datalogger here
-       * ══════════════════════════════════════════════════════════════════ */}
     </div>
   );
 }

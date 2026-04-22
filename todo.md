@@ -1736,4 +1736,10 @@
 - [x] Original Datalogger tab continues to use Tobi's unmodified code as fallback (patch scoped to mount/unmount)
 - [x] Add console logging to patched method for debugging
 - [x] Run tests and verify no regressions (22 pre-existing failures, 0 from our change)
-- [ ] Checkpoint and push to GitHub
+- [x] Checkpoint and push to GitHub (version 92edc837)
+
+## Bug — PPEI Patch Not Applying + Mode 01 Also Zero
+- [ ] Diagnose why PPEI monkey-patch is not executing (no [PPEI Patch] in console)
+- [ ] Fix patch application so it actually runs when PPEI Datalogger tab is active
+- [ ] Investigate why Mode 01 standard PIDs also show zero (transport-level issue, not session-related)
+- [ ] Implement comprehensive fix for both Mode 01 and Mode 22 scan failures
