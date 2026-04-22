@@ -20,7 +20,7 @@
 import { useState, useCallback } from 'react';
 import DataloggerPanel, { type DataloggerPanelProps } from '@/components/DataloggerPanel';
 import { PCANConnection } from '@/lib/pcanConnection';
-import { Beaker, Shield } from 'lucide-react';
+import { Beaker, Shield, Download } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════
 // MODULE-SCOPE MONKEY-PATCHES — applied ONCE when this module is imported
@@ -216,36 +216,74 @@ export default function PpeiDataloggerPanel({
     <div className="relative h-full w-full">
       {showSandboxBanner && (
         <div
-          className="flex items-center justify-between gap-3 px-4 py-2 rounded-lg mb-3"
+          className="rounded-lg mb-3 overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, oklch(0.25 0.12 170 / 0.4), oklch(0.20 0.08 200 / 0.3))',
             border: '1px solid oklch(0.45 0.15 170 / 0.4)',
             fontFamily: '"Share Tech Mono", monospace',
           }}
         >
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <Beaker style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 170)' }} />
-              <span style={{ color: 'oklch(0.72 0.18 170)', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em' }}>
-                PPEI SANDBOX
+          {/* Top row: PPEI SANDBOX badge + status */}
+          <div className="flex items-center justify-between gap-3 px-4 py-2">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <Beaker style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 170)' }} />
+                <span style={{ color: 'oklch(0.72 0.18 170)', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.1em' }}>
+                  PPEI SANDBOX
+                </span>
+              </div>
+              <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
+                PPEI diagnostic patches active — check console (F12) for [PPEI-DIAG] messages
               </span>
             </div>
-            <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
-              PPEI diagnostic patches active — check console (F12) for [PPEI-DIAG] messages
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1" style={{ color: 'oklch(0.55 0.15 145)', fontSize: '0.65rem' }}>
-              <Shield style={{ width: 12, height: 12 }} />
-              <span>TOBI'S CODE PROTECTED</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1" style={{ color: 'oklch(0.55 0.15 145)', fontSize: '0.65rem' }}>
+                <Shield style={{ width: 12, height: 12 }} />
+                <span>TOBI'S CODE PROTECTED</span>
+              </div>
+              <button
+                onClick={() => setShowSandboxBanner(false)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+              >
+                ✕
+              </button>
             </div>
-            <button
-              onClick={() => setShowSandboxBanner(false)}
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
-              style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+          </div>
+          {/* PPEI Bridge download row */}
+          <div
+            className="flex items-center justify-between gap-3 px-4 py-2"
+            style={{
+              borderTop: '1px solid oklch(0.35 0.08 170 / 0.3)',
+              background: 'oklch(0.15 0.04 200 / 0.5)',
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <span style={{ color: 'oklch(0.80 0.15 60)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.05em' }}>
+                ⚠ PPEI BRIDGE REQUIRED FOR BUSY CAN BUSES
+              </span>
+              <span style={{ color: 'oklch(0.55 0.01 260)', fontSize: '0.68rem' }}>
+                Fixes PCAN receive queue overflow on 2019+ trucks. Run this instead of pcan_bridge.py.
+              </span>
+            </div>
+            <a
+              href={`${import.meta.env.BASE_URL}ppei_pcan_bridge.py`}
+              download="ppei_pcan_bridge.py"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded transition-all"
+              style={{
+                background: 'oklch(0.45 0.18 170)',
+                color: 'oklch(0.98 0 0)',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                letterSpacing: '0.05em',
+                textDecoration: 'none',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'oklch(0.55 0.20 170)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'oklch(0.45 0.18 170)'; }}
             >
-              ✕
-            </button>
+              <Download style={{ width: 14, height: 14 }} />
+              ppei_pcan_bridge.py
+            </a>
           </div>
         </div>
       )}

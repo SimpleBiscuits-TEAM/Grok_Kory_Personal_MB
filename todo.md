@@ -1755,3 +1755,7 @@
 - [x] Tobi's pcan_bridge.py remains completely untouched
 - [x] User runs ppei_pcan_bridge.py on Pi instead of pcan_bridge.py for busy buses
 - [ ] Test on 2019 L5P truck and verify PIDs are detected
+
+## PPEI Bridge Download Button
+- [x] Add ppei_pcan_bridge.py download button to PPEI Datalogger connection screen
+- [x] Button in PPEI SANDBOX banner with amber warning + teal download button
