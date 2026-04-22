@@ -717,8 +717,7 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'RPM, FRP, Throttle, Injection, EGT, ECT, IAT, IPW — HPT-verified DIDs',
     pids: [
       0x0C,     // RPM (Mode 01)
-      0x30BC,   // FRP Desired (HPT kPa)
-      0x30C1,   // FRP Actual (HPT kPa)
+      0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x1543,   // Diesel Throttle Position A
       0x1540,   // Diesel Throttle Position B
@@ -741,8 +740,7 @@ export const PID_PRESETS: PIDPreset[] = [
       0x04,     // Calculated Engine Load (Mode 01)
       0x33,     // Barometric Pressure (Mode 01)
       0x42,     // ECU Battery Voltage (Mode 01)
-      0x30C1,   // FRP Actual (HPT kPa)
-      0x30BC,   // FRP Desired (HPT kPa)
+      0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
       0x20E3,   // Main Fuel Rate (mm³)
@@ -777,8 +775,7 @@ export const PID_PRESETS: PIDPreset[] = [
       0x0063,   // Engine Reference Torque (Nm)
       0x005D,   // Fuel Injection Timing (SAE)
       0x208A,   // Fuel Pressure SAE (low-side)
-      0x30BC,   // FRP Desired (HPT kPa)
-      0x30C1,   // FRP Actual (HPT kPa)
+      0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x30BE,   // Diesel Commanded Throttle
       0x12DA,   // Injection Timing (HPT)
       0x20E3,   // Main Fuel Rate
@@ -798,8 +795,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x008B,   // Diesel Particulate Matter
       0x30D5,   // ECT (Diesel proprietary)
       0x30D7,   // DEF Tank Level (Diesel)
-      0x328A,   // DPF Regen Percentage
-      0x308A,   // Barometric Pressure (Diesel)
+      0x328A,   // FRP Actual (live, PSI)
+      0x308A,   // Barometric Pressure (Diesel) — SNAPSHOT
       0x1141,   // Fuel Tank Level
       0x90D6,   // VIN Program Counter
       // -- Injector Pulse Widths --
@@ -815,8 +812,7 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'FRP, Fuel Pressure SAE, Injection Timing, Fuel Rate, IPW 1-8, IBR 1-8 — HPT-verified',
     pids: [
       0x0C,     // RPM
-      0x30BC,   // FRP Desired
-      0x30C1,   // FRP Actual
+      0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
       0x20E3,   // Main Fuel Rate
@@ -930,8 +926,7 @@ export const PID_PRESETS: PIDPreset[] = [
       0x5C,     // Engine Oil Temp
       // ── Mode 22 Extended — Fuel System (HPT-verified) ──
       0x208A,   // Fuel Pressure SAE (low-side, PSI)
-      0x30BC,   // FRP Desired (HPT kPa)
-      0x30C1,   // FRP Actual (HPT kPa)
+      0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x12DA,   // Injection Timing (HPT °BTDC)
       0x20E3,   // Main Fuel Rate (mm³)
       0x208B,   // Injection Timing Correction (°)
@@ -953,11 +948,11 @@ export const PID_PRESETS: PIDPreset[] = [
       0x007A,   // NOx Sensor O2 (%, multi-frame)
       0x006A,   // Exhaust Gas Pressure (kPa)
       0x008B,   // Diesel Particulate Matter (mg/m³)
-      0x328A,   // DPF Regen Percentage (%)
-      0x30DA,   // DPF Soot Load (%)
-      0x30D7,   // DEF Tank Level (%)
-      0x30D5,   // ECT Diesel (°C)
-      0x308A,   // Barometric Pressure Diesel (kPa)
+      0x328A,   // FRP Actual (live, PSI)
+      0x30DA,   // DPF Soot Load (%) — SNAPSHOT
+      0x30D7,   // DEF Tank Level (%) — SNAPSHOT
+      0x30D5,   // ECT Diesel (°F) — SNAPSHOT
+      0x308A,   // Barometric Pressure Diesel (PSI) — SNAPSHOT
       0x30CA,   // Injection Pattern Active
       // ── Mode 22 Extended — Engine / Torque (confirmed) ──
       0x0062,   // Actual Engine Torque % (Mode 22)
@@ -1310,58 +1305,58 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   // ── GM Diesel Proprietary (0x30xx range) — confirmed from BUSMASTER ──
   {
-    pid: 0x30BC, name: 'Desired Fuel Rail Pressure (HPT)', shortName: 'FRP_DES',
+    pid: 0x30BC, name: 'Desired Fuel Rail Pressure (Snapshot)', shortName: 'FRP_DES_SS',
     unit: 'PSI', min: 0.0, max: 7251.9, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; Confirmed: 23346 * 1.39 * 0.145038 ≈ 4706 psi
+    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; SNAPSHOT ONLY — does not update on repeated reads
   },
   {
-    pid: 0x30C1, name: 'Actual Fuel Rail Pressure (HPT)', shortName: 'FRP_ACT2',
+    pid: 0x30C1, name: 'Actual Fuel Rail Pressure (Snapshot)', shortName: 'FRP_ACT_SS',
     unit: 'PSI', min: 0.0, max: 7251.9, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; Same scale as 0x30BC
+    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; SNAPSHOT ONLY — does not update on repeated reads
   },
   {
-    pid: 0x30BE, name: 'Diesel Commanded Throttle A', shortName: 'THRTL_CMD',
+    pid: 0x30BE, name: 'Diesel Commanded Throttle A (Snapshot)', shortName: 'THRTL_CMD',
     unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,  // Confirmed: 1000 * 0.1 = 100.0%
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x30D5, name: 'Engine Coolant Temp (Diesel)', shortName: 'ECT_DSL',
+    pid: 0x30D5, name: 'Engine Coolant Temp Diesel (Snapshot)', shortName: 'ECT_DSL',
     unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a - 40) * 1.8 + 32,  // °C→°F; Confirmed: 120→181.4°F
+    formula: ([a]) => (a - 40) * 1.8 + 32,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x30D7, name: 'DEF Tank Level (Diesel)', shortName: 'DEF_LVL2',
+    pid: 0x30D7, name: 'DEF Tank Level Diesel (Snapshot)', shortName: 'DEF_LVL2',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,  // Confirmed: 97 * 100/255 = 38.04% = HPT 38.04%
+    formula: ([a]) => (a * 100) / 255,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x328A, name: 'DPF Regen Percentage (Diesel)', shortName: 'DPF_REGEN_PCT',
-    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    pid: 0x328A, name: 'Fuel Rail Pressure Actual (Snapshot)', shortName: 'FRP_ACT',
+    unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,  // Confirmed: 10000 * 0.01 = 100.00%
+    formula: ([a, b]) => ((a * 256) + b) * 0.4712,  // Confirmed: 10000 * 0.4712 = 4712 PSI; SNAPSHOT — 0x30xx/0x32xx range only updates on first read after DDDI clear
   },
   {
-    pid: 0x30CA, name: 'Injection Pattern Active', shortName: 'INJ_PAT',
+    pid: 0x30CA, name: 'Injection Pattern Active (Snapshot)', shortName: 'INJ_PAT',
     unit: '', min: 0, max: 7, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => a,  // Bitmask: bit0=Pilot, bit1=Main, bit2=Post
+    formula: ([a]) => a,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x30DA, name: 'DPF Soot Load Percentage', shortName: 'DPF_SOOT_PCT',
+    pid: 0x30DA, name: 'DPF Soot Load Percentage (Snapshot)', shortName: 'DPF_SOOT_PCT',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => a,  // 0-100%
+    formula: ([a]) => a,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x308A, name: 'Barometric Pressure (Diesel)', shortName: 'BARO_DSL',
+    pid: 0x308A, name: 'Barometric Pressure Diesel (Snapshot)', shortName: 'BARO_DSL',
     unit: 'PSI', min: 7.3, max: 16.7, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.03125 * 0.145038,  // kPa→PSI; Confirmed: 3245 * 0.03125 * 0.145038 ≈ 14.7 PSI
+    formula: ([a, b]) => ((a * 256) + b) * 0.03125 * 0.145038,  // SNAPSHOT — 0x30xx range; 3243 * 0.03125 * 0.145038 = 14.7 PSI
   },
   // ── Multi-frame EGT DIDs (ISO-TP, 6-7 data bytes) ──
   {

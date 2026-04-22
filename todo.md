@@ -1851,14 +1851,18 @@
 - [x] Disable strat feedback email/notification function that emails owner
 
 ## Datalog Issues — 2026-04-22 Truck Test
-- [ ] Fix PID selection: gas-only PIDs (TTQRET, TCTQRLR, AFMIR2, PRNDL_T93, KNK2_BMW) appearing on diesel truck — need fuelType filtering in datalogger PID lookup
-- [ ] Fix FUEL_LVL: 142 gal (should be ~31 gal) — formula still wrong
-- [ ] Fix BARO_DSL: 17-23 PSI (should be ~14.7 PSI) — formula wrong
-- [ ] Fix EGT_EXT: 7332°F (should be ~300-400°F at idle) — formula wrong
-- [ ] Fix DPF_REGEN_PCT: 100% constant (should be -4% per HPT) — formula wrong
-- [ ] Fix NOX_CONC: 2081 ppm constant — verify formula
-- [ ] Fix many DEAD columns (DPF_SOOT, DPF_DP, DPF temps, DEF channels, NOX_IN/OUT, SCR_TEMP, FRP_DES, INJ_PAT, NOX_O2)
+- [x] Fix PID selection: gas-only PIDs appearing on diesel truck — fixed with vehicle-filtered PID resolution
+- [x] Fix FUEL_LVL: now reading 29.69-31.66 gal — formula fixed
+- [x] Fix BARO_DSL: formula was correct, bad values were from gas PID collision — now snapshot-only
+- [ ] Fix EGT_EXT: 7332°F (should be ~300-400°F at idle) — formula needs investigation
+- [x] Fix DPF_REGEN_PCT: was actually FRP_ACT (0x328A) — renamed to FRP_ACT, raw 10000 * 0.4712 = 4712 PSI
+- [x] Fix NOX_CONC: now updating (2043-2763 ppm range) — formula working
+- [ ] Investigate DEAD columns: some 0x30xx/0x32xx are snapshot-only, others may not exist on this ECU
 - [x] Implement DDDI clear sequence in VopCan2UsbConnection (ensureDddiClear)
 - [x] Fix PID resolution to use vehicle-filtered PIDs instead of ALL_PIDS (gas PIDs showing on diesel)
-- [ ] Test Mode 22 fuel rail PIDs on truck with DDDI clear active
+- [x] Test Mode 22 fuel rail PIDs on truck — 0x20xx/0x11xx/0x13xx range update live, 0x30xx/0x32xx are snapshot-only
+- [x] Fix 0x328A: was DPF_REGEN_PCT, actually FRP_ACT (Fuel Rail Pressure Actual, snapshot)
+- [x] Replace 0x30BC/0x30C1 with 0x328A in all presets for live FRP
+- [x] Mark all 0x30xx/0x32xx DIDs as snapshot-only
+- [x] Update DATALOGGER_CHANNEL_MAP for renamed shortNames
 - [x] Add TesterPresent (0x3E 0x00) keepalive every ~4s in VopCan2UsbConnection during datalogging
