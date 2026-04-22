@@ -1781,3 +1781,14 @@
 - [x] Added "PPEI Suggested (L5P E41)" preset with 52 PIDs (16 Mode 01 + 36 Mode 22)
 - [x] Includes: FRP CMD/ACT/DEV, Boost CMD/ACT, VGT CMD/ACT, EGT Pre/Post, NOx, DPF, DEF, IBR 1-8, Torque, Throttle
 - [x] Visible in preset selector for GM diesel vehicles
+
+## Bug — Fuel Quantity and Rail Pressure PIDs Not Displaying Proper Values
+- [x] Investigated: bridge _wait_for_response already strips DID prefix, batch handler was double-stripping
+- [x] Investigated: FRP_CMD/ACT formulas correct (MPa→PSI), FRP_DES/ACT2 formulas correct (kPa→PSI)
+- [x] Fixed: removed double-slice in batch response handler (data is pure value bytes, not DID-prefixed)
+- [ ] Test and verify fix (pending user test on truck)
+
+## Feature — Imperial Units for All PIDs
+- [x] Converted 101 PIDs: 40 °C→°F, 26 kPa→PSI, 3 MPa→PSI, 8 bar→PSI, 5 km/h→MPH, 8 km→mi, 10 Nm→lb·ft, 1 kg/h→lb/min
+- [x] Converted standard Mode 01 PIDs: g/s→lb/min (MAF), L/h→gal/h (fuel rate), Pa→PSI (EVAP), kW→HP (BMW power)
+- [x] All min/max values updated for imperial ranges

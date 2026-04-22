@@ -239,10 +239,10 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             if (!pidDef) continue;
 
             try {
-              // result.data includes [DID_hi, DID_lo, ...value_bytes]
-              // Our formulas expect value bytes only (like ELM parity)
-              const rawData: number[] = result.data || [];
-              const payload = rawData.length >= 2 ? rawData.slice(2) : rawData;
+              // Bridge _wait_for_response already strips service byte + DID prefix
+              // via _extract_obd_positive_payload (Mode 22: payload[3:]).
+              // So result.data is PURE VALUE BYTES — do NOT slice further!
+              const payload: number[] = result.data || [];
               if (payload.length === 0) continue;
 
               const value = pidDef.formula(payload);
