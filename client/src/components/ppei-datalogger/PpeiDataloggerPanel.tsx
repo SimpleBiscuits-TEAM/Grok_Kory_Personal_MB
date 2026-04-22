@@ -5,7 +5,7 @@
  * ║  PPEI TEAM SANDBOX — Safe to modify, experiment, and break!        ║
  * ║                                                                     ║
  * ║  MONKEY-PATCHES (applied at module load, before any render):        ║
- * ║  1. ensureGmLiveDataSessionForTx — HP Tuners approach (no 0x10 03) ║
+ * ║  1. ensureGmLiveDataSessionForTx — TesterPresent + Extended Session (0x10 0x03) ║
  * ║  2. sendUDSviaRawCAN — diagnostic logging wrapper                  ║
  * ║  3. scanSupportedDIDs — increased timeouts for scan phase           ║
  * ║  4. onmessage — diagnostic logging for all WebSocket messages       ║
@@ -36,7 +36,9 @@ const NON_GM_MANUFACTURERS = new Set([
 
 /**
  * ── PATCH 1: ensureGmLiveDataSessionForTx ──
- * HP Tuners approach: TesterPresent only, NO extended session (0x10 0x03).
+ * Sends TesterPresent + Extended Diagnostic Session (0x10 0x03) for Mode 22.
+ * The E41 ECU requires an extended session before it responds to ReadDataByIdentifier (0x22).
+ * HP Tuners achieves this implicitly via DDDI setup (0x2C/0x2D); we do it explicitly.
  */
 async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<void> {
   if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
@@ -45,16 +47,37 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   const now = Date.now();
   const last = this.gmLiveSessionAtByTx?.get(ecmTx) ?? 0;
   if (now - last < 12000) return;
-
-  console.log(`${PPEI_TAG} Session setup for 0x${ecmTx.toString(16).toUpperCase()}: TesterPresent only (HP Tuners approach)`);
-
+  const txHex = `0x${ecmTx.toString(16).toUpperCase()}`;
+  console.log(`${PPEI_TAG} Session setup for ${txHex}: TesterPresent + Extended Session (0x10 0x03)`);
+  // Step 1: TesterPresent keepalive
   try {
     await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
-    console.log(`${PPEI_TAG} ✅ TesterPresent OK on 0x${ecmTx.toString(16).toUpperCase()}`);
+    console.log(`${PPEI_TAG} \u2705 TesterPresent OK on ${txHex}`);
   } catch (e: any) {
-    console.warn(`${PPEI_TAG} ⚠️ TesterPresent failed on 0x${ecmTx.toString(16).toUpperCase()}: ${e?.message ?? e}`);
+    console.warn(`${PPEI_TAG} \u26a0\ufe0f TesterPresent failed on ${txHex}: ${e?.message ?? e}`);
   }
-
+  // Step 2: Extended Diagnostic Session (required for Mode 22 on E41)
+  let extendedOk = false;
+  try {
+    const r = await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
+    extendedOk = !!r?.positiveResponse;
+    if (extendedOk) {
+      console.log(`${PPEI_TAG} \u2705 Extended Session (0x10 0x03) OK on ${txHex}`);
+    } else {
+      console.warn(`${PPEI_TAG} \u26a0\ufe0f Extended Session negative response on ${txHex}`);
+    }
+  } catch (e: any) {
+    console.warn(`${PPEI_TAG} \u26a0\ufe0f Extended Session failed on ${txHex}: ${e?.message ?? e}`);
+  }
+  // Step 3: If extended session failed, try default session as fallback
+  if (!extendedOk) {
+    try {
+      await this.sendUDSRequest(0x10, 0x01, [], ecmTx, 3000);
+      console.log(`${PPEI_TAG} \u2705 Default Session (0x10 0x01) fallback on ${txHex}`);
+    } catch {
+      // ignore
+    }
+  }
   if (this.gmLiveSessionAtByTx) {
     this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
   }
@@ -303,7 +326,7 @@ try {
     // Patch 1: Session management
     proto._originalEnsureGmLiveDataSession = proto.ensureGmLiveDataSessionForTx;
     proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
-    console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → HP Tuners approach`);
+    console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → TesterPresent + Extended Session (0x10 0x03)`);
     // Patch 2: sendUDSviaRawCAN diagnostic logging
     proto._originalSendUDSviaRawCAN = proto.sendUDSviaRawCAN;
     proto.sendUDSviaRawCAN = wrapSendUDSviaRawCAN(proto._originalSendUDSviaRawCAN);

@@ -1813,3 +1813,10 @@
 - [x] Added 60+ GM extended PID shortNames to DATALOGGER_CHANNEL_MAP (BOOST_CMD/ACT, EGT_PRE/POST, FRP_DES/ACT2, VGT_CMD/ACT, DPF, DEF, NOx, IBR 1-8, etc.)
 - [x] Fixed 7 duplicate key errors in DATALOGGER_CHANNEL_MAP
 - [ ] Test CSV import in Eric's editor datalogger on truck
+
+## Bug — Mode 22 Extended PIDs Not Responding (ALL empty)
+- [x] Root cause: Patch 1 removed Extended Diagnostic Session (0x10 0x03) — only sent TesterPresent
+- [x] BUSMASTER analysis confirmed: HPT uses DDDI (0x2C/0x2D) which implicitly opens extended session
+- [x] Since we don't use DDDI, we need explicit 0x10 0x03 before Mode 22 reads
+- [x] Fix: Restored 0x10 0x03 in Patch 1 (TesterPresent → Extended Session → fallback to Default)
+- [ ] Test and verify Mode 22 PIDs respond on truck
