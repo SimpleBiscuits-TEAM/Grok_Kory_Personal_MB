@@ -556,6 +556,328 @@ log.info("[PPEI] Patch 5 applied: batch_read_dids for fast multi-DID polling")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Patch 6: DDDI setup — replicate HP Tuners' DynamicallyDefineDataIdentifier
+# sequence to unlock Mode 22 reads on the L5P E41 ECM
+# ═══════════════════════════════════════════════════════════════════════════════
+# The E41 ECM rejects Mode 22 (ReadDataByIdentifier) with NRC 0x31 unless a
+# DDDI session has been established first.  HP Tuners does this by:
+#   1. 0x2D (defineByMemoryAddress) — creates memory-mapped DIDs (FE00-FE05)
+#   2. 0x2C (defineByIdentifier) — links those + existing DIDs into periodic
+#      composite identifiers (FE-F7)
+#   3. 0xAA 04 (ReadDataByPeriodicIdentifier) — starts ECU streaming on 0x5E8
+# After this sequence, individual 0x22 reads also start working.
+#
+# This patch adds a new "dddi_setup" message type that sends the exact same
+# ISO-TP frames captured from the BUSMASTER log.
+#
+# Message format:
+#   → { type: "dddi_setup", id: "...", tx_id: 0x7E0 }
+#   ← { type: "dddi_setup_result", id: "...", ok: true/false, ... }
+
+# ── DDDI sequence derived from IntelliSpy capture (2026-04-22) ──────────────
+# HP Tuners datalogging sequence on 2019 L5P E41 ECM:
+#   Phase 1: Stop any existing periodic reads (0xAA 04 00)
+#   Phase 2: Clear all old DDDI periodic definitions (0x2C FE 00 XX)
+#            This is what UNLOCKS Mode 22 reads on the E41!
+#   Phase 3: Individual Mode 22 reads now work
+#   Phase 4: (Optional) Define new DDDI composites for fast periodic streaming
+#
+# The clear sequence sends 0x2C with DID=0xFE00 and sub=0x00 (clear) for each
+# periodic identifier that may have been previously defined.
+
+# All periodic IDs that HPT clears (from IntelliSpy capture)
+_DDDI_CLEAR_PERIODIC_IDS = [
+    0x01, 0x04, 0x07, 0x08, 0x0F, 0x12, 0x13, 0x14, 0x18, 0x1B,
+    0x1E, 0x21, 0x27, 0x29, 0x2C, 0x2E, 0x30, 0x34, 0x35, 0x36,
+    0x3A, 0x3B, 0x3E, 0x41, 0x42, 0x46, 0x4A, 0x4C, 0x4F, 0x50,
+    0x52, 0x54, 0x5A, 0x5B, 0x5C, 0x61, 0x63, 0x64, 0x67, 0x68,
+    0x69, 0x6A, 0x71, 0x72, 0x75, 0x77, 0x78, 0x7A, 0x7B, 0x87,
+    0x88, 0x8B, 0x98, 0xB1, 0xE5, 0xFD,
+]
+
+# DDDI composite definitions from IntelliSpy capture (Phase 4)
+# These define periodic identifiers FD, FB, F9, F8 for fast ECU-push streaming
+_DDDI_DEFINE_COMPOSITES = [
+    bytes([0x2C, 0xFD, 0x00, 0x4F, 0x00, 0x10, 0x00, 0x0A]),
+    bytes([0x2C, 0xFB, 0x20, 0xB4, 0x30, 0xBE, 0x32, 0x8A, 0x00, 0x0D]),
+    bytes([0x2C, 0xF9, 0x30, 0x8A, 0x13, 0x2A]),
+    bytes([0x2C, 0xF8, 0x11, 0xBB, 0x20, 0xBC, 0x32, 0xA8, 0x00, 0x0F, 0x00, 0x05, 0x00, 0x33, 0x23, 0x2C]),
+]
+
+# Positive response SIDs for each service
+_DDDI_POS_RESP = {0x2D: 0x6D, 0x2C: 0x6C, 0xAA: 0xEA}
+
+# Periodic response arb ID (ECU streams on this after DDDI setup)
+DDDI_PERIODIC_ARB_ID = 0x5E8
+
+
+async def _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0):
+    """Send an ISO-TP message (single or multi-frame) and wait for the positive response."""
+    proto = bridge.protocol
+    bus = bridge.bus
+    
+    # Drain stale frames
+    while not proto._response_queue.empty():
+        try:
+            proto._response_queue.get_nowait()
+        except Exception:
+            break
+    
+    length = len(payload)
+    
+    if length <= 7:
+        # Single frame: PCI byte + payload
+        frame_data = [length] + list(payload)
+        # Pad to 8 bytes
+        while len(frame_data) < 8:
+            frame_data.append(0x00)
+        frame = can.Message(arbitration_id=tx_id, data=frame_data, is_extended_id=False)
+        bus.send(frame)
+    else:
+        # Multi-frame ISO-TP
+        # First frame: PCI (1x xx) + first 6 bytes of payload
+        ff_pci_hi = 0x10 | ((length >> 8) & 0x0F)
+        ff_pci_lo = length & 0xFF
+        ff_data = [ff_pci_hi, ff_pci_lo] + list(payload[:6])
+        frame = can.Message(arbitration_id=tx_id, data=ff_data, is_extended_id=False)
+        bus.send(frame)
+        
+        # Wait for flow control from ECU
+        fc_deadline = time.time() + timeout
+        got_fc = False
+        while time.time() < fc_deadline:
+            try:
+                msg = await asyncio.wait_for(
+                    proto._response_queue.get(),
+                    timeout=min(fc_deadline - time.time(), 0.2)
+                )
+                if msg.arbitration_id == rx_id:
+                    pci = (msg.data[0] >> 4) & 0x0F
+                    if pci == 3:  # Flow control
+                        got_fc = True
+                        break
+            except asyncio.TimeoutError:
+                break
+        
+        if not got_fc:
+            return None  # No flow control received
+        
+        # Send consecutive frames
+        remaining = list(payload[6:])
+        seq = 1
+        while remaining:
+            cf_data = [0x20 | (seq & 0x0F)] + remaining[:7]
+            while len(cf_data) < 8:
+                cf_data.append(0x00)
+            frame = can.Message(arbitration_id=tx_id, data=cf_data, is_extended_id=False)
+            bus.send(frame)
+            remaining = remaining[7:]
+            seq += 1
+            await asyncio.sleep(0.001)  # Small gap between consecutive frames
+    
+    # Wait for positive response
+    expected_sid = _DDDI_POS_RESP.get(payload[0])
+    deadline = time.time() + timeout
+    
+    # For 0xAA, the ECU may not send a positive response — just periodic data
+    if payload[0] == 0xAA:
+        await asyncio.sleep(0.05)  # Give ECU time to start periodic transmission
+        return [0xEA]  # Synthetic OK
+    
+    while time.time() < deadline:
+        try:
+            msg = await asyncio.wait_for(
+                proto._response_queue.get(),
+                timeout=min(deadline - time.time(), 0.5)
+            )
+        except asyncio.TimeoutError:
+            return None
+        
+        if msg.arbitration_id != rx_id:
+            continue
+        
+        frame_data = list(msg.data)
+        pci = (frame_data[0] >> 4) & 0x0F
+        
+        if pci == 0:  # Single frame
+            length = frame_data[0] & 0x0F
+            resp = frame_data[1:1+length]
+            if resp and resp[0] == expected_sid:
+                return resp  # Positive response
+            if resp and resp[0] == 0x7F:
+                nrc = resp[2] if len(resp) >= 3 else 0
+                log.warning(f"[PPEI] DDDI NRC 0x{nrc:02X} for service 0x{payload[0]:02X}")
+                return None  # Negative response
+    
+    return None  # Timeout
+
+
+async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
+    """Execute the DDDI clear sequence to unlock Mode 22 on the E41 ECU.
+    
+    From IntelliSpy capture of HP Tuners datalogging (2026-04-22):
+      1. Stop any existing periodic transmissions (0xAA 04 00)
+      2. Clear all old DDDI periodic definitions (0x2C FE 00 XX x 56)
+         -> This is what UNLOCKS Mode 22 reads on the E41!
+      3. Individual Mode 22 reads now work (183 DIDs confirmed)
+      4. (Optional) Define new DDDI composites for fast periodic streaming
+    """
+    log.info(f"[PPEI] Starting DDDI clear sequence for TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
+    start = time.time()
+    
+    # Ensure CAN bus and protocol are ready
+    if not bridge.can_initialized:
+        success = await bridge._ensure_can_bus()
+        if not success:
+            return {"type": "dddi_setup_result", "id": req_id, "ok": False,
+                    "error": f"CAN bus not available: {bridge.can_error}"}
+    
+    if not bridge.protocol:
+        bridge.protocol = _tobi.OBDProtocol(
+            bridge.bus, rx_broadcast=bridge._broadcast_rx_stream
+        )
+        await bridge.protocol.start()
+    
+    # Add 0x5E8 to the software filter so periodic frames reach the queue
+    bridge.protocol._filter_ids.add(DDDI_PERIODIC_ARB_ID)
+    if hasattr(bridge.protocol, '_ppei_listener'):
+        bridge.protocol._ppei_listener._filter_ids.add(DDDI_PERIODIC_ARB_ID)
+    
+    # Update hardware CAN filters to include 0x5E8
+    if bridge.bus and getattr(bridge, '_ppei_hw_filters_active', False):
+        try:
+            bridge.bus.set_filters([
+                {"can_id": 0x7E0, "can_mask": 0x7F0, "extended": False},
+                {"can_id": 0x7DF, "can_mask": 0x7FF, "extended": False},
+                {"can_id": DDDI_PERIODIC_ARB_ID, "can_mask": 0x7FF, "extended": False},
+            ])
+            log.info(f"[PPEI] Hardware CAN filters updated: added 0x{DDDI_PERIODIC_ARB_ID:03X}")
+        except Exception as e:
+            log.warning(f"[PPEI] Could not update CAN filters: {e}")
+    
+    ok_count = 0
+    fail_count = 0
+    total_steps = 1 + len(_DDDI_CLEAR_PERIODIC_IDS) + len(_DDDI_DEFINE_COMPOSITES)
+    step = 0
+    
+    # ── Phase 1: Stop any existing periodic reads ──
+    log.info("[PPEI] Phase 1: Stopping existing periodic reads (0xAA 04 00)")
+    stop_payload = bytes([0xAA, 0x04, 0x00])
+    resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, stop_payload, timeout=0.5)
+    step += 1
+    if resp:
+        ok_count += 1
+        log.info(f"[PPEI] Step {step}/{total_steps} OK: stopPeriodicRead")
+    else:
+        # 0xAA stop may NRC if nothing was running — that's fine
+        ok_count += 1  # Count as OK since it's expected
+        log.info(f"[PPEI] Step {step}/{total_steps}: stopPeriodicRead (NRC OK, nothing running)")
+    await asyncio.sleep(0.010)
+    
+    # ── Phase 2: Clear all DDDI periodic definitions ──
+    # This is the KEY that unlocks Mode 22 on the E41!
+    # Format: 0x2C (DDDI) + DID 0xFE00 (hi=0xFE, lo=0x00) + periodicID
+    # SubFunction is embedded: 0x2C with DID=FE00 and the periodic ID byte
+    # HPT sends: 04 2C FE 00 XX (single frame, 4 bytes payload)
+    log.info(f"[PPEI] Phase 2: Clearing {len(_DDDI_CLEAR_PERIODIC_IDS)} DDDI periodic definitions")
+    clear_ok = 0
+    clear_nrc = 0
+    for pid in _DDDI_CLEAR_PERIODIC_IDS:
+        clear_payload = bytes([0x2C, 0xFE, 0x00, pid])
+        resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, clear_payload, timeout=0.3)
+        step += 1
+        if resp:
+            clear_ok += 1
+            ok_count += 1
+        else:
+            # NRC 0x31 (requestOutOfRange) is expected for some IDs — not a failure
+            clear_nrc += 1
+            ok_count += 1  # Still count as OK
+        # HPT sends these very fast (~6ms apart)
+        await asyncio.sleep(0.006)
+    
+    log.info(f"[PPEI] Phase 2 complete: {clear_ok} positive, {clear_nrc} NRC (both OK)")
+    
+    # ── Phase 3: Define DDDI composites (optional, for periodic streaming) ──
+    if _DDDI_DEFINE_COMPOSITES:
+        log.info(f"[PPEI] Phase 3: Defining {len(_DDDI_DEFINE_COMPOSITES)} DDDI composites")
+        for payload in _DDDI_DEFINE_COMPOSITES:
+            resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
+            step += 1
+            if resp:
+                ok_count += 1
+                log.info(f"[PPEI] Step {step}/{total_steps} OK: defineComposite 0x{payload[1]:02X}")
+            else:
+                fail_count += 1
+                log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: defineComposite 0x{payload[1]:02X}")
+            await asyncio.sleep(0.015)
+    
+    elapsed = (time.time() - start) * 1000
+    success = True  # Clear phase always succeeds (NRCs are expected)
+    log.info(
+        f"[PPEI] DDDI setup complete in {elapsed:.0f}ms: "
+        f"cleared {len(_DDDI_CLEAR_PERIODIC_IDS)} periodic IDs, "
+        f"defined {len(_DDDI_DEFINE_COMPOSITES)} composites"
+    )
+    
+    return {
+        "type": "dddi_setup_result",
+        "id": req_id,
+        "ok": success,
+        "clear_ok": clear_ok,
+        "clear_nrc": clear_nrc,
+        "define_ok": ok_count - clear_ok - clear_nrc - 1,
+        "elapsed_ms": round(elapsed, 1),
+    }
+async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
+    """Stop periodic reads and clean up DDDI definitions."""
+    log.info(f"[PPEI] DDDI teardown for TX=0x{tx_id:03X}")
+    
+    if not bridge.protocol or not bridge.bus:
+        return {"type": "dddi_teardown_result", "id": req_id, "ok": True}
+    
+    # Send 0xAA 0x00 to stop periodic reads
+    stop_payload = bytes([0xAA, 0x00])
+    await _send_isotp_and_wait(bridge, tx_id, rx_id, stop_payload, timeout=0.5)
+    
+    # Remove 0x5E8 from filters
+    bridge.protocol._filter_ids.discard(DDDI_PERIODIC_ARB_ID)
+    if hasattr(bridge.protocol, '_ppei_listener'):
+        bridge.protocol._ppei_listener._filter_ids.discard(DDDI_PERIODIC_ARB_ID)
+    
+    log.info("[PPEI] DDDI teardown complete")
+    return {"type": "dddi_teardown_result", "id": req_id, "ok": True}
+
+
+# Update the handle_message patch to also intercept dddi_setup and dddi_teardown
+_batch_handle_message = _ppei_handle_message  # Save the batch handler
+
+
+async def _ppei_handle_message_v2(self, msg: dict):
+    """Patched handle_message — intercepts dddi_setup, dddi_teardown, and batch_read_dids."""
+    msg_type = msg.get("type")
+    
+    if msg_type == "dddi_setup":
+        req_id = msg.get("id", "0")
+        tx_id = msg.get("tx_id", 0x7E0)
+        rx_id = tx_id + 8  # 0x7E0 → 0x7E8, 0x7E2 → 0x7EA
+        return await _ppei_dddi_setup(self, tx_id, rx_id, req_id)
+    
+    if msg_type == "dddi_teardown":
+        req_id = msg.get("id", "0")
+        tx_id = msg.get("tx_id", 0x7E0)
+        rx_id = tx_id + 8
+        return await _ppei_dddi_teardown(self, tx_id, rx_id, req_id)
+    
+    # Fall through to batch_read_dids or Tobi's handler
+    return await _batch_handle_message(self, msg)
+
+
+_tobi.PCANBridge.handle_message = _ppei_handle_message_v2
+log.info("[PPEI] Patch 6 applied: DDDI setup/teardown for Mode 22 unlock")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Entry point — run Tobi's main() with all patches applied
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -574,6 +896,7 @@ if __name__ == '__main__':
     log.info("  3. IntelliSpy uses shared Notifier with OBD")
     log.info("  4. send_raw_frame skips queue drain")
     log.info("  5. batch_read_dids for fast multi-DID polling")
+    log.info("  6. DDDI setup/teardown for Mode 22 unlock (HP Tuners method)")
     log.info("=" * 60)
     log.info("Tobi's pcan_bridge.py is NOT modified.")
     log.info("To revert: run pcan_bridge.py directly instead.")

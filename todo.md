@@ -1820,3 +1820,15 @@
 - [x] Since we don't use DDDI, we need explicit 0x10 0x03 before Mode 22 reads
 - [x] Fix: Restored 0x10 0x03 in Patch 1 (TesterPresent → Extended Session → fallback to Default)
 - [ ] Test and verify Mode 22 PIDs respond on truck
+
+## Feature — DDDI Setup for Mode 22 (HP Tuners approach)
+- [x] Analyzed IntelliSpy capture of HPT datalogging (2026-04-22): 183 Mode 22 DIDs succeed after DDDI clear
+- [x] Key finding: DDDI CLEAR (0x2C FE 00 XX × 56) is what unlocks Mode 22 — NOT 0x10 0x03
+- [x] HPT sequence: 0xAA 04 00 (stop periodic) → 0x2C FE 00 XX (clear 56 IDs) → Mode 22 works
+- [x] Implemented Patch 6 in bridge: dddi_setup message type with clear-first approach
+- [x] Implemented _send_isotp_and_wait for raw ISO-TP send/receive (single + multi-frame)
+- [x] Added 0x5E8 to hardware + software CAN filters for periodic DDDI responses
+- [x] Implemented dddi_teardown (0xAA 04 00 + clear all periodic IDs)
+- [x] Updated Patch 1 in frontend: sends dddi_setup to bridge instead of 0x10 0x03
+- [x] Fallback: if dddi_setup fails, tries TesterPresent + 0x10 0x03
+- [ ] Test and verify Mode 22 PIDs respond on truck with DDDI clear

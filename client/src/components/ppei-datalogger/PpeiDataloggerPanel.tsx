@@ -36,9 +36,13 @@ const NON_GM_MANUFACTURERS = new Set([
 
 /**
  * ── PATCH 1: ensureGmLiveDataSessionForTx ──
- * Sends TesterPresent + Extended Diagnostic Session (0x10 0x03) for Mode 22.
- * The E41 ECU requires an extended session before it responds to ReadDataByIdentifier (0x22).
- * HP Tuners achieves this implicitly via DDDI setup (0x2C/0x2D); we do it explicitly.
+ * Sends DDDI clear sequence to unlock Mode 22 on the E41 ECU.
+ * From IntelliSpy capture of HP Tuners datalogging (2026-04-22):
+ *   1. Stop existing periodic reads (0xAA 04 00)
+ *   2. Clear all DDDI periodic definitions (0x2C FE 00 XX × 56)
+ *   3. Mode 22 reads now work (183 DIDs confirmed)
+ * The DDDI clear is the "key" — NOT 0x10 0x03.
+ * This is sent to the bridge as a "dddi_setup" WebSocket message.
  */
 async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<void> {
   if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
@@ -46,44 +50,46 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
   const now = Date.now();
   const last = this.gmLiveSessionAtByTx?.get(ecmTx) ?? 0;
-  if (now - last < 12000) return;
+  // DDDI clear takes ~500ms, so only re-send every 30s
+  if (now - last < 30000) return;
   const txHex = `0x${ecmTx.toString(16).toUpperCase()}`;
-  console.log(`${PPEI_TAG} Session setup for ${txHex}: TesterPresent + Extended Session (0x10 0x03)`);
-  // Step 1: TesterPresent keepalive
+  console.log(`${PPEI_TAG} DDDI clear sequence for ${txHex} (unlocking Mode 22)`);
+  
   try {
-    await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
-    console.log(`${PPEI_TAG} \u2705 TesterPresent OK on ${txHex}`);
-  } catch (e: any) {
-    console.warn(`${PPEI_TAG} \u26a0\ufe0f TesterPresent failed on ${txHex}: ${e?.message ?? e}`);
-  }
-  // Step 2: Extended Diagnostic Session (required for Mode 22 on E41)
-  let extendedOk = false;
-  try {
-    const r = await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
-    extendedOk = !!r?.positiveResponse;
-    if (extendedOk) {
-      console.log(`${PPEI_TAG} \u2705 Extended Session (0x10 0x03) OK on ${txHex}`);
+    // Send dddi_setup to the bridge — this does the full clear sequence
+    const response = await (this as any).sendRequest({
+      type: 'dddi_setup',
+      tx_id: ecmTx,
+    }, 60000); // 60s timeout — clearing 56 periodic IDs takes time
+    
+    if (response?.ok) {
+      console.log(
+        `${PPEI_TAG} ✅ DDDI clear OK on ${txHex}: ` +
+        `cleared ${response.clear_ok ?? '?'} periodic IDs ` +
+        `(${response.clear_nrc ?? '?'} NRC expected) ` +
+        `in ${response.elapsed_ms ?? '?'}ms`
+      );
     } else {
-      console.warn(`${PPEI_TAG} \u26a0\ufe0f Extended Session negative response on ${txHex}`);
+      console.warn(`${PPEI_TAG} ⚠️ DDDI clear partial/failed on ${txHex}:`, response);
     }
   } catch (e: any) {
-    console.warn(`${PPEI_TAG} \u26a0\ufe0f Extended Session failed on ${txHex}: ${e?.message ?? e}`);
-  }
-  // Step 3: If extended session failed, try default session as fallback
-  if (!extendedOk) {
+    console.warn(`${PPEI_TAG} ⚠️ DDDI setup failed on ${txHex}: ${e?.message ?? e}`);
+    // Fallback: try TesterPresent + Extended Session (may work on some ECUs)
     try {
-      await this.sendUDSRequest(0x10, 0x01, [], ecmTx, 3000);
-      console.log(`${PPEI_TAG} \u2705 Default Session (0x10 0x01) fallback on ${txHex}`);
-    } catch {
-      // ignore
-    }
+      await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
+      console.log(`${PPEI_TAG} ✅ TesterPresent fallback OK on ${txHex}`);
+    } catch { /* ignore */ }
+    try {
+      await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
+      console.log(`${PPEI_TAG} ✅ Extended Session (0x10 0x03) fallback OK on ${txHex}`);
+    } catch { /* ignore */ }
   }
+  
   if (this.gmLiveSessionAtByTx) {
     this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
   }
   await new Promise(r => setTimeout(r, 40));
 }
-
 /**
  * ── PATCH 2: sendUDSviaRawCAN wrapper ──
  * Wraps the original to log every CAN frame sent and every response received.
