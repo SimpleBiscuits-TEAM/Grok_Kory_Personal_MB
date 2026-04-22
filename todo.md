@@ -1846,3 +1846,6 @@
 - [x] Add fuel injection timing (0x12DA), main fuel rate (0x20E3)
 - [x] Update PPEI Suggested preset with new working DIDs
 - [x] Update DATALOGGER_CHANNEL_MAP with new shortNames
+
+## Disable Strat Feedback Notifications
+- [x] Disable strat feedback email/notification function that emails owner

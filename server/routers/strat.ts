@@ -2435,14 +2435,15 @@ Do NOT repeat Knox's technical steps. Just wrap up warmly.`,
           sessionDuration: input.sessionDuration ?? null,
         });
 
-        // Notify owner of new Strat feedback
+        // DISABLED: Strat feedback owner notification (turned off per owner request)
+        // To re-enable, uncomment the notifyOwner block below
+        /*
         try {
           const { notifyOwner } = await import("../_core/notification");
           const stars = "\u2605".repeat(input.rating) + "\u2606".repeat(5 - input.rating);
           const msgCount = input.messageCount ?? 0;
           const userName = ctx.user?.name || ctx.user?.email || 'Anonymous';
 
-          // Build chat log transcript for notification
           let chatTranscript = '';
           if (input.chatLog && input.chatLog.length > 0) {
             chatTranscript = '\n\n--- CHAT LOG ---\n' + input.chatLog.map(msg => {
@@ -2469,8 +2470,9 @@ Do NOT repeat Knox's technical steps. Just wrap up warmly.`,
             ].filter(Boolean).join("\n"),
           });
         } catch (_notifyErr) {
-          // Non-critical — don't fail feedback submission if notification fails
+          // Non-critical
         }
+        */
 
         return { success: true };
       } catch (err: any) {
