@@ -1759,3 +1759,25 @@
 ## PPEI Bridge Download Button
 - [x] Add ppei_pcan_bridge.py download button to PPEI Datalogger connection screen
 - [x] Button in PPEI SANDBOX banner with amber warning + teal download button
+
+## Slow Refresh Rate — Replicate HP Tuners Fast Polling Strategy
+- [x] Analyze HP Tuners BUSMASTER log: polling timing, batching, DDDI composite reads
+- [x] Identify what makes HPT fast: multi-DID requests, DDDI grouping, no session overhead
+- [x] Implement HPT-style fast polling: Patch 5 batch_read_dids in ppei_pcan_bridge.py + Patch 5 readPids monkey-patch in PpeiDataloggerPanel.tsx
+- [ ] Test refresh rate improvement on 2019 L5P truck (pending user test)
+
+## Bug — 40 Unsupported PIDs on 2019 L5P E41 That HP Tuners Reads
+- [x] Analyzed: 40 unsupported PIDs are gasoline-only Mode 01 PIDs (O2, lambda, EVAP, catalyst) — correctly unsupported on diesel
+- [x] Cross-referenced: HPT reads these via Mode 22 equivalents which we already have in GM_EXTENDED_PIDS
+- [x] Fixed: Added fuel type filtering to scanSupportedDIDs — gasoline-only PIDs no longer scanned on diesel vehicles
+- [x] Verified: Mode 22 equivalents already in GM_EXTENDED_PIDS and scanned via extendedMode22PidsForPcanVehicle
+
+## Feature — HP Tuners Sniffed Preset Tab
+- [x] Renamed to "PPEI Suggested" per user request
+- [x] Added to PID_PRESETS in obdConnection.ts
+- [x] Added to getPresetsForVehicle filter for GM diesel vehicles
+
+## Feature — PPEI Suggested Preset Tab
+- [x] Added "PPEI Suggested (L5P E41)" preset with 52 PIDs (16 Mode 01 + 36 Mode 22)
+- [x] Includes: FRP CMD/ACT/DEV, Boost CMD/ACT, VGT CMD/ACT, EGT Pre/Post, NOx, DPF, DEF, IBR 1-8, Torque, Throttle
+- [x] Visible in preset selector for GM diesel vehicles

@@ -1358,7 +1358,15 @@ export class PCANConnection {
 
     const allPids: PIDDefinition[] = [];
     if (includeStandard) {
-      allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
+      // Filter out gasoline-only PIDs when vehicle is diesel (they will always fail
+      // and clutter the unsupported list — e.g. O2 sensors, lambda, EVAP, catalyst)
+      const vFuel = this.vehicleInfo.fuelType ?? 'any';
+      allPids.push(...STANDARD_PIDS.filter(p => {
+        if (p.pid <= 0x00 || p.pid === 0x20 || p.pid === 0x40 || p.pid === 0x60) return false;
+        const pFuel = p.fuelType ?? 'any';
+        if (pFuel === 'any' || vFuel === 'any') return true;
+        return pFuel === vFuel;
+      }));
     }
     if (includeExtended) {
       allPids.push(...extendedMode22PidsForPcanVehicle(this.vehicleInfo));

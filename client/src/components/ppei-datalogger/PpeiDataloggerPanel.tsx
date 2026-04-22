@@ -9,6 +9,7 @@
  * ║  2. sendUDSviaRawCAN — diagnostic logging wrapper                  ║
  * ║  3. scanSupportedDIDs — increased timeouts for scan phase           ║
  * ║  4. onmessage — diagnostic logging for all WebSocket messages       ║
+ * ║  5. readPids — batch_read_dids for fast multi-DID polling           ║
  * ║                                                                     ║
  * ║  DO NOT modify Tobi's original files!                               ║
  * ╚══════════════════════════════════════════════════════════════════════╝
@@ -157,6 +158,140 @@ function wrapOpenWebSocket(original: Function) {
   };
 }
 
+
+/**
+ * ── PATCH 5: readPids → batch_read_dids ──
+ * Instead of N sequential readPid calls (each with WS round-trip overhead),
+ * sends a single "batch_read_dids" WebSocket message to the PPEI bridge.
+ * The bridge fires all DID requests back-to-back on the CAN bus (~5ms/DID)
+ * and returns all results in one response.
+ *
+ * Mode 01 PIDs still go through individual readPid (the bridge batch only
+ * handles Mode 22 DIDs). Mode 01 PIDs are fast anyway (~1-2 per cycle).
+ *
+ * Falls back to sequential readPid if the bridge doesn't support batch_read_dids.
+ */
+function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
+  return async function(this: any, pids: any[]): Promise<any[]> {
+    // Split PIDs into Mode 01 (standard) and Mode 22 (extended)
+    const mode01Pids: any[] = [];
+    const mode22Pids: any[] = [];
+    for (const pid of pids) {
+      const mode = pid.service || 0x01;
+      if (mode === 0x22) {
+        mode22Pids.push(pid);
+      } else {
+        mode01Pids.push(pid);
+      }
+    }
+
+    const readings: any[] = [];
+
+    // ── Mode 01: sequential (fast, few PIDs, no batch needed) ──
+    for (const pid of mode01Pids) {
+      try {
+        const reading = await originalReadPid.call(this, pid);
+        if (reading) readings.push(reading);
+      } catch { /* ignore */ }
+    }
+
+    // ── Mode 22: batch via bridge ──
+    if (mode22Pids.length === 0) return readings;
+
+    // Group by ECU TX address (most will be 0x7E0, some on 0x7E1 for TCM)
+    const byTx = new Map<number, any[]>();
+    for (const pid of mode22Pids) {
+      const tx = pid.ecuHeader
+        ? parseInt(pid.ecuHeader.trim().replace(/^0x/i, ''), 16) || 0x7E0
+        : 0x7E0;
+      if (!byTx.has(tx)) byTx.set(tx, []);
+      byTx.get(tx)!.push(pid);
+    }
+
+    for (const [txId, txPids] of byTx) {
+      // Ensure session is active for this ECU
+      try {
+        await this.ensureGmLiveDataSessionForTx(txId);
+      } catch { /* ignore */ }
+
+      const dids = txPids.map((p: any) => p.pid);
+      const batchTimeout = Math.max(3000, txPids.length * 100); // ~100ms/DID budget
+
+      try {
+        // Use sendRequest (private but accessible at runtime via `this`)
+        const response: any = await this.sendRequest(
+          {
+            type: 'batch_read_dids',
+            dids,
+            tx_id: txId,
+            timeout_ms: 50, // per-DID timeout on bridge side
+          },
+          batchTimeout,
+        );
+
+        if (response.type === 'batch_did_results' && Array.isArray(response.results)) {
+          const start = performance.now();
+          let okCount = 0;
+          for (const result of response.results) {
+            if (!result.ok) continue;
+            // Find the matching PID definition
+            const pidDef = txPids.find((p: any) => p.pid === result.did);
+            if (!pidDef) continue;
+
+            try {
+              // result.data includes [DID_hi, DID_lo, ...value_bytes]
+              // Our formulas expect value bytes only (like ELM parity)
+              const rawData: number[] = result.data || [];
+              const payload = rawData.length >= 2 ? rawData.slice(2) : rawData;
+              if (payload.length === 0) continue;
+
+              const value = pidDef.formula(payload);
+              if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+
+              readings.push({
+                pid: pidDef.pid,
+                name: pidDef.name,
+                shortName: pidDef.shortName,
+                value,
+                unit: pidDef.unit,
+                rawBytes: payload,
+                timestamp: Date.now(),
+              });
+              okCount++;
+            } catch { /* formula error — skip */ }
+          }
+          const elapsed = (performance.now() - start).toFixed(1);
+          console.log(
+            `${PPEI_TAG} ⚡ batch_read_dids TX=0x${txId.toString(16).toUpperCase()}: ` +
+            `${okCount}/${dids.length} decoded in ${elapsed}ms (bridge: ${response.elapsed_ms}ms)`
+          );
+        } else {
+          // Unexpected response — fall back to sequential
+          console.warn(`${PPEI_TAG} ⚠️ batch_read_dids unexpected response, falling back to sequential`);
+          for (const pid of txPids) {
+            try {
+              const reading = await originalReadPid.call(this, pid);
+              if (reading) readings.push(reading);
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (e: any) {
+        // Bridge doesn't support batch_read_dids — fall back gracefully
+        console.warn(
+          `${PPEI_TAG} ⚠️ batch_read_dids failed (${e?.message ?? e}), falling back to sequential for ${txPids.length} DIDs`
+        );
+        for (const pid of txPids) {
+          try {
+            const reading = await originalReadPid.call(this, pid);
+            if (reading) readings.push(reading);
+          } catch { /* ignore */ }
+        }
+      }
+    }
+
+    return readings;
+  };
+}
 // ── Apply all patches at module scope ──
 console.log(`${PPEI_TAG} 🔧 Module loaded — attempting to apply patches...`);
 try {
@@ -181,6 +316,12 @@ try {
     proto._originalOpenWebSocket = proto.openWebSocket;
     proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
     console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor`);
+    // Patch 5: readPids → batch_read_dids (fast multi-DID polling)
+    // Must use _originalReadPid (the unwrapped version) for fallback,
+    // and wrap the original readPids (before Patch 3 wrapped readPid).
+    proto._originalReadPids = proto.readPids;
+    proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
+    console.log(`${PPEI_TAG} ✅ Patch 5: readPids → batch_read_dids (fast multi-DID polling)`);
     proto._ppeiFullyPatched = true;
     console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
   }

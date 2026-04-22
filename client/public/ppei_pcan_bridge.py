@@ -348,6 +348,130 @@ log.info("[PPEI] Patch 4 applied: send_raw_frame skips queue drain for Notifier 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Patch 5: batch_read_dids — read multiple DIDs in a tight CAN loop
+# ═══════════════════════════════════════════════════════════════════════════════
+# The frontend normally sends one WebSocket message per DID, waits for the
+# response, then sends the next.  With 30 DIDs, that's 30 × (WS RTT ~20ms +
+# CAN RTT ~5ms) ≈ 750ms per cycle.
+#
+# HP Tuners sends all DID requests back-to-back on the CAN bus with only ~5ms
+# between them, achieving ~400ms for 30 DIDs.
+#
+# This patch adds a new "batch_read_dids" message type that does the same:
+# one WebSocket message in, tight CAN loop, one WebSocket message out.
+#
+# Message format:
+#   → { type: "batch_read_dids", id: "...", dids: [0x0071, 0x30C1, ...],
+#       tx_id: 0x7E0, timeout_ms: 50 }
+#   ← { type: "batch_did_results", id: "...", results: [
+#        { did: 0x0071, ok: true, data: [0x12, 0x34, ...] },
+#        { did: 0x30C1, ok: false, error: "timeout" },
+#        ...  ] }
+
+_original_handle_message = _tobi.PCANBridge.handle_message
+
+
+async def _ppei_handle_message(self, msg: dict):
+    """Patched handle_message — intercepts batch_read_dids before Tobi's router."""
+    msg_type = msg.get("type")
+    if msg_type != "batch_read_dids":
+        return await _original_handle_message(self, msg)
+
+    # ── batch_read_dids handler ──────────────────────────────────────────
+    req_id = msg.get("id", "0")
+    dids = msg.get("dids", [])
+    tx_id = msg.get("tx_id", 0x7E0)
+    per_did_timeout = msg.get("timeout_ms", 50) / 1000.0  # default 50ms per DID
+
+    if not self.can_initialized:
+        success = await self._ensure_can_bus()
+        if not success:
+            return {
+                "type": "error",
+                "id": req_id,
+                "message": f"CAN bus not available: {self.can_error}"
+            }
+    if not self.protocol:
+        self.protocol = _tobi.OBDProtocol(
+            self.bus, rx_broadcast=self._broadcast_rx_stream
+        )
+        await self.protocol.start()
+
+    results = []
+    proto = self.protocol
+    start_all = time.time()
+
+    for did in dids:
+        did_hi = (did >> 8) & 0xFF
+        did_lo = did & 0xFF
+        data = [0x03, 0x22, did_hi, did_lo, 0x00, 0x00, 0x00, 0x00]
+
+        # Drain stale frames from the queue before each request
+        while not proto._response_queue.empty():
+            try:
+                proto._response_queue.get_nowait()
+            except Exception:
+                break
+
+        # Send Mode 22 request
+        frame = can.Message(
+            arbitration_id=tx_id,
+            data=data,
+            is_extended_id=False
+        )
+        try:
+            self.bus.send(frame)
+        except can.CanError as e:
+            results.append({"did": did, "ok": False, "error": f"CAN send: {e}"})
+            continue
+
+        # Wait for response — use _wait_for_response which handles ISO-TP
+        try:
+            resp_data = await asyncio.wait_for(
+                proto._wait_for_response(0x22, did),
+                timeout=per_did_timeout
+            )
+            # _wait_for_response returns the data bytes (after service/DID prefix)
+            # For positive response: just the value bytes
+            # For negative response: [0x7F, 0x22, NRC]
+            if resp_data and len(resp_data) >= 1 and resp_data[0] == 0x7F:
+                nrc = resp_data[2] if len(resp_data) > 2 else 0
+                results.append({
+                    "did": did,
+                    "ok": False,
+                    "error": f"NRC 0x{nrc:02X}"
+                })
+            else:
+                results.append({
+                    "did": did,
+                    "ok": True,
+                    "data": list(resp_data) if resp_data else []
+                })
+        except asyncio.TimeoutError:
+            results.append({"did": did, "ok": False, "error": "timeout"})
+        except Exception as e:
+            results.append({"did": did, "ok": False, "error": str(e)})
+
+    elapsed = (time.time() - start_all) * 1000
+    ok_count = sum(1 for r in results if r.get("ok"))
+    log.info(
+        f"[PPEI] batch_read_dids: {ok_count}/{len(dids)} OK in {elapsed:.0f}ms "
+        f"({elapsed/max(len(dids),1):.1f}ms/DID)"
+    )
+
+    return {
+        "type": "batch_did_results",
+        "id": req_id,
+        "results": results,
+        "elapsed_ms": round(elapsed, 1),
+    }
+
+
+_tobi.PCANBridge.handle_message = _ppei_handle_message
+log.info("[PPEI] Patch 5 applied: batch_read_dids for fast multi-DID polling")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Entry point — run Tobi's main() with all patches applied
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -365,6 +489,7 @@ if __name__ == '__main__':
     log.info("  2. Hardware CAN filters on bus init (0x7E0-0x7EF + 0x7DF)")
     log.info("  3. IntelliSpy uses shared Notifier with OBD")
     log.info("  4. send_raw_frame skips queue drain")
+    log.info("  5. batch_read_dids for fast multi-DID polling")
     log.info("=" * 60)
     log.info("Tobi's pcan_bridge.py is NOT modified.")
     log.info("To revert: run pcan_bridge.py directly instead.")

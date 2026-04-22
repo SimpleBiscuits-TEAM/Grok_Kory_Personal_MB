@@ -883,6 +883,76 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'SOC, Charging Status/Power, DC-DC Output, Cell Delta, EV Range',
     pids: [0x1400, 0x140D, 0x140E, 0x1408, 0x140F, 0x140C],
   },
+  // ── PPEI Suggested — curated from HP Tuners BUSMASTER sniff on 2019 L5P E41 ──
+  {
+    name: 'PPEI Suggested (L5P E41)',
+    description:
+      'PPEI-curated L5P preset — all channels from HP Tuners BUSMASTER sniff. ' +
+      'Core engine + turbo + fuel + exhaust + emissions + trans. ' +
+      'Confirmed working on 2019 GMC Sierra HD 6.6L L5P Duramax (E41 ECM).',
+    pids: [
+      // ── Mode 01 Standard (confirmed in E41 bitmask) ──
+      0x0C,     // Engine RPM
+      0x0D,     // Vehicle Speed
+      0x04,     // Calculated Engine Load
+      0x05,     // Engine Coolant Temp
+      0x0B,     // Manifold Absolute Pressure
+      0x10,     // Mass Air Flow
+      0x33,     // Barometric Pressure
+      0x42,     // Control Module Voltage
+      0x46,     // Ambient Air Temp
+      0x5D,     // Fuel Injection Timing (SAE)
+      0x5E,     // Engine Fuel Rate
+      0x61,     // Driver Demand Engine Torque %
+      0x62,     // Actual Engine Torque %
+      0x63,     // Engine Reference Torque
+      0x2F,     // Fuel Tank Level
+      0x5C,     // Engine Oil Temp
+      // ── Mode 22 Extended — Fuel System (confirmed) ──
+      0x0564,   // FRP Commanded (MPa)
+      0x0565,   // FRP Actual (MPa)
+      0x054A,   // FRP Deviation (MPa)
+      0x30BC,   // FRP Desired (HPT kPa)
+      0x30C1,   // FRP Actual (HPT kPa)
+      0x056C,   // Injection Timing (°BTDC)
+      0x056D,   // Injection Quantity (mm³/stroke)
+      0x0549,   // FPR Solenoid Current (mA)
+      // ── Mode 22 Extended — Turbo / Boost (confirmed) ──
+      0x0572,   // Boost Commanded (kPa)
+      0x0573,   // Boost Actual (kPa)
+      0x0574,   // VGT Commanded (%)
+      0x0575,   // VGT Actual (%)
+      0x0576,   // Turbo Speed (RPM)
+      0x30BE,   // Diesel Commanded Throttle (%)
+      // ── Mode 22 Extended — Exhaust / EGT (confirmed) ──
+      0x0580,   // EGT Pre-Turbo (°C)
+      0x0581,   // EGT Post-Turbo (°C)
+      0x0069,   // EGT Bank Extended (multi-frame)
+      // ── Mode 22 Extended — Emissions / DPF / DEF (confirmed) ──
+      0x0071,   // NOx Sensor Concentration (ppm)
+      0x007A,   // NOx Sensor O2 (%)
+      0x006A,   // Exhaust Gas Pressure (kPa)
+      0x008B,   // Diesel Particulate Matter (mg/m³)
+      0x328A,   // DPF Regen Percentage (%)
+      0x30DA,   // DPF Soot Load (%)
+      0x30D7,   // DEF Tank Level (%)
+      0x30D5,   // ECT Diesel (°C)
+      0x308A,   // Barometric Pressure Diesel (kPa)
+      0x30CA,   // Injection Pattern Active
+      // ── Mode 22 Extended — Engine / Torque (confirmed) ──
+      0x0062,   // Actual Engine Torque % (Mode 22)
+      0x0063,   // Engine Reference Torque Nm (Mode 22)
+      // ── Injector Balance Rates ──
+      0x1940,   // IBR Cyl 1
+      0x1941,   // IBR Cyl 2
+      0x1942,   // IBR Cyl 3
+      0x1943,   // IBR Cyl 4
+      0x1944,   // IBR Cyl 5
+      0x1945,   // IBR Cyl 6
+      0x1946,   // IBR Cyl 7
+      0x1947,   // IBR Cyl 8
+    ],
+  },
 ];
 
 // ─── GM Mode 22 Extended PIDs ─────────────────────────────────────────────
@@ -3112,6 +3182,10 @@ export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: Fu
     }
     if (manufacturer === 'gm' || manufacturer === 'universal') {
       if (name.includes('duramax')) return true;
+      // PPEI Suggested presets — show for GM diesel vehicles
+      if (name.includes('ppei') && (fuelType === 'diesel' || fuelType === 'any')) return true;
+      // L5P HPT presets — show for GM diesel vehicles
+      if (name.includes('l5p') && (fuelType === 'diesel' || fuelType === 'any')) return true;
       if (
         (fuelType === 'gasoline' || fuelType === 'any') &&
         (name.includes('gm e90') || name.includes('l87'))
