@@ -1715,3 +1715,12 @@
 - [x] Render flowcharts and convert to PDF — 16-page PDF generated
 - [x] Add findings to Knox knowledge base — torque/airflow logic added to knoxKnowledgeServer.ts
 - [x] Checkpoint and push to GitHub
+
+## Feature — L5P E41 PID Sniff Analysis & Datalogger PID Updates
+- [x] Parse HP Tuners PID sniff CSV to extract all logged PIDs with values
+- [x] Parse BUSMASTER CAN log — 25 unique Mode 22 DIDs on 0x7E0, 5 multi-frame ISO-TP DIDs
+- [x] Cross-reference — 3 existing DIDs matched, 22 missing identified
+- [x] Confirmed scaling for 8 DIDs via BUSMASTER raw bytes ↔ HPT values cross-reference
+- [x] Added 19 new DID definitions to GM_EXTENDED_PIDS + new 'L5P HPT Full Channel List' preset
+- [x] No incorrect scaling found on existing PIDs — all confirmed correct
+- [x] Checkpoint and push to GitHub

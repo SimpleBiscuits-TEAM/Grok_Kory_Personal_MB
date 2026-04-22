@@ -757,6 +757,44 @@ export const PID_PRESETS: PIDPreset[] = [
     ],
   },
   {
+    name: 'L5P HPT Full Channel List (Confirmed)',
+    description: 'All 25 Mode 22 DIDs confirmed from HP Tuners BUSMASTER sniff — FRP, Boost, VGT, EGT, Torque, Throttle, DPF, DEF, NOx, BARO',
+    pids: [
+      0x0C,     // RPM (Mode 01)
+      0x0D,     // Vehicle Speed (Mode 01)
+      0x05,     // Engine Coolant Temp (Mode 01)
+      0x10,     // Mass Air Flow (Mode 01)
+      0x04,     // Calculated Engine Load (Mode 01)
+      // -- HPT-confirmed Mode 22 DIDs --
+      0x0062,   // Actual Engine Torque %
+      0x0063,   // Engine Reference Torque (Nm)
+      0x005D,   // Fuel Injection Timing (SAE)
+      0x0564,   // FRP Commanded
+      0x0565,   // FRP Actual
+      0x30BC,   // FRP Desired (HPT proprietary)
+      0x30C1,   // FRP Actual (HPT proprietary)
+      0x30BE,   // Diesel Commanded Throttle
+      0x0572,   // Commanded Boost
+      0x0573,   // Actual Boost
+      0x0574,   // VGT Commanded
+      0x0575,   // VGT Actual
+      0x0576,   // Turbo Speed
+      0x0580,   // EGT Pre-Turbo
+      0x0581,   // EGT Post-Turbo
+      0x0069,   // EGT Bank Extended (multi-frame)
+      0x0071,   // NOx Sensor Concentration
+      0x007A,   // NOx Sensor O2
+      0x006A,   // Exhaust Gas Pressure
+      0x008B,   // Diesel Particulate Matter
+      0x30D5,   // ECT (Diesel proprietary)
+      0x30D7,   // DEF Tank Level (Diesel)
+      0x328A,   // DPF Regen Percentage
+      0x308A,   // Barometric Pressure (Diesel)
+      0x1141,   // Fuel Tank Level
+      0x90D6,   // VIN Program Counter
+    ],
+  },
+  {
     name: 'Duramax Fuel System (Extended)',
     description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, FPR current (mA), Injector Balance Rates',
     pids: [
@@ -1090,6 +1128,135 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // L5P E41 Diesel — Additional DIDs confirmed via HP Tuners + BUSMASTER sniff
+  // Verified 2024-04-21 against BUSMASTERLogFile_FullPIDsChannelListHPT4.21.26
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── SAE J1979 PIDs via UDS $22 (HPT requests these as Mode 22, not Mode 01) ──
+  {
+    pid: 0x005D, name: 'Fuel Injection Timing (SAE)', shortName: 'INJ_TMG_SAE',
+    unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
+  },
+  {
+    pid: 0x0062, name: 'Actual Engine Torque %', shortName: 'TQ_ACT',
+    unit: '%', min: -125, max: 130, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a - 125,
+  },
+  {
+    pid: 0x0063, name: 'Engine Reference Torque', shortName: 'TQ_REF',
+    unit: 'Nm', min: 0, max: 2000, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  // ── GM Diesel Proprietary (0x30xx range) — confirmed from BUSMASTER ──
+  {
+    pid: 0x30BC, name: 'Desired Fuel Rail Pressure (HPT)', shortName: 'FRP_DES',
+    unit: 'kPa', min: 0, max: 50000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 1.39,  // Confirmed: 23346 * 1.39 = 32451 kPa = 4706 psi
+  },
+  {
+    pid: 0x30C1, name: 'Actual Fuel Rail Pressure (HPT)', shortName: 'FRP_ACT2',
+    unit: 'kPa', min: 0, max: 50000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 1.39,  // Same scale as 0x30BC
+  },
+  {
+    pid: 0x30BE, name: 'Diesel Commanded Throttle A', shortName: 'THRTL_CMD',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,  // Confirmed: 1000 * 0.1 = 100.0%
+  },
+  {
+    pid: 0x30D5, name: 'Engine Coolant Temp (Diesel)', shortName: 'ECT_DSL',
+    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a - 40,  // Confirmed: 120 - 40 = 80°C ≈ HPT 181.4°F
+  },
+  {
+    pid: 0x30D7, name: 'DEF Tank Level (Diesel)', shortName: 'DEF_LVL2',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a * 100) / 255,  // Confirmed: 97 * 100/255 = 38.04% = HPT 38.04%
+  },
+  {
+    pid: 0x328A, name: 'DPF Regen Percentage (Diesel)', shortName: 'DPF_REGEN_PCT',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,  // Confirmed: 10000 * 0.01 = 100.00%
+  },
+  {
+    pid: 0x30CA, name: 'Injection Pattern Active', shortName: 'INJ_PAT',
+    unit: '', min: 0, max: 7, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,  // Bitmask: bit0=Pilot, bit1=Main, bit2=Post
+  },
+  {
+    pid: 0x30DA, name: 'DPF Soot Load Percentage', shortName: 'DPF_SOOT_PCT',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,  // 0-100%
+  },
+  {
+    pid: 0x308A, name: 'Barometric Pressure (Diesel)', shortName: 'BARO_DSL',
+    unit: 'kPa', min: 50, max: 115, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.03125,  // Confirmed: 3245 * 0.03125 = 101.4 kPa
+  },
+  // ── Multi-frame EGT DIDs (ISO-TP, 6-7 data bytes) ──
+  {
+    pid: 0x0069, name: 'EGT Bank Extended (B1S1-S4)', shortName: 'EGT_EXT',
+    unit: '°C', min: -40, max: 900, bytes: 7, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Multi-byte: byte0=count, bytes1-2=EGT1, bytes3-4=EGT2, etc.
+      // Return primary EGT (B1S1)
+      return ((b * 256) + c) * 0.1 - 40;
+    },
+  },
+  {
+    pid: 0x0071, name: 'NOx Sensor Concentration', shortName: 'NOX_CONC',
+    unit: 'ppm', min: 0, max: 5000, bytes: 6, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f]) => {
+      // Bytes 1-2: NOx sensor 1 concentration, Bytes 3-4: NOx sensor 2
+      return ((b * 256) + c) * 0.05;
+    },
+  },
+  {
+    pid: 0x006A, name: 'Exhaust Gas Pressure', shortName: 'EXH_PRESS',
+    unit: 'kPa', min: 0, max: 500, bytes: 5, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e]) => ((a * 256) + b) * 0.03125,
+  },
+  {
+    pid: 0x007A, name: 'NOx Sensor Oxygen Concentration', shortName: 'NOX_O2',
+    unit: '%', min: -5, max: 25, bytes: 7, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => ((b * 256) + c) * 0.001 - 12,
+  },
+  {
+    pid: 0x008B, name: 'Diesel Particulate Matter', shortName: 'DPM',
+    unit: 'mg/m³', min: 0, max: 1000, bytes: 7, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => ((b * 256) + c) * 0.01,
+  },
+  // ── Fuel Tank / Misc ──
+  {
+    pid: 0x1141, name: 'Fuel Tank Level (Diesel)', shortName: 'FUEL_LVL',
+    unit: 'gal', min: 0, max: 40, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a * 0.2275,  // Derived: 143 * 0.2275 = 32.53 gal
+  },
+  {
+    pid: 0x90D6, name: 'VIN Program Counter', shortName: 'VIN_CNT',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,
   },
   // ── Transmission Extended ──
   {

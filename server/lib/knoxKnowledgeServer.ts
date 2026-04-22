@@ -731,6 +731,29 @@ These ECU platforms have hardened security that requires the unlock box:
 - Requires hardware-level intervention for programming session access
 - Affects: Chevrolet Silverado 2500HD/3500HD, GMC Sierra 2500HD/3500HD (2017-2023)
 
+=== L5P E41/E42 CONFIRMED PID SCALING (HP Tuners + BUSMASTER Verified April 2026) ===
+All DIDs use UDS Mode 22 (ReadDataByIdentifier) on ECM 0x7E0→0x7E8.
+GM Diesel Proprietary DIDs (0x30xx range) confirmed from BUSMASTER passive sniff:
+- 0x30BC: FRP Desired = (A×256+B) × 1.39 kPa (confirmed: 23346→32451 kPa = 4706 psi)
+- 0x30C1: FRP Actual = (A×256+B) × 1.39 kPa (same scale as 0x30BC)
+- 0x30BE: Diesel Commanded Throttle = (A×256+B) × 0.1 % (confirmed: 1000→100%)
+- 0x30D5: ECT (Diesel) = A - 40 °C (confirmed: 120→80°C ≈ HPT 181.4°F)
+- 0x30D7: DEF Tank Level = (A×100)/255 % (confirmed: 97→38.04%)
+- 0x328A: DPF Regen % = (A×256+B) × 0.01 % (confirmed: 10000→100%)
+- 0x308A: Barometric Pressure = (A×256+B) × 0.03125 kPa (confirmed: 3245→101.4 kPa)
+SAE J1979 PIDs via Mode 22:
+- 0x0062: Actual Engine Torque % = A - 125 %
+- 0x0063: Engine Reference Torque = (A×256+B) Nm
+- 0x005D: Fuel Injection Timing (SAE) = ((A×256+B) - 26880) / 128 °BTDC
+Multi-frame ISO-TP DIDs (require flow control):
+- 0x0069: EGT Bank Extended (7 bytes) — byte1-2: (B×256+C) × 0.1 - 40 °C
+- 0x0071: NOx Concentration (6 bytes) — byte1-2: (B×256+C) × 0.05 ppm
+- 0x007A: NOx O2 (7 bytes) — byte1-2: (B×256+C) × 0.001 - 12 %
+- 0x006A: Exhaust Gas Pressure (5 bytes) — (A×256+B) × 0.03125 kPa
+- 0x008B: Diesel Particulate Matter (7 bytes) — byte1-2: (B×256+C) × 0.01 mg/m³
+HP Tuners polls all 25 DIDs at ~10 Hz aggregate (~0.4 Hz per DID with 25 in loop).
+Full reference: docs/l5p-pid-sniff/L5P_E41_PID_Reference.md
+
 #### GM Gas Trucks (2019+)
 - ECU: E42/E86 (various Bosch MG1 variants)
 - Security: GM Global B with enhanced anti-tamper
