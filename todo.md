@@ -1861,3 +1861,4 @@
 - [x] Implement DDDI clear sequence in VopCan2UsbConnection (ensureDddiClear)
 - [x] Fix PID resolution to use vehicle-filtered PIDs instead of ALL_PIDS (gas PIDs showing on diesel)
 - [ ] Test Mode 22 fuel rail PIDs on truck with DDDI clear active
+- [x] Add TesterPresent (0x3E 0x00) keepalive every ~4s in VopCan2UsbConnection during datalogging

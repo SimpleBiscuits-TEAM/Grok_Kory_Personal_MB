@@ -92,6 +92,8 @@ const NON_GM_MANUFACTURERS = new Set([
 ]);
 /** Re-send DDDI clear every 30s (it's idempotent). */
 const DDDI_CLEAR_INTERVAL_MS = 30_000;
+/** TesterPresent keepalive interval — HPT sends every ~4s. */
+const TESTER_PRESENT_INTERVAL_MS = 4_000;
 
 
 function crc16Ccitt(data: Uint8Array, off: number, len: number): number {
@@ -172,6 +174,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private bridgeIdentityLastFlags = 0;
   /** Timestamp of last successful DDDI clear (per TX arb ID). */
   private dddiClearedAt = new Map<number, number>();
+  /** TesterPresent keepalive interval handle. */
+  private testerPresentTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: VopCan2UsbConnectionConfig = {}) {
     this.baudRate = config.baudRate ?? 115200;
@@ -905,6 +909,15 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.loggingActive = true;
     this.setState('logging');
 
+    // Start TesterPresent keepalive (HPT sends 0x3E 0x00 every ~4s)
+    this.stopTesterPresent();
+    this.testerPresentTimer = setInterval(async () => {
+      if (!this.loggingActive) return;
+      try {
+        await this.isoTpRequest([0x3E, 0x00], 500);
+      } catch { /* ignore — non-critical keepalive */ }
+    }, TESTER_PRESENT_INTERVAL_MS);
+
     const fail = new Map<number, number>();
     const pause = new Map<number, number>();
     const MAXF = 8;
@@ -962,6 +975,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
   stopLogging(): LogSession | null {
     this.loggingActive = false;
+    this.stopTesterPresent();
     if (this.currentSession) {
       this.currentSession.endTime = Date.now();
       const s = this.currentSession;
@@ -971,6 +985,13 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
     this.setState('ready');
     return null;
+  }
+
+  private stopTesterPresent(): void {
+    if (this.testerPresentTimer) {
+      clearInterval(this.testerPresentTimer);
+      this.testerPresentTimer = null;
+    }
   }
 
   async scanSupportedDIDs(options?: {
