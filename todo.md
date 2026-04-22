@@ -1849,3 +1849,15 @@
 
 ## Disable Strat Feedback Notifications
 - [x] Disable strat feedback email/notification function that emails owner
+
+## Datalog Issues — 2026-04-22 Truck Test
+- [ ] Fix PID selection: gas-only PIDs (TTQRET, TCTQRLR, AFMIR2, PRNDL_T93, KNK2_BMW) appearing on diesel truck — need fuelType filtering in datalogger PID lookup
+- [ ] Fix FUEL_LVL: 142 gal (should be ~31 gal) — formula still wrong
+- [ ] Fix BARO_DSL: 17-23 PSI (should be ~14.7 PSI) — formula wrong
+- [ ] Fix EGT_EXT: 7332°F (should be ~300-400°F at idle) — formula wrong
+- [ ] Fix DPF_REGEN_PCT: 100% constant (should be -4% per HPT) — formula wrong
+- [ ] Fix NOX_CONC: 2081 ppm constant — verify formula
+- [ ] Fix many DEAD columns (DPF_SOOT, DPF_DP, DPF temps, DEF channels, NOX_IN/OUT, SCR_TEMP, FRP_DES, INJ_PAT, NOX_O2)
+- [x] Implement DDDI clear sequence in VopCan2UsbConnection (ensureDddiClear)
+- [x] Fix PID resolution to use vehicle-filtered PIDs instead of ALL_PIDS (gas PIDs showing on diesel)
+- [ ] Test Mode 22 fuel rail PIDs on truck with DDDI clear active

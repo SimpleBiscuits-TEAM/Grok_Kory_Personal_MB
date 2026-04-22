@@ -76,6 +76,23 @@ const EFUSE_NAME_BYTES = 24;
 const OBD_TX_ID = 0x7e0;
 const OBD_RX_ID = 0x7e8;
 
+/** DDDI periodic IDs that HPT clears before Mode 22 reads (from IntelliSpy capture). */
+const DDDI_CLEAR_PERIODIC_IDS = [
+  0x01, 0x04, 0x07, 0x08, 0x0F, 0x12, 0x13, 0x14, 0x18, 0x1B,
+  0x1E, 0x21, 0x27, 0x29, 0x2C, 0x2E, 0x30, 0x34, 0x35, 0x36,
+  0x3A, 0x3B, 0x3E, 0x41, 0x42, 0x46, 0x4A, 0x4C, 0x4F, 0x50,
+  0x52, 0x54, 0x5A, 0x5B, 0x5C, 0x61, 0x63, 0x64, 0x67, 0x68,
+  0x69, 0x6A, 0x71, 0x72, 0x75, 0x77, 0x78, 0x7A, 0x7B, 0x87,
+  0x88, 0x8B, 0x98, 0xB1, 0xE5, 0xFD,
+];
+/** Non-GM manufacturers that don't need DDDI clear. */
+const NON_GM_MANUFACTURERS = new Set([
+  'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
+  'canam', 'seadoo', 'polaris', 'kawasaki',
+]);
+/** Re-send DDDI clear every 30s (it's idempotent). */
+const DDDI_CLEAR_INTERVAL_MS = 30_000;
+
 
 function crc16Ccitt(data: Uint8Array, off: number, len: number): number {
   let crc = 0xffff;
@@ -153,6 +170,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   /** In-flight reassembly for TYPE_IDENTITY_READ_DATA (0x33) frames from the device. */
   private bridgeIdentityAccumulator = new Uint8Array(0);
   private bridgeIdentityLastFlags = 0;
+  /** Timestamp of last successful DDDI clear (per TX arb ID). */
+  private dddiClearedAt = new Map<number, number>();
 
   constructor(config: VopCan2UsbConnectionConfig = {}) {
     this.baudRate = config.baudRate ?? 115200;
@@ -705,9 +724,53 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
   }
 
+  /**
+   * DDDI clear sequence — unlocks Mode 22 on GM E41 ECU.
+   * Sends: 1) Stop periodic reads (0xAA 0x04 0x00)
+   *        2) Clear all 56 DDDI periodic definitions (0x2C 0xFE 0x00 XX)
+   * NRC responses are expected and OK — some IDs may not be defined.
+   */
+  private async ensureDddiClear(): Promise<void> {
+    const mfr = this.vehicleInfo?.manufacturer;
+    if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
+    const now = Date.now();
+    const last = this.dddiClearedAt.get(this.obdTxId) ?? 0;
+    if (now - last < DDDI_CLEAR_INTERVAL_MS) return;
+
+    this.emit('log', null, 'DDDI clear: unlocking Mode 22…');
+    const t0 = Date.now();
+
+    // Phase 1: Stop any existing periodic reads
+    try {
+      await this.isoTpRequest([0xAA, 0x04, 0x00], 500);
+    } catch { /* NRC OK — nothing may be running */ }
+    await new Promise(r => setTimeout(r, 10));
+
+    // Phase 2: Clear all DDDI periodic definitions
+    let okCount = 0;
+    for (const pid of DDDI_CLEAR_PERIODIC_IDS) {
+      try {
+        const resp = await this.isoTpRequest([0x2C, 0xFE, 0x00, pid], 300);
+        if (resp) okCount++;
+      } catch { /* NRC 0x31 expected for some IDs */ }
+      // HPT sends these ~6ms apart
+      await new Promise(r => setTimeout(r, 6));
+    }
+
+    this.dddiClearedAt.set(this.obdTxId, Date.now());
+    const elapsed = Date.now() - t0;
+    this.emit('log', null, `DDDI clear done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK in ${elapsed}ms`);
+  }
+
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
       const service = pid.service || 0x01;
+
+      // Ensure DDDI clear before first Mode 22 read
+      if (service === 0x22) {
+        await this.ensureDddiClear();
+      }
+
       const pdu =
         service === 0x22
           ? [0x22, (pid.pid >> 8) & 0xff, pid.pid & 0xff]

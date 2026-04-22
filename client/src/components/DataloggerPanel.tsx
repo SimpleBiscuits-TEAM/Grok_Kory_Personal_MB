@@ -1140,12 +1140,21 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // ─── Logging handlers ────────────────────────────────────────────────
 
+  // Vehicle-filtered PID list — excludes gas PIDs on diesel trucks (and vice versa)
+  // This prevents shared DIDs (e.g. 0x208A = FP_SAE on diesel, TTQRET on gas)
+  // from resolving to the wrong definition.
+  const vehicleFilteredPids = useMemo(
+    () => getPidsForVehicle(detectedManufacturer, detectedFuelType),
+    [detectedManufacturer, detectedFuelType]
+  );
+
   // Helper: prepare PIDs and force-add unsupported ones
   const preparePidsForLogging = useCallback(() => {
     const conn = connectionRef.current;
     if (!conn) return null;
 
-    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+    // Use vehicle-filtered PIDs to avoid gas/diesel DID collisions
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
     if (pidsToLog.length === 0) {
       addLog('ERROR: No PIDs selected. Select at least one PID from the list below.');
       return null;
@@ -1167,7 +1176,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       }
     }
     return pidsToLog;
-  }, [selectedPids, addLog]);
+  }, [selectedPids, addLog, vehicleFilteredPids]);
 
   // ─── MONITOR: Start live data view WITHOUT recording ─────────────────
   const handleStartMonitoring = useCallback(async () => {
@@ -1297,7 +1306,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
     const endTime = Date.now();
     const duration = (endTime - recordStartRef.current) / 1000;
-    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
     // Build session from recorded readings
     const session: LogSession = {
@@ -1602,7 +1611,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // ─── Render ──────────────────────────────────────────────────────────
 
-  const activePids = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+  const activePids = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
   return (
     <div>
