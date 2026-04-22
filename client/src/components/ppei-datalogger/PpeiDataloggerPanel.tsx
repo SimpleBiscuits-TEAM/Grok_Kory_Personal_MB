@@ -158,37 +158,37 @@ function wrapOpenWebSocket(original: Function) {
 }
 
 // ── Apply all patches at module scope ──
-(function applyAllPpeiPatches() {
+console.log(`${PPEI_TAG} 🔧 Module loaded — attempting to apply patches...`);
+try {
   const proto = PCANConnection.prototype as any;
   
   if (proto._ppeiFullyPatched) {
     console.log(`${PPEI_TAG} Patches already applied — skipping`);
-    return;
+  } else {
+    // Patch 1: Session management
+    proto._originalEnsureGmLiveDataSession = proto.ensureGmLiveDataSessionForTx;
+    proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
+    console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → HP Tuners approach`);
+    // Patch 2: sendUDSviaRawCAN diagnostic logging
+    proto._originalSendUDSviaRawCAN = proto.sendUDSviaRawCAN;
+    proto.sendUDSviaRawCAN = wrapSendUDSviaRawCAN(proto._originalSendUDSviaRawCAN);
+    console.log(`${PPEI_TAG} ✅ Patch 2: sendUDSviaRawCAN → diagnostic logging wrapper`);
+    // Patch 3: readPid diagnostic logging
+    proto._originalReadPid = proto.readPid;
+    proto.readPid = wrapReadPid(proto._originalReadPid);
+    console.log(`${PPEI_TAG} ✅ Patch 3: readPid → diagnostic logging wrapper`);
+    // Patch 4: openWebSocket interceptor
+    proto._originalOpenWebSocket = proto.openWebSocket;
+    proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
+    console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor`);
+    proto._ppeiFullyPatched = true;
+    console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
   }
-
-  // Patch 1: Session management
-  proto._originalEnsureGmLiveDataSession = proto.ensureGmLiveDataSessionForTx;
-  proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
-  console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → HP Tuners approach`);
-
-  // Patch 2: sendUDSviaRawCAN diagnostic logging
-  proto._originalSendUDSviaRawCAN = proto.sendUDSviaRawCAN;
-  proto.sendUDSviaRawCAN = wrapSendUDSviaRawCAN(proto._originalSendUDSviaRawCAN);
-  console.log(`${PPEI_TAG} ✅ Patch 2: sendUDSviaRawCAN → diagnostic logging wrapper`);
-
-  // Patch 3: readPid diagnostic logging
-  proto._originalReadPid = proto.readPid;
-  proto.readPid = wrapReadPid(proto._originalReadPid);
-  console.log(`${PPEI_TAG} ✅ Patch 3: readPid → diagnostic logging wrapper`);
-
-  // Patch 4: openWebSocket interceptor
-  proto._originalOpenWebSocket = proto.openWebSocket;
-  proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
-  console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor`);
-
-  proto._ppeiFullyPatched = true;
-  console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
-})();
+} catch (err) {
+  console.error(`${PPEI_TAG} ❌ PATCH FAILED:`, err);
+  console.error(`${PPEI_TAG} PCANConnection available:`, typeof PCANConnection);
+  console.error(`${PPEI_TAG} PCANConnection.prototype:`, PCANConnection?.prototype);
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // PPEI DATALOGGER WRAPPER COMPONENT

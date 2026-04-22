@@ -1739,7 +1739,19 @@
 - [x] Checkpoint and push to GitHub (version 92edc837)
 
 ## Bug — PPEI Patch Not Applying + Mode 01 Also Zero
-- [ ] Diagnose why PPEI monkey-patch is not executing (no [PPEI Patch] in console)
-- [ ] Fix patch application so it actually runs when PPEI Datalogger tab is active
-- [ ] Investigate why Mode 01 standard PIDs also show zero (transport-level issue, not session-related)
-- [ ] Implement comprehensive fix for both Mode 01 and Mode 22 scan failures
+- [x] Diagnose why PPEI monkey-patch is not executing — user on published site, not dev; also added try-catch error surfacing
+- [x] Fix patch application — moved to module scope with error reporting
+- [x] Investigate why Mode 01 standard PIDs also show zero — PCAN receive queue overflow (transport-level)
+- [x] Implement comprehensive fix — ppei_pcan_bridge.py with Notifier + HW filters
+
+## Root Cause Found — PCAN Receive Queue Overflow
+- [x] Identified: "The receive queue was read too late" — PCAN driver buffer overflow on busy 2019 truck CAN bus
+- [x] Bench E41 works because less bus traffic (no other modules flooding the bus)
+- [x] Created ppei_pcan_bridge.py — thin wrapper that patches Tobi's bridge at runtime
+- [x] Patch 1: Replace bus.recv() polling with python-can Notifier (background thread reader)
+- [x] Patch 2: Add hardware CAN filters on bus init (0x7E0-0x7EF + 0x7DF only)
+- [x] Patch 3: Remove HW filters when IntelliSpy monitor starts, restore when it stops
+- [x] Patch 4: Skip _drain_queue in send_raw_frame (Notifier delivers frames in real-time)
+- [x] Tobi's pcan_bridge.py remains completely untouched
+- [x] User runs ppei_pcan_bridge.py on Pi instead of pcan_bridge.py for busy buses
+- [ ] Test on 2019 L5P truck and verify PIDs are detected
