@@ -63,14 +63,25 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
     }, 60000); // 60s timeout — clearing 56 periodic IDs takes time
     
     if (response?.ok) {
+      const streaming = response.streaming === true;
+      const periodicIds = Array.isArray(response.periodic_ids)
+        ? response.periodic_ids.map((id: number) => `0x${id.toString(16).toUpperCase()}`).join(', ')
+        : 'none';
       console.log(
-        `${PPEI_TAG} ✅ DDDI clear OK on ${txHex}: ` +
+        `${PPEI_TAG} ✅ DDDI setup OK on ${txHex}: ` +
         `cleared ${response.clear_ok ?? '?'} periodic IDs ` +
-        `(${response.clear_nrc ?? '?'} NRC expected) ` +
-        `in ${response.elapsed_ms ?? '?'}ms`
+        `(${response.clear_nrc ?? '?'} NRC expected), ` +
+        `defined ${response.define_ok ?? '?'} composites ` +
+        `in ${response.elapsed_ms ?? '?'}ms` +
+        (streaming ? ` — PERIODIC STREAMING ACTIVE on 0x5E8 [${periodicIds}]` : '')
       );
+      if (streaming) {
+        _ppeiDddiStreamingActive = true;
+        _ppeiPeriodicFrameCount = 0;
+        console.log(`${PPEI_TAG} 🔄 DDDI periodic streaming started — FRP_ACT will be extracted from 0x5E8 frames`);
+      }
     } else {
-      console.warn(`${PPEI_TAG} ⚠️ DDDI clear partial/failed on ${txHex}:`, response);
+      console.warn(`${PPEI_TAG} ⚠️ DDDI setup partial/failed on ${txHex}:`, response);
     }
   } catch (e: any) {
     console.warn(`${PPEI_TAG} ⚠️ DDDI setup failed on ${txHex}: ${e?.message ?? e}`);
@@ -151,14 +162,101 @@ function wrapReadPid(original: Function) {
   };
 }
 
+// ── DDDI Periodic Frame Parsing ──
+// Composite definitions from ppei_pcan_bridge.py (HP Tuners IntelliSpy capture)
+// Each composite maps a periodic ID to a list of DIDs with their byte offsets
+const DDDI_PERIODIC_ARB_ID = 0x5E8;
+
+interface DddiDidEntry {
+  did: number;
+  shortName: string;
+  offset: number;  // byte offset in the periodic frame (after periodic ID byte)
+  bytes: number;
+  formula: (raw: number[]) => number;
+  unit: string;
+}
+
+// Composite FB: IBR_1 (2B) + THRTL_CMD (2B) + FRP_ACT (2B) + VSS (1B) = 7 bytes
+const COMPOSITE_FB: DddiDidEntry[] = [
+  { did: 0x20B4, shortName: 'IBR_1',     offset: 0, bytes: 2, formula: (r) => { const v = (r[0]*256)+r[1]; return (v>32767?v-65536:v)*0.01; }, unit: 'mm³' },
+  { did: 0x30BE, shortName: 'THRTL_CMD', offset: 2, bytes: 2, formula: (r) => ((r[0]*256)+r[1])*0.1, unit: '%' },
+  { did: 0x328A, shortName: 'FRP_ACT',   offset: 4, bytes: 2, formula: (r) => ((r[0]*256)+r[1])*0.4712, unit: 'PSI' },
+  { did: 0x000D, shortName: 'VSS',       offset: 6, bytes: 1, formula: (r) => r[0]*0.621371, unit: 'MPH' },
+];
+
+// Map periodic ID -> composite layout
+const DDDI_COMPOSITES: Record<number, DddiDidEntry[]> = {
+  0xFB: COMPOSITE_FB,
+  // Add FD, F9, F8 here when needed
+};
+
+// Storage for latest periodic values (keyed by DID)
+interface PeriodicValue {
+  did: number;
+  shortName: string;
+  value: number;
+  unit: string;
+  rawBytes: number[];
+  timestamp: number;
+}
+
+// Module-level map so both Patch 4 (writer) and Patch 5 (reader) can access it
+const _ppeiPeriodicValues = new Map<number, PeriodicValue>();
+let _ppeiPeriodicFrameCount = 0;
+let _ppeiDddiStreamingActive = false;
+
+function parseDddiPeriodicFrame(data: number[]): void {
+  if (!data || data.length < 2) return;
+  const periodicId = data[0];
+  const composite = DDDI_COMPOSITES[periodicId];
+  if (!composite) return;
+
+  _ppeiPeriodicFrameCount++;
+  _ppeiDddiStreamingActive = true;
+  const now = Date.now();
+
+  for (const entry of composite) {
+    const startByte = 1 + entry.offset; // +1 to skip periodic ID byte
+    if (startByte + entry.bytes > data.length) continue;
+    const rawBytes = data.slice(startByte, startByte + entry.bytes);
+    try {
+      const value = entry.formula(rawBytes);
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        _ppeiPeriodicValues.set(entry.did, {
+          did: entry.did,
+          shortName: entry.shortName,
+          value,
+          unit: entry.unit,
+          rawBytes,
+          timestamp: now,
+        });
+      }
+    } catch { /* formula error */ }
+  }
+
+  // Log periodically (every 100th frame to avoid spam)
+  if (_ppeiPeriodicFrameCount <= 5 || _ppeiPeriodicFrameCount % 100 === 0) {
+    const frpVal = _ppeiPeriodicValues.get(0x328A);
+    const vssVal = _ppeiPeriodicValues.get(0x000D);
+    console.log(
+      `${PPEI_TAG} 🔄 DDDI periodic #${_ppeiPeriodicFrameCount}: ` +
+      `FRP_ACT=${frpVal ? frpVal.value.toFixed(1) + ' PSI' : 'N/A'} ` +
+      `VSS=${vssVal ? vssVal.value.toFixed(1) + ' MPH' : 'N/A'} ` +
+      `(0x${periodicId.toString(16).toUpperCase()} frame)`
+    );
+  }
+}
+
 /**
  * ── PATCH 4: openWebSocket wrapper ──
- * Intercepts the WebSocket onmessage to log all incoming can_frame messages.
+ * Intercepts the WebSocket onmessage to:
+ * 1. Log all incoming can_frame messages
+ * 2. Parse 0x5E8 DDDI periodic frames and extract FRP_ACT, VSS, etc.
  */
 function wrapOpenWebSocket(original: Function) {
   return async function(this: any) {
     await original.call(this);
-    // After the original sets up ws.onmessage, wrap it to add logging
+    // After the original sets up ws.onmessage, wrap it to add logging + DDDI parsing
     if (this.ws) {
       const originalOnMessage = this.ws.onmessage;
       let frameCount = 0;
@@ -167,8 +265,16 @@ function wrapOpenWebSocket(original: Function) {
           const msg = JSON.parse(event.data);
           if (msg.type === 'can_frame' || msg.type === 'bus_frame') {
             frameCount++;
-            const arbHex = `0x${(msg.arb_id ?? msg.arbitration_id ?? 0).toString(16).toUpperCase()}`;
-            const dataHex = Array.isArray(msg.data) ? msg.data.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') : '?';
+            const arbId = msg.arb_id ?? msg.arbitration_id ?? 0;
+            const arbHex = `0x${arbId.toString(16).toUpperCase()}`;
+            const dataArr: number[] = Array.isArray(msg.data) ? msg.data : [];
+            const dataHex = dataArr.map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
+
+            // ── DDDI periodic frame parsing (0x5E8) ──
+            if (arbId === DDDI_PERIODIC_ARB_ID && dataArr.length >= 2) {
+              parseDddiPeriodicFrame(dataArr);
+            }
+
             // Log first 20 frames, then every 50th to avoid spam
             if (frameCount <= 20 || frameCount % 50 === 0) {
               console.log(`${PPEI_TAG} 📡 WS frame #${frameCount}: ${arbHex} [${dataHex}]`);
@@ -182,7 +288,7 @@ function wrapOpenWebSocket(original: Function) {
           originalOnMessage.call(this.ws, event);
         }
       };
-      console.log(`${PPEI_TAG} 🔌 WebSocket onmessage interceptor installed`);
+      console.log(`${PPEI_TAG} 🔌 WebSocket onmessage interceptor installed (with DDDI 0x5E8 parser)`);
     }
   };
 }
@@ -318,6 +424,38 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
 
+    // ── Inject DDDI periodic values for PIDs that have fresh data ──
+    // This is the key: if the ECU is streaming FRP_ACT via DDDI periodic,
+    // we use that value instead of waiting for a Mode 22 poll that may fail.
+    const PERIODIC_MAX_AGE_MS = 2000; // Accept periodic values up to 2s old
+    const now = Date.now();
+    const injectedFromPeriodic: string[] = [];
+
+    for (const pid of pids) {
+      // Skip if we already got a reading for this PID from batch/sequential
+      if (readings.some(r => r.pid === pid.pid)) continue;
+
+      const periodic = _ppeiPeriodicValues.get(pid.pid);
+      if (periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS) {
+        readings.push({
+          pid: periodic.did,
+          name: pid.name,
+          shortName: periodic.shortName,
+          value: periodic.value,
+          unit: periodic.unit,
+          rawBytes: periodic.rawBytes,
+          timestamp: periodic.timestamp,
+        });
+        injectedFromPeriodic.push(`${periodic.shortName}=${periodic.value.toFixed(1)}`);
+      }
+    }
+
+    if (injectedFromPeriodic.length > 0) {
+      console.log(
+        `${PPEI_TAG} 🔄 Injected ${injectedFromPeriodic.length} DDDI periodic value(s): ${injectedFromPeriodic.join(', ')}`
+      );
+    }
+
     return readings;
   };
 }
@@ -344,13 +482,13 @@ try {
     // Patch 4: openWebSocket interceptor
     proto._originalOpenWebSocket = proto.openWebSocket;
     proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
-    console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor`);
+    console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor + DDDI 0x5E8 periodic parser`);
     // Patch 5: readPids → batch_read_dids (fast multi-DID polling)
     // Must use _originalReadPid (the unwrapped version) for fallback,
     // and wrap the original readPids (before Patch 3 wrapped readPid).
     proto._originalReadPids = proto.readPids;
     proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
-    console.log(`${PPEI_TAG} ✅ Patch 5: readPids → batch_read_dids (fast multi-DID polling)`);
+    console.log(`${PPEI_TAG} ✅ Patch 5: readPids → batch_read_dids + DDDI periodic value injection`);
     proto._ppeiFullyPatched = true;
     console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
   }
@@ -403,7 +541,7 @@ export default function PpeiDataloggerPanel({
                 </span>
               </div>
               <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
-                PPEI diagnostic patches active — check console (F12) for [PPEI-DIAG] messages
+                PPEI diagnostic patches active — DDDI periodic streaming enabled for FRP_ACT
               </span>
             </div>
             <div className="flex items-center gap-2">

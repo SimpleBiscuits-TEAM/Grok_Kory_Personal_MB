@@ -1957,3 +1957,12 @@
 - [x] Make console text selectable (user-select)
 - [x] Color DDDI log entries in blue for visibility
 - [x] Increased console max height from 150px to 200px
+
+## Port DDDI Periodic Streaming to PPEI PCAN Bridge
+- [x] Add 0xAA 04 start periodic command to ppei_pcan_bridge.py after composite definitions
+- [x] Forward 0x5E8 periodic frames as WebSocket can_frame messages from bridge (via _broadcast_rx_stream)
+- [x] Bridge dddi_setup now returns streaming=true and periodic_ids in response
+- [x] PPEI ensureGmLiveDataSession logs when periodic streaming starts
+- [x] Parse 0x5E8 frames in frontend to extract FRP_ACT from composite FB
+- [x] Wire parsed periodic values into readPids return path (DDDI periodic injection)
+- [x] Add comprehensive console.log for all DDDI steps in PPEI panel

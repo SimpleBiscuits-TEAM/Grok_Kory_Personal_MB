@@ -812,12 +812,39 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
                 log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: defineComposite 0x{payload[1]:02X}")
             await asyncio.sleep(0.015)
     
+    # ── Phase 4: Start periodic streaming (0xAA 04 FD FB F9 F8) ──
+    # This tells the ECU to start pushing data on arb ID 0x5E8
+    # 0xAA = ReadDataByPeriodicIdentifier
+    # 0x04 = transmissionMode (medium rate ~100ms)
+    # FD, FB, F9, F8 = the periodic IDs we just defined
+    periodic_ids = [p[1] for p in _DDDI_DEFINE_COMPOSITES]  # Extract periodic ID from each composite
+    if periodic_ids and fail_count == 0:
+        start_payload = bytes([0xAA, 0x04] + periodic_ids)
+        log.info(f"[PPEI] Phase 4: Starting periodic streaming: 0xAA 04 {' '.join(f'{x:02X}' for x in periodic_ids)}")
+        resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, start_payload, timeout=0.5)
+        if resp:
+            ok_count += 1
+            log.info(f"[PPEI] Phase 4 OK: Periodic streaming started on 0x{DDDI_PERIODIC_ARB_ID:03X}")
+            # Mark that periodic streaming is active on this bridge
+            bridge._ppei_dddi_streaming = True
+            bridge._ppei_dddi_periodic_ids = periodic_ids
+        else:
+            log.warning("[PPEI] Phase 4: 0xAA start may have NRC'd (ECU might not support periodic mode)")
+            bridge._ppei_dddi_streaming = False
+        await asyncio.sleep(0.050)
+    else:
+        if fail_count > 0:
+            log.warning(f"[PPEI] Phase 4 SKIPPED: {fail_count} composite definitions failed")
+        bridge._ppei_dddi_streaming = False
+    
     elapsed = (time.time() - start) * 1000
     success = True  # Clear phase always succeeds (NRCs are expected)
+    streaming = getattr(bridge, '_ppei_dddi_streaming', False)
     log.info(
         f"[PPEI] DDDI setup complete in {elapsed:.0f}ms: "
         f"cleared {len(_DDDI_CLEAR_PERIODIC_IDS)} periodic IDs, "
         f"defined {len(_DDDI_DEFINE_COMPOSITES)} composites"
+        f"{', periodic streaming ACTIVE on 0x5E8' if streaming else ''}"
     )
     
     return {
@@ -828,16 +855,21 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
         "clear_nrc": clear_nrc,
         "define_ok": ok_count - clear_ok - clear_nrc - 1,
         "elapsed_ms": round(elapsed, 1),
+        "streaming": streaming,
+        "periodic_ids": periodic_ids if streaming else [],
     }
 async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
     """Stop periodic reads and clean up DDDI definitions."""
     log.info(f"[PPEI] DDDI teardown for TX=0x{tx_id:03X}")
     
+    bridge._ppei_dddi_streaming = False
+    bridge._ppei_dddi_periodic_ids = []
+    
     if not bridge.protocol or not bridge.bus:
         return {"type": "dddi_teardown_result", "id": req_id, "ok": True}
     
-    # Send 0xAA 0x00 to stop periodic reads
-    stop_payload = bytes([0xAA, 0x00])
+    # Send 0xAA 04 00 to stop periodic reads (same as HPT)
+    stop_payload = bytes([0xAA, 0x04, 0x00])
     await _send_isotp_and_wait(bridge, tx_id, rx_id, stop_payload, timeout=0.5)
     
     # Remove 0x5E8 from filters
@@ -845,7 +877,7 @@ async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
     if hasattr(bridge.protocol, '_ppei_listener'):
         bridge.protocol._ppei_listener._filter_ids.discard(DDDI_PERIODIC_ARB_ID)
     
-    log.info("[PPEI] DDDI teardown complete")
+    log.info("[PPEI] DDDI teardown complete — periodic streaming stopped")
     return {"type": "dddi_teardown_result", "id": req_id, "ok": True}
 
 
@@ -896,7 +928,7 @@ if __name__ == '__main__':
     log.info("  3. IntelliSpy uses shared Notifier with OBD")
     log.info("  4. send_raw_frame skips queue drain")
     log.info("  5. batch_read_dids for fast multi-DID polling")
-    log.info("  6. DDDI setup/teardown for Mode 22 unlock (HP Tuners method)")
+    log.info("  6. DDDI setup/teardown for Mode 22 unlock + periodic streaming (HP Tuners method)")
     log.info("=" * 60)
     log.info("Tobi's pcan_bridge.py is NOT modified.")
     log.info("To revert: run pcan_bridge.py directly instead.")
