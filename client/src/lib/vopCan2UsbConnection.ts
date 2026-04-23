@@ -1222,6 +1222,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         this.drainObdRxFrames();
 
         console.log(`[DDDI-STREAM] TX ${label} FF: ${Array.from(ff).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const ffTs = Date.now();
         const ffOk = await this.sendCanTx(0x7E0, false, ff, true);
         if (!ffOk) {
           console.error(`[DDDI-STREAM] ${label} FF TX NACK`);
@@ -1237,7 +1238,9 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           this.emit('log', null, `[DDDI-STREAM] ${label} FC timeout`);
           return false;
         }
-        console.log(`[DDDI-STREAM] RX ${label} FC: ${Array.from(fcFrame).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const fcHex = Array.from(fcFrame).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+        const fcTs = Date.now();
+        console.log(`[DDDI-STREAM] RX ${label} FC: ${fcHex} (took ${fcTs - ffTs}ms after FF)`);
 
         // Continuation Frame: [21, remaining payload bytes, padded with 00]
         const cf = new Uint8Array(8);
@@ -1245,20 +1248,15 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         for (let i = 6; i < payload.length; i++) cf[1 + (i - 6)] = payload[i];
         // rest stays 0x00 (padding)
 
-        // Respect STmin from FC (byte 2)
-        const stMin = fcFrame[2] || 0;
-        if (stMin > 0 && stMin <= 0x7F) {
-          await new Promise(r => setTimeout(r, stMin));
-        } else if (stMin >= 0xF1 && stMin <= 0xF9) {
-          await new Promise(r => setTimeout(r, 1));
-        }
-
-        console.log(`[DDDI-STREAM] TX ${label} CF: ${Array.from(cf).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
-        const cfOk = await this.sendCanTx(0x7E0, false, cf, true);
-        if (!cfOk) {
-          console.error(`[DDDI-STREAM] ${label} CF TX NACK`);
-          return false;
-        }
+        // CRITICAL: Send CF IMMEDIATELY — do NOT wait for STmin.
+        // The ECU's FC says STmin=0x0A (10ms) but JavaScript setTimeout has
+        // 4-16ms minimum resolution, and any delay risks the ECU's ISO-TP
+        // layer timing out. HPT sends CF within ~2ms of FC.
+        // Also use waitAck=false to avoid any ACK-related timing issues.
+        console.log(`[DDDI-STREAM] TX ${label} CF: ${Array.from(cf).map(b=>b.toString(16).padStart(2,'0')).join(' ')} (sending IMMEDIATELY, no STmin wait, no ACK wait)`);
+        await this.writer!.write(buildBridgePacket(TYPE_CAN_TX, 0, 0x7E0, cf));
+        const cfTs = Date.now();
+        console.log(`[DDDI-STREAM] ${label} CF written to serial (${cfTs - fcTs}ms after FC)`);
 
         // Wait for positive response (0x6D) or NRC (0x7F)
         const resp = await this.waitRxMatch(3000, (id, d) =>
