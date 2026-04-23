@@ -1200,36 +1200,92 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
       // ── Step 3: IOCTL define FE00 — FRP_ACT (RAM 0x40014F08, 4 bytes) ──
       // HPT sends: 2D FE 00 40 01 4F 08 04 (8 bytes, multi-frame ISO-TP)
-      //   0x2D = InputOutputControlByIdentifier
-      //   FE 00 = parameter ID
-      //   40 01 4F 08 = RAM address 0x40014F08 (VeFHPR_p_FuelRail)
-      //   04 = size in bytes (FLOAT32)
-      // NOTE: 8-byte payload requires multi-frame ISO-TP (FF+FC+CF).
-      // Using sendUDSRequest (vopStyleUdsCore) which has proven multi-frame TX
-      // that works on the actual hardware (used for flashing).
-      // isoTpRequest multi-frame was silently failing on the CAN bridge.
-      console.log(`[DDDI-STREAM] TX IOCTL FE00 via sendUDSRequest: 2D FE 00 40 01 4F 08 04`);
-      let ioctl1Ok = false;
-      try {
-        const ioctl1Resp = await this.sendUDSRequest(0x2D, 0xFE, [0x00, 0x40, 0x01, 0x4F, 0x08, 0x04], 0x7E0, 3000);
-        if (ioctl1Resp) {
-          const respHex = ioctl1Resp.data ? ioctl1Resp.data.map((b: number) => b.toString(16).padStart(2,'0')).join(' ') : 'no data';
-          console.log(`[DDDI-STREAM] RX IOCTL FE00: svc=0x${ioctl1Resp.service?.toString(16)} positive=${ioctl1Resp.positiveResponse} nrc=${ioctl1Resp.nrc} data=[${respHex}]`);
-          if (ioctl1Resp.nrc) {
-            console.warn(`[DDDI-STREAM] IOCTL FE00 NRC=0x${ioctl1Resp.nrc.toString(16)} — continuing anyway`);
-            this.emit('log', null, `[DDDI-STREAM] IOCTL FE00 NRC=0x${ioctl1Resp.nrc.toString(16)} — trying to continue`);
-          } else {
-            ioctl1Ok = true;
-            this.emit('log', null, '[DDDI-STREAM] IOCTL FE00 OK → 0x6D');
+      //   FF: 10 08 2D FE 00 40 01 4F
+      //   FC: 30 xx xx (from ECU)
+      //   CF: 21 08 04 00 00 00 00 00
+      //   Resp: 04 6D FE 00 00 (positive)
+      //
+      // APPROACH: Raw CAN frames via sendCanTx — bypasses ALL abstraction layers.
+      // Both isoTpRequest multi-frame and sendUDSRequest failed silently on the
+      // actual CAN bridge hardware. This sends the exact same bytes HPT puts on
+      // the wire, with inline FC polling from rxFrames.
+      const sendIoctlMultiFrame = async (label: string, payload: number[]): Promise<boolean> => {
+        // payload = [2D, FE, 00, 40, 01, 4F, 08, 04] (8 bytes)
+        const totalLen = payload.length; // 8
+        // First Frame: [10 | (len>>8), len & 0xFF, first 6 payload bytes]
+        const ff = new Uint8Array(8);
+        ff[0] = 0x10 | ((totalLen >> 8) & 0x0F);
+        ff[1] = totalLen & 0xFF;
+        for (let i = 0; i < 6 && i < payload.length; i++) ff[i + 2] = payload[i];
+
+        // Drain any stale 0x7E8 frames before we start
+        this.drainObdRxFrames();
+
+        console.log(`[DDDI-STREAM] TX ${label} FF: ${Array.from(ff).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const ffOk = await this.sendCanTx(0x7E0, false, ff, true);
+        if (!ffOk) {
+          console.error(`[DDDI-STREAM] ${label} FF TX NACK`);
+          return false;
+        }
+
+        // Wait for Flow Control (PCI type 3 = 0x3x) from 0x7E8
+        const fcFrame = await this.waitRxMatch(2000, (id, d) =>
+          id === 0x7E8 && d.length > 0 && (d[0] & 0xF0) === 0x30
+        );
+        if (!fcFrame) {
+          console.error(`[DDDI-STREAM] ${label} FC timeout — ECU did not respond to FF`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} FC timeout`);
+          return false;
+        }
+        console.log(`[DDDI-STREAM] RX ${label} FC: ${Array.from(fcFrame).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+
+        // Continuation Frame: [21, remaining payload bytes, padded with 00]
+        const cf = new Uint8Array(8);
+        cf[0] = 0x21; // seq=1
+        for (let i = 6; i < payload.length; i++) cf[1 + (i - 6)] = payload[i];
+        // rest stays 0x00 (padding)
+
+        // Respect STmin from FC (byte 2)
+        const stMin = fcFrame[2] || 0;
+        if (stMin > 0 && stMin <= 0x7F) {
+          await new Promise(r => setTimeout(r, stMin));
+        } else if (stMin >= 0xF1 && stMin <= 0xF9) {
+          await new Promise(r => setTimeout(r, 1));
+        }
+
+        console.log(`[DDDI-STREAM] TX ${label} CF: ${Array.from(cf).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const cfOk = await this.sendCanTx(0x7E0, false, cf, true);
+        if (!cfOk) {
+          console.error(`[DDDI-STREAM] ${label} CF TX NACK`);
+          return false;
+        }
+
+        // Wait for positive response (0x6D) or NRC (0x7F)
+        const resp = await this.waitRxMatch(3000, (id, d) =>
+          id === 0x7E8 && d.length > 1 && ((d[0] & 0xF0) === 0x00) // single frame
+        );
+        if (resp) {
+          const respHex = Array.from(resp).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+          console.log(`[DDDI-STREAM] RX ${label} resp: ${respHex}`);
+          // Check for positive (0x6D) or negative (0x7F)
+          if (resp[1] === 0x6D) {
+            this.emit('log', null, `[DDDI-STREAM] ${label} OK → 0x6D`);
+            return true;
+          } else if (resp[1] === 0x7F) {
+            const nrc = resp[3];
+            console.warn(`[DDDI-STREAM] ${label} NRC=0x${nrc?.toString(16)}`);
+            this.emit('log', null, `[DDDI-STREAM] ${label} NRC=0x${nrc?.toString(16)}`);
+            return false;
           }
         } else {
-          console.warn('[DDDI-STREAM] IOCTL FE00 returned null');
-          this.emit('log', null, '[DDDI-STREAM] IOCTL FE00 no response — continuing');
+          console.warn(`[DDDI-STREAM] ${label} response timeout`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} no response`);
         }
-      } catch (e) {
-        console.warn('[DDDI-STREAM] IOCTL FE00 exception:', e);
-        this.emit('log', null, `[DDDI-STREAM] IOCTL FE00 error: ${e}`);
-      }
+        return false;
+      };
+
+      // IOCTL FE00: 2D FE 00 40 01 4F 08 04
+      const ioctl1Ok = await sendIoctlMultiFrame('IOCTL_FE00', [0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F, 0x08, 0x04]);
       await new Promise(r => setTimeout(r, 15));
 
       // ── Step 4: DDDI composite for FE ──
@@ -1253,28 +1309,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
       // ── Step 5: IOCTL define FE01 — FRP_DES (RAM 0x400225D8, 4 bytes) ──
       // HPT sends: 2D FE 01 40 02 25 D8 04 (8 bytes, multi-frame ISO-TP)
-      //   FE 01 = parameter ID
-      //   40 02 25 D8 = RAM address 0x400225D8 (FRP Desired)
-      //   04 = size in bytes (FLOAT32)
-      // Using sendUDSRequest for proven multi-frame TX (same as IOCTL FE00)
-      console.log(`[DDDI-STREAM] TX IOCTL FE01 via sendUDSRequest: 2D FE 01 40 02 25 D8 04`);
-      try {
-        const ioctl2Resp = await this.sendUDSRequest(0x2D, 0xFE, [0x01, 0x40, 0x02, 0x25, 0xD8, 0x04], 0x7E0, 3000);
-        if (ioctl2Resp) {
-          const respHex = ioctl2Resp.data ? ioctl2Resp.data.map((b: number) => b.toString(16).padStart(2,'0')).join(' ') : 'no data';
-          console.log(`[DDDI-STREAM] RX IOCTL FE01: svc=0x${ioctl2Resp.service?.toString(16)} positive=${ioctl2Resp.positiveResponse} nrc=${ioctl2Resp.nrc} data=[${respHex}]`);
-          if (ioctl2Resp.nrc) {
-            console.warn(`[DDDI-STREAM] IOCTL FE01 NRC=0x${ioctl2Resp.nrc.toString(16)} — continuing`);
-          } else {
-            this.emit('log', null, '[DDDI-STREAM] IOCTL FE01 OK → 0x6D');
-          }
-        } else {
-          console.warn('[DDDI-STREAM] IOCTL FE01 returned null');
-        }
-      } catch (e) {
-        console.warn('[DDDI-STREAM] IOCTL FE01 exception:', e);
-        this.emit('log', null, `[DDDI-STREAM] IOCTL FE01 error: ${e}`);
-      }
+      // Using same raw CAN multi-frame approach as IOCTL FE00
+      const ioctl2Ok = await sendIoctlMultiFrame('IOCTL_FE01', [0x2D, 0xFE, 0x01, 0x40, 0x02, 0x25, 0xD8, 0x04]);
       await new Promise(r => setTimeout(r, 15));
 
       // ── Step 6: DDDI composite for FD ──

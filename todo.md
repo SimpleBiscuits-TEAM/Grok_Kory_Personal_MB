@@ -1927,3 +1927,11 @@
 - [x] Switched IOCTL FE00 and FE01 commands to use sendUDSRequest (vopStyleUdsCore) which has proven multi-frame TX from flashing
 - [x] Fixed TS errors: UDSResponse uses 'service' not 'serviceId', 'data' not 'raw'
 - [x] All 13 remaining TS errors are pre-existing (none in vopCan2UsbConnection.ts)
+
+## Raw CAN Multi-Frame TX (Test 5 — Bypass All Abstraction Layers)
+- [x] Both isoTpRequest and sendUDSRequest multi-frame TX failed silently on truck
+- [x] New approach: sendIoctlMultiFrame() builds FF/CF raw via sendCanTx, polls rxFrames for FC
+- [x] Logs every byte: FF TX, FC RX, CF TX, response (0x6D positive or 0x7F NRC)
+- [x] If FC timeout: logs "ECU did not respond to FF" — will prove if bridge is even sending the FF
+- [x] Respects STmin from FC byte 2
+- [ ] If this also fails: need to investigate if CAN bridge firmware has a TX issue with multi-frame
