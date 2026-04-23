@@ -845,6 +845,15 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       if (!resp || resp.length < 2) return null;
 
       const posResp = service + 0x40;
+      if (resp[0] === 0x7F && resp.length >= 3) {
+        // NRC (Negative Response Code) — ECU rejected this request
+        const nrc = resp[2];
+        if (nrc === 0x31) {
+          // requestOutOfRange — this DID doesn't exist on this ECU
+          console.log(`[POLL-NRC] ${pid.shortName} (0x${pid.pid.toString(16)}) → NRC 0x31 requestOutOfRange`);
+        }
+        return null;
+      }
       if (resp[0] !== posResp) return null;
       if (service === 0x22) {
         if (resp[1] !== ((pid.pid >> 8) & 0xff) || resp[2] !== (pid.pid & 0xff)) return null;
@@ -994,8 +1003,12 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
     const fail = new Map<number, number>();
     const pause = new Map<number, number>();
-    const MAXF = 8;
-    const RET = 20;
+    // MAXF: pause a DID after this many consecutive failures (was 8, reduced to 2
+    // so unsupported DIDs get removed from rotation within 2 cycles instead of 8)
+    const MAXF = 2;
+    // RET: number of cycles before retrying a paused DID (was 20, increased to 50
+    // so paused DIDs stay out of rotation for ~5 minutes)
+    const RET = 50;
     let active = [...filteredPids];
     let loop = 0;
 
@@ -1003,6 +1016,10 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       while (this.loggingActive) {
         const t0 = Date.now();
         loop++;
+        // Log cycle stats every 10 loops
+        if (loop % 10 === 1) {
+          console.log(`[POLL] Cycle ${loop}: ${active.length} active DIDs, ${pause.size} paused`);
+        }
         for (const [pid, at] of pause) {
           if (loop >= at) {
             const d = filteredPids.find(x => x.pid === pid);
@@ -1033,6 +1050,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           }
           if (paused.length) {
             active = active.filter(p => !pause.has(p.pid));
+            console.log(`[POLL] Paused ${paused.length} failing DIDs: ${paused.join(', ')} | Active: ${active.length} remaining`);
             this.emit('log', null, `Paused: ${paused.join(', ')}`);
           }
           if (onData && readings.length) onData(readings);

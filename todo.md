@@ -1897,3 +1897,11 @@
 - [x] Fix: ensureDddiClear runs before every Mode 22 read during logging, wasting bus time → now skipped during logging (one-time clear before loop starts)
 - [x] Fix: When DDDI streaming fails, FRP_ACT and FP_SAE should be polled via Mode 22 at normal rate → dddiPeriodicActive=false after 2s timeout
 - [ ] Investigate: AA start (0xAA 0x04 FE FD) gets NRC 0x31 — command format may be wrong for this ECU
+
+## Truck Test 2 (2026-04-23 16:19) — Polling Rate Fix
+- [x] Reduce MAXF from 8 to 2 — pause failing DIDs after just 2 consecutive NRC failures
+- [x] Reduce RET from 20 to 50 — keep paused DIDs paused longer (50 cycles ≈ 5 min)
+- [x] Add NRC 0x31 detection in readPid: log [POLL-NRC] with DID name when ECU rejects
+- [x] Log which DIDs get paused ([POLL] Paused N failing DIDs: ...)
+- [x] Add cycle-level logging every 10 loops showing active/paused DID counts
+- [ ] Remove ensureDddiClear call from inside readPid during logging (already skipped by loggingActive guard)
