@@ -2023,3 +2023,6 @@
 ## Bug Fix — Batch timeout too high causing 1s stalls when timing PIDs added (Test 4)
 - [x] Reduce frontend batchTimeout from max(3000, n*100) to max(500, n*200) — 3s is way too long for 2 DIDs
 - [x] Bridge total_timeout formula also needs tightening — currently allows ~1s stall per failed DID
+
+## Change — IPW display unit from ms to µs
+- [x] Change all IPW PIDs (IPW_1 through IPW_8) unit from 'ms' to 'µs' and multiply formula by 1000 (1.4ms → 1400µs)

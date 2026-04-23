@@ -1032,51 +1032,51 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Injector Pulse Widths (HPT-verified, DID 0x20AC-0x20B3) ──
   {
     pid: 0x20AC, name: 'Injector Pulse Width Cyl 1', shortName: 'IPW_1',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,  // raw value is µs
   },
   {
     pid: 0x20AD, name: 'Injector Pulse Width Cyl 2', shortName: 'IPW_2',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20AE, name: 'Injector Pulse Width Cyl 3', shortName: 'IPW_3',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20AF, name: 'Injector Pulse Width Cyl 4', shortName: 'IPW_4',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20B0, name: 'Injector Pulse Width Cyl 5', shortName: 'IPW_5',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20B1, name: 'Injector Pulse Width Cyl 6', shortName: 'IPW_6',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20B2, name: 'Injector Pulse Width Cyl 7', shortName: 'IPW_7',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   {
     pid: 0x20B3, name: 'Injector Pulse Width Cyl 8', shortName: 'IPW_8',
-    unit: 'ms', min: 0, max: 65, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+    formula: ([a, b]) => (a * 256) + b,
   },
   // ── Injector Balance Rates (HPT-verified, DID 0x20B4-0x20BB) ──
   // IntelliSpy: raw 0xFFF6 = signed -10, scale * 0.01 → -0.10 mm³
