@@ -535,7 +535,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }
 
     // --- Multi-Frame TX path (payload > 7 bytes, e.g. 8-byte IOCTL) ---
-    // ISO-TP First Frame: [10 | lenHi, lenLo, ...first 6 data bytes]
+    // Uses callback-based FC listener (same proven pattern as vopStyleUdsCore)
     const totalLen = pdu.length;
     const ff = new Uint8Array(8);
     ff[0] = 0x10 | ((totalLen >> 8) & 0x0f);
@@ -543,35 +543,48 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     for (let i = 0; i < 6 && i < pdu.length; i++) ff[i + 2] = pdu[i] & 0xff;
 
     console.log(`[ISO-TP-MF] TX First Frame: ${Array.from(ff).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+
+    // Set up callback-based FC listener BEFORE sending FF
+    const rxId = this.obdRxId;
+    const fcPromise = new Promise<{ blockSize: number; stMin: number } | null>((resolve) => {
+      const fcTimeout = setTimeout(() => {
+        this.vopFlashUdsListener = null;
+        resolve(null);
+      }, Math.min(responseTimeoutMs, 5000));
+
+      this.vopFlashUdsListener = (arbId: number, dataU8: Uint8Array) => {
+        if (arbId !== rxId) return;
+        if (dataU8.length === 0) return;
+        const pciType = (dataU8[0] >> 4) & 0x0f;
+        if (pciType === 3) {
+          clearTimeout(fcTimeout);
+          this.vopFlashUdsListener = null;
+          resolve({ blockSize: dataU8[1] || 0, stMin: dataU8[2] || 0 });
+        } else if (pciType === 0 && dataU8.length > 1 && dataU8[1] === 0x7f) {
+          clearTimeout(fcTimeout);
+          this.vopFlashUdsListener = null;
+          resolve(null);
+        }
+      };
+    });
+
     const ffOk = await this.sendCanTx(this.obdTxId, false, ff, true);
     if (!ffOk) {
+      this.vopFlashUdsListener = null;
       this.emit('log', null, 'CAN TX NACK on First Frame');
       return null;
     }
 
-    // Wait for Flow Control (PCI type 0x3x) from ECU on obdRxId
-    const fcData = await this.waitRxMatch(
-      Math.min(responseTimeoutMs, 5000),
-      (id, d) => id === this.obdRxId && d.length >= 1 && (d[0] & 0xf0) === 0x30,
-    );
-    if (!fcData) {
+    const fc = await fcPromise;
+    if (!fc) {
       console.warn('[ISO-TP-MF] No Flow Control received from ECU');
       return null;
     }
-    const fcFlag = fcData[0] & 0x0f;
-    const blockSize = fcData[1] || 0;
-    const stMin = fcData[2] || 0;
-    let stMinMs = stMin <= 0x7f ? stMin : 1;
+    let stMinMs = fc.stMin <= 0x7f ? fc.stMin : 1;
     stMinMs = Math.max(stMinMs, 1);
-    console.log(`[ISO-TP-MF] RX Flow Control: flag=${fcFlag} BS=${blockSize} STmin=${stMin} (${stMinMs}ms)`);
+    console.log(`[ISO-TP-MF] RX Flow Control: BS=${fc.blockSize} STmin=${fc.stMin} (${stMinMs}ms)`);
 
-    if (fcFlag !== 0) {
-      // 0=ContinueToSend, 1=Wait, 2=Overflow — only proceed on CTS
-      console.warn(`[ISO-TP-MF] FC flag=${fcFlag} (not CTS), aborting`);
-      return null;
-    }
-
-    // Send Continuation Frames
+    // Send Continuation Frames via sendCanTx (proven path)
     let offset = 6; // first 6 bytes already sent in FF
     let seqNum = 1;
     while (offset < pdu.length) {
@@ -1052,12 +1065,20 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     }, TESTER_PRESENT_INTERVAL_MS);
 
     // Start DDDI periodic streaming for fuel pressure if any DDDI PIDs are selected
-    const hasDddiPids = filteredPids.some(p => VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(p.shortName));
+    const dddiShortNames = filteredPids.filter(p => VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(p.shortName)).map(p => p.shortName);
+    const hasDddiPids = dddiShortNames.length > 0;
+    this.emit('log', null, `[DDDI] hasDddiPids=${hasDddiPids} (matched: ${dddiShortNames.join(', ') || 'none'}) out of ${filteredPids.length} PIDs`);
+    console.log(`[DDDI] hasDddiPids=${hasDddiPids}, matched shortNames: [${dddiShortNames.join(', ')}], all shortNames: [${filteredPids.map(p=>p.shortName).join(', ')}]`);
     if (hasDddiPids) {
+      this.emit('log', null, '[DDDI] Starting DDDI periodic streaming setup...');
       const dddiOk = await this.startDddiPeriodicStreaming();
       if (!dddiOk) {
         this.emit('log', null, 'DDDI periodic setup failed — FRP/FP_SAE will use snapshot Mode 22 reads');
+      } else {
+        this.emit('log', null, '[DDDI] Periodic streaming setup completed successfully');
       }
+    } else {
+      this.emit('log', null, '[DDDI] No DDDI PIDs selected — skipping periodic streaming');
     }
 
     const fail = new Map<number, number>();
@@ -1071,13 +1092,23 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     let active = [...filteredPids];
     let loop = 0;
 
+    // Priority PIDs: these get polled every 2nd cycle for faster update rate
+    // when DDDI periodic streaming is not active (Mode 22 fallback).
+    // This ensures FRP_ACT updates every ~2 cycles instead of waiting for
+    // the full DID rotation (which can be 40+ DIDs = ~6 second gap).
+    const PRIORITY_SHORTNAMES = new Set(['FRP_ACT', 'FP_SAE']);
+    const priorityPids = filteredPids.filter(p => PRIORITY_SHORTNAMES.has(p.shortName));
+    if (priorityPids.length > 0) {
+      this.emit('log', null, `[POLL] Priority PIDs: ${priorityPids.map(p=>p.shortName).join(', ')} (polled every 2nd cycle)`);
+    }
+
     const logLoop = async () => {
       while (this.loggingActive) {
         const t0 = Date.now();
         loop++;
         // Log cycle stats every 10 loops
         if (loop % 10 === 1) {
-          console.log(`[POLL] Cycle ${loop}: ${active.length} active DIDs, ${pause.size} paused`);
+          console.log(`[POLL] Cycle ${loop}: ${active.length} active DIDs, ${pause.size} paused, dddiActive=${this.dddiPeriodicActive}`);
         }
         for (const [pid, at] of pause) {
           if (loop >= at) {
@@ -1090,6 +1121,18 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           }
         }
         try {
+          // Priority polling: on even cycles, poll priority PIDs first
+          // (only when DDDI is not active — if DDDI works, readPid returns
+          // the periodic value instantly without a bus request)
+          if (loop % 2 === 0 && priorityPids.length > 0 && !this.dddiPeriodicActive) {
+            const priorityReadings = await this.readPids(priorityPids);
+            for (const r of priorityReadings) {
+              session.readings.get(r.pid)?.push(r);
+              fail.set(r.pid, 0);
+            }
+            if (onData && priorityReadings.length) onData(priorityReadings);
+          }
+
           const readings = await this.readPids(active);
           const got = new Set(readings.map(r => r.pid));
           for (const r of readings) {
@@ -1205,10 +1248,14 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       //   CF: 21 08 04 00 00 00 00 00
       //   Resp: 04 6D FE 00 00 (positive)
       //
-      // APPROACH: Raw CAN frames via sendCanTx — bypasses ALL abstraction layers.
-      // Both isoTpRequest multi-frame and sendUDSRequest failed silently on the
-      // actual CAN bridge hardware. This sends the exact same bytes HPT puts on
-      // the wire, with inline FC polling from rxFrames.
+      // APPROACH: Use callback-based FC listener (same pattern as proven vopStyleUdsCore
+      // sendUdsMultiFrame which works for flashing). Previous approaches that failed:
+      //   1. isoTpRequest multi-frame — silently dropped on hardware
+      //   2. sendUDSRequest (vopStyleUdsCore) — silently failed
+      //   3. Raw sendCanTx FF + waitRxMatch FC + raw writer.write CF — CF never reached ECU
+      // The key difference: vopStyleUdsCore uses setFlashUdsListener (callback) for FC,
+      // then sends CF via sendCanTx with waitAck=true. The raw writer.write approach
+      // bypassed the bridge protocol's ACK mechanism.
       const sendIoctlMultiFrame = async (label: string, payload: number[]): Promise<boolean> => {
         // payload = [2D, FE, 00, 40, 01, 4F, 08, 04] (8 bytes)
         const totalLen = payload.length; // 8
@@ -1221,26 +1268,58 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         // Drain any stale 0x7E8 frames before we start
         this.drainObdRxFrames();
 
-        console.log(`[DDDI-STREAM] TX ${label} FF: ${Array.from(ff).map(b=>b.toString(16).padStart(2,'0')).join(' ')}`);
+        const ffHex = Array.from(ff).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+        console.log(`[DDDI-STREAM] TX ${label} FF: ${ffHex}`);
+        this.emit('log', null, `[DDDI-STREAM] TX ${label} FF: ${ffHex}`);
         const ffTs = Date.now();
+
+        // Use callback-based FC listener (proven pattern from vopStyleUdsCore)
+        const fcPromise = new Promise<{ blockSize: number; stMin: number } | null>((resolve) => {
+          const fcTimeout = setTimeout(() => {
+            this.vopFlashUdsListener = null;
+            resolve(null);
+          }, 3000);
+
+          this.vopFlashUdsListener = (arbId: number, dataU8: Uint8Array) => {
+            if (arbId !== 0x7E8) return;
+            if (dataU8.length === 0) return;
+            const pciType = (dataU8[0] >> 4) & 0x0f;
+            if (pciType === 3) {
+              // Flow Control received!
+              const blockSize = dataU8[1] || 0;
+              const stMin = dataU8[2] || 0;
+              clearTimeout(fcTimeout);
+              this.vopFlashUdsListener = null;
+              resolve({ blockSize, stMin });
+            } else if (pciType === 0) {
+              // Single frame response (could be NRC)
+              const respSvc = dataU8.length > 1 ? dataU8[1] : 0;
+              if (respSvc === 0x7f) {
+                clearTimeout(fcTimeout);
+                this.vopFlashUdsListener = null;
+                resolve(null);
+              }
+            }
+          };
+        });
+
         const ffOk = await this.sendCanTx(0x7E0, false, ff, true);
         if (!ffOk) {
+          this.vopFlashUdsListener = null;
           console.error(`[DDDI-STREAM] ${label} FF TX NACK`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} FF NACK from bridge`);
           return false;
         }
 
-        // Wait for Flow Control (PCI type 3 = 0x3x) from 0x7E8
-        const fcFrame = await this.waitRxMatch(2000, (id, d) =>
-          id === 0x7E8 && d.length > 0 && (d[0] & 0xF0) === 0x30
-        );
-        if (!fcFrame) {
-          console.error(`[DDDI-STREAM] ${label} FC timeout — ECU did not respond to FF`);
-          this.emit('log', null, `[DDDI-STREAM] ${label} FC timeout`);
+        const fc = await fcPromise;
+        const fcTs = Date.now();
+        if (!fc) {
+          console.error(`[DDDI-STREAM] ${label} FC timeout — ECU did not respond to FF (${fcTs - ffTs}ms)`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} FC timeout after ${fcTs - ffTs}ms`);
           return false;
         }
-        const fcHex = Array.from(fcFrame).map(b=>b.toString(16).padStart(2,'0')).join(' ');
-        const fcTs = Date.now();
-        console.log(`[DDDI-STREAM] RX ${label} FC: ${fcHex} (took ${fcTs - ffTs}ms after FF)`);
+        console.log(`[DDDI-STREAM] RX ${label} FC: BS=${fc.blockSize} STmin=${fc.stMin} (${fcTs - ffTs}ms after FF)`);
+        this.emit('log', null, `[DDDI-STREAM] ${label} FC received in ${fcTs - ffTs}ms`);
 
         // Continuation Frame: [21, remaining payload bytes, padded with 00]
         const cf = new Uint8Array(8);
@@ -1248,15 +1327,20 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         for (let i = 6; i < payload.length; i++) cf[1 + (i - 6)] = payload[i];
         // rest stays 0x00 (padding)
 
-        // CRITICAL: Send CF IMMEDIATELY — do NOT wait for STmin.
-        // The ECU's FC says STmin=0x0A (10ms) but JavaScript setTimeout has
-        // 4-16ms minimum resolution, and any delay risks the ECU's ISO-TP
-        // layer timing out. HPT sends CF within ~2ms of FC.
-        // Also use waitAck=false to avoid any ACK-related timing issues.
-        console.log(`[DDDI-STREAM] TX ${label} CF: ${Array.from(cf).map(b=>b.toString(16).padStart(2,'0')).join(' ')} (sending IMMEDIATELY, no STmin wait, no ACK wait)`);
-        await this.writer!.write(buildBridgePacket(TYPE_CAN_TX, 0, 0x7E0, cf));
+        // Send CF via sendCanTx with waitAck=true — the PROVEN path.
+        // vopStyleUdsCore.sendUdsMultiFrame does exactly this for flashing and it works.
+        // Previous approach wrote directly to this.writer bypassing ACK — that failed.
+        const cfHex = Array.from(cf).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+        console.log(`[DDDI-STREAM] TX ${label} CF: ${cfHex} (via sendCanTx with ACK)`);
+        this.emit('log', null, `[DDDI-STREAM] TX ${label} CF: ${cfHex}`);
+        const cfOk = await this.sendCanTx(0x7E0, false, cf, true);
         const cfTs = Date.now();
-        console.log(`[DDDI-STREAM] ${label} CF written to serial (${cfTs - fcTs}ms after FC)`);
+        if (!cfOk) {
+          console.error(`[DDDI-STREAM] ${label} CF TX NACK (${cfTs - fcTs}ms after FC)`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} CF NACK from bridge`);
+          return false;
+        }
+        console.log(`[DDDI-STREAM] ${label} CF ACK received (${cfTs - fcTs}ms after FC)`);
 
         // Wait for positive response (0x6D) or NRC (0x7F)
         const resp = await this.waitRxMatch(3000, (id, d) =>
@@ -1267,7 +1351,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           console.log(`[DDDI-STREAM] RX ${label} resp: ${respHex}`);
           // Check for positive (0x6D) or negative (0x7F)
           if (resp[1] === 0x6D) {
-            this.emit('log', null, `[DDDI-STREAM] ${label} OK → 0x6D`);
+            this.emit('log', null, `[DDDI-STREAM] ${label} OK → 0x6D positive response`);
             return true;
           } else if (resp[1] === 0x7F) {
             const nrc = resp[3];
@@ -1276,8 +1360,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
             return false;
           }
         } else {
-          console.warn(`[DDDI-STREAM] ${label} response timeout`);
-          this.emit('log', null, `[DDDI-STREAM] ${label} no response`);
+          console.warn(`[DDDI-STREAM] ${label} response timeout (3s)`);
+          this.emit('log', null, `[DDDI-STREAM] ${label} no response after 3s`);
         }
         return false;
       };
@@ -1296,6 +1380,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       //   00 = padding/reserved
       const dddi1 = [0x2C, 0xFE, 0xFE, 0x00, 0x00, 0x0A, 0x00];
       console.log(`[DDDI-STREAM] TX DDDI FE: ${hex(dddi1)}`);
+      this.emit('log', null, `[DDDI-STREAM] TX DDDI FE: ${hex(dddi1)}`);
       const dddi1Resp = await this.isoTpRequest(dddi1, 2000);
       logResp('DDDI FE', dddi1Resp);
       if (dddi1Resp && dddi1Resp[0] === 0x7F) {
@@ -1319,6 +1404,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       //   00 00 00 = position/size/reserved
       const dddi2 = [0x2C, 0xFD, 0xFE, 0x01, 0x00, 0x00, 0x00];
       console.log(`[DDDI-STREAM] TX DDDI FD: ${hex(dddi2)}`);
+      this.emit('log', null, `[DDDI-STREAM] TX DDDI FD: ${hex(dddi2)}`);
       const dddi2Resp = await this.isoTpRequest(dddi2, 2000);
       logResp('DDDI FD', dddi2Resp);
       if (dddi2Resp && dddi2Resp[0] === 0x7F) {
@@ -1335,6 +1421,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       //   FE, FD = periodic IDs to start
       const startCmd = [0xAA, 0x04, 0xFE, 0xFD];
       console.log(`[DDDI-STREAM] TX AA start: ${hex(startCmd)}`);
+      this.emit('log', null, `[DDDI-STREAM] TX AA start: ${hex(startCmd)}`);
       const startResp = await this.isoTpRequest(startCmd, 2000);
       logResp('AA start', startResp);
       if (startResp && startResp[0] === 0x7F) {

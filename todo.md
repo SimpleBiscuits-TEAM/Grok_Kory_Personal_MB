@@ -1935,3 +1935,18 @@
 - [x] If FC timeout: logs "ECU did not respond to FF" — will prove if bridge is even sending the FF
 - [x] Respects STmin from FC byte 2
 - [ ] If this also fails: need to investigate if CAN bridge firmware has a TX issue with multi-frame
+
+## Callback-Based FC Listener Fix (Test 8 — Match vopStyleUdsCore Pattern)
+- [x] Rewrote sendIoctlMultiFrame to use callback-based FC listener (vopFlashUdsListener) instead of polling-based waitRxMatch
+- [x] CF now sent via sendCanTx with waitAck=true (proven path from vopStyleUdsCore flashing)
+- [x] Previous approach: raw writer.write(buildBridgePacket(...)) bypassed bridge ACK mechanism — CF never reached ECU
+- [x] Also rewrote isoTpRequest multi-frame path to use same callback-based FC listener pattern
+- [x] Added comprehensive emit('log') at every DDDI decision point for in-app log panel visibility
+- [x] Added emit('log') to hasDddiPids check showing matched shortNames and total PID count
+- [x] Added emit('log') to every IOCTL/DDDI TX and response
+
+## Priority Polling for FRP_ACT (Mode 22 Fallback Improvement)
+- [x] Added priority polling: FRP_ACT and FP_SAE polled every 2nd cycle when DDDI is not active
+- [x] This doubles FRP_ACT update rate from ~6s to ~3s when in Mode 22 fallback
+- [x] Priority polling skipped when DDDI periodic streaming is active (readPid returns periodic value instantly)
+- [x] Logged priority PID list at logging start for visibility
