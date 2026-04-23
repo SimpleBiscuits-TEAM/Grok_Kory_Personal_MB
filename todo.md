@@ -1921,3 +1921,9 @@
 - [x] IOCTL commands are 8 bytes — now sent as FF + FC + CF (was silently dropped)
 - [x] Implement First Frame + wait for Flow Control + Continuation Frame(s) TX
 - [x] DDDI commands (7 bytes) — verified: fit in single frame, no change needed
+
+## CRITICAL FIX: Use sendUDSRequest for IOCTL (Test 4 Root Cause)
+- [x] isoTpRequest multi-frame TX was silently failing on actual CAN bridge hardware
+- [x] Switched IOCTL FE00 and FE01 commands to use sendUDSRequest (vopStyleUdsCore) which has proven multi-frame TX from flashing
+- [x] Fixed TS errors: UDSResponse uses 'service' not 'serviceId', 'data' not 'raw'
+- [x] All 13 remaining TS errors are pre-existing (none in vopCan2UsbConnection.ts)
