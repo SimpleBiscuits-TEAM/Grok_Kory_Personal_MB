@@ -400,13 +400,40 @@ async def _ppei_handle_message(self, msg: dict):
     proto = self.protocol
     start_all = time.time()
 
+     # ── PHASE 0: TesterPresent + Periodic restart BEFORE the batch ──
+    # The ECU's extended diagnostic session (0x10 03) times out after ~5s without
+    # a TesterPresent (0x3E). Without this, the periodic scheduler dies at exactly 5s.
+    # Also re-send the periodic start command BEFORE the batch so the ECU knows
+    # we still want periodic frames even while we're about to flood it with reads.
+    if getattr(self, '_ppei_dddi_streaming', False):
+        try:
+            # TesterPresent — keeps diagnostic session alive
+            tp_frame = can.Message(
+                arbitration_id=tx_id,
+                data=[0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                is_extended_id=False
+            )
+            self.bus.send(tp_frame)
+            await asyncio.sleep(0.003)  # 3ms for TP response
+            # Periodic restart BEFORE batch
+            restart_ids = getattr(self, '_ppei_dddi_periodic_ids', [0xFE, 0xFD])
+            restart_payload = bytes([0xAA, 0x04] + restart_ids)
+            restart_frame = can.Message(
+                arbitration_id=tx_id,
+                data=list(restart_payload) + [0x00] * (8 - len(restart_payload)),
+                is_extended_id=False
+            )
+            self.bus.send(restart_frame)
+            await asyncio.sleep(0.003)  # 3ms settle
+            log.debug(f"[PPEI] Pre-batch: TesterPresent + periodic restart sent")
+        except can.CanError as e:
+            log.warning(f"[PPEI] Pre-batch keepalive failed: {e}")
     # ── Drain stale frames before the batch ──
     while not proto._response_queue.empty():
         try:
             proto._response_queue.get_nowait()
         except Exception:
             break
-
     # ── PHASE 1: Send DID requests with small inter-request gap ──
     # A 2ms gap between requests prevents flooding the ECU's request queue
     # and gives it time to start processing each DID before the next arrives.

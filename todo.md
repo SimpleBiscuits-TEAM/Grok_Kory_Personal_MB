@@ -2016,3 +2016,6 @@
 - [x] DDDI periodic stream dies when only FRP PIDs selected — no batch_read_dids means no periodic restart (0xAA 04 FE FD)
 - [x] Exempt FRP_ACT and FRPDI from pause system — they come from periodic stream, not batch reads, so fail counting is wrong
 - [x] Add periodic keepalive (TesterPresent or 0xAA restart) in wrapReadPids when batchMode22Pids is empty
+
+## Bug Fix — DDDI Periodic Freezes at Exactly 5s (Test 3)
+- [x] Periodic stream dies at exactly 5s despite 0xAA restart after batch — need TesterPresent (0x3E) in batch path + periodic restart BEFORE batch too
