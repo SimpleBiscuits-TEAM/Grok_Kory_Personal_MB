@@ -1335,7 +1335,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a]) => (a * 100) / 255,  // SNAPSHOT — 0x30xx range
   },
   {
-    pid: 0x328A, name: 'Fuel Rail Pressure Actual (Snapshot)', shortName: 'FRP_ACT',
+    pid: 0x328A, name: 'Fuel Rail Pressure Actual (Snapshot) [TEST-DDDI]', shortName: 'FRP_ACT',
     unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.4712,  // Confirmed: 10000 * 0.4712 = 4712 PSI; SNAPSHOT — 0x30xx/0x32xx range only updates on first read after DDDI clear
@@ -1434,7 +1434,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => ((a * 256) + b),
   },
   {
-    pid: 0x131F, name: 'Fuel Rail Pressure Desired', shortName: 'FRPDI',
+    pid: 0x131F, name: 'Fuel Rail Pressure Desired [TEST-DDDI]', shortName: 'FRPDI',
     unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.145038,  // kPa to psi

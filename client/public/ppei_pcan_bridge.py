@@ -543,6 +543,23 @@ async def _ppei_handle_message(self, msg: dict):
         f"({elapsed/max(len(dids),1):.1f}ms/DID)"
     )
 
+    # ── PHASE 4: Restart periodic streaming if DDDI was active ──
+    # Batch reads flood the ECU and kill the periodic scheduler.
+    # Re-send 0xAA 04 FE FD to restart it after each batch.
+    if getattr(self, '_ppei_dddi_streaming', False):
+        restart_ids = getattr(self, '_ppei_dddi_periodic_ids', [0xFE, 0xFD])
+        restart_payload = bytes([0xAA, 0x04] + restart_ids)
+        restart_frame = can.Message(
+            arbitration_id=tx_id,
+            data=list(restart_payload) + [0x00] * (8 - len(restart_payload)),
+            is_extended_id=False
+        )
+        try:
+            self.bus.send(restart_frame)
+            log.debug(f"[PPEI] Restarted periodic streaming after batch_read_dids")
+        except can.CanError:
+            log.warning(f"[PPEI] Failed to restart periodic streaming after batch")
+
     return {
         "type": "batch_did_results",
         "id": req_id,
@@ -890,6 +907,120 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
         "streaming": streaming,
         "periodic_ids": list(_PERIODIC_STREAM_IDS) if streaming else [],
     }
+async def _ppei_streaming_poll(bridge, tx_id, rx_id, req_id, dids=None):
+    """Lightweight poll during DDDI streaming — sends TesterPresent + optional Mode 01/22 reads.
+    
+    Matches HPT behavior: during periodic streaming, only send 0x3E TesterPresent
+    to keep the diagnostic session alive. Optionally poll a few simple PIDs (RPM).
+    Does NOT send batch Mode 22 reads which would kill the periodic scheduler.
+    """
+    if not bridge.protocol or not bridge.bus:
+        return {"type": "streaming_poll_result", "id": req_id, "ok": False,
+                "error": "CAN bus not ready"}
+    
+    proto = bridge.protocol
+    results = {}
+    
+    # ── Step 1: TesterPresent (0x3E) to keep session alive ──
+    # HPT sends: 01 3E 00 00 00 00 00 00
+    tp_frame = can.Message(
+        arbitration_id=tx_id,
+        data=[0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        is_extended_id=False
+    )
+    try:
+        bridge.bus.send(tp_frame)
+    except can.CanError as e:
+        log.warning(f"[PPEI] TesterPresent send failed: {e}")
+    
+    # Small delay for TesterPresent response
+    await asyncio.sleep(0.010)
+    
+    # Drain any TesterPresent response from queue
+    while not proto._response_queue.empty():
+        try:
+            msg = proto._response_queue.get_nowait()
+        except Exception:
+            break
+    
+    # ── Step 2: Poll requested DIDs one at a time (Mode 01 or Mode 22) ──
+    # For RPM: send 02 01 0C on 0x7DF (functional broadcast) — this is Mode 01
+    if dids:
+        for did_info in dids:
+            did = did_info.get("did", 0)
+            mode = did_info.get("mode", 0x22)
+            
+            if mode == 0x01:
+                # Mode 01 PID — send on 0x7DF functional broadcast
+                pid_byte = did & 0xFF
+                req_frame = can.Message(
+                    arbitration_id=0x7DF,
+                    data=[0x02, 0x01, pid_byte, 0x00, 0x00, 0x00, 0x00, 0x00],
+                    is_extended_id=False
+                )
+            else:
+                # Mode 22 DID — send on tx_id
+                did_hi = (did >> 8) & 0xFF
+                did_lo = did & 0xFF
+                req_frame = can.Message(
+                    arbitration_id=tx_id,
+                    data=[0x03, 0x22, did_hi, did_lo, 0x00, 0x00, 0x00, 0x00],
+                    is_extended_id=False
+                )
+            
+            try:
+                bridge.bus.send(req_frame)
+            except can.CanError:
+                results[did] = {"ok": False, "error": "send failed"}
+                continue
+            
+            # Wait for response (short timeout — one DID at a time)
+            deadline = time.time() + 0.100  # 100ms timeout per DID
+            while time.time() < deadline:
+                try:
+                    msg = await asyncio.wait_for(
+                        proto._response_queue.get(),
+                        timeout=deadline - time.time()
+                    )
+                except asyncio.TimeoutError:
+                    break
+                
+                frame_data = list(msg.data)
+                if not frame_data:
+                    continue
+                
+                pci_type = (frame_data[0] >> 4) & 0x0F
+                if pci_type == 0:  # Single frame
+                    length = frame_data[0] & 0x0F
+                    payload = frame_data[1:1+length]
+                    
+                    if mode == 0x01 and payload and payload[0] == 0x41:
+                        # Mode 01 positive response: 41 PID data...
+                        results[did] = {"ok": True, "data": list(payload[2:])}
+                        break
+                    elif mode == 0x22 and payload and payload[0] == 0x62:
+                        resp_did = (payload[1] << 8) | payload[2]
+                        if resp_did == did:
+                            results[did] = {"ok": True, "data": list(payload[3:])}
+                            break
+                    elif payload and payload[0] == 0x7F:
+                        nrc = payload[2] if len(payload) >= 3 else 0
+                        results[did] = {"ok": False, "error": f"NRC 0x{nrc:02X}"}
+                        break
+            
+            if did not in results:
+                results[did] = {"ok": False, "error": "timeout"}
+            
+            await asyncio.sleep(0.005)  # Small gap between DIDs
+    
+    return {
+        "type": "streaming_poll_result",
+        "id": req_id,
+        "ok": True,
+        "results": {str(k): v for k, v in results.items()},
+    }
+
+
 async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
     """Stop periodic reads and clean up DDDI definitions."""
     log.info(f"[PPEI] DDDI teardown for TX=0x{tx_id:03X}")
@@ -932,6 +1063,13 @@ async def _ppei_handle_message_v2(self, msg: dict):
         tx_id = msg.get("tx_id", 0x7E0)
         rx_id = tx_id + 8
         return await _ppei_dddi_teardown(self, tx_id, rx_id, req_id)
+    
+    if msg_type == "streaming_poll":
+        req_id = msg.get("id", "0")
+        tx_id = msg.get("tx_id", 0x7E0)
+        rx_id = tx_id + 8
+        dids = msg.get("dids", [])  # [{did: 0x0C, mode: 0x01}]
+        return await _ppei_streaming_poll(self, tx_id, rx_id, req_id, dids)
     
     # Fall through to batch_read_dids or Tobi's handler
     return await _batch_handle_message(self, msg)

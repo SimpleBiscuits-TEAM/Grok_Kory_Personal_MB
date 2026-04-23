@@ -1982,3 +1982,15 @@
 - [x] Rewrite frontend 0x5E8 parser to decode float32 BE MPa -> PSI using DataView
 - [x] Only stream FE (FRP_ACT) and FD (FRP_DES) periodic IDs like HPT
 - [x] Bridge now has 5-phase setup: stop → clear → IOCTL 0x2D → DDDI 0x2C → 0xAA start
+
+## Verify HPT BUSMASTER PIDs Match Our DDDI Setup
+- [x] Re-analyze HPT BUSMASTER fuel pressure sniff log — complete byte-by-byte analysis done
+- [x] Compare HPT IOCTL bytes with our bridge — IOCTL/DDDI commands match exactly
+- [x] CRITICAL FINDING: HPT sends ZERO Mode 22 reads during streaming, only TesterPresent every 2s
+
+## Match HPT Protocol Exactly for FRP Streaming (FRP + RPM only test)
+- [x] Bridge: streaming_poll handler sends TesterPresent (0x3E) + Mode 01 RPM only (no Mode 22)
+- [x] Bridge: re-sends 0xAA 04 FE FD after each batch_read_dids (when streaming active)
+- [x] Frontend: streaming mode uses streaming_poll instead of batch_read_dids
+- [x] Frontend: FRP injected from 0x5E8 periodic frames during streaming mode
+- [x] Added [TEST-DDDI] label to FRP_ACT (0x328A) and FRPDI (0x131F) in PID menu

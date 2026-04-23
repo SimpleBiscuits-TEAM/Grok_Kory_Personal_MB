@@ -354,8 +354,104 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         mode01Pids.push(pid);
       }
     }
-
     const readings: any[] = [];
+
+    // ══════════════════════════════════════════════════════════════════════
+    // STREAMING MODE: When DDDI periodic streaming is active, do NOT
+    // send batch_read_dids (which floods the ECU and kills the stream).
+    // Instead, send a lightweight streaming_poll (TesterPresent + RPM)
+    // and get FRP from the periodic 0x5E8 frames.
+    //
+    // This matches HPT's exact behavior: during periodic streaming,
+    // HPT only sends TesterPresent (0x3E) every 2s. No Mode 22 reads.
+    // ══════════════════════════════════════════════════════════════════════
+    if (_ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0) {
+      // Build the list of lightweight DIDs to poll (Mode 01 only — RPM, etc.)
+      const streamingDids: { did: number; mode: number }[] = [];
+      for (const pid of mode01Pids) {
+        streamingDids.push({ did: pid.pid, mode: 0x01 });
+      }
+
+      try {
+        const response: any = await this.sendRequest(
+          {
+            type: 'streaming_poll',
+            tx_id: 0x7E0,
+            dids: streamingDids,
+          },
+          2000, // 2s timeout
+        );
+
+        if (response.type === 'streaming_poll_result' && response.ok) {
+          // Parse Mode 01 results from the streaming_poll response
+          const pollResults = response.results || {};
+          for (const pid of mode01Pids) {
+            const key = String(pid.pid);
+            const result = pollResults[key];
+            if (result && result.ok && result.data) {
+              try {
+                const value = pid.formula(result.data);
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                  readings.push({
+                    pid: pid.pid,
+                    name: pid.name,
+                    shortName: pid.shortName,
+                    value,
+                    unit: pid.unit,
+                    rawBytes: result.data,
+                    timestamp: Date.now(),
+                  });
+                }
+              } catch { /* formula error */ }
+            }
+          }
+          ppeiLog(this,
+            `streaming_poll: TesterPresent + ${streamingDids.length} Mode01 PIDs ` +
+            `(${readings.length} OK, periodic frames: ${_ppeiPeriodicFrameCount})`
+          );
+        }
+      } catch (e: any) {
+        ppeiWarn(this, `streaming_poll failed: ${e?.message ?? e}`);
+        // Fallback: read Mode 01 PIDs sequentially
+        for (const pid of mode01Pids) {
+          try {
+            const reading = await originalReadPid.call(this, pid);
+            if (reading) readings.push(reading);
+          } catch { /* ignore */ }
+        }
+      }
+
+      // Inject DDDI periodic values (FRP_ACT, FRP_DES) from 0x5E8 frames
+      const PERIODIC_MAX_AGE_MS = 2000;
+      const now = Date.now();
+      const injectedFromPeriodic: string[] = [];
+      for (const pid of pids) {
+        if (readings.some((r: any) => r.pid === pid.pid)) continue;
+        const periodic = _ppeiPeriodicValues.get(pid.pid);
+        if (periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS) {
+          readings.push({
+            pid: periodic.did,
+            name: pid.name,
+            shortName: periodic.shortName,
+            value: periodic.value,
+            unit: periodic.unit,
+            rawBytes: periodic.rawBytes,
+            timestamp: periodic.timestamp,
+          });
+          injectedFromPeriodic.push(`${periodic.shortName}=${periodic.value.toFixed(1)}`);
+        }
+      }
+      if (injectedFromPeriodic.length > 0) {
+        ppeiLog(this,
+          `\u26A1 DDDI periodic: ${injectedFromPeriodic.join(', ')}`
+        );
+      }
+      return readings;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // NORMAL MODE: No DDDI streaming — use batch_read_dids as before
+    // ══════════════════════════════════════════════════════════════════════
 
     // ── Mode 01: sequential (fast, few PIDs, no batch needed) ──
     for (const pid of mode01Pids) {
@@ -364,10 +460,8 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         if (reading) readings.push(reading);
       } catch { /* ignore */ }
     }
-
     // ── Mode 22: batch via bridge ──
     if (mode22Pids.length === 0) return readings;
-
     // Group by ECU TX address (most will be 0x7E0, some on 0x7E1 for TCM)
     const byTx = new Map<number, any[]>();
     for (const pid of mode22Pids) {
@@ -377,28 +471,23 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       if (!byTx.has(tx)) byTx.set(tx, []);
       byTx.get(tx)!.push(pid);
     }
-
     for (const [txId, txPids] of byTx) {
       // Ensure session is active for this ECU
       try {
         await this.ensureGmLiveDataSessionForTx(txId);
       } catch { /* ignore */ }
-
       const dids = txPids.map((p: any) => p.pid);
-      const batchTimeout = Math.max(3000, txPids.length * 100); // ~100ms/DID budget
-
+      const batchTimeout = Math.max(3000, txPids.length * 100);
       try {
-        // Use sendRequest (private but accessible at runtime via `this`)
         const response: any = await this.sendRequest(
           {
             type: 'batch_read_dids',
             dids,
             tx_id: txId,
-            timeout_ms: 50, // per-DID timeout on bridge side
+            timeout_ms: 50,
           },
           batchTimeout,
         );
-
         if (response.type === 'batch_did_results' && Array.isArray(response.results)) {
           const start = performance.now();
           let okCount = 0;
@@ -406,14 +495,11 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             if (!result.ok) continue;
             const pidDef = txPids.find((p: any) => p.pid === result.did);
             if (!pidDef) continue;
-
             try {
               const payload: number[] = result.data || [];
               if (payload.length === 0) continue;
-
               const value = pidDef.formula(payload);
               if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-
               readings.push({
                 pid: pidDef.pid,
                 name: pidDef.name,
@@ -427,7 +513,6 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             } catch { /* formula error — skip */ }
           }
           const elapsed = (performance.now() - start).toFixed(1);
-          // Log batch results to DEVICE CONSOLE (important diagnostic)
           ppeiLog(this,
             `batch_read_dids TX=0x${txId.toString(16).toUpperCase()}: ` +
             `${okCount}/${dids.length} decoded in ${elapsed}ms (bridge: ${response.elapsed_ms}ms)`
@@ -453,16 +538,12 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         }
       }
     }
-
     // ── Inject DDDI periodic values for PIDs that have fresh data ──
-    const PERIODIC_MAX_AGE_MS = 2000; // Accept periodic values up to 2s old
+    const PERIODIC_MAX_AGE_MS = 2000;
     const now = Date.now();
     const injectedFromPeriodic: string[] = [];
-
     for (const pid of pids) {
-      // Skip if we already got a reading for this PID from batch/sequential
-      if (readings.some(r => r.pid === pid.pid)) continue;
-
+      if (readings.some((r: any) => r.pid === pid.pid)) continue;
       const periodic = _ppeiPeriodicValues.get(pid.pid);
       if (periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS) {
         readings.push({
@@ -477,13 +558,11 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         injectedFromPeriodic.push(`${periodic.shortName}=${periodic.value.toFixed(1)}`);
       }
     }
-
     if (injectedFromPeriodic.length > 0) {
       ppeiLog(this,
         `Injected ${injectedFromPeriodic.length} DDDI periodic value(s): ${injectedFromPeriodic.join(', ')}`
       );
     }
-
     return readings;
   };
 }
