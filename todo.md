@@ -2019,3 +2019,7 @@
 
 ## Bug Fix — DDDI Periodic Freezes at Exactly 5s (Test 3)
 - [x] Periodic stream dies at exactly 5s despite 0xAA restart after batch — need TesterPresent (0x3E) in batch path + periodic restart BEFORE batch too
+
+## Bug Fix — Batch timeout too high causing 1s stalls when timing PIDs added (Test 4)
+- [x] Reduce frontend batchTimeout from max(3000, n*100) to max(500, n*200) — 3s is way too long for 2 DIDs
+- [x] Bridge total_timeout formula also needs tightening — currently allows ~1s stall per failed DID

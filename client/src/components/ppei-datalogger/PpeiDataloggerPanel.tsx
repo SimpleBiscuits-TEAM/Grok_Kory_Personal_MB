@@ -423,7 +423,8 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         await this.ensureGmLiveDataSessionForTx(txId);
       } catch { /* ignore */ }
       const dids = txPids.map((p: any) => p.pid);
-      const batchTimeout = Math.max(3000, txPids.length * 100);
+      // Tight timeout: 500ms base + 200ms per DID (was max(3000, n*100) — too slow)
+      const batchTimeout = Math.max(500, txPids.length * 200);
       try {
         const response: any = await this.sendRequest(
           {

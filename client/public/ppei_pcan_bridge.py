@@ -463,7 +463,9 @@ async def _ppei_handle_message(self, msg: dict):
     collected = {}  # did -> list[int] (value bytes)
     nrc_errors = {}  # did -> NRC code
     pending = set(sent_dids)
-    total_timeout = max(per_did_timeout * len(sent_dids) * 2.0, 1.0)  # generous total (2x per-DID, min 1s)
+    # Tight total: 300ms per DID, min 400ms. Old formula (min 1s) caused 1s stalls
+    # when a single DID timed out. Most DIDs respond in <20ms; 300ms/DID is generous.
+    total_timeout = max(per_did_timeout * len(sent_dids) * 2.0, 0.4)
     collect_deadline = time.time() + total_timeout
     # Track multi-frame ISO-TP state per arbitration ID
     isotp_state = {}  # arb_id -> {total_length, payload, expected_seq, mode, pid_hi, pid_lo}
