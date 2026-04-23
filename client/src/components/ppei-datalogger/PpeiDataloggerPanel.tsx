@@ -67,6 +67,24 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   // DDDI clear takes ~500ms, so only re-send every 30s
   if (now - last < 30000) return;
   const txHex = `0x${ecmTx.toString(16).toUpperCase()}`;
+
+  // If DDDI periodic streaming is already active and we've received frames recently,
+  // skip re-setup to avoid breaking the stream. Just refresh the session timer.
+  if (_ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0) {
+    const lastPeriodicVal = _ppeiPeriodicValues.get(0x328A); // FRP_ACT
+    const periodicAge = lastPeriodicVal ? (now - lastPeriodicVal.timestamp) : Infinity;
+    if (periodicAge < 5000) {
+      ppeiLog(this, `DDDI streaming still active (${_ppeiPeriodicFrameCount} frames, last ${periodicAge.toFixed(0)}ms ago) — skipping re-setup`);
+      if (this.gmLiveSessionAtByTx) {
+        this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
+      }
+      return;
+    } else {
+      ppeiWarn(this, `DDDI streaming stale (last frame ${periodicAge.toFixed(0)}ms ago) — re-running setup`);
+      _ppeiDddiStreamingActive = false;
+    }
+  }
+
   ppeiLog(this, `DDDI setup sequence for ${txHex} (clear + define + start periodic)`);
   
   try {
@@ -85,14 +103,14 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
         `DDDI setup OK on ${txHex}: ` +
         `cleared ${response.clear_ok ?? '?'} periodic IDs ` +
         `(${response.clear_nrc ?? '?'} NRC), ` +
-        `defined ${response.define_ok ?? '?'} composites ` +
+        `IOCTL ${response.ioctl_ok ?? '?'}/2, DDDI ${response.dddi_ok ?? '?'}/2 ` +
         `in ${response.elapsed_ms ?? '?'}ms` +
-        (streaming ? ` — PERIODIC STREAMING ACTIVE on 0x5E8 [${periodicIds}]` : '')
+        (streaming ? ` — PERIODIC STREAMING ACTIVE on 0x5E8 [${periodicIds}] (float32 MPa)` : '')
       );
       if (streaming) {
         _ppeiDddiStreamingActive = true;
         _ppeiPeriodicFrameCount = 0;
-        ppeiLog(this, 'DDDI periodic streaming started — FRP_ACT will be extracted from 0x5E8 frames');
+        ppeiLog(this, 'DDDI periodic streaming started — FRP_ACT/FRP_DES as float32 MPa from 0x5E8 frames');
       }
     } else {
       ppeiWarn(this, `DDDI setup partial/failed on ${txHex}: ${JSON.stringify(response)}`);
@@ -179,31 +197,18 @@ function wrapReadPid(original: Function) {
   };
 }
 
-// ── DDDI Periodic Frame Parsing ──
-// Composite definitions from ppei_pcan_bridge.py (HP Tuners IntelliSpy capture)
+// ── DDDI Periodic Frame Parsing (HPT IOCTL approach) ──
+// HP Tuners reads FRP as IEEE 754 float32 big-endian from ECU RAM via IOCTL 0x2D.
+// Periodic ID 0xFE = FRP Actual (4 bytes float32 MPa from RAM 0x014F08)
+// Periodic ID 0xFD = FRP Desired (4 bytes float32 MPa from RAM 0x0225D8)
+// Formula: float32_BE(bytes[1..4]) * 145.038 = PSI
 const DDDI_PERIODIC_ARB_ID = 0x5E8;
+const MPA_TO_PSI = 145.038;
 
-interface DddiDidEntry {
-  did: number;
-  shortName: string;
-  offset: number;  // byte offset in the periodic frame (after periodic ID byte)
-  bytes: number;
-  formula: (raw: number[]) => number;
-  unit: string;
-}
-
-// Composite FB: IBR_1 (2B) + THRTL_CMD (2B) + FRP_ACT (2B) + VSS (1B) = 7 bytes
-const COMPOSITE_FB: DddiDidEntry[] = [
-  { did: 0x20B4, shortName: 'IBR_1',     offset: 0, bytes: 2, formula: (r) => { const v = (r[0]*256)+r[1]; return (v>32767?v-65536:v)*0.01; }, unit: 'mm³' },
-  { did: 0x30BE, shortName: 'THRTL_CMD', offset: 2, bytes: 2, formula: (r) => ((r[0]*256)+r[1])*0.1, unit: '%' },
-  { did: 0x328A, shortName: 'FRP_ACT',   offset: 4, bytes: 2, formula: (r) => ((r[0]*256)+r[1])*0.4712, unit: 'PSI' },
-  { did: 0x000D, shortName: 'VSS',       offset: 6, bytes: 1, formula: (r) => r[0]*0.621371, unit: 'MPH' },
-];
-
-// Map periodic ID -> composite layout
-const DDDI_COMPOSITES: Record<number, DddiDidEntry[]> = {
-  0xFB: COMPOSITE_FB,
-  // Add FD, F9, F8 here when needed
+// Map periodic ID -> PID info for injection into readPids
+const PERIODIC_ID_MAP: Record<number, { did: number; shortName: string; unit: string }> = {
+  0xFE: { did: 0x328A, shortName: 'FRP_ACT', unit: 'PSI' },
+  0xFD: { did: 0x131F, shortName: 'FRP_DES', unit: 'PSI' },
 };
 
 // Storage for latest periodic values (keyed by DID)
@@ -215,7 +220,6 @@ interface PeriodicValue {
   rawBytes: number[];
   timestamp: number;
 }
-
 // Module-level map so both Patch 4 (writer) and Patch 5 (reader) can access it
 const _ppeiPeriodicValues = new Map<number, PeriodicValue>();
 let _ppeiPeriodicFrameCount = 0;
@@ -223,43 +227,54 @@ let _ppeiDddiStreamingActive = false;
 // Store a reference to the connection instance so parseDddiPeriodicFrame can emit('log')
 let _ppeiConnectionRef: any = null;
 
-function parseDddiPeriodicFrame(data: number[]): void {
-  if (!data || data.length < 2) return;
-  const periodicId = data[0];
-  const composite = DDDI_COMPOSITES[periodicId];
-  if (!composite) return;
+// Reusable DataView for float32 decoding
+const _float32Buf = new ArrayBuffer(4);
+const _float32View = new DataView(_float32Buf);
+const _float32Bytes = new Uint8Array(_float32Buf);
 
+function decodeFloat32BE(b0: number, b1: number, b2: number, b3: number): number {
+  _float32Bytes[0] = b0;
+  _float32Bytes[1] = b1;
+  _float32Bytes[2] = b2;
+  _float32Bytes[3] = b3;
+  return _float32View.getFloat32(0, false); // big-endian
+}
+
+function parseDddiPeriodicFrame(data: number[]): void {
+  if (!data || data.length < 5) return; // Need at least periodicID + 4 bytes float32
+  const periodicId = data[0];
+  const pidInfo = PERIODIC_ID_MAP[periodicId];
+  if (!pidInfo) return; // Not a periodic ID we care about
+  
   _ppeiPeriodicFrameCount++;
   _ppeiDddiStreamingActive = true;
   const now = Date.now();
-
-  for (const entry of composite) {
-    const startByte = 1 + entry.offset; // +1 to skip periodic ID byte
-    if (startByte + entry.bytes > data.length) continue;
-    const rawBytes = data.slice(startByte, startByte + entry.bytes);
-    try {
-      const value = entry.formula(rawBytes);
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        _ppeiPeriodicValues.set(entry.did, {
-          did: entry.did,
-          shortName: entry.shortName,
-          value,
-          unit: entry.unit,
-          rawBytes,
-          timestamp: now,
-        });
-      }
-    } catch { /* formula error */ }
+  
+  // Decode bytes 1-4 as IEEE 754 float32 big-endian (MPa)
+  const mpa = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+  const psi = mpa * MPA_TO_PSI;
+  
+  if (typeof psi === 'number' && Number.isFinite(psi) && psi >= 0 && psi < 100000) {
+    _ppeiPeriodicValues.set(pidInfo.did, {
+      did: pidInfo.did,
+      shortName: pidInfo.shortName,
+      value: psi,
+      unit: pidInfo.unit,
+      rawBytes: data.slice(1, 5),
+      timestamp: now,
+    });
   }
-
-  // Log first 5 frames and then every 100th to DEVICE CONSOLE
-  if (_ppeiPeriodicFrameCount <= 5 || _ppeiPeriodicFrameCount % 100 === 0) {
-    const frpVal = _ppeiPeriodicValues.get(0x328A);
-    const vssVal = _ppeiPeriodicValues.get(0x000D);
+  
+  // Log first 10 frames and then every 100th to DEVICE CONSOLE
+  if (_ppeiPeriodicFrameCount <= 10 || _ppeiPeriodicFrameCount % 100 === 0) {
+    const frpAct = _ppeiPeriodicValues.get(0x328A);
+    const frpDes = _ppeiPeriodicValues.get(0x131F);
+    const hexStr = data.slice(0, 5).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
     const msg = `DDDI periodic #${_ppeiPeriodicFrameCount}: ` +
-      `FRP_ACT=${frpVal ? frpVal.value.toFixed(1) + ' PSI' : 'N/A'} ` +
-      `VSS=${vssVal ? vssVal.value.toFixed(1) + ' MPH' : 'N/A'} ` +
-      `(0x${periodicId.toString(16).toUpperCase()} frame)`;
+      `0x${periodicId.toString(16).toUpperCase()} [${hexStr}] ` +
+      `${pidInfo.shortName}=${psi.toFixed(0)} PSI (${mpa.toFixed(2)} MPa) | ` +
+      `FRP_ACT=${frpAct ? frpAct.value.toFixed(0) + ' PSI' : 'N/A'} ` +
+      `FRP_DES=${frpDes ? frpDes.value.toFixed(0) + ' PSI' : 'N/A'}`;
     ppeiLog(_ppeiConnectionRef, msg);
   }
 }
@@ -552,7 +567,7 @@ export default function PpeiDataloggerPanel({
                 </span>
               </div>
               <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
-                PPEI diagnostic patches active — DDDI periodic streaming enabled for FRP_ACT
+                PPEI diagnostic patches active — DDDI periodic streaming (HPT IOCTL float32 MPa) for FRP_ACT/FRP_DES
               </span>
             </div>
             <div className="flex items-center gap-2">

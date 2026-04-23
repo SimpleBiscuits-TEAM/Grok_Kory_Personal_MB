@@ -1972,3 +1972,13 @@
 - [x] Created ppeiLog/ppeiWarn helpers that dual-log to console AND emit('log') for DEVICE CONSOLE
 - [x] Store _ppeiConnectionRef so parseDddiPeriodicFrame can also emit to DEVICE CONSOLE
 - [x] DDDI setup/streaming/injection messages now visible and exportable in DEVICE CONSOLE
+
+## Fix DDDI Re-Setup Breaking Streaming
+- [x] Skip DDDI re-setup if _ppeiDddiStreamingActive is true and periodic frames are recent
+- [x] Log when skipping re-setup to confirm it's working
+- [ ] Verify FRP_ACT value changes during driving (not just idle) — NEEDS TRUCK TEST
+- [x] Diagnose frozen DDDI periodic data — FOUND: DID 0x328A is snapshot-only, HPT uses IOCTL 0x2D to read float32 from ECU RAM
+- [x] Rewrite ppei_pcan_bridge.py to use IOCTL 0x2D with RAM addresses (0x014F08=FRP_ACT, 0x0225D8=FRP_DES)
+- [x] Rewrite frontend 0x5E8 parser to decode float32 BE MPa -> PSI using DataView
+- [x] Only stream FE (FRP_ACT) and FD (FRP_DES) periodic IDs like HPT
+- [x] Bridge now has 5-phase setup: stop → clear → IOCTL 0x2D → DDDI 0x2C → 0xAA start

@@ -574,16 +574,21 @@ log.info("[PPEI] Patch 5 applied: batch_read_dids for fast multi-DID polling")
 #   → { type: "dddi_setup", id: "...", tx_id: 0x7E0 }
 #   ← { type: "dddi_setup_result", id: "...", ok: true/false, ... }
 
-# ── DDDI sequence derived from IntelliSpy capture (2026-04-22) ──────────────
-# HP Tuners datalogging sequence on 2019 L5P E41 ECM:
+# ── DDDI sequence derived from BUSMASTER capture of HP Tuners (2026-04-23) ──
+# HPT uses IOCTL 0x2D to set up ECU RAM reads, then DDDI 0x2C to map them
+# to periodic identifiers, then 0xAA to start periodic streaming on 0x5E8.
+#
+# HPT approach (IOCTL + DDDI):
 #   Phase 1: Stop any existing periodic reads (0xAA 04 00)
 #   Phase 2: Clear all old DDDI periodic definitions (0x2C FE 00 XX)
 #            This is what UNLOCKS Mode 22 reads on the E41!
-#   Phase 3: Individual Mode 22 reads now work
-#   Phase 4: (Optional) Define new DDDI composites for fast periodic streaming
+#   Phase 3: IOCTL 0x2D to configure RAM data sources (FE00, FE01)
+#   Phase 4: DDDI 0x2C to map periodic IDs to IOCTL sources
+#   Phase 5: Start periodic streaming (0xAA 04 FE FD)
 #
-# The clear sequence sends 0x2C with DID=0xFE00 and sub=0x00 (clear) for each
-# periodic identifier that may have been previously defined.
+# The 0x5E8 frames contain IEEE 754 float32 big-endian values in MPa.
+# FE = FRP Actual (4 bytes float32 from RAM 0x014F08)
+# FD = FRP Desired (4 bytes float32 from RAM 0x0225D8)
 
 # All periodic IDs that HPT clears (from IntelliSpy capture)
 _DDDI_CLEAR_PERIODIC_IDS = [
@@ -595,14 +600,27 @@ _DDDI_CLEAR_PERIODIC_IDS = [
     0x88, 0x8B, 0x98, 0xB1, 0xE5, 0xFD,
 ]
 
-# DDDI composite definitions from IntelliSpy capture (Phase 4)
-# These define periodic identifiers FD, FB, F9, F8 for fast ECU-push streaming
-_DDDI_DEFINE_COMPOSITES = [
-    bytes([0x2C, 0xFD, 0x00, 0x4F, 0x00, 0x10, 0x00, 0x0A]),
-    bytes([0x2C, 0xFB, 0x20, 0xB4, 0x30, 0xBE, 0x32, 0x8A, 0x00, 0x0D]),
-    bytes([0x2C, 0xF9, 0x30, 0x8A, 0x13, 0x2A]),
-    bytes([0x2C, 0xF8, 0x11, 0xBB, 0x20, 0xBC, 0x32, 0xA8, 0x00, 0x0F, 0x00, 0x05, 0x00, 0x33, 0x23, 0x2C]),
+# HPT IOCTL 0x2D commands — set up ECU RAM data sources
+# Format: 0x2D <DID_hi> <DID_lo> <controlOption=0x40> <page> <addr_hi> <addr_lo> <size>
+# These read live float32 values directly from ECU RAM (bypasses snapshot DIDs)
+_IOCTL_SETUP = [
+    # IOCTL FE00: FRP Actual — 4 bytes float32 MPa from RAM page=0x01, addr=0x4F08
+    bytes([0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F, 0x08, 0x04]),
+    # IOCTL FE01: FRP Desired — 4 bytes float32 MPa from RAM page=0x02, addr=0x25D8
+    bytes([0x2D, 0xFE, 0x01, 0x40, 0x02, 0x25, 0xD8, 0x04]),
 ]
+
+# DDDI 0x2C definitions — map periodic IDs to IOCTL data sources
+# Format: 0x2C <periodicID> <sourceDID_hi> <sourceDID_lo> [pos] [size]
+_DDDI_DEFINE_PERIODIC = [
+    # Periodic FE = read from IOCTL DID FE00, position 0, size 10 bytes
+    bytes([0x2C, 0xFE, 0xFE, 0x00, 0x00, 0x0A]),
+    # Periodic FD = read from IOCTL DID FE01
+    bytes([0x2C, 0xFD, 0xFE, 0x01]),
+]
+
+# Periodic IDs to start streaming (must match _DDDI_DEFINE_PERIODIC order)
+_PERIODIC_STREAM_IDS = [0xFE, 0xFD]
 
 # Positive response SIDs for each service
 _DDDI_POS_RESP = {0x2D: 0x6D, 0x2C: 0x6C, 0xAA: 0xEA}
@@ -713,16 +731,19 @@ async def _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0):
 
 
 async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
-    """Execute the DDDI clear sequence to unlock Mode 22 on the E41 ECU.
+    """Execute the HPT-style DDDI setup: IOCTL 0x2D for RAM reads + DDDI 0x2C + periodic start.
     
-    From IntelliSpy capture of HP Tuners datalogging (2026-04-22):
+    From BUSMASTER capture of HP Tuners FRP datalogging (2026-04-23):
       1. Stop any existing periodic transmissions (0xAA 04 00)
       2. Clear all old DDDI periodic definitions (0x2C FE 00 XX x 56)
-         -> This is what UNLOCKS Mode 22 reads on the E41!
-      3. Individual Mode 22 reads now work (183 DIDs confirmed)
-      4. (Optional) Define new DDDI composites for fast periodic streaming
+         -> This UNLOCKS Mode 22 reads on the E41!
+      3. IOCTL 0x2D to set up ECU RAM data sources (FE00=FRP_ACT, FE01=FRP_DES)
+      4. DDDI 0x2C to map periodic IDs (FE, FD) to IOCTL sources
+      5. Start periodic streaming (0xAA 04 FE FD)
+    
+    The 0x5E8 frames contain IEEE 754 float32 big-endian values in MPa.
     """
-    log.info(f"[PPEI] Starting DDDI clear sequence for TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
+    log.info(f"[PPEI] Starting HPT-style DDDI setup for TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
     start = time.time()
     
     # Ensure CAN bus and protocol are ready
@@ -757,7 +778,7 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
     
     ok_count = 0
     fail_count = 0
-    total_steps = 1 + len(_DDDI_CLEAR_PERIODIC_IDS) + len(_DDDI_DEFINE_COMPOSITES)
+    total_steps = 1 + len(_DDDI_CLEAR_PERIODIC_IDS) + len(_IOCTL_SETUP) + len(_DDDI_DEFINE_PERIODIC) + 1
     step = 0
     
     # ── Phase 1: Stop any existing periodic reads ──
@@ -769,16 +790,12 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
         ok_count += 1
         log.info(f"[PPEI] Step {step}/{total_steps} OK: stopPeriodicRead")
     else:
-        # 0xAA stop may NRC if nothing was running — that's fine
-        ok_count += 1  # Count as OK since it's expected
+        ok_count += 1  # NRC OK, nothing was running
         log.info(f"[PPEI] Step {step}/{total_steps}: stopPeriodicRead (NRC OK, nothing running)")
     await asyncio.sleep(0.010)
     
     # ── Phase 2: Clear all DDDI periodic definitions ──
     # This is the KEY that unlocks Mode 22 on the E41!
-    # Format: 0x2C (DDDI) + DID 0xFE00 (hi=0xFE, lo=0x00) + periodicID
-    # SubFunction is embedded: 0x2C with DID=FE00 and the periodic ID byte
-    # HPT sends: 04 2C FE 00 XX (single frame, 4 bytes payload)
     log.info(f"[PPEI] Phase 2: Clearing {len(_DDDI_CLEAR_PERIODIC_IDS)} DDDI periodic definitions")
     clear_ok = 0
     clear_nrc = 0
@@ -790,61 +807,75 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
             clear_ok += 1
             ok_count += 1
         else:
-            # NRC 0x31 (requestOutOfRange) is expected for some IDs — not a failure
             clear_nrc += 1
-            ok_count += 1  # Still count as OK
-        # HPT sends these very fast (~6ms apart)
+            ok_count += 1  # NRC expected for some IDs
         await asyncio.sleep(0.006)
-    
     log.info(f"[PPEI] Phase 2 complete: {clear_ok} positive, {clear_nrc} NRC (both OK)")
     
-    # ── Phase 3: Define DDDI composites (optional, for periodic streaming) ──
-    if _DDDI_DEFINE_COMPOSITES:
-        log.info(f"[PPEI] Phase 3: Defining {len(_DDDI_DEFINE_COMPOSITES)} DDDI composites")
-        for payload in _DDDI_DEFINE_COMPOSITES:
-            resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
-            step += 1
-            if resp:
-                ok_count += 1
-                log.info(f"[PPEI] Step {step}/{total_steps} OK: defineComposite 0x{payload[1]:02X}")
-            else:
-                fail_count += 1
-                log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: defineComposite 0x{payload[1]:02X}")
-            await asyncio.sleep(0.015)
+    # ── Phase 3: IOCTL 0x2D to configure ECU RAM data sources ──
+    # This sets up FE00 and FE01 as live RAM reads (float32 MPa)
+    log.info(f"[PPEI] Phase 3: Setting up {len(_IOCTL_SETUP)} IOCTL RAM data sources")
+    ioctl_ok = 0
+    for payload in _IOCTL_SETUP:
+        did_hi, did_lo = payload[1], payload[2]
+        log.info(f"[PPEI] IOCTL 0x2D DID=0x{did_hi:02X}{did_lo:02X}: {' '.join(f'{b:02X}' for b in payload)}")
+        resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
+        step += 1
+        if resp:
+            ioctl_ok += 1
+            ok_count += 1
+            log.info(f"[PPEI] Step {step}/{total_steps} OK: IOCTL 0x{did_hi:02X}{did_lo:02X} -> 0x6D positive")
+        else:
+            fail_count += 1
+            log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: IOCTL 0x{did_hi:02X}{did_lo:02X}")
+        await asyncio.sleep(0.015)
+    log.info(f"[PPEI] Phase 3 complete: {ioctl_ok}/{len(_IOCTL_SETUP)} IOCTL sources configured")
     
-    # ── Phase 4: Start periodic streaming (0xAA 04 FD FB F9 F8) ──
-    # This tells the ECU to start pushing data on arb ID 0x5E8
-    # 0xAA = ReadDataByPeriodicIdentifier
-    # 0x04 = transmissionMode (medium rate ~100ms)
-    # FD, FB, F9, F8 = the periodic IDs we just defined
-    periodic_ids = [p[1] for p in _DDDI_DEFINE_COMPOSITES]  # Extract periodic ID from each composite
-    if periodic_ids and fail_count == 0:
-        start_payload = bytes([0xAA, 0x04] + periodic_ids)
-        log.info(f"[PPEI] Phase 4: Starting periodic streaming: 0xAA 04 {' '.join(f'{x:02X}' for x in periodic_ids)}")
+    # ── Phase 4: DDDI 0x2C to map periodic IDs to IOCTL sources ──
+    log.info(f"[PPEI] Phase 4: Defining {len(_DDDI_DEFINE_PERIODIC)} periodic ID mappings")
+    dddi_ok = 0
+    for payload in _DDDI_DEFINE_PERIODIC:
+        periodic_id = payload[1]
+        log.info(f"[PPEI] DDDI 0x2C periodic 0x{periodic_id:02X}: {' '.join(f'{b:02X}' for b in payload)}")
+        resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
+        step += 1
+        if resp:
+            dddi_ok += 1
+            ok_count += 1
+            log.info(f"[PPEI] Step {step}/{total_steps} OK: DDDI define 0x{periodic_id:02X} -> 0x6C positive")
+        else:
+            fail_count += 1
+            log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: DDDI define 0x{periodic_id:02X}")
+        await asyncio.sleep(0.015)
+    log.info(f"[PPEI] Phase 4 complete: {dddi_ok}/{len(_DDDI_DEFINE_PERIODIC)} periodic IDs defined")
+    
+    # ── Phase 5: Start periodic streaming (0xAA 04 FE FD) ──
+    if fail_count == 0:
+        start_payload = bytes([0xAA, 0x04] + _PERIODIC_STREAM_IDS)
+        log.info(f"[PPEI] Phase 5: Starting periodic streaming: 0xAA 04 {' '.join(f'{x:02X}' for x in _PERIODIC_STREAM_IDS)}")
         resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, start_payload, timeout=0.5)
         if resp:
             ok_count += 1
-            log.info(f"[PPEI] Phase 4 OK: Periodic streaming started on 0x{DDDI_PERIODIC_ARB_ID:03X}")
-            # Mark that periodic streaming is active on this bridge
+            log.info(f"[PPEI] Phase 5 OK: Periodic streaming started on 0x{DDDI_PERIODIC_ARB_ID:03X}")
+            log.info(f"[PPEI] FE=FRP_ACT (float32 MPa), FD=FRP_DES (float32 MPa)")
             bridge._ppei_dddi_streaming = True
-            bridge._ppei_dddi_periodic_ids = periodic_ids
+            bridge._ppei_dddi_periodic_ids = _PERIODIC_STREAM_IDS
         else:
-            log.warning("[PPEI] Phase 4: 0xAA start may have NRC'd (ECU might not support periodic mode)")
+            log.warning("[PPEI] Phase 5: 0xAA start may have NRC'd")
             bridge._ppei_dddi_streaming = False
         await asyncio.sleep(0.050)
     else:
-        if fail_count > 0:
-            log.warning(f"[PPEI] Phase 4 SKIPPED: {fail_count} composite definitions failed")
+        log.warning(f"[PPEI] Phase 5 SKIPPED: {fail_count} previous steps failed")
         bridge._ppei_dddi_streaming = False
     
     elapsed = (time.time() - start) * 1000
-    success = True  # Clear phase always succeeds (NRCs are expected)
+    success = True  # Clear phase always succeeds
     streaming = getattr(bridge, '_ppei_dddi_streaming', False)
     log.info(
         f"[PPEI] DDDI setup complete in {elapsed:.0f}ms: "
         f"cleared {len(_DDDI_CLEAR_PERIODIC_IDS)} periodic IDs, "
-        f"defined {len(_DDDI_DEFINE_COMPOSITES)} composites"
-        f"{', periodic streaming ACTIVE on 0x5E8' if streaming else ''}"
+        f"IOCTL {ioctl_ok}/{len(_IOCTL_SETUP)}, DDDI {dddi_ok}/{len(_DDDI_DEFINE_PERIODIC)}"
+        f"{', PERIODIC STREAMING ACTIVE on 0x5E8 (FRP float32 MPa)' if streaming else ''}"
     )
     
     return {
@@ -853,10 +884,11 @@ async def _ppei_dddi_setup(bridge, tx_id, rx_id, req_id):
         "ok": success,
         "clear_ok": clear_ok,
         "clear_nrc": clear_nrc,
-        "define_ok": ok_count - clear_ok - clear_nrc - 1,
+        "ioctl_ok": ioctl_ok,
+        "dddi_ok": dddi_ok,
         "elapsed_ms": round(elapsed, 1),
         "streaming": streaming,
-        "periodic_ids": periodic_ids if streaming else [],
+        "periodic_ids": list(_PERIODIC_STREAM_IDS) if streaming else [],
     }
 async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
     """Stop periodic reads and clean up DDDI definitions."""
