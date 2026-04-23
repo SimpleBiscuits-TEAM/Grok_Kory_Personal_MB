@@ -5,11 +5,11 @@
  * ║  PPEI TEAM SANDBOX — Safe to modify, experiment, and break!        ║
  * ║                                                                     ║
  * ║  MONKEY-PATCHES (applied at module load, before any render):        ║
- * ║  1. ensureGmLiveDataSessionForTx — TesterPresent + Extended Session (0x10 0x03) ║
+ * ║  1. ensureGmLiveDataSessionForTx — DDDI setup + periodic streaming  ║
  * ║  2. sendUDSviaRawCAN — diagnostic logging wrapper                  ║
- * ║  3. scanSupportedDIDs — increased timeouts for scan phase           ║
- * ║  4. onmessage — diagnostic logging for all WebSocket messages       ║
- * ║  5. readPids — batch_read_dids for fast multi-DID polling           ║
+ * ║  3. readPid — diagnostic logging wrapper                            ║
+ * ║  4. openWebSocket — WS interceptor + DDDI 0x5E8 periodic parser    ║
+ * ║  5. readPids — batch_read_dids + DDDI periodic value injection      ║
  * ║                                                                     ║
  * ║  DO NOT modify Tobi's original files!                               ║
  * ╚══════════════════════════════════════════════════════════════════════╝
@@ -29,6 +29,26 @@ import { Beaker, Shield, Download } from 'lucide-react';
 
 const PPEI_TAG = '[PPEI-DIAG]';
 
+/**
+ * Helper: log to both console AND the DEVICE CONSOLE panel.
+ * `self` is the PCANConnection instance (from `this` in patched methods).
+ * When called from module scope (no instance), only logs to console.
+ */
+function ppeiLog(self: any, msg: string): void {
+  console.log(`${PPEI_TAG} ${msg}`);
+  // emit is private but accessible at runtime — route to DEVICE CONSOLE
+  if (self && typeof self.emit === 'function') {
+    try { self.emit('log', null, `${PPEI_TAG} ${msg}`); } catch { /* ignore */ }
+  }
+}
+
+function ppeiWarn(self: any, msg: string): void {
+  console.warn(`${PPEI_TAG} ${msg}`);
+  if (self && typeof self.emit === 'function') {
+    try { self.emit('log', null, `${PPEI_TAG} ⚠ ${msg}`); } catch { /* ignore */ }
+  }
+}
+
 const NON_GM_MANUFACTURERS = new Set([
   'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
   'canam', 'seadoo', 'polaris', 'kawasaki',
@@ -36,13 +56,7 @@ const NON_GM_MANUFACTURERS = new Set([
 
 /**
  * ── PATCH 1: ensureGmLiveDataSessionForTx ──
- * Sends DDDI clear sequence to unlock Mode 22 on the E41 ECU.
- * From IntelliSpy capture of HP Tuners datalogging (2026-04-22):
- *   1. Stop existing periodic reads (0xAA 04 00)
- *   2. Clear all DDDI periodic definitions (0x2C FE 00 XX × 56)
- *   3. Mode 22 reads now work (183 DIDs confirmed)
- * The DDDI clear is the "key" — NOT 0x10 0x03.
- * This is sent to the bridge as a "dddi_setup" WebSocket message.
+ * Sends DDDI clear + define + start periodic streaming to the bridge.
  */
 async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<void> {
   if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
@@ -53,10 +67,10 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   // DDDI clear takes ~500ms, so only re-send every 30s
   if (now - last < 30000) return;
   const txHex = `0x${ecmTx.toString(16).toUpperCase()}`;
-  console.log(`${PPEI_TAG} DDDI clear sequence for ${txHex} (unlocking Mode 22)`);
+  ppeiLog(this, `DDDI setup sequence for ${txHex} (clear + define + start periodic)`);
   
   try {
-    // Send dddi_setup to the bridge — this does the full clear sequence
+    // Send dddi_setup to the bridge — this does the full sequence
     const response = await (this as any).sendRequest({
       type: 'dddi_setup',
       tx_id: ecmTx,
@@ -67,10 +81,10 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
       const periodicIds = Array.isArray(response.periodic_ids)
         ? response.periodic_ids.map((id: number) => `0x${id.toString(16).toUpperCase()}`).join(', ')
         : 'none';
-      console.log(
-        `${PPEI_TAG} ✅ DDDI setup OK on ${txHex}: ` +
+      ppeiLog(this,
+        `DDDI setup OK on ${txHex}: ` +
         `cleared ${response.clear_ok ?? '?'} periodic IDs ` +
-        `(${response.clear_nrc ?? '?'} NRC expected), ` +
+        `(${response.clear_nrc ?? '?'} NRC), ` +
         `defined ${response.define_ok ?? '?'} composites ` +
         `in ${response.elapsed_ms ?? '?'}ms` +
         (streaming ? ` — PERIODIC STREAMING ACTIVE on 0x5E8 [${periodicIds}]` : '')
@@ -78,21 +92,21 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
       if (streaming) {
         _ppeiDddiStreamingActive = true;
         _ppeiPeriodicFrameCount = 0;
-        console.log(`${PPEI_TAG} 🔄 DDDI periodic streaming started — FRP_ACT will be extracted from 0x5E8 frames`);
+        ppeiLog(this, 'DDDI periodic streaming started — FRP_ACT will be extracted from 0x5E8 frames');
       }
     } else {
-      console.warn(`${PPEI_TAG} ⚠️ DDDI setup partial/failed on ${txHex}:`, response);
+      ppeiWarn(this, `DDDI setup partial/failed on ${txHex}: ${JSON.stringify(response)}`);
     }
   } catch (e: any) {
-    console.warn(`${PPEI_TAG} ⚠️ DDDI setup failed on ${txHex}: ${e?.message ?? e}`);
+    ppeiWarn(this, `DDDI setup failed on ${txHex}: ${e?.message ?? e}`);
     // Fallback: try TesterPresent + Extended Session (may work on some ECUs)
     try {
       await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
-      console.log(`${PPEI_TAG} ✅ TesterPresent fallback OK on ${txHex}`);
+      ppeiLog(this, `TesterPresent fallback OK on ${txHex}`);
     } catch { /* ignore */ }
     try {
       await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
-      console.log(`${PPEI_TAG} ✅ Extended Session (0x10 0x03) fallback OK on ${txHex}`);
+      ppeiLog(this, `Extended Session (0x10 0x03) fallback OK on ${txHex}`);
     } catch { /* ignore */ }
   }
   
@@ -101,6 +115,7 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   }
   await new Promise(r => setTimeout(r, 40));
 }
+
 /**
  * ── PATCH 2: sendUDSviaRawCAN wrapper ──
  * Wraps the original to log every CAN frame sent and every response received.
@@ -111,23 +126,24 @@ function wrapSendUDSviaRawCAN(original: Function) {
     const subHex = subFunction !== undefined ? `0x${subFunction.toString(16).toUpperCase()}` : 'none';
     const dataHex = data?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? '';
     const txHex = `0x${targetAddress.toString(16).toUpperCase()}`;
-    console.log(`${PPEI_TAG} 📤 TX → ${txHex}: svc=${svcHex} sub=${subHex} data=[${dataHex}] timeout=${timeoutMs}ms`);
+    // Only log to console (too noisy for DEVICE CONSOLE)
+    console.log(`${PPEI_TAG} TX → ${txHex}: svc=${svcHex} sub=${subHex} data=[${dataHex}] timeout=${timeoutMs}ms`);
     
     const start = performance.now();
     try {
       const result = await original.call(this, service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
       const elapsed = (performance.now() - start).toFixed(1);
       if (result) {
-        const posNeg = result.positiveResponse ? '✅ POSITIVE' : '❌ NEGATIVE';
+        const posNeg = result.positiveResponse ? 'POSITIVE' : 'NEGATIVE';
         const respData = result.data?.map((b: number) => b.toString(16).padStart(2, '0')).join(' ') ?? 'no data';
-        console.log(`${PPEI_TAG} 📥 RX ← ${txHex}: ${posNeg} (${elapsed}ms) data=[${respData}]`);
+        console.log(`${PPEI_TAG} RX ← ${txHex}: ${posNeg} (${elapsed}ms) data=[${respData}]`);
       } else {
-        console.log(`${PPEI_TAG} 📥 RX ← ${txHex}: null response (${elapsed}ms)`);
+        console.log(`${PPEI_TAG} RX ← ${txHex}: null response (${elapsed}ms)`);
       }
       return result;
     } catch (e: any) {
       const elapsed = (performance.now() - start).toFixed(1);
-      console.warn(`${PPEI_TAG} 💥 ERR ← ${txHex}: ${e?.message ?? e} (${elapsed}ms)`);
+      console.warn(`${PPEI_TAG} ERR ← ${txHex}: ${e?.message ?? e} (${elapsed}ms)`);
       throw e;
     }
   };
@@ -136,35 +152,35 @@ function wrapSendUDSviaRawCAN(original: Function) {
 /**
  * ── PATCH 3: readPid wrapper ──
  * Logs every PID read attempt and result during scan.
+ * Only logs to console (too noisy for DEVICE CONSOLE).
  */
 function wrapReadPid(original: Function) {
   return async function(this: any, pid: any) {
     const mode = pid.service || 0x01;
     const pidHex = `0x${pid.pid.toString(16).toUpperCase()}`;
     const modeHex = `0x${mode.toString(16).padStart(2, '0').toUpperCase()}`;
-    console.log(`${PPEI_TAG} 🔍 readPid: ${pid.shortName ?? pid.name} (mode=${modeHex} pid=${pidHex})`);
+    console.log(`${PPEI_TAG} readPid: ${pid.shortName ?? pid.name} (mode=${modeHex} pid=${pidHex})`);
     
     const start = performance.now();
     try {
       const result = await original.call(this, pid);
       const elapsed = (performance.now() - start).toFixed(1);
       if (result) {
-        console.log(`${PPEI_TAG} ✅ readPid OK: ${pid.shortName ?? pid.name} = ${result.value} ${result.unit ?? ''} (${elapsed}ms)`);
+        console.log(`${PPEI_TAG} readPid OK: ${pid.shortName ?? pid.name} = ${result.value} ${result.unit ?? ''} (${elapsed}ms)`);
       } else {
-        console.warn(`${PPEI_TAG} ❌ readPid FAIL: ${pid.shortName ?? pid.name} → null (${elapsed}ms) — marked UNSUPPORTED`);
+        console.warn(`${PPEI_TAG} readPid FAIL: ${pid.shortName ?? pid.name} → null (${elapsed}ms)`);
       }
       return result;
     } catch (e: any) {
       const elapsed = (performance.now() - start).toFixed(1);
-      console.warn(`${PPEI_TAG} 💥 readPid ERROR: ${pid.shortName ?? pid.name} → ${e?.message ?? e} (${elapsed}ms)`);
-      return null; // Match original behavior: catch → return null
+      console.warn(`${PPEI_TAG} readPid ERROR: ${pid.shortName ?? pid.name} → ${e?.message ?? e} (${elapsed}ms)`);
+      return null;
     }
   };
 }
 
 // ── DDDI Periodic Frame Parsing ──
 // Composite definitions from ppei_pcan_bridge.py (HP Tuners IntelliSpy capture)
-// Each composite maps a periodic ID to a list of DIDs with their byte offsets
 const DDDI_PERIODIC_ARB_ID = 0x5E8;
 
 interface DddiDidEntry {
@@ -204,6 +220,8 @@ interface PeriodicValue {
 const _ppeiPeriodicValues = new Map<number, PeriodicValue>();
 let _ppeiPeriodicFrameCount = 0;
 let _ppeiDddiStreamingActive = false;
+// Store a reference to the connection instance so parseDddiPeriodicFrame can emit('log')
+let _ppeiConnectionRef: any = null;
 
 function parseDddiPeriodicFrame(data: number[]): void {
   if (!data || data.length < 2) return;
@@ -234,16 +252,15 @@ function parseDddiPeriodicFrame(data: number[]): void {
     } catch { /* formula error */ }
   }
 
-  // Log periodically (every 100th frame to avoid spam)
+  // Log first 5 frames and then every 100th to DEVICE CONSOLE
   if (_ppeiPeriodicFrameCount <= 5 || _ppeiPeriodicFrameCount % 100 === 0) {
     const frpVal = _ppeiPeriodicValues.get(0x328A);
     const vssVal = _ppeiPeriodicValues.get(0x000D);
-    console.log(
-      `${PPEI_TAG} 🔄 DDDI periodic #${_ppeiPeriodicFrameCount}: ` +
+    const msg = `DDDI periodic #${_ppeiPeriodicFrameCount}: ` +
       `FRP_ACT=${frpVal ? frpVal.value.toFixed(1) + ' PSI' : 'N/A'} ` +
       `VSS=${vssVal ? vssVal.value.toFixed(1) + ' MPH' : 'N/A'} ` +
-      `(0x${periodicId.toString(16).toUpperCase()} frame)`
-    );
+      `(0x${periodicId.toString(16).toUpperCase()} frame)`;
+    ppeiLog(_ppeiConnectionRef, msg);
   }
 }
 
@@ -256,9 +273,12 @@ function parseDddiPeriodicFrame(data: number[]): void {
 function wrapOpenWebSocket(original: Function) {
   return async function(this: any) {
     await original.call(this);
+    // Store connection reference so parseDddiPeriodicFrame can emit('log')
+    _ppeiConnectionRef = this;
     // After the original sets up ws.onmessage, wrap it to add logging + DDDI parsing
     if (this.ws) {
       const originalOnMessage = this.ws.onmessage;
+      const connRef = this; // capture for closure
       let frameCount = 0;
       this.ws.onmessage = (event: MessageEvent) => {
         try {
@@ -266,21 +286,21 @@ function wrapOpenWebSocket(original: Function) {
           if (msg.type === 'can_frame' || msg.type === 'bus_frame') {
             frameCount++;
             const arbId = msg.arb_id ?? msg.arbitration_id ?? 0;
-            const arbHex = `0x${arbId.toString(16).toUpperCase()}`;
             const dataArr: number[] = Array.isArray(msg.data) ? msg.data : [];
-            const dataHex = dataArr.map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
 
             // ── DDDI periodic frame parsing (0x5E8) ──
             if (arbId === DDDI_PERIODIC_ARB_ID && dataArr.length >= 2) {
               parseDddiPeriodicFrame(dataArr);
             }
 
-            // Log first 20 frames, then every 50th to avoid spam
-            if (frameCount <= 20 || frameCount % 50 === 0) {
-              console.log(`${PPEI_TAG} 📡 WS frame #${frameCount}: ${arbHex} [${dataHex}]`);
+            // Log first 5 frames to DEVICE CONSOLE, rest only to F12
+            if (frameCount <= 5) {
+              const arbHex = `0x${arbId.toString(16).toUpperCase()}`;
+              const dataHex = dataArr.map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
+              ppeiLog(connRef, `WS frame #${frameCount}: ${arbHex} [${dataHex}]`);
+            } else if (frameCount % 200 === 0) {
+              console.log(`${PPEI_TAG} WS frame count: ${frameCount}`);
             }
-          } else if (msg.type === 'tx_ack') {
-            console.log(`${PPEI_TAG} 📡 WS tx_ack: id=${msg.id} ok=${msg.ok}`);
           }
         } catch { /* ignore */ }
         // Call original handler
@@ -288,7 +308,7 @@ function wrapOpenWebSocket(original: Function) {
           originalOnMessage.call(this.ws, event);
         }
       };
-      console.log(`${PPEI_TAG} 🔌 WebSocket onmessage interceptor installed (with DDDI 0x5E8 parser)`);
+      ppeiLog(this, 'WebSocket interceptor installed (with DDDI 0x5E8 periodic parser)');
     }
   };
 }
@@ -369,14 +389,10 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
           let okCount = 0;
           for (const result of response.results) {
             if (!result.ok) continue;
-            // Find the matching PID definition
             const pidDef = txPids.find((p: any) => p.pid === result.did);
             if (!pidDef) continue;
 
             try {
-              // Bridge _wait_for_response already strips service byte + DID prefix
-              // via _extract_obd_positive_payload (Mode 22: payload[3:]).
-              // So result.data is PURE VALUE BYTES — do NOT slice further!
               const payload: number[] = result.data || [];
               if (payload.length === 0) continue;
 
@@ -396,13 +412,13 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             } catch { /* formula error — skip */ }
           }
           const elapsed = (performance.now() - start).toFixed(1);
-          console.log(
-            `${PPEI_TAG} ⚡ batch_read_dids TX=0x${txId.toString(16).toUpperCase()}: ` +
+          // Log batch results to DEVICE CONSOLE (important diagnostic)
+          ppeiLog(this,
+            `batch_read_dids TX=0x${txId.toString(16).toUpperCase()}: ` +
             `${okCount}/${dids.length} decoded in ${elapsed}ms (bridge: ${response.elapsed_ms}ms)`
           );
         } else {
-          // Unexpected response — fall back to sequential
-          console.warn(`${PPEI_TAG} ⚠️ batch_read_dids unexpected response, falling back to sequential`);
+          ppeiWarn(this, `batch_read_dids unexpected response, falling back to sequential`);
           for (const pid of txPids) {
             try {
               const reading = await originalReadPid.call(this, pid);
@@ -411,9 +427,8 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
           }
         }
       } catch (e: any) {
-        // Bridge doesn't support batch_read_dids — fall back gracefully
-        console.warn(
-          `${PPEI_TAG} ⚠️ batch_read_dids failed (${e?.message ?? e}), falling back to sequential for ${txPids.length} DIDs`
+        ppeiWarn(this,
+          `batch_read_dids failed (${e?.message ?? e}), falling back to sequential for ${txPids.length} DIDs`
         );
         for (const pid of txPids) {
           try {
@@ -425,8 +440,6 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
 
     // ── Inject DDDI periodic values for PIDs that have fresh data ──
-    // This is the key: if the ECU is streaming FRP_ACT via DDDI periodic,
-    // we use that value instead of waiting for a Mode 22 poll that may fail.
     const PERIODIC_MAX_AGE_MS = 2000; // Accept periodic values up to 2s old
     const now = Date.now();
     const injectedFromPeriodic: string[] = [];
@@ -451,8 +464,8 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
 
     if (injectedFromPeriodic.length > 0) {
-      console.log(
-        `${PPEI_TAG} 🔄 Injected ${injectedFromPeriodic.length} DDDI periodic value(s): ${injectedFromPeriodic.join(', ')}`
+      ppeiLog(this,
+        `Injected ${injectedFromPeriodic.length} DDDI periodic value(s): ${injectedFromPeriodic.join(', ')}`
       );
     }
 
@@ -460,40 +473,38 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
   };
 }
 // ── Apply all patches at module scope ──
-console.log(`${PPEI_TAG} 🔧 Module loaded — attempting to apply patches...`);
+console.log(`${PPEI_TAG} Module loaded — attempting to apply patches...`);
 try {
   const proto = PCANConnection.prototype as any;
   
   if (proto._ppeiFullyPatched) {
     console.log(`${PPEI_TAG} Patches already applied — skipping`);
   } else {
-    // Patch 1: Session management
+    // Patch 1: Session management + DDDI setup
     proto._originalEnsureGmLiveDataSession = proto.ensureGmLiveDataSessionForTx;
     proto.ensureGmLiveDataSessionForTx = ppeiEnsureGmLiveDataSession;
-    console.log(`${PPEI_TAG} ✅ Patch 1: ensureGmLiveDataSessionForTx → TesterPresent + Extended Session (0x10 0x03)`);
+    console.log(`${PPEI_TAG} Patch 1: ensureGmLiveDataSessionForTx → DDDI setup + periodic streaming`);
     // Patch 2: sendUDSviaRawCAN diagnostic logging
     proto._originalSendUDSviaRawCAN = proto.sendUDSviaRawCAN;
     proto.sendUDSviaRawCAN = wrapSendUDSviaRawCAN(proto._originalSendUDSviaRawCAN);
-    console.log(`${PPEI_TAG} ✅ Patch 2: sendUDSviaRawCAN → diagnostic logging wrapper`);
+    console.log(`${PPEI_TAG} Patch 2: sendUDSviaRawCAN → diagnostic logging wrapper`);
     // Patch 3: readPid diagnostic logging
     proto._originalReadPid = proto.readPid;
     proto.readPid = wrapReadPid(proto._originalReadPid);
-    console.log(`${PPEI_TAG} ✅ Patch 3: readPid → diagnostic logging wrapper`);
-    // Patch 4: openWebSocket interceptor
+    console.log(`${PPEI_TAG} Patch 3: readPid → diagnostic logging wrapper`);
+    // Patch 4: openWebSocket interceptor + DDDI 0x5E8 parser
     proto._originalOpenWebSocket = proto.openWebSocket;
     proto.openWebSocket = wrapOpenWebSocket(proto._originalOpenWebSocket);
-    console.log(`${PPEI_TAG} ✅ Patch 4: openWebSocket → WS message interceptor + DDDI 0x5E8 periodic parser`);
-    // Patch 5: readPids → batch_read_dids (fast multi-DID polling)
-    // Must use _originalReadPid (the unwrapped version) for fallback,
-    // and wrap the original readPids (before Patch 3 wrapped readPid).
+    console.log(`${PPEI_TAG} Patch 4: openWebSocket → WS interceptor + DDDI 0x5E8 periodic parser`);
+    // Patch 5: readPids → batch_read_dids + DDDI periodic injection
     proto._originalReadPids = proto.readPids;
     proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
-    console.log(`${PPEI_TAG} ✅ Patch 5: readPids → batch_read_dids + DDDI periodic value injection`);
+    console.log(`${PPEI_TAG} Patch 5: readPids → batch_read_dids + DDDI periodic value injection`);
     proto._ppeiFullyPatched = true;
-    console.log(`${PPEI_TAG} 🚀 All PPEI patches applied successfully`);
+    console.log(`${PPEI_TAG} All PPEI patches applied successfully`);
   }
 } catch (err) {
-  console.error(`${PPEI_TAG} ❌ PATCH FAILED:`, err);
+  console.error(`${PPEI_TAG} PATCH FAILED:`, err);
   console.error(`${PPEI_TAG} PCANConnection available:`, typeof PCANConnection);
   console.error(`${PPEI_TAG} PCANConnection.prototype:`, PCANConnection?.prototype);
 }

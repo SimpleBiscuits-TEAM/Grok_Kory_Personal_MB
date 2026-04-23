@@ -1966,3 +1966,9 @@
 - [x] Parse 0x5E8 frames in frontend to extract FRP_ACT from composite FB
 - [x] Wire parsed periodic values into readPids return path (DDDI periodic injection)
 - [x] Add comprehensive console.log for all DDDI steps in PPEI panel
+
+## Route PPEI/DDDI Messages to DEVICE CONSOLE
+- [x] Change all console.log in PPEI patches to also emit('log') so they show in DEVICE CONSOLE export
+- [x] Created ppeiLog/ppeiWarn helpers that dual-log to console AND emit('log') for DEVICE CONSOLE
+- [x] Store _ppeiConnectionRef so parseDddiPeriodicFrame can also emit to DEVICE CONSOLE
+- [x] DDDI setup/streaming/injection messages now visible and exportable in DEVICE CONSOLE
