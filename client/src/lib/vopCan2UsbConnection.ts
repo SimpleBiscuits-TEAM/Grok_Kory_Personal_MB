@@ -768,6 +768,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       console.log('[DDDI-CLEAR] Skipped — periodic streaming is active');
       return;
     }
+    // During active logging, skip the full clear sequence — it sends 56 commands
+    // that eat ~400ms of bus time. The clear was already done at session start.
+    if (this.loggingActive) {
+      return;
+    }
     const now = Date.now();
     const last = this.dddiClearedAt.get(this.obdTxId) ?? 0;
     if (now - last < DDDI_CLEAR_INTERVAL_MS) return;
@@ -961,6 +966,11 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     for (const p of filteredPids) session.readings.set(p.pid, []);
 
     this.currentSession = session;
+
+    // One-time DDDI clear BEFORE we set loggingActive, so Mode 22 reads work immediately.
+    // During the logging loop itself, ensureDddiClear is skipped to save bus time.
+    await this.ensureDddiClear();
+
     this.loggingActive = true;
     this.setState('logging');
 
@@ -1218,12 +1228,22 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         }
       });
 
-      // Also log if we DON'T see any 0x5E8 frames after 2 seconds
+      // Check after 2 seconds: if no 0x5E8 frames arrived, DEACTIVATE periodic
+      // so FRP_ACT/FP_SAE fall through to normal Mode 22 polling.
       setTimeout(() => {
         if (this.dddiPeriodicFrameCount === 0 && this.dddiPeriodicActive) {
-          console.warn('[DDDI-STREAM] ⚠️ NO 0x5E8 frames received after 2 seconds! Bridge may not be forwarding periodic frames.');
-          this.emit('log', null, '[DDDI-STREAM] WARNING: No periodic frames received — bridge may be filtering 0x5E8');
-        } else {
+          console.warn('[DDDI-STREAM] ⚠️ NO 0x5E8 frames after 2s — DEACTIVATING periodic, falling back to Mode 22');
+          this.emit('log', null, '[DDDI-STREAM] No periodic frames — falling back to Mode 22 for FRP/FP_SAE');
+          // CRITICAL: Set dddiPeriodicActive = false so readPid() stops trying
+          // the dead periodic stream and uses Mode 22 instead.
+          this.dddiPeriodicActive = false;
+          // Clean up the CAN monitor subscription
+          if (this.dddiPeriodicUnsub) {
+            this.dddiPeriodicUnsub();
+            this.dddiPeriodicUnsub = null;
+          }
+          this.dddiPeriodicValues.clear();
+        } else if (this.dddiPeriodicActive) {
           console.log(`[DDDI-STREAM] ✓ Received ${this.dddiPeriodicFrameCount} periodic frames in first 2 seconds`);
           this.emit('log', null, `[DDDI-STREAM] Periodic streaming confirmed: ${this.dddiPeriodicFrameCount} frames/2s`);
         }

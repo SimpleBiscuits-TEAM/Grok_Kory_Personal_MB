@@ -1891,3 +1891,9 @@
 - [x] 0x004A AAT formula: NOT A BUG — 0x004A is APP_E (Accel Pedal E), not AAT. AAT is 0x46 and 0x232C, both correct.
 - [x] Update debug logging to show FLOAT32 interpretation alongside existing byte combos
 - [x] Remove/update stale DDDI_FE_FRP_SCALE constant (renamed to DDDI_FE_MPA_TO_PSI)
+
+## Truck Test 2026-04-23 Findings
+- [x] Fix: dddiPeriodicActive stays true even when AA start fails → 2-second timeout now deactivates periodic and falls back to Mode 22
+- [x] Fix: ensureDddiClear runs before every Mode 22 read during logging, wasting bus time → now skipped during logging (one-time clear before loop starts)
+- [x] Fix: When DDDI streaming fails, FRP_ACT and FP_SAE should be polled via Mode 22 at normal rate → dddiPeriodicActive=false after 2s timeout
+- [ ] Investigate: AA start (0xAA 0x04 FE FD) gets NRC 0x31 — command format may be wrong for this ECU
