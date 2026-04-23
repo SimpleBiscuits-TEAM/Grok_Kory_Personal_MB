@@ -20,7 +20,8 @@ import {
   Activity, Zap, ChevronDown, ChevronRight, RefreshCw,
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
-  Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser
+  Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser,
+  Copy, Check
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import {
@@ -705,8 +706,9 @@ function PIDSelector({
 
 // ─── Console Log ───────────────────────────────────────────────────────────
 
-function ConsoleLog({ logs }: { logs: string[] }) {
+function ConsoleLog({ logs, onCopy, onExport }: { logs: string[]; onCopy?: () => void; onExport?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -714,40 +716,109 @@ function ConsoleLog({ logs }: { logs: string[] }) {
     }
   }, [logs]);
 
+  const handleCopy = async () => {
+    const text = logs.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select all text in the console
+      if (scrollRef.current) {
+        const range = document.createRange();
+        range.selectNodeContents(scrollRef.current);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+    onCopy?.();
+  };
+
+  const handleExport = () => {
+    const text = logs.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `vop-console-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onExport?.();
+  };
+
   return (
-    <div
-      ref={scrollRef}
-      style={{
-        background: 'oklch(0.06 0.003 260)', border: `1px solid ${sColor.borderLight}`,
-        borderRadius: '3px', padding: '8px', maxHeight: '150px', overflowY: 'auto',
-        fontFamily: sFont.mono, fontSize: '0.65rem', lineHeight: 1.6, color: sColor.textDim,
-      }}
-    >
-      {logs.length === 0 ? (
-        <span style={{ color: sColor.textMuted }}>No log entries yet. Connect to a device to begin.</span>
-      ) : (
-        logs.map((log, i) => {
-          const isError = log.includes('ERROR') || log.includes('error');
-          const isIncompatible = log.includes('INCOMPATIBLE ADAPTER');
-          const isSuccess = log.includes('ready') || log.includes('Ready') || log.includes('OK');
-          const color = isError ? 'oklch(0.60 0.20 25)' : isSuccess ? sColor.green : sColor.textDim;
-          return (
-            <div key={i} style={{
-              color,
-              ...(isIncompatible ? {
-                background: 'oklch(0.12 0.04 25 / 0.3)',
-                border: '1px solid oklch(0.35 0.12 25)',
-                borderRadius: '3px',
-                padding: '8px 10px',
-                margin: '4px 0',
-                whiteSpace: 'pre-wrap' as const,
-              } : {}),
-            }}>
-              <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
-            </div>
-          );
-        })
+    <div style={{ position: 'relative' }}>
+      {logs.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '4px', right: '8px', zIndex: 2,
+          display: 'flex', gap: '4px',
+        }}>
+          <button
+            onClick={handleCopy}
+            title="Copy to clipboard"
+            style={{
+              background: 'oklch(0.15 0.005 260)', border: `1px solid ${sColor.borderLight}`,
+              borderRadius: '3px', padding: '3px 6px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: copied ? sColor.green : sColor.textDim,
+            }}
+          >
+            {copied ? <Check style={{ width: 10, height: 10 }} /> : <Copy style={{ width: 10, height: 10 }} />}
+            {copied ? 'COPIED' : 'COPY'}
+          </button>
+          <button
+            onClick={handleExport}
+            title="Download as .txt"
+            style={{
+              background: 'oklch(0.15 0.005 260)', border: `1px solid ${sColor.borderLight}`,
+              borderRadius: '3px', padding: '3px 6px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim,
+            }}
+          >
+            <Download style={{ width: 10, height: 10 }} />
+            EXPORT
+          </button>
+        </div>
       )}
+      <div
+        ref={scrollRef}
+        style={{
+          background: 'oklch(0.06 0.003 260)', border: `1px solid ${sColor.borderLight}`,
+          borderRadius: '3px', padding: '8px', paddingTop: logs.length > 0 ? '26px' : '8px',
+          maxHeight: '200px', overflowY: 'auto',
+          fontFamily: sFont.mono, fontSize: '0.65rem', lineHeight: 1.6, color: sColor.textDim,
+          userSelect: 'text', WebkitUserSelect: 'text',
+        }}
+      >
+        {logs.length === 0 ? (
+          <span style={{ color: sColor.textMuted }}>No log entries yet. Connect to a device to begin.</span>
+        ) : (
+          logs.map((log, i) => {
+            const isError = log.includes('ERROR') || log.includes('error');
+            const isIncompatible = log.includes('INCOMPATIBLE ADAPTER');
+            const isSuccess = log.includes('ready') || log.includes('Ready') || log.includes('OK');
+            const isDddi = log.includes('[DDDI');
+            const color = isError ? 'oklch(0.60 0.20 25)' : isDddi ? 'oklch(0.70 0.15 250)' : isSuccess ? sColor.green : sColor.textDim;
+            return (
+              <div key={i} style={{
+                color,
+                ...(isIncompatible ? {
+                  background: 'oklch(0.12 0.04 25 / 0.3)',
+                  border: '1px solid oklch(0.35 0.12 25)',
+                  borderRadius: '3px',
+                  padding: '8px 10px',
+                  margin: '4px 0',
+                  whiteSpace: 'pre-wrap' as const,
+                } : {}),
+              }}>
+                <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

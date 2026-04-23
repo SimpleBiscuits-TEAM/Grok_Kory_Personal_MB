@@ -1950,3 +1950,10 @@
 - [x] This doubles FRP_ACT update rate from ~6s to ~3s when in Mode 22 fallback
 - [x] Priority polling skipped when DDDI periodic streaming is active (readPid returns periodic value instantly)
 - [x] Logged priority PID list at logging start for visibility
+
+## Device Console Export
+- [x] Add copy-to-clipboard button to DEVICE CONSOLE panel
+- [x] Add export/download button to save console log as .txt file
+- [x] Make console text selectable (user-select)
+- [x] Color DDDI log entries in blue for visibility
+- [x] Increased console max height from 150px to 200px
