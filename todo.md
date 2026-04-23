@@ -1905,3 +1905,13 @@
 - [x] Log which DIDs get paused ([POLL] Paused N failing DIDs: ...)
 - [x] Add cycle-level logging every 10 loops showing active/paused DID counts
 - [ ] Remove ensureDddiClear call from inside readPid during logging (already skipped by loggingActive guard)
+
+## DDDI Full Rewrite (HPT BUSMASTER FRP-Only Capture Verified)
+- [x] Rewrite startDddiPeriodicStreaming to match HPT's exact byte sequence
+- [x] Fix IOCTL 0x2D: add missing bytes 08 04 (memory block size + data length = 8 bytes total)
+- [x] Fix DDDI 0x2C for FE: change from [2C FD FE 01] to [2C FE FE 00 00 0A 00]
+- [x] Add second IOCTL for FE01 (FRP_DES): [2D FE 01 40 02 25 D8 04]
+- [x] Add DDDI composite for FD: [2C FD FE 01 00 00 00]
+- [x] Add 3200ms wait after AA stop before sending IOCTL/DDDI/AA
+- [x] Fix FP_SAE parsing: byte 5 × 0.4356 (confirmed from BUSMASTER)
+- [x] Update FD frame parsing: FLOAT32_BE bytes[1:4] × 145.038 for FRP_DES

@@ -114,7 +114,7 @@ const DDDI_PERIODIC_RX_ID = 0x5E8;
  * Previous (WRONG): b67_LE × 0.1338 — wrong data type (uint16 vs float32) and wrong byte positions
  */
 const DDDI_FE_MPA_TO_PSI = 145.038;
-const DDDI_FE_FP_SAE_SCALE = 0.01868;
+const DDDI_FE_FP_SAE_SCALE = 0.4356; // byte5 × 0.4356 = PSI (BUSMASTER verified)
 
 
 function crc16Ccitt(data: Uint8Array, off: number, len: number): number {
@@ -1088,12 +1088,21 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   /**
-   * Set up DDDI periodic streaming for fuel pressure (and later other channels).
-   * Replicates the exact HPT sequence from IntelliSpy:
-   *   1. 0x2D FE 00 40 01 4F  (IOCTL — configure periodic ID 0xFE)
-   *   2. 0x2C FD FE 01        (DDDI define FD from FE byte 1)
-   *   3. 0xAA 04 FE FD        (start periodic for FE + FD)
-   * ECU then pushes frames on 0x5E8 every ~25ms.
+   * Set up DDDI periodic streaming for fuel pressure.
+   * Replicates the EXACT HPT sequence from BUSMASTER capture (2026-04-23):
+   *
+   *   HPT Timing (from BUSMASTER):
+   *   1. AA 04 00                          → Stop all periodic (NRC 0x31 OK)
+   *   2. Wait 3200ms                       → ECU settling time
+   *   3. 2D FE 00 40 01 4F 08 04           → IOCTL define FE00 (RAM 0x40014F08, 4 bytes)
+   *   4. 2C FE FE 00 00 0A 00              → DDDI composite FE = [FE00]
+   *   5. 2D FE 01 40 02 25 D8 04           → IOCTL define FE01 (RAM 0x400225D8, 4 bytes)
+   *   6. 2C FD FE 01 00 00 00              → DDDI composite FD = [FE01]
+   *   7. AA 04 FE FD                       → Start periodic for FE + FD at fast rate
+   *
+   *   Result: 0x5E8 frames at ~12.5ms (80 Hz)
+   *     FE frame: [FE] [FLOAT32_BE MPa] [FP_SAE_byte] [00] [00]
+   *     FD frame: [FD] [FLOAT32_BE MPa] [00] [00] [00]
    */
   private dddiPeriodicFrameCount = 0;
   private dddiPeriodicLastLogTime = 0;
@@ -1106,51 +1115,122 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.dddiPeriodicFrameCount = 0;
     this.dddiPeriodicLastLogTime = 0;
 
+    const hex = (arr: number[]) => arr.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const logResp = (label: string, resp: number[] | null) =>
+      console.log(`[DDDI-STREAM] RX ${label}: ${resp ? hex(resp) : 'NULL/TIMEOUT'}`);
+
     this.emit('log', null, '[DDDI-STREAM] Setting up fuel pressure periodic streaming…');
-    console.log('[DDDI-STREAM] === STARTING DDDI PERIODIC SETUP ===');
+    console.log('[DDDI-STREAM] === STARTING DDDI PERIODIC SETUP (HPT-matched) ===');
 
     try {
-      // Step 1: IOCTL — InputOutputControlByIdentifier (0x2D)
-      // Configures periodic ID 0xFE with fuel pressure source data
-      // From IntelliSpy: HPT sends 2D FE 00 40 01 4F → ECU responds 6D FE 00
-      const ioctlCmd = [0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F];
-      console.log(`[DDDI-STREAM] TX IOCTL: ${ioctlCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
-      const ioctlResp = await this.isoTpRequest(ioctlCmd, 2000);
-      console.log(`[DDDI-STREAM] RX IOCTL: ${ioctlResp ? ioctlResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
-      if (!ioctlResp || ioctlResp[0] !== 0x6D) {
-        const nrc = ioctlResp && ioctlResp[0] === 0x7F ? `NRC=0x${ioctlResp[2]?.toString(16)}` : 'unexpected';
-        this.emit('log', null, `[DDDI-STREAM] IOCTL FAILED: ${nrc} (resp=${ioctlResp ? ioctlResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'null'})`);
-        console.warn(`[DDDI-STREAM] IOCTL FAILED: ${nrc}`);
+      // ── Step 1: Stop any existing periodic reads ──
+      // HPT sends: AA 04 00 (NRC 0x31 expected if nothing running)
+      const stopCmd = [0xAA, 0x04, 0x00];
+      console.log(`[DDDI-STREAM] TX AA stop: ${hex(stopCmd)}`);
+      try {
+        const stopResp = await this.isoTpRequest(stopCmd, 2000);
+        logResp('AA stop', stopResp);
+      } catch { /* NRC OK */ }
+
+      // ── Step 2: Wait 3200ms for ECU to settle ──
+      // HPT waits exactly 3201ms between AA stop and first IOCTL.
+      // This is critical — without it the ECU ignores the defines.
+      console.log('[DDDI-STREAM] Waiting 3200ms for ECU to settle (HPT-matched)…');
+      this.emit('log', null, '[DDDI-STREAM] Waiting 3.2s for ECU settle…');
+      await new Promise(r => setTimeout(r, 3200));
+
+      // ── Step 3: IOCTL define FE00 — FRP_ACT (RAM 0x40014F08, 4 bytes) ──
+      // HPT sends: 2D FE 00 40 01 4F 08 04 (8 bytes, multi-frame)
+      //   0x2D = InputOutputControlByIdentifier
+      //   FE 00 = parameter ID
+      //   40 01 4F 08 = RAM address 0x40014F08 (VeFHPR_p_FuelRail)
+      //   04 = size in bytes (FLOAT32)
+      const ioctl1 = [0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F, 0x08, 0x04];
+      console.log(`[DDDI-STREAM] TX IOCTL FE00: ${hex(ioctl1)}`);
+      const ioctl1Resp = await this.isoTpRequest(ioctl1, 2000);
+      logResp('IOCTL FE00', ioctl1Resp);
+      if (!ioctl1Resp || (ioctl1Resp[0] !== 0x6D && !(ioctl1Resp[0] === 0x7F))) {
+        this.emit('log', null, '[DDDI-STREAM] IOCTL FE00 no response — aborting');
         return false;
       }
-      this.emit('log', null, '[DDDI-STREAM] IOCTL OK → 0x6D FE');
-      await new Promise(r => setTimeout(r, 20));
-
-      // Step 2: DDDI define FD from FE
-      // From IntelliSpy: HPT sends 2C FD FE 01 → ECU responds 6C FD
-      const dddiCmd = [0x2C, 0xFD, 0xFE, 0x01];
-      console.log(`[DDDI-STREAM] TX DDDI define: ${dddiCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
-      const dddiResp = await this.isoTpRequest(dddiCmd, 2000);
-      console.log(`[DDDI-STREAM] RX DDDI define: ${dddiResp ? dddiResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
-      if (!dddiResp || dddiResp[0] !== 0x6C) {
-        const nrc = dddiResp && dddiResp[0] === 0x7F ? `NRC=0x${dddiResp[2]?.toString(16)}` : 'unexpected';
-        this.emit('log', null, `[DDDI-STREAM] DDDI define FAILED: ${nrc}`);
-        console.warn(`[DDDI-STREAM] DDDI define FAILED: ${nrc}`);
-        return false;
-      }
-      this.emit('log', null, '[DDDI-STREAM] DDDI define OK → 0x6C FD');
-      await new Promise(r => setTimeout(r, 20));
-
-      // Step 3: Start periodic for FE + FD
-      // From IntelliSpy: HPT sends AA 04 FE FD → ECU responds 7E (or EA)
-      const startCmd = [0xAA, 0x04, 0xFE, 0xFD];
-      console.log(`[DDDI-STREAM] TX AA start: ${startCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
-      const startResp = await this.isoTpRequest(startCmd, 2000);
-      console.log(`[DDDI-STREAM] RX AA start: ${startResp ? startResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
-      if (startResp) {
-        this.emit('log', null, `[DDDI-STREAM] AA start resp: ${startResp.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+      if (ioctl1Resp[0] === 0x7F) {
+        const nrc = ioctl1Resp[2];
+        console.warn(`[DDDI-STREAM] IOCTL FE00 NRC=0x${nrc?.toString(16)} — continuing anyway`);
+        this.emit('log', null, `[DDDI-STREAM] IOCTL FE00 NRC=0x${nrc?.toString(16)} — trying to continue`);
       } else {
-        this.emit('log', null, '[DDDI-STREAM] AA start: no response (may still work — ECU might just start streaming)');
+        this.emit('log', null, '[DDDI-STREAM] IOCTL FE00 OK → 0x6D');
+      }
+      await new Promise(r => setTimeout(r, 15));
+
+      // ── Step 4: DDDI composite for FE ──
+      // HPT sends: 2C FE FE 00 00 0A 00 (7 bytes)
+      //   0x2C = DynamicallyDefineDataIdentifier
+      //   FE = subfunction (clearAndDefine for periodic ID 0xFE)
+      //   FE 00 = source parameter ID
+      //   00 = position in record
+      //   0A = size of data (10 bytes? includes padding)
+      //   00 = padding/reserved
+      const dddi1 = [0x2C, 0xFE, 0xFE, 0x00, 0x00, 0x0A, 0x00];
+      console.log(`[DDDI-STREAM] TX DDDI FE: ${hex(dddi1)}`);
+      const dddi1Resp = await this.isoTpRequest(dddi1, 2000);
+      logResp('DDDI FE', dddi1Resp);
+      if (dddi1Resp && dddi1Resp[0] === 0x7F) {
+        console.warn(`[DDDI-STREAM] DDDI FE NRC=0x${dddi1Resp[2]?.toString(16)} — continuing`);
+      } else if (dddi1Resp && dddi1Resp[0] === 0x6C) {
+        this.emit('log', null, '[DDDI-STREAM] DDDI FE OK → 0x6C');
+      }
+      await new Promise(r => setTimeout(r, 10));
+
+      // ── Step 5: IOCTL define FE01 — FRP_DES (RAM 0x400225D8, 4 bytes) ──
+      // HPT sends: 2D FE 01 40 02 25 D8 04 (8 bytes, multi-frame)
+      //   FE 01 = parameter ID
+      //   40 02 25 D8 = RAM address 0x400225D8 (FRP Desired)
+      //   04 = size in bytes (FLOAT32)
+      const ioctl2 = [0x2D, 0xFE, 0x01, 0x40, 0x02, 0x25, 0xD8, 0x04];
+      console.log(`[DDDI-STREAM] TX IOCTL FE01: ${hex(ioctl2)}`);
+      const ioctl2Resp = await this.isoTpRequest(ioctl2, 2000);
+      logResp('IOCTL FE01', ioctl2Resp);
+      if (ioctl2Resp && ioctl2Resp[0] === 0x7F) {
+        console.warn(`[DDDI-STREAM] IOCTL FE01 NRC=0x${ioctl2Resp[2]?.toString(16)} — continuing`);
+      } else if (ioctl2Resp && ioctl2Resp[0] === 0x6D) {
+        this.emit('log', null, '[DDDI-STREAM] IOCTL FE01 OK → 0x6D');
+      }
+      await new Promise(r => setTimeout(r, 15));
+
+      // ── Step 6: DDDI composite for FD ──
+      // HPT sends: 2C FD FE 01 00 00 00 (7 bytes)
+      //   0x2C = DynamicallyDefineDataIdentifier
+      //   FD = subfunction (clearAndDefine for periodic ID 0xFD)
+      //   FE 01 = source parameter ID
+      //   00 00 00 = position/size/reserved
+      const dddi2 = [0x2C, 0xFD, 0xFE, 0x01, 0x00, 0x00, 0x00];
+      console.log(`[DDDI-STREAM] TX DDDI FD: ${hex(dddi2)}`);
+      const dddi2Resp = await this.isoTpRequest(dddi2, 2000);
+      logResp('DDDI FD', dddi2Resp);
+      if (dddi2Resp && dddi2Resp[0] === 0x7F) {
+        console.warn(`[DDDI-STREAM] DDDI FD NRC=0x${dddi2Resp[2]?.toString(16)} — continuing`);
+      } else if (dddi2Resp && dddi2Resp[0] === 0x6C) {
+        this.emit('log', null, '[DDDI-STREAM] DDDI FD OK → 0x6C');
+      }
+      await new Promise(r => setTimeout(r, 15));
+
+      // ── Step 7: Start periodic for FE + FD at fast rate ──
+      // HPT sends: AA 04 FE FD
+      //   0xAA = ReadDataByPeriodicIdentifier
+      //   0x04 = fast rate (~12.5ms)
+      //   FE, FD = periodic IDs to start
+      const startCmd = [0xAA, 0x04, 0xFE, 0xFD];
+      console.log(`[DDDI-STREAM] TX AA start: ${hex(startCmd)}`);
+      const startResp = await this.isoTpRequest(startCmd, 2000);
+      logResp('AA start', startResp);
+      if (startResp && startResp[0] === 0x7F) {
+        const nrc = startResp[2];
+        console.warn(`[DDDI-STREAM] AA start NRC=0x${nrc?.toString(16)} — will check for frames anyway`);
+        this.emit('log', null, `[DDDI-STREAM] AA start NRC=0x${nrc?.toString(16)} — checking for frames…`);
+      } else if (startResp) {
+        this.emit('log', null, `[DDDI-STREAM] AA start resp: ${hex(startResp)}`);
+      } else {
+        this.emit('log', null, '[DDDI-STREAM] AA start: no response (may still work)');
       }
 
       // Step 4: Subscribe to 0x5E8 periodic frames via CAN monitor
@@ -1176,16 +1256,15 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
         if (periodicId === 0xFE && data.length >= 8) {
           // ============================================================
-          // FE frame byte layout (A2L-verified):
-          //   [0]=0xFE  [1..4]=FRP_ACT (FLOAT32 BE, MPa)  [5..6]=FP_SAE (uint16 BE)  [7]=??
+          // FE frame byte layout (BUSMASTER + A2L verified):
+          //   [0]=0xFE  [1..4]=FRP_ACT (FLOAT32 BE, MPa)  [5]=FP_SAE (byte × 0.4356)  [6..7]=00
           //
-          // A2L: VeFHPR_p_FuelRail at RAM 0x40014398 = FLOAT32_IEEE, CM_T_p_MPa
+          // A2L: VeFHPR_p_FuelRail at RAM 0x40014F08 = FLOAT32_IEEE, CM_T_p_MPa
           //   DDDI reads raw RAM → bytes are IEEE 754 float, big-endian, value in MPa
           //   Convert: MPa × 145.038 = PSI
           //
-          // Verified: FE 42 02 60 AC → float32 = 32.5944 MPa = 4727 PSI (HPT ~4712)
-          //
-          // FP_SAE: bytes[5:6] uint16 BE × 0.01868 → PSI (unchanged)
+          // Verified: FE 42 02 34 00 89 00 00 → float32 = 32.5508 MPa = 4721.1 PSI (HPT exact match)
+          // FP_SAE: byte[5] × 0.4356 = PSI (e.g. 0x89=137 × 0.4356 = 59.7 PSI, HPT shows 59.6)
           // ============================================================
 
           // --- Parse FRP_ACT as IEEE 754 FLOAT32 big-endian (bytes 1-4) ---
@@ -1193,15 +1272,17 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           const frpMpa = frpBuf.getFloat32(0, false); // false = big-endian
           const frpPsi = frpMpa * DDDI_FE_MPA_TO_PSI;
 
-          // --- Parse FP_SAE as uint16 big-endian (bytes 5-6) ---
-          const fpSaeRaw = (data[5] << 8) | data[6];
+          // --- Parse FP_SAE as single byte (byte 5) × 0.4356 ---
+          // BUSMASTER verified: byte 5 of FE frame × 0.4356 matches HPT FP_SAE exactly
+          // e.g. 0x89=137 × 0.4356 = 59.7 PSI (HPT shows 59.6)
+          const fpSaeRaw = data[5];
           const fpSaePsi = fpSaeRaw * DDDI_FE_FP_SAE_SCALE;
 
           // --- Heavy debug logging (first 50 frames, then every 2s) ---
           if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
             console.log(`[DDDI-FE] raw=[${hex}] ts=${now}`);
             console.log(`[DDDI-FE]   FLOAT32_BE(bytes[1:4]) = ${frpMpa.toFixed(4)} MPa = ${frpPsi.toFixed(1)} PSI`);
-            console.log(`[DDDI-FE]   FP_SAE uint16_BE(bytes[5:6]) = ${fpSaeRaw} × 0.01868 = ${fpSaePsi.toFixed(2)} PSI`);
+            console.log(`[DDDI-FE]   FP_SAE byte[5] = 0x${data[5].toString(16).padStart(2,'0')}=${fpSaeRaw} × 0.4356 = ${fpSaePsi.toFixed(1)} PSI`);
             // Also log legacy byte combos for cross-reference during truck test
             const b67_LE = (data[7] << 8) | data[6];
             const b67_BE = (data[6] << 8) | data[7];
@@ -1220,29 +1301,39 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
             timestamp: now,
           });
 
-          // Store FP_SAE (uint16 BE × 0.01868)
+          // Store FP_SAE (byte[5] × 0.4356)
           this.dddiPeriodicValues.set('FP_SAE', {
             pid: 0x208A,
             name: 'Fuel Pressure SAE (Low Feed)',
             shortName: 'FP_SAE',
             value: Math.round(fpSaePsi * 100) / 100,
             unit: 'PSI',
-            rawBytes: [data[5], data[6]],
+            rawBytes: [data[5]],
             timestamp: now,
           });
         }
 
-        if (periodicId === 0xFD) {
-          // FD frame — log raw bytes for analysis
+        if (periodicId === 0xFD && data.length >= 5) {
+          // FD frame = FRP Desired (FLOAT32 BE, MPa)
+          // BUSMASTER verified: bytes[1:4] = IEEE 754 float, same as FE frame
+          const desBuf = new DataView(new Uint8Array([data[1], data[2], data[3], data[4]]).buffer);
+          const desMpa = desBuf.getFloat32(0, false);
+          const desPsi = desMpa * DDDI_FE_MPA_TO_PSI;
+
           if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
-            console.log(`[DDDI-FD] raw=[${hex}] len=${data.length}`);
-            if (data.length >= 4) {
-              const fd_b12_BE = (data[1] << 8) | data[2];
-              const fd_b23_BE = (data[2] << 8) | data[3];
-              console.log(`[DDDI-FD]   b12_BE=${fd_b12_BE} (×0.4712=${(fd_b12_BE*0.4712).toFixed(1)}) (×0.1338=${(fd_b12_BE*0.1338).toFixed(1)})`);
-              console.log(`[DDDI-FD]   b23_BE=${fd_b23_BE} (×0.4712=${(fd_b23_BE*0.4712).toFixed(1)}) (×0.1338=${(fd_b23_BE*0.1338).toFixed(1)})`);
-            }
+            console.log(`[DDDI-FD] raw=[${hex}] FLOAT32_BE = ${desMpa.toFixed(4)} MPa = ${desPsi.toFixed(1)} PSI`);
           }
+
+          // Store FRP_DES
+          this.dddiPeriodicValues.set('FRP_DES', {
+            pid: 0x30BC,
+            name: 'Fuel Rail Pressure Desired',
+            shortName: 'FRP_DES',
+            value: Math.round(desPsi * 100) / 100,
+            unit: 'PSI',
+            rawBytes: [data[1], data[2], data[3], data[4]],
+            timestamp: now,
+          });
         }
       });
 
