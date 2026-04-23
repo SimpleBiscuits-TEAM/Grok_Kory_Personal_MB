@@ -100,15 +100,20 @@ const DDDI_PERIODIC_RX_ID = 0x5E8;
 
 /**
  * DDDI periodic frame byte→channel mapping.
- * From IntelliSpy correlation:
+ * A2L-verified (E41_a171711502_quasi.a2l):
+ *
  *   FE frame: [FE b1 b2 b3 b4 b5 b6 b7]
- *     b1    = 0x42 constant (status)
- *     b6-b7 = FRP_ACT (little-endian uint16 × 0.1338 → PSI)
- *     b5-b6 = FP_SAE  (big-endian uint16 × 0.01868 → PSI)
+ *     bytes[1:4] = FRP_ACT — IEEE 754 FLOAT32 big-endian, unit MPa
+ *                  A2L: VeFHPR_p_FuelRail at RAM 0x40014398, FLOAT32_IEEE, CM_T_p_MPa
+ *                  Convert MPa → PSI: value × 145.038
+ *     bytes[5:6] = FP_SAE  — uint16 big-endian × 0.01868 → PSI
+ *
  *   FD frame: [FD b1 b2 b3 b4 0 0 0]
  *     b2-b3-b4 = FRP_DES candidate (needs more correlation)
+ *
+ * Previous (WRONG): b67_LE × 0.1338 — wrong data type (uint16 vs float32) and wrong byte positions
  */
-const DDDI_FE_FRP_SCALE = 0.1338;
+const DDDI_FE_MPA_TO_PSI = 145.038;
 const DDDI_FE_FP_SAE_SCALE = 0.01868;
 
 
@@ -1143,53 +1148,51 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
         if (periodicId === 0xFE && data.length >= 8) {
           // ============================================================
-          // FE frame byte layout (from IntelliSpy correlation):
-          //   [0]=0xFE  [1]=status  [2]=b2  [3]=b3  [4]=b4  [5]=b5  [6]=b6  [7]=b7
+          // FE frame byte layout (A2L-verified):
+          //   [0]=0xFE  [1..4]=FRP_ACT (FLOAT32 BE, MPa)  [5..6]=FP_SAE (uint16 BE)  [7]=??
           //
-          // Current hypothesis: FRP_ACT = b67_LE (bytes 6-7 little-endian) × 0.1338
-          //                     FP_SAE  = b56_BE (bytes 5-6 big-endian)   × 0.01868
+          // A2L: VeFHPR_p_FuelRail at RAM 0x40014398 = FLOAT32_IEEE, CM_T_p_MPa
+          //   DDDI reads raw RAM → bytes are IEEE 754 float, big-endian, value in MPa
+          //   Convert: MPa × 145.038 = PSI
           //
-          // Alternative formulas to try if current doesn't match:
-          //   ALT-A: FRP_ACT = b67_BE (bytes 6-7 big-endian) × 0.1338
-          //   ALT-B: FRP_ACT = b56_LE (bytes 5-6 little-endian) × 0.1338
-          //   ALT-C: FRP_ACT = b45_BE (bytes 4-5 big-endian) × 0.4712
-          //   ALT-D: FRP_ACT = b23_BE (bytes 2-3 big-endian) × some_scale
+          // Verified: FE 42 02 60 AC → float32 = 32.5944 MPa = 4727 PSI (HPT ~4712)
+          //
+          // FP_SAE: bytes[5:6] uint16 BE × 0.01868 → PSI (unchanged)
           // ============================================================
 
-          // Log all possible byte combinations for analysis
-          const b23_BE = (data[2] << 8) | data[3];
-          const b34_BE = (data[3] << 8) | data[4];
-          const b45_BE = (data[4] << 8) | data[5];
-          const b56_BE = (data[5] << 8) | data[6];
-          const b67_BE = (data[6] << 8) | data[7];
-          const b67_LE = (data[7] << 8) | data[6];
-          const b56_LE = (data[6] << 8) | data[5];
+          // --- Parse FRP_ACT as IEEE 754 FLOAT32 big-endian (bytes 1-4) ---
+          const frpBuf = new DataView(new Uint8Array([data[1], data[2], data[3], data[4]]).buffer);
+          const frpMpa = frpBuf.getFloat32(0, false); // false = big-endian
+          const frpPsi = frpMpa * DDDI_FE_MPA_TO_PSI;
 
+          // --- Parse FP_SAE as uint16 big-endian (bytes 5-6) ---
+          const fpSaeRaw = (data[5] << 8) | data[6];
+          const fpSaePsi = fpSaeRaw * DDDI_FE_FP_SAE_SCALE;
+
+          // --- Heavy debug logging (first 50 frames, then every 2s) ---
           if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
-            console.log(`[DDDI-FE] raw=[${hex}]`);
-            console.log(`[DDDI-FE]   b23_BE=${b23_BE} (×0.4712=${(b23_BE*0.4712).toFixed(1)}) (×0.1338=${(b23_BE*0.1338).toFixed(1)})`);
-            console.log(`[DDDI-FE]   b45_BE=${b45_BE} (×0.4712=${(b45_BE*0.4712).toFixed(1)}) (×0.1338=${(b45_BE*0.1338).toFixed(1)})`);
-            console.log(`[DDDI-FE]   b56_BE=${b56_BE} (×0.01868=${(b56_BE*0.01868).toFixed(2)} PSI)`);
-            console.log(`[DDDI-FE]   b67_LE=${b67_LE} (×0.1338=${(b67_LE*0.1338).toFixed(1)} PSI)`);
-            console.log(`[DDDI-FE]   b67_BE=${b67_BE} (×0.1338=${(b67_BE*0.1338).toFixed(1)} PSI)`);
+            console.log(`[DDDI-FE] raw=[${hex}] ts=${now}`);
+            console.log(`[DDDI-FE]   FLOAT32_BE(bytes[1:4]) = ${frpMpa.toFixed(4)} MPa = ${frpPsi.toFixed(1)} PSI`);
+            console.log(`[DDDI-FE]   FP_SAE uint16_BE(bytes[5:6]) = ${fpSaeRaw} × 0.01868 = ${fpSaePsi.toFixed(2)} PSI`);
+            // Also log legacy byte combos for cross-reference during truck test
+            const b67_LE = (data[7] << 8) | data[6];
+            const b67_BE = (data[6] << 8) | data[7];
+            console.log(`[DDDI-FE]   (legacy) b67_LE=${b67_LE} ×0.1338=${(b67_LE*0.1338).toFixed(1)} | b67_BE=${b67_BE} ×0.4712=${(b67_BE*0.4712).toFixed(1)}`);
+            console.log(`[DDDI-FE]   byte[7]=0x${data[7].toString(16).padStart(2,'0')} — unknown/padding`);
           }
 
-          // Primary: FRP_ACT = b67_LE × 0.1338
-          const frpRaw = b67_LE;
-          const frpPsi = frpRaw * DDDI_FE_FRP_SCALE;
+          // Store FRP_ACT (FLOAT32 MPa → PSI)
           this.dddiPeriodicValues.set('FRP_ACT', {
             pid: 0x328A,
             name: 'Fuel Rail Pressure Actual',
             shortName: 'FRP_ACT',
             value: Math.round(frpPsi * 100) / 100,
             unit: 'PSI',
-            rawBytes: [data[6], data[7]],
+            rawBytes: [data[1], data[2], data[3], data[4]],
             timestamp: now,
           });
 
-          // Primary: FP_SAE = b56_BE × 0.01868
-          const fpSaeRaw = b56_BE;
-          const fpSaePsi = fpSaeRaw * DDDI_FE_FP_SAE_SCALE;
+          // Store FP_SAE (uint16 BE × 0.01868)
           this.dddiPeriodicValues.set('FP_SAE', {
             pid: 0x208A,
             name: 'Fuel Pressure SAE (Low Feed)',

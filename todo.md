@@ -1885,3 +1885,9 @@
 - [x] Add logging to readPid for DDDI periodic fallback path
 - [ ] Add fallback: if streaming fails after timeout, fall back to Mode 22 with longer delays
 - [ ] Improve byte parsing robustness for FE and FD frames
+
+## A2L Cross-Reference Fixes (Pre-Truck-Test)
+- [x] Fix DDDI FE frame FRP_ACT parser: change from uint16 LE × 0.1338 to FLOAT32_BE(bytes[1:4]) × 145.038
+- [x] 0x004A AAT formula: NOT A BUG — 0x004A is APP_E (Accel Pedal E), not AAT. AAT is 0x46 and 0x232C, both correct.
+- [x] Update debug logging to show FLOAT32 interpretation alongside existing byte combos
+- [x] Remove/update stale DDDI_FE_FRP_SCALE constant (renamed to DDDI_FE_MPA_TO_PSI)
