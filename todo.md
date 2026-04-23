@@ -2011,3 +2011,8 @@
 - [x] Increase PERIODIC_MAX_AGE_MS from 2000ms to handle slower DDDI update cycles during batch traffic
 - [x] Increase bridge batch timeout from 50ms/DID to handle ECU response delays on busy CAN bus
 - [x] Flag FUEL_RATE (0x20E3) formula as unverified — values scale with RPM (4→215 mm³) unlike HPT's flat 5-8 mm³
+
+## Bug Fix — DDDI Periodic Dies When No Batch PIDs Selected (Test 2)
+- [x] DDDI periodic stream dies when only FRP PIDs selected — no batch_read_dids means no periodic restart (0xAA 04 FE FD)
+- [x] Exempt FRP_ACT and FRPDI from pause system — they come from periodic stream, not batch reads, so fail counting is wrong
+- [x] Add periodic keepalive (TesterPresent or 0xAA restart) in wrapReadPids when batchMode22Pids is empty

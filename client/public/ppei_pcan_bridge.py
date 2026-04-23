@@ -1078,7 +1078,39 @@ async def _ppei_handle_message_v2(self, msg: dict):
         rx_id = tx_id + 8
         dids = msg.get("dids", [])  # [{did: 0x0C, mode: 0x01}]
         return await _ppei_streaming_poll(self, tx_id, rx_id, req_id, dids)
-    
+
+    if msg_type == "dddi_keepalive":
+        # Lightweight keepalive for DDDI periodic stream when no batch reads are happening.
+        # Sends TesterPresent (0x3E) to keep diagnostic session alive, then re-sends
+        # the periodic start command (0xAA 04 FE FD) to ensure the ECU keeps streaming.
+        req_id = msg.get("id", "0")
+        tx_id = msg.get("tx_id", 0x7E0)
+        if not self.bus:
+            return {"type": "dddi_keepalive_result", "id": req_id, "ok": False, "error": "no bus"}
+        try:
+            # TesterPresent
+            tp_frame = can.Message(
+                arbitration_id=tx_id,
+                data=[0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                is_extended_id=False
+            )
+            self.bus.send(tp_frame)
+            await asyncio.sleep(0.005)
+            # Periodic restart (0xAA 04 FE FD)
+            restart_ids = getattr(self, '_ppei_dddi_periodic_ids', [0xFE, 0xFD])
+            restart_payload = bytes([0xAA, 0x04] + restart_ids)
+            restart_frame = can.Message(
+                arbitration_id=tx_id,
+                data=list(restart_payload) + [0x00] * (8 - len(restart_payload)),
+                is_extended_id=False
+            )
+            self.bus.send(restart_frame)
+            log.debug(f"[PPEI] dddi_keepalive: TesterPresent + periodic restart sent")
+            return {"type": "dddi_keepalive_result", "id": req_id, "ok": True}
+        except can.CanError as e:
+            log.warning(f"[PPEI] dddi_keepalive failed: {e}")
+            return {"type": "dddi_keepalive_result", "id": req_id, "ok": False, "error": str(e)}
+
     # Fall through to batch_read_dids or Tobi's handler
     return await _batch_handle_message(self, msg)
 

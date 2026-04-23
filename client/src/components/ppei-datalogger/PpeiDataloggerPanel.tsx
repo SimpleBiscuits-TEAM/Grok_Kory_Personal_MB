@@ -394,6 +394,20 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
     // ── Mode 22: batch via bridge ──
     if (batchMode22Pids.length === 0 && !isStreaming) return readings;
+    // When streaming with NO batch PIDs (only FRP_ACT/FRPDI selected),
+    // send a lightweight keepalive to the bridge to keep the DDDI periodic
+    // stream alive. Without this, the ECU stops sending 0x5E8 frames after ~5s
+    // because there's no batch_read_dids to trigger the periodic restart.
+    if (batchMode22Pids.length === 0 && isStreaming) {
+      try {
+        await this.sendRequest(
+          { type: 'dddi_keepalive', tx_id: 0x7E0 },
+          2000,
+        );
+        ppeiLog(this, '⚡ DDDI keepalive sent (no batch PIDs, periodic-only mode)');
+      } catch { /* ignore keepalive failures */ }
+      // Skip to periodic injection below — no batch reads needed
+    }
     // Group by ECU TX address (most will be 0x7E0, some on 0x7E1 for TCM)
     const byTx = new Map<number, any[]>();
     for (const pid of batchMode22Pids) {

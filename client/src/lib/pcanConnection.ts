@@ -1244,6 +1244,10 @@ export class PCANConnection {
     const pidPausedUntilLoop = new Map<number, number>();
     const MAX_CONSECUTIVE_FAILS = 25; // was 8 — too aggressive, PIDs get paused after brief batch timeouts
     const RETRY_INTERVAL = 10; // was 20 — retry sooner after pause
+    // DDDI periodic PIDs (FRP_ACT, FRP_DES) come from 0x5E8 periodic frames,
+    // NOT from batch_read_dids. They should NEVER be paused by the fail counter
+    // because they're injected by wrapReadPids from the periodic cache.
+    const DDDI_EXEMPT_PIDS = new Set([0x328A, 0x131F]);
     let activePids = [...filteredPids];
     let loopCount = 0;
 
@@ -1274,10 +1278,11 @@ export class PCANConnection {
             pidFailCount.set(reading.pid, 0);
           }
 
-          // Track failures
+          // Track failures (exempt DDDI periodic PIDs — they come from 0x5E8, not batch)
           const newlyPaused: string[] = [];
           for (const pid of activePids) {
             if (!respondedPids.has(pid.pid)) {
+              if (DDDI_EXEMPT_PIDS.has(pid.pid)) continue; // Never pause DDDI periodic PIDs
               const fails = (pidFailCount.get(pid.pid) || 0) + 1;
               pidFailCount.set(pid.pid, fails);
 
