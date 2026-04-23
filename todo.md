@@ -1875,3 +1875,13 @@
 - [x] Route parsed periodic data into readPid via getDddiPeriodicReading
 - [x] Prevent DDDI clear from killing active periodic stream
 - [ ] Test on truck — FRP should show live rolling data matching HPT
+
+## DDDI Periodic Streaming Debug Logging
+- [x] Add heavy logging to show every byte received on 0x5E8 ([DDDI-RX] tags)
+- [x] Log all IOCTL/DDDI define/AA start command bytes and responses ([DDDI-STREAM] tags)
+- [x] Add 2-second timeout warning if no 0x5E8 frames arrive
+- [x] Log byte position alternatives for FRP_ACT parsing (b23, b45, b56, b67 in BE/LE)
+- [x] Add logging to ensureDddiClear (AA stop resp, OK/NRC counts)
+- [x] Add logging to readPid for DDDI periodic fallback path
+- [ ] Add fallback: if streaming fails after timeout, fall back to Mode 22 with longer delays
+- [ ] Improve byte parsing robustness for FE and FD frames

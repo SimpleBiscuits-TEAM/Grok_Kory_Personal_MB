@@ -759,26 +759,35 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     const mfr = this.vehicleInfo?.manufacturer;
     if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return;
     // Don't re-clear while DDDI periodic streaming is active — it would kill the stream
-    if (this.dddiPeriodicActive) return;
+    if (this.dddiPeriodicActive) {
+      console.log('[DDDI-CLEAR] Skipped — periodic streaming is active');
+      return;
+    }
     const now = Date.now();
     const last = this.dddiClearedAt.get(this.obdTxId) ?? 0;
     if (now - last < DDDI_CLEAR_INTERVAL_MS) return;
 
-    this.emit('log', null, 'DDDI clear: unlocking Mode 22…');
+    this.emit('log', null, '[DDDI-CLEAR] Unlocking Mode 22…');
+    console.log('[DDDI-CLEAR] === STARTING DDDI CLEAR SEQUENCE ===');
     const t0 = Date.now();
 
     // Phase 1: Stop any existing periodic reads
     try {
-      await this.isoTpRequest([0xAA, 0x04, 0x00], 500);
+      const stopResp = await this.isoTpRequest([0xAA, 0x04, 0x00], 500);
+      console.log(`[DDDI-CLEAR] AA stop resp: ${stopResp ? stopResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'null/timeout'}`);
     } catch { /* NRC OK — nothing may be running */ }
     await new Promise(r => setTimeout(r, 10));
 
     // Phase 2: Clear all DDDI periodic definitions
     let okCount = 0;
+    let nrcCount = 0;
     for (const pid of DDDI_CLEAR_PERIODIC_IDS) {
       try {
         const resp = await this.isoTpRequest([0x2C, 0xFE, 0x00, pid], 300);
-        if (resp) okCount++;
+        if (resp) {
+          okCount++;
+          if (resp[0] === 0x7F) nrcCount++;
+        }
       } catch { /* NRC 0x31 expected for some IDs */ }
       // HPT sends these ~6ms apart
       await new Promise(r => setTimeout(r, 6));
@@ -786,7 +795,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
     this.dddiClearedAt.set(this.obdTxId, Date.now());
     const elapsed = Date.now() - t0;
-    this.emit('log', null, `DDDI clear done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK in ${elapsed}ms`);
+    console.log(`[DDDI-CLEAR] Done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK, ${nrcCount} NRC, ${elapsed}ms`);
+    this.emit('log', null, `[DDDI-CLEAR] Done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK in ${elapsed}ms`);
   }
 
   /** Short names of PIDs whose live data comes from DDDI periodic streaming, not direct Mode 22. */
@@ -796,7 +806,16 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     try {
       // If this PID is served by DDDI periodic streaming, return the latest periodic value
       if (this.dddiPeriodicActive && VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(pid.shortName)) {
-        return this.getDddiPeriodicReading(pid.shortName);
+        const periodic = this.getDddiPeriodicReading(pid.shortName);
+        if (periodic) {
+          // Log periodic value every 2 seconds for debugging
+          if (Date.now() - this.dddiPeriodicLastLogTime > 2000) {
+            console.log(`[DDDI-READ] ${pid.shortName} = ${periodic.value} ${periodic.unit} (from periodic stream, age=${Date.now() - periodic.timestamp}ms)`);
+          }
+          return periodic;
+        }
+        // Periodic not available yet — fall through to Mode 22
+        console.log(`[DDDI-READ] ${pid.shortName}: no periodic data yet, falling back to Mode 22`);
       }
 
       const service = pid.service || 0x01;
@@ -1043,51 +1062,120 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
    *   3. 0xAA 04 FE FD        (start periodic for FE + FD)
    * ECU then pushes frames on 0x5E8 every ~25ms.
    */
+  private dddiPeriodicFrameCount = 0;
+  private dddiPeriodicLastLogTime = 0;
+
   private async startDddiPeriodicStreaming(): Promise<boolean> {
     const mfr = this.vehicleInfo?.manufacturer;
     if (mfr && NON_GM_MANUFACTURERS.has(mfr)) return false;
     if (this.dddiPeriodicActive) return true;
 
-    this.emit('log', null, 'DDDI periodic: setting up fuel pressure streaming…');
+    this.dddiPeriodicFrameCount = 0;
+    this.dddiPeriodicLastLogTime = 0;
+
+    this.emit('log', null, '[DDDI-STREAM] Setting up fuel pressure periodic streaming…');
+    console.log('[DDDI-STREAM] === STARTING DDDI PERIODIC SETUP ===');
 
     try {
       // Step 1: IOCTL — InputOutputControlByIdentifier (0x2D)
       // Configures periodic ID 0xFE with fuel pressure source data
-      const ioctlResp = await this.isoTpRequest([0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F], 1000);
+      // From IntelliSpy: HPT sends 2D FE 00 40 01 4F → ECU responds 6D FE 00
+      const ioctlCmd = [0x2D, 0xFE, 0x00, 0x40, 0x01, 0x4F];
+      console.log(`[DDDI-STREAM] TX IOCTL: ${ioctlCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+      const ioctlResp = await this.isoTpRequest(ioctlCmd, 2000);
+      console.log(`[DDDI-STREAM] RX IOCTL: ${ioctlResp ? ioctlResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
       if (!ioctlResp || ioctlResp[0] !== 0x6D) {
-        this.emit('log', null, `DDDI periodic: IOCTL failed (resp=${ioctlResp ? ioctlResp.map(b => b.toString(16)).join(' ') : 'null'})`);
+        const nrc = ioctlResp && ioctlResp[0] === 0x7F ? `NRC=0x${ioctlResp[2]?.toString(16)}` : 'unexpected';
+        this.emit('log', null, `[DDDI-STREAM] IOCTL FAILED: ${nrc} (resp=${ioctlResp ? ioctlResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'null'})`);
+        console.warn(`[DDDI-STREAM] IOCTL FAILED: ${nrc}`);
         return false;
       }
-      this.emit('log', null, 'DDDI periodic: IOCTL OK (0x6D FE)');
-      await new Promise(r => setTimeout(r, 10));
+      this.emit('log', null, '[DDDI-STREAM] IOCTL OK → 0x6D FE');
+      await new Promise(r => setTimeout(r, 20));
 
       // Step 2: DDDI define FD from FE
-      const dddiResp = await this.isoTpRequest([0x2C, 0xFD, 0xFE, 0x01], 1000);
+      // From IntelliSpy: HPT sends 2C FD FE 01 → ECU responds 6C FD
+      const dddiCmd = [0x2C, 0xFD, 0xFE, 0x01];
+      console.log(`[DDDI-STREAM] TX DDDI define: ${dddiCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+      const dddiResp = await this.isoTpRequest(dddiCmd, 2000);
+      console.log(`[DDDI-STREAM] RX DDDI define: ${dddiResp ? dddiResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
       if (!dddiResp || dddiResp[0] !== 0x6C) {
-        this.emit('log', null, `DDDI periodic: define FD failed (resp=${dddiResp ? dddiResp.map(b => b.toString(16)).join(' ') : 'null'})`);
+        const nrc = dddiResp && dddiResp[0] === 0x7F ? `NRC=0x${dddiResp[2]?.toString(16)}` : 'unexpected';
+        this.emit('log', null, `[DDDI-STREAM] DDDI define FAILED: ${nrc}`);
+        console.warn(`[DDDI-STREAM] DDDI define FAILED: ${nrc}`);
         return false;
       }
-      this.emit('log', null, 'DDDI periodic: define FD OK (0x6C FD)');
-      await new Promise(r => setTimeout(r, 10));
+      this.emit('log', null, '[DDDI-STREAM] DDDI define OK → 0x6C FD');
+      await new Promise(r => setTimeout(r, 20));
 
       // Step 3: Start periodic for FE + FD
-      const startResp = await this.isoTpRequest([0xAA, 0x04, 0xFE, 0xFD], 1000);
-      if (!startResp) {
-        this.emit('log', null, 'DDDI periodic: start command no response (may still work)');
+      // From IntelliSpy: HPT sends AA 04 FE FD → ECU responds 7E (or EA)
+      const startCmd = [0xAA, 0x04, 0xFE, 0xFD];
+      console.log(`[DDDI-STREAM] TX AA start: ${startCmd.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+      const startResp = await this.isoTpRequest(startCmd, 2000);
+      console.log(`[DDDI-STREAM] RX AA start: ${startResp ? startResp.map(b => b.toString(16).padStart(2,'0')).join(' ') : 'NULL/TIMEOUT'}`);
+      if (startResp) {
+        this.emit('log', null, `[DDDI-STREAM] AA start resp: ${startResp.map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
       } else {
-        this.emit('log', null, `DDDI periodic: start resp=${startResp.map(b => b.toString(16)).join(' ')}`);
+        this.emit('log', null, '[DDDI-STREAM] AA start: no response (may still work — ECU might just start streaming)');
       }
 
       // Step 4: Subscribe to 0x5E8 periodic frames via CAN monitor
+      // Log EVERY frame for the first 50 frames, then summary every 2 seconds
       this.dddiPeriodicActive = true;
+      console.log('[DDDI-STREAM] Subscribing to 0x5E8 periodic frames…');
       this.dddiPeriodicUnsub = this.subscribeCanMonitor((arbId, _flags, data) => {
-        if (arbId !== DDDI_PERIODIC_RX_ID || data.length < 7) return;
+        // Log ALL frames near 0x5E8 range for debugging (0x5E0-0x5EF)
+        if (arbId >= 0x5E0 && arbId <= 0x5EF) {
+          this.dddiPeriodicFrameCount++;
+          const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          // Log every frame for first 50, then every 2 seconds
+          if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
+            console.log(`[DDDI-RX] #${this.dddiPeriodicFrameCount} arbId=0x${arbId.toString(16)} len=${data.length} data=[${hex}]`);
+            this.dddiPeriodicLastLogTime = Date.now();
+          }
+        }
+
+        if (arbId !== DDDI_PERIODIC_RX_ID || data.length < 2) return;
         const periodicId = data[0];
         const now = Date.now();
+        const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
 
-        if (periodicId === 0xFE) {
-          // FRP_ACT: bytes 6-7 little-endian × 0.1338
-          const frpRaw = (data[7] << 8) | data[6];
+        if (periodicId === 0xFE && data.length >= 8) {
+          // ============================================================
+          // FE frame byte layout (from IntelliSpy correlation):
+          //   [0]=0xFE  [1]=status  [2]=b2  [3]=b3  [4]=b4  [5]=b5  [6]=b6  [7]=b7
+          //
+          // Current hypothesis: FRP_ACT = b67_LE (bytes 6-7 little-endian) × 0.1338
+          //                     FP_SAE  = b56_BE (bytes 5-6 big-endian)   × 0.01868
+          //
+          // Alternative formulas to try if current doesn't match:
+          //   ALT-A: FRP_ACT = b67_BE (bytes 6-7 big-endian) × 0.1338
+          //   ALT-B: FRP_ACT = b56_LE (bytes 5-6 little-endian) × 0.1338
+          //   ALT-C: FRP_ACT = b45_BE (bytes 4-5 big-endian) × 0.4712
+          //   ALT-D: FRP_ACT = b23_BE (bytes 2-3 big-endian) × some_scale
+          // ============================================================
+
+          // Log all possible byte combinations for analysis
+          const b23_BE = (data[2] << 8) | data[3];
+          const b34_BE = (data[3] << 8) | data[4];
+          const b45_BE = (data[4] << 8) | data[5];
+          const b56_BE = (data[5] << 8) | data[6];
+          const b67_BE = (data[6] << 8) | data[7];
+          const b67_LE = (data[7] << 8) | data[6];
+          const b56_LE = (data[6] << 8) | data[5];
+
+          if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
+            console.log(`[DDDI-FE] raw=[${hex}]`);
+            console.log(`[DDDI-FE]   b23_BE=${b23_BE} (×0.4712=${(b23_BE*0.4712).toFixed(1)}) (×0.1338=${(b23_BE*0.1338).toFixed(1)})`);
+            console.log(`[DDDI-FE]   b45_BE=${b45_BE} (×0.4712=${(b45_BE*0.4712).toFixed(1)}) (×0.1338=${(b45_BE*0.1338).toFixed(1)})`);
+            console.log(`[DDDI-FE]   b56_BE=${b56_BE} (×0.01868=${(b56_BE*0.01868).toFixed(2)} PSI)`);
+            console.log(`[DDDI-FE]   b67_LE=${b67_LE} (×0.1338=${(b67_LE*0.1338).toFixed(1)} PSI)`);
+            console.log(`[DDDI-FE]   b67_BE=${b67_BE} (×0.1338=${(b67_BE*0.1338).toFixed(1)} PSI)`);
+          }
+
+          // Primary: FRP_ACT = b67_LE × 0.1338
+          const frpRaw = b67_LE;
           const frpPsi = frpRaw * DDDI_FE_FRP_SCALE;
           this.dddiPeriodicValues.set('FRP_ACT', {
             pid: 0x328A,
@@ -1099,8 +1187,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
             timestamp: now,
           });
 
-          // FP_SAE: bytes 5-6 big-endian × 0.01868
-          const fpSaeRaw = (data[5] << 8) | data[6];
+          // Primary: FP_SAE = b56_BE × 0.01868
+          const fpSaeRaw = b56_BE;
           const fpSaePsi = fpSaeRaw * DDDI_FE_FP_SAE_SCALE;
           this.dddiPeriodicValues.set('FP_SAE', {
             pid: 0x208A,
@@ -1112,14 +1200,37 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
             timestamp: now,
           });
         }
-        // FD frames could carry FRP_DES but correlation is weak (109% CV)
-        // Skip FD parsing until we have better correlation data
+
+        if (periodicId === 0xFD) {
+          // FD frame — log raw bytes for analysis
+          if (this.dddiPeriodicFrameCount <= 50 || (Date.now() - this.dddiPeriodicLastLogTime > 2000)) {
+            console.log(`[DDDI-FD] raw=[${hex}] len=${data.length}`);
+            if (data.length >= 4) {
+              const fd_b12_BE = (data[1] << 8) | data[2];
+              const fd_b23_BE = (data[2] << 8) | data[3];
+              console.log(`[DDDI-FD]   b12_BE=${fd_b12_BE} (×0.4712=${(fd_b12_BE*0.4712).toFixed(1)}) (×0.1338=${(fd_b12_BE*0.1338).toFixed(1)})`);
+              console.log(`[DDDI-FD]   b23_BE=${fd_b23_BE} (×0.4712=${(fd_b23_BE*0.4712).toFixed(1)}) (×0.1338=${(fd_b23_BE*0.1338).toFixed(1)})`);
+            }
+          }
+        }
       });
 
-      this.emit('log', null, 'DDDI periodic: streaming active on 0x5E8');
+      // Also log if we DON'T see any 0x5E8 frames after 2 seconds
+      setTimeout(() => {
+        if (this.dddiPeriodicFrameCount === 0 && this.dddiPeriodicActive) {
+          console.warn('[DDDI-STREAM] ⚠️ NO 0x5E8 frames received after 2 seconds! Bridge may not be forwarding periodic frames.');
+          this.emit('log', null, '[DDDI-STREAM] WARNING: No periodic frames received — bridge may be filtering 0x5E8');
+        } else {
+          console.log(`[DDDI-STREAM] ✓ Received ${this.dddiPeriodicFrameCount} periodic frames in first 2 seconds`);
+          this.emit('log', null, `[DDDI-STREAM] Periodic streaming confirmed: ${this.dddiPeriodicFrameCount} frames/2s`);
+        }
+      }, 2000);
+
+      this.emit('log', null, '[DDDI-STREAM] Setup complete — listening for 0x5E8 periodic frames');
       return true;
     } catch (e) {
-      this.emit('log', null, `DDDI periodic setup failed: ${e}`);
+      this.emit('log', null, `[DDDI-STREAM] Setup FAILED: ${e}`);
+      console.error('[DDDI-STREAM] Setup exception:', e);
       return false;
     }
   }
