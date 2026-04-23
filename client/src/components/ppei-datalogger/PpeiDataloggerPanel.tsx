@@ -9,7 +9,7 @@
  * ║  2. sendUDSviaRawCAN — diagnostic logging wrapper                  ║
  * ║  3. readPid — diagnostic logging wrapper                            ║
  * ║  4. openWebSocket — WS interceptor + DDDI 0x5E8 periodic parser    ║
- * ║  5. readPids — batch_read_dids + DDDI periodic value injection      ║
+ * ║  5. readPids — hybrid batch_read_dids + DDDI periodic FRP injection  ║
  * ║                                                                     ║
  * ║  DO NOT modify Tobi's original files!                               ║
  * ╚══════════════════════════════════════════════════════════════════════╝
@@ -330,14 +330,15 @@ function wrapOpenWebSocket(original: Function) {
 
 
 /**
- * ── PATCH 5: readPids → batch_read_dids ──
- * Instead of N sequential readPid calls (each with WS round-trip overhead),
- * sends a single "batch_read_dids" WebSocket message to the PPEI bridge.
- * The bridge fires all DID requests back-to-back on the CAN bus (~5ms/DID)
- * and returns all results in one response.
+ * ── PATCH 5: readPids → HYBRID batch_read_dids + DDDI periodic ──
+ * HYBRID MODE: When DDDI periodic streaming is active on 0x5E8:
+ *   - FRP_ACT (0x328A) and FRP_DES (0x131F) come from periodic frames
+ *   - All OTHER PIDs use batch_read_dids (Mode 22) as normal
+ *   - Bridge re-sends 0xAA 04 FE FD after each batch to keep stream alive
  *
- * Mode 01 PIDs still go through individual readPid (the bridge batch only
- * handles Mode 22 DIDs). Mode 01 PIDs are fast anyway (~1-2 per cycle).
+ * NORMAL MODE: When no DDDI streaming:
+ *   - All PIDs use batch_read_dids (Mode 22)
+ *   - Mode 01 PIDs go through individual readPid (fast, few PIDs)
  *
  * Falls back to sequential readPid if the bridge doesn't support batch_read_dids.
  */
@@ -357,101 +358,32 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     const readings: any[] = [];
 
     // ══════════════════════════════════════════════════════════════════════
-    // STREAMING MODE: When DDDI periodic streaming is active, do NOT
-    // send batch_read_dids (which floods the ECU and kills the stream).
-    // Instead, send a lightweight streaming_poll (TesterPresent + RPM)
-    // and get FRP from the periodic 0x5E8 frames.
+    // HYBRID MODE: When DDDI periodic streaming is active, FRP_ACT and
+    // FRP_DES come from the periodic 0x5E8 frames (high-speed float32).
+    // All OTHER PIDs still use batch_read_dids (Mode 22) as normal.
+    // The bridge re-sends 0xAA 04 FE FD after each batch to keep the
+    // periodic stream alive.
     //
-    // This matches HPT's exact behavior: during periodic streaming,
-    // HPT only sends TesterPresent (0x3E) every 2s. No Mode 22 reads.
+    // DIDs excluded from batch when streaming: 0x328A (FRP_ACT), 0x131F (FRP_DES)
     // ══════════════════════════════════════════════════════════════════════
-    if (_ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0) {
-      // Build the list of lightweight DIDs to poll (Mode 01 only — RPM, etc.)
-      const streamingDids: { did: number; mode: number }[] = [];
-      for (const pid of mode01Pids) {
-        streamingDids.push({ did: pid.pid, mode: 0x01 });
-      }
+    const isStreaming = _ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0;
+    // PIDs that come from DDDI periodic frames — exclude from batch reads
+    const DDDI_PERIODIC_DIDS = new Set([0x328A, 0x131F]); // FRP_ACT, FRP_DES
 
-      try {
-        const response: any = await this.sendRequest(
-          {
-            type: 'streaming_poll',
-            tx_id: 0x7E0,
-            dids: streamingDids,
-          },
-          2000, // 2s timeout
-        );
+    // Filter out DDDI PIDs from Mode 22 batch when streaming
+    const batchMode22Pids = isStreaming
+      ? mode22Pids.filter((p: any) => !DDDI_PERIODIC_DIDS.has(p.pid))
+      : mode22Pids;
 
-        if (response.type === 'streaming_poll_result' && response.ok) {
-          // Parse Mode 01 results from the streaming_poll response
-          const pollResults = response.results || {};
-          for (const pid of mode01Pids) {
-            const key = String(pid.pid);
-            const result = pollResults[key];
-            if (result && result.ok && result.data) {
-              try {
-                const value = pid.formula(result.data);
-                if (typeof value === 'number' && Number.isFinite(value)) {
-                  readings.push({
-                    pid: pid.pid,
-                    name: pid.name,
-                    shortName: pid.shortName,
-                    value,
-                    unit: pid.unit,
-                    rawBytes: result.data,
-                    timestamp: Date.now(),
-                  });
-                }
-              } catch { /* formula error */ }
-            }
-          }
-          ppeiLog(this,
-            `streaming_poll: TesterPresent + ${streamingDids.length} Mode01 PIDs ` +
-            `(${readings.length} OK, periodic frames: ${_ppeiPeriodicFrameCount})`
-          );
-        }
-      } catch (e: any) {
-        ppeiWarn(this, `streaming_poll failed: ${e?.message ?? e}`);
-        // Fallback: read Mode 01 PIDs sequentially
-        for (const pid of mode01Pids) {
-          try {
-            const reading = await originalReadPid.call(this, pid);
-            if (reading) readings.push(reading);
-          } catch { /* ignore */ }
-        }
-      }
-
-      // Inject DDDI periodic values (FRP_ACT, FRP_DES) from 0x5E8 frames
-      const PERIODIC_MAX_AGE_MS = 2000;
-      const now = Date.now();
-      const injectedFromPeriodic: string[] = [];
-      for (const pid of pids) {
-        if (readings.some((r: any) => r.pid === pid.pid)) continue;
-        const periodic = _ppeiPeriodicValues.get(pid.pid);
-        if (periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS) {
-          readings.push({
-            pid: periodic.did,
-            name: pid.name,
-            shortName: periodic.shortName,
-            value: periodic.value,
-            unit: periodic.unit,
-            rawBytes: periodic.rawBytes,
-            timestamp: periodic.timestamp,
-          });
-          injectedFromPeriodic.push(`${periodic.shortName}=${periodic.value.toFixed(1)}`);
-        }
-      }
-      if (injectedFromPeriodic.length > 0) {
-        ppeiLog(this,
-          `\u26A1 DDDI periodic: ${injectedFromPeriodic.join(', ')}`
-        );
-      }
-      return readings;
+    if (isStreaming && mode22Pids.length !== batchMode22Pids.length) {
+      const excluded = mode22Pids
+        .filter((p: any) => DDDI_PERIODIC_DIDS.has(p.pid))
+        .map((p: any) => p.shortName || `0x${p.pid.toString(16).toUpperCase()}`);
+      ppeiLog(this,
+        `HYBRID MODE: ${excluded.join(', ')} from DDDI periodic, ` +
+        `${batchMode22Pids.length} other PIDs via batch_read_dids`
+      );
     }
-
-    // ══════════════════════════════════════════════════════════════════════
-    // NORMAL MODE: No DDDI streaming — use batch_read_dids as before
-    // ══════════════════════════════════════════════════════════════════════
 
     // ── Mode 01: sequential (fast, few PIDs, no batch needed) ──
     for (const pid of mode01Pids) {
@@ -461,10 +393,10 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       } catch { /* ignore */ }
     }
     // ── Mode 22: batch via bridge ──
-    if (mode22Pids.length === 0) return readings;
+    if (batchMode22Pids.length === 0 && !isStreaming) return readings;
     // Group by ECU TX address (most will be 0x7E0, some on 0x7E1 for TCM)
     const byTx = new Map<number, any[]>();
-    for (const pid of mode22Pids) {
+    for (const pid of batchMode22Pids) {
       const tx = pid.ecuHeader
         ? parseInt(pid.ecuHeader.trim().replace(/^0x/i, ''), 16) || 0x7E0
         : 0x7E0;
@@ -538,7 +470,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         }
       }
     }
-    // ── Inject DDDI periodic values for PIDs that have fresh data ──
+    // ── Inject DDDI periodic values (FRP_ACT, FRP_DES from 0x5E8 frames) ──
     const PERIODIC_MAX_AGE_MS = 2000;
     const now = Date.now();
     const injectedFromPeriodic: string[] = [];
@@ -560,7 +492,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
     if (injectedFromPeriodic.length > 0) {
       ppeiLog(this,
-        `Injected ${injectedFromPeriodic.length} DDDI periodic value(s): ${injectedFromPeriodic.join(', ')}`
+        `⚡ DDDI periodic: ${injectedFromPeriodic.join(', ')}`
       );
     }
     return readings;
@@ -593,7 +525,7 @@ try {
     // Patch 5: readPids → batch_read_dids + DDDI periodic injection
     proto._originalReadPids = proto.readPids;
     proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
-    console.log(`${PPEI_TAG} Patch 5: readPids → batch_read_dids + DDDI periodic value injection`);
+    console.log(`${PPEI_TAG} Patch 5: readPids → HYBRID batch_read_dids + DDDI periodic FRP injection`);
     proto._ppeiFullyPatched = true;
     console.log(`${PPEI_TAG} All PPEI patches applied successfully`);
   }
@@ -646,7 +578,7 @@ export default function PpeiDataloggerPanel({
                 </span>
               </div>
               <span style={{ color: 'oklch(0.65 0.01 260)', fontSize: '0.7rem' }}>
-                PPEI diagnostic patches active — DDDI periodic streaming (HPT IOCTL float32 MPa) for FRP_ACT/FRP_DES
+                Hybrid mode: DDDI periodic streaming for FRP + batch polling for all other PIDs
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -698,6 +630,41 @@ export default function PpeiDataloggerPanel({
               ppei_pcan_bridge.py
             </a>
           </div>
+          {/* Advanced: Future SID 0x23 note */}
+          <details
+            style={{
+              borderTop: '1px solid oklch(0.30 0.06 260 / 0.3)',
+              background: 'oklch(0.12 0.02 260 / 0.4)',
+            }}
+          >
+            <summary
+              className="cursor-pointer px-4 py-1.5 select-none"
+              style={{ color: 'oklch(0.55 0.08 260)', fontSize: '0.68rem', letterSpacing: '0.05em' }}
+            >
+              ADVANCED: Future SID 0x23 Full Polling (click to expand)
+            </summary>
+            <div className="px-4 pb-2" style={{ color: 'oklch(0.50 0.02 260)', fontSize: '0.65rem', lineHeight: '1.5' }}>
+              <p style={{ marginBottom: '0.3rem' }}>
+                <strong style={{ color: 'oklch(0.65 0.10 60)' }}>Current approach:</strong>{' '}
+                FRP_ACT and FRP_DES use DDDI periodic streaming (IOCTL 0x2D + 0x2C + 0xAA) for high-speed float32 reads
+                from ECU RAM. All other PIDs use standard Mode 22 batch polling.
+              </p>
+              <p style={{ marginBottom: '0.3rem' }}>
+                <strong style={{ color: 'oklch(0.65 0.10 60)' }}>HPT full PID approach:</strong>{' '}
+                HP Tuners uses NO DDDI periodic streaming in full PID mode. Instead, it sets up 6 IOCTL virtual DIDs
+                (FE00-FE05) mapped to ECU RAM addresses, then interleaves Mode 22 DID reads with SID 0x23
+                (ReadMemoryByAddress) RAM reads at ~200ms cycle time. No TesterPresent needed — session kept alive
+                by continuous reads.
+              </p>
+              <p>
+                <strong style={{ color: 'oklch(0.65 0.10 60)' }}>Future enhancement:</strong>{' '}
+                Implement SID 0x23 polling for additional RAM-based PIDs (boost, injection timing, etc.)
+                alongside the existing Mode 22 batch reads. This would match HPT's full PID protocol exactly.
+                See <code style={{ color: 'oklch(0.60 0.12 170)' }}>docs/hpt-full-pid-analysis.md</code> for
+                the complete protocol analysis including all IOCTL RAM addresses and SID 0x23 targets.
+              </p>
+            </div>
+          </details>
         </div>
       )}
 

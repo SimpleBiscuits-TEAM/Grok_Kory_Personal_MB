@@ -1994,3 +1994,10 @@
 - [x] Frontend: streaming mode uses streaming_poll instead of batch_read_dids
 - [x] Frontend: FRP injected from 0x5E8 periodic frames during streaming mode
 - [x] Added [TEST-DDDI] label to FRP_ACT (0x328A) and FRPDI (0x131F) in PID menu
+
+## Hybrid DDDI + Polling Approach
+- [x] Map HPT's 6 IOCTL RAM addresses to known PIDs (FE00-FE05) — FE02=FRP_ACT confirmed, others unknown (future SID 0x23 work)
+- [x] Re-enable batch_read_dids for non-FRP PIDs alongside DDDI streaming
+- [x] Frontend: hybrid mode — DDDI for FRP (0x328A, 0x131F excluded from batch), batch reads for everything else
+- [x] Remove [TEST-DDDI] labels from FRP PIDs — FRP_ACT and FRPDI now show clean names
+- [x] Add "Advanced" note/tab in PPEI datalogger about future SID 0x23 full polling approach — collapsible details section in banner
