@@ -513,25 +513,84 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   private async isoTpRequest(pdu: number[], responseTimeoutMs = CAN_ISO_TP_DEFAULT_TIMEOUT_MS): Promise<number[] | null> {
-    if (pdu.length > 7) {
-      this.emit('log', null, 'ISO-TP SF request max 7B — use shorter OBD request');
-      return null;
-    }
-
     this.drainObdRxFrames();
     if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
       await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
     }
 
-    const used = 1 + pdu.length;
-    const canPdu = new Uint8Array(used);
-    canPdu[0] = pdu.length & 0x0f;
-    for (let i = 0; i < pdu.length; i++) canPdu[i + 1] = pdu[i] & 0xff;
+    // --- Single Frame path (payload <= 7 bytes) ---
+    if (pdu.length <= 7) {
+      const used = 1 + pdu.length;
+      const canPdu = new Uint8Array(used);
+      canPdu[0] = pdu.length & 0x0f;
+      for (let i = 0; i < pdu.length; i++) canPdu[i + 1] = pdu[i] & 0xff;
 
-    const ok = await this.sendCanTx(this.obdTxId, false, canPdu, true);
-    if (!ok) {
-      this.emit('log', null, 'CAN TX NACK/timeout from bridge');
+      const ok = await this.sendCanTx(this.obdTxId, false, canPdu, true);
+      if (!ok) {
+        this.emit('log', null, 'CAN TX NACK/timeout from bridge');
+        return null;
+      }
+
+      return this.readIsoTpResponse(responseTimeoutMs);
+    }
+
+    // --- Multi-Frame TX path (payload > 7 bytes, e.g. 8-byte IOCTL) ---
+    // ISO-TP First Frame: [10 | lenHi, lenLo, ...first 6 data bytes]
+    const totalLen = pdu.length;
+    const ff = new Uint8Array(8);
+    ff[0] = 0x10 | ((totalLen >> 8) & 0x0f);
+    ff[1] = totalLen & 0xff;
+    for (let i = 0; i < 6 && i < pdu.length; i++) ff[i + 2] = pdu[i] & 0xff;
+
+    console.log(`[ISO-TP-MF] TX First Frame: ${Array.from(ff).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+    const ffOk = await this.sendCanTx(this.obdTxId, false, ff, true);
+    if (!ffOk) {
+      this.emit('log', null, 'CAN TX NACK on First Frame');
       return null;
+    }
+
+    // Wait for Flow Control (PCI type 0x3x) from ECU on obdRxId
+    const fcData = await this.waitRxMatch(
+      Math.min(responseTimeoutMs, 5000),
+      (id, d) => id === this.obdRxId && d.length >= 1 && (d[0] & 0xf0) === 0x30,
+    );
+    if (!fcData) {
+      console.warn('[ISO-TP-MF] No Flow Control received from ECU');
+      return null;
+    }
+    const fcFlag = fcData[0] & 0x0f;
+    const blockSize = fcData[1] || 0;
+    const stMin = fcData[2] || 0;
+    let stMinMs = stMin <= 0x7f ? stMin : 1;
+    stMinMs = Math.max(stMinMs, 1);
+    console.log(`[ISO-TP-MF] RX Flow Control: flag=${fcFlag} BS=${blockSize} STmin=${stMin} (${stMinMs}ms)`);
+
+    if (fcFlag !== 0) {
+      // 0=ContinueToSend, 1=Wait, 2=Overflow — only proceed on CTS
+      console.warn(`[ISO-TP-MF] FC flag=${fcFlag} (not CTS), aborting`);
+      return null;
+    }
+
+    // Send Continuation Frames
+    let offset = 6; // first 6 bytes already sent in FF
+    let seqNum = 1;
+    while (offset < pdu.length) {
+      const cf = new Uint8Array(8);
+      cf[0] = 0x20 | (seqNum & 0x0f);
+      for (let i = 0; i < 7 && (offset + i) < pdu.length; i++) {
+        cf[i + 1] = pdu[offset + i] & 0xff;
+      }
+      console.log(`[ISO-TP-MF] TX CF seq=${seqNum}: ${Array.from(cf).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+      const cfOk = await this.sendCanTx(this.obdTxId, false, cf, true);
+      if (!cfOk) {
+        this.emit('log', null, 'CAN TX NACK on Continuation Frame');
+        return null;
+      }
+      offset += 7;
+      seqNum = (seqNum + 1) & 0x0f;
+      if (stMinMs > 0 && offset < pdu.length) {
+        await new Promise(r => setTimeout(r, stMinMs));
+      }
     }
 
     return this.readIsoTpResponse(responseTimeoutMs);

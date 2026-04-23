@@ -1915,3 +1915,9 @@
 - [x] Add 3200ms wait after AA stop before sending IOCTL/DDDI/AA
 - [x] Fix FP_SAE parsing: byte 5 × 0.4356 (confirmed from BUSMASTER)
 - [x] Update FD frame parsing: FLOAT32_BE bytes[1:4] × 145.038 for FRP_DES
+
+## ISO-TP Multi-Frame TX Fix (Root Cause of DDDI Failure)
+- [x] Fix isoTpRequest to support multi-frame TX for payloads > 7 bytes
+- [x] IOCTL commands are 8 bytes — now sent as FF + FC + CF (was silently dropped)
+- [x] Implement First Frame + wait for Flow Control + Continuation Frame(s) TX
+- [x] DDDI commands (7 bytes) — verified: fit in single frame, no change needed
