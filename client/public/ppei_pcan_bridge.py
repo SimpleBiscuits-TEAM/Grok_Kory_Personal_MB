@@ -381,7 +381,7 @@ async def _ppei_handle_message(self, msg: dict):
     req_id = msg.get("id", "0")
     dids = msg.get("dids", [])
     tx_id = msg.get("tx_id", 0x7E0)
-    per_did_timeout = msg.get("timeout_ms", 50) / 1000.0  # default 50ms per DID
+    per_did_timeout = msg.get("timeout_ms", 150) / 1000.0  # default 150ms per DID (was 50 — too tight for busy CAN)
 
     if not self.can_initialized:
         success = await self._ensure_can_bus()
@@ -407,10 +407,12 @@ async def _ppei_handle_message(self, msg: dict):
         except Exception:
             break
 
-    # ── PHASE 1: Send ALL DID requests back-to-back (~1ms each) ──
+    # ── PHASE 1: Send DID requests with small inter-request gap ──
+    # A 2ms gap between requests prevents flooding the ECU's request queue
+    # and gives it time to start processing each DID before the next arrives.
     sent_dids = []
     send_errors = {}  # did -> error string
-    for did in dids:
+    for i, did in enumerate(dids):
         did_hi = (did >> 8) & 0xFF
         did_lo = did & 0xFF
         data = [0x03, 0x22, did_hi, did_lo, 0x00, 0x00, 0x00, 0x00]
@@ -422,6 +424,8 @@ async def _ppei_handle_message(self, msg: dict):
         try:
             self.bus.send(frame)
             sent_dids.append(did)
+            if i < len(dids) - 1:
+                await asyncio.sleep(0.002)  # 2ms gap between requests
         except can.CanError as e:
             send_errors[did] = f"CAN send: {e}"
 
@@ -432,7 +436,7 @@ async def _ppei_handle_message(self, msg: dict):
     collected = {}  # did -> list[int] (value bytes)
     nrc_errors = {}  # did -> NRC code
     pending = set(sent_dids)
-    total_timeout = max(per_did_timeout * len(sent_dids) * 1.5, 0.5)  # generous total
+    total_timeout = max(per_did_timeout * len(sent_dids) * 2.0, 1.0)  # generous total (2x per-DID, min 1s)
     collect_deadline = time.time() + total_timeout
     # Track multi-frame ISO-TP state per arbitration ID
     isotp_state = {}  # arb_id -> {total_length, payload, expected_seq, mode, pid_hi, pid_lo}
@@ -447,8 +451,10 @@ async def _ppei_handle_message(self, msg: dict):
                 timeout=min(remaining, per_did_timeout)
             )
         except asyncio.TimeoutError:
-            # No more frames coming — exit collection
-            break
+            # Individual frame timeout — DON'T break, keep collecting until total deadline.
+            # Other DIDs may still respond; the ECU processes requests in order and some
+            # DIDs take longer than others (especially snapshot/freeze-frame DIDs).
+            continue
 
         if msg.arbitration_id not in _tobi.RESPONSE_IDS:
             continue
@@ -546,7 +552,9 @@ async def _ppei_handle_message(self, msg: dict):
     # ── PHASE 4: Restart periodic streaming if DDDI was active ──
     # Batch reads flood the ECU and kill the periodic scheduler.
     # Re-send 0xAA 04 FE FD to restart it after each batch.
+    # Small delay first to let the ECU finish processing batch responses.
     if getattr(self, '_ppei_dddi_streaming', False):
+        await asyncio.sleep(0.010)  # 10ms settle time before restart
         restart_ids = getattr(self, '_ppei_dddi_periodic_ids', [0xFE, 0xFD])
         restart_payload = bytes([0xAA, 0x04] + restart_ids)
         restart_frame = can.Message(
@@ -556,7 +564,7 @@ async def _ppei_handle_message(self, msg: dict):
         )
         try:
             self.bus.send(restart_frame)
-            log.debug(f"[PPEI] Restarted periodic streaming after batch_read_dids")
+            log.debug(f"[PPEI] Restarted periodic streaming after batch_read_dids (10ms settle)")
         except can.CanError:
             log.warning(f"[PPEI] Failed to restart periodic streaming after batch")
 

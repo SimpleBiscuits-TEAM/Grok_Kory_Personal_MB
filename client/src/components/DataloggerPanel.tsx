@@ -1304,9 +1304,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           consecutiveFailsRef.current = 0;
         }
 
-        const newLive = new Map<number, PIDReading>();
-        for (const r of readings) newLive.set(r.pid, r);
-        setLiveReadings(newLive);
+        // Merge new readings into existing map instead of replacing entirely.
+        // PIDs that didn't respond this cycle keep their last known value
+        // (prevents flickering/disappearing gauges during batch timeouts).
+        setLiveReadings(prev => {
+          const merged = new Map(prev);
+          for (const r of readings) merged.set(r.pid, r);
+          return merged;
+        });
 
         setReadingHistory(prev => {
           const next = new Map(prev);

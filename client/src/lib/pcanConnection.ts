@@ -1242,8 +1242,8 @@ export class PCANConnection {
     // Failure tracking with soft-disable
     const pidFailCount = new Map<number, number>();
     const pidPausedUntilLoop = new Map<number, number>();
-    const MAX_CONSECUTIVE_FAILS = 8;
-    const RETRY_INTERVAL = 20;
+    const MAX_CONSECUTIVE_FAILS = 25; // was 8 — too aggressive, PIDs get paused after brief batch timeouts
+    const RETRY_INTERVAL = 10; // was 20 — retry sooner after pause
     let activePids = [...filteredPids];
     let loopCount = 0;
 

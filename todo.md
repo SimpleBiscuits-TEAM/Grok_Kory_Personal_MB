@@ -2001,3 +2001,13 @@
 - [x] Frontend: hybrid mode — DDDI for FRP (0x328A, 0x131F excluded from batch), batch reads for everything else
 - [x] Remove [TEST-DDDI] labels from FRP PIDs — FRP_ACT and FRPDI now show clean names
 - [x] Add "Advanced" note/tab in PPEI datalogger about future SID 0x23 full polling approach — collapsible details section in banner
+
+## Bug Fix — DDDI Periodic Stream Dying + Aggressive PID Pausing (Truck Test 2026-04-23)
+- [x] DDDI periodic stream (FRP_ACT/FRPDI from 0x5E8) freezes after ~5s — bridge 0xAA restart not surviving batch_read_dids traffic
+- [x] Batch decode rate only 45% (avg 1.6/3.6 OK) — bridge timeout_ms=50 too short for some DIDs
+- [x] Pause system too aggressive — PIDs get strikethrough in Live Data after single failure, even though datalog captures them
+- [x] FUEL_RATE (mm³) shows strikethrough in Live Data despite being recorded in datalog (pause/stale system issue)
+- [x] FRP_ACT_SS and FRP_DES_SS snapshot DIDs frequently paused — may need longer timeout or separate batch
+- [x] Increase PERIODIC_MAX_AGE_MS from 2000ms to handle slower DDDI update cycles during batch traffic
+- [x] Increase bridge batch timeout from 50ms/DID to handle ECU response delays on busy CAN bus
+- [x] Flag FUEL_RATE (0x20E3) formula as unverified — values scale with RPM (4→215 mm³) unlike HPT's flat 5-8 mm³

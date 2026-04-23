@@ -416,7 +416,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             type: 'batch_read_dids',
             dids,
             tx_id: txId,
-            timeout_ms: 50,
+            timeout_ms: 150, // was 50 — too tight for busy CAN bus
           },
           batchTimeout,
         );
@@ -471,7 +471,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
     // ── Inject DDDI periodic values (FRP_ACT, FRP_DES from 0x5E8 frames) ──
-    const PERIODIC_MAX_AGE_MS = 2000;
+    const PERIODIC_MAX_AGE_MS = 5000; // was 2000 — too tight when batch reads delay periodic restart
     const now = Date.now();
     const injectedFromPeriodic: string[] = [];
     for (const pid of pids) {

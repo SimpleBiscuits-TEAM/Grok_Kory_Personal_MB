@@ -1010,10 +1010,13 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     // HPT "Main Fuel Rate" — DID 0x20E3
-    // IntelliSpy: raw 0x003C = 60, HPT shows 7 mm³ → scale ~0.1167
-    // Using 0.1 as approximate (HPT may use slightly different scale)
-    pid: 0x20E3, name: 'Main Fuel Rate', shortName: 'FUEL_RATE',
-    unit: 'mm³', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    // ⚠ UNVERIFIED: At idle, raw 0x003C=60 → 6.0 mm³ (matches HPT ~7 mm³).
+    // BUT at higher RPM, our values scale dramatically (4→215 mm³) while HPT stays flat (5-8 mm³).
+    // This DID may be total fuel flow rate, NOT per-injection quantity.
+    // The idle-only sniff correlation was likely coincidental.
+    // TODO: Verify against HPT at multiple RPMs, or find the correct per-injection DID.
+    pid: 0x20E3, name: 'Fuel Rate (unverified)', shortName: 'FUEL_RATE',
+    unit: 'mm³', min: 0, max: 500, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.1,
   },
