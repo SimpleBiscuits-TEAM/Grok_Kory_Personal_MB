@@ -610,6 +610,198 @@ log.info("[PPEI] Patch 5 applied: batch_read_dids for fast multi-DID polling")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Patch 5b: batch_read_mode01 — read multiple Mode 01 PIDs using multi-PID
+# requests (up to 6 PIDs per CAN frame per SAE J1979 spec).
+#
+# OBD-II allows requesting up to 6 PIDs in a single Mode 01 request:
+#   TX: [07, 01, PID1, PID2, PID3, PID4, PID5, PID6]  (PCI=7, SID=01)
+#   RX: [PCI, 41, PID1, val1, PID2, val2, ...]  (may be multi-frame ISO-TP)
+#
+# This reduces 23 sequential requests (~390ms) to 4 batched requests (~70ms).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _ppei_batch_read_mode01(self, msg: dict):
+    """Handle batch_read_mode01: read multiple Mode 01 PIDs in batched CAN frames.
+    
+    Groups PIDs into batches of up to 6 (SAE J1979 max per request).
+    Each batch is a single CAN frame: [PCI, 0x01, PID1, PID2, ...PID6]
+    ECU responds with all values in one response (may be multi-frame ISO-TP).
+    """
+    req_id = msg.get("id", "0")
+    pids = msg.get("pids", [])  # list of {pid: 0x0C, bytes: 2}
+    tx_id = msg.get("tx_id", 0x7E0)
+    per_batch_timeout = msg.get("timeout_ms", 200) / 1000.0
+
+    if not self.can_initialized:
+        success = await self._ensure_can_bus()
+        if not success:
+            return {
+                "type": "error",
+                "id": req_id,
+                "message": f"CAN bus not available: {self.can_error}"
+            }
+    if not self.protocol:
+        self.protocol = _tobi.OBDProtocol(
+            self.bus, rx_broadcast=self._broadcast_rx_stream
+        )
+        await self.protocol.start()
+    proto = self.protocol
+    start_all = time.time()
+
+    # Group PIDs into batches of 6 (OBD-II max per request)
+    MAX_PIDS_PER_REQUEST = 6
+    batches = []
+    for i in range(0, len(pids), MAX_PIDS_PER_REQUEST):
+        batches.append(pids[i:i + MAX_PIDS_PER_REQUEST])
+
+    # Drain stale frames
+    while not proto._response_queue.empty():
+        try:
+            proto._response_queue.get_nowait()
+        except Exception:
+            break
+
+    collected = {}  # pid -> list[int] (value bytes)
+    rx_id = tx_id + 8
+
+    for batch_idx, batch in enumerate(batches):
+        batch_pids = [p["pid"] for p in batch]
+        batch_bytes = {p["pid"]: p.get("bytes", 1) for p in batch}
+        n = len(batch_pids)
+
+        # Build CAN frame: [PCI, 0x01, PID1, PID2, ...PID6, padding]
+        # PCI = number of data bytes = 1 (SID) + n (PIDs)
+        pci = 1 + n
+        frame_data = [pci, 0x01] + batch_pids
+        while len(frame_data) < 8:
+            frame_data.append(0x00)
+
+        frame = can.Message(
+            arbitration_id=tx_id,
+            data=frame_data,
+            is_extended_id=False
+        )
+        try:
+            self.bus.send(frame)
+        except can.CanError as e:
+            log.warning(f"[PPEI] batch_read_mode01 send error: {e}")
+            continue
+
+        # Collect response — may be single frame or multi-frame ISO-TP
+        deadline = time.time() + per_batch_timeout
+        isotp_state = None
+        response_payload = None
+
+        while time.time() < deadline:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                msg_rx = await asyncio.wait_for(
+                    proto._response_queue.get(),
+                    timeout=min(remaining, 0.05)
+                )
+            except asyncio.TimeoutError:
+                if response_payload is not None:
+                    break
+                continue
+
+            if msg_rx.arbitration_id != rx_id:
+                continue
+
+            frame_data_rx = list(msg_rx.data)
+            if not frame_data_rx:
+                continue
+
+            pci_type = (frame_data_rx[0] >> 4) & 0x0F
+
+            if pci_type == 0:  # Single frame
+                length = frame_data_rx[0] & 0x0F
+                response_payload = frame_data_rx[1:1 + length]
+                break
+
+            elif pci_type == 1:  # First frame (multi-frame)
+                total_length = ((frame_data_rx[0] & 0x0F) << 8) | frame_data_rx[1]
+                isotp_state = {
+                    'total_length': total_length,
+                    'payload': list(frame_data_rx[2:]),
+                    'expected_seq': 1,
+                }
+                # Send flow control
+                fc_msg = can.Message(
+                    arbitration_id=tx_id,
+                    data=[_tobi.ISOTP_FLOW_CONTROL, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                    is_extended_id=False
+                )
+                try:
+                    self.bus.send(fc_msg)
+                except can.CanError:
+                    pass
+                continue
+
+            elif pci_type == 2:  # Consecutive frame
+                if isotp_state is None:
+                    continue
+                cf_seq = frame_data_rx[0] & 0x0F
+                if cf_seq == (isotp_state['expected_seq'] & 0x0F):
+                    isotp_state['payload'].extend(frame_data_rx[1:])
+                    isotp_state['expected_seq'] += 1
+                    if len(isotp_state['payload']) >= isotp_state['total_length']:
+                        response_payload = isotp_state['payload'][:isotp_state['total_length']]
+                        isotp_state = None
+                        break
+                continue
+
+        # Parse response payload: [0x41, PID1, val1_bytes..., PID2, val2_bytes..., ...]
+        if response_payload and len(response_payload) >= 2 and response_payload[0] == 0x41:
+            idx = 1  # skip SID 0x41
+            while idx < len(response_payload):
+                resp_pid = response_payload[idx]
+                idx += 1
+                if resp_pid in batch_bytes:
+                    nb = batch_bytes[resp_pid]
+                    if idx + nb <= len(response_payload):
+                        collected[resp_pid] = response_payload[idx:idx + nb]
+                        idx += nb
+                    else:
+                        break
+                else:
+                    # Unknown PID in response — skip 1 byte and try next
+                    idx += 1
+        elif response_payload and len(response_payload) >= 1 and response_payload[0] == 0x7F:
+            log.debug(f"[PPEI] batch_read_mode01 NRC for batch {batch_idx}")
+
+        # Small gap between batches
+        if batch_idx < len(batches) - 1:
+            await asyncio.sleep(0.002)
+
+    # Build results
+    results = []
+    for p in pids:
+        pid = p["pid"]
+        if pid in collected:
+            results.append({"pid": pid, "ok": True, "data": list(collected[pid])})
+        else:
+            results.append({"pid": pid, "ok": False, "error": "timeout"})
+
+    elapsed = (time.time() - start_all) * 1000
+    ok_count = sum(1 for r in results if r.get("ok"))
+    log.info(
+        f"[PPEI] batch_read_mode01: {ok_count}/{len(pids)} OK in {elapsed:.0f}ms "
+        f"({len(batches)} batches of up to {MAX_PIDS_PER_REQUEST})"
+    )
+
+    return {
+        "type": "batch_mode01_results",
+        "id": req_id,
+        "results": results,
+        "elapsed_ms": round(elapsed, 1),
+    }
+
+log.info("[PPEI] Patch 5b defined: batch_read_mode01 for multi-PID Mode 01 requests")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Patch 6: DDDI setup — replicate HP Tuners' DynamicallyDefineDataIdentifier
 # sequence to unlock Mode 22 reads on the L5P E41 ECM
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1139,6 +1331,9 @@ async def _ppei_handle_message_v2(self, msg: dict):
         except can.CanError as e:
             log.warning(f"[PPEI] dddi_keepalive failed: {e}")
             return {"type": "dddi_keepalive_result", "id": req_id, "ok": False, "error": str(e)}
+
+    if msg_type == "batch_read_mode01":
+        return await _ppei_batch_read_mode01(self, msg)
 
     # Fall through to batch_read_dids or Tobi's handler
     return await _batch_handle_message(self, msg)

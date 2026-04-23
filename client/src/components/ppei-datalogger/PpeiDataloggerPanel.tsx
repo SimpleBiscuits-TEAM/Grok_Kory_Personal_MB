@@ -338,7 +338,7 @@ function wrapOpenWebSocket(original: Function) {
  *
  * NORMAL MODE: When no DDDI streaming:
  *   - All PIDs use batch_read_dids (Mode 22)
- *   - Mode 01 PIDs go through individual readPid (fast, few PIDs)
+ *   - Mode 01 PIDs use batch_read_mode01 (up to 6 PIDs per CAN frame)
  *
  * Falls back to sequential readPid if the bridge doesn't support batch_read_dids.
  */
@@ -385,12 +385,70 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       );
     }
 
-    // ── Mode 01: sequential (fast, few PIDs, no batch needed) ──
-    for (const pid of mode01Pids) {
+    // ── Mode 01: batched via bridge (up to 6 PIDs per CAN frame) ──
+    if (mode01Pids.length > 0) {
+      // Build PID list with byte counts for the bridge
+      const mode01PidList = mode01Pids.map((p: any) => ({
+        pid: p.pid,
+        bytes: p.bytes || 1,
+      }));
+      const mode01Timeout = Math.max(500, Math.ceil(mode01Pids.length / 6) * 250);
       try {
-        const reading = await originalReadPid.call(this, pid);
-        if (reading) readings.push(reading);
-      } catch { /* ignore */ }
+        const response: any = await this.sendRequest(
+          {
+            type: 'batch_read_mode01',
+            pids: mode01PidList,
+            tx_id: 0x7E0,
+            timeout_ms: 200, // per-batch timeout (up to 6 PIDs per batch)
+          },
+          mode01Timeout,
+        );
+        if (response.type === 'batch_mode01_results' && Array.isArray(response.results)) {
+          let okCount = 0;
+          for (const result of response.results) {
+            if (!result.ok) continue;
+            const pidDef = mode01Pids.find((p: any) => p.pid === result.pid);
+            if (!pidDef) continue;
+            try {
+              const payload: number[] = result.data || [];
+              if (payload.length === 0) continue;
+              const value = pidDef.formula(payload);
+              if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+              readings.push({
+                pid: pidDef.pid,
+                name: pidDef.name,
+                shortName: pidDef.shortName,
+                value,
+                unit: pidDef.unit,
+                rawBytes: payload,
+                timestamp: Date.now(),
+              });
+              okCount++;
+            } catch { /* formula error — skip */ }
+          }
+          ppeiLog(this,
+            `batch_read_mode01: ${okCount}/${mode01Pids.length} decoded ` +
+            `(${Math.ceil(mode01Pids.length / 6)} batches, bridge: ${response.elapsed_ms}ms)`
+          );
+        } else {
+          // Fallback to sequential if bridge doesn't support batch_read_mode01
+          ppeiWarn(this, 'batch_read_mode01 unsupported, falling back to sequential');
+          for (const pid of mode01Pids) {
+            try {
+              const reading = await originalReadPid.call(this, pid);
+              if (reading) readings.push(reading);
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (e: any) {
+        ppeiWarn(this, `batch_read_mode01 failed (${e?.message ?? e}), falling back to sequential`);
+        for (const pid of mode01Pids) {
+          try {
+            const reading = await originalReadPid.call(this, pid);
+            if (reading) readings.push(reading);
+          } catch { /* ignore */ }
+        }
+      }
     }
     // ── Mode 22: batch via bridge ──
     if (batchMode22Pids.length === 0 && !isStreaming) return readings;

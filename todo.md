@@ -2026,3 +2026,11 @@
 
 ## Change — IPW display unit from ms to µs
 - [x] Change all IPW PIDs (IPW_1 through IPW_8) unit from 'ms' to 'µs' and multiply formula by 1000 (1.4ms → 1400µs)
+
+## Performance — Multi-PID Mode 01 batching on PCAN bridge
+- [x] Add batch_read_mode01 handler to bridge — groups up to 6 PIDs per CAN frame
+- [x] Update frontend wrapReadPids to use batch_read_mode01 instead of sequential reads
+- [x] Expected improvement: 23 sequential requests (~390ms) → 4 batched requests (~70ms)
+
+## Fix — Scan shows 0 GM Extended PIDs
+- [x] Run DDDI setup before Mode 22 PID probe during scan — reset session cache + ensureGmLiveDataSessionForTx(0x7E0) before scan loop

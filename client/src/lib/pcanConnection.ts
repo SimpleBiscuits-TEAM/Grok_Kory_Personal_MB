@@ -1377,6 +1377,18 @@ export class PCANConnection {
       allPids.push(...extendedMode22PidsForPcanVehicle(this.vehicleInfo));
     }
 
+    // ── Pre-scan: establish extended diagnostic session for Mode 22 PIDs ──
+    // The ECU rejects Mode 22 reads (NRC 0x31) until an extended session is active.
+    // Force session setup now so the scan accurately reports supported extended PIDs.
+    if (includeExtended && allPids.some(p => (p.service || 0x01) === 0x22)) {
+      this.emit('log', null, 'Setting up extended diagnostic session for Mode 22 scan...');
+      // Reset the session cache so ensureGmLiveDataSessionForTx actually runs
+      this.gmLiveSessionAtByTx.delete(0x7E0);
+      try {
+        await this.ensureGmLiveDataSessionForTx(0x7E0);
+      } catch { /* ignore */ }
+    }
+
     let current = 0;
     const total = allPids.length;
 
