@@ -2034,3 +2034,25 @@
 
 ## Fix — Scan shows 0 GM Extended PIDs
 - [x] Run DDDI setup before Mode 22 PID probe during scan — reset session cache + ensureGmLiveDataSessionForTx(0x7E0) before scan loop
+
+## ═══ TOMORROW'S PLAN (Priority Order) ═══
+
+## Phase 1 — Validate Individual PIDs (truck test with filtered selections)
+## User will feed specific PIDs one at a time to nail down each one like we did FRP today.
+- [ ] Test DID 0x20E3 (Main Fuel Rate mm³/injection) solo — verify values track real-world: idle 4-11, no-load rev 7-9, under load up to 200+ on tuned truck
+- [ ] Test IPW PIDs (0x20AC-0x20B3) solo — verify µs values are reasonable (idle ~400-800µs, load ~1200-2000µs)
+- [ ] Test INJ_TMG (0x12DA) solo — verify timing values make sense
+- [ ] Test any other PIDs user flags as suspect — compare against HPT reference if available
+- [ ] For each PID: if values go to "no man's land" (erratic/frozen/nonsensical), capture console log + CSV for byte-level analysis
+
+## Phase 2 — Fix Fuel Rate PID Naming (can do immediately)
+- [x] Rename SAE PID 0x5E from "FUEL_RATE" to "ENG_FUEL_FLOW" — label as "Engine Fuel Flow (total)" in gal/h — this is total engine flow, NOT per-injection
+- [x] Remove "unverified" flag from DID 0x20E3 — confirmed this IS "Main Fuel Rate" (mm³/injection) matching HPT
+- [x] Update 0x20E3 max from 500 to 300 (200+ under load on tuned truck, 500 was too conservative)
+
+## Phase 3 — CAN Bus Overload (AFTER individual PIDs are validated)
+## Only tackle batch optimization once we know each PID reads correctly in isolation.
+- [ ] Investigate CAN bus overload when multi-PID batching is active — Hz drops with limited PIDs selected
+- [ ] Add inter-batch pacing/delays to prevent flooding the CAN bus
+- [ ] Consider adding CAN bus load monitor (frames/sec, utilization %) to datalogger UI
+- [ ] Fix reconnect/repoll issue when adding PIDs mid-session

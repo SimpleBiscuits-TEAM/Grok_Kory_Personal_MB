@@ -557,9 +557,9 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
   },
   {
-    pid: 0x5E, name: 'Engine Fuel Rate', shortName: 'FUEL_RATE',
+    pid: 0x5E, name: 'Engine Fuel Flow (total)', shortName: 'ENG_FUEL_FLOW',
     unit: 'gal/h', min: 0, max: 865.5, bytes: 2, category: 'fuel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.05 * 0.264172,  // L/h→gal/h
+    formula: ([a, b]) => ((a * 256) + b) * 0.05 * 0.264172,  // L/h→gal/h  (SAE total engine flow, NOT per-injection)
   },
   {
     pid: 0x61, name: 'Driver Demand Engine Torque %', shortName: 'DEM_TQ',
@@ -1010,13 +1010,11 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     // HPT "Main Fuel Rate" — DID 0x20E3
-    // ⚠ UNVERIFIED: At idle, raw 0x003C=60 → 6.0 mm³ (matches HPT ~7 mm³).
-    // BUT at higher RPM, our values scale dramatically (4→215 mm³) while HPT stays flat (5-8 mm³).
-    // This DID may be total fuel flow rate, NOT per-injection quantity.
-    // The idle-only sniff correlation was likely coincidental.
-    // TODO: Verify against HPT at multiple RPMs, or find the correct per-injection DID.
-    pid: 0x20E3, name: 'Fuel Rate (unverified)', shortName: 'FUEL_RATE',
-    unit: 'mm³', min: 0, max: 500, bytes: 2, service: 0x22, category: 'fuel',
+    // Per-injection fuel quantity in mm³/stroke. This IS the HPT "Main Fuel Rate".
+    // Idle (600 RPM): 4-11 mm³ | No-load rev: 7-9 mm³ | Under load (tuned): up to 200+ mm³
+    // NOTE: Do NOT confuse with SAE PID 0x5E (ENG_FUEL_FLOW) which is total engine flow in gal/h.
+    pid: 0x20E3, name: 'Main Fuel Rate', shortName: 'FUEL_RATE',
+    unit: 'mm³', min: 0, max: 300, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.1,
   },
