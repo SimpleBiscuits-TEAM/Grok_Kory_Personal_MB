@@ -1032,8 +1032,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Fuel Flow Rate (raw) — under investigation
-      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
+      0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
+      0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
       0x1543,   // Diesel Throttle Position A
       0x1540,   // Diesel Throttle Position B
       0x0069,   // EGT Bank Extended (multi-frame)
@@ -1068,8 +1068,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x30BE,   // Diesel Commanded Throttle
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Fuel Flow Rate (raw) — under investigation
-      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
+      0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
+      0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
       0x208B,   // Injection Timing Correction
       0x1543,   // Diesel Throttle Position A
       0x1540,   // Diesel Throttle Position B
@@ -1106,8 +1106,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Fuel Flow Rate (raw) — under investigation
-      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
+      0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
+      0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
       0x208B,   // Injection Timing Correction
       0x20AC, 0x20AD, 0x20AE, 0x20AF, // IPW Cyl 1-4
       0x20B0, 0x20B1, 0x20B2, 0x20B3, // IPW Cyl 5-8
@@ -1275,8 +1275,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x208A,   // Fuel Pressure SAE (low-side, PSI)
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x12DA,   // Injection Timing (HPT °BTDC)
-      0x20E3,   // Fuel Flow Rate (raw) — under investigation
-      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
+      0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
+      0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
       0x208B,   // Injection Timing Correction (°)
       0x1141,   // Fuel Tank Level (gal)
       // ── Mode 22 Extended — Turbo / Sensors (HPT-verified) ──
@@ -1362,28 +1362,29 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.001; },
   },
   {
-    // DID 0x20E3 — SUSPECTED FLOW RATE, NOT per-injection quantity
-    // Scales with RPM: idle=4-5, 3000RPM=220-300. HPT DDDI shows per-injection=6 at idle, 10 at 3000.
-    // This DID likely returns total fuel flow (mm³/s or similar), NOT mm³/stroke.
-    // Keeping for investigation — compare against 0x1638 on truck.
-    pid: 0x20E3, name: 'Fuel Flow Rate (raw)', shortName: 'FUEL_FLOW_RAW',
-    unit: 'mm³', min: 0, max: 300, bytes: 2, service: 0x22, category: 'fuel',
+    // DID 0x20E3 — CONFIRMED: Total fuel flow rate, NOT per-injection quantity.
+    // Scales with RPM: idle=1.4-5.4 mm³, 2500RPM=190, 3000RPM=233.
+    // HPT DDDI per-injection: idle=6, 3000RPM=10 — completely different behavior.
+    // This is likely total fuel delivery rate (mm³/s or mm³/rev), not mm³/stroke.
+    // Useful for monitoring total fuel consumption, but NOT for injection diagnostics.
+    pid: 0x20E3, name: 'Fuel Flow Rate (total)', shortName: 'FUEL_FLOW_TOTAL',
+    unit: 'mm³', min: 0, max: 500, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.1,
   },
+  // DID 0x1638 — REMOVED: Returns NRC 0x22 (conditionsNotCorrect) on L5P E41.
+  // Raw value 32546 (0x7F22) was being misinterpreted as data instead of UDS negative response.
+  // The ECU rejects this DID — it either doesn't exist or requires special session/security.
   {
-    // DID 0x1638 — "Fuel Rate" from P654 Mode 22 table
-    // TEST CANDIDATE: May be per-injection fuel quantity (mm³/stroke)
-    // HPT DDDI shows: idle=6, 3000RPM no-load=10 (1 byte, no scaling)
-    // Testing multiple scaling hypotheses:
-    //   If 2-byte unsigned * 0.1: idle should be ~60 raw
-    //   If 2-byte unsigned * 1.0: idle should be ~6 raw
-    //   If 1-byte: idle should be 6 raw
-    // Starting with 2 bytes, no scaling (raw) to see what the ECU returns
-    pid: 0x1638, name: 'Fuel Rate (test)', shortName: 'FUEL_RATE_TEST',
-    unit: 'mm³', min: 0, max: 300, bytes: 2, service: 0x22, category: 'fuel',
+    // DID 0x245D — TEST CANDIDATE for per-injection fuel quantity (mm³/stroke)
+    // Decoded from IntelliSpy capture of HPT's DDDI setup command: 2C FE 00 0C 24 5D
+    // HPT maps this into DPID 0xFE byte 3 as 1-byte integer mm³/stroke.
+    // DDDI stream values: idle=6, elevated RPM=8-14 — matches HPT ground truth.
+    // Testing via Mode 22 to see if ECU supports direct DID read (may require DDDI only).
+    pid: 0x245D, name: 'Fuel Inj Qty (test)', shortName: 'FUEL_INJ_QTY_TEST',
+    unit: 'mm³', min: 0, max: 255, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (a * 256) + b,  // raw value — determine scaling from truck test
+    formula: ([a]) => a,  // 1 byte, no scaling, integer mm³/stroke (per HPT DDDI)
   },
   {
     // HPT "Injection Timing Correction" — DID 0x208B

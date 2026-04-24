@@ -958,6 +958,13 @@ export class PCANConnection {
               CAN_LIVE_UDS_DID_TIMEOUT_MS,
             ) as unknown as BridgeOBDResponse;
             if (response.data && response.data.length > 0) {
+              // NRC detection: if first byte is 0x7F, this is a UDS negative response, not data.
+              // Example: DID 0x1638 returns [0x7F, 0x22, NRC] which was being parsed as value 32546.
+              if (response.data[0] === 0x7F) {
+                const nrc = response.data.length >= 3 ? response.data[2] : response.data[1] ?? 0;
+                console.warn(`[PCAN] Mode 22 DID 0x${pid.pid.toString(16).toUpperCase()} NRC 0x${nrc.toString(16).toUpperCase()} in obd_request fallback — not data`);
+                return null;
+              }
               const value = pid.formula(response.data);
               return {
                 pid: pid.pid,
@@ -1247,7 +1254,7 @@ export class PCANConnection {
     // DDDI periodic PIDs (FRP_ACT, FRP_DES) come from 0x5E8 periodic frames,
     // NOT from batch_read_dids. They should NEVER be paused by the fail counter
     // because they're injected by wrapReadPids from the periodic cache.
-    const DDDI_EXEMPT_PIDS = new Set([0x328A, 0x131F]);
+    const DDDI_EXEMPT_PIDS = new Set([0x328A, 0x131F, 0x245D]); // FRP_ACT, FRP_DES, FUEL_INJ_QTY
     let activePids = [...filteredPids];
     let loopCount = 0;
 

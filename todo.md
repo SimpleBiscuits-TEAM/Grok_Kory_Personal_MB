@@ -2122,3 +2122,11 @@
 - [ ] Fix: DID discovery scan returns 0/103 supported
 - [ ] Fix: Monitor button broken — "None of the selected PIDs are supported"
 - [ ] Root cause: likely related to $AA stop command change or bridge universal upgrade
+
+## Fuel Rate Investigation — IntelliSpy Analysis & Fixes
+- [x] Fix NRC detection in pcanConnection.ts Mode 22 response parser (0x7F prefix = error, not data)
+- [x] Remove DID 0x1638 from all presets (confirmed NRC 0x22 conditionsNotCorrect on L5P E41)
+- [x] Relabel DID 0x20E3 from "Main Fuel Rate" to "Fuel Flow Rate (total)" — scales with RPM, not per-injection
+- [x] Add DID 0x245D as test candidate for per-injection fuel quantity (from IntelliSpy decode)
+- [x] Add HPT fuel rate DDDI mode to ppei_pcan_bridge.py (exact command: 2C FE 00 0C 24 5D)
+- [x] Document IntelliSpy analysis findings in docs/intellispy-fuel-rate-analysis.md

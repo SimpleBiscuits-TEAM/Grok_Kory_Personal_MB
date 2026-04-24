@@ -71,7 +71,9 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   // If DDDI periodic streaming is already active and we've received frames recently,
   // skip re-setup to avoid breaking the stream. Just refresh the session timer.
   if (_ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0) {
-    const lastPeriodicVal = _ppeiPeriodicValues.get(0x328A); // FRP_ACT
+    // Check staleness based on active mode
+    const staleCheckDid = _ppeiDddiMode === 'fuel_rate' ? 0x245D : 0x328A;
+    const lastPeriodicVal = _ppeiPeriodicValues.get(staleCheckDid); // FRP_ACT or FUEL_INJ_QTY
     const periodicAge = lastPeriodicVal ? (now - lastPeriodicVal.timestamp) : Infinity;
     if (periodicAge < 5000) {
       ppeiLog(this, `DDDI streaming still active (${_ppeiPeriodicFrameCount} frames, last ${periodicAge.toFixed(0)}ms ago) — skipping re-setup`);
@@ -88,10 +90,15 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   ppeiLog(this, `DDDI setup sequence for ${txHex} (clear + define + start periodic)`);
   
   try {
+    // Determine DDDI mode from _desiredDddiMode (set by wrapReadPids based on selected PIDs)
+    const dddiMode = (this as any)._desiredDddiMode || 'frp';
+    ppeiLog(this, `DDDI mode: ${dddiMode}`);
+
     // Send dddi_setup to the bridge — this does the full sequence
     const response = await (this as any).sendRequest({
       type: 'dddi_setup',
       tx_id: ecmTx,
+      dddi_mode: dddiMode,
     }, 60000); // 60s timeout — clearing 56 periodic IDs takes time
     
     if (response?.ok) {
@@ -110,7 +117,13 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
       if (streaming) {
         _ppeiDddiStreamingActive = true;
         _ppeiPeriodicFrameCount = 0;
-        ppeiLog(this, 'DDDI periodic streaming started — FRP_ACT/FRP_DES as float32 MPa from 0x5E8 frames');
+        // Track which DDDI mode the bridge is running
+        const activeMode = response.dddi_mode || dddiMode || 'frp';
+        _ppeiDddiMode = activeMode as DddiMode;
+        const modeDesc = activeMode === 'fuel_rate'
+          ? 'FUEL_RATE: RPM + fuel mm³/stroke from DPID 0xFE'
+          : 'FRP: FRP_ACT/FRP_DES as float32 MPa';
+        ppeiLog(this, `DDDI periodic streaming started — ${modeDesc} from 0x5E8 frames`);
       }
     } else {
       ppeiWarn(this, `DDDI setup partial/failed on ${txHex}: ${JSON.stringify(response)}`);
@@ -197,18 +210,31 @@ function wrapReadPid(original: Function) {
   };
 }
 
-// ── DDDI Periodic Frame Parsing (HPT IOCTL approach) ──
-// HP Tuners reads FRP as IEEE 754 float32 big-endian from ECU RAM via IOCTL 0x2D.
-// Periodic ID 0xFE = FRP Actual (4 bytes float32 MPa from RAM 0x014F08)
-// Periodic ID 0xFD = FRP Desired (4 bytes float32 MPa from RAM 0x0225D8)
-// Formula: float32_BE(bytes[1..4]) * 145.038 = PSI
+// ── DDDI Periodic Frame Parsing (supports FRP mode + fuel_rate mode) ──
+// Mode 'frp' (default): HP Tuners IOCTL approach
+//   Periodic ID 0xFE = FRP Actual (4 bytes float32 MPa from RAM 0x014F08)
+//   Periodic ID 0xFD = FRP Desired (4 bytes float32 MPa from RAM 0x0225D8)
+//   Formula: float32_BE(bytes[1..4]) * 145.038 = PSI
+// Mode 'fuel_rate': HPT fuel rate DDDI (from IntelliSpy capture 2026-04-24)
+//   DPID 0xFE layout: byte0=0xFE, bytes1-2=RPM (uint16 ×0.25), byte3=fuel_rate (uint8 mm³/stroke)
+//   No IOCTL needed. Default session only. Verified: idle=6 mm³, elevated=8-14 mm³.
 const DDDI_PERIODIC_ARB_ID = 0x5E8;
 const MPA_TO_PSI = 145.038;
 
-// Map periodic ID -> PID info for injection into readPids
-const PERIODIC_ID_MAP: Record<number, { did: number; shortName: string; unit: string }> = {
+// DDDI mode tracking — set by dddi_setup response
+type DddiMode = 'frp' | 'fuel_rate';
+let _ppeiDddiMode: DddiMode = 'frp';
+
+// Map periodic ID -> PID info for FRP mode
+const PERIODIC_ID_MAP_FRP: Record<number, { did: number; shortName: string; unit: string }> = {
   0xFE: { did: 0x328A, shortName: 'FRP_ACT', unit: 'PSI' },
   0xFD: { did: 0x131F, shortName: 'FRP_DES', unit: 'PSI' },
+};
+// Map periodic ID -> PID info for fuel_rate mode
+// DPID 0xFE contains BOTH RPM and fuel rate in a single frame
+const FUEL_RATE_DPID_FE = {
+  rpm: { did: 0x000C, shortName: 'RPM_DDDI', unit: 'RPM' },
+  fuelRate: { did: 0x245D, shortName: 'FUEL_INJ_QTY', unit: 'mm³' },
 };
 
 // Storage for latest periodic values (keyed by DID)
@@ -226,12 +252,10 @@ let _ppeiPeriodicFrameCount = 0;
 let _ppeiDddiStreamingActive = false;
 // Store a reference to the connection instance so parseDddiPeriodicFrame can emit('log')
 let _ppeiConnectionRef: any = null;
-
 // Reusable DataView for float32 decoding
 const _float32Buf = new ArrayBuffer(4);
 const _float32View = new DataView(_float32Buf);
 const _float32Bytes = new Uint8Array(_float32Buf);
-
 function decodeFloat32BE(b0: number, b1: number, b2: number, b3: number): number {
   _float32Bytes[0] = b0;
   _float32Bytes[1] = b1;
@@ -239,16 +263,58 @@ function decodeFloat32BE(b0: number, b1: number, b2: number, b3: number): number
   _float32Bytes[3] = b3;
   return _float32View.getFloat32(0, false); // big-endian
 }
-
 function parseDddiPeriodicFrame(data: number[]): void {
-  if (!data || data.length < 5) return; // Need at least periodicID + 4 bytes float32
+  if (!data || data.length < 4) return; // Need at least periodicID + some data
   const periodicId = data[0];
-  const pidInfo = PERIODIC_ID_MAP[periodicId];
-  if (!pidInfo) return; // Not a periodic ID we care about
   
   _ppeiPeriodicFrameCount++;
   _ppeiDddiStreamingActive = true;
   const now = Date.now();
+
+  // ── Fuel Rate Mode: DPID 0xFE = RPM (uint16 ×0.25) + fuel_rate (uint8 mm³/stroke) ──
+  if (_ppeiDddiMode === 'fuel_rate' && periodicId === 0xFE) {
+    if (data.length < 4) return; // Need at least: DPID + 2 RPM bytes + 1 fuel byte
+    const rpmRaw = (data[1] << 8) | data[2];
+    const rpm = rpmRaw * 0.25;
+    const fuelRate = data[3]; // integer mm³/stroke, no scaling
+
+    // Store RPM from DDDI
+    if (Number.isFinite(rpm) && rpm >= 0 && rpm < 10000) {
+      _ppeiPeriodicValues.set(FUEL_RATE_DPID_FE.rpm.did, {
+        did: FUEL_RATE_DPID_FE.rpm.did,
+        shortName: FUEL_RATE_DPID_FE.rpm.shortName,
+        value: rpm,
+        unit: FUEL_RATE_DPID_FE.rpm.unit,
+        rawBytes: [data[1], data[2]],
+        timestamp: now,
+      });
+    }
+    // Store fuel injection quantity
+    if (fuelRate >= 0 && fuelRate <= 255) {
+      _ppeiPeriodicValues.set(FUEL_RATE_DPID_FE.fuelRate.did, {
+        did: FUEL_RATE_DPID_FE.fuelRate.did,
+        shortName: FUEL_RATE_DPID_FE.fuelRate.shortName,
+        value: fuelRate,
+        unit: FUEL_RATE_DPID_FE.fuelRate.unit,
+        rawBytes: [data[3]],
+        timestamp: now,
+      });
+    }
+
+    // Log first 10 frames and every 100th
+    if (_ppeiPeriodicFrameCount <= 10 || _ppeiPeriodicFrameCount % 100 === 0) {
+      const hexStr = data.slice(0, 5).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+      const msg = `DDDI fuel_rate #${_ppeiPeriodicFrameCount}: [${hexStr}] ` +
+        `RPM=${rpm.toFixed(0)} | FUEL_INJ_QTY=${fuelRate} mm³/stroke`;
+      ppeiLog(_ppeiConnectionRef, msg);
+    }
+    return;
+  }
+
+  // ── FRP Mode: standard float32 decode ──
+  if (data.length < 5) return; // Need periodicID + 4 bytes float32
+  const pidInfo = PERIODIC_ID_MAP_FRP[periodicId];
+  if (!pidInfo) return;
   
   // Decode bytes 1-4 as IEEE 754 float32 big-endian (MPa)
   const mpa = decodeFloat32BE(data[1], data[2], data[3], data[4]);
@@ -278,6 +344,7 @@ function parseDddiPeriodicFrame(data: number[]): void {
     ppeiLog(_ppeiConnectionRef, msg);
   }
 }
+
 
 /**
  * ── PATCH 4: openWebSocket wrapper ──
@@ -356,6 +423,9 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
     const readings: any[] = [];
+    // Store desired DDDI mode on the connection instance so ensureGmLiveDataSession can read it
+    const hasFuelRatePid = pids.some((p: any) => p.pid === 0x245D);
+    (this as any)._desiredDddiMode = hasFuelRatePid ? "fuel_rate" : "frp";
 
     // ══════════════════════════════════════════════════════════════════════
     // HYBRID MODE: When DDDI periodic streaming is active, FRP_ACT and
@@ -368,7 +438,11 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     // ══════════════════════════════════════════════════════════════════════
     const isStreaming = _ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0;
     // PIDs that come from DDDI periodic frames — exclude from batch reads
-    const DDDI_PERIODIC_DIDS = new Set([0x328A, 0x131F]); // FRP_ACT, FRP_DES
+    // FRP mode: 0x328A (FRP_ACT), 0x131F (FRP_DES)
+    // Fuel rate mode: 0x245D (FUEL_INJ_QTY) — RPM (0x000C) still comes from Mode 01
+    const DDDI_PERIODIC_DIDS = _ppeiDddiMode === 'fuel_rate'
+      ? new Set([0x245D])
+      : new Set([0x328A, 0x131F]);
 
     // Filter out DDDI PIDs from Mode 22 batch when streaming
     const batchMode22Pids = isStreaming

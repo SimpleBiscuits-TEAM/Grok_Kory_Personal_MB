@@ -241,21 +241,35 @@ _DDDI_POS_RESP = {0x2D: 0x6D, 0x2C: 0x6C, 0xAA: 0xEA}
 # Periodic response arb ID (ECU streams on this after DDDI setup)
 DDDI_PERIODIC_ARB_ID = 0x5E8
 
+# ── Fuel Rate DDDI Mode (from IntelliSpy capture of HPT fuel rate datalogging) ──
+# HPT sends exactly: 06 2C FE 00 0C 24 5D 00
+# No IOCTL 0x2D needed. No extended session needed. Default session only.
+# DPID 0xFE stream layout: byte0=0xFE, bytes1-2=RPM (uint16 ×0.25), byte3=fuel_rate (uint8 mm³/stroke)
+# Verified values: idle=6 mm³, elevated RPM=8-14 mm³
+_FUEL_RATE_DDDI_DEFINE = bytes([0x2C, 0xFE, 0x00, 0x0C, 0x24, 0x5D])  # HPT's exact command
+_FUEL_RATE_PERIODIC_IDS = [0xFE]  # Only DPID 0xFE (no 0xFD)
 
-async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict:
-    """GM-specific DDDI session setup — exact same logic as original, now in its own function.
+# DDDI mode constants
+DDDI_MODE_FRP = 'frp'          # Default: FRP Actual + FRP Desired (IOCTL float32)
+DDDI_MODE_FUEL_RATE = 'fuel_rate'  # HPT fuel rate: RPM + fuel mm³/stroke (no IOCTL)
 
-    Execute the HPT-style DDDI setup: IOCTL 0x2D for RAM reads + DDDI 0x2C + periodic start.
-    From BUSMASTER capture of HP Tuners FRP datalogging (2026-04-23):
-      1. Stop any existing periodic transmissions (0xAA 00 = stopSending per GMW3110)
-      2. Clear all old DDDI periodic definitions (0x2C FE 00 XX x 56) → UNLOCKS Mode 22
-      3. IOCTL 0x2D to set up ECU RAM data sources (FE00=FRP_ACT, FE01=FRP_DES)
-      4. DDDI 0x2C to map periodic IDs (FE, FD) to IOCTL sources
-      5. Start periodic streaming (0xAA 04 FE FD)
 
-    The 0x5E8 frames contain IEEE 754 float32 big-endian values in MPa.
+async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mode: str = DDDI_MODE_FRP) -> dict:
+    """GM-specific DDDI session setup.
+
+    Supports two modes:
+      - 'frp' (default): IOCTL 0x2D + DDDI 0x2C for FRP_ACT/FRP_DES (float32 MPa)
+      - 'fuel_rate': HPT's exact fuel rate command (no IOCTL, default session)
+        DPID 0xFE = RPM (uint16 ×0.25) + fuel_rate (uint8 mm³/stroke)
+
+    Both modes:
+      1. Stop existing periodic transmissions (0xAA 00)
+      2. Clear all old DDDI periodic definitions
+      3. (FRP only) IOCTL 0x2D for RAM data sources
+      4. DDDI 0x2C to define periodic IDs
+      5. Start periodic streaming (0xAA 04 ...)
     """
-    log.info(f"[PPEI] GM session setup: HPT-style DDDI for TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
+    log.info(f"[PPEI] GM session setup: mode={dddi_mode} TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
     start = time.time()
 
     # Ensure CAN bus and protocol are ready
@@ -288,9 +302,16 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
         except Exception as e:
             log.warning(f"[PPEI] Could not update CAN filters: {e}")
 
+    # Select DDDI payloads and periodic IDs based on mode
+    is_fuel_rate = dddi_mode == DDDI_MODE_FUEL_RATE
+    ioctl_payloads = [] if is_fuel_rate else _IOCTL_SETUP
+    dddi_payloads = [_FUEL_RATE_DDDI_DEFINE] if is_fuel_rate else _DDDI_DEFINE_PERIODIC
+    periodic_ids = _FUEL_RATE_PERIODIC_IDS if is_fuel_rate else _PERIODIC_STREAM_IDS
+    mode_label = 'FUEL_RATE (RPM+mm³/stroke)' if is_fuel_rate else 'FRP (float32 MPa)'
+
     ok_count = 0
     fail_count = 0
-    total_steps = 1 + len(_DDDI_CLEAR_PERIODIC_IDS) + len(_IOCTL_SETUP) + len(_DDDI_DEFINE_PERIODIC) + 1
+    total_steps = 1 + len(_DDDI_CLEAR_PERIODIC_IDS) + len(ioctl_payloads) + len(dddi_payloads) + 1
     step = 0
 
     # ── Phase 1: Stop any existing periodic reads ──
@@ -323,28 +344,31 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
         await asyncio.sleep(0.006)
     log.info(f"[PPEI] GM Phase 2 complete: {clear_ok} positive, {clear_nrc} NRC (both OK)")
 
-    # ── Phase 3: IOCTL 0x2D to configure ECU RAM data sources ──
-    log.info(f"[PPEI] GM Phase 3: Setting up {len(_IOCTL_SETUP)} IOCTL RAM data sources")
+    # ── Phase 3: IOCTL 0x2D to configure ECU RAM data sources (FRP mode only) ──
     ioctl_ok = 0
-    for payload in _IOCTL_SETUP:
-        did_hi, did_lo = payload[1], payload[2]
-        log.info(f"[PPEI] IOCTL 0x2D DID=0x{did_hi:02X}{did_lo:02X}: {' '.join(f'{b:02X}' for b in payload)}")
-        resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
-        step += 1
-        if resp:
-            ioctl_ok += 1
-            ok_count += 1
-            log.info(f"[PPEI] Step {step}/{total_steps} OK: IOCTL 0x{did_hi:02X}{did_lo:02X} -> 0x6D positive")
-        else:
-            fail_count += 1
-            log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: IOCTL 0x{did_hi:02X}{did_lo:02X}")
-        await asyncio.sleep(0.015)
-    log.info(f"[PPEI] GM Phase 3 complete: {ioctl_ok}/{len(_IOCTL_SETUP)} IOCTL sources configured")
+    if ioctl_payloads:
+        log.info(f"[PPEI] GM Phase 3: Setting up {len(ioctl_payloads)} IOCTL RAM data sources")
+        for payload in ioctl_payloads:
+            did_hi, did_lo = payload[1], payload[2]
+            log.info(f"[PPEI] IOCTL 0x2D DID=0x{did_hi:02X}{did_lo:02X}: {' '.join(f'{b:02X}' for b in payload)}")
+            resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
+            step += 1
+            if resp:
+                ioctl_ok += 1
+                ok_count += 1
+                log.info(f"[PPEI] Step {step}/{total_steps} OK: IOCTL 0x{did_hi:02X}{did_lo:02X} -> 0x6D positive")
+            else:
+                fail_count += 1
+                log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: IOCTL 0x{did_hi:02X}{did_lo:02X}")
+            await asyncio.sleep(0.015)
+        log.info(f"[PPEI] GM Phase 3 complete: {ioctl_ok}/{len(ioctl_payloads)} IOCTL sources configured")
+    else:
+        log.info(f"[PPEI] GM Phase 3: SKIPPED (fuel_rate mode — no IOCTL needed)")
 
-    # ── Phase 4: DDDI 0x2C to map periodic IDs to IOCTL sources ──
-    log.info(f"[PPEI] GM Phase 4: Defining {len(_DDDI_DEFINE_PERIODIC)} periodic ID mappings")
+    # ── Phase 4: DDDI 0x2C to define periodic IDs ──
+    log.info(f"[PPEI] GM Phase 4: Defining {len(dddi_payloads)} periodic ID mappings ({mode_label})")
     dddi_ok = 0
-    for payload in _DDDI_DEFINE_PERIODIC:
+    for payload in dddi_payloads:
         periodic_id = payload[1]
         log.info(f"[PPEI] DDDI 0x2C periodic 0x{periodic_id:02X}: {' '.join(f'{b:02X}' for b in payload)}")
         resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0)
@@ -357,19 +381,20 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
             fail_count += 1
             log.warning(f"[PPEI] Step {step}/{total_steps} FAILED: DDDI define 0x{periodic_id:02X}")
         await asyncio.sleep(0.015)
-    log.info(f"[PPEI] GM Phase 4 complete: {dddi_ok}/{len(_DDDI_DEFINE_PERIODIC)} periodic IDs defined")
+    log.info(f"[PPEI] GM Phase 4 complete: {dddi_ok}/{len(dddi_payloads)} periodic IDs defined")
 
-    # ── Phase 5: Start periodic streaming (0xAA 04 FE FD) ──
+    # ── Phase 5: Start periodic streaming ──
     if fail_count == 0:
-        start_payload = bytes([0xAA, 0x04] + _PERIODIC_STREAM_IDS)
-        log.info(f"[PPEI] GM Phase 5: Starting periodic streaming: 0xAA 04 {' '.join(f'{x:02X}' for x in _PERIODIC_STREAM_IDS)}")
+        start_payload = bytes([0xAA, 0x04] + periodic_ids)
+        log.info(f"[PPEI] GM Phase 5: Starting periodic streaming: 0xAA 04 {' '.join(f'{x:02X}' for x in periodic_ids)}")
         resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, start_payload, timeout=0.5)
         if resp:
             ok_count += 1
             log.info(f"[PPEI] GM Phase 5 OK: Periodic streaming started on 0x{DDDI_PERIODIC_ARB_ID:03X}")
-            log.info(f"[PPEI] FE=FRP_ACT (float32 MPa), FD=FRP_DES (float32 MPa)")
+            log.info(f"[PPEI] Mode: {mode_label}")
             bridge._ppei_dddi_streaming = True
-            bridge._ppei_dddi_periodic_ids = _PERIODIC_STREAM_IDS
+            bridge._ppei_dddi_mode = dddi_mode  # Track which mode is active
+            bridge._ppei_dddi_periodic_ids = periodic_ids
         else:
             log.warning("[PPEI] GM Phase 5: 0xAA start may have NRC'd")
             bridge._ppei_dddi_streaming = False
@@ -382,10 +407,10 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
     success = True
     streaming = getattr(bridge, '_ppei_dddi_streaming', False)
     log.info(
-        f"[PPEI] GM DDDI setup complete in {elapsed:.0f}ms: "
+        f"[PPEI] GM DDDI setup complete in {elapsed:.0f}ms: mode={dddi_mode}, "
         f"cleared {len(_DDDI_CLEAR_PERIODIC_IDS)} periodic IDs, "
-        f"IOCTL {ioctl_ok}/{len(_IOCTL_SETUP)}, DDDI {dddi_ok}/{len(_DDDI_DEFINE_PERIODIC)}"
-        f"{', PERIODIC STREAMING ACTIVE on 0x5E8 (FRP float32 MPa)' if streaming else ''}"
+        f"IOCTL {ioctl_ok}/{len(ioctl_payloads)}, DDDI {dddi_ok}/{len(dddi_payloads)}"
+        f"{f', PERIODIC STREAMING ACTIVE on 0x5E8 ({mode_label})' if streaming else ''}"
     )
 
     return {
@@ -393,13 +418,14 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
         "id": req_id,
         "ok": success,
         "manufacturer": MANUFACTURER_GM,
+        "dddi_mode": dddi_mode,
         "clear_ok": clear_ok,
         "clear_nrc": clear_nrc,
         "ioctl_ok": ioctl_ok,
         "dddi_ok": dddi_ok,
         "elapsed_ms": round(elapsed, 1),
         "streaming": streaming,
-        "periodic_ids": list(_PERIODIC_STREAM_IDS) if streaming else [],
+        "periodic_ids": list(periodic_ids) if streaming else [],
     }
 
 
@@ -931,6 +957,28 @@ async def _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# UDS Negative Response Code (NRC) lookup — ISO 14229-1 Table A.1
+# ═══════════════════════════════════════════════════════════════════════════════
+_NRC_NAMES = {
+    0x10: 'generalReject', 0x11: 'serviceNotSupported',
+    0x12: 'subFunctionNotSupported', 0x13: 'incorrectMessageLength',
+    0x14: 'responseTooLong', 0x21: 'busyRepeatRequest',
+    0x22: 'conditionsNotCorrect', 0x24: 'requestSequenceError',
+    0x25: 'noResponseFromSubNetComponent', 0x26: 'failurePreventsExecution',
+    0x31: 'requestOutOfRange', 0x33: 'securityAccessDenied',
+    0x35: 'invalidKey', 0x36: 'exceededNumberOfAttempts',
+    0x37: 'requiredTimeDelayNotExpired', 0x70: 'uploadDownloadNotAccepted',
+    0x71: 'transferDataSuspended', 0x72: 'generalProgrammingFailure',
+    0x73: 'wrongBlockSequenceCounter', 0x78: 'responsePending',
+    0x7E: 'subFunctionNotSupportedInActiveSession',
+    0x7F: 'serviceNotSupportedInActiveSession',
+}
+
+def decodeNRC(nrc: int) -> str:
+    return _NRC_NAMES.get(nrc, f'unknown(0x{nrc:02X})')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Patch 5: batch_read_dids — read multiple DIDs in a tight CAN loop
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1062,7 +1110,18 @@ async def _ppei_handle_message(self, msg: dict):
 
             if payload and payload[0] == 0x7F and len(payload) >= 3 and payload[1] == 0x22:
                 nrc = payload[2]
-                log.debug(f"[PPEI] batch NRC 0x{nrc:02X} received")
+                # Extract the DID that was rejected from the request we sent
+                # NRC response format: [0x7F, 0x22, NRC_code]
+                # We need to figure out which DID this NRC belongs to.
+                # Since we send DIDs sequentially and the ECU responds in order,
+                # the first pending DID is the one that got NRC'd.
+                if pending:
+                    nrc_did = min(pending)  # earliest pending DID
+                    nrc_errors[nrc_did] = nrc
+                    pending.discard(nrc_did)
+                    log.warning(f"[PPEI] batch NRC 0x{nrc:02X} for DID 0x{nrc_did:04X} ({decodeNRC(nrc)})")
+                else:
+                    log.warning(f"[PPEI] batch NRC 0x{nrc:02X} received but no pending DIDs")
                 continue
 
             if payload and payload[0] == 0x62 and len(payload) >= 3:
@@ -1522,11 +1581,15 @@ async def _ppei_handle_message_v2(self, msg: dict):
         tx_id = msg.get("tx_id", MANUFACTURER_DEFAULTS.get(manufacturer, {}).get("tx_id", 0x7E0))
         rx_id_param = msg.get("rx_id", None)
         rx_id = get_rx_id(tx_id, manufacturer, rx_id_param)
+        dddi_mode = msg.get("dddi_mode", DDDI_MODE_FRP)  # 'frp' or 'fuel_rate'
         log.info(
             f"[PPEI] Universal Bridge — mode: {manufacturer} | filter: {filter_mode} | "
-            f"session: dddi_setup | TX=0x{tx_id:03X} RX=0x{rx_id:03X}"
+            f"session: dddi_setup | dddi_mode: {dddi_mode} | TX=0x{tx_id:03X} RX=0x{rx_id:03X}"
         )
         setup_fn = SESSION_SETUP.get(manufacturer, _gm_session_setup)
+        # Pass dddi_mode only to GM setup (other manufacturers ignore it)
+        if manufacturer == MANUFACTURER_GM or setup_fn == _gm_session_setup:
+            return await setup_fn(self, tx_id, rx_id, req_id, dddi_mode=dddi_mode)
         return await setup_fn(self, tx_id, rx_id, req_id)
 
     # ── dddi_teardown ──
