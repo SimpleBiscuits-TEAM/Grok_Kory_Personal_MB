@@ -1334,6 +1334,7 @@ export const PID_PRESETS: PIDPreset[] = [
       0xDD03,   // Injector Pulse Width DDDI (ms, float32)
       0xDD04,   // Cylinder Airmass (g)
       0xDD07,   // Desired Boost Pressure DDDI (PSI)
+      0xDD08,   // Boost / Vacuum DDDI (PSI gauge)
     ],
   },
 ];
@@ -1427,6 +1428,12 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD08, name: 'Boost / Vacuum (DDDI)', shortName: 'BOOST_VAC_DDDI',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only — gauge pressure
   },
   {
     // HPT "Injection Timing Correction" — DID 0x208B

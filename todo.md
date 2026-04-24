@@ -2145,3 +2145,9 @@
 - [x] Remove 50K frame buffer cap — raise to 500K to match BusMaster-level capture capability
 - [x] Add frame count display to UI so user knows how many frames are captured
 - [x] Add memory warning if buffer exceeds 300K frames
+
+## Boost/MAP Scaling Fix + Decode Methodology Doc (April 24, 2026)
+- [x] Fix Desired Boost — was stored under 0x20E3 (wrong label). Created virtual DID 0xDD08 for Boost/Vacuum
+- [x] Fix Actual Boost — Boost/Vacuum now uses VDID_BOOST_VACUUM (0xDD08) with correct gauge PSI display
+- [x] Fix MAP scaling — was using standard 0.145038 (kPa→PSI), now uses DDDI-specific 0.244574 (validated: 14.19 psi at idle)
+- [x] Document HPT decode methodology — docs/hpt-decode-methodology.md (full playbook for new vehicles)

@@ -237,6 +237,7 @@ const VDID_INJ_PULSE_WIDTH = 0xDD03; // IOCTL slot 3: Injector Pulse Width Cyl 1
 const VDID_CYL_AIRMASS = 0xDD04;    // IOCTL slot 4: Cylinder Airmass (mg)
 const VDID_UNKNOWN_SLOT5 = 0xDD05;   // IOCTL slot 5: Unknown (0 at stationary)
 const VDID_DES_FRP_FLOAT32 = 0xDD06; // IOCTL slot 6: Desired FRP (MPa, float32)
+const VDID_BOOST_VACUUM = 0xDD08;    // DID 0x20E3 in DDDI = Boost/Vacuum (gauge PSI)
 
 // Map periodic ID -> PID info for FRP mode
 const PERIODIC_ID_MAP_FRP: Record<number, { did: number; shortName: string; unit: string }> = {
@@ -338,11 +339,13 @@ function parseDddiPeriodicFrame(data: number[]): void {
         // DPID 0xFB: IOCTL[3](f32) + 0x303A(2B filler) + PID 0x0B(1B)
         // bytes[1:5] = Injector Pulse Width Cyl 1 (µs, float32 BE) -> / 1000 = ms
         // bytes[5:7] = constant 0x28A0 (filler, ignored)
-        // byte[7]    = Intake MAP (kPa, uint8) — OBD PID 0x0B
+        // byte[7]    = Intake MAP (uint8) — OBD PID 0x0B in DDDI context
+        //   DDDI returns non-standard scaling: 1 count = 1.6862 kPa = 0.244574 psi
+        //   (validated: HPT idle=14.19psi @ byte=58, peak=17.85psi @ byte=73, ratio=0.244573 at both)
         const injPwUs = decodeFloat32BE(data[1], data[2], data[3], data[4]);
         const injPwMs = injPwUs / 1000;
-        const mapKpa = data[7];
-        const mapPsi = mapKpa * 0.145038;
+        const mapRaw = data[7];
+        const mapPsi = mapRaw * 0.244574;
         storeVal(VDID_INJ_PULSE_WIDTH, 'INJ_PW', injPwMs, 'ms', [data[1], data[2], data[3], data[4]]);
         storeVal(0x000B, 'MAP', mapPsi, 'PSI', [data[7]]);
         break;
@@ -407,7 +410,7 @@ function parseDddiPeriodicFrame(data: number[]): void {
         const rpm = rpmRaw / 4;
         const desBoostRaw = (data[5] << 8) | data[6];
         const desBoostPsi = (desBoostRaw / 100) * 0.145038;
-        storeVal(0x20E3, 'BOOST', boostPsi, 'PSI', [data[1], data[2]]);
+        storeVal(VDID_BOOST_VACUUM, 'BOOST_VAC', boostPsi, 'PSI', [data[1], data[2]]);
         storeVal(0x000C, 'RPM', rpm, 'RPM', [data[3], data[4]]);
         // Use a virtual DID for Desired Boost to avoid collision with 0x328A (FRP_ACT in Mode 22)
         // In hpt_common mode, 0x328A on DPID 0xF7 is Desired Boost, not FRP
@@ -618,7 +621,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     const DDDI_PERIODIC_DIDS = _ppeiDddiMode === 'hpt_common'
       ? new Set([
           // IOCTL float32 channels (no Mode 22 DID equivalent)
-          0xDD00, 0xDD01, 0xDD02, 0xDD03, 0xDD04, 0xDD05, 0xDD06,
+          0xDD00, 0xDD01, 0xDD02, 0xDD03, 0xDD04, 0xDD05, 0xDD06, 0xDD08,
           // Standard DIDs that HPT packs into DPIDs
           0x245D, 0x1543, 0x1540, 0x20E3, 0x20B4,
           // FRP comes from IOCTL float32 in hpt_common (higher precision than Mode 22)
