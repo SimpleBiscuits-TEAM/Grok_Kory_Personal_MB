@@ -2056,3 +2056,9 @@
 - [ ] Add inter-batch pacing/delays to prevent flooding the CAN bus
 - [ ] Consider adding CAN bus load monitor (frames/sec, utilization %) to datalogger UI
 - [ ] Fix reconnect/repoll issue when adding PIDs mid-session
+
+## Multi-Platform PID Expansion (Universal Scantool)
+- [x] Add FORD_EXTENDED_PIDS array — 6.7L Power Stroke Mode 22 signals (FRP, Main Inj Qty, Pilot Inj, Desired Boost)
+- [x] Add additional GM Global A / L5P extended PIDs (Desired Boost 0x1E3B, Actual Boost 0x1E3C from commaai/opendbc)
+- [x] Wire new arrays into ALL_PIDS / VIN-based auto-detection — added to PPEI Suggested preset + Duramax Gen 1/Gen 2 profiles
+- [x] Verify no duplicate shortNames or PID numbers across arrays — all new PIDs have unique shortNames, no conflicts

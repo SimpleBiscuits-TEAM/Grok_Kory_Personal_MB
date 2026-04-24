@@ -710,7 +710,7 @@ export const PID_PRESETS: PIDPreset[] = [
   {
     name: 'Full Duramax (Gen 1 / 2017-2023)',
     description: 'RPM, Boost, Rail Pressure, MAF, ECT, EGT, Load — E41 ECM',
-    pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04],
+    pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04, 0x1E3B, 0x1E3C],
   },
   {
     name: 'Full Duramax (Gen 2 / 2024+)',
@@ -727,6 +727,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x114D,   // Intake Air Temp Diesel
       0x20AC,   // IPW Cyl 1
       0x20B4,   // IBR Cyl 1
+      0x1E3B,   // Desired Boost Pressure (GM)
+      0x1E3C,   // Actual Boost Pressure (GM)
     ],
   },
   {
@@ -938,6 +940,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x13C8,   // Engine Coolant Temp HPT (°F)
       0x232C,   // Ambient Air Temp Diesel (°F)
       0x30BE,   // Diesel Commanded Throttle (%)
+      0x1E3B,   // Desired Boost Pressure (GM)
+      0x1E3C,   // Actual Boost Pressure (GM)
       // ── Mode 22 Extended — Exhaust / EGT (confirmed) ──
       0x0069,   // EGT Bank Extended (multi-frame)
       // ── Mode 22 Extended — Emissions (HPT-verified) ──
@@ -1840,6 +1844,23 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E2',
     formula: ([a, b]) => ((a * 256) + b) * 0.621371,
   },
+  // ── GM Global A Boost Pressure (commaai/opendbc) ──
+  {
+    // Desired Boost Pressure — DID 0x1E3B
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3B, name: 'Desired Boost Pressure (GM)', shortName: 'BOOST_DES',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
+  {
+    // Actual Boost Pressure — DID 0x1E3C
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3C, name: 'Actual Boost Pressure (GM)', shortName: 'BOOST_ACT',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
 ];
 
 //// ─── Ford Mode 22 Extended PIDs ───────────────────────────────────────────
@@ -2281,6 +2302,34 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
     unit: 'PSI', min: 0.0, max: 145.0, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'any',
     formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
+  },
+  // ══════════════════════════════════════════════════════════════════════
+  // 6.7L Power Stroke (2011–2025) — Community-verified Mode 22 signals
+  // Sourced from Torque Pro verified lists + Ford truck forums
+  // ══════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x2201, name: 'Fuel Rail Pressure (Ford)', shortName: 'FRP_FORD',
+    unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038,
+  },
+  {
+    pid: 0x2203, name: 'Main Injection Quantity', shortName: 'MAIN_INJ_QTY',
+    unit: 'mm³', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x2205, name: 'Pilot Injection Quantity', shortName: 'PILOT_INJ',
+    unit: 'mm³', min: 0, max: 50, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x2207, name: 'Desired Boost Pressure (Ford)', shortName: 'BOOST_DES_FORD',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
   },
 ];
 
