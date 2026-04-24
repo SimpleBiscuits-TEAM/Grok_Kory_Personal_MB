@@ -2199,3 +2199,24 @@
 - [x] Datalogger, PPEI Datalogger, and Analyzer panels now kept mounted (CSS display:none) instead of conditional rendering — state persists across tab switches
 - [x] Data persists until user starts a new log or clears it — readingHistory maintained while panel is mounted
 - [x] User can freely switch between datalogger and analyzer tabs without losing any data
+
+## Gauge Layout Too Tall (April 24, 2026)
+- [x] Reduced gauge card height/padding — compact layout with smaller font sizes and tighter spacing
+- [x] Made gauge grid more compact (reduced gap, margins, category header spacing)
+
+## Fix ANALYZE LIVE Button (April 24, 2026)
+- [x] Fixed: both handleOpenInAnalyzer and handleAutoExportToAnalyzer now use exportSessionToCSV (shortName format) instead of sessionToAnalyzerCSV (HP Tuners format)
+- [x] Analyzer's parseDataloggerCSV now correctly parses the datalogger format with 'Timestamp (ms)' / 'Elapsed (s)' headers
+- [x] CSV format matches exactly what the user's actual datalogs look like
+
+## Erik-Style Datalog Analysis Viewer (April 24, 2026)
+- [x] Studied Erik's TalonLogViewer — 4 stacked sections, channel panel, synced crosshair, zoom/pan, minimap
+- [x] Built OBDDatalogViewer component adapted from TalonLogViewer for OBD PID data
+- [x] 4 stacked chart sections with up to 4 overlaid channels each
+- [x] Left panel with all channels showing live/cursor values, click-to-assign to sections
+- [x] Synced vertical crosshair across all sections
+- [x] Per-channel color coding with Y-axis labels
+- [x] Mouse wheel zoom + drag pan synced across sections
+- [x] Minimap at bottom showing zoom position
+- [x] Smart auto-assignment by category (engine, turbo, fuel, temps)
+- [x] Replaced LiveChart in both list and gauge views with OBDDatalogViewer

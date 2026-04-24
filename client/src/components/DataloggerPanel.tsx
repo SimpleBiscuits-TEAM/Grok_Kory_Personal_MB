@@ -33,6 +33,7 @@ import { PCANConnection } from '@/lib/pcanConnection';
 import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
+import OBDDatalogViewer from '@/components/OBDDatalogViewer';
 import LiveGaugeDashboard from '@/components/gauges/LiveGaugeDashboard';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
@@ -75,38 +76,32 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
 
   return (
     <div style={{
-      background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
-      backdropFilter: 'blur(10px)',
-      border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: '12px',
-      padding: '14px',
-      minWidth: '160px',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+      background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '6px',
+      padding: '6px 8px',
+      minWidth: '120px',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
         {isMode22 && (
-          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'rgba(255,127,0,0.2)', padding: '2px 6px', borderRadius: '3px', fontWeight: 700 }}>
+          <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.orange, background: 'rgba(255,127,0,0.2)', padding: '1px 4px', borderRadius: '2px', fontWeight: 700 }}>
             M22
           </span>
         )}
-        <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, letterSpacing: '0.08em', textTransform: 'uppercase', flex: 1 }}>
+        <span style={{ fontFamily: sFont.body, fontSize: '0.58rem', color: sColor.textDim, letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {pid.shortName}
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '10px' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '1.9rem', fontWeight: 700, color: getColor(pct), lineHeight: 1, transition: 'color 0.3s ease-out' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', marginBottom: '3px' }}>
+        <span style={{ fontFamily: sFont.mono, fontSize: '1.3rem', fontWeight: 700, color: getColor(pct), lineHeight: 1, transition: 'color 0.3s ease-out' }}>
           {reading ? (Number.isInteger(value) ? value : value.toFixed(1)) : '---'}
         </span>
-        <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim }}>
+        <span style={{ fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textDim }}>
           {pid.unit}
         </span>
       </div>
-      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginBottom: '8px' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.2s ease-out', borderRadius: '3px', boxShadow: `0 0 12px ${getColor(pct)}80` }} />
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.min}</span>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.max}</span>
+      <div style={{ width: '100%', height: '3px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.2s ease-out', borderRadius: '2px' }} />
       </div>
     </div>
   );
@@ -1799,7 +1794,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   }, [addLog]);
 
   const handleOpenInAnalyzer = useCallback((session: LogSession) => {
-    const csv = sessionToAnalyzerCSV(session);
+    const csv = exportSessionToCSV(session);
     const filename = `datalog_${new Date(session.startTime).toISOString().replace(/[:.]/g, '-')}.csv`;
     if (onOpenInAnalyzer) {
       onOpenInAnalyzer(csv, filename);
@@ -1839,12 +1834,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       readings: new Map(readingHistory),
       vehicleInfo: vehicleInfo || undefined,
     };
-    const csv = sessionToAnalyzerCSV(session);
+    const csv = exportSessionToCSV(session);
     const filename = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
     if (onOpenInAnalyzer) {
       onOpenInAnalyzer(csv, filename);
     }
-    addLog('Live data sent to Analyzer');
+    addLog('Live data exported and sent to Analyzer');
   }, [readingHistory, vehicleFilteredPids, selectedPids, sampleRateMs, vehicleInfo, onOpenInAnalyzer, addLog]);
 
   const handleDeleteSession = useCallback((id: string) => {
@@ -2797,28 +2792,28 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                   return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
                 });
                 return (
-                  <div style={{ marginBottom: '16px' }}>
-                    <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '12px' }}>
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '6px' }}>
                       LIVE DATA
                     </div>
                     {sortedCats.map(cat => (
-                      <div key={cat} style={{ marginBottom: '12px' }}>
+                      <div key={cat} style={{ marginBottom: '6px' }}>
                         <div style={{
-                          display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px',
-                          paddingBottom: '4px', borderBottom: `1px solid ${sColor.borderLight}`,
+                          display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px',
+                          paddingBottom: '2px', borderBottom: `1px solid ${sColor.borderLight}`,
                         }}>
                           <span style={{ color: sColor.textDim }}>{catIcons[cat] || null}</span>
                           <span style={{
-                            fontFamily: sFont.heading, fontSize: '0.7rem', color: sColor.textDim,
-                            letterSpacing: '0.1em', textTransform: 'uppercase',
+                            fontFamily: sFont.heading, fontSize: '0.6rem', color: sColor.textDim,
+                            letterSpacing: '0.08em', textTransform: 'uppercase',
                           }}>
                             {cat}
                           </span>
-                          <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, marginLeft: 'auto' }}>
+                          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textMuted, marginLeft: 'auto' }}>
                             {grouped.get(cat)!.length}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
                           {grouped.get(cat)!.map(pid => (
                             <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
                           ))}
@@ -2829,10 +2824,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 );
               })()}
 
-              {/* Real-Time Chart */}
+              {/* Real-Time Datalog Viewer (Erik-style multi-section) */}
               {(isLogging || readingHistory.size > 0) && (
                 <div style={{ marginBottom: '16px' }}>
-                  <LiveChart
+                  <OBDDatalogViewer
                     pids={activePids}
                     readingHistory={readingHistory}
                     liveReadings={liveReadings}
@@ -2852,10 +2847,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 allAvailablePids={ALL_PIDS}
                 isLogging={isLogging}
               />
-              {/* Still show the chart below gauges */}
+              {/* Datalog Viewer below gauges */}
               {(isLogging || readingHistory.size > 0) && (
                 <div style={{ marginTop: '16px' }}>
-                  <LiveChart
+                  <OBDDatalogViewer
                     pids={activePids}
                     readingHistory={readingHistory}
                     liveReadings={liveReadings}
