@@ -2115,3 +2115,10 @@
 - [x] Verify ECU identification DIDs against GMW15862 bar code traceability — 29/29 correct
 - [x] Fix $AA stop command: [0xAA, 0x04, 0x00] → [0xAA, 0x00] per GMW3110 Table 190
 - [x] Document full verification report in docs/cross-verification-report.md
+
+## CRITICAL BUG: Bridge connects but VIN/PID scan returns 0 results
+- [ ] Fix: VIN read fails ("vehicle may not support Mode 09")
+- [ ] Fix: PID scan returns 0 standard + 0 extended PIDs
+- [ ] Fix: DID discovery scan returns 0/103 supported
+- [ ] Fix: Monitor button broken — "None of the selected PIDs are supported"
+- [ ] Root cause: likely related to $AA stop command change or bridge universal upgrade

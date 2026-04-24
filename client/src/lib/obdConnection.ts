@@ -1032,7 +1032,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Main Fuel Rate (mm³)
+      0x20E3,   // Fuel Flow Rate (raw) — under investigation
+      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
       0x1543,   // Diesel Throttle Position A
       0x1540,   // Diesel Throttle Position B
       0x0069,   // EGT Bank Extended (multi-frame)
@@ -1067,7 +1068,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x30BE,   // Diesel Commanded Throttle
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Main Fuel Rate
+      0x20E3,   // Fuel Flow Rate (raw) — under investigation
+      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
       0x208B,   // Injection Timing Correction
       0x1543,   // Diesel Throttle Position A
       0x1540,   // Diesel Throttle Position B
@@ -1104,7 +1106,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
       0x12DA,   // Injection Timing (HPT)
-      0x20E3,   // Main Fuel Rate
+      0x20E3,   // Fuel Flow Rate (raw) — under investigation
+      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
       0x208B,   // Injection Timing Correction
       0x20AC, 0x20AD, 0x20AE, 0x20AF, // IPW Cyl 1-4
       0x20B0, 0x20B1, 0x20B2, 0x20B3, // IPW Cyl 5-8
@@ -1272,7 +1275,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x208A,   // Fuel Pressure SAE (low-side, PSI)
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x12DA,   // Injection Timing (HPT °BTDC)
-      0x20E3,   // Main Fuel Rate (mm³)
+      0x20E3,   // Fuel Flow Rate (raw) — under investigation
+      0x1638,   // Fuel Rate (test) — candidate for per-injection mm³
       0x208B,   // Injection Timing Correction (°)
       0x1141,   // Fuel Tank Level (gal)
       // ── Mode 22 Extended — Turbo / Sensors (HPT-verified) ──
@@ -1358,14 +1362,28 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.001; },
   },
   {
-    // HPT "Main Fuel Rate" — DID 0x20E3
-    // Per-injection fuel quantity in mm³/stroke. This IS the HPT "Main Fuel Rate".
-    // Idle (600 RPM): 4-11 mm³ | No-load rev: 7-9 mm³ | Under load (tuned): up to 200+ mm³
-    // NOTE: Do NOT confuse with SAE PID 0x5E (ENG_FUEL_FLOW) which is total engine flow in gal/h.
-    pid: 0x20E3, name: 'Main Fuel Rate', shortName: 'FUEL_RATE',
+    // DID 0x20E3 — SUSPECTED FLOW RATE, NOT per-injection quantity
+    // Scales with RPM: idle=4-5, 3000RPM=220-300. HPT DDDI shows per-injection=6 at idle, 10 at 3000.
+    // This DID likely returns total fuel flow (mm³/s or similar), NOT mm³/stroke.
+    // Keeping for investigation — compare against 0x1638 on truck.
+    pid: 0x20E3, name: 'Fuel Flow Rate (raw)', shortName: 'FUEL_FLOW_RAW',
     unit: 'mm³', min: 0, max: 300, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    // DID 0x1638 — "Fuel Rate" from P654 Mode 22 table
+    // TEST CANDIDATE: May be per-injection fuel quantity (mm³/stroke)
+    // HPT DDDI shows: idle=6, 3000RPM no-load=10 (1 byte, no scaling)
+    // Testing multiple scaling hypotheses:
+    //   If 2-byte unsigned * 0.1: idle should be ~60 raw
+    //   If 2-byte unsigned * 1.0: idle should be ~6 raw
+    //   If 1-byte: idle should be 6 raw
+    // Starting with 2 bytes, no scaling (raw) to see what the ECU returns
+    pid: 0x1638, name: 'Fuel Rate (test)', shortName: 'FUEL_RATE_TEST',
+    unit: 'mm³', min: 0, max: 300, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // raw value — determine scaling from truck test
   },
   {
     // HPT "Injection Timing Correction" — DID 0x208B
