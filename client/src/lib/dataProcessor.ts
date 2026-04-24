@@ -42,7 +42,13 @@ export interface VehicleMeta {
   manufacturer?: string;  // 'gm' | 'ford' | 'bmw' | 'universal'
   fuelType?: string;      // 'diesel' | 'gasoline' | 'hybrid' | 'any'
   displacement?: string;
+  cylinders?: number;
   protocol?: string;
+  /** Session metadata from V-OP datalog export headers */
+  sessionName?: string;
+  durationSec?: number;
+  sampleRateMs?: number;
+  channelCount?: number;
   /** Heuristic diesel vs spark-ignition classification from columns/PIDs (see combustionInference). */
   combustionInference?: CombustionInferenceResult;
 }
@@ -274,7 +280,12 @@ function extractVehicleMeta(lines: string[]): VehicleMeta | undefined {
       case 'manufacturer': meta.manufacturer = v; break;
       case 'fueltype': meta.fuelType = v; break;
       case 'displacement': meta.displacement = v; break;
+      case 'cylinders': meta.cylinders = parseInt(v, 10) || undefined; break;
       case 'protocol': meta.protocol = v; break;
+      case 'session': meta.sessionName = v; break;
+      case 'duration': meta.durationSec = parseFloat(v) || undefined; break;
+      case 'samplerate': meta.sampleRateMs = parseInt(v, 10) || undefined; break;
+      case 'channels': meta.channelCount = parseInt(v, 10) || undefined; break;
     }
   }
 
@@ -454,8 +465,8 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   // GM extended PIDs (Mode 22) — HPT-verified replacements
   'FP_SAE': '_fp_sae',           // 0x208A Fuel Pressure SAE (low-side)
   'INJ_COR': '_inj_cor',         // 0x208B Injection Timing Correction
-  'THRTL_A': 'turboVanePosition',// 0x1543 Diesel Throttle Position A (HPT maps this to VGT)
-  'THRTL_B': 'turboVaneDesired', // 0x1540 Diesel Throttle Position B
+  'ACT_VANE': 'turboVanePosition',// 0x1543 Actual Turbo Vane Position
+  'DES_VANE': 'turboVaneDesired', // 0x1540 Desired Turbo Vane Position
   'IAT_DSL': 'intakeAirTemp',    // 0x114D Intake Air Temp Diesel
   'ECT_HPT': 'coolantTemp',      // 0x13C8 Engine Coolant Temp HPT
   'AAT_DSL': '_aat_dsl',          // 0x232C Ambient Air Temp Diesel

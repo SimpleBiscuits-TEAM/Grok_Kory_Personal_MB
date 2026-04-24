@@ -562,7 +562,7 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   // ── Fuel Injection Timing (diesel) ──
   {
-    pid: 0x5D, name: 'Fuel Injection Timing', shortName: 'INJ_TMG_STD',
+    pid: 0x5D, name: 'Fuel Injection Timing (Mode 01)', shortName: 'INJ_TMG_STD',
     unit: '°', min: -210, max: 301.992, bytes: 2, category: 'fuel',
     fuelType: 'diesel',
     formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
@@ -578,12 +578,12 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     formula: ([a]) => a - 125,
   },
   {
-    pid: 0x62, name: 'Actual Engine Torque %', shortName: 'ACT_TQ',
+    pid: 0x62, name: 'Actual Engine Torque % (Mode 01)', shortName: 'ACT_TQ',
     unit: '%', min: -125, max: 130, bytes: 1, category: 'engine',
     formula: ([a]) => a - 125,
   },
   {
-    pid: 0x63, name: 'Engine Reference Torque', shortName: 'REF_TQ',
+    pid: 0x63, name: 'Engine Reference Torque (Mode 01)', shortName: 'REF_TQ',
     unit: 'Nm', min: 0, max: 65535, bytes: 2, category: 'engine',
     formula: ([a, b]) => (a * 256) + b,
   },
@@ -1003,8 +1003,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x0C,     // RPM (Mode 01)
       0x328A,   // FRP Actual (live, PSI) — 0x30BC/0x30C1 are snapshot-only
       0x208A,   // Fuel Pressure SAE (low-side)
-      0x1543,   // Diesel Throttle Position A
-      0x1540,   // Diesel Throttle Position B
+      0x1543,   // Actual Turbo Vane Position
+      0x1540,   // Desired Turbo Vane Position
       0x12DA,   // Injection Timing (HPT)
       0x0069,   // EGT Bank Extended (multi-frame)
       0x13C8,   // Engine Coolant Temp HPT
@@ -1034,8 +1034,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x12DA,   // Injection Timing (HPT)
       0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
       0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
-      0x1543,   // Diesel Throttle Position A
-      0x1540,   // Diesel Throttle Position B
+      0x1543,   // Actual Turbo Vane Position
+      0x1540,   // Desired Turbo Vane Position
       0x0069,   // EGT Bank Extended (multi-frame)
       0x114D,   // Intake Air Temp Diesel
       0x13C8,   // Engine Coolant Temp HPT
@@ -1071,8 +1071,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x20E3,   // Fuel Flow Rate (total) — scales with RPM, not per-injection
       0x245D,   // Fuel Inj Qty (test) — per-injection mm³ from HPT DDDI decode
       0x208B,   // Injection Timing Correction
-      0x1543,   // Diesel Throttle Position A
-      0x1540,   // Diesel Throttle Position B
+      0x1543,   // Actual Turbo Vane Position
+      0x1540,   // Desired Turbo Vane Position
       0x114D,   // Intake Air Temp Diesel
       0x13C8,   // Engine Coolant Temp HPT
       0x232C,   // Ambient Air Temp Diesel
@@ -1280,8 +1280,8 @@ export const PID_PRESETS: PIDPreset[] = [
       0x208B,   // Injection Timing Correction (°)
       0x1141,   // Fuel Tank Level (gal)
       // ── Mode 22 Extended — Turbo / Sensors (HPT-verified) ──
-      0x1543,   // Diesel Throttle Position A (%)
-      0x1540,   // Diesel Throttle Position B (%)
+      0x1543,   // Actual Turbo Vane Position (%)
+      0x1540,   // Desired Turbo Vane Position (%)
       0x114D,   // Intake Air Temp Diesel (°F)
       0x13C8,   // Engine Coolant Temp HPT (°F)
       0x232C,   // Ambient Air Temp Diesel (°F)
@@ -1363,7 +1363,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     // HPT "Fuel Injection Timing" — DID 0x12DA
     // IntelliSpy: raw 0x0F0B = 3851, HPT shows -1° at idle
     // Signed 16-bit * 0.001 degrees (negative = BTDC)
-    pid: 0x12DA, name: 'Fuel Injection Timing', shortName: 'INJ_TMG',
+    pid: 0x12DA, name: 'Fuel Injection Timing (GM Extended)', shortName: 'INJ_TMG',
     unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.001; },
@@ -1545,16 +1545,18 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   // ── Turbo / Boost (HPT-verified DIDs) ──
   {
-    // HPT "Diesel Throttle Position A" — DID 0x1543
+    // HPT "Actual Turbo Vane Position" — DID 0x1543
     // IntelliSpy: raw 0xA1 = 161, 161/255*100 = 63.14% → matches HPT "Turbo Vane Position"
-    pid: 0x1543, name: 'Diesel Throttle Position A', shortName: 'THRTL_A',
+    // DPID 0xFD byte 6 in DDDI stream, also readable via Mode 22
+    pid: 0x1543, name: 'Actual Turbo Vane Position', shortName: 'ACT_VANE',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    // HPT "Diesel Throttle Position B" — DID 0x1540
-    pid: 0x1540, name: 'Diesel Throttle Position B', shortName: 'THRTL_B',
+    // HPT "Desired Turbo Vane Position" — DID 0x1540
+    // DPID 0xFC byte 6 in DDDI stream, also readable via Mode 22
+    pid: 0x1540, name: 'Desired Turbo Vane Position', shortName: 'DES_VANE',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
@@ -1616,7 +1618,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
   {
-    pid: 0x1A11, name: 'DPF Differential Pressure', shortName: 'DPF_DP',
+    pid: 0x1A11, name: 'DPF Differential Pressure (GM)', shortName: 'DPF_DP',
     unit: 'PSI', min: 0.0, max: 14.5, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.145038,
@@ -1655,7 +1657,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   // EGT data available via multi-frame DID 0x0069 (EGT Bank Extended) below
   // ── DEF / SCR ──
   {
-    pid: 0x1A20, name: 'DEF Tank Level', shortName: 'DEF_LVL',
+    pid: 0x1A20, name: 'DEF Tank Level (GM)', shortName: 'DEF_LVL',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
@@ -1710,13 +1712,13 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
   },
   {
-    pid: 0x0062, name: 'Actual Engine Torque %', shortName: 'TQ_ACT',
+    pid: 0x0062, name: 'Actual Engine Torque % (HPT)', shortName: 'TQ_ACT',
     unit: '%', min: -125, max: 130, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => a - 125,
   },
   {
-    pid: 0x0063, name: 'Engine Reference Torque', shortName: 'TQ_REF',
+    pid: 0x0063, name: 'Engine Reference Torque (HPT)', shortName: 'TQ_REF',
     unit: 'lb·ft', min: 0, max: 1475, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.737562,
@@ -1882,7 +1884,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
   },
   {
-    pid: 0x248B, name: 'Relative Throttle Position', shortName: 'TP_R',
+    pid: 0x248B, name: 'Relative Throttle Position (GM Extended)', shortName: 'TP_R',
     unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
@@ -5153,16 +5155,25 @@ export function exportSessionToCSV(session: LogSession): string {
   
   // Build metadata rows (prefixed with # for easy parsing)
   const metaRows: string[] = [];
-  if (session.vehicleInfo) {
-    const vi = session.vehicleInfo;
-    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
-    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
-    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
-    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
-    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
-    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
-    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
-  }
+  // Session info
+  metaRows.push(`# V-OP Datalog Export`);
+  metaRows.push(`# Date: ${new Date(session.startTime).toISOString()}`);
+  if (session.name) metaRows.push(`# Session: ${session.name}`);
+  const durationSec = ((session.endTime || Date.now()) - session.startTime) / 1000;
+  metaRows.push(`# Duration: ${durationSec.toFixed(1)}s`);
+  metaRows.push(`# SampleRate: ${session.sampleRate}ms`);
+  metaRows.push(`# Channels: ${pids.length}`);
+  // Vehicle info — always write VIN and Vehicle lines so analyzer can identify the vehicle.
+  // When vehicleInfo exists but VIN read failed, we still write whatever we have.
+  const vi = session.vehicleInfo;
+  metaRows.push(`# VIN: ${vi?.vin || 'not available'}`);
+  metaRows.push(`# Vehicle: ${(vi?.make || vi?.model || vi?.year) ? [vi.year, vi.make, vi.model].filter(Boolean).join(' ') : 'unknown'}`);
+  if (vi?.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+  metaRows.push(`# Manufacturer: ${vi?.manufacturer || 'unknown'}`);
+  metaRows.push(`# FuelType: ${vi?.fuelType || 'unknown'}`);
+  if (vi?.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+  if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
+  if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
 
   // Build header
   const header = ['Timestamp (ms)', 'Elapsed (s)', ...pids.map(p => `${p.shortName} (${p.unit})`)];
@@ -5238,16 +5249,24 @@ export function sessionToAnalyzerCSV(session: LogSession): string {
   
   // Build metadata rows (prefixed with # for easy parsing by analyzer)
   const metaRows: string[] = [];
-  if (session.vehicleInfo) {
-    const vi = session.vehicleInfo;
-    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
-    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
-    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
-    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
-    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
-    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
-    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
-  }
+  // Session info
+  metaRows.push(`# V-OP Datalog Export`);
+  metaRows.push(`# Date: ${new Date(session.startTime).toISOString()}`);
+  if (session.name) metaRows.push(`# Session: ${session.name}`);
+  const durationSec = ((session.endTime || Date.now()) - session.startTime) / 1000;
+  metaRows.push(`# Duration: ${durationSec.toFixed(1)}s`);
+  metaRows.push(`# SampleRate: ${session.sampleRate}ms`);
+  metaRows.push(`# Channels: ${pids.length}`);
+  // Vehicle info — always write VIN and Vehicle lines so analyzer can identify the vehicle.
+  const vi = session.vehicleInfo;
+  metaRows.push(`# VIN: ${vi?.vin || 'not available'}`);
+  metaRows.push(`# Vehicle: ${(vi?.make || vi?.model || vi?.year) ? [vi.year, vi.make, vi.model].filter(Boolean).join(' ') : 'unknown'}`);
+  if (vi?.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+  metaRows.push(`# Manufacturer: ${vi?.manufacturer || 'unknown'}`);
+  metaRows.push(`# FuelType: ${vi?.fuelType || 'unknown'}`);
+  if (vi?.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+  if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
+  if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
 
   // HP Tuners format header
   const header = ['Time', ...pids.map(p => p.name)];

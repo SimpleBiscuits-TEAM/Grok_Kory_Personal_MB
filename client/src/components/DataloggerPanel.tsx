@@ -447,6 +447,7 @@ function PIDSelector({
 }) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>('engine');
   const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'extended' | 'vehicle'>('vehicle');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Get vehicle-specific PIDs
   const vehiclePids = useMemo(() => getPidsForVehicle(manufacturer, fuelType), [manufacturer, fuelType]);
@@ -466,13 +467,25 @@ function PIDSelector({
       case 'vehicle': pidsToShow = vehiclePids; break;
       default: pidsToShow = ALL_PIDS; break;
     }
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      pidsToShow = pidsToShow.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.shortName.toLowerCase().includes(q) ||
+        `0x${p.pid.toString(16)}`.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q)
+      );
+    }
     for (const pid of pidsToShow) {
       const list = cats.get(pid.category) || [];
       list.push(pid);
       cats.set(pid.category, list);
     }
     return cats;
-  }, [pidSource, vehiclePids, extendedPids]);
+  }, [pidSource, vehiclePids, extendedPids, searchQuery]);
+  // Auto-expand all categories when searching
+  const isSearching = searchQuery.trim().length > 0;
 
   const categoryIcons: Record<string, React.ReactNode> = {
     engine: <Cpu style={{ width: 14, height: 14 }} />,
@@ -510,6 +523,32 @@ function PIDSelector({
           </span>
         </div>
       )}
+
+      {/* Search Input */}
+      <div style={{ position: 'relative', marginBottom: '8px' }}>
+        <Search style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: sColor.textMuted }} />
+        <input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search PIDs by name, shortName, or hex..."
+          style={{
+            width: '100%', padding: '6px 8px 6px 28px', background: 'oklch(0.08 0.004 260)',
+            border: `1px solid ${searchQuery ? sColor.red : sColor.border}`, borderRadius: '3px',
+            fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.text, outline: 'none',
+            boxSizing: 'border-box',
+          }}
+          onFocus={e => { e.target.style.borderColor = sColor.red; }}
+          onBlur={e => { if (!searchQuery) e.target.style.borderColor = sColor.border; }}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: sColor.textMuted, cursor: 'pointer', padding: '2px' }}
+          >
+            <X style={{ width: 12, height: 12 }} />
+          </button>
+        )}
+      </div>
 
       {/* Source Filter */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
@@ -629,6 +668,13 @@ function PIDSelector({
         )}
       </div>
 
+      {/* Search results count */}
+      {isSearching && (
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, marginBottom: '6px', padding: '0 4px' }}>
+          {Array.from(categories.values()).reduce((sum, pids) => sum + pids.length, 0)} results for "{searchQuery}"
+        </div>
+      )}
+
       {/* Category groups */}
       {Array.from(categories.entries()).map(([category, pids]) => (
         <div key={category} style={{ marginBottom: '4px' }}>
@@ -641,14 +687,14 @@ function PIDSelector({
               textTransform: 'uppercase', letterSpacing: '0.06em',
             }}
           >
-            {expandedCategory === category ? <ChevronDown style={{ width: 12, height: 12 }} /> : <ChevronRight style={{ width: 12, height: 12 }} />}
+            {(isSearching || expandedCategory === category) ? <ChevronDown style={{ width: 12, height: 12 }} /> : <ChevronRight style={{ width: 12, height: 12 }} />}
             {categoryIcons[category] || null}
             {category}
             <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginLeft: 'auto' }}>
               {pids.filter(p => selectedPids.has(p.pid)).length}/{pids.length}
             </span>
           </button>
-          {expandedCategory === category && (
+          {(isSearching || expandedCategory === category) && (
             <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
               {pids.map(pid => {
                 const isMode22 = (pid.service ?? 0x01) === 0x22;
@@ -1484,6 +1530,105 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     setSelectedPids(new Set(preset.pids));
     addLog(`Applied preset: ${preset.name}`);
   }, [addLog]);
+
+  // ─── Auto-repoll: restart polling when PIDs change during monitoring ──
+  // Uses a ref to track the previous selectedPids set and a debounce timer
+  // to avoid rapid stop/start cycles when toggling multiple PIDs quickly.
+  const prevSelectedPidsRef = useRef<Set<number>>(selectedPids);
+  const repollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Only auto-repoll when monitoring but NOT recording
+    if (!isMonitoring || isRecording) {
+      prevSelectedPidsRef.current = selectedPids;
+      return;
+    }
+    // Check if selectedPids actually changed
+    const prev = prevSelectedPidsRef.current;
+    const changed = prev.size !== selectedPids.size || [...selectedPids].some(p => !prev.has(p));
+    if (!changed) return;
+    prevSelectedPidsRef.current = selectedPids;
+    // Debounce: wait 600ms after last PID change before restarting
+    if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
+    repollTimerRef.current = setTimeout(async () => {
+      repollTimerRef.current = null;
+      const conn = connectionRef.current;
+      if (!conn) return;
+      // Stop current polling loop
+      conn.stopLogging();
+      // Brief pause to let the loop exit cleanly
+      await new Promise(resolve => setTimeout(resolve, 100));
+      // Prepare new PID list
+      const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
+      if (pidsToLog.length === 0) {
+        addLog('All PIDs deselected — monitoring paused. Select PIDs to resume.');
+        return;
+      }
+      const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
+      const mode01Count = pidsToLog.length - mode22Count;
+      addLog(`PID selection changed — restarting poll: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext)`);
+      // Force-add unsupported PIDs
+      if ('filterSupportedPids' in conn && typeof (conn as any).filterSupportedPids === 'function') {
+        const { unsupported } = (conn as any).filterSupportedPids(pidsToLog);
+        if (unsupported.length > 0 && 'supportedPids' in conn) {
+          for (const pid of unsupported) (conn as any).supportedPids.add(pid.pid);
+        }
+      }
+      try {
+        // Re-set state to logging (connection may have gone to 'ready' after stopLogging)
+        conn.startLogging(pidsToLog, sampleRateMs, (readings) => {
+          if (!readings || readings.length === 0) {
+            consecutiveFailsRef.current++;
+            if (consecutiveFailsRef.current >= ECU_FAIL_THRESHOLD && !ecuLostReason) {
+              const reason = 'ECU stopped responding after PID change.';
+              setEcuLostReason(reason);
+              addLog(`⚠ ECU COMMUNICATION LOST: ${reason}`);
+            }
+            return;
+          }
+          if (consecutiveFailsRef.current > 0) {
+            if (ecuLostReason) {
+              addLog('✓ ECU communication restored.');
+              setEcuLostReason(null);
+            }
+            consecutiveFailsRef.current = 0;
+          }
+          setLiveReadings(prev => {
+            const merged = new Map(prev);
+            for (const r of readings) merged.set(r.pid, r);
+            return merged;
+          });
+          setReadingHistory(prev => {
+            const next = new Map(prev);
+            for (const r of readings) {
+              const arr = next.get(r.pid) || [];
+              arr.push(r);
+              if (arr.length > 1000) arr.shift();
+              next.set(r.pid, [...arr]);
+            }
+            return next;
+          });
+          setSampleCount(prev => prev + 1);
+          if (isRecordingRef.current) {
+            setRecordedReadings(prev => {
+              const next = new Map(prev);
+              for (const r of readings) {
+                const arr = next.get(r.pid) || [];
+                arr.push(r);
+                next.set(r.pid, [...arr]);
+              }
+              return next;
+            });
+            setRecordSampleCount(prev => prev + 1);
+          }
+        });
+      } catch (err) {
+        addLog(`ERROR restarting poll: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    }, 600);
+    return () => {
+      if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
+    };
+  }, [selectedPids, isMonitoring, isRecording, vehicleFilteredPids, sampleRateMs, addLog, ecuLostReason]);
 
   // ─── Custom Preset handlers ─────────────────────────────────────────
 
@@ -2510,7 +2655,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               onTogglePid={handleTogglePid}
               onApplyPreset={handleApplyPreset}
               supportedPids={supportedPids}
-              disabled={isLogging}
+              disabled={isRecording}
               customPresets={customPresets}
               onCreatePreset={handleCreatePreset}
               onEditPreset={handleEditPreset}

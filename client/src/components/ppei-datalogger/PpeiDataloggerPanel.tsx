@@ -321,7 +321,7 @@ function parseDddiPeriodicFrame(data: number[]): void {
         const turboVane = (data[7] * 100) / 255;
         storeVal(VDID_FRP_FLOAT32, 'FRP_ACT', frpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
         storeVal(0x328A, 'FRP_ACT', frpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
-        storeVal(0x1543, 'THRTL_A', turboVane, '%', [data[7]]);
+        storeVal(0x1543, 'ACT_VANE', turboVane, '%', [data[7]]);
         break;
       }
       case 0xFC: {
@@ -332,7 +332,7 @@ function parseDddiPeriodicFrame(data: number[]): void {
         const lambdaSmoke = decodeFloat32BE(data[1], data[2], data[3], data[4]);
         const desTurboVane = (data[7] * 100) / 255;
         storeVal(VDID_LAMBDA_SMOKE, 'LAMBDA_SMOKE', lambdaSmoke, '', [data[1], data[2], data[3], data[4]]);
-        storeVal(0x1540, 'THRTL_B', desTurboVane, '%', [data[7]]);
+        storeVal(0x1540, 'DES_VANE', desTurboVane, '%', [data[7]]);
         break;
       }
       case 0xFB: {

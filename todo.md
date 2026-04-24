@@ -2156,3 +2156,30 @@
 - [x] MAP still showing 8.4 PSI — ROOT CAUSE: Mode 01 batch reads were overriding DDDI values. Fixed by filtering Mode 01 PIDs from batch when DDDI streaming is active
 - [x] Injection Timing BTDC — DDDI formula verified EXACT match to HPT (min=-1.8906, max=11.0859). Issue was same Mode 01 override bug, now fixed
 - [x] APP_E (PID 0x4A) limited to 42% — correct OBD-II behavior (raw sensor voltage). Renamed to 'Accel Pedal Sensor E (raw voltage)'. Users should use PID 0x5A (REL_APP) for 0-100% pedal travel
+
+## Missing Turbo Vane Position PIDs (April 24, 2026)
+- [x] Renamed 0x1543 from 'Diesel Throttle Position A' to 'Actual Turbo Vane Position' (shortName: ACT_VANE)
+- [x] Renamed 0x1540 from 'Diesel Throttle Position B' to 'Desired Turbo Vane Position' (shortName: DES_VANE)
+- [x] Updated DDDI parser shortNames from THRTL_A/THRTL_B to ACT_VANE/DES_VANE
+- [x] Updated dataProcessor.ts combustion inference to use new shortNames
+- [x] Both already in PPEI Suggested preset and DDDI_PERIODIC_DIDS
+
+## VIN + Vehicle Info in Datalog Export (April 24, 2026)
+- [x] Export now always writes VIN, Vehicle, Manufacturer, FuelType, Engine, Cylinders, Session, Duration, SampleRate, Channels headers (even when values are missing — writes 'Unknown')
+- [x] Updated VehicleMeta interface with cylinders, sessionName, duration, sampleRate, channels fields
+- [x] Updated extractVehicleMeta parser to handle all new metadata fields
+- [x] Verified vehicle-aware diagnostics pipeline receives vehicle metadata from exported datalogs
+
+## Live PID Selection While Monitoring (April 24, 2026)
+- [x] PID selector now unlocked during monitoring (disabled only during recording)
+- [x] Changed PIDSelector disabled prop from isLogging to isRecording
+- [x] Live PID toggle/preset changes take effect immediately during monitoring
+
+## Auto-Repoll on PID Change (April 24, 2026)
+- [x] Added auto-repoll effect with 600ms debounce — stops and restarts polling loop when PIDs change during monitoring
+- [x] Handles edge cases: all PIDs deselected (pauses), force-adds unsupported PIDs, maintains ECU loss detection
+
+## PID Selector Search + Redundant Names (April 24, 2026)
+- [x] Added search input to PID selector — filters by name, shortName, hex PID, or category
+- [x] Search auto-expands all matching categories and shows result count
+- [x] Disambiguated 9 redundant PID names: added (Mode 01), (GM Extended), (HPT), (GM) suffixes to duplicates
