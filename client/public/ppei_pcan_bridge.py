@@ -247,7 +247,7 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
 
     Execute the HPT-style DDDI setup: IOCTL 0x2D for RAM reads + DDDI 0x2C + periodic start.
     From BUSMASTER capture of HP Tuners FRP datalogging (2026-04-23):
-      1. Stop any existing periodic transmissions (0xAA 04 00)
+      1. Stop any existing periodic transmissions (0xAA 00 = stopSending per GMW3110)
       2. Clear all old DDDI periodic definitions (0x2C FE 00 XX x 56) → UNLOCKS Mode 22
       3. IOCTL 0x2D to set up ECU RAM data sources (FE00=FRP_ACT, FE01=FRP_DES)
       4. DDDI 0x2C to map periodic IDs (FE, FD) to IOCTL sources
@@ -294,8 +294,8 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict
     step = 0
 
     # ── Phase 1: Stop any existing periodic reads ──
-    log.info("[PPEI] GM Phase 1: Stopping existing periodic reads (0xAA 04 00)")
-    stop_payload = bytes([0xAA, 0x04, 0x00])
+    log.info("[PPEI] GM Phase 1: Stopping existing periodic reads (0xAA 00 = stopSending per GMW3110)")
+    stop_payload = bytes([0xAA, 0x00])  # GMW3110 Table 190: sub-function $00 = stopSending
     resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, stop_payload, timeout=0.5)
     step += 1
     if resp:
@@ -1447,7 +1447,7 @@ async def _ppei_dddi_teardown(bridge, tx_id, rx_id, req_id):
     if not bridge.protocol or not bridge.bus:
         return {"type": "dddi_teardown_result", "id": req_id, "ok": True}
 
-    stop_payload = bytes([0xAA, 0x04, 0x00])
+    stop_payload = bytes([0xAA, 0x00])  # GMW3110 Table 190: sub-function $00 = stopSending
     await _send_isotp_and_wait(bridge, tx_id, rx_id, stop_payload, timeout=0.5)
 
     bridge.protocol._filter_ids.discard(DDDI_PERIODIC_ARB_ID)

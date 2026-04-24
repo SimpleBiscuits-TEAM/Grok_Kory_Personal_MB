@@ -2106,3 +2106,12 @@
 - [x] Update buildAlphaSystemPrompt to accept and inject protocolBridgeContext
 - [x] Soften Alpha's "do NOT reason about protocols" to "do NOT OWN protocol reasoning" — Alpha now understands protocol-to-data mapping
 - [x] Domain-aware context: editor/diagnostics domains get extra E42 A2L + advanced logger PID sections
+
+## Cross-Verification: Source Documents vs V-OP Implementation
+- [x] Verify STANDARD_PIDS formulas and byte counts against OBD-PID.pdf / SAE J1979 — 56/56 correct
+- [x] Verify bridge CAN IDs and DDDI protocol against GMW3110 — 17/18 correct, 1 bug fixed ($AA stop)
+- [x] Verify UDS service IDs and NRC codes in bridge against ISO 14229 — 25/25 correct
+- [x] Verify J1939 filter mode implementation against J1939-21 — 3/3 correct
+- [x] Verify ECU identification DIDs against GMW15862 bar code traceability — 29/29 correct
+- [x] Fix $AA stop command: [0xAA, 0x04, 0x00] → [0xAA, 0x00] per GMW3110 Table 190
+- [x] Document full verification report in docs/cross-verification-report.md
