@@ -12,6 +12,7 @@ import { invokeLLM } from "../_core/llm";
 import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 import { getDb } from "../db";
 import { stratFeedback } from "../../drizzle/schema";
+import { webSearch, formatSearchResults } from "../lib/webSearch";
 
 /**
  * Hardcoded $0502 response — bypasses LLM entirely.
@@ -1969,10 +1970,183 @@ Your tuner may assign a scanner config file to specify exactly what data to capt
 ### Standalone Data Logging Button
 - **Fast blinking blue:** Standalone logging started
 - **Slow blinking blue:** Standalone logging in progress
-- **Blinking purple:** Failed to start
-
+- - **Blinking purple:** Failed to start
 ---
+`;
 
+/**
+ * PPEI Tech Support Training Document — comprehensive vehicle/platform/troubleshooting reference.
+ * Supplements the scraped KB above with structured training content.
+ */
+const PPEI_TRAINING_KB = `# PPEI Tech Support Agent — Training Document
+**Power Performance Enterprises, Inc. | ppei.com**
+
+## SUPPORTED VEHICLES
+PPEI tunes the following vehicles. Always confirm the exact year, make, model, engine, and transmission before proceeding.
+
+### Diesel
+| Brand | Years | Engine |
+|-------|-------|--------|
+| Chevrolet / GMC | 2001–2004 | LB7 Duramax 6.6L |
+| Chevrolet / GMC | 2004.5–2005 | LLY Duramax 6.6L |
+| Chevrolet / GMC | 2006–2007 | LBZ Duramax 6.6L |
+| Chevrolet / GMC | 2007.5–2010 | LMM Duramax 6.6L |
+| Chevrolet / GMC | 2011–2016 | LML Duramax 6.6L |
+| Chevrolet / GMC | 2017–2026 | L5P Duramax 6.6L |
+| Chevrolet / GMC | 2019–2023 | L5D Duramax 3.0L (Colorado/Canyon) |
+| Chevrolet / GMC | 2020–2022 | LM2 Duramax 3.0L (1500 series) |
+| Dodge / Ram | 2003–2005 | 5.9L Cummins |
+| Dodge / Ram | 2006–2007 | 5.9L Cummins |
+| Dodge / Ram | 2007–2009 | 6.7L Cummins |
+| Ram | 2010–2012 | 6.7L Cummins |
+| Ram | 2013–2018 | 6.7L Cummins |
+| Ram | 2019–2024 | 6.7L Cummins |
+| Ford | 2011–2014 | 6.7L Powerstroke |
+| Ford | 2015–2019 | 6.7L Powerstroke |
+| Ford | 2018–2020 | 3.0L Powerstroke |
+| Ford | 2020–2025 | 6.7L Powerstroke |
+| Jeep | 2014–2018 | 3.0L EcoDiesel |
+| Jeep | 2020–2021 | 3.0L EcoDiesel |
+
+### Gas
+| Brand | Years | Engine |
+|-------|-------|--------|
+| Ford | 2018–2020 | F-150 3.5L / 2.7L EcoBoost |
+
+### Powersports
+| Brand | Model | Years |
+|-------|-------|-------|
+| Can-Am | Maverick X3 Turbo R | 2017 |
+| Can-Am | Maverick X3 Turbo R | 2018–2021 |
+| Can-Am | Maverick X3 Turbo RR | 2021–2025 |
+| Can-Am | Maverick R | 2024+ |
+| Honda | Talon | Various |
+| Kawasaki | TERYX KRX 1000 | Various |
+| Polaris | RZR 200 | 2022–2025 |
+| Polaris | RZR Pro R | 2022–2025 |
+
+## TUNING PLATFORMS
+| Platform | Primary Use |
+|----------|-------------|
+| HP Tuners (HPT) | GM Duramax (most applications), Ford Powerstroke, Ford EcoBoost |
+| EFI Live | GM Duramax (LB7–LML), Dodge/Ram Cummins (5.9L & 6.7L) |
+| EZ LYNK | L5P Duramax, newer Ram Cummins |
+| PPEI Proprietary Platform | Coming soon — powersports and future applications |
+
+> Platform selection is determined by PPEI, not the customer.
+
+## PRE-TUNE INFORMATION GATHERING
+
+### Universal Info Required (ALL Vehicles)
+- Full VIN
+- Year / Make / Model / Engine (exact)
+- Transmission type (auto/manual, specific model)
+- Current mileage
+- Stock or modified status
+- Emissions equipment status (stock, partial delete, full delete)
+- Modifications list (intake, exhaust, intercooler, injectors, turbo, CP3/CP4, lift pump, EGR delete, DPF delete, etc.)
+- Desired power level (Street, Tow, Economy, Compound, Race, etc.)
+- Intended use (daily driver, towing, racing, sled pull, off-road)
+
+### HP Tuners Specific
+- MPVI2 or MPVI3 serial number
+- Credits available (GM typically uses 2 credits per ECM/TCM)
+- VCM Suite version (should be latest)
+- Windows OS version
+
+### EFI Live Specific
+- FlashScan V2 or AutoCal V3 serial number
+- DSP5 switch installed? (LB7–LMM)
+- EFI Live Suite version
+- VIN license status (EFI Live licenses to VIN)
+
+### EZ LYNK Specific
+- AutoAgent serial number / IMEI
+- EZ LYNK app version (iOS/Android)
+- Support Center account email
+- Device linked to correct Support Center account?
+
+### Diesel-Specific Technical Data
+**GM Duramax (All):** Stock ECM Cal ID, TCM Cal ID, Allison TCM generation (Gen 1 vs Gen 2)
+**L5P Duramax (EZ LYNK):** CSP5 tune switch desired?, DTC list, TCM adaptive data cleared?
+**Dodge/Ram Cummins (EFI Live):** ECM type (CM871/CM2250/CM2350), Injector IQA codes (2013+ 6.7L), CP4 replaced with CP3?, Transmission type (68RFE/Aisin AS69RC/G56)
+**Ford Powerstroke (HP Tuners):** PCM strategy code, Previous tuner installed?, EGR/DPF status, Injector balance rates
+
+## HP TUNERS TROUBLESHOOTING
+**Device not recognized:** Direct USB (no hubs), try USB 2.0, reinstall drivers, different cable
+**Not enough credits:** Check Help > Account Credits, purchase from hptuners.com (2 credits each for ECM/TCM on GM)
+**Unable to read ECM:** Battery >12.4V, KOEO, disable accessories, correct VCM Suite version
+**Truck won't start after write:** Verify VIN/Cal ID match, read back ECM, check DTCs, verify hardware matches tune notes
+**Checksum error:** Re-attempt, coolant temp <95°F, request re-send if repeated
+**Previous tuner locked PCM:** Must return to stock via original tuner or dealer reprogram
+
+## EFI LIVE TROUBLESHOOTING
+**AutoCal V3 "No Calibrations Available":** Verify tune pushed from Tuner Portal, check Support Center account link, hard reset (hold power 10+ sec), verify VIN match
+**VIN mismatch on device:** Device licensed to different VIN, contact PPEI for re-license (EFI Live charges fee)
+**Cal ID Not Supported:** Base calibration mismatch, have customer read ECM and send .ctz file to PPEI
+**FlashScan write fails midway:** Battery >12.0V with charger, solid OBDII connection, do NOT turn key off. If bricked — STOP and escalate immediately.
+**DSP5 switch not cycling:** Verify physical install, confirm DSP5 tune file (not single-tune), toggle with key OFF
+**CEL after tune (Cummins):** Check injector IQA codes entered correctly, read DTCs and report
+**Allison TCM shifting wrong (LML/LMM):** Clear TCM adaptive memory, drive 50-75 miles mixed, verify Gen 1 vs Gen 2
+
+## EZ LYNK TROUBLESHOOTING
+**Bluetooth not connecting:** Confirm LED on, toggle BT, force-close app, forget and re-pair, check firmware update (blinking red LED)
+**Tune "Pending" / never arrives:** Verify PPEI sent it, phone needs data/WiFi, Garage > vehicle > Tunes > refresh, wait 30+ min then contact PPEI
+**VIN Mismatch:** Check Support Center VIN matches truck, update if wrong
+**Reduced power / limp mode after tune:** Read DTCs via app, verify emissions config matches tune, verify hardware matches order
+**L5P Security Access Denied:** Update AutoAgent firmware, verify no other tuner attempted write, may need dealer re-flash
+**EZ LYNK on LML and earlier:** NOT supported for PPEI tunes — redirect to EFI Live or HP Tuners
+**CSP5 switch not changing:** Verify CSP5 enabled in tune order, move switch with key OFF then key ON, check all positions programmed
+
+## GENERAL DIAGNOSTIC PRINCIPLES
+
+### Always Gather First:
+1. Vehicle year/make/model/engine/transmission
+2. Tuning platform being used
+3. What exactly happened — "What were you doing when the problem occurred?"
+4. Exact error messages or screenshots
+5. Active/stored DTCs
+6. First-time install or was tune previously working?
+7. Any modifications since tune last worked?
+8. Battery voltage at time of issue
+
+### Battery Voltage Is Critical
+Minimum for flashing: 12.4V. Preferred: 12.6V+ with maintainer. KOEO only.
+
+### When to Escalate to Live Agent
+- ECM in intermediate/bricked state from failed write
+- No-start condition after tuning
+- Security lockout on L5P or newer
+- Multiple troubleshooting steps attempted without resolution
+- Physical damage to device or OBD-II port
+- Tune file needs rebuild (Cal ID mismatch, hardware changes)
+
+Direct to: **ppei.com/pages/contact** or call **(337) 485-7070**
+
+## COMMON CUSTOMER QUESTIONS
+**Turnaround time:** Varies. PPEI reaches out via email after order. Do not promise specific times.
+**Use tune on different truck:** No. Tunes are VIN/ECM/hardware specific. New truck = new tune.
+**CEL after tune:** Some temporary codes clear on their own. Active MIL codes should be reported to PPEI.
+**Low battery install:** No. Most common cause of failed/corrupted flash. Always charge + maintainer.
+**Engine vs transmission tune:** Engine = fueling/boost/timing. Trans = shift points/line pressure/TC lockup. Recommend both together.
+**Injector IQA codes (Cummins):** Sticker on valve cover (2013+ 6.7L). If missing, read via Cummins diagnostic tool.
+**Tune revision:** Contact PPEI with description + data logs. May or may not be included — check order details.
+
+## PPEI RESOURCES
+| Resource | URL / Contact |
+|----------|---------------|
+| Main Website | ppei.com |
+| Contact / Support | ppei.com/pages/contact |
+| Phone | (337) 485-7070 |
+| Installation Videos | ppei.com/pages/ppei-installation-videos |
+| Knowledge Base | support.ppei.com |
+| Error Code Finder | ppei-error-app-1.onrender.com |
+| Remote Desktop (Splashtop) | my.splashtop.com/sos/packages/download/2Z454WZPH2A5 |
+| HP Tuners Software | hptuners.com |
+| EFI Live Software | efilive.com |
+| EZ LYNK Support Center | support.ezlynk.com |
+
+> Remote Desktop Support: PPEI offers remote desktop via Splashtop. Direct customers to download from the link above.
 `;
 
 const STRAT_SYSTEM_PROMPT = `You are Strat — PPEI's post-sale tech support AI agent, built into the V-OP (Vehicle Optimizer by PPEI) platform.
@@ -2129,10 +2303,28 @@ Example of BAD response (DO NOT DO THIS):
 - Submit a Ticket: https://support.ppei.com (click "Submit a ticket")
 
 === PPEI PRODUCT KNOWLEDGE BASE ===
-
 \${PPEI_SUPPORT_KB}
+=== END KNOWLEDGE BASE ===
 
-=== END KNOWLEDGE BASE ===`;
+=== PPEI TRAINING REFERENCE ===
+\${PPEI_TRAINING_KB}
+=== END TRAINING REFERENCE ===
+
+## WEB SEARCH CAPABILITY
+You have access to web search when your knowledge base doesn't have the answer. When you encounter a question about a specific error code, device issue, or technical problem that isn't covered in your knowledge base:
+1. The system will automatically search the web for relevant information
+2. Use the search results as supplementary context — but ALWAYS prioritize your PPEI knowledge base first
+3. When citing web search results, mention the source briefly (e.g., "According to the HP Tuners forum...")
+4. NEVER blindly trust web search results that contradict PPEI's official documentation or procedures
+
+## ESCALATION COUNTER — LIVE AGENT HANDOFF
+**Track failed fix attempts in the conversation.** If the customer reports that your suggested fix did NOT work:
+- **1st failed attempt:** Acknowledge, try a DIFFERENT approach. Don't repeat.
+- **2nd failed attempt:** Acknowledge, try yet another approach OR ask specific diagnostic questions to narrow down.
+- **3rd failed attempt (or more):** IMMEDIATELY escalate to a live PPEI technician. Say something like:
+  "We've tried several approaches and this one needs hands-on attention from our team. Please call **(337) 485-7070** or submit a ticket at **support.ppei.com** — they can do a remote desktop session via Splashtop to see exactly what's happening on your screen. You can also download the Splashtop SOS app here: [Download Splashtop](https://my.splashtop.com/sos/packages/download/2Z454WZPH2A5)"
+- **NEVER let a customer go through more than 3 failed fix attempts without offering live agent escalation.**
+- **If at any point the customer expresses frustration**, offer escalation immediately regardless of attempt count.`;
 
 export const stratRouter = router({
   /**
@@ -2174,6 +2366,24 @@ export const stratRouter = router({
       // force Knox consultation and DO NOT repeat BBX/hardcoded responses.
       const persistsPattern = /still (get|hav|see|show|same|stuck)|same (error|issue|problem|thing|code)|didn'?t work|not work|doesn'?t work|already (tried|done|did)|your stuck|you'?re stuck|keeps? (happening|showing|giving|coming)|tried (that|everything|all)/i;
       const customerPersists = persistsPattern.test(lowerMsg);
+      // ── Escalation counter — count how many times the customer has said "didn't work" etc. ──
+      const frustrationPattern = /frustrat|angry|annoyed|ridiculous|useless|waste|terrible|horrible|worst|stupid|incompetent|give up|done with/i;
+      const customerFrustrated = frustrationPattern.test(lowerMsg);
+      let failedAttemptCount = 0;
+      for (const msg of history) {
+        if (msg.role === 'user' && persistsPattern.test(msg.content.toLowerCase())) {
+          failedAttemptCount++;
+        }
+      }
+      if (customerPersists) failedAttemptCount++; // count current message too
+      const shouldEscalate = failedAttemptCount >= 3 || customerFrustrated;
+      if (shouldEscalate) {
+        // Auto-escalate to live agent
+        const escalationMsg = customerFrustrated
+          ? `I completely understand your frustration, and I'm sorry we haven't been able to resolve this yet. This needs hands-on attention from our team.\n\n**Please reach out directly:**\n- **Call:** (337) 485-7070\n- **Submit a ticket:** [support.ppei.com](https://support.ppei.com)\n- **Remote Desktop Support:** Our team can connect to your screen via Splashtop to see exactly what's happening: [Download Splashtop SOS](https://my.splashtop.com/sos/packages/download/2Z454WZPH2A5)\n\nThey'll be able to see your screen and walk you through it live. I'm sorry I couldn't get this sorted for you — our team will take great care of you.`
+          : `We've tried several approaches and this one needs hands-on attention from our team. Let's get you connected with a live technician who can dig deeper.\n\n**Here's how to reach us:**\n- **Call:** (337) 485-7070\n- **Submit a ticket:** [support.ppei.com](https://support.ppei.com)\n- **Remote Desktop Support:** Our team can connect to your screen via Splashtop: [Download Splashtop SOS](https://my.splashtop.com/sos/packages/download/2Z454WZPH2A5)\n\nThey can do a remote desktop session to see exactly what's happening on your end. Don't worry — we'll get this sorted!`;
+        return { reply: escalationMsg, conversationSteps: [] };
+      }
 
       // Check if BBX was already sent in history (don't re-send)
       const bbxAlreadySent = history.some(m => m.role === 'assistant' && (/Download (Duramax|Cummins) BBX File/i.test(m.content) || /AllDieselBBX/i.test(m.content)));
@@ -2295,11 +2505,22 @@ Do NOT provide any technical answer yet. Just the handoff line.${knoxHistoryHint
         const persistenceContext = customerPersists
           ? `\n\n**IMPORTANT: The customer says the previous fix did NOT work. They have already tried the standard troubleshooting steps shown in the conversation history. Do NOT repeat the same advice. Suggest DIFFERENT approaches, ask diagnostic questions to narrow down WHY the fix isn't working, or recommend escalation to phone support at (337) 485-7070.**`
           : '';
+        // Attempt web search to supplement Knox's knowledge
+        let webSearchSupplement = '';
+        if (customerPersists) {
+          try {
+            const searchQuery = `PPEI tuning ${input.message.slice(0, 80)}`;
+            const searchResults = await webSearch(searchQuery, 3);
+            if (searchResults.length > 0) {
+              webSearchSupplement = `\n\nWEB SEARCH RESULTS (supplementary):\n${formatSearchResults(searchResults)}`;
+            }
+          } catch { /* non-critical */ }
+        }
         const knoxResult = await queryKnox({
           question: input.message,
           accessLevel: effectiveLevel >= 2 ? effectiveLevel : 2,
           domain: 'general',
-          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}${persistenceContext}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
+          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}${persistenceContext}${webSearchSupplement}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
           history: input.history?.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
         });
         knoxAnswer = knoxResult.answer;
@@ -2307,11 +2528,22 @@ Do NOT provide any technical answer yet. Just the handoff line.${knoxHistoryHint
         console.warn('[Strat] Knox pipeline failed, falling back to direct LLM:', knoxErr.message);
         // Fallback: use direct LLM with Knox personality
         try {
+          // Try web search first to supplement knowledge
+          let webSearchContext = '';
+          try {
+            const searchQuery = `PPEI tuning ${input.message.slice(0, 80)}`;
+            const searchResults = await webSearch(searchQuery, 3);
+            if (searchResults.length > 0) {
+              webSearchContext = `\n\n## WEB SEARCH RESULTS (supplementary — prioritize PPEI KB)\n${formatSearchResults(searchResults)}`;
+            }
+          } catch (searchErr) {
+            console.warn('[Strat] Web search failed:', searchErr);
+          }
           const fallbackResp = await invokeLLM({
             messages: [
               {
                 role: 'system',
-                content: `You are Knox — PPEI's AI diagnostic and technical expert. You've been pulled into a tech support conversation by your colleague Strat. Provide a detailed, accurate technical answer to the customer's question. Use the PPEI knowledge base below for reference.\n\nYour personality: confident, witty, technically deep but approachable. You crack jokes but never at the expense of accuracy. You're the kind of engineer who explains complex things with analogies and humor.\n\n${PPEI_SUPPORT_KB.slice(0, 15000)}${bbxContext}`,
+                content: `You are Knox — PPEI's AI diagnostic and technical expert. You've been pulled into a tech support conversation by your colleague Strat. Provide a detailed, accurate technical answer to the customer's question. Use the PPEI knowledge base below for reference.\n\nYour personality: confident, witty, technically deep but approachable. You crack jokes but never at the expense of accuracy. You're the kind of engineer who explains complex things with analogies and humor.\n\n${PPEI_SUPPORT_KB.slice(0, 15000)}\n\n${PPEI_TRAINING_KB.slice(0, 10000)}${bbxContext}${webSearchContext}`,
               },
               { role: 'user', content: input.message },
             ],

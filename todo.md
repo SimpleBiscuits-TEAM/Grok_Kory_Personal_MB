@@ -2286,3 +2286,12 @@
 - [x] Overlay visible when loaded, dismiss button to remove
 - [x] Visual distinction: primary = solid lines, overlay = dashed lines at 45% opacity
 - [x] Support loading comparison from CSV file import (COMPARE button in header)
+
+## Strat Training Doc Integration (April 24, 2026)
+- [x] Add PPEI_TRAINING_KB constant with full training doc content to strat.ts
+- [x] Update STRAT_SYSTEM_PROMPT to reference training KB for vehicle verification and pre-tune intake
+- [x] Add web search fallback capability when Strat/Knox can't find answer in knowledge base
+- [x] Add escalation counter tracking — auto-escalate to live agent after 3 failed fix attempts
+- [x] Ensure existing PPEI_SUPPORT_KB and Knox pipeline remain intact (training doc supplements, not replaces)
+- [x] Add supported vehicles table to Strat's knowledge for quick vehicle compatibility checks
+- [x] Add pre-tune info gathering workflow so Strat can walk customers through intake checklist
