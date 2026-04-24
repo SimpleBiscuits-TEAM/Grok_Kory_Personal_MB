@@ -2076,3 +2076,15 @@
 - [x] Fix rx_id assumption: add explicit rx_id parameter + get_rx_id() helper across all handlers
 - [x] Update routing and logging with manufacturer-aware status line in _ppei_handle_message_v2
 - [x] Update header comment to mark ppei_pcan_bridge.py as the universal layer
+
+## Universal PID Expansion (from OBD-PID.pdf, GMW3110-2010.pdf, GMW15862.pdf)
+- [x] Extract PID data from OBD-PID.pdf (SAE J1979 standard Mode 01 PIDs 0x00-0xC4)
+- [x] Extract GM diagnostic communication data from GMW3110-2010.pdf (CAN IDs, DDDI, Mode 22, $AA streaming)
+- [x] Extract GM bar code traceability data from GMW15862.pdf (part numbers, supplier DUNS, VIN trace)
+- [x] Add 35 new standard Mode 01 PIDs to STANDARD_PIDS (monitor, fuel, throttle, torque, turbo, DPF, NOx, hybrid)
+- [x] Add "Universal Diesel Extended" preset (29 standard PIDs for any diesel vehicle)
+- [x] Train Knox on OBD-II PID reference (formulas, byte counts, CAN frame format, DTC encoding)
+- [x] Train Knox on GMW3110 (GM CAN IDs, DDDI protocol, $AA streaming rates, SPS flash process)
+- [x] Train Knox on GMW15862 (bar code traceability structure, ECU identification, flash validation)
+- [x] Add Normen_CAN archive listing to Knox (J1939, ISO 14229, KWP2000, BMW Global-B — pending extraction)
+- [ ] Extract and integrate full Normen_CAN archive contents when unzipped files are provided

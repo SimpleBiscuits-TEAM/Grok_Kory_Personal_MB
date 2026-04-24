@@ -1410,4 +1410,153 @@ Once device + vehicle are confirmed, structure your response as:
 4. One follow-up question if needed ("Did it flash successfully?")
 
 Keep the energy conversational but efficient. The customer wants to get their tune loaded, not read an essay.
+
+## OBD-II Standard PID Reference (from SAE J1979 / OBD-PID spec)
+
+### Mode 01 Standard PIDs — Complete Reference
+All vehicles with OBD-II (1996+) must support a subset of these PIDs. The ECU reports which PIDs it supports via bitmask PIDs (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0).
+
+**Core Engine PIDs (universally supported):**
+- 0x04: Calculated Engine Load (0-100%, A*100/255)
+- 0x05: Engine Coolant Temperature (-40 to 215°C, A-40)
+- 0x0B: Intake Manifold Absolute Pressure (0-255 kPa, A)
+- 0x0C: Engine RPM (0-16383.75 rpm, ((A*256)+B)/4)
+- 0x0D: Vehicle Speed (0-255 km/h, A)
+- 0x0F: Intake Air Temperature (-40 to 215°C, A-40)
+- 0x10: MAF Air Flow Rate (0-655.35 g/s, ((A*256)+B)/100)
+- 0x11: Throttle Position (0-100%, A*100/255)
+
+**Fuel System PIDs:**
+- 0x06/0x07: Short/Long Term Fuel Trim Bank 1 (-100 to 99.2%, (A-128)*100/128)
+- 0x08/0x09: Short/Long Term Fuel Trim Bank 2 (same formula)
+- 0x0A: Fuel Pressure (0-765 kPa gauge, A*3)
+- 0x23: Fuel Rail Gauge Pressure — diesel/GDI (0-655350 kPa, ((A*256)+B)*10)
+- 0x59: Fuel Rail Absolute Pressure (0-655350 kPa, ((A*256)+B)*10)
+- 0x51: Fuel Type (enum: 1=Gas, 2=Methanol, 3=Ethanol, 4=Diesel, 5=LPG, 6=CNG, 7=Propane, 8=Electric, 0x11=Hybrid Gas, 0x13=Hybrid Diesel)
+- 0x52: Ethanol Fuel % (0-100%, A*100/255)
+- 0x5D: Fuel Injection Timing (-210 to 301.992°, (((A*256)+B)-26880)/128)
+- 0x5E: Engine Fuel Rate (0-3212.75 L/h, ((A*256)+B)*0.05)
+
+**Torque PIDs (critical for tuning):**
+- 0x61: Driver Demand Engine Torque % (-125 to 130%, A-125)
+- 0x62: Actual Engine Torque % (-125 to 130%, A-125)
+- 0x63: Engine Reference Torque (0-65535 Nm, A*256+B)
+- 0x64: Engine % Torque Data — 5 operating points (idle + 4 pts, each A-125)
+
+**Diesel Turbo/Exhaust PIDs (extended, multi-byte):**
+- 0x6B: EGR Temperature (5 bytes, support flags + sensor temps, ((B*256)+C)/10-40 °C)
+- 0x6D: Fuel Pressure Control System (6 bytes, desired/actual pressure)
+- 0x6E: Injection Pressure Control System (5 bytes)
+- 0x6F: Turbocharger Compressor Inlet Pressure (3 bytes, B = kPa)
+- 0x72: Wastegate Control (5 bytes, position %)
+- 0x73: Exhaust Pressure (5 bytes, ((B*256)+C)*0.01 kPa)
+- 0x74: Turbocharger RPM (5 bytes, ((B*256)+C)*10 rpm)
+- 0x75/0x76: Turbocharger Temperature A/B (7 bytes, inlet/outlet temps)
+- 0x77: Charge Air Cooler Temperature (5 bytes)
+- 0x78/0x79: EGT Bank 1/2 (9 bytes, 4 sensors each, ((A*256)+B)/10-40 °C)
+- 0x7B: DPF Info (7 bytes, differential pressure)
+- 0x7C: DPF Temperature (9 bytes, inlet/outlet Bank 1/2)
+- 0x83: NOx Reagent System / DEF (5 bytes, tank level + consumption)
+- 0x84: Particulate Matter Sensor (5 bytes, Bank 1/2)
+
+**Monitor/Readiness PIDs:**
+- 0x01: Monitor Status (4 bytes — A7=MIL on/off, A0-A6=DTC count, B3=spark/compression ignition, C/D=readiness monitors)
+- 0x41: Monitor Status This Drive Cycle (same encoding as 0x01)
+- 0x30: Warm-ups Since Codes Cleared (0-255 count)
+
+**DTC Encoding (Mode 03/07/0A):**
+2 bytes per DTC: A7,A6 → P/C/B/U; A5,A4 → second digit; A3-A0,B7-B4,B3-B0 → remaining digits. Example: P0158, U0100.
+
+### CAN Bus Frame Format (11-bit standard)
+**Query:** CAN ID 0x7DF (broadcast) or 0x7E0-0x7E7 (physical ECU). Byte 0 = additional data bytes, Byte 1 = mode, Byte 2+ = PID.
+**Response:** CAN ID 0x7E8-0x7EF (ECU address + 8). Byte 1 = mode+0x40, Byte 2+ = PID echo + data.
+**Mode 22 enhanced:** Request [03 22 PID_H PID_L], Response [62 PID_H PID_L data...].
+**Negative response:** [7F mode 31] = PID not supported.
+
+## GM Diagnostic Communication (from GMW3110-2010)
+
+### GM CAN Identifier Assignments
+GM uses TWO parallel addressing schemes:
+1. **GMLAN enhanced:** $241-$25F (request) / $641-$65F (USDT response) / $541-$55F (UUDT/periodic)
+2. **OBD/EOBD standard:** $7DF-$7EF (standard 8-ECU range)
+
+**CAN ID nibble pattern:** For any GM ECU with USDT Response CAN ID $6xx:
+- $2xx = physical request CAN Identifier
+- $5xx = UUDT response CAN Identifier
+- $6xx = USDT response CAN Identifier
+Example: ECU at diagnostic address $22 → PhysReq=$24A, USDTResp=$64A, UUDTResp=$54A
+
+**OBD 11-bit CAN IDs:**
+- $7DF = functional broadcast (all OBD ECUs)
+- $7E0/$7E8 = ECM (engine)
+- $7E1/$7E9 = TCM (transmission)
+- $7E2-$7E7 / $7EA-$7EF = additional ECUs
+
+### GM Diagnostic Services (SIDs)
+- $10: InitiateDiagnosticOperation (session control — default/extended/programming)
+- $1A: ReadDataByIdentifier (single DID reads, GMLAN equivalent of Mode 22)
+- $22: ReadDataByParameterIdentifier (Mode 22 — 2-byte PID reads)
+- $23: ReadMemoryByAddress (direct RAM reads — IOCTL path)
+- $27: SecurityAccess (seed/key authentication — levels $01/$02 standard, $03/$04 extended, $09/$0A programming)
+- $2C: DynamicallyDefineMessage (DDDI — pack PIDs into DPIDs for streaming)
+- $2D: DefinePIDByAddress (custom PIDs by RAM address)
+- $34/$36: RequestDownload/TransferData (SPS flash programming)
+- $3E: TesterPresent (keep-alive heartbeat, sub-function $00=with response, $80=no response)
+- $AA: ReadDataByPacketIdentifier (periodic DPID streaming)
+- $AE: DeviceControl (IOCTL — actuator/output control)
+
+### DDDI Protocol (Service $2C) — How L5P Streaming Works
+1. Define DPID: Send $2C [DPID#] [PID_H PID_L] [PID_H PID_L]... to pack PIDs into a single DPID
+2. DPID range: $FE-$90 (dynamic, numbered backward from $FE), $01-$7F (static/firmware)
+3. Each DPID = 1 byte identifier + up to 7 bytes signal data
+4. Request streaming: Send $AA [rate] [DPID#1] [DPID#2]...
+5. Rates: $01=one-shot, $02=slow (1000ms), $03=medium (200ms), $04=fast (25ms/40Hz)
+6. Responses come on UUDT CAN IDs ($541-$55F or $5E8-$5EF for emissions ECUs)
+7. TesterPresent ($3E) must stay active or periodic scheduler dies
+
+### GM Timing Parameters
+- P2: Max request-to-response time (50ms default)
+- P2*: Extended response time when $78 (ResponsePending) sent (5000ms)
+- P3: Min time between consecutive tester requests (55ms)
+- TesterPresent must be sent before P3 timeout to keep session alive
+
+### GM ECU Programming (SPS) Process
+1. Read Identification ($1A service — part numbers, VIN, cal IDs)
+2. Retrieve SPS Data ($34/$36 services)
+3. Programming Session: $A5 → $27 → $34 → $36 → $20
+
+## GM Bar Code Traceability (from GMW15862)
+
+### Traceability Label Structure
+Every GM powertrain component has a 2D bar code (Data Matrix or QR) encoding:
+- **Y field** (14 chars): GM Compressed VPPS Code
+- **P field** (8 chars): GM Part Number (e.g., P12345678)
+- **12V field** (9 chars): Supplier DUNS Number (identifies manufacturer)
+- **T field** (16 chars): Traceability Code (LSYYDDDTRACEDATA — Line, Shift, Year, Julian Date, lot/batch)
+- **4D field** (5 chars): Julian Date (YYDDD)
+- **2P field** (3 chars): Part Version/Suffix
+- **I field** (17 chars): Vehicle ID Number (VIN)
+
+### Relevance to V-OP
+1. **ECU Identification:** Scanning the bar code on an ECU should match Mode 22 DID reads ($F190 VIN, $F187 part number)
+2. **Flash Validation:** Before/after flashing, compare 9 software part numbers read via Mode 22 against bar code data
+3. **Component Matching:** Cross-reference bar code on replacement ECU against vehicle VIN and expected part number
+4. **Supplier Traceability:** DUNS number identifies OEM vs aftermarket modules
+
+### Data Syntax (ISO/IEC 15434)
+Start: [ (0x5B), End: EOT (0x04), Group Separator: GS (0x1D), Record Separator: RS (0x1E)
+Format header: >Rs06Gs (format 06 = ISO/IEC 15418 data identifiers)
+Example powertrain bar code: [>Rs06GsY1210000000000XGsP24257888Gs12V138440180GsT11120934ACOX0043RsEOT
+
+## Normen_CAN Archive Contents (pending extraction)
+The following CAN/diagnostic standards are available in the Normen_CAN.rar archive:
+1. **SAE-J1939-21-2006.pdf** — J1939 Transport Protocol / Data Link Layer (heavy-duty CAN)
+2. **SAE-J1979.pdf** — OBD-II Diagnostic Test Modes (original SAE standard)
+3. **UDS-14229 Global-B-Tool Help.pdf** — BMW Global-B UDS Tool Help
+4. **ISO-14229 DTC Statusbits.pdf** — UDS DTC Status Bits reference
+5. **ISO-14229.1.pdf** — UDS Road Vehicles (full ISO standard)
+6. **ISO-15031.5.docx** — OBD-II Emission-Related Diagnostic Services
+7. **KWP2000 ISO 14230-3.pdf** — KWP2000 Application Layer (legacy diagnostics)
+8. **SAE J1979 2007.pdf** — SAE J1979 2007 edition (updated OBD-II modes)
+These will be fully extracted and integrated once the RAR archive is provided unzipped.
 `;

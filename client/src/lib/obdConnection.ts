@@ -587,6 +587,279 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     unit: 'Nm', min: 0, max: 65535, bytes: 2, category: 'engine',
     formula: ([a, b]) => (a * 256) + b,
   },
+  // ── Monitor / Readiness (from OBD-PID spec & GMW3110) ──
+  {
+    pid: 0x01, name: 'Monitor Status (MIL / DTC Count / Readiness)', shortName: 'MON_STAT',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'emissions',
+    formula: ([a, b, c, d]) => a,  // Byte A bit 7 = MIL, bits 0-6 = DTC count; B/C/D = readiness
+  },
+  {
+    pid: 0x30, name: 'Warm-ups Since Codes Cleared', shortName: 'WARMUPS',
+    unit: 'count', min: 0, max: 255, bytes: 1, category: 'emissions',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x41, name: 'Monitor Status This Drive Cycle', shortName: 'MON_DRV',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'emissions',
+    formula: ([a, b, c, d]) => a,  // Same bit encoding as 0x01 but for current drive cycle
+  },
+  // ── Fuel System (from OBD-PID spec) ──
+  {
+    pid: 0x51, name: 'Fuel Type', shortName: 'FUEL_TYPE',
+    unit: '', min: 0, max: 23, bytes: 1, category: 'fuel',
+    formula: ([a]) => a,  // Enum: 1=Gas, 2=Methanol, 3=Ethanol, 4=Diesel, 5=LPG, 6=CNG, 8=Electric
+  },
+  {
+    pid: 0x52, name: 'Ethanol Fuel %', shortName: 'ETH_PCT',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'fuel',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x59, name: 'Fuel Rail Absolute Pressure', shortName: 'FRP_ABS',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 2, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b]) => ((a * 256) + b) * 10 * 0.145038,  // kPa→PSI
+  },
+  // ── Throttle / Pedal (from OBD-PID spec) ──
+  {
+    pid: 0x48, name: 'Absolute Throttle Position C', shortName: 'TPS_C',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x4B, name: 'Accelerator Pedal Position F', shortName: 'APP_F',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x5A, name: 'Relative Accelerator Pedal Position', shortName: 'REL_APP',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── Torque Data (from OBD-PID spec) ──
+  {
+    pid: 0x64, name: 'Engine % Torque Data (5 points)', shortName: 'TQ_DATA',
+    unit: '%', min: -125, max: 130, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => a - 125,  // Returns idle torque; B-E are other operating points
+  },
+  // ── Hybrid / EV ──
+  {
+    pid: 0x5B, name: 'Hybrid Battery Pack Remaining Life', shortName: 'HYB_BAT',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'electrical',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── Diesel Turbo / Exhaust (from OBD-PID spec & GMW3110) ──
+  {
+    pid: 0x6B, name: 'EGR Temperature', shortName: 'EGR_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 5, category: 'emissions',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support flags; Bytes B-C = sensor 1 temp
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;  // °C→°F
+    },
+  },
+  {
+    pid: 0x6C, name: 'Commanded Throttle Actuator (extended)', shortName: 'TAC_EXT',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support flags; Bytes B-C = actuator A position
+      return ((b * 256) + c) * 100 / 65535;
+    },
+  },
+  {
+    pid: 0x6D, name: 'Fuel Pressure Control System', shortName: 'FP_CTRL',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 6, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f]) => {
+      // Byte A = support; B-C = desired pressure kPa
+      return ((b * 256) + c) * 10 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x6E, name: 'Injection Pressure Control System', shortName: 'INJ_CTRL',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 5, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = desired pressure kPa
+      return ((b * 256) + c) * 10 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x6F, name: 'Turbocharger Compressor Inlet Pressure', shortName: 'TC_INLET',
+    unit: 'PSI', min: 0, max: 37.0, bytes: 3, category: 'turbo',
+    formula: ([a, b, c]) => {
+      // Byte A = support; B = sensor A pressure kPa
+      return b * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x72, name: 'Wastegate Control', shortName: 'WG_CTRL',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = wastegate A position
+      return ((b * 256) + c) * 100 / 65535;
+    },
+  },
+  {
+    pid: 0x73, name: 'Exhaust Pressure', shortName: 'EXH_PRESS',
+    unit: 'PSI', min: 0, max: 944.7, bytes: 5, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = sensor 1 pressure kPa
+      return ((b * 256) + c) * 0.01 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x74, name: 'Turbocharger RPM', shortName: 'TC_RPM',
+    unit: 'rpm', min: 0, max: 400000, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = turbo A RPM
+      return ((b * 256) + c) * 10;
+    },
+  },
+  {
+    pid: 0x75, name: 'Turbocharger Temperature A', shortName: 'TC_TEMP_A',
+    unit: '°F', min: -40, max: 11756, bytes: 7, category: 'turbo',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B-C = inlet temp, D-E = outlet temp
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;  // °C→°F (inlet temp)
+    },
+  },
+  {
+    pid: 0x76, name: 'Turbocharger Temperature B', shortName: 'TC_TEMP_B',
+    unit: '°F', min: -40, max: 11756, bytes: 7, category: 'turbo',
+    formula: ([a, b, c, d, e, f, g]) => {
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  {
+    pid: 0x77, name: 'Charge Air Cooler Temperature', shortName: 'CAC_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  // ── DPF / Aftertreatment (from OBD-PID spec) ──
+  {
+    pid: 0x7B, name: 'DPF Info', shortName: 'DPF_INFO',
+    unit: 'PSI', min: 0, max: 37.0, bytes: 7, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B-C = delta pressure sensor 1 kPa
+      return ((b * 256) + c) * 0.01 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x7C, name: 'DPF Temperature', shortName: 'DPF_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 9, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f, g, h, i]) => {
+      // Byte A = support; B-C = inlet temp Bank 1
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  // ── NOx / PM (from OBD-PID spec) ──
+  {
+    pid: 0x83, name: 'NOx Reagent System (DEF)', shortName: 'DEF_SYS',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'def',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B = tank level %
+      return (b * 100) / 255;
+    },
+  },
+  {
+    pid: 0x84, name: 'Particulate Matter Sensor', shortName: 'PM_SENS',
+    unit: 'mg/m³', min: 0, max: 655.35, bytes: 5, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = Bank 1 sensor
+      return ((b * 256) + c) * 0.01;
+    },
+  },
+  // ── Auxiliary / PTO ──
+  {
+    pid: 0x1E, name: 'Auxiliary Input Status (PTO)', shortName: 'AUX_PTO',
+    unit: '', min: 0, max: 1, bytes: 1, category: 'other',
+    formula: ([a]) => a & 0x01,  // Bit 0 = PTO active
+  },
+  // ── Extended Sensor Pairs (from OBD-PID spec) ──
+  {
+    pid: 0x66, name: 'MAF Sensor (extended, dual)', shortName: 'MAF_EXT',
+    unit: 'lb/min', min: 0, max: 86.7, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = sensor A rate g/s
+      return ((b * 256) + c) * 0.03125 * 0.132277;  // g/s→lb/min
+    },
+  },
+  {
+    pid: 0x67, name: 'Engine Coolant Temperature (extended)', shortName: 'ECT_EXT',
+    unit: '°F', min: -40, max: 419, bytes: 3, category: 'cooling',
+    formula: ([a, b, c]) => {
+      // Byte A = support; B = sensor 1 temp °C
+      return (b - 40) * 1.8 + 32;
+    },
+  },
+  {
+    pid: 0x68, name: 'Intake Air Temperature (extended)', shortName: 'IAT_EXT',
+    unit: '°F', min: -40, max: 419, bytes: 7, category: 'intake',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B = sensor 1 temp °C
+      return (b - 40) * 1.8 + 32;
+    },
+  },
+  // ── EVAP Extended (from OBD-PID spec) ──
+  {
+    pid: 0x53, name: 'Absolute EVAP System Vapor Pressure', shortName: 'EVAP_ABS',
+    unit: 'PSI', min: 0, max: 47.3, bytes: 2, category: 'evap',
+    formula: ([a, b]) => ((a * 256) + b) / 200 * 0.145038,  // kPa→PSI
+  },
+  {
+    pid: 0x54, name: 'EVAP System Vapor Pressure (wide)', shortName: 'EVAP_WIDE',
+    unit: 'PSI', min: -4.7, max: 4.7, bytes: 2, category: 'evap',
+    formula: ([a, b]) => ((a * 256) + b - 32768) * 0.000145038,  // Pa→PSI
+  },
+  // ── Secondary O2 Trims (from OBD-PID spec) ──
+  {
+    pid: 0x55, name: 'Short Term Sec O2 Trim (B1 & B3)', shortName: 'STO2_B1B3',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,  // Bank 1; Bank 3 = same formula on B
+  },
+  {
+    pid: 0x56, name: 'Long Term Sec O2 Trim (B1 & B3)', shortName: 'LTO2_B1B3',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  {
+    pid: 0x57, name: 'Short Term Sec O2 Trim (B2 & B4)', shortName: 'STO2_B2B4',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  {
+    pid: 0x58, name: 'Long Term Sec O2 Trim (B2 & B4)', shortName: 'LTO2_B2B4',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  // ── Max Values (from OBD-PID spec) ──
+  {
+    pid: 0x4F, name: 'Max Values (Eq Ratio, O2V, O2I, MAP)', shortName: 'MAX_VALS',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'other',
+    formula: ([a, b, c, d]) => a,  // A=max eq ratio, B=max O2 voltage, C=max O2 current, D=max MAP*10
+  },
+  {
+    pid: 0x50, name: 'Max MAF Rate', shortName: 'MAX_MAF',
+    unit: 'lb/min', min: 0, max: 338.5, bytes: 4, category: 'engine',
+    formula: ([a, b, c, d]) => a * 10 * 0.132277,  // g/s→lb/min
+  },
 ];
 
 // ─── PID Preset Groups ──────────────────────────────────────────────────────
@@ -930,6 +1203,45 @@ export const PID_PRESETS: PIDPreset[] = [
     name: 'BMW XM Charging',
     description: 'SOC, Charging Status/Power, DC-DC Output, Cell Delta, EV Range',
     pids: [0x1400, 0x140D, 0x140E, 0x1408, 0x140F, 0x140C],
+  },
+  // ── Universal Diesel Extended (new standard Mode 01 PIDs from OBD-PID spec & GMW3110) ──
+  {
+    name: 'Universal Diesel Extended',
+    description:
+      'Extended standard Mode 01 PIDs for any diesel vehicle — turbo RPM/temps, exhaust pressure, ' +
+      'DPF temps, fuel pressure control, injection pressure, NOx/DEF, EGR temp. ' +
+      'All SAE J1979 standard — no manufacturer-specific DIDs needed.',
+    pids: [
+      0x0C,     // Engine RPM
+      0x0D,     // Vehicle Speed
+      0x04,     // Calculated Engine Load
+      0x05,     // Engine Coolant Temp
+      0x0B,     // MAP
+      0x33,     // Barometric Pressure
+      0x42,     // Control Module Voltage
+      0x23,     // Fuel Rail Gauge Pressure (diesel)
+      0x59,     // Fuel Rail Absolute Pressure
+      0x6D,     // Fuel Pressure Control System
+      0x6E,     // Injection Pressure Control System
+      0x5D,     // Fuel Injection Timing
+      0x61,     // Driver Demand Torque %
+      0x62,     // Actual Engine Torque %
+      0x63,     // Engine Reference Torque
+      0x6F,     // Turbocharger Compressor Inlet Pressure
+      0x74,     // Turbocharger RPM
+      0x75,     // Turbocharger Temperature A
+      0x77,     // Charge Air Cooler Temperature
+      0x72,     // Wastegate Control
+      0x73,     // Exhaust Pressure
+      0x6B,     // EGR Temperature
+      0x78,     // EGT Bank 1
+      0x7C,     // DPF Temperature
+      0x7B,     // DPF Info (differential pressure)
+      0x83,     // NOx Reagent System (DEF)
+      0x84,     // Particulate Matter Sensor
+      0x01,     // Monitor Status (MIL/DTC/Readiness)
+      0x51,     // Fuel Type
+    ],
   },
   // ── PPEI Suggested — curated from HP Tuners BUSMASTER sniff on 2019 L5P E41 ──
   {
