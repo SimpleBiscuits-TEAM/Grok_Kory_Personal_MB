@@ -17,6 +17,7 @@
 import { invokeLLM, type Message, type InvokeResult } from "../_core/llm";
 import { getKnoxFileContextForLLM, getKnoxFiles, getKnoxFileById } from "../db";
 import { parseA2LFile, type CalibrationMap, type A2LMetadata } from "./a2lParser";
+import { getFullKnoxKnowledge } from "./knoxKnowledgeServer";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ export interface AlphaResponse {
 
 // ── Alpha System Prompt ──────────────────────────────────────────────────────
 
-function buildAlphaSystemPrompt(query: AlphaQuery, fileLibraryContext: string, a2lAnalysis: string): string {
+function buildAlphaSystemPrompt(query: AlphaQuery, fileLibraryContext: string, a2lAnalysis: string, protocolBridgeContext: string): string {
   return `You are ALPHA — the V-OP Data Agent. You are one half of Knox's dual-expert reasoning system.
 
 ## Your Role
@@ -70,11 +71,52 @@ You reason EXCLUSIVELY from DATA — A2L files, binary structures, calibration m
 - Match ECU platforms to known A2L files in the Knox library
 
 ## What You Do NOT Do
-- You do NOT reason about protocols (UDS, GMLAN, CAN) — that's Beta
+- You do NOT OWN protocol reasoning (UDS, GMLAN, CAN) — that's Beta's primary domain
 - You do NOT reason about flash procedures or timing — that's Beta
-- You do NOT reason about NRC codes or diagnostic services — that's Beta
+- You do NOT reason about NRC codes — that's Beta
 - You do NOT make recommendations about tuning strategy — that's Knox's job after reconciliation
 - You do NOT speculate beyond what the data shows
+
+## Protocol-to-Data Bridge Knowledge
+You UNDERSTAND how diagnostic protocols map to A2L data structures so you can cross-reference effectively:
+
+### A2L ↔ UDS/OBD Mapping
+- A2L MEASUREMENT blocks define live data signals. Each has an ECU_ADDRESS (RAM address) that can be read via UDS $23 (ReadMemoryByAddress) or mapped to a Mode 22 DID.
+- A2L CHARACTERISTIC blocks define calibration parameters (maps, curves, values). These are the tunable data at specific ECU addresses.
+- COMPU_METHOD blocks define scaling formulas (e.g., RAT_FUNC with coefficients a-f) that convert raw bytes to engineering units — same math as OBD PID formulas.
+- RECORD_LAYOUT blocks define how multi-dimensional maps are stored in memory (row-major, column-major, axis interleaving).
+- DID (Data Identifier) numbers in Mode 22 ($22) often correspond to A2L MEASUREMENT names. Example: DID 0x162F maps to CylBalRate_Cyl1 in the A2L.
+- DDDI (Service $2C) packs multiple A2L MEASUREMENTs into a single periodic stream by referencing their ECU_ADDRESS offsets.
+- IOCTL (Service $2F/$AE) controls actuators that correspond to A2L CHARACTERISTIC outputs.
+
+### GM CAN Addressing for A2L Context
+- GM Global A (11-bit): ECM at 0x7E0/0x7E8, TCM at 0x7E1/0x7E9, UUDT periodic on 0x5xx
+- GM Global B (29-bit): Format 0x14DA[Target][Source], e.g., ECM = 0x14DA11F1/0x14DAF111
+- GMLAN enhanced: $241-$25F (request) / $641-$65F (USDT response) / $541-$55F (UUDT/periodic)
+- A2L files for GM Global B ECUs (E42, T93) use 29-bit extended CAN IDs in their IF_DATA sections
+
+### J1939 for A2L Context (Heavy-Duty)
+- J1939 uses 29-bit CAN IDs: Priority(3) + EDP(1) + DP(1) + PF(8) + PS(8) + SA(8)
+- PGN = Parameter Group Number, maps to groups of SPNs (Suspect Parameter Numbers)
+- SPNs are the J1939 equivalent of A2L MEASUREMENTs — each has a defined bit position, scaling, and unit
+- Key source addresses: 0x00=Engine, 0x03=Transmission, 0x0B=Brakes
+
+### ISO 14229 UDS Services Relevant to A2L Data
+- $22 ReadDataByIdentifier: Read DIDs that map to A2L MEASUREMENTs
+- $23 ReadMemoryByAddress: Read raw ECU RAM at A2L ECU_ADDRESS offsets
+- $2C DynamicallyDefineDataIdentifier: Create custom DIDs from A2L addresses for streaming
+- $2A ReadDataByPeriodicIdentifier: Subscribe to periodic DID updates
+- $2E WriteDataByIdentifier: Write to A2L CHARACTERISTIC addresses
+- $2F IOControlByIdentifier: Control actuators mapped in A2L
+
+### KWP2000 Legacy Mapping
+- $21 readDataByLocalIdentifier (older GM equivalent of $22)
+- $2C dynamicallyDefineLocalIdentifier (older DDDI)
+- Service IDs overlap with UDS but some differ — positive response = SID + 0x40
+
+### DTC Status Bits (for A2L diagnostic context)
+- Each DTC has 8-bit status: bit0=testFailed, bit2=pendingDTC, bit3=confirmedDTC, bit7=warningIndicatorRequested
+- A2L files may reference DTC-related MEASUREMENTs that track these status bits
 
 ## How You Respond
 Your response MUST be structured JSON with these fields:
@@ -102,7 +144,10 @@ ${a2lAnalysis || 'No A2L data currently available for analysis'}
 ${query.binaryContext || 'No binary data context provided'}
 
 ### Module-Specific Context
-${query.moduleContext || 'No additional module context'}`;
+${query.moduleContext || 'No additional module context'}
+
+### Diagnostic Standards Reference
+${protocolBridgeContext}`;
 }
 
 // ── A2L Analysis Helper ──────────────────────────────────────────────────────
@@ -181,6 +226,62 @@ async function searchKnoxLibrary(ecuFamily: string | undefined): Promise<string>
   }
 }
 
+// ── Protocol Bridge Context for Alpha ────────────────────────────────────────
+
+/**
+ * Extract A2L-relevant protocol knowledge from the Knox knowledge base.
+ * Alpha doesn't get the full spec knowledge (that's Beta's job), but it needs
+ * enough diagnostic protocol context to cross-reference A2L data structures
+ * with UDS services, DID addresses, DDDI definitions, and J1939 SPNs.
+ */
+function extractProtocolBridgeContext(domain: string): string {
+  const fullKnowledge = getFullKnoxKnowledge();
+  const maxLength = 8000;
+  let sections = '';
+
+  // Always include: GM CAN ID assignments, DDDI protocol, Mode 22 PIDs
+  const gmDiagIdx = fullKnowledge.indexOf('## GM Diagnostic Communication');
+  if (gmDiagIdx >= 0) {
+    sections += fullKnowledge.substring(gmDiagIdx, gmDiagIdx + 3000) + '\n\n';
+  }
+
+  // Include: Normen_CAN standards reference (J1939, UDS, KWP2000, Global B)
+  const normenIdx = fullKnowledge.indexOf('## Normen_CAN Standards Reference');
+  if (normenIdx >= 0) {
+    sections += fullKnowledge.substring(normenIdx, normenIdx + 4000) + '\n\n';
+  }
+
+  // Include: OBD-II PID reference (for Mode 01 formula cross-referencing)
+  const obdPidIdx = fullKnowledge.indexOf('## OBD-II Standard PID Reference');
+  if (obdPidIdx >= 0) {
+    sections += fullKnowledge.substring(obdPidIdx, obdPidIdx + 2000) + '\n\n';
+  }
+
+  // Include: GM bar code traceability (for ECU identification context)
+  const barCodeIdx = fullKnowledge.indexOf('## GM Bar Code Traceability');
+  if (barCodeIdx >= 0) {
+    sections += fullKnowledge.substring(barCodeIdx, barCodeIdx + 1500) + '\n\n';
+  }
+
+  // For editor domain, also include E42 A2L knowledge and advanced logger PIDs
+  if (domain === 'editor' || domain === 'diagnostics') {
+    const e42Idx = fullKnowledge.indexOf('## E42 (2024 L5P Gen2) A2L Knowledge');
+    if (e42Idx >= 0) {
+      sections += fullKnowledge.substring(e42Idx, e42Idx + 2000) + '\n\n';
+    }
+    const advLogIdx = fullKnowledge.indexOf('## Advanced Logger PIDs');
+    if (advLogIdx >= 0) {
+      sections += fullKnowledge.substring(advLogIdx, advLogIdx + 2000) + '\n\n';
+    }
+  }
+
+  if (sections.length === 0) {
+    return 'No protocol bridge context available';
+  }
+
+  return sections.slice(0, maxLength);
+}
+
 // ── Main Alpha Query Function ────────────────────────────────────────────────
 
 /**
@@ -200,10 +301,16 @@ export async function queryAlpha(query: AlphaQuery): Promise<AlphaResponse> {
 
   const combinedA2L = [a2lAnalysis, knoxLibrarySearch].filter(Boolean).join('\n\n');
 
+  // Extract protocol-to-data bridge context from Knox knowledge base
+  // Alpha gets the A2L-relevant sections: GM CAN IDs, DDDI protocol, Mode 22 PIDs,
+  // J1939 structure, UDS service table, GM bar code traceability, and Normen_CAN standards
+  const protocolBridgeContext = extractProtocolBridgeContext(query.domain);
+
   const systemPrompt = buildAlphaSystemPrompt(
     query,
     fileLibraryContext.slice(0, 6000),
     combinedA2L.slice(0, 15000),
+    protocolBridgeContext,
   );
 
   const messages: Message[] = [

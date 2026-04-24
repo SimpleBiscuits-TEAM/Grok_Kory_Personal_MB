@@ -2098,3 +2098,11 @@
 - [x] Extract and integrate Global-B Tool Help (GM diagnostic, not BMW) into Knox
 - [x] Extract and integrate KWP2000 ISO 14230-3 into Knox
 - [x] Extract and integrate ISO 15031.5 into Knox
+
+## Alpha Agent — Protocol Bridge Integration
+- [x] Add protocol-to-data bridge knowledge to Alpha's system prompt (A2L↔UDS/OBD mapping, GM CAN addressing, J1939, KWP2000, DTC status bits)
+- [x] Create extractProtocolBridgeContext() function to pull relevant Knox knowledge sections for Alpha
+- [x] Import getFullKnoxKnowledge into agentAlpha.ts
+- [x] Update buildAlphaSystemPrompt to accept and inject protocolBridgeContext
+- [x] Soften Alpha's "do NOT reason about protocols" to "do NOT OWN protocol reasoning" — Alpha now understands protocol-to-data mapping
+- [x] Domain-aware context: editor/diagnostics domains get extra E42 A2L + advanced logger PID sections
