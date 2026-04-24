@@ -25,7 +25,7 @@
  *   - Dark theme inspired by HPTuners VCM Scanner
  */
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { X, Search, Maximize2, Minimize2, Upload, Layers } from 'lucide-react';
+import { X, Search, Maximize2, Minimize2, Upload, Download, Layers } from 'lucide-react';
 import type { PIDDefinition, PIDReading } from '@/lib/obdConnection';
 
 // ─── Theme: HPTuners VCM Scanner dark blue ──────────────────────────────────
@@ -451,18 +451,8 @@ function ChartSection({
         ctx.stroke();
       });
 
-      // Header readout at cursor
-      let hx = marginLeft + 8;
-      channelIndices.forEach((ci, slot) => {
-        const pid = pids[ci];
-        if (!pid) return;
-        const color = getChannelColor(sectionIdx, slot);
-        const v = rows[cursorIdx]?.values[ci];
-        const valStr = Number.isFinite(v) ? formatValue(v, pid) : '—';
-        const label = `${pid.shortName}: ${valStr} ${pid.unit}`;
-        const tw = drawLabelWithBg(ctx, label, hx, marginTop - 5, color, 'left', 10);
-        hx += tw + 16;
-      });
+      // Cursor readout values are shown in the HTML badge overlay (not canvas)
+      // to avoid text overlap with the channel name badges
     }
   }, [canvasSize, channelIndices, pids, rows, startIdx, endIdx, cursorIdx, channelRanges, sectionIdx, overlayRows, overlayPids]);
 
@@ -487,27 +477,34 @@ function ChartSection({
 
   return (
     <div ref={containerRef} style={{ position: 'relative', height, borderBottom: `1px solid ${T.border}` }}>
-      {/* Channel badges in header */}
+      {/* Channel badges + cursor values in header */}
       <div style={{
         position: 'absolute', top: 0, left: marginLeft, right: marginRight,
-        height: marginTop, display: 'flex', alignItems: 'center', gap: 8,
-        padding: '0 8px', zIndex: 2, pointerEvents: 'auto',
+        height: marginTop, display: 'flex', alignItems: 'center', gap: 4,
+        padding: '0 4px', zIndex: 2, pointerEvents: 'auto',
+        overflow: 'hidden', whiteSpace: 'nowrap',
       }}>
         {channelIndices.map((ci, slot) => {
           const pid = pids[ci];
           if (!pid) return null;
           const color = getChannelColor(sectionIdx, slot);
+          const cursorVal = cursorIdx !== null && cursorIdx < rows.length
+            ? rows[cursorIdx]?.values[ci]
+            : undefined;
+          const valStr = cursorVal !== undefined && Number.isFinite(cursorVal)
+            ? `: ${formatValue(cursorVal, pid)} ${pid.unit}`
+            : '';
           return (
-            <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
-              <span style={{ fontSize: '0.6rem', color, fontFamily: FONT.mono, fontWeight: 'bold' }}>
-                {pid.shortName}
+            <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+              <span style={{ fontSize: '0.55rem', color, fontFamily: FONT.mono, fontWeight: 'bold' }}>
+                {pid.shortName}{valStr}
               </span>
               <button
                 onClick={() => onRemoveChannel(sectionIdx, ci)}
-                style={{ background: 'transparent', border: 'none', color: T.textDim, cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 10, display: 'flex' }}
+                style={{ background: 'transparent', border: 'none', color: T.textDim, cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 9, display: 'flex', flexShrink: 0 }}
               >
-                <X size={9} />
+                <X size={8} />
               </button>
             </div>
           );
@@ -712,10 +709,13 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
     e.target.value = '';
   }, [pids]);
 
-  // Build unified row data from readingHistoryy
+  // Build unified row data from readingHistory
+  // IMPORTANT: pidList always uses the full pids array during live monitoring
+  // to keep channel indices stable. Only imported data uses its own pidList.
   const { rows, pidList } = useMemo(() => {
     // Use imported data if available
     if (importedData) return { rows: importedData.rows, pidList: importedData.pidList };
+    // Always use full pids array as pidList to keep indices stable
     const activePids = pids.filter(p => readingHistory.has(p.pid) && (readingHistory.get(p.pid)?.length ?? 0) > 0);
     if (activePids.length === 0) return { rows: [] as DataRow[], pidList: pids };
 
@@ -754,7 +754,16 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
       dataRows.push({ timestamp: ts, values });
     }
 
-    return { rows: dataRows, pidList: activePids };
+    // Use full pids array as pidList for stable indices.
+    // Build rows with values for ALL pids (0 for inactive ones).
+    const fullRows: DataRow[] = dataRows.map(row => {
+      const fullValues: number[] = pids.map(p => {
+        const activeIdx = activePids.indexOf(p);
+        return activeIdx >= 0 ? row.values[activeIdx] : 0;
+      });
+      return { timestamp: row.timestamp, values: fullValues };
+    });
+    return { rows: fullRows, pidList: pids };
   }, [pids, readingHistory, importedData]);
 
   // Section channel assignments
@@ -1017,6 +1026,35 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
             onChange={handleImportCSV}
             style={{ display: 'none' }}
           />
+          <button
+            onClick={() => {
+              if (rows.length === 0 || pidList.length === 0) return;
+              const header = ['Timestamp', ...pidList.map(p => `${p.shortName} (${p.unit})`)];
+              const csvRows = rows.map(r => [
+                r.timestamp.toFixed(3),
+                ...r.values.map(v => Number.isFinite(v) ? v.toFixed(4) : ''),
+              ]);
+              const csv = [header.join(','), ...csvRows.map(r => r.join(','))].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `datalog_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            disabled={rows.length === 0}
+            style={{
+              background: 'transparent',
+              color: rows.length > 0 ? T.green : T.textDim,
+              border: `1px solid ${rows.length > 0 ? T.green : T.border}`,
+              borderRadius: 2, padding: '2px 8px', fontSize: '0.65rem',
+              cursor: rows.length > 0 ? 'pointer' : 'default',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <Download size={10} /> EXPORT CSV
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             style={{

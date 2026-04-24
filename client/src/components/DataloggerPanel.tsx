@@ -1085,6 +1085,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
   const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
+  // Drag-to-rearrange PID gauge blocks
+  const [pidGaugeOrder, setPidGaugeOrder] = useState<number[]>([]); // PID numbers in user-chosen order
+  const dragPidRef = useRef<number | null>(null);
+  const dragOverPidRef = useRef<number | null>(null);
 
   // DID Scan state
   const [isScanning, setIsScanning] = useState(false);
@@ -2822,67 +2826,65 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           {/* === LIST VIEW (original layout) === */}
           {liveViewMode === 'list' && (
             <>
-              {/* Live Gauges — grouped by category */}
+              {/* Live Gauges — drag-to-rearrange flat grid */}
               {(isLogging || liveReadings.size > 0) && (() => {
-                // Group active PIDs by category, preserving selection order within each group
-                const categoryOrder = ['engine', 'turbo', 'fuel', 'exhaust', 'emissions', 'transmission', 'def', 'intake', 'cooling', 'electrical', 'oxygen', 'catalyst', 'evap', 'ignition', 'other'];
-                const grouped = new Map<string, typeof activePids>();
-                for (const pid of activePids) {
-                  const cat = pid.category || 'other';
-                  if (!grouped.has(cat)) grouped.set(cat, []);
-                  grouped.get(cat)!.push(pid);
+                // Build ordered PID list: use user's custom order, appending any new PIDs at end
+                const activePidNums = activePids.map(p => p.pid);
+                const ordered: PIDDefinition[] = [];
+                const seen = new Set<number>();
+                // First: PIDs in user's saved order
+                for (const pidNum of pidGaugeOrder) {
+                  if (activePidNums.includes(pidNum) && !seen.has(pidNum)) {
+                    const def = activePids.find(p => p.pid === pidNum);
+                    if (def) { ordered.push(def); seen.add(pidNum); }
+                  }
                 }
-                const catIcons: Record<string, React.ReactNode> = {
-                  engine: <Cpu style={{ width: 13, height: 13 }} />,
-                  turbo: <Wind style={{ width: 13, height: 13 }} />,
-                  fuel: <Flame style={{ width: 13, height: 13 }} />,
-                  emissions: <AlertCircle style={{ width: 13, height: 13 }} />,
-                  transmission: <Settings style={{ width: 13, height: 13 }} />,
-                  electrical: <Zap style={{ width: 13, height: 13 }} />,
-                  exhaust: <Thermometer style={{ width: 13, height: 13 }} />,
-                  def: <Droplets style={{ width: 13, height: 13 }} />,
-                  oxygen: <Activity style={{ width: 13, height: 13 }} />,
-                  catalyst: <Thermometer style={{ width: 13, height: 13 }} />,
-                  evap: <Wind style={{ width: 13, height: 13 }} />,
-                  ignition: <Zap style={{ width: 13, height: 13 }} />,
-                  cooling: <Thermometer style={{ width: 13, height: 13 }} />,
-                  intake: <Wind style={{ width: 13, height: 13 }} />,
-                  other: <BarChart3 style={{ width: 13, height: 13 }} />,
+                // Then: any new PIDs not yet in order
+                for (const pid of activePids) {
+                  if (!seen.has(pid.pid)) { ordered.push(pid); seen.add(pid.pid); }
+                }
+                const handleDragStart = (pidNum: number) => { dragPidRef.current = pidNum; };
+                const handleDragOver = (e: React.DragEvent, pidNum: number) => {
+                  e.preventDefault();
+                  dragOverPidRef.current = pidNum;
                 };
-                const sortedCats = [...grouped.keys()].sort((a, b) => {
-                  const ai = categoryOrder.indexOf(a);
-                  const bi = categoryOrder.indexOf(b);
-                  return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-                });
+                const handleDrop = () => {
+                  const from = dragPidRef.current;
+                  const to = dragOverPidRef.current;
+                  if (from === null || to === null || from === to) return;
+                  const currentOrder = ordered.map(p => p.pid);
+                  const fromIdx = currentOrder.indexOf(from);
+                  const toIdx = currentOrder.indexOf(to);
+                  if (fromIdx < 0 || toIdx < 0) return;
+                  currentOrder.splice(fromIdx, 1);
+                  currentOrder.splice(toIdx, 0, from);
+                  setPidGaugeOrder(currentOrder);
+                  dragPidRef.current = null;
+                  dragOverPidRef.current = null;
+                };
                 return (
                   <div style={{ marginBottom: '8px' }}>
                     <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '6px' }}>
                       LIVE DATA
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textMuted, marginLeft: '8px' }}>
+                        drag to rearrange
+                      </span>
                     </div>
-                    {sortedCats.map(cat => (
-                      <div key={cat} style={{ marginBottom: '6px' }}>
-                        <div style={{
-                          display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '3px',
-                          paddingBottom: '2px', borderBottom: `1px solid ${sColor.borderLight}`,
-                        }}>
-                          <span style={{ color: sColor.textDim }}>{catIcons[cat] || null}</span>
-                          <span style={{
-                            fontFamily: sFont.heading, fontSize: '0.6rem', color: sColor.textDim,
-                            letterSpacing: '0.08em', textTransform: 'uppercase',
-                          }}>
-                            {cat}
-                          </span>
-                          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textMuted, marginLeft: 'auto' }}>
-                            {grouped.get(cat)!.length}
-                          </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                      {ordered.map(pid => (
+                        <div
+                          key={`${pid.service}-${pid.pid}`}
+                          draggable
+                          onDragStart={() => handleDragStart(pid.pid)}
+                          onDragOver={(e) => handleDragOver(e, pid.pid)}
+                          onDrop={handleDrop}
+                          onDragEnd={() => { dragPidRef.current = null; dragOverPidRef.current = null; }}
+                          style={{ cursor: 'grab' }}
+                        >
+                          <LiveGauge pid={pid} reading={liveReadings.get(pid.pid) || null} />
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                          {grouped.get(cat)!.map(pid => (
-                            <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 );
               })()}

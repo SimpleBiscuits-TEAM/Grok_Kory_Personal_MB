@@ -920,11 +920,13 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       if (resp[0] === 0x7F && resp.length >= 3) {
         // NRC (Negative Response Code) — ECU rejected this request
         const nrc = resp[2];
-        if (nrc === 0x31) {
-          // requestOutOfRange — this DID doesn't exist on this ECU
-          console.log(`[POLL-NRC] ${pid.shortName} (0x${pid.pid.toString(16)}) → NRC 0x31 requestOutOfRange`);
-        }
-        return null;
+        console.log(`[POLL-NRC] ${pid.shortName} (0x${pid.pid.toString(16)}) → NRC 0x${nrc.toString(16).toUpperCase()}`);
+        // Return NRC info so monitoring loop can permanently blacklist unsupported DIDs
+        return {
+          pid: pid.pid, name: pid.name, shortName: pid.shortName,
+          value: NaN, unit: pid.unit, rawBytes: [], timestamp: Date.now(),
+          nrc,
+        };
       }
       if (resp[0] !== posResp) return null;
       if (service === 0x22) {
@@ -1089,6 +1091,9 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     // RET: number of cycles before retrying a paused DID (was 20, increased to 50
     // so paused DIDs stay out of rotation for ~5 minutes)
     const RET = 50;
+    const nrcCount = new Map<number, number>(); // Track NRC responses for permanent blacklisting
+    const blacklisted = new Set<number>(); // Permanently blacklisted DIDs (NRC 0x31)
+    const NRC_BL = 2; // Blacklist after 2 NRC responses
     let active = [...filteredPids];
     let loop = 0;
 
@@ -1133,15 +1138,39 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
             if (onData && priorityReadings.length) onData(priorityReadings);
           }
 
-          const readings = await this.readPids(active);
+          const allReadings = await this.readPids(active);
+          // Separate NRC responses from valid data
+          const readings: PIDReading[] = [];
+          const nrcHits: PIDReading[] = [];
+          for (const r of allReadings) {
+            if (r.nrc) nrcHits.push(r);
+            else readings.push(r);
+          }
           const got = new Set(readings.map(r => r.pid));
           for (const r of readings) {
             session.readings.get(r.pid)?.push(r);
             fail.set(r.pid, 0);
+            nrcCount.set(r.pid, 0);
+          }
+          // Permanently blacklist DIDs with NRC 0x31 (Request Out Of Range)
+          const newBl: string[] = [];
+          for (const r of nrcHits) {
+            const n = (nrcCount.get(r.pid) || 0) + 1;
+            nrcCount.set(r.pid, n);
+            if (n >= NRC_BL && !blacklisted.has(r.pid)) {
+              blacklisted.add(r.pid);
+              const d = active.find(p => p.pid === r.pid);
+              newBl.push(`${d?.shortName || '0x' + r.pid.toString(16)} (NRC 0x${(r.nrc||0).toString(16)})`);
+            }
+          }
+          if (newBl.length) {
+            active = active.filter(p => !blacklisted.has(p.pid));
+            console.log(`[POLL] Blacklisted ${newBl.length} unsupported DIDs: ${newBl.join(', ')}`);
+            this.emit('log', null, `Blacklisted: ${newBl.join(', ')}`);
           }
           const paused: string[] = [];
           for (const p of active) {
-            if (!got.has(p.pid)) {
+            if (!got.has(p.pid) && !nrcHits.find(r => r.pid === p.pid)) {
               const f = (fail.get(p.pid) || 0) + 1;
               fail.set(p.pid, f);
               if (f >= MAXF && !pause.has(p.pid)) {

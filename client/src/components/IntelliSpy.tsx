@@ -493,7 +493,9 @@ function createFlashProgress(): FlashProgress {
 }
 
 function updateFlashProgress(progress: FlashProgress, decode: FlashDecode): FlashProgress {
-  if (!decode.isFlash && decode.type !== 'negative_response') return progress;
+  // Only track flash-related services — ignore NRCs for non-flash services like
+  // ReadDataByIdentifier (0x22) which fires constantly during monitoring/datalogging
+  if (!decode.isFlash) return progress;
 
   const updated = { ...progress, lastActivity: Date.now() };
   if (!updated.startTime) updated.startTime = Date.now();

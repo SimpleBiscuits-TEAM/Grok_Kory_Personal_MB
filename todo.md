@@ -2295,3 +2295,13 @@
 - [x] Ensure existing PPEI_SUPPORT_KB and Knox pipeline remain intact (training doc supplements, not replaces)
 - [x] Add supported vehicles table to Strat's knowledge for quick vehicle compatibility checks
 - [x] Add pre-tune info gathering workflow so Strat can walk customers through intake checklist
+
+## Bug Fixes — April 24, 2026 (Truck Testing Session 2)
+- [x] Fix IntelliSpy false "flash operation detected" and red "rejected, read data by identifier" during monitoring/datalogging
+- [x] Fix OBDDatalogViewer PID deselect/reselect bug — can deselect but cannot re-select (won't highlight)
+- [x] Fix Boost Desired DDDI PID — subtract barometric pressure for gauge pressure (currently showing absolute ~14.x psi at idle)
+- [x] Fix bridge timeout after ~20 min continuous monitoring — PIDs start failing, requires bridge restart
+- [x] Add PID export button in OBDDatalogViewer (import exists but no export)
+- [x] Add drag-to-rearrange PID blocks in live view (square PID blocks)
+- [x] Fix chart section header text overlap — badges and cursor readout labels overlap when 4 channels assigned
+- [x] Remove all GM presets except Engine Basics — keep only Engine Basics built-in + user-created presets

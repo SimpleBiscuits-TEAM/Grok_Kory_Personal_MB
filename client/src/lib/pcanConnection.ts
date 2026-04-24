@@ -947,6 +947,14 @@ export class PCANConnection {
         await this.ensureGmLiveDataSessionForTx(tx);
         const uds = await this.readUDSDID(pid.pid, tx);
         if (!uds?.positiveResponse || !uds.data?.length) {
+          // If UDS returned an NRC, propagate it so the monitoring loop can permanently blacklist this DID.
+          if (uds && !uds.positiveResponse && uds.nrc) {
+            return {
+              pid: pid.pid, name: pid.name, shortName: pid.shortName,
+              value: NaN, unit: pid.unit, rawBytes: [], timestamp: Date.now(),
+              nrc: uds.nrc,
+            };
+          }
           // Fallback: bridges that only implement OBD framing (fixed reference bridge strips 2-byte DID).
           try {
             const response = await this.sendRequest(
@@ -963,7 +971,11 @@ export class PCANConnection {
               if (response.data[0] === 0x7F) {
                 const nrc = response.data.length >= 3 ? response.data[2] : response.data[1] ?? 0;
                 console.warn(`[PCAN] Mode 22 DID 0x${pid.pid.toString(16).toUpperCase()} NRC 0x${nrc.toString(16).toUpperCase()} in obd_request fallback — not data`);
-                return null;
+                return {
+                  pid: pid.pid, name: pid.name, shortName: pid.shortName,
+                  value: NaN, unit: pid.unit, rawBytes: [], timestamp: Date.now(),
+                  nrc,
+                };
               }
               const value = pid.formula(response.data);
               return {
@@ -1249,8 +1261,11 @@ export class PCANConnection {
     // Failure tracking with soft-disable
     const pidFailCount = new Map<number, number>();
     const pidPausedUntilLoop = new Map<number, number>();
+    const pidNrcCount = new Map<number, number>(); // Track NRC responses for permanent blacklisting
+    const pidBlacklisted = new Set<number>(); // Permanently blacklisted DIDs (NRC 0x31 = Request Out Of Range)
     const MAX_CONSECUTIVE_FAILS = 25; // was 8 — too aggressive, PIDs get paused after brief batch timeouts
     const RETRY_INTERVAL = 10; // was 20 — retry sooner after pause
+    const NRC_BLACKLIST_THRESHOLD = 2; // Permanently blacklist after 2 NRC 0x31 responses (DID doesn't exist on this ECU)
     // DDDI periodic PIDs (FRP_ACT, FRP_DES) come from 0x5E8 periodic frames,
     // NOT from batch_read_dids. They should NEVER be paused by the fail counter
     // because they're injected by wrapReadPids from the periodic cache.
@@ -1280,18 +1295,47 @@ export class PCANConnection {
 
         try {
           const readings = await this.readPids(activePids);
-          const respondedPids = new Set(readings.map(r => r.pid));
+          // Separate NRC responses from valid data
+          const validReadings: PIDReading[] = [];
+          const nrcReadings: PIDReading[] = [];
+          for (const r of readings) {
+            if (r.nrc) {
+              nrcReadings.push(r);
+            } else {
+              validReadings.push(r);
+            }
+          }
+          const respondedPids = new Set(validReadings.map(r => r.pid));
 
-          for (const reading of readings) {
+          for (const reading of validReadings) {
             const arr = session.readings.get(reading.pid);
             if (arr) arr.push(reading);
             pidFailCount.set(reading.pid, 0);
+            pidNrcCount.set(reading.pid, 0); // Reset NRC count on success
           }
 
-          // Track failures (exempt DDDI periodic PIDs — they come from 0x5E8, not batch)
+          // Permanently blacklist DIDs that get NRC 0x31 (Request Out Of Range)
+          // These DIDs don't exist on this ECU and will NEVER work — stop wasting CAN bus bandwidth.
+          const newlyBlacklisted: string[] = [];
+          for (const r of nrcReadings) {
+            if (DDDI_EXEMPT_PIDS.has(r.pid)) continue;
+            const nrcHits = (pidNrcCount.get(r.pid) || 0) + 1;
+            pidNrcCount.set(r.pid, nrcHits);
+            if (nrcHits >= NRC_BLACKLIST_THRESHOLD && !pidBlacklisted.has(r.pid)) {
+              pidBlacklisted.add(r.pid);
+              const pidDef = activePids.find(p => p.pid === r.pid);
+              newlyBlacklisted.push(`${pidDef?.shortName || '0x' + r.pid.toString(16)} (NRC 0x${(r.nrc || 0).toString(16)})`);
+            }
+          }
+          if (newlyBlacklisted.length > 0) {
+            activePids = activePids.filter(p => !pidBlacklisted.has(p.pid));
+            this.emit('log', null, `Blacklisted unsupported DIDs: ${newlyBlacklisted.join(', ')} — permanently removed from poll`);
+          }
+
+          // Track timeout failures (exempt DDDI periodic PIDs — they come from 0x5E8, not batch)
           const newlyPaused: string[] = [];
           for (const pid of activePids) {
-            if (!respondedPids.has(pid.pid)) {
+            if (!respondedPids.has(pid.pid) && !nrcReadings.find(r => r.pid === pid.pid)) {
               if (DDDI_EXEMPT_PIDS.has(pid.pid)) continue; // Never pause DDDI periodic PIDs
               const fails = (pidFailCount.get(pid.pid) || 0) + 1;
               pidFailCount.set(pid.pid, fails);
@@ -1308,8 +1352,8 @@ export class PCANConnection {
             this.emit('log', null, `Paused non-responding PIDs: ${newlyPaused.join(', ')} (will retry)`);
           }
 
-          if (onData && readings.length > 0) {
-            onData(readings);
+          if (onData && validReadings.length > 0) {
+            onData(validReadings);
           }
         } catch (e) {
           if (this.loggingActive) {
