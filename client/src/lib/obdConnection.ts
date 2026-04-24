@@ -505,9 +505,10 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x49, name: 'Accelerator Pedal Position D', shortName: 'APP_D',
+    pid: 0x49, name: 'Accelerator Pedal Position D (test)', shortName: 'APP_D',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
-    formula: ([a]) => (a * 100) / 255,
+    // Rescaled: raw 19.2% at idle → 0%, raw 84.7% at WOT → 100%
+    formula: ([a]) => { const raw = (a * 100) / 255; return Math.max(0, Math.min(100, ((raw - 19.2) / (84.7 - 19.2)) * 100)); },
   },
   {
     pid: 0x4A, name: 'Accel Pedal Sensor E (raw voltage)', shortName: 'APP_E_RAW',

@@ -1006,7 +1006,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [checkingBridge, setCheckingBridge] = useState(false);
 
   // PID selection
-  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
+  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04]));
   const autoAppliedE42PresetRef = useRef(false);
 
   // Handle PIDs injected from Knox Diagnostic Agent
@@ -1815,6 +1815,38 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     addLog('Session sent to Analyzer');
   }, [onOpenInAnalyzer, addLog]);
 
+  // ─── AUTO-EXPORT: Build session from current live data and send to analyzer ──
+  const handleAutoExportToAnalyzer = useCallback(() => {
+    if (readingHistory.size === 0) {
+      addLog('No data to export — start monitoring first');
+      return;
+    }
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
+    // Find earliest and latest timestamps across all readings
+    let earliest = Infinity, latest = -Infinity;
+    readingHistory.forEach(readings => {
+      if (readings.length > 0) {
+        earliest = Math.min(earliest, readings[0].timestamp);
+        latest = Math.max(latest, readings[readings.length - 1].timestamp);
+      }
+    });
+    const session: LogSession = {
+      id: `live_export_${Date.now()}`,
+      startTime: earliest === Infinity ? Date.now() : earliest,
+      endTime: latest === -Infinity ? Date.now() : latest,
+      sampleRate: sampleRateMs,
+      pids: pidsToLog,
+      readings: new Map(readingHistory),
+      vehicleInfo: vehicleInfo || undefined,
+    };
+    const csv = sessionToAnalyzerCSV(session);
+    const filename = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    if (onOpenInAnalyzer) {
+      onOpenInAnalyzer(csv, filename);
+    }
+    addLog('Live data sent to Analyzer');
+  }, [readingHistory, vehicleFilteredPids, selectedPids, sampleRateMs, vehicleInfo, onOpenInAnalyzer, addLog]);
+
   const handleDeleteSession = useCallback((id: string) => {
     setCompletedSessions(prev => prev.filter(s => s.id !== id));
   }, []);
@@ -2033,6 +2065,23 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               }}
             >
               <Square style={{ width: 14, height: 14 }} /> STOP REC · {recordDuration}s · {recordSampleCount} samples
+            </button>
+          )}
+          {/* AUTO EXPORT TO ANALYZER — available when there's live data */}
+          {(isMonitoring || readingHistory.size > 0) && onOpenInAnalyzer && (
+            <button
+              onClick={handleAutoExportToAnalyzer}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: 'oklch(0.15 0.04 200 / 0.3)',
+                border: `1px solid oklch(0.70 0.14 200)`, borderRadius: '3px',
+                color: 'oklch(0.70 0.14 200)',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer',
+              }}
+              title="Send current live data to Analyzer tab"
+            >
+              <BarChart3 style={{ width: 14, height: 14 }} /> ANALYZE LIVE
             </button>
           )}
           {/* AI Auto-Naming indicator */}
@@ -2715,19 +2764,70 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           {/* === LIST VIEW (original layout) === */}
           {liveViewMode === 'list' && (
             <>
-              {/* Live Gauges */}
-              {(isLogging || liveReadings.size > 0) && (
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
-                    LIVE DATA
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {activePids.map(pid => (
-                      <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
+              {/* Live Gauges — grouped by category */}
+              {(isLogging || liveReadings.size > 0) && (() => {
+                // Group active PIDs by category, preserving selection order within each group
+                const categoryOrder = ['engine', 'turbo', 'fuel', 'exhaust', 'emissions', 'transmission', 'def', 'intake', 'cooling', 'electrical', 'oxygen', 'catalyst', 'evap', 'ignition', 'other'];
+                const grouped = new Map<string, typeof activePids>();
+                for (const pid of activePids) {
+                  const cat = pid.category || 'other';
+                  if (!grouped.has(cat)) grouped.set(cat, []);
+                  grouped.get(cat)!.push(pid);
+                }
+                const catIcons: Record<string, React.ReactNode> = {
+                  engine: <Cpu style={{ width: 13, height: 13 }} />,
+                  turbo: <Wind style={{ width: 13, height: 13 }} />,
+                  fuel: <Flame style={{ width: 13, height: 13 }} />,
+                  emissions: <AlertCircle style={{ width: 13, height: 13 }} />,
+                  transmission: <Settings style={{ width: 13, height: 13 }} />,
+                  electrical: <Zap style={{ width: 13, height: 13 }} />,
+                  exhaust: <Thermometer style={{ width: 13, height: 13 }} />,
+                  def: <Droplets style={{ width: 13, height: 13 }} />,
+                  oxygen: <Activity style={{ width: 13, height: 13 }} />,
+                  catalyst: <Thermometer style={{ width: 13, height: 13 }} />,
+                  evap: <Wind style={{ width: 13, height: 13 }} />,
+                  ignition: <Zap style={{ width: 13, height: 13 }} />,
+                  cooling: <Thermometer style={{ width: 13, height: 13 }} />,
+                  intake: <Wind style={{ width: 13, height: 13 }} />,
+                  other: <BarChart3 style={{ width: 13, height: 13 }} />,
+                };
+                const sortedCats = [...grouped.keys()].sort((a, b) => {
+                  const ai = categoryOrder.indexOf(a);
+                  const bi = categoryOrder.indexOf(b);
+                  return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+                });
+                return (
+                  <div style={{ marginBottom: '16px' }}>
+                    <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '12px' }}>
+                      LIVE DATA
+                    </div>
+                    {sortedCats.map(cat => (
+                      <div key={cat} style={{ marginBottom: '12px' }}>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px',
+                          paddingBottom: '4px', borderBottom: `1px solid ${sColor.borderLight}`,
+                        }}>
+                          <span style={{ color: sColor.textDim }}>{catIcons[cat] || null}</span>
+                          <span style={{
+                            fontFamily: sFont.heading, fontSize: '0.7rem', color: sColor.textDim,
+                            letterSpacing: '0.1em', textTransform: 'uppercase',
+                          }}>
+                            {cat}
+                          </span>
+                          <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, marginLeft: 'auto' }}>
+                            {grouped.get(cat)!.length}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          {grouped.get(cat)!.map(pid => (
+                            <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Real-Time Chart */}
               {(isLogging || readingHistory.size > 0) && (

@@ -1571,7 +1571,8 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         {/* Tab content */}
-        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8, fileName) => { setInjectedWP8(wp8); setInjectedWP8FileName(fileName); setActiveTab('talon'); }} /></div>}
+        {/* Analyzer, Datalogger, PPEI Datalogger: kept mounted (CSS hidden) so state persists across tab switches */}
+        <div style={{ display: activeTab === 'analyzer' ? 'block' : 'none' }} className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8, fileName) => { setInjectedWP8(wp8); setInjectedWP8FileName(fileName); setActiveTab('talon'); }} /></div>
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
@@ -1692,7 +1693,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
           </div>
         )}
         {activeTab === 'diagnostic' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 120px)' }}><KnoxDiagnosticAgent onInjectPids={(pids) => { setDiagnosticPids(pids); setActiveTab('datalogger'); }} onSwitchToDatalogger={() => setActiveTab('datalogger')} onSwitchToAnalyzer={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
+        <div style={{ display: activeTab === 'datalogger' ? 'block' : 'none' }} className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>
         {activeTab === 'editor' && (
           <div className="ppei-anim-fade-up">
             <EditorGate />
@@ -1704,7 +1705,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
         {activeTab === ('ppei-flash' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><PpeiFlashContainerPanel /></div>}
 
-        {activeTab === ('ppei-datalogger' as TabId) && <div className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
+        <div style={{ display: activeTab === ('ppei-datalogger' as TabId) ? 'block' : 'none' }} className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>
         {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} wp8FileName={injectedWP8FileName} onBack={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'notifications' && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
         {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}

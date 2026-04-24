@@ -259,9 +259,15 @@ function drawChart(
     const yMin = trace.min;
     const yMax = trace.max;
     const yRange = yMax - yMin || 1;
-    const yPad = yRange * 0.05;
-    const effectiveMin = yMin - yPad;
-    const effectiveMax = yMax + yPad;
+    // Calm down sensitivity: use at least 15% padding, and enforce a minimum Y range
+    // based on the PID's defined range so small fluctuations don't fill the whole chart
+    const pidFullRange = (trace.pid.max ?? 0) - (trace.pid.min ?? 0);
+    const minRange = pidFullRange > 0 ? pidFullRange * 0.10 : Math.max(yRange * 3, 5);
+    const displayRange = Math.max(yRange, minRange);
+    const center = (yMin + yMax) / 2;
+    const yPad = displayRange * 0.15;
+    const effectiveMin = center - displayRange / 2 - yPad;
+    const effectiveMax = center + displayRange / 2 + yPad;
     const effectiveRange = effectiveMax - effectiveMin;
 
     ctx.strokeStyle = trace.color;
@@ -309,9 +315,13 @@ function drawChart(
   if (visibleTraces.length > 0) {
     const pt = visibleTraces[0];
     const yRange = pt.max - pt.min || 1;
-    const yPad = yRange * 0.05;
-    const eMin = pt.min - yPad;
-    const eMax = pt.max + yPad;
+    const pidFullRangeLabel = (pt.pid.max ?? 0) - (pt.pid.min ?? 0);
+    const minRangeLabel = pidFullRangeLabel > 0 ? pidFullRangeLabel * 0.10 : Math.max(yRange * 3, 5);
+    const displayRangeLabel = Math.max(yRange, minRangeLabel);
+    const centerLabel = (pt.min + pt.max) / 2;
+    const yPadLabel = displayRangeLabel * 0.15;
+    const eMin = centerLabel - displayRangeLabel / 2 - yPadLabel;
+    const eMax = centerLabel + displayRangeLabel / 2 + yPadLabel;
 
     ctx.fillStyle = pt.color;
     ctx.font = '10px "Share Tech Mono", monospace';

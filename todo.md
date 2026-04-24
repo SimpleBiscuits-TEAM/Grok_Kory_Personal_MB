@@ -2183,3 +2183,19 @@
 - [x] Added search input to PID selector — filters by name, shortName, hex PID, or category
 - [x] Search auto-expands all matching categories and shows result count
 - [x] Disambiguated 9 redundant PID names: added (Mode 01), (GM Extended), (HPT), (GM) suffixes to duplicates
+
+## Live Data Gauge Layout + Chart Sensitivity (April 24, 2026)
+- [x] Group live data gauge squares by category (engine, turbo, fuel, exhaust, emissions, etc.) with section headers and icons
+- [x] Match category grouping to PID selector categories for consistency (same categoryOrder and icons)
+- [x] Reduce real-time chart sensitivity — enforce minimum Y range (10% of PID full range) so small fluctuations don't fill the chart
+- [x] Add Y-axis padding (15%) and center-based scaling to prevent jittery lines from minor fluctuations
+
+## APP D Rescale + Ghost TPS (April 24, 2026)
+- [x] Rescale APP D: raw 19.2% idle → 0%, raw 84.7% WOT → 100%. Added "(test)" label to name
+- [x] Removed ghost TPS (0x11) from default selected PIDs — was in initial set [0x0C, 0x0D, 0x05, 0x04, 0x11], now [0x0C, 0x0D, 0x05, 0x04]
+
+## Auto-Export to Analyzer Button (April 24, 2026)
+- [x] Added "ANALYZE LIVE" button in control bar (visible when monitoring or data exists) — builds session from live readingHistory and sends to Analyzer
+- [x] Datalogger, PPEI Datalogger, and Analyzer panels now kept mounted (CSS display:none) instead of conditional rendering — state persists across tab switches
+- [x] Data persists until user starts a new log or clears it — readingHistory maintained while panel is mounted
+- [x] User can freely switch between datalogger and analyzer tabs without losing any data
