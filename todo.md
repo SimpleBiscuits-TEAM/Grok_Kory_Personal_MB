@@ -2069,3 +2069,10 @@
 - [x] Update getPresetsForVehicle() with Ford 'power stroke' / '6.7l' filter
 - [x] Add new GM PIDs (0x1E3D, 0x1E3E, 0x1E3F) to PPEI Suggested (L5P E41) preset
 - [x] Add new GM PIDs to Duramax Gen 1 and Gen 2 profiles
+
+## PPEI PCAN Bridge — Universal Upgrade (3/10 → 7/10)
+- [x] Make hardware CAN filters configurable with filter_mode (obd/universal/j1939) + CLI flag --filter-mode
+- [x] Create manufacturer dispatch table for session setup (gm/ford/bmw) with GM DDDI moved to _gm_session_setup
+- [x] Fix rx_id assumption: add explicit rx_id parameter + get_rx_id() helper across all handlers
+- [x] Update routing and logging with manufacturer-aware status line in _ppei_handle_message_v2
+- [x] Update header comment to mark ppei_pcan_bridge.py as the universal layer
