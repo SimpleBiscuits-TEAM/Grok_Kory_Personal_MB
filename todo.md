@@ -2235,3 +2235,28 @@
 - [x] Increased minimum Y-axis range to 15% of PID full range with 15% padding
 - [x] Added nice-number rounding for cleaner Y-axis labels
 - [x] Increased line width to 1.8px with round joins/caps for smoother visual appearance
+
+## Bug: Analyzer Not Seeing All PIDs from Datalog (April 24, 2026)
+- [x] Added 15 missing shortNames to DATALOGGER_CHANNEL_MAP: INJ_PW_DDDI, INJ_PW, CYL_AIRMASS, BOOST_DES_DDDI, BOOST_VAC_DDDI, BOOST_VAC, FUEL_INJ_QTY_TEST, METER_VALVE, LAMBDA_SMOKE, IAT_EXT, FRPDI, FRP_DES, EGR_CMD, EGR_A_CMD, IOCTL_SLOT5
+- [x] Also fixed INJ_TMG mapping from '_inj_tmg' to 'injectionTiming' for proper analyzer recognition
+
+## Bug: IAT Zero-Drop (April 24, 2026)
+- [x] Root cause: when DDDI stream goes stale (>5s), isStreaming=false causes batch Mode 01 poll for IAT (0x0F) which returns different scaling on diesel ECUs
+- [x] Fix 1: Increased PERIODIC_MAX_AGE_MS from 5s to 15s so periodic values survive stream re-setup
+- [x] Fix 2: When batch reading AND periodic value both exist for a DDDI PID, always prefer the periodic value (higher accuracy)
+
+## Bug: TPS PID Persistent in Live Data (April 24, 2026)
+- [x] Marked TPS (0x11) as fuelType: 'gasoline' — now hidden from diesel vehicles in PID selector
+- [x] Updated isDefaultQuickSelection to check for 4 PIDs (removed 0x11 check)
+- [x] Default selected PIDs already updated to [0x0C, 0x0D, 0x05, 0x04] (no TPS)
+
+## Recording Persistence Across Tabs (April 24, 2026)
+- [x] Already working — panels use display:none instead of conditional rendering (implemented in earlier fix)
+- [x] User confirmed: 'datalogging stayed running between pages so thats good'
+
+## Import Datalog into OBDDatalogViewer (April 24, 2026)
+- [x] Added IMPORT CSV button to OBDDatalogViewer header bar
+- [x] Parses shortName format CSV (skips # comment headers), builds PID definitions from headers
+- [x] Imported data uses same zoom/pan/crosshair/channel assignment as live data
+- [x] Shows imported filename with dismiss button to return to live data
+- [x] Matches PID definitions from props when available for proper formatting

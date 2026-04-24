@@ -25,7 +25,7 @@
  *   - Dark theme inspired by HPTuners VCM Scanner
  */
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { X, Search, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Search, Maximize2, Minimize2, Upload } from 'lucide-react';
 import type { PIDDefinition, PIDReading } from '@/lib/obdConnection';
 
 // ─── Theme: HPTuners VCM Scanner dark blue ──────────────────────────────────
@@ -455,8 +455,115 @@ interface OBDDatalogViewerProps {
 }
 
 export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, isLogging }: OBDDatalogViewerProps) {
+  // ── CSV Import state ──
+  const [importedData, setImportedData] = useState<{
+    rows: DataRow[];
+    pidList: PIDDefinition[];
+    readingHistory: Map<number, PIDReading[]>;
+    fileName: string;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportCSV = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = reader.result as string;
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        // Skip comment lines (# VIN:, # Vehicle:, etc.)
+        const dataLines = lines.filter(l => !l.startsWith('#'));
+        if (dataLines.length < 2) return;
+        const headers = dataLines[0].split(',').map(h => h.trim());
+        // Parse header: "SHORTNAME (unit)" or "Timestamp (ms)" / "Elapsed (s)"
+        const tsIdx = headers.findIndex(h => h.toLowerCase().startsWith('timestamp'));
+        const elapsedIdx = headers.findIndex(h => h.toLowerCase().startsWith('elapsed'));
+        // Build PID definitions from headers
+        const pidCols: { idx: number; pid: PIDDefinition }[] = [];
+        let nextFakePid = 0xF000;
+        for (let i = 0; i < headers.length; i++) {
+          if (i === tsIdx || i === elapsedIdx) continue;
+          const h = headers[i];
+          const match = h.match(/^(.+?)\s*\((.+?)\)$/);
+          const shortName = match ? match[1].trim() : h;
+          const unit = match ? match[2].trim() : '';
+          // Try to find matching PID from the props pids
+          const matchedPid = pids.find(p => p.shortName === shortName);
+          const pidDef: PIDDefinition = matchedPid || {
+            pid: nextFakePid++,
+            name: shortName,
+            shortName,
+            unit,
+            min: 0,
+            max: 100,
+            bytes: 1,
+            category: 'other',
+            formula: ([a]: number[]) => a,
+          };
+          pidCols.push({ idx: i, pid: pidDef });
+        }
+        // Parse data rows
+        const importedReadingHistory = new Map<number, PIDReading[]>();
+        for (const pc of pidCols) {
+          importedReadingHistory.set(pc.pid.pid, []);
+        }
+        const importedRows: DataRow[] = [];
+        let baseTs = 0;
+        for (let r = 1; r < dataLines.length; r++) {
+          const cells = dataLines[r].split(',');
+          const ts = tsIdx >= 0 ? parseFloat(cells[tsIdx]) : (r * 100);
+          if (r === 1) baseTs = ts;
+          const values: number[] = [];
+          for (const pc of pidCols) {
+            const raw = cells[pc.idx]?.trim();
+            const val = raw ? parseFloat(raw) : NaN;
+            const finalVal = Number.isFinite(val) ? val : 0;
+            values.push(finalVal);
+            if (Number.isFinite(val)) {
+              importedReadingHistory.get(pc.pid.pid)?.push({
+                pid: pc.pid.pid,
+                name: pc.pid.name,
+                shortName: pc.pid.shortName,
+                value: val,
+                unit: pc.pid.unit,
+                rawBytes: [],
+                timestamp: ts,
+              });
+            }
+          }
+          importedRows.push({ timestamp: ts, values });
+        }
+        // Update min/max from actual data
+        for (const pc of pidCols) {
+          const readings = importedReadingHistory.get(pc.pid.pid) || [];
+          if (readings.length > 0) {
+            const vals = readings.map(r => r.value);
+            pc.pid.min = Math.min(...vals);
+            pc.pid.max = Math.max(...vals);
+          }
+        }
+        setImportedData({
+          rows: importedRows,
+          pidList: pidCols.map(pc => pc.pid),
+          readingHistory: importedReadingHistory,
+          fileName: file.name,
+        });
+        // Reset auto-assign so imported data gets fresh assignment
+        hasAutoAssigned.current = false;
+      } catch (err) {
+        console.error('Failed to import CSV:', err);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be re-imported
+    e.target.value = '';
+  }, [pids]);
+
   // Build unified row data from readingHistory
   const { rows, pidList } = useMemo(() => {
+    // Use imported data if available
+    if (importedData) return { rows: importedData.rows, pidList: importedData.pidList };
     const activePids = pids.filter(p => readingHistory.has(p.pid) && (readingHistory.get(p.pid)?.length ?? 0) > 0);
     if (activePids.length === 0) return { rows: [] as DataRow[], pidList: pids };
 
@@ -496,7 +603,7 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
     }
 
     return { rows: dataRows, pidList: activePids };
-  }, [pids, readingHistory]);
+  }, [pids, readingHistory, importedData]);
 
   // Section channel assignments
   const [sections, setSections] = useState<SectionConfig[]>([
@@ -736,6 +843,7 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
           </span>
           <span style={{ fontSize: '0.7rem', color: T.textDim }}>
             {pidList.length} ch | {rows.length} samples
+            {importedData && ' | IMPORTED'}
           </span>
           {isLogging && (
             <span style={{ fontSize: '0.6rem', color: T.red, fontWeight: 'bold', animation: 'pulse 1s infinite' }}>
@@ -748,6 +856,40 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
             <span style={{ fontSize: '0.7rem', color: T.accent }}>
               {zoomPct}% | {getTimeStr(startIdx)} – {getTimeStr(endIdx)}
             </span>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleImportCSV}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              background: 'transparent',
+              color: T.accent,
+              border: `1px solid ${T.accent}`,
+              borderRadius: 2, padding: '2px 8px', fontSize: '0.65rem',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <Upload size={10} /> IMPORT CSV
+          </button>
+          {importedData && (
+            <button
+              onClick={() => { setImportedData(null); hasAutoAssigned.current = false; }}
+              style={{
+                background: T.red + '33',
+                color: T.red,
+                border: `1px solid ${T.red}`,
+                borderRadius: 2, padding: '2px 8px', fontSize: '0.65rem',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ {importedData.fileName}
+            </button>
           )}
           <button
             onClick={() => { setStartIdx(0); setEndIdx(Math.max(0, rows.length - 1)); }}

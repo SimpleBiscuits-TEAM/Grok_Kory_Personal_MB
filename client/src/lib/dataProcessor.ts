@@ -460,8 +460,24 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'RUN_TIME': '_run_time',
   'MIL_DIST': '_mil_dist',
   'CLR_DIST': '_clr_dist',
-  'INJ_TMG': '_inj_tmg',
+  'INJ_TMG': 'injectionTiming',
   'EGR_FLOW': '_egr_flow',
+  // DDDI virtual channels (HPT Common mode)
+  'INJ_PW_DDDI': 'injectorPulseWidth',  // 0xDD03 Injector Pulse Width from DDDI float32
+  'INJ_PW': 'injectorPulseWidth',        // alias used by storeVal
+  'CYL_AIRMASS': '_cyl_airmass',          // 0xDD04 Cylinder Airmass
+  'BOOST_DES_DDDI': 'boostDesired',       // 0xDD07 Desired Boost from DDDI
+  'BOOST_VAC_DDDI': 'boost',              // 0xDD08 Boost/Vacuum from DDDI
+  'BOOST_VAC': 'boost',                   // alias used by storeVal
+  'FUEL_INJ_QTY_TEST': 'fuelQuantity',    // 0x245D Fuel Injection Qty (test)
+  'METER_VALVE': '_meter_valve',           // 0xDD00 Metering Unit Valve Current
+  'LAMBDA_SMOKE': '_lambda_smoke',         // 0xDD02 Lambda Smoke Limit
+  'IAT_EXT': 'intakeAirTemp',             // 0x68 Intake Air Temp Extended
+  'FRPDI': 'railPressureDesired',         // 0xDD06/0x131F Desired FRP from DDDI
+  'FRP_DES': 'railPressureDesired',       // alias used by storeVal
+  'EGR_CMD': 'egrPosition',               // 0x2C Commanded EGR
+  'EGR_A_CMD': '_egr_a_cmd',              // 0x20B4 Commanded EGR A (raw)
+  'IOCTL_SLOT5': '_ioctl_slot5',          // Unknown IOCTL slot 5
   // GM extended PIDs (Mode 22) — HPT-verified replacements
   'FP_SAE': '_fp_sae',           // 0x208A Fuel Pressure SAE (low-side)
   'INJ_COR': '_inj_cor',         // 0x208B Injection Timing Correction

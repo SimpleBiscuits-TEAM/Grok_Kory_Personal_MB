@@ -1,0 +1,41 @@
+Datalog CSV Analysis (2026-04-24T21-50-51-065Z.csv)
+====================================================
+
+Header line (line 15):
+Timestamp (ms),Elapsed (s),ECT (°F),MAP (PSI),RPM (rpm),VSS (MPH),MAF (lb/min),TPS (%),BARO (PSI),VPWR (V),AAT (°F),APP_D (%),INJ_TMG_STD (°),IAT_EXT (°F),FP_SAE (PSI),FUEL_INJ_QTY_TEST (mm³),METER_VALVE (A),LAMBDA_SMOKE (),INJ_PW_DDDI (ms),CYL_AIRMASS (g),BOOST_DES_DDDI (PSI),BOOST_VAC_DDDI (PSI),ACT_VANE (%),DES_VANE (%),INJ_TMG_SAE (°BTDC),FRP_ACT (PSI),FRPDI (PSI)
+
+Total columns: 27 (including Timestamp and Elapsed)
+Total PID columns: 25
+
+PIDs in CSV:
+1. ECT (°F)
+2. MAP (PSI)
+3. RPM (rpm)
+4. VSS (MPH)
+5. MAF (lb/min)
+6. TPS (%)           <-- Ghost TPS still being logged!
+7. BARO (PSI)
+8. VPWR (V)
+9. AAT (°F)
+10. APP_D (%)
+11. INJ_TMG_STD (°)
+12. IAT_EXT (°F)
+13. FP_SAE (PSI)
+14. FUEL_INJ_QTY_TEST (mm³)
+15. METER_VALVE (A)
+16. LAMBDA_SMOKE ()
+17. INJ_PW_DDDI (ms)
+18. CYL_AIRMASS (g)
+19. BOOST_DES_DDDI (PSI)
+20. BOOST_VAC_DDDI (PSI)
+21. ACT_VANE (%)
+22. DES_VANE (%)
+23. INJ_TMG_SAE (°BTDC)
+24. FRP_ACT (PSI)
+25. FRPDI (PSI)
+
+Key observations:
+- TPS (%) is column 6 — still being logged even though user removed it
+- IAT_EXT is the IAT PID — need to check if it has zero-drop issue
+- All PIDs use shortName (unit) format
+- Metadata headers present: VIN, Vehicle, Engine, Manufacturer, FuelType, etc.

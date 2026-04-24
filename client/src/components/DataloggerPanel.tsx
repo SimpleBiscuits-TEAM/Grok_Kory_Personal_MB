@@ -960,12 +960,11 @@ export type DataloggerAdapterType = 'pcan' | 'can2usb' | 'elm327';
 
 export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
   const isDefaultQuickSelection = (pids: Set<number>) => (
-    pids.size === 5 &&
+    pids.size === 4 &&
     pids.has(0x0C) &&
     pids.has(0x0D) &&
     pids.has(0x05) &&
-    pids.has(0x04) &&
-    pids.has(0x11)
+    pids.has(0x04)
   );
 
   const isE42DuramaxVehicle = (info: VehicleInfo | null) => {

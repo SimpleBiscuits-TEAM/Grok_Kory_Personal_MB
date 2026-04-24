@@ -819,13 +819,37 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
     // ── Inject DDDI periodic values (FRP_ACT, FRP_DES from 0x5E8 frames) ──
-    const PERIODIC_MAX_AGE_MS = 5000; // was 2000 — too tight when batch reads delay periodic restart
+    // Use generous max age for periodic values — during stream re-setup (stale detection
+    // at 5s), we still want to show the last known periodic value rather than falling
+    // back to batch-polled Mode 01 values which may have different scaling on diesel ECUs.
+    const PERIODIC_MAX_AGE_MS = 15000;
     const now = Date.now();
     const injectedFromPeriodic: string[] = [];
     for (const pid of pids) {
-      if (readings.some((r: any) => r.pid === pid.pid)) continue;
+      // If this PID already has a batch reading AND it's also a DDDI periodic PID,
+      // prefer the periodic value (higher accuracy on diesel ECUs)
+      const hasBatchReading = readings.some((r: any) => r.pid === pid.pid);
       const periodic = _ppeiPeriodicValues.get(pid.pid);
-      if (periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS) {
+      const periodicFresh = periodic && (now - periodic.timestamp) < PERIODIC_MAX_AGE_MS;
+      if (hasBatchReading && periodicFresh && DDDI_PERIODIC_DIDS.has(pid.pid)) {
+        // Replace batch reading with periodic value (DDDI is more accurate)
+        const idx = readings.findIndex((r: any) => r.pid === pid.pid);
+        if (idx >= 0) {
+          readings[idx] = {
+            pid: periodic.did,
+            name: pid.name,
+            shortName: periodic.shortName,
+            value: periodic.value,
+            unit: periodic.unit,
+            rawBytes: periodic.rawBytes,
+            timestamp: periodic.timestamp,
+          };
+          injectedFromPeriodic.push(`${periodic.shortName}=${periodic.value.toFixed(1)}(replaced)`);
+        }
+        continue;
+      }
+      if (hasBatchReading) continue;
+      if (periodicFresh) {
         readings.push({
           pid: periodic.did,
           name: pid.name,

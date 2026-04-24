@@ -272,6 +272,7 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   {
     pid: 0x11, name: 'Throttle Position', shortName: 'TPS',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    fuelType: 'gasoline', // Diesel ECUs don't respond to Mode 01 TPS — use APP D instead
     formula: ([a]) => (a * 100) / 255,
   },
   {
