@@ -2062,3 +2062,10 @@
 - [x] Add additional GM Global A / L5P extended PIDs (Desired Boost 0x1E3B, Actual Boost 0x1E3C from commaai/opendbc)
 - [x] Wire new arrays into ALL_PIDS / VIN-based auto-detection — added to PPEI Suggested preset + Duramax Gen 1/Gen 2 profiles
 - [x] Verify no duplicate shortNames or PID numbers across arrays — all new PIDs have unique shortNames, no conflicts
+- [x] Add GM Global A torque/EGT PIDs: 0x1E3D (Engine Torque Actual), 0x1E3E (Driver Demand Torque), 0x1E3F (EGT Bank 1)
+- [x] Add Ford 6.7L Power Stroke PIDs: 0x2208 (Actual Boost), 0x2209 (Engine Torque Actual), 0x220A (Driver Demand Torque)
+- [x] Add Ford 6.7L presets: Full, Fuel System, Turbo & Boost
+- [x] Add getPidsFromDbc() placeholder helper for future DBC file import
+- [x] Update getPresetsForVehicle() with Ford 'power stroke' / '6.7l' filter
+- [x] Add new GM PIDs (0x1E3D, 0x1E3E, 0x1E3F) to PPEI Suggested (L5P E41) preset
+- [x] Add new GM PIDs to Duramax Gen 1 and Gen 2 profiles

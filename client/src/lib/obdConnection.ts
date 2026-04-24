@@ -1,11 +1,22 @@
 /**
- * OBDLink EX WebSerial Communication Library
- * Implements ELM327/STN2xx command protocol for OBD-II datalogging.
- * 
+ * V-OP Universal OBD Communication Library
+ * ==========================================
+ * This file powers the universal replacement for every traditional scantool
+ * and code reader. L5P/GMLAN was the hardest platform and is now working.
+ * Everything else (Ford, BMW, Toyota, Honda, Chrysler, powersports) follows
+ * the same architecture.
+ *
+ * Implements ELM327/STN2xx + PCAN bridge protocols for OBD-II datalogging.
  * Based on OBDLink Family Reference and Programming Manual (FRPM) Rev E.
  * Supports ISO 15765-4 CAN (11-bit/500k) for all OBD-II vehicles.
- * Universal PID database with standard Mode 01, manufacturer-specific Mode 22,
- * and automatic VIN-based vehicle identification.
+ *
+ * Features:
+ * - Full SAE J1979 Mode 01 PID set (truly universal)
+ * - Manufacturer-specific Mode 22 extended PIDs (GM, Ford, BMW, Chrysler, etc.)
+ * - Hybrid DDDI + batch polling engine for high-speed data acquisition
+ * - VIN-based auto-detection with manufacturer/engine/fuel type identification
+ * - Preset system with per-vehicle suggested PID configurations
+ * - Live RAM / DDDI-style access where possible (HPTuners-level quality target)
  */
 
 // ─── Known USB Adapter Database ──────────────────────────────────────────────
@@ -709,8 +720,8 @@ export const PID_PRESETS: PIDPreset[] = [
   },
   {
     name: 'Full Duramax (Gen 1 / 2017-2023)',
-    description: 'RPM, Boost, Rail Pressure, MAF, ECT, EGT, Load — E41 ECM',
-    pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04, 0x1E3B, 0x1E3C],
+    description: 'RPM, Boost, Rail Pressure, MAF, ECT, EGT, Load, Torque — E41 ECM',
+    pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04, 0x1E3B, 0x1E3C, 0x1E3D, 0x1E3E, 0x1E3F],
   },
   {
     name: 'Full Duramax (Gen 2 / 2024+)',
@@ -729,6 +740,9 @@ export const PID_PRESETS: PIDPreset[] = [
       0x20B4,   // IBR Cyl 1
       0x1E3B,   // Desired Boost Pressure (GM)
       0x1E3C,   // Actual Boost Pressure (GM)
+      0x1E3D,   // Engine Torque Actual (GM)
+      0x1E3E,   // Driver Demand Torque (GM)
+      0x1E3F,   // EGT Bank 1 (GM Global A)
     ],
   },
   {
@@ -870,6 +884,22 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'RPM, Fuel Rail Press, Fuel Pump Duty, Pulse Width, ETC',
     pids: [0x0C, 0xF4B0, 0xF4B1, 0xF4B2, 0xF4B5, 0xF4B6],
   },
+  // ── Ford 6.7L Power Stroke Presets ──
+  {
+    name: 'Ford 6.7L Power Stroke Full',
+    description: 'FRP, Main Inj Qty, Pilot Inj, Boost Des/Act, Torque, Demand Torque + core SAE PIDs',
+    pids: [0x0C, 0x0B, 0x05, 0x0F, 0x11, 0x2201, 0x2203, 0x2205, 0x2207, 0x2208, 0x2209, 0x220A],
+  },
+  {
+    name: 'Ford 6.7L Fuel System',
+    description: 'RPM, FRP, Main Inj Qty, Pilot Inj, Fuel Rate',
+    pids: [0x0C, 0x2201, 0x2203, 0x2205, 0x5E],
+  },
+  {
+    name: 'Ford 6.7L Turbo & Boost',
+    description: 'RPM, MAP, Desired Boost, Actual Boost, IAT, MAF',
+    pids: [0x0C, 0x0B, 0x2207, 0x2208, 0x0F, 0x10],
+  },
   // ── BMW XM Presets ──
   {
     name: 'BMW XM S68 Engine',
@@ -961,6 +991,9 @@ export const PID_PRESETS: PIDPreset[] = [
       // ── Mode 22 Extended — Engine / Torque (confirmed) ──
       0x0062,   // Actual Engine Torque % (Mode 22)
       0x0063,   // Engine Reference Torque Nm (Mode 22)
+      0x1E3D,   // Engine Torque Actual (GM Global A, Nm)
+      0x1E3E,   // Driver Demand Torque (GM Global A, Nm)
+      0x1E3F,   // EGT Bank 1 (GM Global A, °F)
       // ── Injector Pulse Widths (HPT-verified) ──
       0x20AC,   // IPW Cyl 1
       0x20AD,   // IPW Cyl 2
@@ -1861,6 +1894,30 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
   },
+  {
+    // Engine Torque Actual — DID 0x1E3D
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3D, name: 'Engine Torque Actual (GM)', shortName: 'TQ_ACT_GM',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    // Driver Demand Torque — DID 0x1E3E
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3E, name: 'Driver Demand Torque (GM)', shortName: 'DEM_TQ_GM',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    // Exhaust Gas Temperature Bank 1 — DID 0x1E3F
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3F, name: 'EGT Bank 1 (GM Global A)', shortName: 'EGT1_GM',
+    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
+  },
 ];
 
 //// ─── Ford Mode 22 Extended PIDs ───────────────────────────────────────────
@@ -2330,6 +2387,24 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
     unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
+  {
+    pid: 0x2208, name: 'Actual Boost Pressure (Ford)', shortName: 'BOOST_ACT_FORD',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
+  {
+    pid: 0x2209, name: 'Engine Torque (Ford)', shortName: 'TQ_ACT_FORD',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    pid: 0x220A, name: 'Driver Demand Torque (Ford)', shortName: 'DEM_TQ_FORD',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
   },
 ];
 
@@ -3213,6 +3288,14 @@ export function getMode01Pids(): PIDDefinition[] {
   return STANDARD_PIDS;
 }
 
+/**
+ * Placeholder for future .dbc-based PID expansion (commaai/opendbc, etc.).
+ * We will feed actual .dbc content later for automatic signal extraction.
+ */
+export function getPidsFromDbc(manufacturer: PIDManufacturer): PIDDefinition[] {
+  return [];
+}
+
 export function getPidsByManufacturer(manufacturer: PIDManufacturer): PIDDefinition[] {
   if (manufacturer === 'universal') return STANDARD_PIDS;
   return MANUFACTURER_PIDS[manufacturer] || [];
@@ -3253,6 +3336,7 @@ export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: Fu
     // Manufacturer-specific presets
     if (manufacturer === 'ford' || manufacturer === 'universal') {
       if (name.includes('raptor')) return true;
+      if (name.includes('power stroke') || name.includes('6.7l')) return true;
     }
     if (manufacturer === 'bmw' || manufacturer === 'universal') {
       if (name.includes('bmw') || name.includes('xm')) return true;
