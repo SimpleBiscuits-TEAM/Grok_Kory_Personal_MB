@@ -190,10 +190,10 @@ function ChartSection({
       }
       if (mn === Infinity) { mn = 0; mx = 1; }
       if (mn === mx) { mn -= 1; mx += 1; }
-      // Enforce minimum range (10% of PID full range) for stability
+      // Enforce minimum range (15% of PID full range) for visual stability
       if (pid) {
         const pidRange = pid.max - pid.min;
-        const minRange = pidRange * 0.1;
+        const minRange = pidRange * 0.15;
         const dataRange = mx - mn;
         if (dataRange < minRange) {
           const center = (mn + mx) / 2;
@@ -201,8 +201,17 @@ function ChartSection({
           mx = center + minRange / 2;
         }
       }
-      const pad = (mx - mn) * 0.1;
-      ranges.push({ min: mn - pad, max: mx + pad });
+      // 15% padding for breathing room
+      const pad = (mx - mn) * 0.15;
+      mn -= pad;
+      mx += pad;
+      // Round to nice numbers for cleaner axis labels
+      const step = Math.pow(10, Math.floor(Math.log10(mx - mn)) - 1);
+      if (step > 0) {
+        mn = Math.floor(mn / step) * step;
+        mx = Math.ceil(mx / step) * step;
+      }
+      ranges.push({ min: mn, max: mx });
     }
     return ranges;
   }, [channelIndices, pids, rows, startIdx, endIdx]);
@@ -263,23 +272,56 @@ function ChartSection({
       ctx.stroke();
     }
 
-    // Draw traces
+    // Draw traces with EMA smoothing + Catmull-Rom spline interpolation
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
       const { min, max } = channelRanges[slot];
       const range = max - min;
       const color = getChannelColor(sectionIdx, slot);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      let started = false;
+
+      // Collect raw data points
+      const pts: { x: number; y: number }[] = [];
+      // EMA smoothing factor — higher = smoother (0.0–1.0)
+      // Adapt based on visible density: more points = more smoothing
+      const alpha = visibleCount > 500 ? 0.15 : visibleCount > 200 ? 0.25 : 0.4;
+      let ema: number | null = null;
       for (let i = startIdx; i <= endIdx && i < rows.length; i++) {
         const v = rows[i].values[ci];
         if (!Number.isFinite(v)) continue;
+        // Apply EMA filter
+        if (ema === null) ema = v;
+        else ema = alpha * v + (1 - alpha) * ema;
         const x = marginLeft + ((i - startIdx) / (visibleCount - 1)) * plotW;
-        const y = marginTop + plotH - ((v - min) / range) * plotH;
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
+        const y = marginTop + plotH - ((ema - min) / range) * plotH;
+        pts.push({ x, y });
+      }
+
+      if (pts.length < 2) return;
+
+      // Draw with Catmull-Rom spline for smooth curves
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.8;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+
+      if (pts.length === 2) {
+        ctx.lineTo(pts[1].x, pts[1].y);
+      } else {
+        // Catmull-Rom to cubic bezier conversion (tension = 0.5)
+        const tension = 0.5;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = pts[Math.max(0, i - 1)];
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const p3 = pts[Math.min(pts.length - 1, i + 2)];
+          const cp1x = p1.x + (p2.x - p0.x) * tension / 3;
+          const cp1y = p1.y + (p2.y - p0.y) * tension / 3;
+          const cp2x = p2.x - (p3.x - p1.x) * tension / 3;
+          const cp2y = p2.y - (p3.y - p1.y) * tension / 3;
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+        }
       }
       ctx.stroke();
     });

@@ -2228,3 +2228,10 @@
 ## Bug: Analyzer Not Seeing VIN from Auto-Export (April 24, 2026)
 - [x] Root cause: processCSVContent only checked extractVinFromFilename(name), never rawData.vehicleMeta.vin from CSV headers
 - [x] Fix: Now falls through to rawData.vehicleMeta?.vin when filename doesn't contain VIN — picks up # VIN: header from exported CSV
+
+## Smooth Live Chart Visualization (April 24, 2026)
+- [x] Added EMA (exponential moving average) filter with adaptive alpha based on visible point density
+- [x] Added Catmull-Rom spline interpolation for smooth curves through data points
+- [x] Increased minimum Y-axis range to 15% of PID full range with 15% padding
+- [x] Added nice-number rounding for cleaner Y-axis labels
+- [x] Increased line width to 1.8px with round joins/caps for smoother visual appearance
