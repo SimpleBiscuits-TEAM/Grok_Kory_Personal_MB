@@ -98,7 +98,7 @@ type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'monitorin
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MAX_CAPTURED_FRAMES = 50000;
+const MAX_CAPTURED_FRAMES = 500000; // Raised from 50K to 500K to capture full DDDI setup sequences
 const STATS_UPDATE_INTERVAL = 500; // ms
 const FRAME_DISPLAY_LIMIT = 500;   // Show last N frames in live view
 
@@ -1165,7 +1165,12 @@ export default function IntelliSpy() {
         } else {
           frameBufferRef.current.push(frame);
           if (frameBufferRef.current.length > MAX_CAPTURED_FRAMES) {
-            frameBufferRef.current = frameBufferRef.current.slice(-MAX_CAPTURED_FRAMES);
+            // Keep first 2000 frames (DDDI setup) + last (MAX-2000) frames
+            // This ensures diagnostic setup commands are never lost
+            const PROTECTED_HEAD = 2000;
+            const head = frameBufferRef.current.slice(0, PROTECTED_HEAD);
+            const tail = frameBufferRef.current.slice(-(MAX_CAPTURED_FRAMES - PROTECTED_HEAD));
+            frameBufferRef.current = [...head, ...tail];
           }
         }
       }
@@ -2338,7 +2343,9 @@ export default function IntelliSpy() {
         </span>
         {totalFrames > 0 && (
           <>
-            <span>CAPTURED: {totalFrames.toLocaleString()}</span>
+            <span className={totalFrames > 300000 ? 'text-yellow-400' : totalFrames > 450000 ? 'text-red-400' : ''}>
+              BUFFER: {totalFrames.toLocaleString()} / 500K {totalFrames > 300000 ? '⚠' : ''}
+            </span>
             <span>VISIBLE: {liveTableFrames.length.toLocaleString()}</span>
             <span>UNIQUE IDs: {arbIdStats.size}</span>
             <span>HIDDEN: {hiddenArbIds.size}</span>

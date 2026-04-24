@@ -2140,3 +2140,8 @@
 - [x] Update existing PID definitions for DDDI-streamed channels (FRP float32, Turbo Vane, Des Turbo Vane, Boost, Des Boost)
 - [x] Add auto-detection logic to select hpt_common mode when multiple common PIDs are selected
 - [x] Run tests and verify no regressions
+
+## IntelliSpy Buffer Fix (April 24, 2026)
+- [x] Remove 50K frame buffer cap — raise to 500K to match BusMaster-level capture capability
+- [x] Add frame count display to UI so user knows how many frames are captured
+- [x] Add memory warning if buffer exceeds 300K frames
