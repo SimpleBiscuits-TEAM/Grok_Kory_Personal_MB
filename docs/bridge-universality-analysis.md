@@ -50,12 +50,11 @@ The PPEI layer accepts `tx_id` as a parameter in most handlers:
 | `streaming_poll` | `msg.get("tx_id", 0x7E0)` | `rx_id = tx_id + 8` (line 1299) | 0x7E0 |
 | `dddi_keepalive` | `msg.get("tx_id", 0x7E0)` | N/A (fire-and-forget) | 0x7E0 |
 
-**The `tx_id + 8` assumption** is the standard OBD-II convention (0x7E0 → 0x7E8, 0x7E2 → 0x7EA) and works for GM, most Fords, and most BMWs on the standard OBD diagnostic CAN bus. It does **not** work for:
+**The `tx_id + 8` assumption** is the standard OBD-II convention (0x7E0 → 0x7E8, 0x7E2 → 0x7EA) and works for GM, most Fords, and most vehicles on the standard OBD diagnostic CAN bus. It does **not** work for:
 
 - **J1939 heavy-duty** — uses 29-bit extended IDs with PGN-based addressing, not `tx_id + 8`
 - **Tesla** — uses different CAN bus topology (multiple buses, non-standard addressing)
-- **Some BMW F/G-series** — use Global B addressing (29-bit extended IDs like `0x18DA00F1` → `0x18DAF100`) where `tx_id + 8` is meaningless
-- **GM Global B** — 29-bit extended UDS addressing (e.g., `0x18DA10F1` for ECM)
+- **GM Global B vehicles (T87, T93, Opel)** — use 29-bit extended IDs like `0x14DA11F1` → `0x14DAF111` where `tx_id + 8` is meaningless
 
 **Is there a clean `set_ecu_address()` method?** No, not in the PPEI layer. The base bridge's `UDSProtocol` class does have `set_target(request_id, response_id)` (line 851) which is the closest thing — it allows setting arbitrary request/response ID pairs. But the PPEI layer's batch handlers bypass `UDSProtocol` entirely and talk directly to the `OBDProtocol`'s bus and queue.
 
@@ -138,13 +137,13 @@ The base bridge does have separate protocol objects (`OBDProtocol`, `J1939Protoc
 
 **1. Hardcoded hardware CAN filters block non-OBD traffic** (`_ppei_init_can_bus`, line 144). The filter `{"can_id": 0x7E0, "can_mask": 0x7F0}` only passes 0x7E0-0x7EF. All J1939 (29-bit), Global B UDS (29-bit), Tesla, and non-standard response IDs are silently dropped at the PCAN hardware level. This is the single biggest universality blocker.
 
-**2. DDDI/IOCTL setup is entirely GM E41-specific.** The `_DDDI_CLEAR_PERIODIC_IDS` list (line 840), `_IOCTL_SETUP` RAM addresses (line 852: `0x014F08` for FRP_ACT, `0x0225D8` for FRP_DES), `_DDDI_DEFINE_PERIODIC` mappings (line 861), and `DDDI_PERIODIC_ARB_ID = 0x5E8` (line 875) are all hardcoded to the GM L5P E41 ECM. Ford, BMW, and other manufacturers use completely different DDDI/periodic mechanisms (if they support them at all).
+**2. DDDI/IOCTL setup is entirely GM E41-specific.** The `_DDDI_CLEAR_PERIODIC_IDS` list (line 840), `_IOCTL_SETUP` RAM addresses (line 852: `0x014F08` for FRP_ACT, `0x0225D8` for FRP_DES), `_DDDI_DEFINE_PERIODIC` mappings (line 861), and `DDDI_PERIODIC_ARB_ID = 0x5E8` (line 875) are all hardcoded to the GM L5P E41 ECM. Ford, GM Global B, and other manufacturers use completely different DDDI/periodic mechanisms (if they support them at all).
 
-**3. `rx_id = tx_id + 8` assumption** in `batch_read_mode01` (line 665), `dddi_setup` (line 1287), `dddi_teardown` (line 1293), and `streaming_poll` (line 1299). This works for standard 11-bit OBD but fails for 29-bit addressing schemes used by BMW Global B, some Ford modules, and all J1939 devices.
+**3. `rx_id = tx_id + 8` assumption** in `batch_read_mode01` (line 665), `dddi_setup` (line 1287), `dddi_teardown` (line 1293), and `streaming_poll` (line 1299). This works for standard 11-bit OBD but fails for 29-bit addressing schemes used by GM Global B, some Ford modules, and all J1939 devices.
 
 **4. Single shared response queue.** All PPEI handlers use `OBDProtocol._response_queue`. When DDDI periodic frames (0x5E8), Mode 22 batch responses (0x7E8), and Mode 01 responses all land in the same queue, handlers must filter by arbitration ID. This works but is fragile — adding another concurrent data source (like J1939 PGN polling alongside OBD) would create queue contention.
 
-**5. No manufacturer-specific session management abstraction.** GM requires DDDI clear (0x2C) to unlock Mode 22. Ford may require different session setup. BMW F-series needs specific diagnostic session types. Currently, session management is hardcoded in `_ppei_dddi_setup()` with GM-specific byte sequences. There is no abstraction layer that says "establish diagnostic session for this manufacturer" — it is all raw bytes.
+**5. No manufacturer-specific session management abstraction.** GM requires DDDI clear (0x2C) to unlock Mode 22. Ford may require different session setup. GM Global B needs specific diagnostic session types. Currently, session management is hardcoded in `_ppei_dddi_setup()` with GM-specific byte sequences. There is no abstraction layer that says "establish diagnostic session for this manufacturer" — it is all raw bytes.
 
 ### What Works Well for Universality
 
@@ -152,4 +151,4 @@ Despite the limitations, the architecture has solid foundations to build on. The
 
 ### Recommended Path to True Universality
 
-The most impactful single change would be making the hardware CAN filter configurable based on active protocol. When in OBD mode, keep the current 0x7E0-0x7EF filter. When in J1939 mode, remove filters entirely (or filter for 29-bit only). When in "universal" mode, accept all frames and filter in software. This one change would unlock J1939 support that already exists in the base bridge. The second priority would be abstracting the DDDI/session setup into a manufacturer-keyed dispatch table so that GM, Ford, and BMW each get their own session initialization sequence without touching the core batch read logic.
+The most impactful single change would be making the hardware CAN filter configurable based on active protocol. When in OBD mode, keep the current 0x7E0-0x7EF filter. When in J1939 mode, remove filters entirely (or filter for 29-bit only). When in "universal" mode, accept all frames and filter in software. This one change would unlock J1939 support that already exists in the base bridge. The second priority would be abstracting the DDDI/session setup into a manufacturer-keyed dispatch table so that GM Global A, Ford, and GM Global B each get their own session initialization sequence without touching the core batch read logic.

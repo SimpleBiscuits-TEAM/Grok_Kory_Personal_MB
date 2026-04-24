@@ -2086,5 +2086,15 @@
 - [x] Train Knox on OBD-II PID reference (formulas, byte counts, CAN frame format, DTC encoding)
 - [x] Train Knox on GMW3110 (GM CAN IDs, DDDI protocol, $AA streaming rates, SPS flash process)
 - [x] Train Knox on GMW15862 (bar code traceability structure, ECU identification, flash validation)
-- [x] Add Normen_CAN archive listing to Knox (J1939, ISO 14229, KWP2000, BMW Global-B — pending extraction)
-- [ ] Extract and integrate full Normen_CAN archive contents when unzipped files are provided
+- [x] Add Normen_CAN archive listing to Knox (J1939, ISO 14229, KWP2000, GM Global-B — pending extraction)
+- [x] Extract and integrate full Normen_CAN archive contents when unzipped files are provided
+
+## Global B Attribution Fix + Normen_CAN Full Integration
+- [x] Fix Global B attribution in ppei_pcan_bridge.py (Global B = GM newer 29-bit UDS, NOT BMW)
+- [x] Fix Global B attribution in Knox knowledge base
+- [x] Extract and integrate J1939-21 transport protocol data into Knox
+- [x] Extract and integrate SAE J1979 (both editions) into Knox
+- [x] Extract and integrate ISO 14229.1 UDS + DTC Status Bits into Knox
+- [x] Extract and integrate Global-B Tool Help (GM diagnostic, not BMW) into Knox
+- [x] Extract and integrate KWP2000 ISO 14230-3 into Knox
+- [x] Extract and integrate ISO 15031.5 into Knox

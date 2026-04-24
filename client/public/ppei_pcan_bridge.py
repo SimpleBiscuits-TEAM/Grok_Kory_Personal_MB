@@ -4,11 +4,11 @@ PPEI PCAN Bridge — Universal CAN Bus Layer
 ═══════════════════════════════════════════
 
 This file is now the universal layer. GM-specific code lives in _gm_* functions only.
-Ford-specific code lives in _ford_* functions. BMW-specific code lives in _bmw_* functions.
+Ford-specific code lives in _ford_* functions. GM Global B code lives in _globalb_* functions.
 
 Wraps Tobi's pcan_bridge.py with:
   - Configurable hardware CAN filters (obd / universal / j1939)
-  - Manufacturer dispatch table for session setup (GM / Ford / BMW)
+  - Manufacturer dispatch table for session setup (GM Global A / Ford / GM Global B)
   - Explicit rx_id support (no more tx_id + 8 assumption)
   - Notifier-based frame reader for high-traffic CAN buses
   - Batch DID reads, Mode 01 multi-PID, DDDI periodic streaming
@@ -26,7 +26,7 @@ Fix:
   4. Remove filters when IntelliSpy needs all frames
 
 Usage:
-  python ppei_pcan_bridge.py [same args as pcan_bridge.py] [--filter-mode obd|universal|j1939] [--manufacturer gm|ford|bmw|auto]
+  python ppei_pcan_bridge.py [same args as pcan_bridge.py] [--filter-mode obd|universal|j1939] [--manufacturer gm|ford|globalb|auto]
 
 Tobi's pcan_bridge.py is NEVER modified. This file imports and patches at runtime.
 """
@@ -70,18 +70,18 @@ VALID_FILTER_MODES = {FILTER_MODE_OBD, FILTER_MODE_UNIVERSAL, FILTER_MODE_J1939}
 # ── Manufacturer Profiles ────────────────────────────────────────────────────
 MANUFACTURER_GM = "gm"
 MANUFACTURER_FORD = "ford"
-MANUFACTURER_BMW = "bmw"
+MANUFACTURER_GLOBALB = "globalb"  # GM Global B — newer 29-bit UDS (T87, T93, Opel)
 MANUFACTURER_AUTO = "auto"
 
-VALID_MANUFACTURERS = {MANUFACTURER_GM, MANUFACTURER_FORD, MANUFACTURER_BMW, MANUFACTURER_AUTO}
+VALID_MANUFACTURERS = {MANUFACTURER_GM, MANUFACTURER_FORD, MANUFACTURER_GLOBALB, MANUFACTURER_AUTO}
 
 # ── Default ECU Addressing by Manufacturer ────────────────────────────────────
 # Standard 11-bit OBD addressing: request on tx_id, response on rx_id
 # GM Global A:  tx=0x7E0 (ECM), rx=0x7E8 — standard tx_id + 8
 # Ford:         tx=0x7E0 (PCM), rx=0x7E8 — standard tx_id + 8
 #               tx=0x7E2 (some modules), rx=0x7EA — standard tx_id + 8
-# BMW E-series: tx=0x7E0, rx=0x7E8 — standard tx_id + 8
-# BMW F/G-series Global B (29-bit): tx=0x18DA10F1, rx=0x18DAF110 — NOT tx+8!
+# GM Global B (29-bit UDS, T87/T93/Opel): tx=0x14DA11F1, rx=0x14DAF111 — NOT tx+8!
+#   29-bit format: 0x14DA + [Target SA] + [Source SA], response swaps TA/SA
 # J1939:        29-bit PGN-based, no tx/rx pair concept
 
 MANUFACTURER_DEFAULTS = {
@@ -101,13 +101,13 @@ MANUFACTURER_DEFAULTS = {
         "session_type": "default",  # Ford PCM typically works in default session
         "description": "Ford (6.7L Power Stroke, 6R140, etc.)",
     },
-    MANUFACTURER_BMW: {
-        "tx_id": 0x7E0,
-        "rx_id": 0x7E8,
-        "addressing": "11bit",  # E-series; F/G-series would be "29bit"
-        "filter_mode": FILTER_MODE_OBD,
+    MANUFACTURER_GLOBALB: {
+        "tx_id": 0x14DA11F1,
+        "rx_id": 0x14DAF111,
+        "addressing": "29bit",  # GM Global B uses 29-bit extended CAN IDs
+        "filter_mode": FILTER_MODE_UNIVERSAL,  # Need universal filter for 29-bit
         "session_type": "extended",
-        "description": "BMW (E-series OBD, F/G-series placeholder)",
+        "description": "GM Global B (T87, T93, Opel — 29-bit UDS)",
     },
 }
 
@@ -123,8 +123,8 @@ def get_rx_id(tx_id: int, manufacturer: str = MANUFACTURER_GM, rx_id_override: i
     Returns:
         The expected response arbitration ID.
 
-    For standard 11-bit OBD (GM, Ford, BMW E-series): rx = tx + 8.
-    For BMW Global B 29-bit: swap source/target bytes in the extended ID.
+    For standard 11-bit OBD (GM Global A, Ford): rx = tx + 8.
+    For GM Global B 29-bit: swap source/target bytes in the extended ID.
     For J1939: not applicable (PGN-based), returns 0.
     """
     if rx_id_override is not None:
@@ -134,10 +134,10 @@ def get_rx_id(tx_id: int, manufacturer: str = MANUFACTURER_GM, rx_id_override: i
     if tx_id <= 0x7FF:
         return tx_id + 8
 
-    # BMW Global B 29-bit addressing: 0x18DAxxFF → 0x18DAFFxx
+    # GM Global B 29-bit addressing: 0x14DAxxFF → 0x14DAFFxx
     # Source and target bytes are swapped in the response
-    if manufacturer == MANUFACTURER_BMW and tx_id > 0x7FF:
-        # Extract: 0x18DA <target> <source> → response: 0x18DA <source> <target>
+    if manufacturer == MANUFACTURER_GLOBALB and tx_id > 0x7FF:
+        # Extract: 0x14DA <target> <source> → response: 0x14DA <source> <target>
         target = (tx_id >> 8) & 0xFF
         source = tx_id & 0xFF
         return (tx_id & 0xFFFF0000) | (source << 8) | target
@@ -476,29 +476,27 @@ async def _ford_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> di
             }
 
 
-async def _bmw_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict:
-    """BMW-specific session setup — placeholder for future implementation.
+async def _globalb_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dict:
+    """GM Global B session setup — for newer GM vehicles with 29-bit UDS.
 
-    BMW E-series (11-bit OBD, tx=0x7E0, rx=0x7E8):
-      - Standard OBD-II addressing, similar to GM
-      - Extended diagnostic session (0x10 03) for advanced DIDs
-
-    BMW F/G-series Global B (29-bit UDS):
-      - tx=0x18DA10F1 (target=0x10 ECM, source=0xF1 tester)
-      - rx=0x18DAF110 (source/target swapped)
+    GM Global B (29-bit UDS, T87/T93/Opel platforms):
+      - tx=0x14DA11F1 (target=0x11 ECM, source=0xF1 tester)
+      - rx=0x14DAF111 (source/target swapped)
       - Requires filter_mode='universal' to see 29-bit frames
-      - Different diagnostic session management
+      - Uses ISO 14229 UDS services (same as GM Global A but 29-bit addressing)
+      - GMW-3110 PIDs renamed to DIDs in ISO-14229
 
-    TODO: Implement BMW-specific session initialization when hardware is available.
+    NOTE: Global B is a GM protocol, NOT BMW. The 0x14DA prefix is the
+    ISO 15765 normal fixed addressing format for UDS on CAN.
     """
-    log.info(f"[PPEI] BMW session setup: TX=0x{tx_id:03X} RX=0x{rx_id:03X}")
+    log.info(f"[PPEI] GM Global B session setup: TX=0x{tx_id:08X} RX=0x{rx_id:08X}")
 
     # Ensure CAN bus and protocol are ready
     if not bridge.can_initialized:
         success = await bridge._ensure_can_bus()
         if not success:
             return {"type": "dddi_setup_result", "id": req_id, "ok": False,
-                    "manufacturer": MANUFACTURER_BMW,
+                    "manufacturer": MANUFACTURER_GLOBALB,
                     "error": f"CAN bus not available: {bridge.can_error}"}
 
     if not bridge.protocol:
@@ -507,30 +505,30 @@ async def _bmw_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dic
         )
         await bridge.protocol.start()
 
-    # Try extended diagnostic session (BMW typically needs this for Mode 22)
-    log.info("[PPEI] BMW: Requesting extended diagnostic session (0x10 03)")
+    # Try extended diagnostic session (Global B uses UDS, needs extended session for Mode 22)
+    log.info("[PPEI] Global B: Requesting extended diagnostic session (0x10 03)")
     ext_payload = bytes([0x10, 0x03])
     resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, ext_payload, timeout=1.0)
 
     if resp:
-        log.info("[PPEI] BMW session setup OK: Extended session established")
+        log.info("[PPEI] Global B session setup OK: Extended session established")
         return {
             "type": "dddi_setup_result",
             "id": req_id,
             "ok": True,
-            "manufacturer": MANUFACTURER_BMW,
-            "note": "BMW ECU in extended diagnostic session",
+            "manufacturer": MANUFACTURER_GLOBALB,
+            "note": "GM Global B ECU in extended diagnostic session",
             "streaming": False,
             "periodic_ids": [],
         }
     else:
-        log.warning("[PPEI] BMW session setup: ECU not responding to extended session request")
+        log.warning("[PPEI] Global B session setup: ECU not responding to extended session request")
         return {
             "type": "dddi_setup_result",
             "id": req_id,
             "ok": False,
-            "manufacturer": MANUFACTURER_BMW,
-            "error": "BMW ECU not responding to extended session request",
+            "manufacturer": MANUFACTURER_GLOBALB,
+            "error": "GM Global B ECU not responding to extended session request",
             "streaming": False,
             "periodic_ids": [],
         }
@@ -540,7 +538,7 @@ async def _bmw_session_setup(bridge, tx_id: int, rx_id: int, req_id: str) -> dic
 SESSION_SETUP = {
     MANUFACTURER_GM: _gm_session_setup,
     MANUFACTURER_FORD: _ford_session_setup,
-    MANUFACTURER_BMW: _bmw_session_setup,
+    MANUFACTURER_GLOBALB: _globalb_session_setup,
 }
 
 
@@ -1642,7 +1640,7 @@ if __name__ == '__main__':
     log.info("  4. send_raw_frame skips queue drain")
     log.info("  5. batch_read_dids for fast multi-DID polling")
     log.info("  5b. batch_read_mode01 for multi-PID Mode 01 requests")
-    log.info("  6. Manufacturer session dispatch (GM DDDI / Ford / BMW)")
+    log.info("  6. Manufacturer session dispatch (GM DDDI / Ford / GM Global B)")
     log.info("  7. Universal message router with set_filter_mode + set_manufacturer")
     log.info("=" * 70)
     log.info("GM-specific code lives in _gm_* functions only.")

@@ -1548,15 +1548,167 @@ Start: [ (0x5B), End: EOT (0x04), Group Separator: GS (0x1D), Record Separator: 
 Format header: >Rs06Gs (format 06 = ISO/IEC 15418 data identifiers)
 Example powertrain bar code: [>Rs06GsY1210000000000XGsP24257888Gs12V138440180GsT11120934ACOX0043RsEOT
 
-## Normen_CAN Archive Contents (pending extraction)
-The following CAN/diagnostic standards are available in the Normen_CAN.rar archive:
-1. **SAE-J1939-21-2006.pdf** — J1939 Transport Protocol / Data Link Layer (heavy-duty CAN)
-2. **SAE-J1979.pdf** — OBD-II Diagnostic Test Modes (original SAE standard)
-3. **UDS-14229 Global-B-Tool Help.pdf** — BMW Global-B UDS Tool Help
-4. **ISO-14229 DTC Statusbits.pdf** — UDS DTC Status Bits reference
-5. **ISO-14229.1.pdf** — UDS Road Vehicles (full ISO standard)
-6. **ISO-15031.5.docx** — OBD-II Emission-Related Diagnostic Services
-7. **KWP2000 ISO 14230-3.pdf** — KWP2000 Application Layer (legacy diagnostics)
-8. **SAE J1979 2007.pdf** — SAE J1979 2007 edition (updated OBD-II modes)
-These will be fully extracted and integrated once the RAR archive is provided unzipped.
+## Normen_CAN Standards Reference (Fully Extracted)
+The following CAN/diagnostic standards have been fully extracted and integrated:
+
+### SAE J1939-21-2006 — Heavy-Duty CAN Transport Protocol
+J1939 uses **29-bit extended CAN IDs** with this structure:
+- Bits 28-26: Priority (3 bits, 0-7, lower = higher priority)
+- Bit 25: EDP (Extended Data Page)
+- Bit 24: DP (Data Page)
+- Bits 23-16: PF (PDU Format, 8 bits) — if PF >= 240 → PDU2 broadcast, PF < 240 → PDU1 destination-specific
+- Bits 15-8: PS (PDU Specific) — destination address (PDU1) or group extension (PDU2)
+- Bits 7-0: SA (Source Address)
+- PGN = (EDP << 17) | (DP << 16) | (PF << 8) | PS (for PDU2) or (EDP << 17) | (DP << 16) | (PF << 8) (for PDU1)
+
+Example: CAN ID 0x18FEF200 → Priority=6, PF=0xFE (PDU2 broadcast), PS=0xF2, SA=0x00 (Engine #1), PGN=0xFEF2=65266 (Vehicle Speed)
+
+**Key J1939 Source Addresses:** 0x00=Engine #1, 0x03=Transmission #1, 0x0B=Brakes, 0x0F=Retarder-Engine, 0x11=Cruise Control, 0x21=Body Controller, 0x31=Instrument Cluster, 0xF9=Off-Board Diagnostic Tool #1, 0xFF=Global (broadcast)
+
+**Transport Protocol PGNs:** TP.CM=PGN 0x00EC00 (60416), TP.DT=PGN 0x00EB00 (60160), Request=PGN 0x00EA00 (59904), ACK=PGN 0x00E800 (59392)
+
+**TP Message Types:**
+- RTS (Control=16): Total size, packet count, max packets/CTS, target PGN
+- CTS (Control=17): Packets allowed, next sequence number
+- EndOfMsgACK (Control=19): Confirms complete reception
+- BAM (Control=32): Broadcast announce — no acknowledgment, 50-200ms inter-packet
+- Conn_Abort (Control=255): Abort with reason code
+
+**Timing:** Tr=200ms response, Th=500ms hold, T1=750ms packet timeout, T2/T3=1250ms CTS/ACK timeout, BAM inter-packet=50-200ms
+
+### SAE J1979 — OBD-II Diagnostic Test Modes
+**Service $01** — Request Current Powertrain Diagnostic Data (Mode 01 PIDs 0x00-0xC4+)
+**Service $02** — Request Freeze Frame Data (same PIDs as $01 but frozen at DTC set time)
+**Service $03** — Request Emission-Related DTCs (up to 3 DTCs per response message)
+**Service $04** — Clear/Reset Emission-Related Diagnostic Information (clears DTCs, freeze frames, readiness bits, MIL, O2 data, monitoring results, distance/time counters)
+**Service $05** — Request O2 Sensor Monitoring Test Results
+**Service $06** — Request On-Board Monitoring Test Results (OBDMIDs + TIDs with min/max/value)
+**Service $07** — Request DTCs Detected During Current/Last Driving Cycle (pending DTCs)
+**Service $08** — Request Control of On-Board System/Test/Component
+**Service $09** — Request Vehicle Information (VIN, Calibration IDs, CVN, ECU Name, IPT)
+**Service $0A** — Request Permanent DTCs (cannot be cleared by Service $04)
+
+**VIN via Service $09:** InfoType 0x02, MessageCount first, then VIN in 5 messages (3 fill bytes + 17 VIN chars)
+**Calibration ID:** InfoType 0x04, up to 16 ASCII characters per calibration
+**CVN:** InfoType 0x06, 4-byte Calibration Verification Number per calibration
+
+### ISO 14229-1 — Unified Diagnostic Services (UDS)
+**Diagnostic & Communication Management:**
+- DiagnosticSessionControl (0x10): default=0x01, programming=0x02, extended=0x03
+- ECUReset (0x11): hardReset=0x01, keyOffOnReset=0x02, softReset=0x03
+- SecurityAccess (0x27): requestSeed (odd subfunction), sendKey (even subfunction)
+- CommunicationControl (0x28): enableRxAndTx=0x00, enableRxAndDisableTx=0x01, disableRxAndEnableTx=0x02, disableRxAndTx=0x03
+- TesterPresent (0x3E): subfunction 0x00 (with response), 0x80 (suppress positive response)
+- ControlDTCSetting (0x85): on=0x01, off=0x02
+
+**Data Transmission:**
+- ReadDataByIdentifier (0x22): Read DIDs (2-byte identifiers, multiple per request)
+- ReadMemoryByAddress (0x23): Read raw memory by address and length
+- ReadDataByPeriodicIdentifier (0x2A): Subscribe to periodic DID updates
+- DynamicallyDefineDataIdentifier (0x2C): Define custom DIDs from memory addresses or existing DIDs
+- WriteDataByIdentifier (0x2E): Write DID values
+
+**Stored Data:**
+- ClearDiagnosticInformation (0x14): Clear DTCs by 3-byte group (0xFFFFFF = all)
+- ReadDTCInformation (0x19): Multiple subfunctions for DTC status, snapshot, extended data
+
+**Upload/Download:**
+- RequestDownload (0x34): Initiate download (tester→ECU)
+- RequestUpload (0x35): Initiate upload (ECU→tester)
+- TransferData (0x36): Transfer data blocks with sequence counter
+- RequestTransferExit (0x37): Complete transfer
+
+**IO Control & Routines:**
+- InputOutputControlByIdentifier (0x2F): Control actuators
+- RoutineControl (0x31): startRoutine=0x01, stopRoutine=0x02, requestResults=0x03
+
+### ISO 14229 DTC Status Bits
+Each DTC has an 8-bit status byte:
+- Bit 0 (LSB): **testFailed** (TF) — most recent test result
+- Bit 1: **testFailedThisMonitoringCycle** (TFTMC) — failed this cycle
+- Bit 2: **pendingDTC** (PDTC) — failed current or previous cycle
+- Bit 3: **confirmedDTC** (CDTC) — stored in long-term memory
+- Bit 4: **testNotCompletedSinceLastClear** (TNCSLC)
+- Bit 5: **testFailedSinceLastClear** (TFSLC)
+- Bit 6: **testNotCompletedThisMonitoringCycle** (TNCTMC)
+- Bit 7 (MSB): **warningIndicatorRequested** (WIR) — MIL/warning light
+
+After ClearDiagnosticInformation: bits 0,1,2,3,5 → 0; bits 4,6 → 1
+
+### UDS-14229 Global-B Diagnostic Tool (GM, NOT BMW)
+**CRITICAL: Global B is a GM protocol** — used on newer GM vehicles (T87, T93, Opel). NOT BMW.
+
+**GM Global B 29-bit CAN addressing:**
+- Format: 0x14DA + [Target Address] + [Source Address]
+- Request to ECM: 0x14DA11F1 (target=0x11 ECM, source=0xF1 tester)
+- Response from ECM: 0x14DAF111 (target=0xF1 tester, source=0x11 ECM)
+- This is ISO 15765 normal fixed addressing for UDS on CAN
+
+**Tool Configuration:** ProjectType 0=PSA, 1=GM-GlobalB; TesterPresent cycle 1000-5000ms (default 4000); Controller timeout 50-5000ms (default 500)
+
+**Menus:** DTCs, IO-Control (case learn, brake learning), DIDs (GMW-3110 PIDs renamed to DIDs), OBD, User commands
+
+**User Command Format:** CAN-ID [Byte1 Byte2 ...] — e.g., 14DA11F1 [03 19 02 20] (all hex, no 0x prefix)
+
+**Hardware:** PCAN-USB Pro FD with PeakOemDrv.exe / PcanDrv.exe / PcanDevRedist.exe
+
+### KWP2000 (ISO 14230-3) — Legacy Diagnostic Protocol
+KWP2000 is the predecessor to UDS, used on older vehicles (pre-2008 era). Key differences from UDS:
+- Uses K-Line (serial) or CAN as transport
+- Service IDs overlap with UDS but some are different
+- Positive response = request SID + 0x40 (bit 6 set)
+- Negative response = 0x7F + SID + NRC
+
+**KWP2000 Service ID Table:**
+| Hex | Service | Response |
+|-----|---------|----------|
+| 0x10 | startDiagnosticSession | 0x50 |
+| 0x11 | ecuReset | 0x51 |
+| 0x12 | readFreezeFrameData | 0x52 |
+| 0x13 | readDiagnosticTroubleCodes | 0x53 |
+| 0x14 | clearDiagnosticInformation | 0x54 |
+| 0x17 | readStatusOfDTCs | 0x57 |
+| 0x18 | readDTCsByStatus | 0x58 |
+| 0x1A | readEcuIdentification | 0x5A |
+| 0x20 | stopDiagnosticSession | 0x60 |
+| 0x21 | readDataByLocalIdentifier | 0x61 |
+| 0x22 | readDataByCommonIdentifier | 0x62 |
+| 0x23 | readMemoryByAddress | 0x63 |
+| 0x26 | setDataRates | 0x66 |
+| 0x27 | securityAccess | 0x67 |
+| 0x2C | dynamicallyDefineLocalIdentifier | 0x6C |
+| 0x2E | writeDataByCommonIdentifier | 0x6E |
+| 0x2F | inputOutputControlByCommonId | 0x6F |
+| 0x30 | inputOutputControlByLocalId | 0x70 |
+| 0x31 | startRoutineByLocalIdentifier | 0x71 |
+| 0x34 | requestDownload | 0x74 |
+| 0x35 | requestUpload | 0x75 |
+| 0x36 | transferData | 0x76 |
+| 0x37 | requestTransferExit | 0x77 |
+| 0x3B | writeDataByLocalIdentifier | 0x7B |
+| 0x3D | writeMemoryByAddress | 0x7D |
+| 0x3E | testerPresent | 0x7E |
+| 0x80 | escapeCode (KWP2000 only) | 0xC0 |
+
+**KWP2000 NRC (Negative Response Codes):**
+0x10=generalReject, 0x11=serviceNotSupported, 0x12=subFunctionNotSupported, 0x21=busy-RepeatRequest, 0x22=conditionsNotCorrect, 0x23=routineNotComplete, 0x31=requestOutOfRange, 0x33=securityAccessDenied, 0x35=invalidKey, 0x36=exceedNumberOfAttempts, 0x37=requiredTimeDelayNotExpired, 0x40=downloadNotAccepted, 0x50=uploadNotAccepted, 0x71=transferSuspended, 0x72=transferAborted, 0x74=illegalAddressInBlockTransfer, 0x75=illegalByteCountInBlockTransfer, 0x76=illegalBlockTransferType, 0x77=blockTransferDataChecksumError, 0x78=reqCorrectlyRcvd-RspPending, 0x79=incorrectByteCountDuringBlockTransfer, 0x80-0xFF=manufacturerSpecific
+
+### ISO 15031-5 — OBD-II Emission-Related Diagnostic Services
+Defines the application layer for emission-related OBD services over CAN/K-Line/J1850.
+
+**Service $04 clears:** MIL, DTC count, confirmed DTCs, pending DTCs, freeze frame data, O2 sensor data, monitoring test results, distance/time counters, readiness bits. Some ECUs may refuse with engine running (NRC 0x22 conditionsNotCorrect).
+
+**CAN ISO-TP framing (ISO 15765-2):**
+- SF (Single Frame): N_PCI = 0x0L (L = data length, 1-7 bytes)
+- FF (First Frame): N_PCI = 0x1LLL (12-bit total length)
+- CF (Consecutive Frame): N_PCI = 0x2N (N = sequence 0-F)
+- FC (Flow Control): N_PCI = 0x3F (F = flow status: 0=continue, 1=wait, 2=overflow)
+
+### CAN Diagnostic Communication Overview
+**K-Line message structure:** Header (Fmt, Tgt, Src, Len — max 4 bytes) + Data (SId + params — max 255 bytes) + Checksum (1 byte)
+**KWP2000 over CAN examples:**
+- Functional request: 0x7DF [02 10 81] (startDiagnosticSession)
+- Physical request: 0x7E1 [02 21 80] (readDataByLocalId)
+- Multi-frame: FF + FC + CF sequence for >7 data bytes
+- Positive response SID = request SID + 0x40; Negative response = 0x7F + SID + NRC
 `;
