@@ -2130,3 +2130,13 @@
 - [x] Add DID 0x245D as test candidate for per-injection fuel quantity (from IntelliSpy decode)
 - [x] Add HPT fuel rate DDDI mode to ppei_pcan_bridge.py (exact command: 2C FE 00 0C 24 5D)
 - [x] Document IntelliSpy analysis findings in docs/intellispy-fuel-rate-analysis.md
+
+## HPT Common DDDI Mode Implementation (April 24, 2026)
+- [x] Add hpt_common mode to ppei_pcan_bridge.py — 7 IOCTL + 8 DDDI + periodic start for all 8 DPIDs
+- [x] Add hpt_common DPID parser in bridge — decode all 8 DPIDs (0xF7-0xFE) byte map
+- [ ] Add polled DID 0x0077 and 0x0069 support at 1-2 Hz in bridge
+- [x] Update frontend parseDddiPeriodicFrame for hpt_common mode — all 8 DPIDs
+- [x] Add new PID definitions for IOCTL-only channels (Metering Unit Valve, Lambda Smoke Limit, Inj Pulse Width, Cyl Airmass, Des FRP)
+- [x] Update existing PID definitions for DDDI-streamed channels (FRP float32, Turbo Vane, Des Turbo Vane, Boost, Des Boost)
+- [x] Add auto-detection logic to select hpt_common mode when multiple common PIDs are selected
+- [x] Run tests and verify no regressions

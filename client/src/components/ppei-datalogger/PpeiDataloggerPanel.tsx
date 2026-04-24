@@ -72,7 +72,7 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
   // skip re-setup to avoid breaking the stream. Just refresh the session timer.
   if (_ppeiDddiStreamingActive && _ppeiPeriodicFrameCount > 0) {
     // Check staleness based on active mode
-    const staleCheckDid = _ppeiDddiMode === 'fuel_rate' ? 0x245D : 0x328A;
+    const staleCheckDid = _ppeiDddiMode === 'hpt_common' ? 0x245D : _ppeiDddiMode === 'fuel_rate' ? 0x245D : 0x328A;
     const lastPeriodicVal = _ppeiPeriodicValues.get(staleCheckDid); // FRP_ACT or FUEL_INJ_QTY
     const periodicAge = lastPeriodicVal ? (now - lastPeriodicVal.timestamp) : Infinity;
     if (periodicAge < 5000) {
@@ -120,9 +120,11 @@ async function ppeiEnsureGmLiveDataSession(this: any, ecmTx: number): Promise<vo
         // Track which DDDI mode the bridge is running
         const activeMode = response.dddi_mode || dddiMode || 'frp';
         _ppeiDddiMode = activeMode as DddiMode;
-        const modeDesc = activeMode === 'fuel_rate'
-          ? 'FUEL_RATE: RPM + fuel mm³/stroke from DPID 0xFE'
-          : 'FRP: FRP_ACT/FRP_DES as float32 MPa';
+        const modeDesc = activeMode === 'hpt_common'
+          ? 'HPT_COMMON: 8 DPIDs (F7-FE) streaming 34 channels @ 20Hz'
+          : activeMode === 'fuel_rate'
+            ? 'FUEL_RATE: RPM + fuel mm³/stroke from DPID 0xFE'
+            : 'FRP: FRP_ACT/FRP_DES as float32 MPa';
         ppeiLog(this, `DDDI periodic streaming started — ${modeDesc} from 0x5E8 frames`);
       }
     } else {
@@ -222,8 +224,19 @@ const DDDI_PERIODIC_ARB_ID = 0x5E8;
 const MPA_TO_PSI = 145.038;
 
 // DDDI mode tracking — set by dddi_setup response
-type DddiMode = 'frp' | 'fuel_rate';
+type DddiMode = 'frp' | 'fuel_rate' | 'hpt_common';
 let _ppeiDddiMode: DddiMode = 'frp';
+
+// ── Virtual DID IDs for IOCTL-only channels (no Mode 22 equivalent) ──
+// These are synthetic DIDs used only in the periodic value map to identify
+// channels that come exclusively from IOCTL RAM addresses via DDDI streaming.
+const VDID_METERING_VALVE = 0xDD00;  // IOCTL slot 0: Metering Unit Valve Current (A)
+const VDID_FRP_FLOAT32 = 0xDD01;     // IOCTL slot 1: Fuel Rail Pressure (MPa, float32)
+const VDID_LAMBDA_SMOKE = 0xDD02;    // IOCTL slot 2: Lambda Smoke Limit
+const VDID_INJ_PULSE_WIDTH = 0xDD03; // IOCTL slot 3: Injector Pulse Width Cyl 1 (µs)
+const VDID_CYL_AIRMASS = 0xDD04;    // IOCTL slot 4: Cylinder Airmass (mg)
+const VDID_UNKNOWN_SLOT5 = 0xDD05;   // IOCTL slot 5: Unknown (0 at stationary)
+const VDID_DES_FRP_FLOAT32 = 0xDD06; // IOCTL slot 6: Desired FRP (MPa, float32)
 
 // Map periodic ID -> PID info for FRP mode
 const PERIODIC_ID_MAP_FRP: Record<number, { did: number; shortName: string; unit: string }> = {
@@ -237,48 +250,196 @@ const FUEL_RATE_DPID_FE = {
   fuelRate: { did: 0x245D, shortName: 'FUEL_INJ_QTY', unit: 'mm³' },
 };
 
-// Storage for latest periodic values (keyed by DID)
-interface PeriodicValue {
+// ── Module-level state for DDDI periodic streaming ──
+let _ppeiDddiStreamingActive = false;
+let _ppeiPeriodicFrameCount = 0;
+let _ppeiConnectionRef: any = null;
+const _ppeiPeriodicValues = new Map<number, {
   did: number;
   shortName: string;
   value: number;
   unit: string;
   rawBytes: number[];
   timestamp: number;
-}
-// Module-level map so both Patch 4 (writer) and Patch 5 (reader) can access it
-const _ppeiPeriodicValues = new Map<number, PeriodicValue>();
-let _ppeiPeriodicFrameCount = 0;
-let _ppeiDddiStreamingActive = false;
-// Store a reference to the connection instance so parseDddiPeriodicFrame can emit('log')
-let _ppeiConnectionRef: any = null;
-// Reusable DataView for float32 decoding
-const _float32Buf = new ArrayBuffer(4);
-const _float32View = new DataView(_float32Buf);
-const _float32Bytes = new Uint8Array(_float32Buf);
+}>();
+
+/**
+ * Decode 4 bytes as a big-endian IEEE 754 float32.
+ * Used for IOCTL RAM values (FRP, Cylinder Airmass, Inj Pulse Width, etc.)
+ */
 function decodeFloat32BE(b0: number, b1: number, b2: number, b3: number): number {
-  _float32Bytes[0] = b0;
-  _float32Bytes[1] = b1;
-  _float32Bytes[2] = b2;
-  _float32Bytes[3] = b3;
-  return _float32View.getFloat32(0, false); // big-endian
+  const buf = new ArrayBuffer(4);
+  const view = new DataView(buf);
+  view.setUint8(0, b0);
+  view.setUint8(1, b1);
+  view.setUint8(2, b2);
+  view.setUint8(3, b3);
+  return view.getFloat32(0, false); // big-endian
 }
+
 function parseDddiPeriodicFrame(data: number[]): void {
-  if (!data || data.length < 4) return; // Need at least periodicID + some data
+  if (!data || data.length < 4) return;
   const periodicId = data[0];
   
   _ppeiPeriodicFrameCount++;
   _ppeiDddiStreamingActive = true;
   const now = Date.now();
 
-  // ── Fuel Rate Mode: DPID 0xFE = RPM (uint16 ×0.25) + fuel_rate (uint8 mm³/stroke) ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // HPT COMMON MODE: 8 DPIDs (0xF7-0xFE) streaming 34 channels @ 20Hz
+  // Each DPID carries 7 data bytes: bytes data[1] through data[7]
+  // ══════════════════════════════════════════════════════════════════════════
+  if (_ppeiDddiMode === 'hpt_common') {
+    if (data.length < 8) return; // Need DPID + 7 data bytes
+
+    const storeVal = (did: number, shortName: string, value: number, unit: string, raw: number[]) => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        _ppeiPeriodicValues.set(did, { did, shortName, value, unit, rawBytes: raw, timestamp: now });
+      }
+    };
+
+    switch (periodicId) {
+      case 0xFE: {
+        // DPID 0xFE: IOCTL[0](f32) + 0x30AA(2B filler) + DID 0x245D(1B)
+        // bytes[1:5] = Metering Unit Valve Current (A, float32 BE)
+        // bytes[5:7] = constant 0x28A0 (filler, ignored)
+        // byte[7]    = Main Fuel Rate (mm³/stroke, uint8)
+        const meteringValve = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const fuelRate = data[7];
+        storeVal(VDID_METERING_VALVE, 'METER_VALVE', meteringValve, 'A', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x245D, 'FUEL_INJ_QTY', fuelRate, 'mm³', [data[7]]);
+        break;
+      }
+      case 0xFD: {
+        // DPID 0xFD: IOCTL[1](f32) + 0x30A9(2B filler) + DID 0x1543(1B)
+        // bytes[1:5] = Fuel Rail Pressure (MPa, float32 BE) -> * 145.038 = PSI
+        // bytes[5:7] = constant 0x28A0 (filler, ignored)
+        // byte[7]    = Turbo Vane Position (uint8 * 100/255 = %)
+        const frpMpa = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const frpPsi = frpMpa * MPA_TO_PSI;
+        const turboVane = (data[7] * 100) / 255;
+        storeVal(VDID_FRP_FLOAT32, 'FRP_ACT', frpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x328A, 'FRP_ACT', frpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x1543, 'THRTL_A', turboVane, '%', [data[7]]);
+        break;
+      }
+      case 0xFC: {
+        // DPID 0xFC: IOCTL[2](f32) + 0x303B(2B filler) + DID 0x1540(1B)
+        // bytes[1:5] = Lambda Smoke Limit (dimensionless, float32 BE)
+        // bytes[5:7] = constant 0x28A0 (filler, ignored)
+        // byte[7]    = Desired Turbo Vane Position (uint8 * 100/255 = %)
+        const lambdaSmoke = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const desTurboVane = (data[7] * 100) / 255;
+        storeVal(VDID_LAMBDA_SMOKE, 'LAMBDA_SMOKE', lambdaSmoke, '', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x1540, 'THRTL_B', desTurboVane, '%', [data[7]]);
+        break;
+      }
+      case 0xFB: {
+        // DPID 0xFB: IOCTL[3](f32) + 0x303A(2B filler) + PID 0x0B(1B)
+        // bytes[1:5] = Injector Pulse Width Cyl 1 (µs, float32 BE) -> / 1000 = ms
+        // bytes[5:7] = constant 0x28A0 (filler, ignored)
+        // byte[7]    = Intake MAP (kPa, uint8) — OBD PID 0x0B
+        const injPwUs = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const injPwMs = injPwUs / 1000;
+        const mapKpa = data[7];
+        const mapPsi = mapKpa * 0.145038;
+        storeVal(VDID_INJ_PULSE_WIDTH, 'INJ_PW', injPwMs, 'ms', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x000B, 'MAP', mapPsi, 'PSI', [data[7]]);
+        break;
+      }
+      case 0xFA: {
+        // DPID 0xFA: IOCTL[4](f32) + IOCTL[5](2B) + PID 0x0D(1B)
+        // bytes[1:5] = Cylinder Airmass (mg, float32 BE) -> / 1000 = grams
+        // bytes[5:7] = IOCTL slot 5 (uint16, unknown — 0 at stationary)
+        // byte[7]    = Vehicle Speed (km/h -> mph, uint8) — OBD PID 0x0D
+        const cylAirmassMg = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const cylAirmassG = cylAirmassMg / 1000;
+        const slot5 = (data[5] << 8) | data[6];
+        const vssKmh = data[7];
+        const vssMph = vssKmh * 0.621371;
+        storeVal(VDID_CYL_AIRMASS, 'CYL_AIRMASS', cylAirmassG, 'g', [data[1], data[2], data[3], data[4]]);
+        storeVal(VDID_UNKNOWN_SLOT5, 'IOCTL_SLOT5', slot5, '', [data[5], data[6]]);
+        storeVal(0x000D, 'VSS', vssMph, 'MPH', [data[7]]);
+        break;
+      }
+      case 0xF9: {
+        // DPID 0xF9: IOCTL[6](f32) + DID 0x20B4(2B) + PID 0x2C(1B)
+        // bytes[1:5] = Desired Fuel Rail Pressure (MPa, float32 BE) -> * 145.038 = PSI
+        // bytes[5:7] = Commanded EGR A (DID 0x20B4, uint16 — complex scaling)
+        // byte[7]    = Commanded EGR (PID 0x2C, uint8 * 100/255 = %)
+        const desFrpMpa = decodeFloat32BE(data[1], data[2], data[3], data[4]);
+        const desFrpPsi = desFrpMpa * MPA_TO_PSI;
+        const egrCmdRaw = (data[5] << 8) | data[6];
+        const egrCmd = (data[7] * 100) / 255;
+        storeVal(VDID_DES_FRP_FLOAT32, 'FRP_DES', desFrpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x131F, 'FRP_DES', desFrpPsi, 'PSI', [data[1], data[2], data[3], data[4]]);
+        storeVal(0x20B4, 'EGR_A_CMD', egrCmdRaw, '', [data[5], data[6]]);
+        storeVal(0x002C, 'EGR_CMD', egrCmd, '%', [data[7]]);
+        break;
+      }
+      case 0xF8: {
+        // DPID 0xF8: DID 0x30AB(2B filler) + PID 0x5D(2B) + PID 0x10(2B) + PID 0x0F(1B)
+        // bytes[1:3] = constant 0x28A0 (DID 0x30AB filler, ignored)
+        // bytes[3:5] = Fuel Injection Timing (uint16 / 128 - 210 = degrees)
+        // bytes[5:7] = Mass Airflow (uint16 / 100 = g/s)
+        // byte[7]    = Intake Air Temp (uint8 - 40 = °C -> °F)
+        const injTimingRaw = (data[3] << 8) | data[4];
+        const injTimingDeg = (injTimingRaw / 128) - 210;
+        const mafRaw = (data[5] << 8) | data[6];
+        const mafGs = mafRaw / 100;
+        const mafLbMin = mafGs * 0.132277;
+        const iatC = data[7] - 40;
+        const iatF = (iatC * 9 / 5) + 32;
+        storeVal(0x005D, 'INJ_TMG', injTimingDeg, '°', [data[3], data[4]]);
+        storeVal(0x0010, 'MAF', mafLbMin, 'lb/min', [data[5], data[6]]);
+        storeVal(0x000F, 'IAT', iatF, '°F', [data[7]]);
+        break;
+      }
+      case 0xF7: {
+        // DPID 0xF7: DID 0x20E3(2B) + PID 0x0C(2B) + DID 0x328A(2B) + padding(1B)
+        // bytes[1:3] = Boost/Vacuum (uint16 / 100 = kPa gauge -> * 0.145038 = PSI)
+        // bytes[3:5] = Engine RPM (uint16 / 4 = RPM)
+        // bytes[5:7] = Desired Boost (uint16 / 100 = kPa absolute -> * 0.145038 = PSI)
+        // byte[7]    = always 0 (padding)
+        const boostRaw = (data[1] << 8) | data[2];
+        const boostPsi = (boostRaw / 100) * 0.145038;
+        const rpmRaw = (data[3] << 8) | data[4];
+        const rpm = rpmRaw / 4;
+        const desBoostRaw = (data[5] << 8) | data[6];
+        const desBoostPsi = (desBoostRaw / 100) * 0.145038;
+        storeVal(0x20E3, 'BOOST', boostPsi, 'PSI', [data[1], data[2]]);
+        storeVal(0x000C, 'RPM', rpm, 'RPM', [data[3], data[4]]);
+        // Use a virtual DID for Desired Boost to avoid collision with 0x328A (FRP_ACT in Mode 22)
+        // In hpt_common mode, 0x328A on DPID 0xF7 is Desired Boost, not FRP
+        storeVal(0xDD07, 'BOOST_DES', desBoostPsi, 'PSI', [data[5], data[6]]);
+        break;
+      }
+    }
+
+    // Log first 10 frames and every 500th
+    if (_ppeiPeriodicFrameCount <= 10 || _ppeiPeriodicFrameCount % 500 === 0) {
+      const hexStr = data.slice(0, 8).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+      const vals: string[] = [];
+      for (const [, pv] of _ppeiPeriodicValues) {
+        if (now - pv.timestamp < 100) { // Only show recently updated values
+          vals.push(`${pv.shortName}=${pv.value.toFixed(1)}${pv.unit}`);
+        }
+      }
+      const msg = `DDDI hpt_common #${_ppeiPeriodicFrameCount}: 0x${periodicId.toString(16).toUpperCase()} [${hexStr}]` +
+        (vals.length > 0 ? ` | ${vals.join(', ')}` : '');
+      ppeiLog(_ppeiConnectionRef, msg);
+    }
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FUEL RATE MODE: DPID 0xFE = RPM (uint16 ×0.25) + fuel_rate (uint8 mm³/stroke)
+  // ══════════════════════════════════════════════════════════════════════════
   if (_ppeiDddiMode === 'fuel_rate' && periodicId === 0xFE) {
-    if (data.length < 4) return; // Need at least: DPID + 2 RPM bytes + 1 fuel byte
+    if (data.length < 4) return;
     const rpmRaw = (data[1] << 8) | data[2];
     const rpm = rpmRaw * 0.25;
-    const fuelRate = data[3]; // integer mm³/stroke, no scaling
-
-    // Store RPM from DDDI
+    const fuelRate = data[3];
     if (Number.isFinite(rpm) && rpm >= 0 && rpm < 10000) {
       _ppeiPeriodicValues.set(FUEL_RATE_DPID_FE.rpm.did, {
         did: FUEL_RATE_DPID_FE.rpm.did,
@@ -289,7 +450,6 @@ function parseDddiPeriodicFrame(data: number[]): void {
         timestamp: now,
       });
     }
-    // Store fuel injection quantity
     if (fuelRate >= 0 && fuelRate <= 255) {
       _ppeiPeriodicValues.set(FUEL_RATE_DPID_FE.fuelRate.did, {
         did: FUEL_RATE_DPID_FE.fuelRate.did,
@@ -300,8 +460,6 @@ function parseDddiPeriodicFrame(data: number[]): void {
         timestamp: now,
       });
     }
-
-    // Log first 10 frames and every 100th
     if (_ppeiPeriodicFrameCount <= 10 || _ppeiPeriodicFrameCount % 100 === 0) {
       const hexStr = data.slice(0, 5).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
       const msg = `DDDI fuel_rate #${_ppeiPeriodicFrameCount}: [${hexStr}] ` +
@@ -311,12 +469,13 @@ function parseDddiPeriodicFrame(data: number[]): void {
     return;
   }
 
-  // ── FRP Mode: standard float32 decode ──
-  if (data.length < 5) return; // Need periodicID + 4 bytes float32
+  // ══════════════════════════════════════════════════════════════════════════
+  // FRP MODE: standard float32 decode (original behavior)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (data.length < 5) return;
   const pidInfo = PERIODIC_ID_MAP_FRP[periodicId];
   if (!pidInfo) return;
   
-  // Decode bytes 1-4 as IEEE 754 float32 big-endian (MPa)
   const mpa = decodeFloat32BE(data[1], data[2], data[3], data[4]);
   const psi = mpa * MPA_TO_PSI;
   
@@ -331,21 +490,18 @@ function parseDddiPeriodicFrame(data: number[]): void {
     });
   }
   
-  // Log first 10 frames and then every 100th to DEVICE CONSOLE
   if (_ppeiPeriodicFrameCount <= 10 || _ppeiPeriodicFrameCount % 100 === 0) {
     const frpAct = _ppeiPeriodicValues.get(0x328A);
     const frpDes = _ppeiPeriodicValues.get(0x131F);
     const hexStr = data.slice(0, 5).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
     const msg = `DDDI periodic #${_ppeiPeriodicFrameCount}: ` +
       `0x${periodicId.toString(16).toUpperCase()} [${hexStr}] ` +
-      `${pidInfo.shortName}=${psi.toFixed(0)} PSI (${mpa.toFixed(2)} MPa) | ` +
+      `MPa=${mpa.toFixed(3)} PSI=${psi.toFixed(0)} | ` +
       `FRP_ACT=${frpAct ? frpAct.value.toFixed(0) + ' PSI' : 'N/A'} ` +
       `FRP_DES=${frpDes ? frpDes.value.toFixed(0) + ' PSI' : 'N/A'}`;
     ppeiLog(_ppeiConnectionRef, msg);
   }
 }
-
-
 /**
  * ── PATCH 4: openWebSocket wrapper ──
  * Intercepts the WebSocket onmessage to:
@@ -424,8 +580,26 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
     const readings: any[] = [];
     // Store desired DDDI mode on the connection instance so ensureGmLiveDataSession can read it
+    // Detect desired DDDI mode based on selected PIDs
+    // hpt_common: when 3+ HPT-streamable PIDs are selected (covers most common logging scenarios)
+    // fuel_rate: when only fuel injection qty PID is selected
+    // frp: default FRP-only mode
+    const HPT_COMMON_DIDS = new Set([
+      0x328A, 0x131F, 0x245D, 0x1543, 0x1540, 0x20B4, 0x20E3,
+      // Standard OBD PIDs that HPT streams via DDDI (Mode 01 equivalents)
+      0x000B, 0x000C, 0x000D, 0x000F, 0x0010, 0x002C, 0x005D,
+    ]);
+    const hptStreamablePids = pids.filter((p: any) => HPT_COMMON_DIDS.has(p.pid));
     const hasFuelRatePid = pids.some((p: any) => p.pid === 0x245D);
-    (this as any)._desiredDddiMode = hasFuelRatePid ? "fuel_rate" : "frp";
+    let desiredMode: DddiMode;
+    if (hptStreamablePids.length >= 3) {
+      desiredMode = 'hpt_common';
+    } else if (hasFuelRatePid) {
+      desiredMode = 'fuel_rate';
+    } else {
+      desiredMode = 'frp';
+    }
+    (this as any)._desiredDddiMode = desiredMode;
 
     // ══════════════════════════════════════════════════════════════════════
     // HYBRID MODE: When DDDI periodic streaming is active, FRP_ACT and
@@ -440,9 +614,21 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     // PIDs that come from DDDI periodic frames — exclude from batch reads
     // FRP mode: 0x328A (FRP_ACT), 0x131F (FRP_DES)
     // Fuel rate mode: 0x245D (FUEL_INJ_QTY) — RPM (0x000C) still comes from Mode 01
-    const DDDI_PERIODIC_DIDS = _ppeiDddiMode === 'fuel_rate'
-      ? new Set([0x245D])
-      : new Set([0x328A, 0x131F]);
+    // In hpt_common mode, ALL channels come from periodic frames — exclude from batch reads
+    const DDDI_PERIODIC_DIDS = _ppeiDddiMode === 'hpt_common'
+      ? new Set([
+          // IOCTL float32 channels (no Mode 22 DID equivalent)
+          0xDD00, 0xDD01, 0xDD02, 0xDD03, 0xDD04, 0xDD05, 0xDD06,
+          // Standard DIDs that HPT packs into DPIDs
+          0x245D, 0x1543, 0x1540, 0x20E3, 0x20B4,
+          // FRP comes from IOCTL float32 in hpt_common (higher precision than Mode 22)
+          0x328A, 0x131F,
+          // Standard OBD PIDs streamed via DDDI (Mode 01 equivalents)
+          0x000B, 0x000C, 0x000D, 0x000F, 0x0010, 0x002C, 0x005D,
+        ])
+      : _ppeiDddiMode === 'fuel_rate'
+        ? new Set([0x245D])
+        : new Set([0x328A, 0x131F]);
 
     // Filter out DDDI PIDs from Mode 22 batch when streaming
     const batchMode22Pids = isStreaming

@@ -252,6 +252,34 @@ _FUEL_RATE_PERIODIC_IDS = [0xFE]  # Only DPID 0xFE (no 0xFD)
 # DDDI mode constants
 DDDI_MODE_FRP = 'frp'          # Default: FRP Actual + FRP Desired (IOCTL float32)
 DDDI_MODE_FUEL_RATE = 'fuel_rate'  # HPT fuel rate: RPM + fuel mm³/stroke (no IOCTL)
+DDDI_MODE_HPT_COMMON = 'hpt_common'  # HPT full 34-channel streaming (7 IOCTL + 8 DDDI)
+
+# ── HPT Common Mode: Full 34-channel DDDI setup (from BusMaster capture) ──
+# 7 IOCTL slots define RAM addresses for float32 parameters
+_HPT_COMMON_IOCTL_SETUP = [
+    bytes([0x2D, 0xFE, 0x00, 0x40, 0x02, 0x21, 0x58, 0x04]),  # Slot 0: Metering Unit Valve Current (A, f32)
+    bytes([0x2D, 0xFE, 0x01, 0x40, 0x01, 0x4F, 0x08, 0x04]),  # Slot 1: Fuel Rail Pressure (MPa, f32)
+    bytes([0x2D, 0xFE, 0x02, 0x40, 0x01, 0xBC, 0x8C, 0x04]),  # Slot 2: Lambda Smoke Limit (f32)
+    bytes([0x2D, 0xFE, 0x03, 0x40, 0x01, 0x3B, 0x84, 0x04]),  # Slot 3: Inj Pulse Width Cyl 1 (µs, f32)
+    bytes([0x2D, 0xFE, 0x04, 0x40, 0x01, 0xBB, 0x54, 0x04]),  # Slot 4: Cylinder Airmass (mg, f32)
+    bytes([0x2D, 0xFE, 0x05, 0x40, 0x01, 0x1F, 0x18, 0x02]),  # Slot 5: Unknown (2B, 0 at stationary)
+    bytes([0x2D, 0xFE, 0x06, 0x40, 0x02, 0x25, 0xD8, 0x04]),  # Slot 6: Desired FRP (MPa, f32)
+]
+
+# 8 DDDI definitions pack IOCTL slots + standard DIDs into DPIDs 0xF7-0xFE
+_HPT_COMMON_DDDI_DEFINE = [
+    bytes([0x2C, 0xFE, 0xFE, 0x00, 0x30, 0xAA, 0x24, 0x5D]),        # FE: IOCTL[0]+0x30AA+0x245D
+    bytes([0x2C, 0xFD, 0xFE, 0x01, 0x30, 0xA9, 0x15, 0x43]),        # FD: IOCTL[1]+0x30A9+0x1543
+    bytes([0x2C, 0xFC, 0xFE, 0x02, 0x30, 0x3B, 0x15, 0x40]),        # FC: IOCTL[2]+0x303B+0x1540
+    bytes([0x2C, 0xFB, 0xFE, 0x03, 0x30, 0x3A, 0x00, 0x0B]),        # FB: IOCTL[3]+0x303A+PID 0x0B
+    bytes([0x2C, 0xFA, 0xFE, 0x04, 0xFE, 0x05, 0x00, 0x0D]),        # FA: IOCTL[4]+IOCTL[5]+PID 0x0D
+    bytes([0x2C, 0xF9, 0xFE, 0x06, 0x20, 0xB4, 0x00, 0x2C]),        # F9: IOCTL[6]+0x20B4+PID 0x2C
+    bytes([0x2C, 0xF8, 0x30, 0xAB, 0x00, 0x5D, 0x00, 0x10, 0x00, 0x0F]),  # F8: 0x30AB+PID 0x5D+PID 0x10+PID 0x0F
+    bytes([0x2C, 0xF7, 0x20, 0xE3, 0x00, 0x0C, 0x32, 0x8A]),        # F7: 0x20E3+PID 0x0C+0x328A
+]
+
+# All 8 DPIDs streaming at 25ms
+_HPT_COMMON_PERIODIC_IDS = [0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8, 0xF7]
 
 
 async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mode: str = DDDI_MODE_FRP) -> dict:
@@ -303,11 +331,21 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mo
             log.warning(f"[PPEI] Could not update CAN filters: {e}")
 
     # Select DDDI payloads and periodic IDs based on mode
-    is_fuel_rate = dddi_mode == DDDI_MODE_FUEL_RATE
-    ioctl_payloads = [] if is_fuel_rate else _IOCTL_SETUP
-    dddi_payloads = [_FUEL_RATE_DDDI_DEFINE] if is_fuel_rate else _DDDI_DEFINE_PERIODIC
-    periodic_ids = _FUEL_RATE_PERIODIC_IDS if is_fuel_rate else _PERIODIC_STREAM_IDS
-    mode_label = 'FUEL_RATE (RPM+mm³/stroke)' if is_fuel_rate else 'FRP (float32 MPa)'
+    if dddi_mode == DDDI_MODE_HPT_COMMON:
+        ioctl_payloads = _HPT_COMMON_IOCTL_SETUP
+        dddi_payloads = _HPT_COMMON_DDDI_DEFINE
+        periodic_ids = _HPT_COMMON_PERIODIC_IDS
+        mode_label = 'HPT_COMMON (34-channel, 8 DPIDs @ 20Hz)'
+    elif dddi_mode == DDDI_MODE_FUEL_RATE:
+        ioctl_payloads = []
+        dddi_payloads = [_FUEL_RATE_DDDI_DEFINE]
+        periodic_ids = _FUEL_RATE_PERIODIC_IDS
+        mode_label = 'FUEL_RATE (RPM+mm³/stroke)'
+    else:
+        ioctl_payloads = _IOCTL_SETUP
+        dddi_payloads = _DDDI_DEFINE_PERIODIC
+        periodic_ids = _PERIODIC_STREAM_IDS
+        mode_label = 'FRP (float32 MPa)'
 
     ok_count = 0
     fail_count = 0
@@ -363,7 +401,7 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mo
             await asyncio.sleep(0.015)
         log.info(f"[PPEI] GM Phase 3 complete: {ioctl_ok}/{len(ioctl_payloads)} IOCTL sources configured")
     else:
-        log.info(f"[PPEI] GM Phase 3: SKIPPED (fuel_rate mode — no IOCTL needed)")
+        log.info(f"[PPEI] GM Phase 3: SKIPPED ({dddi_mode} mode — no IOCTL needed)")
 
     # ── Phase 4: DDDI 0x2C to define periodic IDs ──
     log.info(f"[PPEI] GM Phase 4: Defining {len(dddi_payloads)} periodic ID mappings ({mode_label})")

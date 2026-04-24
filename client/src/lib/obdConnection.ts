@@ -1328,6 +1328,12 @@ export const PID_PRESETS: PIDPreset[] = [
       0x20B9,   // IBR Cyl 6
       0x20BA,   // IBR Cyl 7
       0x20BB,   // IBR Cyl 8
+      // ── Virtual DIDs (IOCTL-only, HPT Common DDDI mode) ──
+      0xDD00,   // Metering Unit Valve Current (A)
+      0xDD02,   // Lambda Smoke Limit
+      0xDD03,   // Injector Pulse Width DDDI (ms, float32)
+      0xDD04,   // Cylinder Airmass (g)
+      0xDD07,   // Desired Boost Pressure DDDI (PSI)
     ],
   },
 ];
@@ -1385,6 +1391,42 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     unit: 'mm³', min: 0, max: 255, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => a,  // 1 byte, no scaling, integer mm³/stroke (per HPT DDDI)
+  },
+  // ── Virtual DIDs for IOCTL-only channels (HPT Common DDDI mode) ──
+  // These channels have NO Mode 22 DID equivalent. They only exist in the
+  // DDDI periodic stream via IOCTL 0x2D RAM address access. The 0xDDxx
+  // DID range is synthetic — used only to key the periodic value map.
+  // When hpt_common mode is active, these values are injected from the
+  // periodic frame parser. When NOT streaming, they show no data.
+  {
+    pid: 0xDD00, name: 'Metering Unit Valve Current', shortName: 'METER_VALVE',
+    unit: 'A', min: 0, max: 5, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD02, name: 'Lambda Smoke Limit', shortName: 'LAMBDA_SMOKE',
+    unit: '', min: 0, max: 5, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD03, name: 'Injector Pulse Width (DDDI)', shortName: 'INJ_PW_DDDI',
+    unit: 'ms', min: 0, max: 10, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD04, name: 'Cylinder Airmass', shortName: 'CYL_AIRMASS',
+    unit: 'g', min: 0, max: 5, bytes: 4, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD07, name: 'Desired Boost Pressure (DDDI)', shortName: 'BOOST_DES_DDDI',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
   },
   {
     // HPT "Injection Timing Correction" — DID 0x208B

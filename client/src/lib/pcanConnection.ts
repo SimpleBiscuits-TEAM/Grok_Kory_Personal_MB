@@ -1254,7 +1254,10 @@ export class PCANConnection {
     // DDDI periodic PIDs (FRP_ACT, FRP_DES) come from 0x5E8 periodic frames,
     // NOT from batch_read_dids. They should NEVER be paused by the fail counter
     // because they're injected by wrapReadPids from the periodic cache.
-    const DDDI_EXEMPT_PIDS = new Set([0x328A, 0x131F, 0x245D]); // FRP_ACT, FRP_DES, FUEL_INJ_QTY
+    const DDDI_EXEMPT_PIDS = new Set([
+      0x328A, 0x131F, 0x245D, // FRP_ACT, FRP_DES, FUEL_INJ_QTY
+      0xDD00, 0xDD02, 0xDD03, 0xDD04, 0xDD07, // Virtual IOCTL-only DIDs (HPT Common DDDI)
+    ]);
     let activePids = [...filteredPids];
     let loopCount = 0;
 
