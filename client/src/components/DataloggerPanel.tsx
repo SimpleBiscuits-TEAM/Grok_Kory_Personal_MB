@@ -21,9 +21,11 @@ import {
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
   Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser,
-  Copy, Check
+  Copy, Check, Upload, Share2, Clock, FolderOpen
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
+import { downloadPresetAsJSON, importPresetFromFile, copyPresetToClipboard } from '@/lib/presetSharing';
+import { saveSession, loadSessionIndex, loadSession, deleteSession as deleteHistorySession, updateSessionName, getStorageUsage, type SessionMeta } from '@/lib/sessionHistory';
 import {
   PCAN_BRIDGE_PY_DOWNLOAD_FILENAME,
   PCAN_BRIDGE_PY_DOWNLOAD_HREF,
@@ -426,6 +428,7 @@ function CustomPresetDialog({
 function PIDSelector({
   selectedPids, onTogglePid, onApplyPreset, supportedPids, disabled,
   customPresets, onCreatePreset, onEditPreset, onDeletePreset,
+  onExportPreset, onImportPreset,
   manufacturer, fuelType
 }: {
   selectedPids: Set<number>;
@@ -437,6 +440,8 @@ function PIDSelector({
   onCreatePreset: () => void;
   onEditPreset: (preset: PIDPreset) => void;
   onDeletePreset: (presetId: string) => void;
+  onExportPreset: (preset: PIDPreset) => void;
+  onImportPreset: () => void;
   manufacturer: PIDManufacturer;
   fuelType: FuelType;
 }) {
@@ -598,19 +603,34 @@ function PIDSelector({
           <span style={{ fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.orange, letterSpacing: '0.1em' }}>
             MY PRESETS
           </span>
-          <button
-            onClick={onCreatePreset}
-            disabled={disabled}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '3px',
-              padding: '2px 6px', background: 'oklch(0.15 0.02 55 / 0.3)',
-              border: `1px solid ${sColor.orange}`, borderRadius: '3px',
-              color: sColor.orange, fontFamily: sFont.mono, fontSize: '0.6rem',
-              cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-            }}
-          >
-            <Plus style={{ width: 10, height: 10 }} /> NEW
-          </button>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button
+              onClick={onImportPreset}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px',
+                padding: '2px 6px', background: 'oklch(0.12 0.01 260)',
+                border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                color: sColor.textDim, fontFamily: sFont.mono, fontSize: '0.6rem',
+                cursor: 'pointer',
+              }}
+              title="Import preset from JSON file"
+            >
+              <Upload style={{ width: 10, height: 10 }} /> IMPORT
+            </button>
+            <button
+              onClick={onCreatePreset}
+              disabled={disabled}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px',
+                padding: '2px 6px', background: 'oklch(0.15 0.02 55 / 0.3)',
+                border: `1px solid ${sColor.orange}`, borderRadius: '3px',
+                color: sColor.orange, fontFamily: sFont.mono, fontSize: '0.6rem',
+                cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+              }}
+            >
+              <Plus style={{ width: 10, height: 10 }} /> NEW
+            </button>
+          </div>
         </div>
         {customPresets.length === 0 ? (
           <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, padding: '6px 0' }}>
@@ -642,6 +662,13 @@ function PIDSelector({
                   <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted, marginLeft: '6px' }}>
                     ({preset.pids.length})
                   </span>
+                </button>
+                <button
+                  onClick={() => onExportPreset(preset)}
+                  style={{ background: 'transparent', border: 'none', color: sColor.textDim, cursor: 'pointer', padding: '2px' }}
+                  title="Export preset as JSON"
+                >
+                  <Share2 style={{ width: 11, height: 11 }} />
                 </button>
                 <button
                   onClick={() => onEditPreset(preset)}
@@ -1436,7 +1463,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     };
 
     setCompletedSessions(prev => [session, ...prev]);
-    addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples`);
+    // Persist to session history (localStorage)
+    const savedMeta = saveSession(session);
+    if (savedMeta) {
+      setSessionHistory(loadSessionIndex());
+      addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples · Saved to history`);
+    } else {
+      addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples (history save skipped — too large)`);
+    }
 
     // AI Auto-Name the session
     try {
@@ -1473,6 +1507,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         session.name = result.name;
         // Update the session in state
         setCompletedSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: result.name } : s));
+        // Also update in persistent history
+        updateSessionName(session.id, result.name);
+        setSessionHistory(loadSessionIndex());
         addLog(`🤖 AI named session: "${result.name}"`);
       }
     } catch (err) {
@@ -1658,8 +1695,33 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     setEditingPreset(null);
   }, [editingPreset, customPresets, addLog]);
 
-  // ─── DID Scan handlers ──────────────────────────────────────────────
+   // ─── Preset Export/Import handlers ──────────────────────────────────
+  const presetImportRef = useRef<HTMLInputElement>(null);
+  const handleExportPreset = useCallback((preset: PIDPreset) => {
+    downloadPresetAsJSON(preset);
+    addLog(`Exported preset: ${preset.name}`);
+  }, [addLog]);
+  const handleImportPreset = useCallback(() => {
+    presetImportRef.current?.click();
+  }, []);
+  const handleImportPresetFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const imported = await importPresetFromFile(file);
+    if (imported) {
+      setCustomPresets(loadCustomPresets());
+      addLog(`Imported preset: ${imported.name} (${imported.pids.length} PIDs)`);
+    } else {
+      addLog('ERROR: Failed to import preset — invalid JSON format');
+    }
+    e.target.value = '';
+  }, [addLog]);
 
+  // ─── Session History ─────────────────────────────────────────────────
+  const [sessionHistory, setSessionHistory] = useState<SessionMeta[]>(() => loadSessionIndex());
+  const [showSessionHistory, setShowSessionHistory] = useState(false);
+
+  // ─── DID Scan handlers ──────────────────────────────────────────────
   const handleStartScan = useCallback(async () => {
     const conn = connectionRef.current;
     if (!conn || connectionState !== 'ready') return;
@@ -2703,6 +2765,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               onCreatePreset={handleCreatePreset}
               onEditPreset={handleEditPreset}
               onDeletePreset={handleDeletePreset}
+              onExportPreset={handleExportPreset}
+              onImportPreset={handleImportPreset}
               manufacturer={detectedManufacturer}
               fuelType={detectedFuelType}
             />
@@ -3161,9 +3225,117 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             onOpenInAnalyzer={handleOpenInAnalyzer}
             onDelete={handleDeleteSession}
           />
+          {/* Session History (persisted) */}
+          <div style={{ marginTop: '16px' }}>
+            <button
+              onClick={() => setShowSessionHistory(!showSessionHistory)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+                fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.textDim,
+                letterSpacing: '0.1em', background: 'transparent', border: 'none',
+                cursor: 'pointer', marginBottom: '6px', padding: 0,
+              }}
+            >
+              {showSessionHistory ? <ChevronDown style={{ width: 14, height: 14 }} /> : <ChevronRight style={{ width: 14, height: 14 }} />}
+              <Clock style={{ width: 14, height: 14 }} /> SESSION HISTORY
+              <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginLeft: 'auto' }}>
+                {sessionHistory.length} saved · {getStorageUsage().sizeKB} KB
+              </span>
+            </button>
+            {showSessionHistory && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {sessionHistory.length === 0 ? (
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, padding: '12px', textAlign: 'center' }}>
+                    No saved sessions yet. Record a session and it will appear here.
+                  </div>
+                ) : sessionHistory.map(meta => {
+                  const dateStr = new Date(meta.startTime).toLocaleString();
+                  return (
+                    <div key={meta.id} style={{
+                      background: sColor.bgCard, border: `1px solid ${sColor.border}`,
+                      borderRadius: '3px', padding: '10px 14px',
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.text }}>
+                          {meta.name || dateStr}
+                        </div>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, marginTop: '2px' }}>
+                          {meta.name ? dateStr + ' · ' : ''}{meta.durationSec.toFixed(1)}s · {meta.channelCount} ch · {meta.totalSamples} samples
+                        </div>
+                        {meta.vehicle && (
+                          <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.orange, marginTop: '2px' }}>
+                            {meta.vehicle}{meta.vin ? ` · ${meta.vin}` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          const session = loadSession(meta.id);
+                          if (session) {
+                            handleOpenInAnalyzer(session);
+                            addLog(`Loaded session from history: ${meta.name || 'unnamed'}`);
+                          } else {
+                            addLog('ERROR: Failed to load session from history');
+                          }
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '4px 10px', background: 'oklch(0.15 0.01 25 / 0.4)',
+                          border: `1px solid ${sColor.red}`, borderRadius: '3px',
+                          color: sColor.red, fontFamily: sFont.body, fontSize: '0.7rem',
+                          cursor: 'pointer', letterSpacing: '0.06em',
+                        }}
+                        title="Open in Analyzer"
+                      >
+                        <BarChart3 style={{ width: 12, height: 12 }} /> ANALYZE
+                      </button>
+                      <button
+                        onClick={() => {
+                          const session = loadSession(meta.id);
+                          if (session) handleExportCSV(session);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '4px 10px', background: 'oklch(0.15 0.008 260)',
+                          border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                          color: sColor.text, fontFamily: sFont.body, fontSize: '0.7rem',
+                          cursor: 'pointer',
+                        }}
+                        title="Export CSV"
+                      >
+                        <Download style={{ width: 12, height: 12 }} /> CSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          deleteHistorySession(meta.id);
+                          setSessionHistory(loadSessionIndex());
+                          addLog('Deleted session from history');
+                        }}
+                        style={{
+                          padding: '4px 6px', background: 'transparent', border: 'none',
+                          color: sColor.textMuted, cursor: 'pointer',
+                        }}
+                        title="Delete from history"
+                      >
+                        <Trash2 style={{ width: 14, height: 14 }} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
+      {/* Hidden file input for preset import */}
+      <input
+        ref={presetImportRef}
+        type="file"
+        accept=".json"
+        onChange={handleImportPresetFile}
+        style={{ display: 'none' }}
+      />
       {/* Console */}
       <div style={{ marginTop: '16px' }}>
         <button

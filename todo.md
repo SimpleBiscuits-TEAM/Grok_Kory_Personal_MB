@@ -2260,3 +2260,29 @@
 - [x] Imported data uses same zoom/pan/crosshair/channel assignment as live data
 - [x] Shows imported filename with dismiss button to return to live data
 - [x] Matches PID definitions from props when available for proper formatting
+
+## Session History — Store Past Datalog Sessions (April 24, 2026)
+- [x] Create localStorage-based session store with metadata (date, VIN, vehicle, duration, sample count, channels)
+- [x] Auto-save completed recording sessions to history on stop
+- [x] Add Session History panel/drawer accessible from datalogger UI
+- [x] Show list of past sessions with date, VIN, duration, channel count
+- [x] Click to load a session into OBDDatalogViewer for review
+- [x] Delete individual sessions from history
+- [x] Export session from history as CSV
+
+## PID Preset Sharing — Save/Load Custom PID Selections (April 24, 2026)
+- [x] Add "Save Preset" button to PID selector that saves current selection with a user-chosen name (already existed)
+- [x] Store custom presets in localStorage alongside built-in presets (already existed)
+- [x] Show custom presets in preset dropdown with visual distinction from built-in presets (already existed)
+- [x] Add delete button for custom presets (built-in presets cannot be deleted) (already existed)
+- [x] Add export/import preset as JSON for sharing between users
+- [x] Presets store PID hex IDs + preset name + vehicle type
+
+## Datalog Overlay/Comparison in OBDDatalogViewer (April 24, 2026)
+- [x] Add "Compare" button to OBDDatalogViewer that loads a second CSV for overlay
+- [x] Render comparison traces as dashed lines (semi-transparent, 45% opacity)
+- [x] Match channels by shortName between primary and comparison datasets
+- [x] Align by elapsed time (both start at 0) for before/after tune comparison
+- [x] Overlay visible when loaded, dismiss button to remove
+- [x] Visual distinction: primary = solid lines, overlay = dashed lines at 45% opacity
+- [x] Support loading comparison from CSV file import (COMPARE button in header)

@@ -25,7 +25,7 @@
  *   - Dark theme inspired by HPTuners VCM Scanner
  */
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { X, Search, Maximize2, Minimize2, Upload } from 'lucide-react';
+import { X, Search, Maximize2, Minimize2, Upload, Layers } from 'lucide-react';
 import type { PIDDefinition, PIDReading } from '@/lib/obdConnection';
 
 // ─── Theme: HPTuners VCM Scanner dark blue ──────────────────────────────────
@@ -137,6 +137,13 @@ function drawLabelWithBg(
 }
 
 // ─── Canvas Chart Section ───────────────────────────────────────────────────
+// ─── Overlay data for comparison ────────────────────────────────────────────
+interface OverlayData {
+  rows: DataRow[];
+  pidList: PIDDefinition[];
+  fileName: string;
+}
+
 interface ChartSectionProps {
   sectionIdx: number;
   pids: PIDDefinition[];
@@ -148,11 +155,14 @@ interface ChartSectionProps {
   onCursorMove: (idx: number | null) => void;
   height: number;
   onRemoveChannel: (sectionIdx: number, channelIdx: number) => void;
+  overlayRows?: DataRow[];
+  overlayPids?: PIDDefinition[];
 }
 
 function ChartSection({
   sectionIdx, pids, channelIndices, rows, startIdx, endIdx,
   cursorIdx, onCursorMove, height, onRemoveChannel,
+  overlayRows, overlayPids,
 }: ChartSectionProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -326,6 +336,75 @@ function ChartSection({
       ctx.stroke();
     });
 
+    // ─── Overlay traces (dashed, semi-transparent) ─────────────────────
+    if (overlayRows && overlayPids && overlayRows.length >= 2) {
+      // For each channel in this section, find matching overlay channel by shortName
+      channelIndices.forEach((ci, slot) => {
+        if (slot >= channelRanges.length) return;
+        const pid = pids[ci];
+        if (!pid) return;
+        // Find matching overlay channel
+        const overlayIdx = overlayPids!.findIndex(op => op.shortName === pid.shortName);
+        if (overlayIdx < 0) return;
+        const { min, max } = channelRanges[slot];
+        const range = max - min;
+        const color = getChannelColor(sectionIdx, slot);
+        // Map overlay time range to primary time range
+        // Overlay is time-aligned: normalize both to 0-based elapsed time
+        const primaryStartTs = rows[startIdx]?.timestamp || 0;
+        const primaryEndTs = rows[endIdx]?.timestamp || 0;
+        const primaryDuration = primaryEndTs - primaryStartTs;
+        if (primaryDuration <= 0) return;
+        const overlayStartTs = overlayRows![0]?.timestamp || 0;
+        // Collect overlay points that fall within the visible time window
+        const pts: { x: number; y: number }[] = [];
+        const alpha = visibleCount > 500 ? 0.15 : visibleCount > 200 ? 0.25 : 0.4;
+        let ema: number | null = null;
+        for (const row of overlayRows!) {
+          const elapsed = row.timestamp - overlayStartTs;
+          // Map overlay elapsed time to primary time axis fraction
+          const primaryElapsed = elapsed; // same time base (ms)
+          const frac = primaryElapsed / primaryDuration;
+          if (frac < -0.05 || frac > 1.05) continue; // skip out-of-range
+          const v = row.values[overlayIdx];
+          if (!Number.isFinite(v)) continue;
+          if (ema === null) ema = v;
+          else ema = alpha * v + (1 - alpha) * ema;
+          const x = marginLeft + frac * plotW;
+          const y = marginTop + plotH - ((ema - min) / range) * plotH;
+          pts.push({ x, y });
+        }
+        if (pts.length < 2) return;
+        // Draw dashed overlay trace
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.45;
+        ctx.setLineDash([6, 4]);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        if (pts.length === 2) {
+          ctx.lineTo(pts[1].x, pts[1].y);
+        } else {
+          const tension = 0.5;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const p0 = pts[Math.max(0, i - 1)];
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            const p3 = pts[Math.min(pts.length - 1, i + 2)];
+            const cp1x = p1.x + (p2.x - p0.x) * tension / 3;
+            const cp1y = p1.y + (p2.y - p0.y) * tension / 3;
+            const cp2x = p2.x - (p3.x - p1.x) * tension / 3;
+            const cp2y = p2.y - (p3.y - p1.y) * tension / 3;
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+          }
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+        ctx.setLineDash([]);
+      });
+    }
     // Y-axis labels (left for slot 0, right for slot 1, etc.)
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
@@ -385,7 +464,7 @@ function ChartSection({
         hx += tw + 16;
       });
     }
-  }, [canvasSize, channelIndices, pids, rows, startIdx, endIdx, cursorIdx, channelRanges, sectionIdx]);
+  }, [canvasSize, channelIndices, pids, rows, startIdx, endIdx, cursorIdx, channelRanges, sectionIdx, overlayRows, overlayPids]);
 
   // Mouse handling
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -463,6 +542,9 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
     fileName: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Overlay comparison data
+  const [overlayData, setOverlayData] = useState<OverlayData | null>(null);
+  const overlayInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportCSV = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -560,7 +642,77 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
     e.target.value = '';
   }, [pids]);
 
-  // Build unified row data from readingHistory
+  // Overlay CSV import handler (reuses same parsing logic)
+  const handleImportOverlayCSV = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = reader.result as string;
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const dataLines = lines.filter(l => !l.startsWith('#'));
+        if (dataLines.length < 2) return;
+        const headers = dataLines[0].split(',').map(h => h.trim());
+        const tsIdx = headers.findIndex(h => h.toLowerCase().startsWith('timestamp'));
+        const elapsedIdx = headers.findIndex(h => h.toLowerCase().startsWith('elapsed'));
+        const pidCols: { idx: number; pid: PIDDefinition }[] = [];
+        let nextFakePid = 0xE000;
+        for (let i = 0; i < headers.length; i++) {
+          if (i === tsIdx || i === elapsedIdx) continue;
+          const h = headers[i];
+          const match = h.match(/^(.+?)\s*\((.+?)\)$/);
+          const shortName = match ? match[1].trim() : h;
+          const unit = match ? match[2].trim() : '';
+          const matchedPid = pids.find(p => p.shortName === shortName);
+          const pidDef: PIDDefinition = matchedPid || {
+            pid: nextFakePid++,
+            name: shortName,
+            shortName,
+            unit,
+            min: 0,
+            max: 100,
+            bytes: 1,
+            category: 'other',
+            formula: ([a]: number[]) => a,
+          };
+          pidCols.push({ idx: i, pid: pidDef });
+        }
+        const overlayRows: DataRow[] = [];
+        for (let r = 1; r < dataLines.length; r++) {
+          const cells = dataLines[r].split(',');
+          const ts = tsIdx >= 0 ? parseFloat(cells[tsIdx]) : (r * 100);
+          const values: number[] = [];
+          for (const pc of pidCols) {
+            const raw = cells[pc.idx]?.trim();
+            const val = raw ? parseFloat(raw) : NaN;
+            values.push(Number.isFinite(val) ? val : 0);
+          }
+          overlayRows.push({ timestamp: ts, values });
+        }
+        // Update min/max from actual data
+        for (const pc of pidCols) {
+          const colIdx = pidCols.indexOf(pc);
+          const vals = overlayRows.map(r => r.values[colIdx]).filter(Number.isFinite);
+          if (vals.length > 0) {
+            pc.pid.min = Math.min(pc.pid.min, Math.min(...vals));
+            pc.pid.max = Math.max(pc.pid.max, Math.max(...vals));
+          }
+        }
+        setOverlayData({
+          rows: overlayRows,
+          pidList: pidCols.map(pc => pc.pid),
+          fileName: file.name,
+        });
+      } catch (err) {
+        console.error('Failed to import overlay CSV:', err);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, [pids]);
+
+  // Build unified row data from readingHistoryy
   const { rows, pidList } = useMemo(() => {
     // Use imported data if available
     if (importedData) return { rows: importedData.rows, pidList: importedData.pidList };
@@ -844,6 +996,7 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
           <span style={{ fontSize: '0.7rem', color: T.textDim }}>
             {pidList.length} ch | {rows.length} samples
             {importedData && ' | IMPORTED'}
+            {overlayData && ' | OVERLAY'}
           </span>
           {isLogging && (
             <span style={{ fontSize: '0.6rem', color: T.red, fontWeight: 'bold', animation: 'pulse 1s infinite' }}>
@@ -889,6 +1042,42 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
               }}
             >
               ✕ {importedData.fileName}
+            </button>
+          )}
+          {/* Overlay comparison button */}
+          <input
+            ref={overlayInputRef}
+            type="file"
+            accept=".csv"
+            onChange={handleImportOverlayCSV}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => overlayInputRef.current?.click()}
+            style={{
+              background: overlayData ? T.yellow + '22' : 'transparent',
+              color: overlayData ? T.yellow : T.textDim,
+              border: `1px solid ${overlayData ? T.yellow : T.border}`,
+              borderRadius: 2, padding: '2px 8px', fontSize: '0.65rem',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+            title="Load a second CSV to overlay for comparison (dashed lines)"
+          >
+            <Layers size={10} /> {overlayData ? 'OVERLAY' : 'COMPARE'}
+          </button>
+          {overlayData && (
+            <button
+              onClick={() => setOverlayData(null)}
+              style={{
+                background: T.yellow + '22',
+                color: T.yellow,
+                border: `1px solid ${T.yellow}`,
+                borderRadius: 2, padding: '2px 8px', fontSize: '0.65rem',
+                cursor: 'pointer',
+              }}
+            >
+              ✕ {overlayData.fileName}
             </button>
           )}
           <button
@@ -1071,6 +1260,8 @@ export default function OBDDatalogViewer({ pids, readingHistory, liveReadings, i
                 onCursorMove={setCursorIdx}
                 height={sectionHeight}
                 onRemoveChannel={removeChannel}
+                overlayRows={overlayData?.rows}
+                overlayPids={overlayData?.pidList}
               />
             </div>
           ))}
