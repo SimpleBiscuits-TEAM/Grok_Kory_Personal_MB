@@ -814,7 +814,8 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
       setDragAnalysis(drag);
       const reportNoVin = generateHealthReport(downsampled, undefined);
       setHealthReport(reportNoVin);
-      const detectedVin = extractVinFromFilename(name);
+      // Try to find VIN: first from filename, then from CSV metadata headers (# VIN: ...)
+      const detectedVin = extractVinFromFilename(name) || rawData.vehicleMeta?.vin || null;
       setVinFromFile(detectedVin);
       if (detectedVin) {
         decodeVinNhtsa(detectedVin).then(vehicleInfo => {

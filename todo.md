@@ -2220,3 +2220,11 @@
 - [x] Minimap at bottom showing zoom position
 - [x] Smart auto-assignment by category (engine, turbo, fuel, temps)
 - [x] Replaced LiveChart in both list and gauge views with OBDDatalogViewer
+
+## Bug: Desired Boost DDDI Drops to Zero (April 24, 2026)
+- [x] Root cause: 0xDD07 (Desired Boost DDDI) was missing from DDDI_PERIODIC_DIDS set in hpt_common mode
+- [x] Fix: Added 0xDD07 to the set — batch read no longer tries to send Mode 22 for this virtual DID, eliminating the zero-drop
+
+## Bug: Analyzer Not Seeing VIN from Auto-Export (April 24, 2026)
+- [x] Root cause: processCSVContent only checked extractVinFromFilename(name), never rawData.vehicleMeta.vin from CSV headers
+- [x] Fix: Now falls through to rawData.vehicleMeta?.vin when filename doesn't contain VIN — picks up # VIN: header from exported CSV

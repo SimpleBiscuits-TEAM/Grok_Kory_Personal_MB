@@ -621,7 +621,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     const DDDI_PERIODIC_DIDS = _ppeiDddiMode === 'hpt_common'
       ? new Set([
           // IOCTL float32 channels (no Mode 22 DID equivalent)
-          0xDD00, 0xDD01, 0xDD02, 0xDD03, 0xDD04, 0xDD05, 0xDD06, 0xDD08,
+          0xDD00, 0xDD01, 0xDD02, 0xDD03, 0xDD04, 0xDD05, 0xDD06, 0xDD07, 0xDD08,
           // Standard DIDs that HPT packs into DPIDs
           0x245D, 0x1543, 0x1540, 0x20E3, 0x20B4,
           // FRP comes from IOCTL float32 in hpt_common (higher precision than Mode 22)
