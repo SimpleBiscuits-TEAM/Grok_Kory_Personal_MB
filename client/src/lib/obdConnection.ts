@@ -510,9 +510,9 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x4A, name: 'Accelerator Pedal Position E', shortName: 'APP_E',
+    pid: 0x4A, name: 'Accel Pedal Sensor E (raw voltage)', shortName: 'APP_E_RAW',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
-    formula: ([a]) => (a * 100) / 255,
+    formula: ([a]) => (a * 100) / 255,  // Raw sensor %; WOT ≈ 42% on L5P. Use PID 0x5A (REL_APP) for 0-100% pedal travel
   },
   {
     pid: 0x4C, name: 'Commanded Throttle Actuator', shortName: 'TAC',

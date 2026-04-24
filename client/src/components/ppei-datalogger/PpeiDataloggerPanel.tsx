@@ -649,13 +649,25 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     }
 
     // ── Mode 01: batched via bridge (up to 6 PIDs per CAN frame) ──
-    if (mode01Pids.length > 0) {
+    // Filter out Mode 01 PIDs that are streamed via DDDI periodic frames
+    const batchMode01Pids = isStreaming
+      ? mode01Pids.filter((p: any) => !DDDI_PERIODIC_DIDS.has(p.pid))
+      : mode01Pids;
+    if (isStreaming && mode01Pids.length !== batchMode01Pids.length) {
+      const excluded = mode01Pids
+        .filter((p: any) => DDDI_PERIODIC_DIDS.has(p.pid))
+        .map((p: any) => p.shortName || `0x${p.pid.toString(16).toUpperCase()}`);
+      ppeiLog(this,
+        `HYBRID MODE: Mode 01 PIDs from DDDI: ${excluded.join(', ')}`
+      );
+    }
+    if (batchMode01Pids.length > 0) {
       // Build PID list with byte counts for the bridge
-      const mode01PidList = mode01Pids.map((p: any) => ({
+      const mode01PidList = batchMode01Pids.map((p: any) => ({
         pid: p.pid,
         bytes: p.bytes || 1,
       }));
-      const mode01Timeout = Math.max(500, Math.ceil(mode01Pids.length / 6) * 250);
+      const mode01Timeout = Math.max(500, Math.ceil(batchMode01Pids.length / 6) * 250);
       try {
         const response: any = await this.sendRequest(
           {
@@ -670,7 +682,7 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
           let okCount = 0;
           for (const result of response.results) {
             if (!result.ok) continue;
-            const pidDef = mode01Pids.find((p: any) => p.pid === result.pid);
+            const pidDef = batchMode01Pids.find((p: any) => p.pid === result.pid);
             if (!pidDef) continue;
             try {
               const payload: number[] = result.data || [];
@@ -690,13 +702,13 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
             } catch { /* formula error — skip */ }
           }
           ppeiLog(this,
-            `batch_read_mode01: ${okCount}/${mode01Pids.length} decoded ` +
-            `(${Math.ceil(mode01Pids.length / 6)} batches, bridge: ${response.elapsed_ms}ms)`
+            `batch_read_mode01: ${okCount}/${batchMode01Pids.length} decoded ` +
+            `(${Math.ceil(batchMode01Pids.length / 6)} batches, bridge: ${response.elapsed_ms}ms)`
           );
         } else {
           // Fallback to sequential if bridge doesn't support batch_read_mode01
           ppeiWarn(this, 'batch_read_mode01 unsupported, falling back to sequential');
-          for (const pid of mode01Pids) {
+          for (const pid of batchMode01Pids) {
             try {
               const reading = await originalReadPid.call(this, pid);
               if (reading) readings.push(reading);

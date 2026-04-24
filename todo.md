@@ -2151,3 +2151,8 @@
 - [x] Fix Actual Boost — Boost/Vacuum now uses VDID_BOOST_VACUUM (0xDD08) with correct gauge PSI display
 - [x] Fix MAP scaling — was using standard 0.145038 (kPa→PSI), now uses DDDI-specific 0.244574 (validated: 14.19 psi at idle)
 - [x] Document HPT decode methodology — docs/hpt-decode-methodology.md (full playbook for new vehicles)
+
+## DDDI Scaling Fixes Round 2 (April 24, 2026)
+- [x] MAP still showing 8.4 PSI — ROOT CAUSE: Mode 01 batch reads were overriding DDDI values. Fixed by filtering Mode 01 PIDs from batch when DDDI streaming is active
+- [x] Injection Timing BTDC — DDDI formula verified EXACT match to HPT (min=-1.8906, max=11.0859). Issue was same Mode 01 override bug, now fixed
+- [x] APP_E (PID 0x4A) limited to 42% — correct OBD-II behavior (raw sensor voltage). Renamed to 'Accel Pedal Sensor E (raw voltage)'. Users should use PID 0x5A (REL_APP) for 0-100% pedal travel
