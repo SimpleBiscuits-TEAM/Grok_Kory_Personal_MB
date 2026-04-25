@@ -2383,3 +2383,14 @@
 - [x] Sort PIDs by ecuHeader in readPids and DID scan to minimize address switches
 - [x] TCM PIDs display in existing TRANS category alongside PCM PIDs (no UI changes needed)
 - [ ] Test and verify TCM PID decoding against known HP Tuners values (on-truck verification)
+
+## Bug: TCM PIDs mislabeled as T93 — should be T87A (April 25, 2026)
+- [x] Strip TCM PID library from 100 down to 8 confirmed T87A DIDs (0x1141, 0x1941, 0x1942, 0x194F, 0x1991, 0x199A, 0x19D4, 0x281C)
+- [x] Rename all TCM PID names and shortNames from T93 to T87A
+- [x] Remove all unverified T93-sourced PIDs that T87A does not support
+- [x] Update test file (e90PidDefinitions.test.ts) for T87A — 25/25 tests passing
+- [x] Update old T93 reference comments in obdConnection.ts
+- [ ] Implement DDDI-by-memory-address (service 0x2D) for T87A RAM-based channels (deferred — verify Mode 22 DIDs on truck first)
+- [ ] Add 4 memory-defined DDDIs: FE00→RAM 0x40014682, FE01→RAM 0x40014DB4, FE02→RAM 0x400143C2, FE03→RAM 0x40014CC0 (deferred)
+- [ ] Wire DDDI memory streaming into V-OP USB bridge for TCM periodic reads (deferred)
+- [ ] Map memory DDDIs to HP Tuners channels: Trans Fluid Temp, Turbine RPM, Current Gear, TCC State, Shift Mode (deferred)

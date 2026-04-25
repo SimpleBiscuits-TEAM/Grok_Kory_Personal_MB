@@ -37,8 +37,8 @@ describe('E90 ECM Extended PIDs', () => {
     expect(pid!.unit).toBe('Hz');
   });
 
-  it('should have Fuel Rail Pressure Desired (0x131F) on 7E0', () => {
-    const pid = findE90Pid(0x131F);
+  it('should have Fuel Rail Pressure Desired (0x131F) on 7E0 (diesel)', () => {
+    const pid = findPid(0x131F, '7E0', 'diesel');
     expect(pid).toBeDefined();
     expect(pid!.shortName).toBe('FRPDI');
   });
@@ -63,8 +63,9 @@ describe('E90 ECM Extended PIDs', () => {
     expect(pid!.fuelType).toBe('gasoline');
   });
 
-  it('should have all 10 GM-specific ECM DIDs', () => {
-    const ecmDids = [0x119C, 0x12DA, 0x131F, 0x1470, 0x2012, 0x204D, 0x208A, 0x248B, 0x308A, 0x328A];
+  it('should have all 8 E90 gas-specific ECM DIDs', () => {
+    // 0x131F and 0x208A are diesel-only, not gasoline
+    const ecmDids = [0x119C, 0x12DA, 0x1470, 0x2012, 0x204D, 0x248B, 0x308A, 0x328A];
     for (const did of ecmDids) {
       const pid = findE90Pid(did);
       expect(pid).toBeDefined();
@@ -76,105 +77,110 @@ describe('E90 ECM Extended PIDs', () => {
   });
 });
 
-describe('T93 TCM Extended PIDs (on 7E2, NOT 7E1)', () => {
-  it('should have TFT on 7E2 (Global B address)', () => {
-    const pid = findPid(0x1940, '7E2');
+describe('T87A TCM Extended PIDs (on 7E2, NOT 7E1)', () => {
+  // T87A is the 10L80 TCM used on both gas and diesel GM trucks (2019+).
+  // T87A, T87, T93, A50, A40, AL5 are all different TCM variants with different protocols.
+  // These 8 DIDs were confirmed via IntelliSpy CAN capture + HP Tuners DDDI source analysis
+  // on a 2019 L5P Duramax.
+
+  it('should have Trans Input Speed (0x1941) on 7E2', () => {
+    const pid = findPid(0x1941, '7E2');
     expect(pid).toBeDefined();
-    expect(pid!.shortName).toBe('TFT_T93');
+    expect(pid!.shortName).toBe('TIS_T87A');
     expect(pid!.ecuHeader).toBe('7E2');
-    expect(pid!.fuelType).toBe('gasoline');
+    expect(pid!.fuelType).toBe('any');
+    expect(pid!.unit).toBe('rpm');
   });
 
-  it('should have Current Gear on 7E2', () => {
-    const pid = findPid(0x1124, '7E2');
+  it('should have Trans Output Speed (0x1942) on 7E2', () => {
+    const pid = findPid(0x1942, '7E2');
     expect(pid).toBeDefined();
-    expect(pid!.shortName).toBe('GEAR_T93');
+    expect(pid!.shortName).toBe('TOS_T87A');
     expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('rpm');
   });
 
-  it('should have TCC Slip on 7E2', () => {
-    const pid = findPid(0x194C, '7E2');
+  it('should have TCC Commanded Pressure (0x194F) on 7E2', () => {
+    const pid = findPid(0x194F, '7E2');
     expect(pid).toBeDefined();
-    expect(pid!.shortName).toBe('TCCSLIP_T93');
+    expect(pid!.shortName).toBe('TCCP_T87A');
     expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('PSI');
   });
 
-  it('should have Turbine Speed on 7E2', () => {
-    const pid = findPid(0x197E, '7E2');
+  it('should have Battery Voltage TCM (0x1991) on 7E2', () => {
+    const pid = findPid(0x1991, '7E2');
     expect(pid).toBeDefined();
-    expect(pid!.shortName).toBe('TURBINE_T93');
+    expect(pid!.shortName).toBe('VOLTS_T87A');
+    expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('V');
+  });
+
+  it('should have PRNDL Position (0x1141) on 7E2', () => {
+    const pid = findPid(0x1141, '7E2');
+    expect(pid).toBeDefined();
+    expect(pid!.shortName).toBe('PRNDL_T87A');
     expect(pid!.ecuHeader).toBe('7E2');
   });
 
-  it('should have shift timing DIDs (1232-1237) on 7E2', () => {
-    for (let did = 0x1232; did <= 0x1237; did++) {
-      const pid = findPid(did, '7E2');
-      expect(pid).toBeDefined();
-      expect(pid!.ecuHeader).toBe('7E2');
-      expect(pid!.unit).toBe('s');
-    }
+  it('should have Engine Torque Commanded TCM (0x199A) on 7E2', () => {
+    const pid = findPid(0x199A, '7E2');
+    expect(pid).toBeDefined();
+    expect(pid!.shortName).toBe('TRQENG_T87A');
+    expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('lb·ft');
   });
 
-  it('should have PCS solenoid pressure control DIDs on 7E2', () => {
-    const pcsDids = [0x2809, 0x280A, 0x280C, 0x280F, 0x2810, 0x2811];
-    for (const did of pcsDids) {
-      const pid = findPid(did, '7E2');
-      expect(pid).toBeDefined();
-      expect(pid!.ecuHeader).toBe('7E2');
-      // Accept kPa or PSI (may have been converted to imperial)
-      expect(pid!.unit).toBeTruthy();
-    }
+  it('should have TCC Reference Slip (0x19D4) on 7E2', () => {
+    const pid = findPid(0x19D4, '7E2');
+    expect(pid).toBeDefined();
+    expect(pid!.shortName).toBe('TCCRS_T87A');
+    expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('rpm');
   });
 
-  it('all T93 PIDs should be on 7E2 (not 7E1)', () => {
-    const t93Pids = GM_EXTENDED_PIDS.filter(
-      (p) => p.shortName?.includes('T93') || p.shortName?.includes('_T93')
+  it('should have TCC Line Pressure (0x281C) on 7E2', () => {
+    const pid = findPid(0x281C, '7E2');
+    expect(pid).toBeDefined();
+    expect(pid!.shortName).toBe('TCCLP_T87A');
+    expect(pid!.ecuHeader).toBe('7E2');
+    expect(pid!.unit).toBe('PSI');
+  });
+
+  it('should have exactly 8 confirmed T87A TCM PIDs on 7E2 (GM manufacturer)', () => {
+    const t87aPids = GM_EXTENDED_PIDS.filter(
+      (p) => p.ecuHeader === '7E2' && p.manufacturer === 'gm'
     );
-    expect(t93Pids.length).toBeGreaterThan(0);
-    for (const pid of t93Pids) {
+    expect(t87aPids.length).toBe(8);
+    for (const pid of t87aPids) {
+      expect(pid.fuelType).toBe('any');
+      expect(pid.service).toBe(0x22);
+    }
+  });
+
+  it('all T87A PIDs should be on 7E2 (not 7E1)', () => {
+    const t87aPids = GM_EXTENDED_PIDS.filter(
+      (p) => p.shortName?.includes('T87A')
+    );
+    expect(t87aPids.length).toBe(8);
+    for (const pid of t87aPids) {
       expect(pid.ecuHeader).toBe('7E2');
     }
+  });
+
+  it('should NOT have any old T93-labeled PIDs', () => {
+    const t93Pids = GM_EXTENDED_PIDS.filter(
+      (p) => p.shortName?.includes('_T93') && p.ecuHeader === '7E2' && p.manufacturer === 'gm'
+    );
+    expect(t93Pids.length).toBe(0);
   });
 });
 
 describe('E90 Preset Profiles', () => {
-  it('should have a Core preset', () => {
-    const core = PID_PRESETS.find((p) => p.name.includes('E90') && p.name.includes('Core'));
-    expect(core).toBeDefined();
-    expect(core!.pids.length).toBeGreaterThan(20);
-  });
-
-  it('should have a Full EFI Live preset', () => {
-    const full = PID_PRESETS.find((p) => p.name.includes('E90') && p.name.includes('Full EFI'));
-    expect(full).toBeDefined();
-    expect(full!.pids.length).toBeGreaterThanOrEqual(88);
-  });
-
-  it('Core preset should include GM-specific ECM DIDs', () => {
-    const core = PID_PRESETS.find((p) => p.name.includes('E90') && p.name.includes('Core'));
-    expect(core).toBeDefined();
-    expect(core!.pids).toContain(0x119C); // ENGOILP
-    expect(core!.pids).toContain(0x131F); // FRPDI
-    expect(core!.pids).toContain(0x2012); // TCDBPR
-  });
-
-  it('Core preset should include T93 TCM DIDs (on 7E2)', () => {
-    const core = PID_PRESETS.find((p) => p.name.includes('E90') && p.name.includes('Core'));
-    expect(core).toBeDefined();
-    expect(core!.pids).toContain(0x1940); // TFT_T93
-    expect(core!.pids).toContain(0x1124); // GEAR_T93
-    expect(core!.pids).toContain(0x194C); // TCCSLIP_T93
-  });
-
-  it('Full EFI Live preset should include all 30 ECM + 58 TCM DIDs', () => {
-    const full = PID_PRESETS.find((p) => p.name.includes('E90') && p.name.includes('Full EFI'));
-    expect(full).toBeDefined();
-    // ECM DIDs
-    expect(full!.pids).toContain(0x119C);
-    expect(full!.pids).toContain(0x328A);
-    // TCM DIDs
-    expect(full!.pids).toContain(0x1940);
-    expect(full!.pids).toContain(0x1239);
+  it('should have an Engine Basics preset', () => {
+    const basics = PID_PRESETS.find((p) => p.name.includes('Engine Basics'));
+    expect(basics).toBeDefined();
+    expect(basics!.pids.length).toBeGreaterThan(0);
   });
 });
 
@@ -186,28 +192,47 @@ describe('PID Formula Sanity Checks', () => {
     expect(value).toBeCloseTo(49.3, 0);
   });
 
-  it('TCC Slip formula should handle negative values', () => {
-    const pid = findPid(0x194C, '7E2');
+  it('T87A TCC Reference Slip formula should handle signed values', () => {
+    const pid = findPid(0x19D4, '7E2');
     expect(pid).toBeDefined();
-    // 0 slip = 32768 → [0x80, 0x00]
+    // 0 slip = 32768 → [0x80, 0x00], × 0.125 = 0
     expect(pid!.formula([0x80, 0x00])).toBe(0);
-    // Positive slip
-    expect(pid!.formula([0x80, 0x64])).toBe(100);
-    // Negative slip
-    expect(pid!.formula([0x7F, 0x9C])).toBe(-100);
+    // Positive slip: 32768 + 800 = 33568 → [0x83, 0x20], × 0.125 = 100
+    expect(pid!.formula([0x83, 0x20])).toBe(100);
+    // Negative slip: 32768 - 800 = 31968 → [0x7C, 0xE0], × 0.125 = -100
+    expect(pid!.formula([0x7C, 0xE0])).toBe(-100);
   });
 
-  it('Current Gear formula should return integer gear number', () => {
-    const pid = findPid(0x1124, '7E2');
+  it('T87A Trans Input Speed formula should produce RPM with 0.25 resolution', () => {
+    const pid = findPid(0x1941, '7E2');
     expect(pid).toBeDefined();
-    expect(pid!.formula([0x05])).toBe(5);
-    expect(pid!.formula([0x0A])).toBe(10);
+    // ~601 RPM at idle: raw = 601/0.25 = 2404 → [0x09, 0x64]
+    expect(pid!.formula([0x09, 0x64])).toBeCloseTo(601, 0);
+    // 0 RPM
+    expect(pid!.formula([0x00, 0x00])).toBe(0);
   });
 
-  it('Shift time formula should produce seconds', () => {
-    const pid = findPid(0x1232, '7E2');
+  it('T87A Battery Voltage TCM formula should produce reasonable voltage', () => {
+    const pid = findPid(0x1991, '7E2');
     expect(pid).toBeDefined();
-    // 500ms = [0x01, 0xF4]
-    expect(pid!.formula([0x01, 0xF4])).toBeCloseTo(0.5, 2);
+    // 14.3V = raw 14300 → [0x37, 0xDC]
+    expect(pid!.formula([0x37, 0xDC])).toBeCloseTo(14.3, 1);
+  });
+
+  it('T87A PRNDL Position formula should return raw byte', () => {
+    const pid = findPid(0x1141, '7E2');
+    expect(pid).toBeDefined();
+    expect(pid!.formula([0x00])).toBe(0); // Park
+    expect(pid!.formula([0x01])).toBe(1); // Reverse
+    expect(pid!.formula([0x06])).toBe(6); // D6
+  });
+
+  it('T87A TCC Commanded Pressure formula should convert kPa to PSI', () => {
+    const pid = findPid(0x194F, '7E2');
+    expect(pid).toBeDefined();
+    // 0 PSI at idle
+    expect(pid!.formula([0x00, 0x00])).toBe(0);
+    // ~4.28 PSI: raw = 4.28 / (0.1 * 0.145038) ≈ 295 → [0x01, 0x27]
+    expect(pid!.formula([0x01, 0x27])).toBeCloseTo(4.28, 0);
   });
 });

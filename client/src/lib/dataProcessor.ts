@@ -553,6 +553,15 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'TRANS_IN': 'turbineRpm',
   'TRANS_OUT': 'outputShaftRpm',
   'TCC_CMD': 'converterDutyCycle',
+  // T87A TCM PIDs (confirmed Mode 22 on 0x7E2)
+  'TIS_T87A': 'turbineRpm',           // 0x1941 Trans Input Speed → turbine RPM
+  'TOS_T87A': 'outputShaftRpm',       // 0x1942 Trans Output Speed
+  'TCCP_T87A': 'converterPressure',   // 0x194F TCC Commanded Pressure
+  'TCCRS_T87A': 'converterSlip',      // 0x19D4 TCC Reference Slip
+  'TCCLP_T87A': '_tcc_line_pressure',  // 0x281C TCC Line Pressure
+  'PRNDL_T87A': 'currentGear',        // 0x1141 PRNDL Position (mapped to gear for analyzer)
+  'TRQENG_T87A': '_tq_eng_tcm',       // 0x199A Engine Torque Commanded (TCM)
+  'VOLTS_T87A': '_voltage_tcm',        // 0x1991 Battery Voltage (TCM)
   'OIL_LIFE': '_oil_life',
   'FUEL_FILT': '_fuel_filt',
   'VIN_CNT': '_vin_cnt',
