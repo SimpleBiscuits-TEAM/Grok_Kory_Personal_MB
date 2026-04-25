@@ -892,7 +892,8 @@ export class PCANConnection {
    * UDS ReadDataByIdentifier (0x22) returns live parameters. Cached ~8s per request address.
    */
   private async ensureGmLiveDataSessionForTx(ecmTx: number): Promise<void> {
-    if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1) return;
+    // 0x7E0 = ECM/PCM, 0x7E1 = Allison/6L80 TCM (older), 0x7E2 = T87A/T93 10-speed TCM (2019+)
+    if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1 && ecmTx !== 0x7e2) return;
     const mfr = this.vehicleInfo.manufacturer;
     if (mfr && NON_GM_FOR_GMLAN_SESSION.has(mfr)) return;
     const now = Date.now();

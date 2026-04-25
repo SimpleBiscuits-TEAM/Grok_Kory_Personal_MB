@@ -2369,3 +2369,17 @@
 ## Feature: Back button from Analyzer to Datalogger (April 25, 2026)
 - [x] Add a "Back to Datalogger" button when Analyzer is opened via ANALYZE LIVE from the datalogger
 - [x] Button should switch back to the Datalogger tab preserving state
+
+## TCM (T87A Transmission) PID Support (April 25, 2026)
+- [x] Analyze IntelliSpy CAN capture to identify TCM (0x7E2) request/response DIDs
+- [x] Cross-reference HP Tuners datalog engineering values with raw CAN bytes to derive formulas
+- [x] Add TCM PID definitions to obdConnection.ts PID library (100 TCM PIDs at 0x7E2)
+- [x] Add 36 new TCM PIDs from HP Tuners DDDI decode (TCC Line Pressure, TCC State, Shift Mode, torque values, etc.)
+- [x] Fix fuelType from 'gasoline' to 'any' on all TCM PIDs (10L80 used on both gas and diesel GM trucks)
+- [x] Enable dual ECU polling (PCM 0x7E0 + TCM 0x7E2) in PCAN bridge — add 0x7E2 to ensureGmLiveDataSessionForTx
+- [x] Enable dual ECU polling in V-OP USB bridge — add ecuHeader-based TX/RX address switching in readPid
+- [x] Add TCM extended diagnostic session setup (TesterPresent + 0x10 0x03) before logging TCM PIDs
+- [x] Add TCM TesterPresent keepalive alongside ECM keepalive during logging
+- [x] Sort PIDs by ecuHeader in readPids and DID scan to minimize address switches
+- [x] TCM PIDs display in existing TRANS category alongside PCM PIDs (no UI changes needed)
+- [ ] Test and verify TCM PID decoding against known HP Tuners values (on-truck verification)

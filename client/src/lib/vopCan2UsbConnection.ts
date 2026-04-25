@@ -907,13 +907,37 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
         await this.ensureDddiClear();
       }
 
+      // Route Mode 22 requests to the correct ECU based on ecuHeader.
+      // Default is 0x7E0 (ECM/PCM). TCM PIDs use 0x7E2 on 2019+ GM trucks.
+      let savedTx: number | null = null;
+      let savedRx: number | null = null;
+      if (service === 0x22 && pid.ecuHeader) {
+        const targetTx = parseInt(pid.ecuHeader.replace(/^0x/i, ''), 16);
+        if (Number.isFinite(targetTx) && targetTx !== this.obdTxId) {
+          savedTx = this.obdTxId;
+          savedRx = this.obdRxId;
+          this.obdTxId = targetTx;
+          this.obdRxId = targetTx + 0x08; // Standard GM response offset
+          this.drainObdRxFrames(); // Clear stale frames from previous ECU
+        }
+      }
+
       const pdu =
         service === 0x22
           ? [0x22, (pid.pid >> 8) & 0xff, pid.pid & 0xff]
           : [service, pid.pid];
 
       const respTimeout = service === 0x22 ? CAN_LIVE_UDS_DID_TIMEOUT_MS : CAN_LIVE_OBD_MODE01_TIMEOUT_MS;
-      const resp = await this.isoTpRequest(pdu, respTimeout);
+      let resp: number[] | null;
+      try {
+        resp = await this.isoTpRequest(pdu, respTimeout);
+      } finally {
+        // Restore original TX/RX IDs after the request
+        if (savedTx !== null && savedRx !== null) {
+          this.obdTxId = savedTx;
+          this.obdRxId = savedRx;
+        }
+      }
       if (!resp || resp.length < 2) return null;
 
       const posResp = service + 0x40;
@@ -963,8 +987,17 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   }
 
   async readPids(pids: PIDDefinition[]): Promise<PIDReading[]> {
+    // Sort by ecuHeader to minimize TX/RX address switches between ECM (7E0) and TCM (7E2).
+    // ECM PIDs first, then TCM PIDs, then broadcast (Mode 01).
+    const sorted = [...pids].sort((a, b) => {
+      const hA = a.ecuHeader ?? '7DF';
+      const hB = b.ecuHeader ?? '7DF';
+      if (hA < hB) return -1;
+      if (hA > hB) return 1;
+      return 0;
+    });
     const readings: PIDReading[] = [];
-    for (const p of pids) {
+    for (const p of sorted) {
       const r = await this.readPid(p);
       if (r) readings.push(r);
     }
@@ -1057,13 +1090,54 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.loggingActive = true;
     this.setState('logging');
 
+    // Detect if any selected PIDs target the TCM (0x7E2) so we can open an extended session
+    // and send TesterPresent keepalives to both ECM and TCM.
+    const hasTcmPids = filteredPids.some(p => p.ecuHeader === '7E2');
+    if (hasTcmPids) {
+      this.emit('log', null, '[TCM] TCM PIDs selected — opening extended diagnostic session on 0x7E2...');
+      const origTx = this.obdTxId;
+      const origRx = this.obdRxId;
+      this.obdTxId = 0x7E2;
+      this.obdRxId = 0x7EA;
+      this.drainObdRxFrames();
+      try {
+        // TesterPresent first
+        await this.isoTpRequest([0x3E, 0x00], 2500);
+        // Extended Diagnostic Session (0x10 0x03)
+        const sessResp = await this.isoTpRequest([0x10, 0x03], 4000);
+        if (sessResp && sessResp[0] === 0x50) {
+          this.emit('log', null, '[TCM] Extended diagnostic session opened on 0x7E2');
+        } else {
+          this.emit('log', null, '[TCM] Extended session request to 0x7E2 did not get positive response — falling back to default session');
+          await this.isoTpRequest([0x10, 0x01], 3000);
+        }
+      } catch {
+        this.emit('log', null, '[TCM] Failed to open extended session on 0x7E2 — TCM PIDs may return NRC');
+      }
+      // Restore ECM address
+      this.obdTxId = origTx;
+      this.obdRxId = origRx;
+    }
+
     // Start TesterPresent keepalive (HPT sends 0x3E 0x00 every ~4s)
+    // When TCM PIDs are active, also send TesterPresent to 0x7E2.
     this.stopTesterPresent();
     this.testerPresentTimer = setInterval(async () => {
       if (!this.loggingActive) return;
       try {
         await this.isoTpRequest([0x3E, 0x00], 500);
       } catch { /* ignore — non-critical keepalive */ }
+      if (hasTcmPids) {
+        const origTx = this.obdTxId;
+        const origRx = this.obdRxId;
+        this.obdTxId = 0x7E2;
+        this.obdRxId = 0x7EA;
+        try {
+          await this.isoTpRequest([0x3E, 0x00], 500);
+        } catch { /* ignore — non-critical keepalive */ }
+        this.obdTxId = origTx;
+        this.obdRxId = origRx;
+      }
     }, TESTER_PRESENT_INTERVAL_MS);
 
     // Start DDDI periodic streaming for fuel pressure if any DDDI PIDs are selected
@@ -1642,12 +1716,13 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       all.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
     }
     if (incE) {
-      all.push(
-        ...getPidsForVehicle(
-          this.vehicleInfo.manufacturer || 'universal',
-          this.vehicleInfo.fuelType || 'any'
-        ).filter(p => (p.service || 0x01) === 0x22)
-      );
+      // Sort extended PIDs by ecuHeader to minimize TX/RX address switches during scan
+      const extPids = getPidsForVehicle(
+        this.vehicleInfo.manufacturer || 'universal',
+        this.vehicleInfo.fuelType || 'any'
+      ).filter(p => (p.service || 0x01) === 0x22)
+       .sort((a, b) => (a.ecuHeader ?? '7DF').localeCompare(b.ecuHeader ?? '7DF'));
+      all.push(...extPids);
     }
     let cur = 0;
     const tot = all.length;
