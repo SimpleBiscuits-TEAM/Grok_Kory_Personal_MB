@@ -7,10 +7,11 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { useFullscreen } from '@/hooks/useFullscreen';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket, Maximize2, Minimize2 } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
@@ -64,6 +65,8 @@ export default function Home() {
   const [showProTeaser, setShowProTeaser] = useState(false);
   const [liteTab, setLiteTab] = useState<'analyze' | 'basic-editor' | 'datalogger'>('analyze');
   const [editorSubTab, setEditorSubTab] = useState<'vehicle-coding' | 'tire-correction'>('vehicle-coding');
+  // Fullscreen mode for Analyzer results
+  const { isFullscreen: analyzerFs, containerRef: analyzerFsRef, toggleFullscreen: toggleAnalyzerFs } = useFullscreen();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -744,7 +747,7 @@ export default function Home() {
           </div>
         ) : liteTab === 'analyze' && data ? (
           /* ── Dashboard Section ── */
-          <div className="space-y-6 ppei-anim-fade-in">
+          <div ref={analyzerFsRef} className="space-y-6 ppei-anim-fade-in" style={analyzerFs ? { background: 'oklch(0.10 0.005 260)', padding: '16px', overflow: 'auto', height: '100vh' } : undefined}>
 
             {/* File info bar */}
             <div style={{
@@ -830,6 +833,29 @@ export default function Home() {
                   onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = 'oklch(0.28 0.008 260)'; (e.target as HTMLElement).style.color = 'oklch(0.65 0.010 260)'; }}
                 >
                   NEW FILE
+                </button>
+                {/* Fullscreen Toggle */}
+                <button
+                  onClick={toggleAnalyzerFs}
+                  title={analyzerFs ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
+                  style={{
+                    background: analyzerFs ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
+                    color: analyzerFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.65 0.010 260)',
+                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.08em',
+                    padding: '8px 16px',
+                    borderRadius: '3px',
+                    border: analyzerFs ? '1px solid oklch(0.70 0.14 200)' : '1px solid oklch(0.28 0.008 260)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s'
+                  }}
+                >
+                  {analyzerFs ? <Minimize2 style={{ width: 14, height: 14 }} /> : <Maximize2 style={{ width: 14, height: 14 }} />}
+                  {analyzerFs ? 'EXIT' : 'FULLSCREEN'}
                 </button>
                 {/* Share to Facebook */}
                 {data && (

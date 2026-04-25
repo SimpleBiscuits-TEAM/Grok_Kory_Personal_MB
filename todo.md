@@ -2337,3 +2337,8 @@
 ## Bug Fix: Gradual Slowdown During Long Sessions (April 25, 2026)
 - [x] Fix reading history — stop creating array copies per sample, mutate in place
 - [x] Trim oldest readings in bulk (slice at 1200 → keep last 1000) instead of shift() every sample
+
+## Fullscreen Fixes (April 25, 2026)
+- [x] Fix fullscreen breaking when switching tabs — useFullscreen hook auto-exits on unmount
+- [x] Add fullscreen toggle button to Analyzer dashboard (next to EXPORT PDF and NEW FILE buttons)
+- [x] Ensure fullscreen exits cleanly when switching tabs — cleanup effect in useFullscreen hook

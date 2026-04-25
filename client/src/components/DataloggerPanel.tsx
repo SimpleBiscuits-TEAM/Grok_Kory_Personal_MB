@@ -13,6 +13,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useFullscreen } from '@/hooks/useFullscreen';
 import { trpc } from '@/lib/trpc';
 import {
   Wifi, WifiOff, Play, Square, Download, BarChart3,
@@ -1163,22 +1164,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
   const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
-  // Fullscreen mode
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const panelContainerRef = useRef<HTMLDivElement>(null);
-  const toggleFullscreen = useCallback(() => {
-    if (!panelContainerRef.current) return;
-    if (!document.fullscreenElement) {
-      panelContainerRef.current.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  }, []);
-  useEffect(() => {
-    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+  // Fullscreen mode (reusable hook — auto-exits on unmount to prevent broken state on tab switch)
+  const { isFullscreen, containerRef: panelContainerRef, toggleFullscreen } = useFullscreen();
   // Drag-to-rearrange PID gauge blocks
   const [pidGaugeOrder, setPidGaugeOrder] = useState<number[]>([]); // PID numbers in user-chosen order
   const dragPidRef = useRef<number | null>(null);
