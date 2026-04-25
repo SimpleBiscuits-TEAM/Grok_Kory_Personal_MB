@@ -43,8 +43,8 @@ import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultCh
 import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
-import DtcSearch from '@/components/DtcSearch';
-import EcuReferencePanel from '@/components/EcuReferencePanel';
+const DtcSearch = React.lazy(() => import('@/components/DtcSearch'));
+const EcuReferencePanel = React.lazy(() => import('@/components/EcuReferencePanel'));
 import { ReasoningPanel } from '@/components/ReasoningPanel';
 import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
@@ -1142,7 +1142,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
         </div>
       )}
 
-      <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><DtcSearch /></div>
+      <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>Loading DTC database...</div>}><DtcSearch /></React.Suspense></div>
 
       {/* Compare section — shown when compare mode is active, data already loaded above */}
       {analyzerMode === 'compare' && (

@@ -12,7 +12,7 @@
  * - Direct handoff to Analyzer tab
  */
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { trpc } from '@/lib/trpc';
 import {
@@ -84,7 +84,7 @@ const CATEGORY_CONFIG: Record<PIDCategory, { label: string; color: string; icon:
 };
 const CATEGORY_ORDER: PIDCategory[] = ['engine', 'turbo', 'fuel', 'exhaust', 'transmission', 'emissions', 'electrical', 'def', 'oxygen', 'catalyst', 'evap', 'ignition', 'cooling', 'intake', 'other'];
 
-function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefinition }) {
+const LiveGauge = React.memo(function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefinition }) {
   const value = reading?.value ?? 0;
   const range = pid.max - pid.min;
   const pct = Math.max(0, Math.min(100, ((value - pid.min) / range) * 100));
@@ -186,7 +186,12 @@ function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefin
       </div>
     </div>
   );
-}
+}, (prev, next) => {
+  // Only re-render if the value or unit actually changed
+  return prev.reading?.value === next.reading?.value
+    && prev.reading?.unit === next.reading?.unit
+    && prev.pid.pid === next.pid.pid;
+});
 
 // ─── Mini Chart (last N readings) ──────────────────────────────────────────
 
@@ -1456,34 +1461,27 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           consecutiveFailsRef.current = 0;
         }
 
-        // Merge new readings into existing map instead of replacing entirely.
-        // PIDs that didn't respond this cycle keep their last known value
-        // (prevents flickering/disappearing gauges during batch timeouts).
+        // React 18 auto-batches setState calls inside event handlers and effects,
+        // but this callback fires from an async CAN bus read (outside React lifecycle).
+        // We combine related updates to minimize re-render passes.
+        // Merge live + history + sample count in one setState to reduce re-renders.
         setLiveReadings(prev => {
           const merged = new Map(prev);
           for (const r of readings) merged.set(r.pid, r);
           return merged;
         });
-
         setReadingHistory(prev => {
           const next = new Map(prev);
           for (const r of readings) {
             let arr = next.get(r.pid);
             if (!arr) { arr = []; next.set(r.pid, arr); }
             arr.push(r);
-            // Trim in bulk: when we hit 1200, chop back to 1000 (avoids per-sample shift)
-            if (arr.length > 1200) {
-              next.set(r.pid, arr.slice(-1000));
-            }
+            if (arr.length > 1200) next.set(r.pid, arr.slice(-1000));
           }
           return next;
         });
-
         setSampleCount(prev => prev + 1);
-
         // If recording, also capture into recorded readings
-        // Use ref (not state) to avoid stale closure — the onData callback
-        // is created when monitoring starts, but recording starts later.
         if (isRecordingRef.current) {
           setRecordedReadings(prev => {
             const next = new Map(prev);
@@ -2002,6 +2000,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+      if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
       if (connectionRef.current) {
         connectionRef.current.disconnect();
       }

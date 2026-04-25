@@ -6,7 +6,7 @@
  * Layout: Full-width dark panels, red left-border accents, sharp corners
  */
 
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, Suspense } from 'react';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
@@ -22,8 +22,8 @@ import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
 import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
-import EcuReferencePanel from '@/components/EcuReferencePanel';
-import DtcSearch from '@/components/DtcSearch';
+const EcuReferencePanel = React.lazy(() => import('@/components/EcuReferencePanel'));
+const DtcSearch = React.lazy(() => import('@/components/DtcSearch'));
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { FeedbackPanel, FeedbackTrigger } from '@/components/FeedbackPanel';
 import { ReasoningPanel } from '@/components/ReasoningPanel';
@@ -1127,7 +1127,9 @@ export default function Home() {
             {/* DTC Code Search */}
             <div>
               <SectionHeader icon={<Search style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DIAGNOSTIC CODE LOOKUP" />
-              <DtcSearch />
+              <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'oklch(0.50 0.008 260)', fontFamily: 'Rajdhani, sans-serif' }}>Loading DTC database...</div>}>
+                <DtcSearch />
+              </Suspense>
             </div>
 
           </div>

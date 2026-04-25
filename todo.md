@@ -2342,3 +2342,13 @@
 - [x] Fix fullscreen breaking when switching tabs — useFullscreen hook auto-exits on unmount
 - [x] Add fullscreen toggle button to Analyzer dashboard (next to EXPORT PDF and NEW FILE buttons)
 - [x] Ensure fullscreen exits cleanly when switching tabs — cleanup effect in useFullscreen hook
+
+## Code Audit & Cleanup (April 25, 2026)
+- [x] Fix memory leak: recordIntervalRef + repollTimerRef cleared on unmount in DataloggerPanel cleanup effect
+- [x] Batch state updates in onData callback — combined liveReadings + readingHistory into single update path
+- [x] LiveChart dirty flag added — only redraws when traces/viewport/mouse changes
+- [ ] RadialGauge arc path memoization (deferred — low impact, SVG math is fast)
+- [ ] Extract static inline styles to constants (deferred — low impact with React.memo on LiveGauge)
+- [ ] Add debug flag for console.log in connection libraries (deferred — useful for truck debugging)
+- [x] Lazy-load DtcSearch and EcuReferencePanel in Home.tsx and Advanced.tsx — reduces initial bundle by ~10K lines
+- [x] LiveGauge memoized with React.memo — only re-renders when value/unit/pid actually changes

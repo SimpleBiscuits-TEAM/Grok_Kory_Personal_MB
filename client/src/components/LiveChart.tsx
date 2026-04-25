@@ -469,6 +469,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
   const animFrameRef = useRef<number>(0);
   const mouseXRef = useRef<number | null>(null);
   const mouseYRef = useRef<number | null>(null);
+  const dirtyRef = useRef(true);
 
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(30);
   const [expanded, setExpanded] = useState(false);
@@ -741,11 +742,13 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     const rect = e.currentTarget.getBoundingClientRect();
     mouseXRef.current = e.clientX - rect.left;
     mouseYRef.current = e.clientY - rect.top;
+    dirtyRef.current = true;
   }, []);
 
   const handleMouseLeave = useCallback(() => {
     mouseXRef.current = null;
     mouseYRef.current = null;
+    dirtyRef.current = true;
   }, []);
 
   // Reset viewport
@@ -785,7 +788,19 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     });
   }, []);
 
-  // Animation loop
+  // Animation loop — draw once per dependency change instead of every frame.
+  // Re-draw is triggered when traces, viewport, expanded, or isDragging change.
+  // Mouse hover triggers re-draw via the mousemove handler below.
+  const tracesRef = useRef(traces);
+  tracesRef.current = traces;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const isDraggingRef = useRef(isDragging);
+  isDraggingRef.current = isDragging;
+
+  // Mark dirty when dependencies change
+  useEffect(() => { dirtyRef.current = true; }, [traces, expanded, isDragging]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -793,7 +808,10 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     let running = true;
     const render = () => {
       if (!running) return;
-      drawChart(canvas, traces, viewportRef.current, mouseXRef.current, mouseYRef.current, expanded, isDragging);
+      if (dirtyRef.current) {
+        drawChart(canvas, tracesRef.current, viewportRef.current, mouseXRef.current, mouseYRef.current, expandedRef.current, isDraggingRef.current);
+        dirtyRef.current = false;
+      }
       animFrameRef.current = requestAnimationFrame(render);
     };
     render();
@@ -802,7 +820,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
       running = false;
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [traces, expanded, isDragging]);
+  }, []);
 
   const chartHeight = expanded ? 500 : 280;
   const timeWindowOptions: { value: TimeWindow; label: string }[] = [
