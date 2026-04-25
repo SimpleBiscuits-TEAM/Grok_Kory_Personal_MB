@@ -976,18 +976,17 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     pid: 0xDD07, name: 'Desired Boost Pressure (DDDI)', shortName: 'BOOST_DES_DDDI',
     unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    // ECU responds to Mode 22 with kPa absolute (1 kPa resolution, uint16 big-endian).
-    // Convert to gauge PSI by subtracting standard atmosphere (14.696 PSI).
-    // At idle: ~100 kPa → 100 × 0.145038 = 14.5 PSI abs → 14.5 - 14.696 = ~-0.2 PSI gauge ≈ 0
-    formula: ([a, b]) => ((a * 256) + b) * 0.145038 - 14.696,
+    // ECU responds to Mode 22 with absolute pressure (same scaling as DID 0x1E3B).
+    // Factor 0.00145038 converts from ~10 Pa units to PSI. Subtract 14.696 for gauge.
+    // At idle: raw ~10100 → 10100 × 0.00145038 = 14.65 abs → 14.65 - 14.696 = ~-0.05 PSI gauge ≈ 0
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
   },
   {
     pid: 0xDD08, name: 'Boost / Vacuum (DDDI)', shortName: 'BOOST_VAC_DDDI',
     unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    // ECU responds to Mode 22 with kPa absolute (1 kPa resolution, uint16 big-endian).
-    // Convert to gauge PSI by subtracting standard atmosphere (14.696 PSI).
-    formula: ([a, b]) => ((a * 256) + b) * 0.145038 - 14.696,
+    // Same scaling as BOOST_DES_DDDI (0xDD07) and BOOST_DES (0x1E3B).
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
   },
   {
     // HPT "Injection Timing Correction" — DID 0x208B

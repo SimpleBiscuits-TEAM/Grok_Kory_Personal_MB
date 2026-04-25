@@ -17,27 +17,30 @@ describe('BOOST_DES_DDDI (0xDD07) formula fix', () => {
   });
 
   it('formula accepts 2 bytes and returns gauge PSI (not absolute)', () => {
-    // At idle: ECU returns ~100 kPa absolute (bytes [0, 100])
-    // 100 kPa * 0.145038 = 14.5038 PSI absolute
-    // Gauge = 14.5038 - 14.696 = -0.1922 PSI ≈ 0 (near atmospheric)
-    const idleValue = pid!.formula([0, 100]);
-    expect(idleValue).toBeCloseTo(-0.192, 1);
+    // At idle: ECU returns ~10100 raw (101 kPa in ~10 Pa units)
+    // 10100 * 0.00145038 = 14.649 PSI absolute
+    // Gauge = 14.649 - 14.696 = -0.047 PSI ≈ 0 (near atmospheric)
+    const raw = 10100; // [0x27, 0x74] = [39, 116]
+    const idleValue = pid!.formula([Math.floor(raw / 256), raw % 256]);
+    expect(idleValue).toBeCloseTo(-0.05, 0);
     // Should NOT be ~14.5 (the old absolute reading)
     expect(Math.abs(idleValue)).toBeLessThan(1);
   });
 
   it('formula returns positive gauge PSI under boost', () => {
-    // Under boost: ~200 kPa absolute (bytes [0, 200])
-    // 200 * 0.145038 = 29.0076 - 14.696 = 14.3116 PSI gauge
-    const boostValue = pid!.formula([0, 200]);
+    // Under boost: ~200 kPa = raw ~20000
+    // 20000 * 0.00145038 = 29.008 - 14.696 = 14.312 PSI gauge
+    const raw = 20000;
+    const boostValue = pid!.formula([Math.floor(raw / 256), raw % 256]);
     expect(boostValue).toBeCloseTo(14.31, 1);
     expect(boostValue).toBeGreaterThan(10);
   });
 
-  it('formula handles high-byte values (>255 kPa)', () => {
-    // 300 kPa = bytes [1, 44] (1*256 + 44 = 300)
-    // 300 * 0.145038 = 43.5114 - 14.696 = 28.8154 PSI gauge
-    const highBoost = pid!.formula([1, 44]);
+  it('formula handles high raw values (>300 kPa)', () => {
+    // 300 kPa = raw ~30000
+    // 30000 * 0.00145038 = 43.511 - 14.696 = 28.815 PSI gauge
+    const raw = 30000;
+    const highBoost = pid!.formula([Math.floor(raw / 256), raw % 256]);
     expect(highBoost).toBeCloseTo(28.82, 1);
   });
 
@@ -57,9 +60,10 @@ describe('BOOST_VAC_DDDI (0xDD08) formula fix', () => {
     expect(pid!.shortName).toBe('BOOST_VAC_DDDI');
   });
 
-  it('formula converts kPa absolute to gauge PSI', () => {
-    // Same formula as BOOST_DES_DDDI
-    const idleValue = pid!.formula([0, 100]);
+  it('formula converts raw absolute to gauge PSI', () => {
+    // Same formula as BOOST_DES_DDDI — raw ~10100 at idle
+    const raw = 10100;
+    const idleValue = pid!.formula([Math.floor(raw / 256), raw % 256]);
     expect(Math.abs(idleValue)).toBeLessThan(1);
   });
 

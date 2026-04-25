@@ -2322,3 +2322,18 @@
 
 ## Bug Fix: BOOST_DES_DDDI Still Showing Absolute Pressure (April 25, 2026)
 - [x] Fix BOOST_DES_DDDI (PID 0xDD07) formula — changed from `() => 0` to proper kPa→gauge PSI conversion with barometric subtraction
+
+## Bug Fix: BOOST_DES_DDDI Still 14.5 PSI After Formula Fix (April 25, 2026)
+- [x] Investigate why BOOST_DES_DDDI still shows 14.5 PSI despite formula change — scaling factor was wrong (0.145038 vs 0.00145038)
+- [x] Fixed formula to use 0.00145038 (same as BOOST_DES 0x1E3B) — ECU returns 10 Pa resolution, not 1 kPa
+
+## Bug Fix: Datalog Viewer PID Reselect Chart Bug (April 25, 2026)
+- [x] Fix OBDDatalogViewer — throttled row computation to prevent UI thread blocking during reselect clicks
+
+## Radial Gauge Dashboard Modernization (April 25, 2026)
+- [x] Redesign LiveGaugeDashboard radial gauges with modern Tesla-style aesthetic
+- [x] Update gauge face, needle, and color scheme — clean SVG arcs, subtle glow, glass-card design
+
+## Bug Fix: Gradual Slowdown During Long Sessions (April 25, 2026)
+- [x] Fix reading history — stop creating array copies per sample, mutate in place
+- [x] Trim oldest readings in bulk (slice at 1200 → keep last 1000) instead of shift() every sample

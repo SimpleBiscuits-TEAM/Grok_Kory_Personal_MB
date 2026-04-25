@@ -1481,10 +1481,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setReadingHistory(prev => {
           const next = new Map(prev);
           for (const r of readings) {
-            const arr = next.get(r.pid) || [];
+            let arr = next.get(r.pid);
+            if (!arr) { arr = []; next.set(r.pid, arr); }
             arr.push(r);
-            if (arr.length > 1000) arr.shift();
-            next.set(r.pid, [...arr]);
+            // Trim in bulk: when we hit 1200, chop back to 1000 (avoids per-sample shift)
+            if (arr.length > 1200) {
+              next.set(r.pid, arr.slice(-1000));
+            }
           }
           return next;
         });
@@ -1498,9 +1501,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           setRecordedReadings(prev => {
             const next = new Map(prev);
             for (const r of readings) {
-              const arr = next.get(r.pid) || [];
+              let arr = next.get(r.pid);
+              if (!arr) { arr = []; next.set(r.pid, arr); }
               arr.push(r);
-              next.set(r.pid, [...arr]);
             }
             return next;
           });
@@ -1729,10 +1732,12 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           setReadingHistory(prev => {
             const next = new Map(prev);
             for (const r of readings) {
-              const arr = next.get(r.pid) || [];
+              let arr = next.get(r.pid);
+              if (!arr) { arr = []; next.set(r.pid, arr); }
               arr.push(r);
-              if (arr.length > 1000) arr.shift();
-              next.set(r.pid, [...arr]);
+              if (arr.length > 1200) {
+                next.set(r.pid, arr.slice(-1000));
+              }
             }
             return next;
           });
@@ -1741,9 +1746,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             setRecordedReadings(prev => {
               const next = new Map(prev);
               for (const r of readings) {
-                const arr = next.get(r.pid) || [];
+                let arr = next.get(r.pid);
+                if (!arr) { arr = []; next.set(r.pid, arr); }
                 arr.push(r);
-                next.set(r.pid, [...arr]);
               }
               return next;
             });
