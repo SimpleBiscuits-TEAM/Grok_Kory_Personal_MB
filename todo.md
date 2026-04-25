@@ -2305,3 +2305,20 @@
 - [x] Add drag-to-rearrange PID blocks in live view (square PID blocks)
 - [x] Fix chart section header text overlap — badges and cursor readout labels overlap when 4 channels assigned
 - [x] Remove all GM presets except Engine Basics — keep only Engine Basics built-in + user-created presets
+
+## Fullscreen Mode (April 25, 2026)
+- [x] Add fullscreen toggle button to the main layout (especially datalogger)
+- [x] Use browser Fullscreen API to enter/exit fullscreen
+- [x] ESC key exits fullscreen (native browser behavior + custom handler)
+- [x] Fullscreen button visible on datalogger panel and other key panels
+
+## Modern Gauge Dashboard Redesign (April 25, 2026)
+- [x] Redesign LiveGauge blocks with modern Tesla-style aesthetic (glass/gradient, smooth arcs, clean typography)
+- [x] Replace basic progress bar with radial or arc gauge visualization
+- [x] Add subtle glow/animation effects for active readings
+- [x] Restore category grouping (Engine, Fuel, Turbo, Exhaust, etc.) with section headers
+- [x] Keep drag-to-rearrange working within and between category groups
+- [x] Ensure gauge blocks remain compact and readable at all sizes
+
+## Bug Fix: BOOST_DES_DDDI Still Showing Absolute Pressure (April 25, 2026)
+- [x] Fix BOOST_DES_DDDI (PID 0xDD07) formula — changed from `() => 0` to proper kPa→gauge PSI conversion with barometric subtraction

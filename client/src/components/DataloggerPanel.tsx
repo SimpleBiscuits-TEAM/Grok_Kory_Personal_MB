@@ -21,7 +21,7 @@ import {
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
   Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser,
-  Copy, Check, Upload, Share2, Clock, FolderOpen
+  Copy, Check, Upload, Share2, Clock, FolderOpen, Maximize2, Minimize2
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import { downloadPresetAsJSON, importPresetFromFile, copyPresetToClipboard } from '@/lib/presetSharing';
@@ -44,7 +44,7 @@ import {
   exportSessionToCSV, sessionToAnalyzerCSV,
   loadCustomPresets, saveCustomPresets, createCustomPreset,
   deleteCustomPreset, updateCustomPreset, getAllPresets,
-  VehicleInfo, PIDManufacturer, FuelType,
+  VehicleInfo, PIDManufacturer, FuelType, PIDCategory,
   FORD_EXTENDED_PIDS, CHRYSLER_EXTENDED_PIDS, TOYOTA_EXTENDED_PIDS, HONDA_EXTENDED_PIDS,
   MANUFACTURER_PIDS, getPidsForVehicle, getPresetsForVehicle,
 } from '@/lib/obdConnection';
@@ -63,47 +63,125 @@ const sColor = {
 
 // ─── Gauge Component ───────────────────────────────────────────────────────
 
+// Category display config
+const CATEGORY_CONFIG: Record<PIDCategory, { label: string; color: string; icon: string }> = {
+  engine: { label: 'ENGINE', color: 'oklch(0.52 0.22 25)', icon: '⚡' },
+  turbo: { label: 'TURBO', color: 'oklch(0.65 0.20 55)', icon: '🌀' },
+  fuel: { label: 'FUEL', color: 'oklch(0.65 0.20 145)', icon: '⛽' },
+  exhaust: { label: 'EXHAUST', color: 'oklch(0.60 0.20 25)', icon: '🔥' },
+  transmission: { label: 'TRANS', color: 'oklch(0.60 0.20 300)', icon: '⚙️' },
+  emissions: { label: 'EMISSIONS', color: 'oklch(0.65 0.18 200)', icon: '🌿' },
+  electrical: { label: 'ELECTRICAL', color: 'oklch(0.75 0.18 60)', icon: '🔋' },
+  def: { label: 'DEF', color: 'oklch(0.70 0.14 200)', icon: '💧' },
+  oxygen: { label: 'O2 SENSORS', color: 'oklch(0.65 0.18 220)', icon: '🫧' },
+  catalyst: { label: 'CATALYST', color: 'oklch(0.70 0.20 155)', icon: '🧪' },
+  evap: { label: 'EVAP', color: 'oklch(0.60 0.15 260)', icon: '💨' },
+  ignition: { label: 'IGNITION', color: 'oklch(0.75 0.18 70)', icon: '🔌' },
+  cooling: { label: 'COOLING', color: 'oklch(0.70 0.18 220)', icon: '❄️' },
+  intake: { label: 'INTAKE', color: 'oklch(0.65 0.18 200)', icon: '🌬️' },
+  other: { label: 'OTHER', color: 'oklch(0.58 0.008 260)', icon: '📊' },
+};
+const CATEGORY_ORDER: PIDCategory[] = ['engine', 'turbo', 'fuel', 'exhaust', 'transmission', 'emissions', 'electrical', 'def', 'oxygen', 'catalyst', 'evap', 'ignition', 'cooling', 'intake', 'other'];
+
 function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefinition }) {
   const value = reading?.value ?? 0;
   const range = pid.max - pid.min;
   const pct = Math.max(0, Math.min(100, ((value - pid.min) / range) * 100));
   const isMode22 = (pid.service ?? 0x01) === 0x22;
-  
-  const getColor = (p: number) => {
-    if (p < 25) return sColor.blue;
-    if (p < 50) return sColor.green;
-    if (p < 75) return sColor.yellow;
-    return sColor.red;
-  };
+
+  // Tesla-style color: subtle accent based on value zone
+  const accentColor = pct < 30 ? 'oklch(0.70 0.14 200)' // cool blue
+    : pct < 60 ? 'oklch(0.70 0.16 155)' // teal-green
+    : pct < 80 ? 'oklch(0.72 0.16 70)' // amber
+    : 'oklch(0.58 0.22 25)'; // red
+
+  // Arc gauge SVG (180° sweep, bottom-center)
+  const arcRadius = 28;
+  const arcStroke = 3;
+  const arcCx = 36;
+  const arcCy = 32;
+  const startAngle = Math.PI; // left (180°)
+  const endAngle = 0; // right (0°)
+  const valueAngle = startAngle - (pct / 100) * Math.PI;
+  const bgArcD = `M ${arcCx + arcRadius * Math.cos(startAngle)} ${arcCy - arcRadius * Math.sin(startAngle)} A ${arcRadius} ${arcRadius} 0 1 1 ${arcCx + arcRadius * Math.cos(endAngle)} ${arcCy - arcRadius * Math.sin(endAngle)}`;
+  const valArcD = pct > 0.5
+    ? `M ${arcCx + arcRadius * Math.cos(startAngle)} ${arcCy - arcRadius * Math.sin(startAngle)} A ${arcRadius} ${arcRadius} 0 ${pct > 50 ? 1 : 0} 1 ${arcCx + arcRadius * Math.cos(valueAngle)} ${arcCy - arcRadius * Math.sin(valueAngle)}`
+    : '';
 
   return (
     <div style={{
-      background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.01) 100%)',
-      border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '6px',
-      padding: '6px 8px',
-      minWidth: '120px',
+      background: 'oklch(0.11 0.006 260)',
+      border: `1px solid oklch(0.20 0.008 260)`,
+      borderRadius: '10px',
+      padding: '8px 10px 6px',
+      minWidth: '130px',
+      maxWidth: '160px',
+      position: 'relative',
+      overflow: 'hidden',
+      backdropFilter: 'blur(8px)',
+      transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+      boxShadow: reading ? `0 0 12px -4px ${accentColor}33` : 'none',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
+      {/* Subtle top accent line */}
+      <div style={{
+        position: 'absolute', top: 0, left: '10%', right: '10%', height: '1px',
+        background: `linear-gradient(90deg, transparent, ${accentColor}66, transparent)`,
+      }} />
+
+      {/* Header: badge + name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
         {isMode22 && (
-          <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.orange, background: 'rgba(255,127,0,0.2)', padding: '1px 4px', borderRadius: '2px', fontWeight: 700 }}>
+          <span style={{
+            fontFamily: sFont.mono, fontSize: '0.42rem', color: sColor.orange,
+            background: 'oklch(0.15 0.06 55 / 0.4)', padding: '1px 4px', borderRadius: '3px',
+            fontWeight: 700, letterSpacing: '0.04em',
+          }}>
             M22
           </span>
         )}
-        <span style={{ fontFamily: sFont.body, fontSize: '0.58rem', color: sColor.textDim, letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span style={{
+          fontFamily: sFont.body, fontSize: '0.56rem', color: 'oklch(0.60 0.008 260)',
+          letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          fontWeight: 600,
+        }}>
           {pid.shortName}
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', marginBottom: '3px' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '1.3rem', fontWeight: 700, color: getColor(pct), lineHeight: 1, transition: 'color 0.3s ease-out' }}>
-          {reading ? (Number.isInteger(value) ? value : value.toFixed(1)) : '---'}
-        </span>
-        <span style={{ fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textDim }}>
-          {pid.unit}
-        </span>
+
+      {/* Arc gauge + value */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        <svg width="72" height="36" viewBox="0 0 72 36" style={{ flexShrink: 0 }}>
+          {/* Background arc */}
+          <path d={bgArcD} fill="none" stroke="oklch(0.18 0.006 260)" strokeWidth={arcStroke} strokeLinecap="round" />
+          {/* Value arc */}
+          {valArcD && (
+            <path d={valArcD} fill="none" stroke={accentColor} strokeWidth={arcStroke} strokeLinecap="round"
+              style={{ transition: 'stroke 0.3s ease-out', filter: `drop-shadow(0 0 3px ${accentColor}66)` }} />
+          )}
+          {/* Center value */}
+          <text x={arcCx} y={arcCy - 4} textAnchor="middle" dominantBaseline="central"
+            fill="oklch(0.96 0.005 260)" fontSize="14" fontFamily='"Share Tech Mono", monospace' fontWeight="700">
+            {reading ? (Number.isInteger(value) ? value.toString() : value.toFixed(1)) : '---'}
+          </text>
+          {/* Unit below */}
+          <text x={arcCx} y={arcCy + 8} textAnchor="middle" dominantBaseline="central"
+            fill="oklch(0.50 0.008 260)" fontSize="7" fontFamily='"Rajdhani", sans-serif' letterSpacing="0.06em">
+            {pid.unit}
+          </text>
+        </svg>
       </div>
-      <div style={{ width: '100%', height: '3px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.2s ease-out', borderRadius: '2px' }} />
+
+      {/* Bottom bar — thin accent */}
+      <div style={{
+        width: '100%', height: '2px', borderRadius: '1px', marginTop: '4px',
+        background: 'oklch(0.15 0.005 260)', overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${pct}%`, height: '100%', borderRadius: '1px',
+          background: `linear-gradient(90deg, ${accentColor}88, ${accentColor})`,
+          transition: 'width 0.2s ease-out',
+        }} />
       </div>
     </div>
   );
@@ -1085,6 +1163,22 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
   const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
+  // Fullscreen mode
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const panelContainerRef = useRef<HTMLDivElement>(null);
+  const toggleFullscreen = useCallback(() => {
+    if (!panelContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      panelContainerRef.current.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
   // Drag-to-rearrange PID gauge blocks
   const [pidGaugeOrder, setPidGaugeOrder] = useState<number[]>([]); // PID numbers in user-chosen order
   const dragPidRef = useRef<number | null>(null);
@@ -1927,7 +2021,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const activePids = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
   return (
-    <div>
+    <div ref={panelContainerRef} style={isFullscreen ? { background: sColor.bg, padding: '12px', overflow: 'auto', height: '100vh' } : undefined}>
       {/* Custom Preset Dialog */}
       <CustomPresetDialog
         open={presetDialogOpen}
@@ -2003,6 +2097,23 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               <option value="elm327">ELM327 (WebSerial)</option>
             </select>
           </div>
+
+          {/* Fullscreen Toggle */}
+          <button
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '6px 10px', background: isFullscreen ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
+              border: `1px solid ${isFullscreen ? 'oklch(0.70 0.14 200)' : sColor.border}`,
+              borderRadius: '3px', color: isFullscreen ? 'oklch(0.70 0.14 200)' : sColor.textDim,
+              fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.08em',
+              cursor: 'pointer', transition: 'all 0.2s ease',
+            }}
+          >
+            {isFullscreen ? <Minimize2 style={{ width: 13, height: 13 }} /> : <Maximize2 style={{ width: 13, height: 13 }} />}
+            {isFullscreen ? 'EXIT' : 'FULLSCREEN'}
+          </button>
 
           {/* Connect/Disconnect */}
           {connectionState === 'disconnected' || connectionState === 'error' ? (
@@ -2823,26 +2934,35 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             </div>
           </div>
 
-          {/* === LIST VIEW (original layout) === */}
+          {/* === LIST VIEW (category-grouped layout) === */}
           {liveViewMode === 'list' && (
             <>
-              {/* Live Gauges — drag-to-rearrange flat grid */}
+              {/* Live Gauges — grouped by category with drag-to-rearrange */}
               {(isLogging || liveReadings.size > 0) && (() => {
                 // Build ordered PID list: use user's custom order, appending any new PIDs at end
                 const activePidNums = activePids.map(p => p.pid);
                 const ordered: PIDDefinition[] = [];
                 const seen = new Set<number>();
-                // First: PIDs in user's saved order
                 for (const pidNum of pidGaugeOrder) {
                   if (activePidNums.includes(pidNum) && !seen.has(pidNum)) {
                     const def = activePids.find(p => p.pid === pidNum);
                     if (def) { ordered.push(def); seen.add(pidNum); }
                   }
                 }
-                // Then: any new PIDs not yet in order
                 for (const pid of activePids) {
                   if (!seen.has(pid.pid)) { ordered.push(pid); seen.add(pid.pid); }
                 }
+
+                // Group by category
+                const groups = new Map<PIDCategory, PIDDefinition[]>();
+                for (const pid of ordered) {
+                  const cat = pid.category || 'other';
+                  if (!groups.has(cat)) groups.set(cat, []);
+                  groups.get(cat)!.push(pid);
+                }
+                // Sort categories by CATEGORY_ORDER
+                const sortedCategories = CATEGORY_ORDER.filter(c => groups.has(c));
+
                 const handleDragStart = (pidNum: number) => { dragPidRef.current = pidNum; };
                 const handleDragOver = (e: React.DragEvent, pidNum: number) => {
                   e.preventDefault();
@@ -2862,29 +2982,72 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                   dragPidRef.current = null;
                   dragOverPidRef.current = null;
                 };
+
                 return (
                   <div style={{ marginBottom: '8px' }}>
-                    <div style={{ fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '6px' }}>
-                      LIVE DATA
-                      <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.textMuted, marginLeft: '8px' }}>
-                        drag to rearrange
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      marginBottom: '10px',
+                    }}>
+                      <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em' }}>
+                        LIVE DATA
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.48rem', color: sColor.textMuted, marginLeft: '8px' }}>
+                          drag to rearrange
+                        </span>
+                      </div>
+                      <span style={{
+                        fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim,
+                        background: 'oklch(0.12 0.005 260)', padding: '2px 8px', borderRadius: '3px',
+                        border: `1px solid ${sColor.border}`,
+                      }}>
+                        {ordered.length} PIDs · {sortedCategories.length} groups
                       </span>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                      {ordered.map(pid => (
-                        <div
-                          key={`${pid.service}-${pid.pid}`}
-                          draggable
-                          onDragStart={() => handleDragStart(pid.pid)}
-                          onDragOver={(e) => handleDragOver(e, pid.pid)}
-                          onDrop={handleDrop}
-                          onDragEnd={() => { dragPidRef.current = null; dragOverPidRef.current = null; }}
-                          style={{ cursor: 'grab' }}
-                        >
-                          <LiveGauge pid={pid} reading={liveReadings.get(pid.pid) || null} />
+
+                    {sortedCategories.map(cat => {
+                      const catConfig = CATEGORY_CONFIG[cat];
+                      const pidsInCat = groups.get(cat)!;
+                      return (
+                        <div key={cat} style={{ marginBottom: '12px' }}>
+                          {/* Category header */}
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: '6px',
+                            marginBottom: '6px', paddingBottom: '4px',
+                            borderBottom: `1px solid oklch(0.18 0.006 260)`,
+                          }}>
+                            <span style={{ fontSize: '0.7rem' }}>{catConfig.icon}</span>
+                            <span style={{
+                              fontFamily: sFont.heading, fontSize: '0.72rem', color: catConfig.color,
+                              letterSpacing: '0.12em',
+                            }}>
+                              {catConfig.label}
+                            </span>
+                            <span style={{
+                              fontFamily: sFont.mono, fontSize: '0.48rem', color: sColor.textMuted,
+                            }}>
+                              ({pidsInCat.length})
+                            </span>
+                            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, ${catConfig.color}33, transparent)` }} />
+                          </div>
+                          {/* PID blocks */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {pidsInCat.map(pid => (
+                              <div
+                                key={`${pid.service}-${pid.pid}`}
+                                draggable
+                                onDragStart={() => handleDragStart(pid.pid)}
+                                onDragOver={(e) => handleDragOver(e, pid.pid)}
+                                onDrop={handleDrop}
+                                onDragEnd={() => { dragPidRef.current = null; dragOverPidRef.current = null; }}
+                                style={{ cursor: 'grab' }}
+                              >
+                                <LiveGauge pid={pid} reading={liveReadings.get(pid.pid) || null} />
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
