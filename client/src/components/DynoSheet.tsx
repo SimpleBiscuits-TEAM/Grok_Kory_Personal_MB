@@ -36,9 +36,6 @@ import {
   detectTurboType,
 } from '@/lib/talonVirtualDyno';
 
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface WOTRun {
@@ -519,6 +516,7 @@ import {
   ReferenceDot,
 } from 'recharts';
 import { ZoomableChart } from './ZoomableChart';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 interface DynoSheetProps {
   data: DynoSheetData;
@@ -1236,8 +1234,6 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                   }}
                 />
 
-
-
                 {/* Peak HP cursor dot */}
                 <ReferenceDot
                   x={data.peakHPRpm}
@@ -1329,7 +1325,6 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                   dot={false}
                   activeDot={{ r: 5, fill: COLORS.torqueLine, stroke: '#fff', strokeWidth: 2 }}
                 />
-
 
               </ComposedChart>
             </ResponsiveContainer>

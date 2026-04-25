@@ -2352,3 +2352,20 @@
 - [ ] Add debug flag for console.log in connection libraries (deferred — useful for truck debugging)
 - [x] Lazy-load DtcSearch and EcuReferencePanel in Home.tsx and Advanced.tsx — reduces initial bundle by ~10K lines
 - [x] LiveGauge memoized with React.memo — only re-renders when value/unit/pid actually changes
+
+## Storage & Dead Code Audit (April 25, 2026)
+- [ ] Consolidate PPEI_LOGO_URL into shared/constants.ts — currently duplicated in 7 files
+- [ ] Archive 25 dead files (11,302 lines) — orphaned libs and components never imported by production code
+- [ ] Remove dead test files associated with dead lib files (me17WinolsParser.test.ts, accessRightsDetection.test.ts, binaryPatternDatabase.test.ts)
+- [ ] Implement RadialGauge arc path memoization (deferred from previous audit)
+- [ ] Extract static inline styles to constants in DataloggerPanel and LiveGaugeDashboard
+- [ ] Add debug flag for console.log in connection libraries (pcanConnection, vopCan2UsbConnection)
+
+## Bug: Fullscreen breaks when switching tabs (April 25, 2026)
+- [x] Move fullscreen from per-panel (DataloggerPanel / Analyzer) to app-level (whole app shell)
+- [x] Ensure scroll and click still work when switching between Datalogger and Analyzer while fullscreen
+- [x] Fullscreen toggle button should be at the app level, not inside individual panels
+
+## Feature: Back button from Analyzer to Datalogger (April 25, 2026)
+- [x] Add a "Back to Datalogger" button when Analyzer is opened via ANALYZE LIVE from the datalogger
+- [x] Button should switch back to the Datalogger tab preserving state

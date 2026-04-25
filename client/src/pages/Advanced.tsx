@@ -77,6 +77,7 @@ import PpeiHeader from '@/components/PpeiHeader';
 import { PpeiFlashContainerPanel } from '@/components/ppei-flash';
 import { PpeiDataloggerPanel } from '@/components/ppei-datalogger';
 import DieselInjectorFlowConverter from '@/components/DieselInjectorFlowConverter';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 // Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
 const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
@@ -87,8 +88,6 @@ const FleetPanel = React.lazy(() => import('@/pages/Fleet').then(m => ({ default
 const CompetitionPanel = React.lazy(() => import('@/pages/Competition').then(m => ({ default: m.CompetitionContent })));
 const WeatherPanel = React.lazy(() => import('@/pages/Weather').then(m => ({ default: m.WeatherContent })));
 const CloudPanel = React.lazy(() => import('@/pages/Cloud').then(m => ({ default: m.CloudContent })));
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 
@@ -1700,7 +1699,6 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             <EditorGate />
           </div>
         )}
-
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
         {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}

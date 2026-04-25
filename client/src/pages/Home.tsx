@@ -11,7 +11,7 @@ import { useFullscreen } from '@/hooks/useFullscreen';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket, Maximize2, Minimize2 } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket, Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
 import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
 import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
@@ -65,8 +65,12 @@ export default function Home() {
   const [showProTeaser, setShowProTeaser] = useState(false);
   const [liteTab, setLiteTab] = useState<'analyze' | 'basic-editor' | 'datalogger'>('analyze');
   const [editorSubTab, setEditorSubTab] = useState<'vehicle-coding' | 'tire-correction'>('vehicle-coding');
-  // Fullscreen mode for Analyzer results
-  const { isFullscreen: analyzerFs, containerRef: analyzerFsRef, toggleFullscreen: toggleAnalyzerFs } = useFullscreen();
+  // App-level fullscreen (covers entire page — works across all tabs)
+  const { isFullscreen: appFs, containerRef: appFsRef, toggleFullscreen: toggleAppFs } = useFullscreen();
+  // Track when analyzer was opened from datalogger's ANALYZE LIVE button
+  const [cameFromDatalogger, setCameFromDatalogger] = useState(false);
+  // Injected CSV from datalogger's ANALYZE LIVE
+  const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -291,8 +295,37 @@ export default function Home() {
     setHealthReport(report);
   }, [data, manualVin]);
 
+  // Process injected CSV from datalogger's ANALYZE LIVE
+  const processInjectedCSV = useCallback(() => {
+    if (!injectedCSV) return;
+    try {
+      const rawData = parseCSV(injectedCSV.csv);
+      const processed = processData(rawData);
+      const downsampled = downsampleData(processed, 2000);
+      const binned = createBinnedData(processed, 40);
+      setData(downsampled);
+      setBinnedData(binned);
+      setFileName(injectedCSV.filename);
+      const diagnosticReport = analyzeDiagnostics(downsampled);
+      setDiagnostics(diagnosticReport);
+      const reasoning = runReasoningEngine(downsampled, diagnosticReport);
+      setReasoningReport(reasoning);
+      const drag = analyzeDragRuns(processed);
+      setDragAnalysis(drag);
+      const report = generateHealthReport(downsampled, undefined);
+      setHealthReport(report);
+      setShowProTeaser(true);
+      setInjectedCSV(null);
+    } catch { /* silent */ }
+  }, [injectedCSV]);
+
+  // Auto-process injected CSV when it arrives
+  React.useEffect(() => {
+    if (injectedCSV) processInjectedCSV();
+  }, [injectedCSV, processInjectedCSV]);
+
   return (
-    <div className="min-h-screen" style={{ background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
+    <div ref={appFsRef} className="min-h-screen" style={appFs ? { background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)', overflow: 'auto', height: '100vh' } : { background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
       {/* ── PPEI Header (shared across all pages) ── */}
       <PpeiHeader />
 
@@ -302,7 +335,7 @@ export default function Home() {
         borderBottom: '1px solid oklch(0.20 0.008 260)',
       }}>
         <div className="container mx-auto px-4">
-          <div style={{ display: 'flex', gap: '2px', overflowX: 'auto' }}>
+          <div style={{ display: 'flex', gap: '2px', overflowX: 'auto', alignItems: 'center' }}>
             {[
               { id: 'analyze' as const, label: 'ANALYZE', icon: <BarChart3 style={{ width: 15, height: 15 }} /> },
               { id: 'basic-editor' as const, label: 'BASIC EDITOR', icon: <Settings style={{ width: 15, height: 15 }} /> },
@@ -326,6 +359,22 @@ export default function Home() {
                 {tab.icon} {tab.label}
               </button>
             ))}
+            {/* App-level Fullscreen Toggle */}
+            <button
+              onClick={toggleAppFs}
+              title={appFs ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto',
+                padding: '6px 12px', background: appFs ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
+                border: `1px solid ${appFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.25 0.008 260)'}`,
+                borderRadius: '3px', color: appFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.63 0.010 260)',
+                fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '0.8rem', letterSpacing: '0.08em',
+                cursor: 'pointer', transition: 'all 0.2s ease', whiteSpace: 'nowrap',
+              }}
+            >
+              {appFs ? <Minimize2 style={{ width: 13, height: 13 }} /> : <Maximize2 style={{ width: 13, height: 13 }} />}
+              {appFs ? 'EXIT' : 'FULLSCREEN'}
+            </button>
           </div>
         </div>
       </div>
@@ -373,7 +422,11 @@ export default function Home() {
         {/* ── DATALOGGER Tab ── */}
         {liteTab === 'datalogger' && (
           <div className="ppei-anim-fade-up">
-            <DataloggerPanel />
+            <DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => {
+              setInjectedCSV({ csv, filename });
+              setCameFromDatalogger(true);
+              setLiteTab('analyze');
+            }} />
           </div>
         )}
 
@@ -747,7 +800,7 @@ export default function Home() {
           </div>
         ) : liteTab === 'analyze' && data ? (
           /* ── Dashboard Section ── */
-          <div ref={analyzerFsRef} className="space-y-6 ppei-anim-fade-in" style={analyzerFs ? { background: 'oklch(0.10 0.005 260)', padding: '16px', overflow: 'auto', height: '100vh' } : undefined}>
+          <div className="space-y-6 ppei-anim-fade-in">
 
             {/* File info bar */}
             <div style={{
@@ -816,7 +869,7 @@ export default function Home() {
                   )}
                 </button>
                 <button
-                  onClick={() => { setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setFileName(null); }}
+                  onClick={() => { setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setFileName(null); setCameFromDatalogger(false); }}
                   style={{
                     background: 'transparent',
                     color: 'oklch(0.65 0.010 260)',
@@ -834,29 +887,32 @@ export default function Home() {
                 >
                   NEW FILE
                 </button>
-                {/* Fullscreen Toggle */}
-                <button
-                  onClick={toggleAnalyzerFs}
-                  title={analyzerFs ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
-                  style={{
-                    background: analyzerFs ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
-                    color: analyzerFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.65 0.010 260)',
-                    fontFamily: '"Bebas Neue", "Impact", sans-serif',
-                    fontSize: '0.95rem',
-                    letterSpacing: '0.08em',
-                    padding: '8px 16px',
-                    borderRadius: '3px',
-                    border: analyzerFs ? '1px solid oklch(0.70 0.14 200)' : '1px solid oklch(0.28 0.008 260)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    transition: 'all 0.15s'
-                  }}
-                >
-                  {analyzerFs ? <Minimize2 style={{ width: 14, height: 14 }} /> : <Maximize2 style={{ width: 14, height: 14 }} />}
-                  {analyzerFs ? 'EXIT' : 'FULLSCREEN'}
-                </button>
+                {/* Back to Datalogger — shown when analyzer was opened via ANALYZE LIVE */}
+                {cameFromDatalogger && (
+                  <button
+                    onClick={() => {
+                      setCameFromDatalogger(false);
+                      setLiteTab('datalogger');
+                    }}
+                    style={{
+                      background: 'oklch(0.15 0.04 200 / 0.3)',
+                      color: 'oklch(0.70 0.14 200)',
+                      fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                      fontSize: '0.95rem',
+                      letterSpacing: '0.08em',
+                      padding: '8px 16px',
+                      borderRadius: '3px',
+                      border: '1px solid oklch(0.70 0.14 200)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <ArrowLeft style={{ width: 14, height: 14 }} /> BACK TO DATALOGGER
+                  </button>
+                )}
                 {/* Share to Facebook */}
                 {data && (
                   <ShareCard

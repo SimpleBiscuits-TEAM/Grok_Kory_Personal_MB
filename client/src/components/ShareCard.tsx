@@ -24,8 +24,7 @@ import { APP_VERSION } from '@/lib/version';
 
 // @ts-ignore — dom-to-image-more has no @types package
 import domtoimage from 'dom-to-image-more';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 export type ShareCardType = 'dyno' | 'diagnostic' | 'timeslip' | 'callout' | 'league' | 'fleet' | 'community' | 'health';
 

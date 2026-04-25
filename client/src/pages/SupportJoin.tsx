@@ -27,8 +27,7 @@ import {
   Headphones, Camera, ScreenShare, Settings, Volume2,
   ArrowLeft, Maximize2, Minimize2, X
 } from 'lucide-react';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 const sFont = {

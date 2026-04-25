@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { useFullscreen } from '@/hooks/useFullscreen';
+// Fullscreen is now handled at the app level (Home.tsx / Advanced.tsx)
 import { trpc } from '@/lib/trpc';
 import {
   Wifi, WifiOff, Play, Square, Download, BarChart3,
@@ -22,7 +22,7 @@ import {
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
   Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser,
-  Copy, Check, Upload, Share2, Clock, FolderOpen, Maximize2, Minimize2
+  Copy, Check, Upload, Share2, Clock, FolderOpen
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
 import { downloadPresetAsJSON, importPresetFromFile, copyPresetToClipboard } from '@/lib/presetSharing';
@@ -1169,8 +1169,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
   const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
-  // Fullscreen mode (reusable hook — auto-exits on unmount to prevent broken state on tab switch)
-  const { isFullscreen, containerRef: panelContainerRef, toggleFullscreen } = useFullscreen();
+  // Fullscreen is now handled at the app level — no per-panel fullscreen
   // Drag-to-rearrange PID gauge blocks
   const [pidGaugeOrder, setPidGaugeOrder] = useState<number[]>([]); // PID numbers in user-chosen order
   const dragPidRef = useRef<number | null>(null);
@@ -2013,7 +2012,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const activePids = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
   return (
-    <div ref={panelContainerRef} style={isFullscreen ? { background: sColor.bg, padding: '12px', overflow: 'auto', height: '100vh' } : undefined}>
+    <div>
       {/* Custom Preset Dialog */}
       <CustomPresetDialog
         open={presetDialogOpen}
@@ -2090,22 +2089,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             </select>
           </div>
 
-          {/* Fullscreen Toggle */}
-          <button
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '4px',
-              padding: '6px 10px', background: isFullscreen ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
-              border: `1px solid ${isFullscreen ? 'oklch(0.70 0.14 200)' : sColor.border}`,
-              borderRadius: '3px', color: isFullscreen ? 'oklch(0.70 0.14 200)' : sColor.textDim,
-              fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.08em',
-              cursor: 'pointer', transition: 'all 0.2s ease',
-            }}
-          >
-            {isFullscreen ? <Minimize2 style={{ width: 13, height: 13 }} /> : <Maximize2 style={{ width: 13, height: 13 }} />}
-            {isFullscreen ? 'EXIT' : 'FULLSCREEN'}
-          </button>
+          {/* Fullscreen toggle moved to app-level (Home.tsx tab bar) */}
 
           {/* Connect/Disconnect */}
           {connectionState === 'disconnected' || connectionState === 'error' ? (

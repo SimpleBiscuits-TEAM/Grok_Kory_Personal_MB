@@ -6,8 +6,7 @@ import { useRoute } from 'wouter';
 import { trpc } from '@/lib/trpc';
 import { Loader2, Download, Eye, Gauge, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 const TURBO_LABELS: Record<string, string> = {
   na: 'Naturally Aspirated',
