@@ -809,5 +809,111 @@ When Knox reviews a Honda Talon WP8 datalog:
 | Vehicle Speed | mph | Useful for gear ratio analysis |
 | Commanded Gear | gear | DCT gear position |
 | Module Voltage | V | Battery/charging system health |
+| Oil Temperature Voltage | V | EQT sensor raw voltage — convert to °F using lookup table |
+| Barometric Pressure | kPa | Ambient atmospheric pressure |
+| Oxygen Sensor Voltage | V | Narrowband O2 sensor output |
+
+### Honda Talon 1000X-4 Service Manual Reference (2020 SXS1000S4/S4D)
+Service manual PDF stored at: https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/honda_2020_talon_1000x-4_service_manual(1)-Copy_3b8448b6.pdf
+Oil temp calibration spreadsheet: https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/TalonOilTempCalforPPEI-Delete_afe077a6.xlsx
+
+#### Engine Specifications
+- 999cc parallel-twin, longitudinally installed, bore 92.0mm x stroke 75.148mm
+- Compression ratio: 10.0:1, OHC with valve lifter and rocker arm
+- Dry sump lubrication with trochoid oil pump, liquid cooled
+- PGM-FI (Programmed Fuel Injection), 46mm throttle bore
+- Idle speed: 1,200 ± 100 RPM
+- Fuel pressure: 331–367 kPa (48–53 psi)
+- Ignition timing: 15° BTDC at idle
+- Spark plug: NGK SILMAR8A9S, gap 0.8–0.9mm
+
+#### Sensor Specifications
+- IAT sensor: NTC thermistor, 1.0–1.3 kΩ at 40°C/104°F
+- ECT sensor: NTC thermistor, 1.0–1.3 kΩ at 40°C/104°F
+- EQT (Engine Oil Temperature) sensor: NTC thermistor, 2.5–2.8 kΩ at 20°C/68°F
+- O2 sensor heater: 13.0–18.5 Ω at 20°C/68°F
+- Fuel injector: 11–13 Ω at 24°C/75°F
+- IACV: 99–121 Ω at 20°C/68°F
+
+#### Oil Temperature Sensor (EQT) — Voltage to Temperature Conversion
+The Honda Talon EQT sensor is an NTC (Negative Temperature Coefficient) thermistor.
+Higher voltage = colder temperature. The WP8 datalog channel name varies:
+- "Oil Temperature Voltage" or similar voltage channel (0–5V range)
+- Must be converted using the PPEI calibration lookup table (42 interpolation points)
+- Conversion uses linear interpolation between table entries
+
+Key temperature thresholds for oil temp health analysis:
+| Condition | Temperature | Voltage |
+|-----------|------------|----------|
+| Cold start (below operating) | < 150°F | > 1.34V |
+| Warming up | 150–180°F | 0.93–1.34V |
+| Normal operating range | 180–220°F | 0.63–0.93V |
+| Upper normal (hard driving) | 220–250°F | 0.40–0.63V |
+| Caution zone | 250–280°F | 0.28–0.40V |
+| Overheat warning | > 280°F | < 0.28V |
+| Critical overheat | > 300°F | < 0.22V |
+
+#### Lubrication System
+- Oil capacity after draining: 5.5L (5.8 US qt)
+- After draining + oil filter: 5.75L (6.08 US qt)
+- After draining + engine + DCT oil filter: 5.8L (6.1 US qt)
+- Recommended: Pro Honda GN4 4-stroke, API SG+, JASO MA, SAE 10W-30
+- Oil pressure at No.3 journal: 490–588 kPa (71–85 psi) at 5,000 RPM / 80°C (176°F)
+
+#### Cooling System
+- Coolant capacity: 3.3L (3.5 US qt) at replacement
+- Thermostat opens: 80–84°C (176–183°F), fully open at 95°C (203°F)
+- Radiator cap relief: 108–137 kPa (16–20 psi)
+
+#### DCT (Dual Clutch Transmission)
+- 6-speed dual clutch automatic
+- Gear ratios: 1st 2.764, 2nd 2.047, 3rd 1.583, 4th 1.230, 5th 0.968, 6th 0.800
+- Sub-transmission: Automatic/electric shift, ratios 2.666 (H) / 1.880 (L)
+- Drive modes: P-R-N-H-L
+- Clutch clearance: 1.4–1.6mm
+
+#### Drivetrain
+- 2WD / i-4WD (Intelligent 4 Wheel Drive)
+- Final reduction: 3.384 (S4) / 3.307 (S4D)
+- Fox Live Valve (FLV) suspension on equipped models
+- Electric Power Steering (EPS)
+- Hill Start Assist (HSA)
+
+### Honda Talon Health Report Guidelines
+When generating a health report for a Honda Talon WP8 datalog:
+
+1. **Oil Temperature Analysis** (if Oil Temperature Voltage channel present):
+   - Convert voltage to °F using the PPEI calibration lookup table
+   - Flag if oil temp exceeds 250°F sustained (>10 seconds)
+   - Critical warning if oil temp exceeds 280°F at any point
+   - Note if oil temp never reaches 180°F (insufficient warm-up)
+   - Report peak oil temp, average operating temp, and time spent in each zone
+
+2. **AFR/Lambda Analysis**:
+   - Convert AFR to Lambda (÷14.7)
+   - WOT target: Lambda 0.82–0.88 (rich for safety)
+   - Cruise target: Lambda 0.95–1.02
+   - Flag sustained lean conditions (Lambda > 1.05) at high RPM/load
+   - Flag excessively rich conditions (Lambda < 0.75) at cruise
+
+3. **DCT Health**:
+   - Monitor clutch pressures for abnormal patterns
+   - Check for excessive slip between commanded and actual gear
+   - Flag rapid clutch pressure oscillations
+
+4. **Ignition Timing**:
+   - Normal range at idle: ~15° BTDC
+   - Flag significant timing retard under load (knock detection)
+   - Monitor timing advance progression with RPM
+
+5. **Coolant Temperature**:
+   - Normal operating: 176–203°F (80–95°C, thermostat range)
+   - Overheat warning: > 230°F
+   - Note if coolant temp never reaches thermostat opening (176°F)
+
+6. **Module Voltage**:
+   - Normal: 13.5–14.5V while running
+   - Low voltage warning: < 12.5V while running
+   - Flag voltage drops during high electrical load
 
 `;

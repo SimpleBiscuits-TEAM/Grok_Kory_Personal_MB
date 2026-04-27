@@ -3195,3 +3195,11 @@
 - [x] Updated Home.tsx to use wp8ToDuramaxData instead of wp8ToCSV + parseCSV
 - [x] Added 5 new tests for wp8ToDuramaxData (synthetic + real V4 file + processData compatibility)
 - [x] Test with the provided WP8 file (1271 tests passed)
+
+## Honda Talon Service Manual & Oil Temperature Enhancement
+- [ ] Store Honda Talon 2020 service manual in Knox knowledge base
+- [ ] Extract oil temp voltage-to-temperature conversion table from TalonOilTempCalforPPEI spreadsheet
+- [ ] Add oil temperature voltage-to-temp conversion function (lookup/interpolation)
+- [ ] Add computed Oil Temperature (°F) channel to Honda Talon Tuner datalog viewer
+- [ ] Enhance Honda Talon health report with Talon-specific checks (AFR, DCT clutch, ignition timing, oil temp)
+- [ ] Write tests for oil temp conversion and Talon health report
