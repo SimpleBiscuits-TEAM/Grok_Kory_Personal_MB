@@ -26,13 +26,97 @@ import {
   STANDARD_PIDS,
   GM_EXTENDED_PIDS,
   getPidsForVehicle,
+  buildPersistedScanAutoPreset,
   type FuelType,
   type PIDManufacturer,
 } from './obdConnection';
-import { decodeVinNhtsa } from './universalVinDecoder';
+import { parseOBDResponse } from 'obd-utils';
+import { decodeVinLocal, decodeVinNhtsa } from './universalVinDecoder';
+import {
+  DATALOGGER_OBD_PHYSICAL_TX,
+  DATALOGGER_STANDARD_BITMASK_PIDS,
+  ISO_TP_FLOW_CONTROL_CTS_PADDED,
+} from './dataloggerVehicleScanProtocol';
 import { type SupportedProtocol, ALL_PROTOCOLS, UDS_SERVICES, J1939_PGNS } from './protocolDetection';
+import {
+  CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS,
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
+  CAN_ISO_TP_RX_WAIT_FLOOR_MS,
+  CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+  CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_UDS_POST_SESSION_SETTLE_MS,
+  CAN_UDS_PRE_TX_SETTLE_MS,
+} from './canTransportTiming';
 
 type EventCallback = (event: ConnectionEvent) => void;
+
+/** Swap localhost ↔ 127.0.0.1 so we can try both (Windows often prefers ::1 for "localhost"). */
+function alternateLocalhostBridgeUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'localhost') {
+      u.hostname = '127.0.0.1';
+    } else if (u.hostname === '127.0.0.1') {
+      u.hostname = 'localhost';
+    } else {
+      return null;
+    }
+    // Avoid trailing slash from URL serialization (breaks WebSocket string equality)
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Parse CAN arbitration ID from bridge WebSocket JSON.
+ * `parseInt("7E8", 10)` is 7 — breaks functional 0x7DF / 0x7E8 matching.
+ */
+export function parseWsCanArbId(raw: unknown): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw >>> 0;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (s.startsWith('0x') || s.startsWith('0X')) return parseInt(s, 16) >>> 0;
+    if (/^[0-9]+$/.test(s)) return parseInt(s, 10) >>> 0;
+    return parseInt(s, 16) >>> 0;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n >>> 0 : 0;
+}
+
+/** Normalize `data` from bridge JSON — some builds send string nibbles; PCI math must be numeric. */
+export function normalizeBridgeCanDataBytes(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x: unknown) => {
+    if (typeof x === 'number' && Number.isFinite(x)) return x & 0xff;
+    if (typeof x === 'string') {
+      const s = x.trim();
+      const n = /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+      return Number.isFinite(n) ? n & 0xff : 0;
+    }
+    return 0;
+  });
+}
+
+/**
+ * Default bridge WebSocket URLs. Prefer 127.0.0.1 first: on some Windows setups
+ * `localhost` resolves to IPv6 while the bridge listens on IPv4 only, so wss/ws
+ * to "localhost" never connects and live data / PID lists do not populate.
+ */
+export function defaultBridgeWebSocketCandidates(
+  secure = 'wss://127.0.0.1:8766',
+  insecure = 'ws://127.0.0.1:8765'
+): string[] {
+  const out: string[] = [];
+  for (const base of [secure, insecure]) {
+    if (!out.includes(base)) out.push(base);
+    const alt = alternateLocalhostBridgeUrl(base);
+    if (alt && !out.includes(alt)) out.push(alt);
+  }
+  return out;
+}
 
 // ─── Bridge Protocol Types ──────────────────────────────────────────────────
 
@@ -64,6 +148,73 @@ interface BridgeError {
   message: string;
 }
 
+/**
+ * NHTSA sometimes labels HD diesels as gasoline; WMI + engine text still identify diesel.
+ */
+function applyPcanDieselFuelReconciliation(info: VehicleInfo): void {
+  const vin = info.vin;
+  if (vin && vin.length === 17) {
+    const local = decodeVinLocal(vin);
+    if (local.fuelType === 'diesel') {
+      info.fuelType = 'diesel';
+    }
+  }
+  const blob = `${info.engineType ?? ''} ${info.model ?? ''} ${info.make ?? ''}`.toLowerCase();
+  if (/duramax|\bdiesel\b|\bl5p\b|\blml\b|\bl5d\b|\blz0\b|\blm2\b/.test(blob)) {
+    info.fuelType = 'diesel';
+  }
+}
+
+/**
+ * Mode 0x22 catalog for PCAN: must not rely on `universal` alone (no extended PIDs) or on a
+ * single wrong fuel filter that drops all GM diesel DIDs.
+ */
+function extendedMode22PidsForPcanVehicle(info: VehicleInfo): PIDDefinition[] {
+  const vin = info.vin;
+  let mfr: PIDManufacturer = info.manufacturer ?? 'universal';
+  let fuel: FuelType = info.fuelType ?? 'any';
+
+  if (vin && vin.length === 17) {
+    const local = decodeVinLocal(vin);
+    if (mfr === 'universal' && local.manufacturer !== 'universal') {
+      mfr = local.manufacturer;
+    }
+    if (local.fuelType === 'diesel') {
+      fuel = 'diesel';
+    }
+  }
+
+  const text = `${info.make ?? ''} ${info.model ?? ''} ${info.engineType ?? ''}`.toLowerCase();
+  if (mfr === 'universal' && /chev|gmc|cadillac|buick|silverado|sierra/.test(text)) {
+    mfr = 'gm';
+  }
+  if (/duramax|\bdiesel\b|\bl5p\b|\blml\b|\bl5d\b|\blz0\b|\blm2\b/.test(text)) {
+    fuel = 'diesel';
+  }
+
+  let list = getPidsForVehicle(mfr, fuel).filter((p) => (p.service ?? 0x01) === 0x22);
+  if (mfr === 'gm' && list.length < 12 && fuel !== 'any') {
+    list = getPidsForVehicle('gm', 'any').filter((p) => (p.service ?? 0x01) === 0x22);
+  }
+  if (list.length === 0 && vin && vin.length === 17 && decodeVinLocal(vin).manufacturer === 'gm') {
+    list = getPidsForVehicle('gm', 'any').filter((p) => (p.service ?? 0x01) === 0x22);
+  }
+  return list;
+}
+
+/** GM_EXTENDED_PIDS `ecuHeader` (e.g. "7E0") → physical CAN TX id for UDS. */
+function parsePidEcuTxId(header?: string): number {
+  if (!header?.trim()) return 0x7e0;
+  const n = parseInt(header.trim().replace(/^0x/i, ''), 16);
+  return Number.isFinite(n) && n > 0 ? n : 0x7e0;
+}
+
+/** Do not send GM E41-style 0x10 0x03 on 0x7E0 when we already know the vehicle is non-GM. */
+const NON_GM_FOR_GMLAN_SESSION = new Set<PIDManufacturer>([
+  'ford', 'chrysler', 'toyota', 'honda', 'nissan', 'hyundai', 'bmw',
+  'canam', 'seadoo', 'polaris', 'kawasaki',
+]);
+
 // ─── PCAN Connection Class ──────────────────────────────────────────────────
 
 // ─── Multi-Protocol Types ────────────────────────────────────────────────────
@@ -91,6 +242,183 @@ export interface UDSResponse {
   timestamp: number;
 }
 
+const UDS_NRC_CODES: Record<number, string> = {
+  0x10: 'General Reject',
+  0x11: 'Service Not Supported',
+  0x12: 'Sub-Function Not Supported',
+  0x13: 'Incorrect Message Length / Invalid Format',
+  0x14: 'Response Too Long',
+  0x21: 'Busy — Repeat Request',
+  0x22: 'Conditions Not Correct',
+  0x24: 'Request Sequence Error',
+  0x25: 'No Response From Sub-Net Component',
+  0x26: 'Failure Prevents Execution',
+  0x31: 'Request Out Of Range',
+  0x33: 'Security Access Denied',
+  0x35: 'Invalid Key',
+  0x36: 'Exceeded Number Of Attempts',
+  0x37: 'Required Time Delay Not Expired',
+  0x70: 'Upload/Download Not Accepted',
+  0x71: 'Transfer Data Suspended',
+  0x72: 'General Programming Failure',
+  0x73: 'Wrong Block Sequence Counter',
+  0x78: 'Request Correctly Received — Response Pending',
+  0x7e: 'Sub-Function Not Supported In Active Session',
+  0x7f: 'Service Not Supported In Active Session',
+};
+
+function decodeNRC(nrc: number): string {
+  return UDS_NRC_CODES[nrc] || `Unknown NRC (0x${nrc.toString(16).toUpperCase()})`;
+}
+
+/** ISO-TP first-frame → {@link UDSResponse} (shared by PCAN bridge and V-OP USB bridge). */
+export function parseIsoTpDataToUdsResponse(
+  service: number,
+  subFunction: number | undefined,
+  rawData: number[],
+): UDSResponse | null {
+  const pciType = (rawData[0] >> 4) & 0x0f;
+  let payload: number[];
+
+  if (pciType === 0) {
+    const length = rawData[0] & 0x0f;
+    payload = rawData.slice(1, 1 + length);
+  } else if (pciType === 1) {
+    const totalLen = ((rawData[0] & 0x0f) << 8) | rawData[1];
+    payload = rawData.slice(2);
+    console.log(`[UDS] Multi-frame response (${totalLen} bytes) — partial first frame`);
+  } else {
+    payload = rawData.slice(1);
+  }
+
+  if (payload.length === 0) return null;
+
+  const responseServiceId = payload[0];
+
+  if (responseServiceId === 0x7f) {
+    const rejectedService = payload.length > 1 ? payload[1] : service;
+    const nrc = payload.length > 2 ? payload[2] : 0;
+    return {
+      service: rejectedService,
+      serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
+      subFunction,
+      data: payload,
+      positiveResponse: false,
+      nrc,
+      nrcName: decodeNRC(nrc),
+      isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId === service + 0x40) {
+    return {
+      service,
+      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId >= 0x40 && responseServiceId !== 0x7f) {
+    const actualService = responseServiceId - 0x40;
+    console.log(
+      `[UDS] parseIsoTpDataToUdsResponse: positive 0x${responseServiceId.toString(16)} for svc 0x${actualService.toString(16)} (expected 0x${service.toString(16)})`,
+    );
+    return {
+      service: actualService,
+      serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  console.log(
+    `[UDS] parseIsoTpDataToUdsResponse: unexpected 0x${responseServiceId.toString(16)} for svc 0x${service.toString(16)} — raw: [${payload.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`,
+  );
+  return {
+    service,
+    serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+    subFunction,
+    data: payload,
+    positiveResponse: false,
+    nrc: undefined,
+    nrcName: 'unparseable response',
+    isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+    timestamp: Date.now(),
+  };
+}
+
+/** Parse a full reassembled UDS payload (no ISO-TP PCI) — used after multi-frame ISO-TP RX from ECU. */
+export function parseUdsDiagnosticPayload(
+  service: number,
+  subFunction: number | undefined,
+  payload: number[],
+): UDSResponse | null {
+  if (payload.length === 0) return null;
+
+  const responseServiceId = payload[0];
+
+  if (responseServiceId === 0x7f) {
+    const rejectedService = payload.length > 1 ? payload[1] : service;
+    const nrc = payload.length > 2 ? payload[2] : 0;
+    return {
+      service: rejectedService,
+      serviceName: UDS_SERVICES[rejectedService]?.name || `Service 0x${rejectedService.toString(16)}`,
+      subFunction,
+      data: payload,
+      positiveResponse: false,
+      nrc,
+      nrcName: decodeNRC(nrc),
+      isFlashRelated: UDS_SERVICES[rejectedService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId === service + 0x40) {
+    return {
+      service,
+      serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  if (responseServiceId >= 0x40 && responseServiceId !== 0x7f) {
+    const actualService = responseServiceId - 0x40;
+    return {
+      service: actualService,
+      serviceName: UDS_SERVICES[actualService]?.name || `Service 0x${actualService.toString(16)}`,
+      subFunction,
+      data: payload.slice(1),
+      positiveResponse: true,
+      isFlashRelated: UDS_SERVICES[actualService]?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
+  return {
+    service,
+    serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+    subFunction,
+    data: payload,
+    positiveResponse: false,
+    nrc: undefined,
+    nrcName: 'unparseable response',
+    isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+    timestamp: Date.now(),
+  };
+}
+
 export interface BusMonitorFrame {
   arbId: number;
   arbIdHex: string;
@@ -110,11 +438,11 @@ export interface BusMonitorFrame {
 }
 
 export interface PCANConnectionConfig {
-  bridgeUrl?: string;       // Default: auto-detect (wss://localhost:8766 then ws://localhost:8765)
-  bridgeUrlSecure?: string; // Default: wss://localhost:8766
-  bridgeUrlInsecure?: string; // Default: ws://localhost:8765
+  bridgeUrl?: string;       // Tried first; then wss/ws candidates (127.0.0.1 before localhost)
+  bridgeUrlSecure?: string; // Default: wss://127.0.0.1:8766
+  bridgeUrlInsecure?: string; // Default: ws://127.0.0.1:8765
   reconnectAttempts?: number; // Default: 3
-  requestTimeout?: number;   // Default: 3000ms
+  requestTimeout?: number;   // Default: CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS
 }
 
 export class PCANConnection {
@@ -128,6 +456,8 @@ export class PCANConnection {
   private bridgeUrl: string;
   private bridgeUrlSecure: string;
   private bridgeUrlInsecure: string;
+  /** When set, connect() tries this URL before secure/insecure candidates. */
+  private userSpecifiedBridgeUrl: string | null;
   private reconnectAttempts: number;
   private requestTimeout: number;
   private requestId = 0;
@@ -140,13 +470,28 @@ export class PCANConnection {
   private monitorActive = false;
   private monitorCallback: ((frame: BusMonitorFrame) => void) | null = null;
   private monitorFrameHandler: ((event: MessageEvent) => void) | null = null;
+  private udsResponseListener: ((msg: Record<string, unknown>) => void) | null = null;
+  /**
+   * Extra `message` listener: duplicates `can_frame`/`bus_frame` to {@link udsResponseListener}.
+   * Primary path is {@link PCANConnection.openWebSocket}'s `onmessage`; this is a cheap backup
+   * if a future refactor ever routes frames differently.
+   */
+  private udsBusSidecarHandler: ((event: MessageEvent) => void) | null = null;
+  /** Clears the active {@link sendUDSviaRawCAN} first-frame wait (user abort). */
+  private udsRawWaitAbort: (() => void) | null = null;
+  /** Set by {@link cancelInFlightDiagnostics} so {@link receiveIsoTpMultiFrameFromEcu} exits quickly. */
+  private isoTpRxAbortRequested = false;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  /** Per ECM TX: last time we sent 0x10 extended session for GM live UDS 0x22 */
+  private gmLiveSessionAtByTx = new Map<number, number>();
 
   constructor(config: PCANConnectionConfig = {}) {
-    this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://localhost:8766';
-    this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://localhost:8765';
-    this.bridgeUrl = config.bridgeUrl ?? this.bridgeUrlSecure; // Start with secure
+    this.bridgeUrlSecure = config.bridgeUrlSecure ?? 'wss://127.0.0.1:8766';
+    this.bridgeUrlInsecure = config.bridgeUrlInsecure ?? 'ws://127.0.0.1:8765';
+    this.userSpecifiedBridgeUrl = config.bridgeUrl ?? null;
+    this.bridgeUrl = this.userSpecifiedBridgeUrl ?? this.bridgeUrlSecure;
     this.reconnectAttempts = config.reconnectAttempts ?? 3;
-    this.requestTimeout = config.requestTimeout ?? 3000;
+    this.requestTimeout = config.requestTimeout ?? CAN_BRIDGE_DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   // ─── Event System (identical to OBDConnection) ────────────────────────────
@@ -181,15 +526,13 @@ export class PCANConnection {
 
   /**
    * Check if the PCAN bridge is running.
-   * Tries wss://localhost:8766 first (works from HTTPS pages),
-   * then falls back to ws://localhost:8765.
+   * Tries wss:// on 127.0.0.1 and localhost, then ws:// (same hosts).
    * Returns { available, url } with the working URL.
    */
   static async isBridgeAvailable(
-    secureUrl = 'wss://localhost:8766',
-    insecureUrl = 'ws://localhost:8765'
+    secureUrl = 'wss://127.0.0.1:8766',
+    insecureUrl = 'ws://127.0.0.1:8765'
   ): Promise<{ available: boolean; url: string }> {
-    // Try secure first (works from HTTPS pages without mixed content issues)
     const tryUrl = (url: string): Promise<boolean> => {
       return new Promise((resolve) => {
         try {
@@ -226,27 +569,27 @@ export class PCANConnection {
       });
     };
 
-    // Try wss:// first
-    if (await tryUrl(secureUrl)) {
-      return { available: true, url: secureUrl };
-    }
-    // Fall back to ws://
-    if (await tryUrl(insecureUrl)) {
-      return { available: true, url: insecureUrl };
+    const candidates = defaultBridgeWebSocketCandidates(secureUrl, insecureUrl);
+    for (const url of candidates) {
+      if (await tryUrl(url)) {
+        return { available: true, url };
+      }
     }
     return { available: false, url: insecureUrl };
   }
 
   // ─── WebSocket Connection ─────────────────────────────────────────────────
 
-  async connect(): Promise<boolean> {
+  async connect(options?: { skipVehicleInit?: boolean }): Promise<boolean> {
     try {
       this.setState('connecting');
       this.emit('log', null, 'Connecting to PCAN-USB bridge...');
 
-      // Try wss:// (secure) first, then ws:// (insecure)
-      // HTTPS pages block ws:// due to mixed content, so wss:// is preferred
-      const urlsToTry = [this.bridgeUrlSecure, this.bridgeUrlInsecure];
+      // Try user URL first, then wss/ws with 127.0.0.1 before localhost (Windows IPv6 localhost)
+      const candidates = defaultBridgeWebSocketCandidates(this.bridgeUrlSecure, this.bridgeUrlInsecure);
+      const urlsToTry = this.userSpecifiedBridgeUrl
+        ? [...new Set([this.userSpecifiedBridgeUrl, ...candidates])]
+        : candidates;
       let connected = false;
 
       for (const url of urlsToTry) {
@@ -286,8 +629,8 @@ export class PCANConnection {
           '  pip install cryptography\n' +
           '  (then restart the bridge — it auto-generates a certificate)\n\n' +
           'First time with TLS? Accept the certificate:\n' +
-          '  1. Open https://localhost:8766 in Chrome\n' +
-          '  2. Click Advanced → Proceed to localhost\n' +
+          '  1. Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome\n' +
+          '  2. Click Advanced → Proceed\n' +
           '  3. Then retry connecting here'
         );
         this.setState('disconnected');
@@ -296,6 +639,12 @@ export class PCANConnection {
 
       this.emit('log', null, 'Bridge connected. Initializing vehicle communication...');
       this.setState('initializing');
+
+      if (options?.skipVehicleInit) {
+        this.setState('ready');
+        this.emit('log', null, 'PCAN-USB bridge ready (vehicle init skipped — use ECU Scan or Datalogger to identify vehicle).');
+        return true;
+      }
 
       // Initialize: read VIN, detect vehicle, scan supported PIDs
       await this.initialize();
@@ -336,21 +685,29 @@ export class PCANConnection {
               this.emit('log', null, 
                 `Bridge connected: ${info.adapter} on ${info.channel} @ ${info.bitrate} bps (v${info.version})`
               );
+              // Start application-level heartbeat (backup for protocol-level ping/pong)
+              this.startHeartbeat();
               resolve();
               return;
             }
 
-            // Route responses to pending requests
+            // Route responses to pending requests (sendRequest / awaited bridge ops)
             if (msg.id && this.pendingRequests.has(msg.id)) {
               const pending = this.pendingRequests.get(msg.id)!;
               clearTimeout(pending.timer);
               this.pendingRequests.delete(msg.id);
-              
+
               if (msg.type === 'error') {
                 pending.reject(new Error((msg as unknown as BridgeError).message));
               } else {
                 pending.resolve(msg);
               }
+              return;
+            }
+
+            // Fire-and-forget can_send responses: no pending id — ISO-TP FF etc. (sendUDSviaRawCAN)
+            if (this.udsResponseListener) {
+              this.udsResponseListener(msg as Record<string, unknown>);
             }
           } catch {
             // ignore parse errors
@@ -363,6 +720,7 @@ export class PCANConnection {
         };
 
         this.ws.onclose = () => {
+          this.stopHeartbeat();
           // If we were connected and logging, emit an error
           if (this.state === 'logging' || this.state === 'ready') {
             this.emit('error', null, 'Bridge connection lost. Reconnect to continue.');
@@ -381,7 +739,7 @@ export class PCANConnection {
     return `req_${++this.requestId}`;
   }
 
-  private sendRequest(msg: BridgeMessage): Promise<BridgeMessage> {
+  private sendRequest(msg: BridgeMessage, timeoutOverrideMs?: number): Promise<BridgeMessage> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
@@ -391,10 +749,11 @@ export class PCANConnection {
       const id = msg.id || this.nextRequestId();
       msg.id = id;
 
+      const deadlineMs = timeoutOverrideMs ?? this.requestTimeout;
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`Request timeout: ${msg.type}`));
-      }, this.requestTimeout);
+      }, deadlineMs);
 
       this.pendingRequests.set(id, { resolve, reject, timer });
       this.ws.send(JSON.stringify(msg));
@@ -404,21 +763,43 @@ export class PCANConnection {
   // ─── Vehicle Initialization ───────────────────────────────────────────────
 
   private async initialize(): Promise<void> {
-    // 1. Read VIN
-    this.emit('log', null, 'Reading VIN...');
+    // 1. VIN — same ISO-TP / PDU as V-OP (`09 02` on 0x7E0); no TesterPresent / session before bitmask scan.
+    this.emit('log', null, 'Reading VIN (ISO-TP 7E0/7E8)…');
     try {
-      const vinResponse = await this.sendRequest({
-        type: 'obd_request',
-        mode: 0x09,
-        pid: 0x02,
-      }) as unknown as BridgeOBDResponse;
-
-      if (vinResponse.data && vinResponse.data.length >= 17) {
-        const vin = String.fromCharCode(...vinResponse.data.slice(0, 17));
+      const vinUds = await this.sendUDSRequest(
+        0x09,
+        0x02,
+        undefined,
+        DATALOGGER_OBD_PHYSICAL_TX,
+        CAN_DATALOGGER_VIN_TIMEOUT_MS,
+      );
+      let vin: string | null = null;
+      if (vinUds?.positiveResponse && vinUds.data?.length) {
+        const full = [0x49, ...vinUds.data];
+        if (full.length >= 3 + 17 && full[0] === 0x49 && full[1] === 0x02) {
+          const vinChars = full.slice(3, 3 + 17);
+          if (vinChars.length >= 17) {
+            vin = String.fromCharCode(...vinChars);
+          }
+        }
+        if (!vin) {
+          vin = this.parseVinFromMode0902(vinUds.data);
+        }
+      }
+      if (vin) {
         this.vehicleInfo.vin = vin;
         this.emit('log', null, `VIN: ${vin}`);
 
-        // Decode VIN via NHTSA
+        // Always seed from local WMI so a failed NHTSA fetch does not leave manufacturer unset.
+        const localVin = decodeVinLocal(vin);
+        this.vehicleInfo.manufacturer = localVin.manufacturer;
+        this.vehicleInfo.make = localVin.make;
+        this.vehicleInfo.year = localVin.year;
+        if (localVin.fuelType !== 'any') {
+          this.vehicleInfo.fuelType = localVin.fuelType;
+        }
+
+        // Decode VIN via NHTSA (richer model/engine; may mis-label fuel on some HD trucks)
         try {
           const decoded = await decodeVinNhtsa(vin);
           if (decoded) {
@@ -439,6 +820,8 @@ export class PCANConnection {
         } catch {
           this.emit('log', null, 'VIN decode failed — continuing with basic info');
         }
+
+        applyPcanDieselFuelReconciliation(this.vehicleInfo);
       }
     } catch (e) {
       this.emit('log', null, 'VIN read failed — vehicle may not support Mode 09. Continuing...');
@@ -448,8 +831,8 @@ export class PCANConnection {
     this.vehicleInfo.protocolNumber = '6';
     this.emit('vehicleInfo', this.vehicleInfo);
 
-    // 2. Scan supported standard PIDs using Mode 01 PID 00/20/40/60
-    this.emit('log', null, 'Scanning supported PIDs...');
+    // 2. Mode 01 bitmasks only — same order / PDUs as V-OP (no ELM probe sweep, no 0x7DF here).
+    this.emit('log', null, 'Scanning supported PIDs…');
     await this.scanSupportedStandardPids();
 
     const stdCount = this.getAvailablePids().length;
@@ -462,60 +845,274 @@ export class PCANConnection {
   }
 
   private async scanSupportedStandardPids(): Promise<void> {
-    // Read the PID support bitmasks: PIDs 0x00, 0x20, 0x40, 0x60
-    const bitmaskPids = [0x00, 0x20, 0x40, 0x60];
-
-    for (const bitmaskPid of bitmaskPids) {
+    for (const bitmaskPid of DATALOGGER_STANDARD_BITMASK_PIDS) {
       try {
-        const response = await this.sendRequest({
-          type: 'obd_request',
-          mode: 0x01,
-          pid: bitmaskPid,
-        }) as unknown as BridgeOBDResponse;
-
-        if (response.data && response.data.length >= 4) {
-          // Decode 4-byte bitmask
-          const bytes = response.data;
+        const uds = await this.sendUDSRequest(
+          0x01,
+          bitmaskPid,
+          undefined,
+          DATALOGGER_OBD_PHYSICAL_TX,
+          CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+        );
+        if (uds?.positiveResponse && uds.data && uds.data.length >= 2) {
+          if (uds.data[0] !== bitmaskPid) continue;
+          const bytes = uds.data.slice(1);
+          if (bytes.length < 4) continue;
           for (let byteIdx = 0; byteIdx < 4; byteIdx++) {
             for (let bit = 7; bit >= 0; bit--) {
               if (bytes[byteIdx] & (1 << bit)) {
-                const pid = bitmaskPid + (byteIdx * 8) + (7 - bit) + 1;
+                const pid = bitmaskPid + byteIdx * 8 + (7 - bit) + 1;
                 this.supportedPids.add(pid);
               }
             }
           }
         }
       } catch {
-        // If a bitmask PID fails, just skip it
         break;
       }
     }
   }
 
+  /**
+   * J1979 Mode 09 PID 02: data is [count][17× ASCII VIN]. Count is usually 0x01.
+   * Skip non-printable / count bytes so position 1 is WMI (e.g. 1, 4, 5, W…).
+   */
+  private parseVinFromMode0902(data: number[] | undefined): string | null {
+    if (!data?.length) return null;
+    let i = 0;
+    while (i < data.length && (data[i] < 0x20 || data[i] > 0x7e)) {
+      i++;
+    }
+    if (data.length - i < 17) return null;
+    return String.fromCharCode(...data.slice(i, i + 17));
+  }
+
+  /**
+   * GM E41 / L5P: extended diagnostic session on the physical ECM is usually required before
+   * UDS ReadDataByIdentifier (0x22) returns live parameters. Cached ~8s per request address.
+   */
+  private async ensureGmLiveDataSessionForTx(ecmTx: number): Promise<void> {
+    // 0x7E0 = ECM/PCM, 0x7E1 = Allison/6L80 TCM (older), 0x7E2 = T87A/T93 10-speed TCM (2019+)
+    if (ecmTx !== 0x7e0 && ecmTx !== 0x7e1 && ecmTx !== 0x7e2) return;
+    const mfr = this.vehicleInfo.manufacturer;
+    if (mfr && NON_GM_FOR_GMLAN_SESSION.has(mfr)) return;
+    const now = Date.now();
+    const last = this.gmLiveSessionAtByTx.get(ecmTx) ?? 0;
+    if (now - last < 12000) return;
+
+    try {
+      await this.sendUDSRequest(0x3e, 0x00, [], ecmTx, 2500);
+    } catch {
+      // ignore
+    }
+    let extendedOk = false;
+    try {
+      const r = await this.sendUDSRequest(0x10, 0x03, [], ecmTx, 4000);
+      extendedOk = !!r?.positiveResponse;
+    } catch {
+      // ignore
+    }
+    if (!extendedOk) {
+      try {
+        await this.sendUDSRequest(0x10, 0x01, [], ecmTx, 3000);
+      } catch {
+        // ignore
+      }
+    }
+    this.gmLiveSessionAtByTx.set(ecmTx, Date.now());
+    await new Promise(r => setTimeout(r, CAN_UDS_POST_SESSION_SETTLE_MS));
+  }
+
   // ─── PID Reading ──────────────────────────────────────────────────────────
+
+  /** ELM327-style hex parse (`obd-utils`) when our formula fails or returns non-finite. */
+  private decodePidWithElmUtils(mode: number, pidNum: number, data: number[]): number | null {
+    if (mode !== 0x01 || !data.length) return null;
+    const svc = (mode + 0x40).toString(16).padStart(2, '0');
+    const p = pidNum.toString(16).padStart(2, '0');
+    const body = data.map((b) => b.toString(16).padStart(2, '0')).join('');
+    const parsed = parseOBDResponse(svc + p + body);
+    const v = parsed.value;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v);
+    return null;
+  }
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
       const mode = pid.service || 0x01;
-      const response = await this.sendRequest({
-        type: 'obd_request',
-        mode,
-        pid: pid.pid,
-      }) as unknown as BridgeOBDResponse;
-
-      if (response.data && response.data.length > 0) {
-        const value = pid.formula(response.data);
+      // Mode 0x22 = UDS ReadDataByIdentifier — must use UDS/ISO-TP path (`uds_request` / raw CAN).
+      // `obd_request` is for SAE J1979 modes 01/03/09; many bridges mishandle 0x22 there.
+      if (mode === 0x22) {
+        const tx = parsePidEcuTxId(pid.ecuHeader);
+        await this.ensureGmLiveDataSessionForTx(tx);
+        const uds = await this.readUDSDID(pid.pid, tx);
+        if (!uds?.positiveResponse || !uds.data?.length) {
+          // If UDS returned an NRC, propagate it so the monitoring loop can permanently blacklist this DID.
+          if (uds && !uds.positiveResponse && uds.nrc) {
+            return {
+              pid: pid.pid, name: pid.name, shortName: pid.shortName,
+              value: NaN, unit: pid.unit, rawBytes: [], timestamp: Date.now(),
+              nrc: uds.nrc,
+            };
+          }
+          // Fallback: bridges that only implement OBD framing (fixed reference bridge strips 2-byte DID).
+          try {
+            const response = await this.sendRequest(
+              {
+                type: 'obd_request',
+                mode: 0x22,
+                pid: pid.pid,
+              },
+              CAN_LIVE_UDS_DID_TIMEOUT_MS,
+            ) as unknown as BridgeOBDResponse;
+            if (response.data && response.data.length > 0) {
+              // NRC detection: if first byte is 0x7F, this is a UDS negative response, not data.
+              // Example: DID 0x1638 returns [0x7F, 0x22, NRC] which was being parsed as value 32546.
+              if (response.data[0] === 0x7F) {
+                const nrc = response.data.length >= 3 ? response.data[2] : response.data[1] ?? 0;
+                console.warn(`[PCAN] Mode 22 DID 0x${pid.pid.toString(16).toUpperCase()} NRC 0x${nrc.toString(16).toUpperCase()} in obd_request fallback — not data`);
+                return {
+                  pid: pid.pid, name: pid.name, shortName: pid.shortName,
+                  value: NaN, unit: pid.unit, rawBytes: [], timestamp: Date.now(),
+                  nrc,
+                };
+              }
+              const value = pid.formula(response.data);
+              return {
+                pid: pid.pid,
+                name: pid.name,
+                shortName: pid.shortName,
+                value,
+                unit: pid.unit,
+                rawBytes: response.data,
+                timestamp: Date.now(),
+              };
+            }
+          } catch {
+            // ignore
+          }
+          return null;
+        }
+        // Positive 0x62: [DID_hi, DID_lo, ...value] — formulas expect value bytes only (ELM parity).
+        const payload = uds.data.length >= 2 ? uds.data.slice(2) : uds.data;
+        if (payload.length === 0) return null;
+        const value = pid.formula(payload);
         return {
           pid: pid.pid,
           name: pid.name,
           shortName: pid.shortName,
           value,
           unit: pid.unit,
-          rawBytes: response.data,
+          rawBytes: payload,
           timestamp: Date.now(),
         };
       }
-      return null;
+
+      // SAE J1979 Mode 01 — same ISO-TP path as V-OP (`01 xx` on physical TX), not `obd_request`.
+      if (mode === 0x01) {
+        const tx = parsePidEcuTxId(pid.ecuHeader);
+        const uds = await this.sendUDSRequest(
+          0x01,
+          pid.pid,
+          undefined,
+          tx,
+          CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+        );
+        if (!uds?.positiveResponse || !uds.data?.length) return null;
+        if (uds.data[0] !== pid.pid) return null;
+        const raw = uds.data.slice(1);
+        if (raw.length === 0) return null;
+        try {
+          const value = pid.formula(raw);
+          if (typeof value === 'number' && !Number.isFinite(value)) {
+            const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+            if (alt === null) return null;
+            return {
+              pid: pid.pid,
+              name: pid.name,
+              shortName: pid.shortName,
+              value: alt,
+              unit: pid.unit,
+              rawBytes: raw,
+              timestamp: Date.now(),
+            };
+          }
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        } catch {
+          const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+          if (alt === null) return null;
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value: alt,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        }
+      }
+
+      const response = await this.sendRequest(
+        {
+          type: 'obd_request',
+          mode,
+          pid: pid.pid,
+        },
+        CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+      ) as unknown as BridgeOBDResponse;
+
+      const raw = response.data;
+      if (!raw?.length) return null;
+      // ISO 15765 negative response passed through as data
+      if (raw[0] === 0x7f) return null;
+
+      try {
+        const value = pid.formula(raw);
+        if (typeof value === 'number' && !Number.isFinite(value)) {
+          const alt = this.decodePidWithElmUtils(mode, pid.pid, raw);
+          if (alt === null) return null;
+          return {
+            pid: pid.pid,
+            name: pid.name,
+            shortName: pid.shortName,
+            value: alt,
+            unit: pid.unit,
+            rawBytes: raw,
+            timestamp: Date.now(),
+          };
+        }
+        return {
+          pid: pid.pid,
+          name: pid.name,
+          shortName: pid.shortName,
+          value,
+          unit: pid.unit,
+          rawBytes: raw,
+          timestamp: Date.now(),
+        };
+      } catch {
+        const alt = mode === 0x01 ? this.decodePidWithElmUtils(mode, pid.pid, raw) : null;
+        if (alt === null) return null;
+        return {
+          pid: pid.pid,
+          name: pid.name,
+          shortName: pid.shortName,
+          value: alt,
+          unit: pid.unit,
+          rawBytes: raw,
+          timestamp: Date.now(),
+        };
+      }
     } catch {
       return null;
     }
@@ -616,7 +1213,7 @@ export class PCANConnection {
 
   async startLogging(
     pids: PIDDefinition[],
-    intervalMs = 200,
+    intervalMs = 0,
     onData?: (readings: PIDReading[]) => void
   ): Promise<LogSession> {
     if (this.state !== 'ready') {
@@ -656,13 +1253,27 @@ export class PCANConnection {
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${filteredPids.length}/${pids.length} PIDs)`);
+    this.emit(
+      'log',
+      null,
+      `Logging started: ${filteredPids.map(p => p.shortName).join(', ')} @ ${intervalMs > 0 ? `${intervalMs}ms` : 'max rate'} (${filteredPids.length}/${pids.length} PIDs)`,
+    );
 
     // Failure tracking with soft-disable
     const pidFailCount = new Map<number, number>();
     const pidPausedUntilLoop = new Map<number, number>();
-    const MAX_CONSECUTIVE_FAILS = 8;
-    const RETRY_INTERVAL = 20;
+    const pidNrcCount = new Map<number, number>(); // Track NRC responses for permanent blacklisting
+    const pidBlacklisted = new Set<number>(); // Permanently blacklisted DIDs (NRC 0x31 = Request Out Of Range)
+    const MAX_CONSECUTIVE_FAILS = 25; // was 8 — too aggressive, PIDs get paused after brief batch timeouts
+    const RETRY_INTERVAL = 10; // was 20 — retry sooner after pause
+    const NRC_BLACKLIST_THRESHOLD = 2; // Permanently blacklist after 2 NRC 0x31 responses (DID doesn't exist on this ECU)
+    // DDDI periodic PIDs (FRP_ACT, FRP_DES) come from 0x5E8 periodic frames,
+    // NOT from batch_read_dids. They should NEVER be paused by the fail counter
+    // because they're injected by wrapReadPids from the periodic cache.
+    const DDDI_EXEMPT_PIDS = new Set([
+      0x328A, 0x131F, 0x245D, // FRP_ACT, FRP_DES, FUEL_INJ_QTY
+      0xDD00, 0xDD02, 0xDD03, 0xDD04, 0xDD07, 0xDD08, // Virtual IOCTL-only DIDs (HPT Common DDDI)
+    ]);
     let activePids = [...filteredPids];
     let loopCount = 0;
 
@@ -685,18 +1296,48 @@ export class PCANConnection {
 
         try {
           const readings = await this.readPids(activePids);
-          const respondedPids = new Set(readings.map(r => r.pid));
+          // Separate NRC responses from valid data
+          const validReadings: PIDReading[] = [];
+          const nrcReadings: PIDReading[] = [];
+          for (const r of readings) {
+            if (r.nrc) {
+              nrcReadings.push(r);
+            } else {
+              validReadings.push(r);
+            }
+          }
+          const respondedPids = new Set(validReadings.map(r => r.pid));
 
-          for (const reading of readings) {
+          for (const reading of validReadings) {
             const arr = session.readings.get(reading.pid);
             if (arr) arr.push(reading);
             pidFailCount.set(reading.pid, 0);
+            pidNrcCount.set(reading.pid, 0); // Reset NRC count on success
           }
 
-          // Track failures
+          // Permanently blacklist DIDs that get NRC 0x31 (Request Out Of Range)
+          // These DIDs don't exist on this ECU and will NEVER work — stop wasting CAN bus bandwidth.
+          const newlyBlacklisted: string[] = [];
+          for (const r of nrcReadings) {
+            if (DDDI_EXEMPT_PIDS.has(r.pid)) continue;
+            const nrcHits = (pidNrcCount.get(r.pid) || 0) + 1;
+            pidNrcCount.set(r.pid, nrcHits);
+            if (nrcHits >= NRC_BLACKLIST_THRESHOLD && !pidBlacklisted.has(r.pid)) {
+              pidBlacklisted.add(r.pid);
+              const pidDef = activePids.find(p => p.pid === r.pid);
+              newlyBlacklisted.push(`${pidDef?.shortName || '0x' + r.pid.toString(16)} (NRC 0x${(r.nrc || 0).toString(16)})`);
+            }
+          }
+          if (newlyBlacklisted.length > 0) {
+            activePids = activePids.filter(p => !pidBlacklisted.has(p.pid));
+            this.emit('log', null, `Blacklisted unsupported DIDs: ${newlyBlacklisted.join(', ')} — permanently removed from poll`);
+          }
+
+          // Track timeout failures (exempt DDDI periodic PIDs — they come from 0x5E8, not batch)
           const newlyPaused: string[] = [];
           for (const pid of activePids) {
-            if (!respondedPids.has(pid.pid)) {
+            if (!respondedPids.has(pid.pid) && !nrcReadings.find(r => r.pid === pid.pid)) {
+              if (DDDI_EXEMPT_PIDS.has(pid.pid)) continue; // Never pause DDDI periodic PIDs
               const fails = (pidFailCount.get(pid.pid) || 0) + 1;
               pidFailCount.set(pid.pid, fails);
 
@@ -712,8 +1353,8 @@ export class PCANConnection {
             this.emit('log', null, `Paused non-responding PIDs: ${newlyPaused.join(', ')} (will retry)`);
           }
 
-          if (onData && readings.length > 0) {
-            onData(readings);
+          if (onData && validReadings.length > 0) {
+            onData(validReadings);
           }
         } catch (e) {
           if (this.loggingActive) {
@@ -777,14 +1418,30 @@ export class PCANConnection {
 
     const allPids: PIDDefinition[] = [];
     if (includeStandard) {
-      allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
+      // Filter out gasoline-only PIDs when vehicle is diesel (they will always fail
+      // and clutter the unsupported list — e.g. O2 sensors, lambda, EVAP, catalyst)
+      const vFuel = this.vehicleInfo.fuelType ?? 'any';
+      allPids.push(...STANDARD_PIDS.filter(p => {
+        if (p.pid <= 0x00 || p.pid === 0x20 || p.pid === 0x40 || p.pid === 0x60) return false;
+        const pFuel = p.fuelType ?? 'any';
+        if (pFuel === 'any' || vFuel === 'any') return true;
+        return pFuel === vFuel;
+      }));
     }
     if (includeExtended) {
-      const extPids = getPidsForVehicle(
-        this.vehicleInfo.manufacturer || 'universal',
-        this.vehicleInfo.fuelType || 'any'
-      ).filter(p => (p.service || 0x01) === 0x22);
-      allPids.push(...extPids);
+      allPids.push(...extendedMode22PidsForPcanVehicle(this.vehicleInfo));
+    }
+
+    // ── Pre-scan: establish extended diagnostic session for Mode 22 PIDs ──
+    // The ECU rejects Mode 22 reads (NRC 0x31) until an extended session is active.
+    // Force session setup now so the scan accurately reports supported extended PIDs.
+    if (includeExtended && allPids.some(p => (p.service || 0x01) === 0x22)) {
+      this.emit('log', null, 'Setting up extended diagnostic session for Mode 22 scan...');
+      // Reset the session cache so ensureGmLiveDataSessionForTx actually runs
+      this.gmLiveSessionAtByTx.delete(0x7E0);
+      try {
+        await this.ensureGmLiveDataSessionForTx(0x7E0);
+      } catch { /* ignore */ }
     }
 
     let current = 0;
@@ -815,9 +1472,23 @@ export class PCANConnection {
       options?.onProgress?.(current, total, pid, !!reading);
     }
 
+    const duration = Date.now() - startTime;
+    const autoPreset = buildPersistedScanAutoPreset(
+      this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+    );
+    if (autoPreset) {
+      this.emit(
+        'log',
+        null,
+        `Auto-generated preset "${autoPreset.name}" with ${autoPreset.pids.length} PIDs saved.`,
+      );
+    }
+
     return {
-      timestamp: Date.now(),
-      duration: Date.now() - startTime,
+      timestamp: startTime,
+      duration,
       vehicleInfo: this.vehicleInfo,
       standardSupported,
       extendedSupported,
@@ -825,6 +1496,7 @@ export class PCANConnection {
       extendedUnsupported,
       totalScanned: current,
       totalSupported: standardSupported.length + extendedSupported.length,
+      autoPreset,
     };
   }
 
@@ -834,15 +1506,16 @@ export class PCANConnection {
     return new Set(this.supportedPids);
   }
 
+  getVehicleInfo(): VehicleInfo {
+    return { ...this.vehicleInfo };
+  }
+
   getAvailablePids(): PIDDefinition[] {
     return STANDARD_PIDS.filter(p => this.supportedPids.has(p.pid));
   }
 
   getAvailableExtendedPids(): PIDDefinition[] {
-    return getPidsForVehicle(
-      this.vehicleInfo.manufacturer || 'universal',
-      this.vehicleInfo.fuelType || 'any'
-    ).filter(p => (p.service || 0x01) === 0x22);
+    return extendedMode22PidsForPcanVehicle(this.vehicleInfo);
   }
 
   getAllAvailablePids(): PIDDefinition[] {
@@ -945,37 +1618,639 @@ export class PCANConnection {
   // ─── UDS Operations ──────────────────────────────────────────────────────
 
   /**
-   * Send a UDS service request.
-   * Used for diagnostics, flash monitoring, and parameter read/write.
+   * Same entry shape as V-OP `sendUDSRequest`: build PDU, multi-frame if more than 7 bytes, else raw ISO-TP SF.
+   * Uses only `can_send` + `udsResponseListener` — no `uds_request`, no OBD fallback (matches V-OP).
    */
   async sendUDSRequest(
     service: number,
     subFunction?: number,
     data?: number[],
-    targetAddress = 0x7E0
+    targetAddress = 0x7E0,
+    timeoutMs = 5000,
+    responseArbIdOverride?: number,
+  ): Promise<UDSResponse | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+    const udsPayload: number[] = [service];
+    if (subFunction !== undefined) udsPayload.push(subFunction);
+    if (data) udsPayload.push(...data);
+    if (udsPayload.length > 7) {
+      return this.sendUDSMultiFrame(service, subFunction, udsPayload, targetAddress, responseArbIdOverride);
+    }
+    return this.sendUDSviaRawCAN(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride);
+  }
+
+  /**
+   * ECU sent ISO-TP First Frame — send Flow Control and reassemble consecutive frames (GMLAN long ReadDID, OBD Mode 9 VIN, …).
+   *
+   * PCAN bridge: `can_send` returns **tx_ack**; every RX is also **pushed** as `can_frame` (rx_stream) like V-OP.
+   * This method still uses **can_recv** to dequeue the same frames from the Python queue for ISO-TP assembly.
+   *
+   * @param fcTxAddress Tester TX ID for Flow Control (physical 0x7E0; functional 0x7DF → typically `rxArbId - 8`).
+   * @param rxArbId ECU TX ID for consecutive frames (e.g. 0x7E8).
+   */
+  private async receiveIsoTpMultiFrameFromEcu(
+    fcTxAddress: number,
+    rxArbId: number,
+    firstFrame: number[],
+    timeoutMs: number,
+  ): Promise<number[] | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return null;
+
+    this.udsResponseListener = null;
+
+    const totalLen = ((firstFrame[0] & 0x0f) << 8) | firstFrame[1];
+    if (totalLen < 1 || totalLen > 4095) {
+      console.log(`[ISO-TP RX] invalid total length ${totalLen}`);
+      return null;
+    }
+
+    const out: number[] = [];
+    for (let i = 2; i < 8 && out.length < totalLen; i++) {
+      out.push(firstFrame[i] ?? 0);
+    }
+    if (out.length >= totalLen) {
+      return out.slice(0, totalLen);
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    let expectedSeq = 1;
+    const fc = [...ISO_TP_FLOW_CONTROL_CTS_PADDED];
+    let sendFcWithCanSend = true;
+
+    while (out.length < totalLen) {
+      if (this.isoTpRxAbortRequested) return null;
+      const waitMs = Math.max(CAN_ISO_TP_RX_WAIT_FLOOR_MS, deadline - Date.now());
+      if (waitMs <= 0) return null;
+
+      let br: BridgeMessage;
+      try {
+        if (sendFcWithCanSend) {
+          sendFcWithCanSend = false;
+          br = await this.sendRequest(
+            {
+              type: 'can_send',
+              id: this.nextRequestId(),
+              arb_id: fcTxAddress,
+              data: fc,
+            },
+            waitMs,
+          );
+          if (br.type === 'tx_ack') {
+            br = await this.sendRequest(
+              {
+                type: 'can_recv',
+                id: this.nextRequestId(),
+                timeout_ms: waitMs,
+              },
+              waitMs,
+            );
+          }
+        } else {
+          br = await this.sendRequest(
+            {
+              type: 'can_recv',
+              id: this.nextRequestId(),
+              timeout_ms: waitMs,
+            },
+            waitMs,
+          );
+        }
+      } catch {
+        return null;
+      }
+
+      if (br.type !== 'can_frame' && br.type !== 'bus_frame') return null;
+
+      const arbId = parseWsCanArbId(br.arb_id);
+      if (arbId !== rxArbId) {
+        console.log(`[ISO-TP RX] unexpected arb 0x${arbId.toString(16)}, want 0x${rxArbId.toString(16)}`);
+        return null;
+      }
+
+      const fd = normalizeBridgeCanDataBytes(br.data);
+      if (fd.length === 0) return null;
+      const pci = (fd[0] >> 4) & 0x0f;
+      if (pci !== 2) continue;
+      const seq = fd[0] & 0x0f;
+      if (seq !== expectedSeq) {
+        console.log(`[ISO-TP RX] sequence mismatch: want ${expectedSeq}, got ${seq}`);
+        if(seq <expectedSeq) continue;
+        if(seq > expectedSeq) return null;
+        return null;
+      }
+
+      for (let j = 1; j < 8 && out.length < totalLen; j++) {
+        out.push(fd[j] ?? 0);
+      }
+      expectedSeq = (expectedSeq + 1) & 0x0f;
+    }
+
+    return out.slice(0, totalLen);
+  }
+
+  private ensureUdsBusSidecar(): void {
+    if (!this.ws || this.udsBusSidecarHandler) return;
+    this.udsBusSidecarHandler = (event: MessageEvent) => {
+      try {
+        const msg = JSON.parse(event.data) as Record<string, unknown>;
+        const t = msg.type as string;
+        if ((t === 'can_frame' || t === 'bus_frame') && this.udsResponseListener) {
+          this.udsResponseListener(msg);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    this.ws.addEventListener('message', this.udsBusSidecarHandler);
+  }
+
+  private detachUdsBusSidecar(): void {
+    if (this.ws && this.udsBusSidecarHandler) {
+      try {
+        this.ws.removeEventListener('message', this.udsBusSidecarHandler);
+      } catch {
+        /* ignore */
+      }
+    }
+    this.udsBusSidecarHandler = null;
+  }
+
+  private async sendUDSviaRawCAN(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress = 0x7E0,
+    timeoutMs = 5000,
+    responseArbIdOverride?: number,
+  ): Promise<UDSResponse | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    this.isoTpRxAbortRequested = false;
+
+    // Do not call start_monitor here: the bridge OBD listener feeds `can_send` responses; a parallel
+    // bus monitor recv() would race and steal frames (V-OP has a single RX path only).
+
+    // Build UDS payload: [service, subFunction?, ...data] — caller already split multi-frame TX.
+    const udsPayload: number[] = [service];
+    if (subFunction !== undefined) udsPayload.push(subFunction);
+    if (data) udsPayload.push(...data);
+
+    // Build ISO-TP single frame: [PCI_length, ...udsPayload, 0x00 padding]
+    const pciLength = udsPayload.length;
+    const frame: number[] = [pciLength, ...udsPayload];
+    while (frame.length < 8) frame.push(0x00);
+
+    // Response arbitration ID: physical = request + 0x08
+    // Functional addressing (0x7DF) gets responses from any ECU on its physical ID.
+    // For GM ECUs, responses come on 0x7E8 regardless of whether request was on 0x7E0 or 0x7DF.
+    const isFunctional = ((targetAddress >>> 0) & 0xfff) === 0x7df;
+    const responseArbId = responseArbIdOverride !== undefined
+      ? responseArbIdOverride
+      : (isFunctional ? -1 : (targetAddress + 0x08));
+
+    this.udsResponseListener = null;
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
+
+    // Set up response capture via udsResponseListener (see openWebSocket onmessage).
+    let userAbortedWait = false;
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.udsResponseListener = null;
+        this.udsRawWaitAbort = null;
+        resolve(null);
+      }, timeoutMs);
+
+      this.udsRawWaitAbort = () => {
+        userAbortedWait = true;
+        clearTimeout(timeout);
+        this.udsResponseListener = null;
+        this.udsRawWaitAbort = null;
+        resolve(null);
+      };
+
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        // Only process CAN frame messages
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+        const arbId = parseWsCanArbId(msg.arb_id ?? msg.arbitration_id);
+
+        // For functional addressing, accept any standard OBD-II response range (0x7E8-0x7EF)
+        const isMatch = isFunctional
+          ? (arbId >= 0x7E8 && arbId <= 0x7EF)
+          : (arbId === responseArbId);
+
+        if (!isMatch) return;
+
+        const frameData = normalizeBridgeCanDataBytes(msg.data);
+        if (frameData.length === 0) return;
+
+        const pciType = (frameData[0] >> 4) & 0x0f;
+
+        if (pciType === 1) {
+          const rxCf = isFunctional ? arbId : responseArbId;
+          const fcDest = isFunctional ? arbId - 0x08 : targetAddress;
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          this.udsRawWaitAbort = null;
+          void (async () => {
+            try {
+              const assembled = await this.receiveIsoTpMultiFrameFromEcu(fcDest, rxCf, frameData, timeoutMs);
+              if (!assembled || assembled.length === 0) {
+                resolve(null);
+                return;
+              }
+              resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+            } catch {
+              resolve(null);
+            }
+          })();
+          return;
+        }
+
+        if (pciType !== 0) {
+          console.log(`[UDS] Ignoring unexpected PCI type ${pciType} (not SF)`);
+          return;
+        }
+
+        const respSvcId = frameData.length > 1 ? frameData[1] : 0;
+        const expectedPositive = service + 0x40;
+        const isNegative = respSvcId === 0x7F;
+        const isPositiveMatch = respSvcId === expectedPositive;
+        const isNegativeForUs = isNegative && frameData.length > 2 && frameData[2] === service;
+        const isNegativeUnknown = isNegative && (frameData.length <= 2);
+
+        if (isPositiveMatch) {
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          this.udsRawWaitAbort = null;
+          resolve(this.parseISOTPResponse(service, subFunction, frameData));
+        } else if (isNegativeForUs || isNegativeUnknown) {
+          const nrc = frameData.length > 3 ? frameData[3] : 0;
+          if (nrc === 0x78) {
+            console.log(`[UDS] NRC 0x78 (responsePending) — ECU processing, waiting for real response...`);
+            return;
+          }
+          clearTimeout(timeout);
+          this.udsResponseListener = null;
+          this.udsRawWaitAbort = null;
+          resolve(this.parseISOTPResponse(service, subFunction, frameData));
+        } else {
+          const reason = isNegative
+            ? `NRC for svc=0x${(frameData[2] ?? 0).toString(16)}, we sent svc=0x${service.toString(16)}`
+            : `positive svc=0x${respSvcId.toString(16)}, expected=0x${expectedPositive.toString(16)}`;
+          console.log(`[UDS] Discarding non-matching frame: arb=0x${arbId.toString(16)} ${reason} data=[${frameData.map(b => b.toString(16)).join(',')}]`);
+        }
+      };
+    });
+
+    // Send the CAN frame fire-and-forget
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: this.nextRequestId(),
+      arb_id: targetAddress,
+      data: frame,
+    }));
+
+    const udsResult = await responsePromise;
+    if (!udsResult) {
+      if (userAbortedWait) return null;
+      throw new Error('Timeout waiting for CAN response');
+    }
+
+    return udsResult;
+  }
+
+  /**
+   * Parse an ISO-TP CAN frame into a UDSResponse.
+   */
+  private parseISOTPResponse(
+    service: number,
+    subFunction: number | undefined,
+    rawData: number[]
+  ): UDSResponse | null {
+    const r = parseIsoTpDataToUdsResponse(service, subFunction, rawData);
+    if (r && rawData.length > 0) {
+      const pciType = (rawData[0] >> 4) & 0x0f;
+      if (pciType === 1) {
+        const totalLen = ((rawData[0] & 0x0f) << 8) | rawData[1];
+        this.emit('log', null, `Multi-frame response (${totalLen} bytes) — partial data extracted`);
+      }
+    }
+    return r;
+  }
+
+  /**
+   * Send a UDS command using ISO-TP multi-frame transport.
+   * Used when the UDS payload exceeds 7 bytes (single-frame limit).
+   *
+   * ISO-TP multi-frame protocol:
+   * 1. Send First Frame (FF): announces total payload length, contains first 6 bytes
+   * 2. Wait for Flow Control (FC) from ECU: [0x30, BlockSize, STmin]
+   * 3. Send Consecutive Frames (CF): remaining data in 7-byte chunks
+   * 4. Wait for ECU response (positive or negative)
+   *
+   * BUSMASTER analysis confirms ECU flow control: 30 00 F1
+   *   - BlockSize=0 (unlimited), STmin=0xF1 (241μs)
+   */
+  private async sendUDSMultiFrame(
+    service: number,
+    subFunction: number | undefined,
+    udsPayload: number[],
+    targetAddress: number,
+    responseArbIdOverride?: number,
+  ): Promise<UDSResponse | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const totalLength = udsPayload.length;
+    const responseArbId = responseArbIdOverride !== undefined
+      ? responseArbIdOverride
+      : targetAddress + 0x08;
+
+    console.log(`[UDS-MF] Multi-frame TX: svc=0x${service.toString(16)} total=${totalLength} bytes on 0x${targetAddress.toString(16)}`);
+
+    this.udsResponseListener = null;
+    if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+      await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+    }
+
+    // Step 1: Build and send First Frame (FF)
+    // FF format: [0x1H, 0xLL, data0..data5] where 0x1HLL = total length
+    const firstFrame: number[] = [
+      0x10 | ((totalLength >> 8) & 0x0F),
+      totalLength & 0xFF,
+      ...udsPayload.slice(0, 6),
+    ];
+    while (firstFrame.length < 8) firstFrame.push(0x00);
+
+    // Step 2: Set up Flow Control listener BEFORE sending FF
+    const fcPromise = new Promise<{ blockSize: number; stMin: number } | null>((resolve) => {
+      const fcTimeout = setTimeout(() => {
+        this.udsResponseListener = null;
+        console.log('[UDS-MF] Flow Control timeout — no FC received');
+        resolve(null);
+      }, 5000);
+
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+        const arbId = parseWsCanArbId(msg.arb_id ?? msg.arbitration_id);
+
+        if (arbId === responseArbId) {
+          const frameData: number[] = (msg.data as number[]) || [];
+          if (frameData.length === 0) return;
+
+          const pciType = (frameData[0] >> 4) & 0x0F;
+
+          if (pciType === 3) {
+            // Flow Control frame: [0x30, BlockSize, STmin, ...]
+            const blockSize = frameData[1] || 0;
+            const stMin = frameData[2] || 0;
+            console.log(`[UDS-MF] FC received: BS=${blockSize} STmin=0x${stMin.toString(16)} (${stMin > 0x80 ? ((stMin - 0xF0) * 100) + 'μs' : stMin + 'ms'})`);
+            clearTimeout(fcTimeout);
+            this.udsResponseListener = null;
+            resolve({ blockSize, stMin });
+          } else if (pciType === 0) {
+            // Single frame response (could be NRC) — handle it
+            const respSvc = frameData[1];
+            if (respSvc === 0x7F) {
+              // Negative response before FC
+              clearTimeout(fcTimeout);
+              this.udsResponseListener = null;
+              resolve(null);
+            }
+          }
+        }
+      };
+    });
+
+    // Send First Frame
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: this.nextRequestId(),
+      arb_id: targetAddress,
+      data: firstFrame,
+    }));
+    console.log(`[UDS-MF] FF sent: [${firstFrame.map(b => b.toString(16).padStart(2, '0')).join(' ')}]`);
+
+    // Wait for Flow Control
+    const fc = await fcPromise;
+    if (!fc) {
+      console.log('[UDS-MF] No Flow Control — checking if ECU sent a response instead');
+      // Try to read a response (ECU may have responded with NRC immediately)
+      throw new Error('No Flow Control received from ECU after First Frame');
+    }
+
+    // Step 3: Send Consecutive Frames (CF)
+    // Calculate inter-frame delay from STmin
+    // 0x00-0x7F = 0-127ms, 0xF1-0xF9 = 100-900μs
+    let stMinMs = 0;
+    if (fc.stMin <= 0x7F) {
+      stMinMs = fc.stMin;
+    } else if (fc.stMin >= 0xF1 && fc.stMin <= 0xF9) {
+      stMinMs = 1; // Sub-millisecond — use 1ms minimum (JS can't do μs accurately)
+    }
+    // Minimum 1ms to avoid flooding the CAN bus
+    stMinMs = Math.max(stMinMs, 1);
+
+    let offset = 6; // First 6 bytes already sent in FF
+    let seqNum = 1;
+    let framesSentSinceFC = 0;
+
+    while (offset < udsPayload.length) {
+      // Check BlockSize — if non-zero, wait for another FC after sending BS frames
+      if (fc.blockSize > 0 && framesSentSinceFC >= fc.blockSize) {
+        // Wait for next FC
+        const nextFcPromise = new Promise<boolean>((resolve) => {
+          const fcTimeout = setTimeout(() => {
+            this.udsResponseListener = null;
+            resolve(false);
+          }, 5000);
+
+          this.udsResponseListener = (msg: Record<string, unknown>) => {
+            const msgType = msg.type as string;
+            if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+            const arbId = parseWsCanArbId(msg.arb_id ?? msg.arbitration_id);
+            if (arbId === responseArbId) {
+              const frameData: number[] = (msg.data as number[]) || [];
+              if (frameData.length > 0 && ((frameData[0] >> 4) & 0x0F) === 3) {
+                clearTimeout(fcTimeout);
+                this.udsResponseListener = null;
+                resolve(true);
+              }
+            }
+          };
+        });
+        const gotFC = await nextFcPromise;
+        if (!gotFC) throw new Error('Flow Control timeout during consecutive frames');
+        framesSentSinceFC = 0;
+      }
+
+      const chunk = udsPayload.slice(offset, offset + 7);
+      const cf: number[] = [0x20 | (seqNum & 0x0F), ...chunk];
+      while (cf.length < 8) cf.push(0x00);
+
+      // Fire-and-forget for consecutive frames
+      this.ws.send(JSON.stringify({
+        type: 'can_send',
+        id: this.nextRequestId(),
+        arb_id: targetAddress,
+        data: cf,
+      }));
+
+      offset += 7;
+      seqNum++;
+      framesSentSinceFC++;
+
+      // Inter-frame delay
+      if (stMinMs > 0 && offset < udsPayload.length) {
+        await new Promise(r => setTimeout(r, stMinMs));
+      }
+    }
+
+    console.log(`[UDS-MF] All ${seqNum} frames sent (${totalLength} bytes). Waiting for response...`);
+
+    // Step 4: Wait for ECU response (positive or negative)
+    // BUSMASTER analysis: After TransferData, ECU sends NRC 0x78 (responsePending = writing to flash)
+    // followed by 0x76 (positive). NRC 0x78 is NOT an error — it means "data received, writing."
+    // We must keep listening past NRC 0x78 until we get the actual positive/negative response.
+    // First chunk after erase can take ~22s; normal chunks take ~20ms.
+    const MF_RESPONSE_TIMEOUT = 30000; // 30s to handle first-chunk-after-erase scenario
+    const responsePromise = new Promise<UDSResponse | null>((resolve) => {
+      const respTimeout = setTimeout(() => {
+        this.udsResponseListener = null;
+        resolve(null);
+      }, MF_RESPONSE_TIMEOUT);
+
+      this.udsResponseListener = (msg: Record<string, unknown>) => {
+        const msgType = msg.type as string;
+        if (msgType !== 'can_frame' && msgType !== 'bus_frame') return;
+
+        const arbId = parseWsCanArbId(msg.arb_id ?? msg.arbitration_id);
+
+        if (arbId !== responseArbId) return;
+
+        const frameData = normalizeBridgeCanDataBytes(msg.data);
+        if (frameData.length === 0) return;
+
+        const pciType = (frameData[0] >> 4) & 0x0f;
+
+        if (pciType === 1) {
+          clearTimeout(respTimeout);
+          this.udsResponseListener = null;
+          void (async () => {
+            try {
+              const assembled = await this.receiveIsoTpMultiFrameFromEcu(
+                targetAddress,
+                responseArbId,
+                frameData,
+                MF_RESPONSE_TIMEOUT,
+              );
+              if (!assembled || assembled.length === 0) {
+                resolve(null);
+                return;
+              }
+              resolve(parseUdsDiagnosticPayload(service, subFunction, assembled));
+            } catch {
+              resolve(null);
+            }
+          })();
+          return;
+        }
+
+        if (pciType === 0) {
+          const respSvc = frameData.length > 1 ? frameData[1] : 0;
+          const expectedPositive = service + 0x40;
+          const isNegativeForUs = respSvc === 0x7F && frameData.length > 2 && frameData[2] === service;
+          const isPositiveMatch = respSvc === expectedPositive;
+
+          if (isPositiveMatch) {
+            clearTimeout(respTimeout);
+            this.udsResponseListener = null;
+            resolve(this.parseISOTPResponse(service, subFunction, frameData));
+          } else if (isNegativeForUs) {
+            const nrc = frameData.length > 3 ? frameData[3] : 0;
+            if (nrc === 0x78) {
+              console.log(`[UDS-MF] NRC 0x78 (responsePending) — ECU writing, waiting for positive response...`);
+              return;
+            }
+            clearTimeout(respTimeout);
+            this.udsResponseListener = null;
+            resolve(this.parseISOTPResponse(service, subFunction, frameData));
+          }
+        }
+      };
+    });
+
+    const udsResult = await responsePromise;
+    if (!udsResult) {
+      throw new Error('Timeout waiting for CAN response after multi-frame send');
+    }
+
+    return udsResult;
+  }
+
+  private async sendUDSviaOBD(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress = 0x7E0,
+    timeoutMs = 5000,
   ): Promise<UDSResponse | null> {
     try {
-      const response = await this.sendRequest({
-        type: 'uds_request',
-        service,
-        sub_function: subFunction,
-        data: data || [],
-        target: targetAddress,
-      });
+      // Build the payload: [service, subFunction?, ...data]
+      const payload: number[] = [];
+      if (subFunction !== undefined) payload.push(subFunction);
+      if (data) payload.push(...data);
 
-      if (response.type === 'uds_response') {
-        const serviceInfo = UDS_SERVICES[service];
-        const isPositive = !response.nrc;
+      const response = await this.sendRequest(
+        {
+          type: 'obd_request',
+          mode: service,
+          pid: subFunction ?? 0x00,
+          data: payload,
+          target: targetAddress,
+        },
+        timeoutMs,
+      ) as unknown as BridgeOBDResponse;
+
+      // Parse the OBD response as a UDS response
+      // OBD response data contains the raw response bytes after the service+0x40 byte
+      if (response.data) {
+        const responseData = response.data;
+        // Check for negative response: first byte is 0x7F
+        if (responseData.length >= 2 && responseData[0] === 0x7F) {
+          const nrc = responseData.length >= 3 ? responseData[2] : 0;
+          return {
+            service,
+            serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
+            subFunction,
+            data: responseData,
+            positiveResponse: false,
+            nrc,
+            nrcName: decodeNRC(nrc),
+            isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
+            timestamp: Date.now(),
+          };
+        }
+
+        // Positive response
         return {
           service,
-          serviceName: serviceInfo?.name || `Service 0x${service.toString(16)}`,
+          serviceName: UDS_SERVICES[service]?.name || `Service 0x${service.toString(16)}`,
           subFunction,
-          did: (response.did as number) || undefined,
-          data: (response.data as number[]) || [],
-          positiveResponse: isPositive,
-          nrc: (response.nrc as number) || undefined,
-          nrcName: response.nrc ? decodeNRC(response.nrc as number) : undefined,
-          isFlashRelated: serviceInfo?.isFlashRelated || false,
+          data: responseData,
+          positiveResponse: true,
+          isFlashRelated: UDS_SERVICES[service]?.isFlashRelated || false,
           timestamp: Date.now(),
         };
       }
@@ -985,11 +2260,42 @@ export class PCANConnection {
     }
   }
 
+  private parseUDSResponse(
+    service: number,
+    subFunction: number | undefined,
+    response: BridgeMessage
+  ): UDSResponse {
+    const serviceInfo = UDS_SERVICES[service];
+    const isPositive = !response.nrc;
+    return {
+      service,
+      serviceName: serviceInfo?.name || `Service 0x${service.toString(16)}`,
+      subFunction,
+      did: (response.did as number) || undefined,
+      data: (response.data as number[]) || [],
+      positiveResponse: isPositive,
+      nrc: (response.nrc as number) || undefined,
+      nrcName: response.nrc ? decodeNRC(response.nrc as number) : undefined,
+      isFlashRelated: serviceInfo?.isFlashRelated || false,
+      timestamp: Date.now(),
+    };
+  }
+
   /**
    * Read a UDS DID (Data Identifier) — ReadDataByIdentifier (0x22)
    */
   async readUDSDID(did: number, targetAddress = 0x7E0): Promise<UDSResponse | null> {
-    return this.sendUDSRequest(0x22, undefined, [(did >> 8) & 0xFF, did & 0xFF], targetAddress);
+    try {
+      return await this.sendUDSRequest(
+        0x22,
+        undefined,
+        [(did >> 8) & 0xff, did & 0xff],
+        targetAddress,
+        CAN_LIVE_UDS_DID_TIMEOUT_MS,
+      );
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -997,8 +2303,12 @@ export class PCANConnection {
    */
   async setUDSSession(sessionType: 'default' | 'programming' | 'extended'): Promise<boolean> {
     const sessionMap = { default: 0x01, programming: 0x02, extended: 0x03 };
-    const response = await this.sendUDSRequest(0x10, sessionMap[sessionType]);
-    return response?.positiveResponse || false;
+    try {
+      const response = await this.sendUDSRequest(0x10, sessionMap[sessionType]);
+      return response?.positiveResponse || false;
+    } catch {
+      return false;
+    }
   }
 
   // ─── Bus Monitor (IntelliSpy) ────────────────────────────────────────────
@@ -1055,6 +2365,7 @@ export class PCANConnection {
       await this.sendRequest({
         type: 'start_monitor',
         filter_ids: options?.filterIds || [],
+        arb_ids: options?.filterIds || [],
       });
       this.emit('log', null, `Bus monitor started (${ALL_PROTOCOLS[this.currentProtocol].name})`);
       return true;
@@ -1101,8 +2412,11 @@ export class PCANConnection {
    * Identifies OBD-II, J1939, UDS, and flash-related frames.
    */
   private decodeBusFrame(msg: BridgeMessage, decodeFlash = true): BusMonitorFrame {
-    const arbId = (msg.arb_id as number) || 0;
-    const data = (msg.data as number[]) || [];
+    const arbId = parseWsCanArbId(msg.arb_id ?? msg.arbitration_id);
+    const rawData = msg.data;
+    const data = Array.isArray(rawData)
+      ? rawData.map((x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x & 0xff : 0))
+      : [];
     const isExtended = (msg.is_extended as boolean) || arbId > 0x7FF;
 
     const frame: BusMonitorFrame = {
@@ -1261,8 +2575,120 @@ export class PCANConnection {
 
   // ─── Disconnect ───────────────────────────────────────────────────────────
 
+  /**
+   * Start application-level heartbeat ping every 15s.
+   * This supplements the WebSocket protocol-level ping/pong from the bridge (v2.1+).
+   * If the bridge doesn't respond within 10s, the ping is silently dropped.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ type: 'ping', id: `hb_${Date.now()}` }));
+        } catch {
+          // ignore — onclose will handle cleanup
+        }
+      }
+    }, 15_000);
+  }
+
+  /**
+   * Stop the application-level heartbeat.
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
+  /**
+   * Reconnect WebSocket only — no VIN read, no PID scan, no protocol switch.
+   * 
+   * This avoids the VIN read + PID scan that connect() does, which would
+   * fail during a flash session (ECU is in programming mode).
+   */
+  async reconnectForFlash(): Promise<boolean> {    // Clean up old WebSocket
+    this.detachUdsBusSidecar();
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* ignore */ }
+      this.ws = null;
+    }
+
+    this.monitorActive = false;
+    this.monitorCallback = null;
+    if (this.monitorFrameHandler) {
+      this.monitorFrameHandler = null;
+    }
+    this.udsResponseListener = null;
+
+    // Cancel pending requests
+    for (const [id, pending] of Array.from(this.pendingRequests.entries())) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Reconnecting'));
+    }
+    this.pendingRequests.clear();
+
+    const expanded = defaultBridgeWebSocketCandidates(this.bridgeUrlSecure, this.bridgeUrlInsecure);
+    const urlsToTry = this.bridgeUrl ? [this.bridgeUrl, ...expanded] : expanded;
+    const uniqueUrls = [...new Set(urlsToTry)];
+
+    for (const url of uniqueUrls) {
+      this.bridgeUrl = url;
+      try {
+        await this.openWebSocket();
+        this.setState('ready');
+        return true;
+      } catch {
+        // Try next URL
+      }
+    }
+
+    this.setState('error');
+    return false;
+  }
+
+  /** Used by {@link PCANFlashEngine} for transport health checks. */
+  isFlashTransportOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Clears raw-CAN UDS listeners and rejects pending {@link sendUDSRequest} waits so
+   * {@link PCANFlashEngine.abort} stops CAN traffic immediately.
+   */
+  cancelInFlightDiagnostics(): void {
+    this.isoTpRxAbortRequested = true;
+    this.udsRawWaitAbort?.();
+    this.udsRawWaitAbort = null;
+    this.udsResponseListener = null;
+    for (const [, pending] of Array.from(this.pendingRequests.entries())) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Aborted'));
+    }
+    this.pendingRequests.clear();
+  }
+
+  /** Fire-and-forget CAN TX (8 bytes, zero-padded) for keepalive / UUDT. */
+  async sendRawCanFrame(arbId: number, data: number[]): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket not connected');
+    }
+    const frame = [...data];
+    while (frame.length < 8) frame.push(0x00);
+    this.ws.send(JSON.stringify({
+      type: 'can_send',
+      id: `raw_${Date.now()}`,
+      arb_id: arbId,
+      data: frame.slice(0, 8),
+    }));
+  }
+
   async disconnect(): Promise<void> {
+    this.stopHeartbeat();
     this.loggingActive = false;
+    this.detachUdsBusSidecar();
     if (this.monitorActive) {
       await this.stopBusMonitor();
     }
@@ -1285,41 +2711,10 @@ export class PCANConnection {
     }
 
     this.supportedPids.clear();
+    this.gmLiveSessionAtByTx.clear();
     this.vehicleInfo = {};
     this.currentSession = null;
     this.setState('disconnected');
     this.emit('log', null, 'Disconnected from PCAN-USB bridge');
   }
-}
-
-
-// ─── UDS Negative Response Code Decoder ──────────────────────────────────────
-
-const NRC_CODES: Record<number, string> = {
-  0x10: 'General Reject',
-  0x11: 'Service Not Supported',
-  0x12: 'Sub-Function Not Supported',
-  0x13: 'Incorrect Message Length / Invalid Format',
-  0x14: 'Response Too Long',
-  0x21: 'Busy — Repeat Request',
-  0x22: 'Conditions Not Correct',
-  0x24: 'Request Sequence Error',
-  0x25: 'No Response From Sub-Net Component',
-  0x26: 'Failure Prevents Execution',
-  0x31: 'Request Out Of Range',
-  0x33: 'Security Access Denied',
-  0x35: 'Invalid Key',
-  0x36: 'Exceeded Number Of Attempts',
-  0x37: 'Required Time Delay Not Expired',
-  0x70: 'Upload/Download Not Accepted',
-  0x71: 'Transfer Data Suspended',
-  0x72: 'General Programming Failure',
-  0x73: 'Wrong Block Sequence Counter',
-  0x78: 'Request Correctly Received — Response Pending',
-  0x7E: 'Sub-Function Not Supported In Active Session',
-  0x7F: 'Service Not Supported In Active Session',
-};
-
-function decodeNRC(nrc: number): string {
-  return NRC_CODES[nrc] || `Unknown NRC (0x${nrc.toString(16).toUpperCase()})`;
 }

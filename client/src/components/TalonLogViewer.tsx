@@ -129,12 +129,77 @@ function getChannelColor(sectionIdx: number, channelSlot: number): string {
   return TRACE_COLORS[(sectionIdx * 4 + channelSlot) % TRACE_COLORS.length];
 }
 
-// ─── AFR→Lambda conversion for chart traces ────────────────────────────────
+/**
+ * Draw text with a dark background pill for readability over chart lines.
+ * Returns the measured text width for layout purposes.
+ */
+function drawLabelWithBg(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  align: CanvasTextAlign = 'left',
+  fontSize = 11,
+  paddingH = 4,
+  paddingV = 3,
+): number {
+  ctx.font = `bold ${fontSize}px ${FONT.mono}`;
+  const metrics = ctx.measureText(text);
+  const tw = metrics.width;
+  const th = fontSize;
+  // Compute box x based on alignment
+  let bx = x - paddingH;
+  if (align === 'right') bx = x - tw - paddingH;
+  else if (align === 'center') bx = x - tw / 2 - paddingH;
+  const by = y - th + 1 - paddingV;
+  const bw = tw + paddingH * 2;
+  const bh = th + paddingV * 2;
+  // Dark background pill
+  ctx.fillStyle = 'rgba(8, 12, 24, 0.88)';
+  const r = 3;
+  ctx.beginPath();
+  ctx.moveTo(bx + r, by);
+  ctx.lineTo(bx + bw - r, by);
+  ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+  ctx.lineTo(bx + bw, by + bh - r);
+  ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+  ctx.lineTo(bx + r, by + bh);
+  ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+  ctx.lineTo(bx, by + r);
+  ctx.quadraticCurveTo(bx, by, bx + r, by);
+  ctx.closePath();
+  ctx.fill();
+  // Text
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.fillText(text, x, y);
+  return tw;
+}
+
+// ─── Unit detection helpers ────────────────────────────────────────────────
 function isAFRChannel(ch: WP8Channel): boolean {
   return ch.name.toLowerCase().includes('air fuel ratio');
 }
-function convertAFRValue(v: number, ch: WP8Channel): number {
-  if (isAFRChannel(ch) && Number.isFinite(v) && v > 0) return v / 14.7;
+function isTemperatureChannel(ch: WP8Channel): boolean {
+  const n = ch.name.toLowerCase();
+  return n.includes('temperature') || n.includes('temp');
+}
+function isVehicleSpeedChannel(ch: WP8Channel): boolean {
+  return ch.name.toLowerCase() === 'vehicle speed';
+}
+
+// ─── Value conversion for chart display ────────────────────────────────────
+// WP8 binary stores temperatures in °C and vehicle speed in km/h.
+// Dynojet WinPEP displays in °F and mph, so we convert here for consistency.
+function convertDisplayValue(v: number, ch: WP8Channel): number {
+  if (!Number.isFinite(v)) return v;
+  // AFR → Lambda
+  if (isAFRChannel(ch) && v > 0) return v / 14.7;
+  // Temperature: °C → °F
+  if (isTemperatureChannel(ch)) return v * 9 / 5 + 32;
+  // Vehicle Speed: km/h → mph
+  if (isVehicleSpeedChannel(ch)) return v * 0.621371;
   return v;
 }
 
@@ -168,10 +233,10 @@ function ChartSection({
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ w: 800, h: height });
 
-  // Margins for axis labels
+  // Margins for axis labels — marginTop creates a header band for channel readouts
   const marginLeft = 65;
   const marginRight = 65;
-  const marginTop = 4;
+  const marginTop = 22;
   const marginBottom = 2;
 
   // Resize observer
@@ -189,14 +254,20 @@ function ChartSection({
   }, [height]);
 
   // Compute min/max for each channel in visible range (AFR channels converted to Lambda)
+  // AFR/Lambda channels use a fixed range of 0.68–1.25 λ for consistent tuning reference
   const channelRanges = useMemo(() => {
     const ranges: { min: number; max: number }[] = [];
     for (const ci of channelIndices) {
-      let mn = Infinity, mx = -Infinity;
       const ch = channels[ci];
+      // Fixed range for AFR/Lambda channels
+      if (ch && isAFRChannel(ch)) {
+        ranges.push({ min: 0.68, max: 1.25 });
+        continue;
+      }
+      let mn = Infinity, mx = -Infinity;
       for (let i = startIdx; i <= endIdx && i < rows.length; i++) {
         const raw = ci < rows[i].values.length ? rows[i].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         if (Number.isFinite(v)) {
           if (v < mn) mn = v;
           if (v > mx) mx = v;
@@ -232,6 +303,17 @@ function ChartSection({
     ctx.fillStyle = T.sectionBg;
     ctx.fillRect(0, 0, W, H);
 
+    // Header band background (slightly lighter) for channel readouts
+    ctx.fillStyle = 'rgba(13, 18, 32, 0.95)';
+    ctx.fillRect(marginLeft, 0, plotW, marginTop);
+    // Subtle separator line below header
+    ctx.strokeStyle = T.borderLight;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(marginLeft, marginTop);
+    ctx.lineTo(W - marginRight, marginTop);
+    ctx.stroke();
+
     if (channelIndices.length === 0 || rows.length === 0) {
       ctx.fillStyle = T.textDim;
       ctx.font = `13px ${FONT.mono}`;
@@ -264,6 +346,47 @@ function ChartSection({
       ctx.stroke();
     }
 
+    // AFR reference lines — dashed lines at λ 1.0 (stoich) and λ 0.8 (rich target)
+    const hasAFR = channelIndices.some((ci) => {
+      const ch = channels[ci];
+      return ch && isAFRChannel(ch);
+    });
+    if (hasAFR) {
+      // Use the first AFR channel's range (they all share the fixed 0.68–1.25 range)
+      const afrSlot = channelIndices.findIndex((ci) => {
+        const ch = channels[ci];
+        return ch && isAFRChannel(ch);
+      });
+      if (afrSlot >= 0 && afrSlot < channelRanges.length) {
+        const { min: afrMin, max: afrMax } = channelRanges[afrSlot];
+        const afrRange = afrMax - afrMin;
+        const refLines = [
+          { value: 1.0, label: 'λ 1.0 stoich', color: 'rgba(100, 220, 100, 0.5)' },
+          { value: 0.8, label: 'λ 0.8 rich', color: 'rgba(255, 160, 60, 0.5)' },
+        ];
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1;
+        ctx.font = `9px ${FONT.mono}`;
+        for (const ref of refLines) {
+          if (ref.value >= afrMin && ref.value <= afrMax) {
+            const y = marginTop + plotH - ((ref.value - afrMin) / afrRange) * plotH;
+            ctx.strokeStyle = ref.color;
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, y);
+            ctx.lineTo(W - marginRight, y);
+            ctx.stroke();
+            // Label on the right side
+            ctx.fillStyle = ref.color;
+            ctx.textAlign = 'right';
+            ctx.fillText(ref.label, W - marginRight - 4, y - 3);
+          }
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+
     // Draw traces (AFR channels auto-converted to Lambda)
     channelIndices.forEach((ci, slot) => {
       if (slot >= channelRanges.length) return;
@@ -279,7 +402,7 @@ function ChartSection({
         const rowIdx = startIdx + i;
         if (rowIdx >= rows.length) break;
         const raw = ci < rows[rowIdx].values.length ? rows[rowIdx].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         const x = marginLeft + (i / (visibleCount - 1)) * plotW;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         if (!started) {
@@ -302,22 +425,28 @@ function ChartSection({
       const fmtName = afrConv ? 'lambda' : (ch?.name || '');
       const unit = afrConv ? 'λ' : getUnit(ch?.name || '');
       const isRight = slot >= 2;
-      ctx.fillStyle = color;
-      ctx.font = `bold 10px ${FONT.mono}`;
-      ctx.textAlign = isRight ? 'left' : 'right';
+      const alignDir: CanvasTextAlign = isRight ? 'left' : 'right';
       const xBase = isRight ? W - marginRight + 4 : marginLeft - 4;
       const yOffset = slot % 2 === 0 ? 0 : (plotH / 2);
-      // Max value at top
-      ctx.fillText(
+      // Max value at top (with background)
+      drawLabelWithBg(
+        ctx,
         formatValue(max, fmtName) + (unit ? ' ' + unit : ''),
         xBase,
-        marginTop + 10 + yOffset
+        marginTop + 10 + yOffset,
+        color,
+        alignDir,
+        10,
       );
-      // Min value at bottom
-      ctx.fillText(
+      // Min value at bottom (with background)
+      drawLabelWithBg(
+        ctx,
         formatValue(min, fmtName),
         xBase,
-        marginTop + plotH / 2 - 2 + yOffset
+        marginTop + plotH / 2 - 2 + yOffset,
+        color,
+        alignDir,
+        10,
       );
     });
 
@@ -334,26 +463,86 @@ function ChartSection({
       ctx.setLineDash([]);
 
       // Value dots on crosshair (AFR→Lambda converted)
+      // Collect all labels first, then resolve overlaps before drawing
+      const dotLabels: { ci: number; slot: number; x: number; y: number; v: number; color: string; displayName: string }[] = [];
       channelIndices.forEach((ci, slot) => {
         if (slot >= channelRanges.length) return;
         const { min, max } = channelRanges[slot];
         const range = max - min;
         const ch = channels[ci];
         const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
-        const v = ch ? convertAFRValue(raw, ch) : raw;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
         const y = marginTop + plotH - ((v - min) / range) * plotH;
         const color = getChannelColor(sectionIdx, slot);
+        const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
+        dotLabels.push({ ci, slot, x, y, v, color, displayName });
+      });
+
+      // Sort by Y so we can push overlapping labels apart
+      dotLabels.sort((a, b) => a.y - b.y);
+      const labelH = 18; // min vertical spacing between labels (px)
+      // Multiple passes to resolve cascading overlaps (e.g., 3-4 labels clustered together)
+      for (let pass = 0; pass < 5; pass++) {
+        let anyOverlap = false;
+        for (let i = 1; i < dotLabels.length; i++) {
+          const prev = dotLabels[i - 1];
+          const curr = dotLabels[i];
+          if (curr.y - prev.y < labelH) {
+            anyOverlap = true;
+            const mid = (prev.y + curr.y) / 2;
+            dotLabels[i - 1] = { ...prev, y: mid - labelH / 2 };
+            dotLabels[i] = { ...curr, y: mid + labelH / 2 };
+          }
+        }
+        if (!anyOverlap) break;
+      }
+      // Clamp labels within the plot area so they don't go off-screen
+      for (let i = 0; i < dotLabels.length; i++) {
+        const lbl = dotLabels[i];
+        if (lbl.y < marginTop + 8) dotLabels[i] = { ...lbl, y: marginTop + 8 };
+        if (lbl.y > marginTop + plotH - 4) dotLabels[i] = { ...lbl, y: marginTop + plotH - 4 };
+      }
+
+      // Draw dots at original positions, labels at adjusted positions
+      channelIndices.forEach((ci, slot) => {
+        if (slot >= channelRanges.length) return;
+        const { min, max } = channelRanges[slot];
+        const range = max - min;
+        const ch = channels[ci];
+        const raw = ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0;
+        const v = ch ? convertDisplayValue(raw, ch) : raw;
+        const origY = marginTop + plotH - ((v - min) / range) * plotH;
+        const color = getChannelColor(sectionIdx, slot);
+        // Draw dot at true data position
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.arc(x, origY, 4, 0, Math.PI * 2);
         ctx.fill();
-        // Value label near dot
-        ctx.fillStyle = color;
-        ctx.font = `bold 11px ${FONT.mono}`;
-        ctx.textAlign = 'left';
-        const displayName = ch && isAFRChannel(ch) ? 'lambda' : (ch?.name || '');
-        ctx.fillText(formatValue(v, displayName), x + 8, y + 4);
+        // Draw white ring around dot for visibility
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(x, origY, 5, 0, Math.PI * 2);
+        ctx.stroke();
       });
+
+      // Draw value labels with background at adjusted Y positions
+      for (const lbl of dotLabels) {
+        // Place label to the right of crosshair, or left if near right edge
+        const labelX = (lbl.x + 120 > W - marginRight) ? lbl.x - 10 : lbl.x + 10;
+        const labelAlign: CanvasTextAlign = (lbl.x + 120 > W - marginRight) ? 'right' : 'left';
+        drawLabelWithBg(
+          ctx,
+          formatValue(lbl.v, lbl.displayName),
+          labelX,
+          lbl.y + 4,
+          lbl.color,
+          labelAlign,
+          12,
+          5,
+          3,
+        );
+      }
     }
 
   }, [canvasSize, channelIndices, channelRanges, rows, startIdx, endIdx, cursorIdx, sectionIdx, channels]);
@@ -389,10 +578,10 @@ function ChartSection({
         overflow: 'hidden',
       }}
     >
-      {/* Channel labels overlay (top-left) */}
+      {/* Channel labels overlay — positioned in the header band above the plot area */}
       <div style={{
         position: 'absolute',
-        top: 2,
+        top: 3,
         left: marginLeft + 4,
         display: 'flex',
         gap: 8,
@@ -420,7 +609,7 @@ function ChartSection({
               </span>
               {cursorIdx !== null && cursorIdx < rows.length && (
                 <span style={{ color, fontFamily: FONT.mono, fontSize: '11px', fontWeight: 'bold' }}>
-                  {formatValue(ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0, ch?.name || '')}
+                  {formatValue(ch ? convertDisplayValue(ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0, ch) : (ci < rows[cursorIdx].values.length ? rows[cursorIdx].values[ci] : 0), ch?.name || '')}
                 </span>
               )}
               <button
@@ -708,8 +897,8 @@ export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8
     return (ts / 1000).toFixed(3) + 's';
   };
 
-  // Section height
-  const sectionHeight = 160;
+  // Section height — increased for better readability on modern monitors
+  const sectionHeight = 210;
 
   return (
     <div style={{
@@ -900,17 +1089,16 @@ export default function TalonLogViewer({ wp8Data, onCursorData }: { wp8Data: WP8
                     : undefined;
                   const isInActiveSection = assignment?.sectionIdx === activeSection;
 
-                  // Get value at cursor (convert AFR→Lambda for AFR channels)
+                  // Get value at cursor (apply unit conversions: AFR→Lambda, °C→°F, km/h→mph)
                   let val = '—';
                   let displayName = ch.name;
                   if (cursorIdx !== null && cursorIdx < wp8Data.rows.length) {
-                    let v = ch.index < wp8Data.rows[cursorIdx].values.length
+                    const raw = ch.index < wp8Data.rows[cursorIdx].values.length
                       ? wp8Data.rows[cursorIdx].values[ch.index]
                       : 0;
-                    // Convert AFR to Lambda (÷14.7)
+                    const v = convertDisplayValue(raw, ch);
                     const isAFR = ch.name.toLowerCase().includes('air fuel ratio');
-                    if (isAFR && Number.isFinite(v) && v > 0) {
-                      v = v / 14.7;
+                    if (isAFR) {
                       displayName = ch.name.replace(/Air Fuel Ratio/i, 'Lambda');
                     }
                     val = formatValue(v, isAFR ? 'lambda' : ch.name);

@@ -1,0 +1,44 @@
+---
+description: All user-visible web UI copy must be in English
+globs: client/**/*.tsx,client/**/*.jsx
+alwaysApply: false
+---
+
+# Web UI language (English only)
+
+All strings shown to end users in the web client must be **English**, including:
+
+- Button labels, headings, helper text, empty states
+- `placeholder`, `title`, `aria-label`, `alt`
+- Select/menu options, badges, tooltips
+- Inline user-facing errors and toasts (`toast()`, Sonner, etc.)
+
+## Allowed exceptions
+
+- **Identifiers** in code (variable names, routes) — follow normal code style
+- **Proper nouns** (product names, OEM terms, Knox, PCAN, etc.)
+- **Formatted data** (numbers, dates via `Intl` with user locale) — the **pattern** is localized; surrounding labels stay English unless you add real i18n
+- **Quoted third-party / user content** shown verbatim
+
+## Do not
+
+- Add German (or other non-English) UI copy for convenience during implementation; use English from the start
+- Mix languages in the same surface (e.g. English title + German tooltip)
+
+## Examples
+
+```tsx
+// ❌ BAD
+<button title="Verbindung prüfen">Connect</button>
+
+// ✅ GOOD
+<button title="Check connection">Connect</button>
+```
+
+```tsx
+// ❌ BAD
+<span>Zykluszeit seit letztem Frame</span>
+
+// ✅ GOOD
+<span>Time since previous frame with same ID</span>
+```

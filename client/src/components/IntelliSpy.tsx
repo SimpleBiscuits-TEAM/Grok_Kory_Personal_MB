@@ -36,7 +36,9 @@ import { lookupModule, ALL_KNOWN_MODULES, type KnownModule } from '@/lib/moduleS
 import { ALL_PROTOCOLS, type SupportedProtocol } from '@/lib/protocolDetection';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
-import { PCANConnection } from '@/lib/pcanConnection';
+import { PCANConnection, defaultBridgeWebSocketCandidates } from '@/lib/pcanConnection';
+import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
+import KnoxConfidenceDashboard from '@/components/KnoxConfidenceDashboard';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -57,6 +59,10 @@ interface CapturedFrame {
   direction?: 'request' | 'response' | 'broadcast';
   // Live flash decode
   flashDecode?: FlashDecode | null;
+  /** Overwrite-by-ID view: indices that changed vs previous frame on this arb ID */
+  payloadChangedBytes?: Set<number>;
+  /** Overwrite-by-ID: ms since previous frame with same arb ID */
+  cycleTimeMs?: number;
 }
 
 interface FlashDecode {
@@ -92,9 +98,31 @@ type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'monitorin
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MAX_CAPTURED_FRAMES = 50000;
+const MAX_CAPTURED_FRAMES = 500000; // Raised from 50K to 500K to capture full DDDI setup sequences
 const STATS_UPDATE_INTERVAL = 500; // ms
 const FRAME_DISPLAY_LIMIT = 500;   // Show last N frames in live view
+
+function diffPayloadBytes(prev: number[] | undefined, next: number[]): Set<number> {
+  const changed = new Set<number>();
+  if (prev === undefined) return changed;
+  const max = Math.max(prev.length, next.length);
+  for (let i = 0; i < max; i++) {
+    if (prev[i] !== next[i]) changed.add(i);
+  }
+  return changed;
+}
+
+function snapshotOverwriteFrames(map: Map<number, CapturedFrame>): CapturedFrame[] {
+  return Array.from(map.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, f]) => ({
+      ...f,
+      data: [...f.data],
+      payloadChangedBytes: f.payloadChangedBytes
+        ? new Set(f.payloadChangedBytes)
+        : undefined,
+    }));
+}
 
 // Known CAN ID ranges for direction detection
 const isRequestId = (id: number) => id >= 0x700 && id <= 0x7DF;
@@ -167,11 +195,80 @@ function formatHexData(data: number[]): string {
   return data.map(b => formatHexByte(b)).join(' ');
 }
 
+/** Bridges differ: `bus_frame` vs `can_frame`, `arb_id` vs `arbitration_id`, string vs number. */
+function parseBridgeCanArbId(msg: Record<string, unknown>): number | null {
+  if (!('arb_id' in msg) && !('arbitration_id' in msg)) return null;
+  const raw = msg.arb_id ?? msg.arbitration_id;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw >>> 0;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    const n = /^0x/i.test(s) ? parseInt(s, 16) : parseInt(s, 10);
+    return Number.isFinite(n) ? (n >>> 0) : null;
+  }
+  return null;
+}
+
+function parseBridgeCanData(msg: Record<string, unknown>): number[] {
+  const raw = msg.data;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => {
+    if (typeof x === 'number' && Number.isFinite(x)) return x & 0xff;
+    if (typeof x === 'string' && /^[0-9a-fA-F]{1,2}$/.test(x)) return parseInt(x, 16) & 0xff;
+    const n = parseInt(String(x), 10);
+    return Number.isFinite(n) ? (n & 0xff) : 0;
+  });
+}
+
 function formatAsciiData(data: number[]): string {
   return data.map(b => (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '.').join('');
 }
 
+/** Epoch ms → local date/time (browser locale); millisecond precision for frame ordering */
+const frameTimestampFormatter = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  fractionalSecondDigits: 3,
+});
+
+function formatFrameTimestamp(epochMs: number): string {
+  return frameTimestampFormatter.format(new Date(epochMs));
+}
+
+/** Inter-frame time for same arb ID (ms since previous frame) */
+function formatInterFrameMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
+  if (ms >= 10) return `${ms.toFixed(1)} ms`;
+  return `${ms.toFixed(3)} ms`;
+}
+
+function decodeGlobalBAddress(arbId: number): { target: number; source: number } | null {
+  // 29-bit UDS addressing pattern commonly used on Global B:
+  // 0x18DAxxYY where xx/yy are tester/ECU addresses.
+  if ((arbId & 0x1FFF0000) !== 0x18DA0000) return null;
+  const target = (arbId >> 8) & 0xFF;
+  const source = arbId & 0xFF;
+  return { target, source };
+}
+
 function identifyModule(arbId: number): { name: string; acronym: string } | null {
+  const globalB = decodeGlobalBAddress(arbId);
+  if (globalB) {
+    const targetHex = globalB.target.toString(16).toUpperCase().padStart(2, '0');
+    const sourceHex = globalB.source.toString(16).toUpperCase().padStart(2, '0');
+    if (globalB.source === 0xF1) {
+      return { name: `Global B UDS Request (Tester F1 -> ECU ${targetHex})`, acronym: `GB_REQ_${targetHex}` };
+    }
+    if (globalB.target === 0xF1) {
+      return { name: `Global B UDS Response (ECU ${sourceHex} -> Tester F1)`, acronym: `GB_RSP_${sourceHex}` };
+    }
+    return { name: `Global B UDS Traffic (${sourceHex} -> ${targetHex})`, acronym: 'GB_UDS' };
+  }
+
   // Direct lookup
   const module = lookupModule(arbId);
   if (module) return { name: module.name, acronym: module.acronym };
@@ -192,6 +289,12 @@ function identifyModule(arbId: number): { name: string; acronym: string } | null
 }
 
 function detectDirection(arbId: number): 'request' | 'response' | 'broadcast' {
+  const globalB = decodeGlobalBAddress(arbId);
+  if (globalB) {
+    if (globalB.source === 0xF1) return 'request';
+    if (globalB.target === 0xF1) return 'response';
+    return 'broadcast';
+  }
   if (arbId === 0x7DF) return 'broadcast';
   if (isRequestId(arbId)) return 'request';
   if (isResponseId(arbId)) return 'response';
@@ -390,7 +493,9 @@ function createFlashProgress(): FlashProgress {
 }
 
 function updateFlashProgress(progress: FlashProgress, decode: FlashDecode): FlashProgress {
-  if (!decode.isFlash && decode.type !== 'negative_response') return progress;
+  // Only track flash-related services — ignore NRCs for non-flash services like
+  // ReadDataByIdentifier (0x22) which fires constantly during monitoring/datalogging
+  if (!decode.isFlash) return progress;
 
   const updated = { ...progress, lastActivity: Date.now() };
   if (!updated.startTime) updated.startTime = Date.now();
@@ -444,13 +549,22 @@ const FLASH_STAGE_LABELS: Record<string, { label: string; color: string; step: n
 export default function IntelliSpy() {
   // Connection state
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  const [bridgeUrl, setBridgeUrl] = useState('wss://localhost:8766');
+  const [bridgeUrl, setBridgeUrl] = useState('wss://127.0.0.1:8766');
   const wsRef = useRef<WebSocket | null>(null);
+  /** PCAN WebSocket vs V-OP USB binary bridge */
+  const [spyTransport, setSpyTransport] = useState<'ws' | 'vop'>('ws');
+  const vopConnRef = useRef<VopCan2UsbConnection | null>(null);
+  const vopUnsubRef = useRef<(() => void) | null>(null);
+  const vopFrameSeqRef = useRef(0);
+  const [vopAdapterIdentity, setVopAdapterIdentity] = useState<string | null>(null);
+  const handleBridgeMessageRef = useRef<(msg: Record<string, unknown>) => void>(() => {});
 
   // Bridge check state (matches DataloggerPanel pattern)
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
   const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
+  /** Invalidates in-flight availability checks when the adapter changes */
+  const adapterCheckGenRef = useRef(0);
 
   // Protocol state
   const [activeProtocol, setActiveProtocol] = useState<SupportedProtocol>('obd2');
@@ -486,8 +600,16 @@ export default function IntelliSpy() {
   // Knox tRPC mutation
   const knoxMutation = trpc.intellispy.analyzeFrames.useMutation();
 
-  // ECU Communication Loss Detection
+  // Knox conversational chat state
+  const [knoxChatMessages, setKnoxChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; knoxMeta?: { pipeline?: string; confidence?: string; agreement?: string; durationMs?: number; agentDetails?: Record<string, unknown> } }>>([]);
+  const [knoxChatInput, setKnoxChatInput] = useState('');
+  const [knoxChatOpen, setKnoxChatOpen] = useState(false);
+  const knoxChatMutation = trpc.intellispy.knoxChat.useMutation();
+  const knoxChatScrollRef = useRef<HTMLDivElement>(null);
+
+  // ECU Communication Loss Detection / bridge errors
   const [ecuLostReason, setEcuLostReason] = useState<string | null>(null);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
   const lastFrameTimeRef = useRef<number>(Date.now());
   const ecuLostTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ECU_TIMEOUT_MS = 10000; // 10 seconds without frames = ECU lost
@@ -500,6 +622,17 @@ export default function IntelliSpy() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const updateTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  /** Live CAN list: one row per arb ID, updated in place */
+  const overwriteMapRef = useRef<Map<number, CapturedFrame>>(new Map());
+  const liveDisplayModeRef = useRef<'scroll' | 'overwrite'>('scroll');
+  const [liveDisplayMode, setLiveDisplayMode] = useState<'scroll' | 'overwrite'>('scroll');
+  const [overwriteLiveSort, setOverwriteLiveSort] = useState<{
+    key: 'arbId' | 'dt';
+    dir: 'asc' | 'desc';
+  }>({ key: 'arbId', dir: 'asc' });
+  const prevLiveDisplayModeRef = useRef(liveDisplayMode);
+  liveDisplayModeRef.current = liveDisplayMode;
+
   // Keep paused ref in sync
   useEffect(() => { pausedRef.current = isPaused; }, [isPaused]);
 
@@ -509,6 +642,8 @@ export default function IntelliSpy() {
     setActiveProtocol(protocol);
     setShowProtocolMenu(false);
 
+    if (spyTransport === 'vop') return;
+
     // Send protocol switch to bridge if connected
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -517,39 +652,222 @@ export default function IntelliSpy() {
         bitrate: ALL_PROTOCOLS[protocol]?.defaultBitrate || 500000,
       }));
     }
-  }, []);
+  }, [spyTransport]);
 
-  // ─── Bridge Check ─────────────────────────────────────────────────────
+  // ─── Bridge / serial availability check ───────────────────────────────
 
-  const handleCheckBridge = useCallback(async () => {
+  const runAdapterAvailabilityCheck = useCallback(async (transport: 'ws' | 'vop') => {
+    const gen = ++adapterCheckGenRef.current;
+    setBridgeAvailable(null);
+    setDetectedBridgeUrl(null);
     setCheckingBridge(true);
     try {
-      const result = await PCANConnection.isBridgeAvailable();
-      setBridgeAvailable(result.available);
-      if (result.available) {
-        setDetectedBridgeUrl(result.url);
+      if (transport === 'vop') {
+        const ok = VopCan2UsbConnection.isSupported();
+        if (gen !== adapterCheckGenRef.current) return;
+        setBridgeAvailable(ok);
       } else {
-        setDetectedBridgeUrl(null);
+        const result = await PCANConnection.isBridgeAvailable();
+        if (gen !== adapterCheckGenRef.current) return;
+        setBridgeAvailable(result.available);
+        if (result.available) {
+          setDetectedBridgeUrl(result.url);
+        } else {
+          setDetectedBridgeUrl(null);
+        }
       }
     } catch {
+      if (gen !== adapterCheckGenRef.current) return;
       setBridgeAvailable(false);
       setDetectedBridgeUrl(null);
     } finally {
-      setCheckingBridge(false);
+      if (gen === adapterCheckGenRef.current) {
+        setCheckingBridge(false);
+      }
     }
   }, []);
 
-  // ─── WebSocket Connection ──────────────────────────────────────────────
+  const handleCheckBridge = useCallback(() => {
+    void runAdapterAvailabilityCheck(spyTransport);
+  }, [spyTransport, runAdapterAvailabilityCheck]);
+
+  useEffect(() => {
+    void runAdapterAvailabilityCheck(spyTransport);
+  }, [spyTransport, runAdapterAvailabilityCheck]);
+
+  // ─── Stats Timer (batch UI updates) — must be above connect() ─────────────
+
+  const startStatsTimer = useCallback(() => {
+    if (updateTimerRef.current) return;
+    updateTimerRef.current = setInterval(() => {
+      if (liveDisplayModeRef.current === 'overwrite') {
+        setFrames(snapshotOverwriteFrames(overwriteMapRef.current));
+      } else {
+        setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
+      }
+      setTotalFrames(frameCountRef.current);
+      setArbIdStats(new Map(statsRef.current));
+      setFlashProgress({ ...flashProgressRef.current });
+    }, STATS_UPDATE_INTERVAL);
+  }, []);
+
+  const stopStatsTimer = useCallback(() => {
+    if (updateTimerRef.current) {
+      clearInterval(updateTimerRef.current);
+      updateTimerRef.current = null;
+    }
+    if (liveDisplayModeRef.current === 'overwrite') {
+      setFrames(snapshotOverwriteFrames(overwriteMapRef.current));
+    } else {
+      setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
+    }
+    setTotalFrames(frameCountRef.current);
+    setArbIdStats(new Map(statsRef.current));
+    setFlashProgress({ ...flashProgressRef.current });
+  }, []);
+
+  /** Push ref state to React immediately (stats timer only runs every STATS_UPDATE_INTERVAL) */
+  const syncLiveUiFromRefs = useCallback(() => {
+    if (liveDisplayModeRef.current === 'overwrite') {
+      setFrames(snapshotOverwriteFrames(overwriteMapRef.current));
+    } else {
+      setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
+    }
+    setTotalFrames(frameCountRef.current);
+    setArbIdStats(new Map(statsRef.current));
+    setFlashProgress({ ...flashProgressRef.current });
+  }, []);
+
+  const resetCaptureData = useCallback(() => {
+    frameBufferRef.current = [];
+    overwriteMapRef.current.clear();
+    statsRef.current.clear();
+    frameCountRef.current = 0;
+    vopFrameSeqRef.current = 0;
+    flashProgressRef.current = createFlashProgress();
+    setFlashProgress(createFlashProgress());
+    setKnoxAnalysis(null);
+    setSelectedFramesForKnox(new Set());
+    syncLiveUiFromRefs();
+  }, [syncLiveUiFromRefs]);
+
+  useEffect(() => {
+    if (liveDisplayMode === 'overwrite' && prevLiveDisplayModeRef.current !== 'overwrite') {
+      if (status === 'monitoring') {
+        resetCaptureData();
+      } else {
+        for (const [id, stat] of statsRef.current) {
+          if (overwriteMapRef.current.has(id)) continue;
+          const data = [...stat.lastData];
+          let flashDecode: FlashDecode | null = null;
+          if (id >= 0x700 && id <= 0x7ff) {
+            flashDecode = decodeUDSFrameLocal(id, data);
+          }
+          const frame: CapturedFrame = {
+            frameNumber: stat.count,
+            timestamp: stat.lastSeen,
+            arbId: id,
+            data,
+            dlc: data.length,
+            isExtended: false,
+            isRemote: false,
+            isError: false,
+            moduleName: stat.moduleName,
+            moduleAcronym: stat.moduleAcronym,
+            direction: detectDirection(id),
+            flashDecode,
+            payloadChangedBytes: new Set(),
+          };
+          overwriteMapRef.current.set(id, frame);
+        }
+        syncLiveUiFromRefs();
+      }
+    }
+    if (liveDisplayMode === 'scroll' && prevLiveDisplayModeRef.current !== 'scroll') {
+      overwriteMapRef.current.clear();
+      syncLiveUiFromRefs();
+    }
+    prevLiveDisplayModeRef.current = liveDisplayMode;
+  }, [liveDisplayMode, status, resetCaptureData, syncLiveUiFromRefs]);
+
+  const armEcuLostTimer = useCallback(() => {
+    lastFrameTimeRef.current = Date.now();
+    setEcuLostReason(null);
+    if (ecuLostTimerRef.current) clearInterval(ecuLostTimerRef.current);
+    ecuLostTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - lastFrameTimeRef.current;
+      if (elapsed > ECU_TIMEOUT_MS) {
+        const reason = elapsed > 30000
+          ? 'No CAN bus traffic for over 30 seconds. The vehicle may be off, the adapter disconnected, or the CAN bus is inactive.'
+          : `No CAN frames received for ${Math.round(elapsed / 1000)}s. Possible causes: vehicle ignition off, adapter disconnected, CAN bus error, or wiring issue.`;
+        setEcuLostReason(reason);
+      }
+    }, 2000);
+  }, []);
+
+  // ─── WebSocket / V-OP USB Connection ─────────────────────────────────
 
   const connect = useCallback(async () => {
+    if (spyTransport === 'vop') {
+      if (!VopCan2UsbConnection.isSupported()) {
+        setStatus('error');
+        return;
+      }
+      setStatus('connecting');
+      try {
+        if (!vopConnRef.current) vopConnRef.current = getSharedVopCan2UsbConnection({});
+        const v = vopConnRef.current;
+        const ok = await v.connect({ skipVehicleInit: true });
+        if (!ok) {
+          setStatus('error');
+          setVopAdapterIdentity(null);
+          return;
+        }
+        const vi = v.getVehicleInfo();
+        setVopAdapterIdentity(
+          [vi.vopDeviceName, vi.vopDeviceSerial].filter(Boolean).join(' · ') || vi.vopDeviceIdentity || null
+        );
+        vopUnsubRef.current?.();
+        vopFrameSeqRef.current = 0;
+        const unsub = v.subscribeCanMonitor((arbId, flags, data) => {
+          const frameNumber = ++vopFrameSeqRef.current;
+          const dataArr = [...data];
+          handleBridgeMessageRef.current({
+            type: 'bus_frame',
+            arb_id: arbId,
+            data: dataArr,
+            timestamp: Date.now(),
+            frame_number: frameNumber,
+            dlc: dataArr.length,
+            is_extended: !!(flags & 1),
+            is_remote: !!(flags & 2),
+            is_error: false,
+          });
+        });
+        vopUnsubRef.current = unsub;
+        setStatus('monitoring');
+        setCaptureStartTime(Date.now());
+        frameCountRef.current = 0;
+        setFlashProgress(createFlashProgress());
+        flashProgressRef.current = createFlashProgress();
+        startStatsTimer();
+        armEcuLostTimer();
+      } catch {
+        setStatus('error');
+        setVopAdapterIdentity(null);
+      }
+      return;
+    }
+
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     setStatus('connecting');
 
     // Use detected URL first, then fall back to defaults
+    const fallback = defaultBridgeWebSocketCandidates();
     const urlsToTry = detectedBridgeUrl
-      ? [detectedBridgeUrl, ...(['wss://localhost:8766', 'ws://localhost:8765'].filter(u => u !== detectedBridgeUrl))]
-      : ['wss://localhost:8766', 'ws://localhost:8765'];
+      ? [detectedBridgeUrl, ...fallback.filter((u) => u !== detectedBridgeUrl)]
+      : fallback;
     let connected = false;
 
     for (const url of urlsToTry) {
@@ -615,9 +933,10 @@ export default function IntelliSpy() {
         // and reinitializes the CAN bus. Instead, read the bridge's active protocol
         // from the 'connected' message above. User can switch protocol manually later.
 
-        // Auto-start bus monitoring so traffic flows immediately
-        ws.send(JSON.stringify({ type: 'start_monitor' }));
+        // Auto-start bus monitoring — send both keys so older/newer bridges accept filters
+        ws.send(JSON.stringify({ type: 'start_monitor', arb_ids: [], filter_ids: [] }));
         setStatus('monitoring');
+        setBridgeError(null);
         setCaptureStartTime(Date.now());
         frameCountRef.current = 0;
         setFlashProgress(createFlashProgress());
@@ -633,11 +952,25 @@ export default function IntelliSpy() {
     if (!connected) {
       setStatus('error');
     }
-  }, [detectedBridgeUrl]);
+  }, [spyTransport, detectedBridgeUrl, armEcuLostTimer, startStatsTimer]);
 
   const disconnect = useCallback(() => {
+    if (spyTransport === 'vop') {
+      vopUnsubRef.current?.();
+      vopUnsubRef.current = null;
+      void vopConnRef.current?.disconnect();
+      vopConnRef.current = null;
+      setVopAdapterIdentity(null);
+      setStatus('disconnected');
+      stopStatsTimer();
+      if (ecuLostTimerRef.current) {
+        clearInterval(ecuLostTimerRef.current);
+        ecuLostTimerRef.current = null;
+      }
+      setEcuLostReason(null);
+      return;
+    }
     if (wsRef.current) {
-      // Stop monitor first
       if (status === 'monitoring') {
         wsRef.current.send(JSON.stringify({ type: 'stop_monitor' }));
       }
@@ -646,62 +979,98 @@ export default function IntelliSpy() {
     }
     setStatus('disconnected');
     stopStatsTimer();
-  }, [status]);
+  }, [spyTransport, status]);
 
   // ─── Monitor Control ──────────────────────────────────────────────────
 
   const startMonitor = useCallback((filterIds?: number[]) => {
+    if (spyTransport === 'vop') {
+      const v = vopConnRef.current;
+      if (!v?.isFlashTransportOpen()) return;
+      vopUnsubRef.current?.();
+      vopFrameSeqRef.current = 0;
+      const unsub = v.subscribeCanMonitor((arbId, flags, data) => {
+        const frameNumber = ++vopFrameSeqRef.current;
+        const dataArr = [...data];
+        handleBridgeMessageRef.current({
+          type: 'bus_frame',
+          arb_id: arbId,
+          data: dataArr,
+          timestamp: Date.now(),
+          frame_number: frameNumber,
+          dlc: dataArr.length,
+          is_extended: !!(flags & 1),
+          is_remote: !!(flags & 2),
+          is_error: false,
+        });
+      });
+      vopUnsubRef.current = unsub;
+      setStatus('monitoring');
+      setCaptureStartTime(Date.now());
+      frameCountRef.current = 0;
+      setFlashProgress(createFlashProgress());
+      flashProgressRef.current = createFlashProgress();
+      startStatsTimer();
+      armEcuLostTimer();
+      return;
+    }
+
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    const msg: Record<string, unknown> = { type: 'start_monitor' };
+    const msg: Record<string, unknown> = { type: 'start_monitor', arb_ids: [], filter_ids: [] };
     if (filterIds && filterIds.length > 0) {
       msg.arb_ids = filterIds;
+      msg.filter_ids = filterIds;
     }
 
     wsRef.current.send(JSON.stringify(msg));
+    setBridgeError(null);
     setStatus('monitoring');
     setCaptureStartTime(Date.now());
     frameCountRef.current = 0;
     setFlashProgress(createFlashProgress());
     flashProgressRef.current = createFlashProgress();
     startStatsTimer();
-
-    // Start ECU loss detection timer
-    lastFrameTimeRef.current = Date.now();
-    setEcuLostReason(null);
-    if (ecuLostTimerRef.current) clearInterval(ecuLostTimerRef.current);
-    ecuLostTimerRef.current = setInterval(() => {
-      const elapsed = Date.now() - lastFrameTimeRef.current;
-      if (elapsed > ECU_TIMEOUT_MS) {
-        const reason = elapsed > 30000
-          ? 'No CAN bus traffic for over 30 seconds. The vehicle may be off, the adapter disconnected, or the CAN bus is inactive.'
-          : `No CAN frames received for ${Math.round(elapsed / 1000)}s. Possible causes: vehicle ignition off, adapter disconnected, CAN bus error, or wiring issue.`;
-        setEcuLostReason(reason);
-      }
-    }, 2000);
-  }, []);
+    armEcuLostTimer();
+  }, [spyTransport, armEcuLostTimer, startStatsTimer]);
 
   const stopMonitor = useCallback(() => {
+    if (spyTransport === 'vop') {
+      vopUnsubRef.current?.();
+      vopUnsubRef.current = null;
+      setStatus('connected');
+      stopStatsTimer();
+      if (ecuLostTimerRef.current) {
+        clearInterval(ecuLostTimerRef.current);
+        ecuLostTimerRef.current = null;
+      }
+      setEcuLostReason(null);
+      return;
+    }
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: 'stop_monitor' }));
     setStatus('connected');
     stopStatsTimer();
-    // Stop ECU loss detection timer
     if (ecuLostTimerRef.current) {
       clearInterval(ecuLostTimerRef.current);
       ecuLostTimerRef.current = null;
     }
     setEcuLostReason(null);
-  }, []);
+  }, [spyTransport]);
 
   // ─── Frame Processing ─────────────────────────────────────────────────
 
   const handleBridgeMessage = useCallback((msg: Record<string, unknown>) => {
-    if (msg.type === 'bus_frame') {
-      const arbId = msg.arb_id as number;
-      const data = msg.data as number[];
-      const timestamp = msg.timestamp as number;
-      const frameNumber = msg.frame_number as number;
+    const frameType = msg.type;
+    if (frameType === 'bus_frame' || frameType === 'can_frame') {
+      const parsedArb = parseBridgeCanArbId(msg);
+      if (parsedArb === null) return;
+      const arbId = parsedArb;
+      const data = parseBridgeCanData(msg);
+      const timestamp =
+        typeof msg.timestamp === 'number' ? msg.timestamp : Date.now() / 1000;
+      const frameNumber =
+        typeof msg.frame_number === 'number' ? msg.frame_number : frameCountRef.current + 1;
 
       // Identify module
       const moduleInfo = identifyModule(arbId);
@@ -716,6 +1085,12 @@ export default function IntelliSpy() {
         }
       }
 
+      const prevOverwrite = overwriteMapRef.current.get(arbId);
+      const payloadChangedBytes =
+        liveDisplayModeRef.current === 'overwrite'
+          ? diffPayloadBytes(prevOverwrite?.data, data)
+          : undefined;
+
       const frame: CapturedFrame = {
         frameNumber,
         timestamp,
@@ -729,6 +1104,7 @@ export default function IntelliSpy() {
         moduleAcronym: moduleInfo?.acronym,
         direction,
         flashDecode,
+        payloadChangedBytes,
       };
 
       frameCountRef.current++;
@@ -738,10 +1114,18 @@ export default function IntelliSpy() {
       if (ecuLostReason) {
         setEcuLostReason(null);
       }
+      setBridgeError(null);
 
       // Update stats
       const stats = statsRef.current;
       const existing = stats.get(arbId);
+      const cycleTimeMs =
+        liveDisplayModeRef.current === 'overwrite' && existing
+          ? timestamp - existing.lastSeen
+          : undefined;
+
+      const frameWithCycle: CapturedFrame = { ...frame, cycleTimeMs };
+
       if (existing) {
         existing.prevData = [...existing.lastData];
         existing.count++;
@@ -774,13 +1158,33 @@ export default function IntelliSpy() {
 
       // Buffer frames (don't update React state on every frame — too fast)
       if (!pausedRef.current) {
-        frameBufferRef.current.push(frame);
-        if (frameBufferRef.current.length > MAX_CAPTURED_FRAMES) {
-          frameBufferRef.current = frameBufferRef.current.slice(-MAX_CAPTURED_FRAMES);
+        if (liveDisplayModeRef.current === 'overwrite') {
+          overwriteMapRef.current.set(arbId, {
+            ...frameWithCycle,
+            data: [...data],
+            payloadChangedBytes,
+          });
+        } else {
+          frameBufferRef.current.push(frame);
+          if (frameBufferRef.current.length > MAX_CAPTURED_FRAMES) {
+            // Keep first 2000 frames (DDDI setup) + last (MAX-2000) frames
+            // This ensures diagnostic setup commands are never lost
+            const PROTECTED_HEAD = 2000;
+            const head = frameBufferRef.current.slice(0, PROTECTED_HEAD);
+            const tail = frameBufferRef.current.slice(-(MAX_CAPTURED_FRAMES - PROTECTED_HEAD));
+            frameBufferRef.current = [...head, ...tail];
+          }
         }
+      }
+    } else if (msg.type === 'error') {
+      const text = typeof msg.message === 'string' ? msg.message : 'Bridge error';
+      setBridgeError(text);
+      if (/CAN bus not available|not initialized|Failed to open/i.test(text)) {
+        setEcuLostReason(text);
       }
     } else if (msg.type === 'monitor_started') {
       setStatus('monitoring');
+      setBridgeError(null);
     } else if (msg.type === 'monitor_stopped') {
       setStatus('connected');
     } else if (msg.type === 'protocol_changed') {
@@ -790,32 +1194,7 @@ export default function IntelliSpy() {
     }
   }, []);
 
-  // ─── Stats Timer (batch UI updates) ───────────────────────────────────
-
-  const startStatsTimer = useCallback(() => {
-    if (updateTimerRef.current) return;
-    updateTimerRef.current = setInterval(() => {
-      // Batch update frames
-      setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
-      setTotalFrames(frameCountRef.current);
-      // Batch update stats
-      setArbIdStats(new Map(statsRef.current));
-      // Batch update flash progress
-      setFlashProgress({ ...flashProgressRef.current });
-    }, STATS_UPDATE_INTERVAL);
-  }, []);
-
-  const stopStatsTimer = useCallback(() => {
-    if (updateTimerRef.current) {
-      clearInterval(updateTimerRef.current);
-      updateTimerRef.current = null;
-    }
-    // Final update
-    setFrames([...frameBufferRef.current.slice(-FRAME_DISPLAY_LIMIT)]);
-    setTotalFrames(frameCountRef.current);
-    setArbIdStats(new Map(statsRef.current));
-    setFlashProgress({ ...flashProgressRef.current });
-  }, []);
+  handleBridgeMessageRef.current = handleBridgeMessage;
 
   // Cleanup on unmount
   useEffect(() => {
@@ -824,33 +1203,30 @@ export default function IntelliSpy() {
       if (wsRef.current) {
         wsRef.current.close();
       }
+      void vopConnRef.current?.disconnect();
     };
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll (scroll stream only; overwrite list is stable per row)
   useEffect(() => {
+    if (liveDisplayMode !== 'scroll') return;
     if (autoScroll && scrollRef.current && viewMode === 'live') {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [frames, autoScroll, viewMode]);
+  }, [frames, autoScroll, viewMode, liveDisplayMode]);
 
   // ─── Actions ──────────────────────────────────────────────────────────
 
   const clearCapture = useCallback(() => {
-    frameBufferRef.current = [];
-    statsRef.current.clear();
-    frameCountRef.current = 0;
-    setFrames([]);
-    setArbIdStats(new Map());
-    setTotalFrames(0);
-    setFlashProgress(createFlashProgress());
-    flashProgressRef.current = createFlashProgress();
-    setKnoxAnalysis(null);
-    setSelectedFramesForKnox(new Set());
-  }, []);
+    resetCaptureData();
+  }, [resetCaptureData]);
 
   const exportCapture = useCallback(() => {
-    const csv = exportFramesToCSV(frameBufferRef.current);
+    const toExport =
+      liveDisplayMode === 'overwrite'
+        ? snapshotOverwriteFrames(overwriteMapRef.current)
+        : frameBufferRef.current;
+    const csv = exportFramesToCSV(toExport);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -858,7 +1234,7 @@ export default function IntelliSpy() {
     a.download = `intellispy_capture_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }, []);
+  }, [liveDisplayMode]);
 
   const toggleArbIdVisibility = useCallback((arbId: number) => {
     setHiddenArbIds(prev => {
@@ -943,6 +1319,64 @@ export default function IntelliSpy() {
     }
   }, [arbIdStats, selectedFramesForKnox, activeProtocol, flashProgress, knoxQuestion, knoxMutation]);
 
+  // Knox conversational chat handler
+  const sendKnoxChat = useCallback(async () => {
+    const msg = knoxChatInput.trim();
+    if (!msg || knoxChatMutation.isPending) return;
+
+    const newMessages = [...knoxChatMessages, { role: 'user' as const, content: msg }];
+    setKnoxChatMessages(newMessages);
+    setKnoxChatInput('');
+
+    // Build live bus context
+    const liveFrames = Array.from(arbIdStats.values()).slice(0, 50).map(stat => ({
+      arbIdHex: formatArbId(stat.arbId),
+      moduleName: stat.moduleName || 'Unknown',
+      dataHex: formatHexData(stat.lastData),
+      count: stat.count,
+      rateHz: stat.rateHz,
+    }));
+
+    const busContext = `${arbIdStats.size} unique arb IDs, ${frameCountRef.current} total frames captured. ${flashProgress.stage !== 'idle' ? `Flash in progress: ${flashProgress.stage}` : 'No flash active.'}`;
+
+    try {
+      const result = await knoxChatMutation.mutateAsync({
+        message: msg,
+        liveFrames: Array.from(arbIdStats.values()).slice(0, 100).map(stat => ({
+          arbId: stat.arbId,
+          arbIdHex: formatArbId(stat.arbId),
+          data: stat.lastData,
+          dataHex: formatHexData(stat.lastData),
+          dlc: stat.lastData.length,
+          isExtended: false,
+          moduleName: stat.moduleName,
+          moduleAcronym: stat.moduleAcronym,
+          count: stat.count,
+          rateHz: stat.rateHz,
+        })),
+        protocol: activeProtocol,
+        busContext,
+        history: newMessages.slice(-20),
+      });
+      setKnoxChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: result.reply,
+        knoxMeta: {
+          pipeline: result.pipeline,
+          confidence: result.confidence,
+          agreement: result.agreement,
+          durationMs: result.durationMs,
+          agentDetails: result.agentDetails as Record<string, unknown> | undefined,
+        },
+      }]);
+    } catch (err) {
+      setKnoxChatMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err instanceof Error ? err.message : String(err)}` }]);
+    }
+
+    // Auto-scroll
+    setTimeout(() => knoxChatScrollRef.current?.scrollTo({ top: knoxChatScrollRef.current.scrollHeight, behavior: 'smooth' }), 100);
+  }, [knoxChatInput, knoxChatMessages, knoxChatMutation, arbIdStats, activeProtocol, flashProgress, frameCountRef]);
+
   const toggleFrameForKnox = useCallback((arbId: number) => {
     setSelectedFramesForKnox(prev => {
       const next = new Set(prev);
@@ -982,6 +1416,37 @@ export default function IntelliSpy() {
     return result;
   }, [frames, hiddenArbIds, showOnlyDiagnostic, filterText]);
 
+  const liveTableFrames = useMemo(() => {
+    if (liveDisplayMode !== 'overwrite') return filteredFrames;
+    const arr = [...filteredFrames];
+    const { key, dir } = overwriteLiveSort;
+    const sign = dir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      if (key === 'arbId') {
+        const c = (a.arbId - b.arbId) * sign;
+        if (c !== 0) return c;
+      } else {
+        const aMissing = a.cycleTimeMs == null;
+        const bMissing = b.cycleTimeMs == null;
+        if (aMissing && bMissing) return a.arbId - b.arbId;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
+        const c = (a.cycleTimeMs! - b.cycleTimeMs!) * sign;
+        if (c !== 0) return c;
+      }
+      return a.arbId - b.arbId;
+    });
+    return arr;
+  }, [filteredFrames, liveDisplayMode, overwriteLiveSort]);
+
+  const toggleOverwriteColumnSort = useCallback((columnKey: 'arbId' | 'dt') => {
+    setOverwriteLiveSort(prev =>
+      prev.key === columnKey
+        ? { key: columnKey, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key: columnKey, dir: 'asc' },
+    );
+  }, []);
+
   // ─── Sorted Stats ────────────────────────────────────────────────────
 
   const sortedStats = useMemo(() => {
@@ -1001,8 +1466,8 @@ export default function IntelliSpy() {
   // ─── Flash frames count ──────────────────────────────────────────────
 
   const flashFrameCount = useMemo(() => {
-    return frames.filter(f => f.flashDecode?.isFlash).length;
-  }, [frames]);
+    return liveTableFrames.filter(f => f.flashDecode?.isFlash).length;
+  }, [liveTableFrames]);
 
   // ═══════════════════════════════════════════════════════════════════════
   // Render
@@ -1023,8 +1488,11 @@ export default function IntelliSpy() {
         {/* Protocol Badge */}
         <div className="relative">
           <button
+            type="button"
+            disabled={spyTransport === 'vop'}
+            title={spyTransport === 'vop' ? 'Protocol is defined by bus / firmware when using USB CAN' : undefined}
             onClick={() => setShowProtocolMenu(!showProtocolMenu)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-['Share_Tech_Mono',monospace] transition-colors hover:bg-zinc-800/50 ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-['Share_Tech_Mono',monospace] transition-colors hover:bg-zinc-800/50 disabled:opacity-40 disabled:cursor-not-allowed ${
               PROTOCOL_OPTIONS.find(p => p.value === activeProtocol)?.color || 'text-zinc-400 border-zinc-700'
             }`}
           >
@@ -1120,8 +1588,45 @@ export default function IntelliSpy() {
         </div>
       )}
 
+      {bridgeError && (
+        <div className="flex items-start gap-3 px-4 py-2 border-b border-amber-900/50 bg-amber-950/25">
+          <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="font-['Rajdhani',sans-serif] text-xs text-amber-200/90 leading-relaxed">
+            <span className="font-semibold text-amber-400">Bridge: </span>
+            {bridgeError}
+          </div>
+        </div>
+      )}
+
       {/* ─── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800/50">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-500">ADAPTER</span>
+          <select
+            value={spyTransport}
+            onChange={e => {
+              const next = e.target.value as 'ws' | 'vop';
+              if (next === 'ws') setVopAdapterIdentity(null);
+              setSpyTransport(next);
+            }}
+            disabled={status === 'monitoring' || status === 'connecting' || status === 'connected'}
+            className={`rounded border border-zinc-700 bg-zinc-900/80 py-1 pl-2 pr-6 text-[10px] font-['Share_Tech_Mono',monospace] ${
+              spyTransport === 'vop' ? 'text-violet-300' : 'text-red-300'
+            } disabled:cursor-not-allowed disabled:opacity-40`}
+          >
+            <option value="ws">PCAN-USB (WS bridge)</option>
+            <option value="vop" disabled={!VopCan2UsbConnection.isSupported()}>V-OP Can2USB</option>
+          </select>
+          {spyTransport === 'vop' && vopAdapterIdentity && (
+            <span
+              className="ml-2 max-w-[min(220px,28vw)] truncate text-[9px] font-['Share_Tech_Mono',monospace] text-zinc-500"
+              title={vopAdapterIdentity}
+            >
+              {vopAdapterIdentity}
+            </span>
+          )}
+        </div>
+
         {/* Bridge Check */}
         <Button size="sm" variant="outline" onClick={handleCheckBridge} disabled={checkingBridge || status === 'monitoring'}
           className={`font-['Share_Tech_Mono',monospace] text-xs ${
@@ -1132,11 +1637,11 @@ export default function IntelliSpy() {
           {checkingBridge ? (
             <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> Checking...</>
           ) : bridgeAvailable === true ? (
-            <><CheckCircle className="w-3.5 h-3.5 mr-1" /> Bridge OK</>
+            <><CheckCircle className="w-3.5 h-3.5 mr-1" /> {spyTransport === 'vop' ? 'Serial OK' : 'Bridge OK'}</>
           ) : bridgeAvailable === false ? (
-            <><XCircle className="w-3.5 h-3.5 mr-1" /> No Bridge</>
+            <><XCircle className="w-3.5 h-3.5 mr-1" /> {spyTransport === 'vop' ? 'No Web Serial' : 'No Bridge'}</>
           ) : (
-            <><Search className="w-3.5 h-3.5 mr-1" /> Check Bridge</>
+            <><Search className="w-3.5 h-3.5 mr-1" /> {spyTransport === 'vop' ? 'Check Serial' : 'Check Bridge'}</>
           )}
         </Button>
 
@@ -1146,7 +1651,11 @@ export default function IntelliSpy() {
         {status === 'disconnected' || status === 'error' ? (
           <Button size="sm" variant="outline" onClick={connect}
             className="border-green-700 text-green-400 hover:bg-green-900/30 font-['Share_Tech_Mono',monospace] text-xs">
-            <Wifi className="w-3.5 h-3.5 mr-1" /> Connect Bridge
+            {spyTransport === 'vop' ? (
+              <><Radio className="w-3.5 h-3.5 mr-1" /> Connect USB</>
+            ) : (
+              <><Wifi className="w-3.5 h-3.5 mr-1" /> Connect Bridge</>
+            )}
           </Button>    ) : status === 'connected' ? (
           <>
             <Button size="sm" variant="outline" onClick={() => startMonitor()}
@@ -1333,22 +1842,68 @@ export default function IntelliSpy() {
         <div className="flex-1 overflow-hidden flex flex-col">
           {viewMode === 'live' && (
             <>
-              {/* Column headers */}
-              <div className="flex items-center px-3 py-1 bg-zinc-900/30 border-b border-zinc-800/50 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-600">
-                <span className="w-16">#</span>
-                <span className="w-24">TIMESTAMP</span>
-                <span className="w-16">ARB ID</span>
-                <span className="w-16">MODULE</span>
-                <span className="w-8">DLC</span>
-                <span className="flex-1">DATA (HEX)</span>
-                {showAscii && <span className="w-20">ASCII</span>}
-                <span className="w-12">DIR</span>
-                <span className="w-48">DECODE</span>
+              <div className="flex items-center justify-end gap-2 px-3 py-1 border-b border-zinc-800/50 bg-zinc-900/20 text-[10px] font-['Share_Tech_Mono',monospace]">
+                <span className="text-zinc-500">LIVE</span>
+                <select
+                  value={liveDisplayMode}
+                  onChange={e => setLiveDisplayMode(e.target.value as 'scroll' | 'overwrite')}
+                  className="rounded border border-zinc-700 bg-zinc-950 py-0.5 pl-1.5 pr-5 text-[10px] text-zinc-300"
+                >
+                  <option value="scroll">Scroll stream</option>
+                  <option value="overwrite">Overwrite by ID</option>
+                </select>
+              </div>
+              {/* Column headers (same flex + gap as rows; no toolbar here — avoids column shift) */}
+              <div className="flex items-center gap-2 px-3 py-1 bg-zinc-900/30 border-b border-zinc-800/50 text-[10px] font-['Share_Tech_Mono',monospace] text-zinc-600">
+                <span className="w-16 shrink-0">{liveDisplayMode === 'overwrite' ? 'COUNT' : '#'}</span>
+                <span className="w-[13.5rem] shrink-0">TIME (LOCAL)</span>
+                {liveDisplayMode === 'overwrite' && (
+                  <button
+                    type="button"
+                    onClick={() => toggleOverwriteColumnSort('dt')}
+                    title="Sort by inter-frame time (Δt)"
+                    className={`w-24 shrink-0 flex items-center gap-0.5 text-left hover:text-zinc-400 ${
+                      overwriteLiveSort.key === 'dt' ? 'text-zinc-400' : ''
+                    }`}
+                  >
+                    Δt
+                    {overwriteLiveSort.key === 'dt' ? (
+                      overwriteLiveSort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
+                  </button>
+                )}
+                {liveDisplayMode === 'overwrite' ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleOverwriteColumnSort('arbId')}
+                    title="Sort by arbitration ID"
+                    className={`w-[4.75rem] shrink-0 flex items-center gap-0.5 text-left hover:text-zinc-400 ${
+                      overwriteLiveSort.key === 'arbId' ? 'text-zinc-400' : ''
+                    }`}
+                  >
+                    ARB ID
+                    {overwriteLiveSort.key === 'arbId' ? (
+                      overwriteLiveSort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 opacity-40" />
+                    )}
+                  </button>
+                ) : (
+                  <span className="w-[4.75rem] shrink-0">ARB ID</span>
+                )}
+                <span className="w-20 shrink-0">MODULE</span>
+                <span className="w-8 shrink-0">DLC</span>
+                <span className="min-w-0 flex-1">DATA (HEX)</span>
+                {showAscii && <span className="w-20 shrink-0">ASCII</span>}
+                <span className="w-12 shrink-0">DIR</span>
+                <span className="w-48 shrink-0 min-w-0 truncate">DECODE</span>
               </div>
 
               {/* Frame list */}
               <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden">
-                {filteredFrames.length === 0 ? (
+                {liveTableFrames.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-zinc-600">
                     {status === 'monitoring' ? (
                       <>
@@ -1377,36 +1932,56 @@ export default function IntelliSpy() {
                     )}
                   </div>
                 ) : (
-                  filteredFrames.map((frame, idx) => {
+                  liveTableFrames.map((frame, idx) => {
                     const stat = arbIdStats.get(frame.arbId);
                     const hasFlash = frame.flashDecode?.isFlash;
                     const isNegative = frame.flashDecode?.type === 'negative_response';
+                    const rowKey = liveDisplayMode === 'overwrite' ? frame.arbId : idx;
                     return (
-                      <div key={idx}
-                        className={`flex items-center px-3 py-0.5 text-[11px] font-['Share_Tech_Mono',monospace] hover:bg-zinc-800/30 border-b border-zinc-900/30 ${
+                      <div key={rowKey}
+                        className={`flex items-center gap-2 px-3 py-0.5 text-[11px] font-['Share_Tech_Mono',monospace] hover:bg-zinc-800/30 border-b border-zinc-900/30 ${
                           frame.isError ? 'bg-red-900/20 text-red-400' :
                           isNegative ? 'bg-red-900/15' :
                           hasFlash ? 'bg-yellow-900/10' : ''
                         }`}>
-                        <span className="w-16 text-zinc-600">{frame.frameNumber}</span>
-                        <span className="w-24 text-zinc-500">{frame.timestamp.toFixed(4)}</span>
-                        <span className="w-16 text-red-400">{formatArbId(frame.arbId)}</span>
-                        <span className="w-16 text-zinc-500 truncate">{frame.moduleAcronym || '—'}</span>
-                        <span className="w-8 text-zinc-600">{frame.dlc}</span>
-                        <span className="flex-1 text-zinc-300">
+                        <span className="w-16 shrink-0 text-zinc-600">
+                          {liveDisplayMode === 'overwrite' ? (stat?.count ?? frame.frameNumber) : frame.frameNumber}
+                        </span>
+                        <span className="w-[13.5rem] shrink-0 text-zinc-500 tabular-nums truncate" title={new Date(frame.timestamp).toISOString()}>
+                          {formatFrameTimestamp(frame.timestamp)}
+                        </span>
+                        {liveDisplayMode === 'overwrite' && (
+                          <span
+                            className="w-24 shrink-0 text-zinc-500 tabular-nums"
+                            title="Time since the previous frame with the same arbitration ID"
+                          >
+                            {frame.cycleTimeMs != null ? formatInterFrameMs(frame.cycleTimeMs) : '—'}
+                          </span>
+                        )}
+                        <span className="w-[4.75rem] shrink-0 text-red-400">{formatArbId(frame.arbId)}</span>
+                        <span className="w-20 shrink-0 text-zinc-500 truncate">{frame.moduleAcronym || '—'}</span>
+                        <span className="w-8 shrink-0 text-zinc-600">{frame.dlc}</span>
+                        <span className="min-w-0 flex-1 text-zinc-300">
                           {frame.data.map((byte, bi) => {
-                            const changed = stat?.changedBytes.has(bi);
+                            const changed = frame.payloadChangedBytes?.has(bi) ?? false;
                             return (
-                              <span key={bi} className={changed ? 'text-yellow-400 font-bold' : ''}>
+                              <span
+                                key={bi}
+                                className={
+                                  changed
+                                    ? 'rounded px-0.5 bg-amber-500/30 text-amber-100 font-semibold'
+                                    : ''
+                                }
+                              >
                                 {formatHexByte(byte)}{bi < frame.data.length - 1 ? ' ' : ''}
                               </span>
                             );
                           })}
                         </span>
                         {showAscii && (
-                          <span className="w-20 text-zinc-600">{formatAsciiData(frame.data)}</span>
+                          <span className="w-20 shrink-0 text-zinc-600">{formatAsciiData(frame.data)}</span>
                         )}
-                        <span className={`w-12 text-[10px] ${
+                        <span className={`w-12 shrink-0 text-[10px] ${
                           frame.direction === 'request' ? 'text-blue-400' :
                           frame.direction === 'response' ? 'text-green-400' :
                           'text-zinc-600'
@@ -1415,7 +1990,7 @@ export default function IntelliSpy() {
                            frame.direction === 'response' ? 'RSP' : 'BC'}
                         </span>
                         {/* Live flash decode column */}
-                        <span className={`w-48 text-[10px] truncate ${
+                        <span className={`w-48 shrink-0 min-w-0 text-[10px] truncate ${
                           isNegative ? 'text-red-400' :
                           hasFlash ? 'text-yellow-400' :
                           frame.flashDecode ? 'text-cyan-400' :
@@ -1595,6 +2170,104 @@ export default function IntelliSpy() {
                 )}
               </Card>
 
+              {/* Knox Conversational Chat */}
+              <Card className="bg-zinc-900/50 border-zinc-800/50">
+                <button
+                  onClick={() => setKnoxChatOpen(!knoxChatOpen)}
+                  className="w-full flex items-center gap-3 p-4 hover:bg-zinc-800/20 transition-colors"
+                >
+                  <Send className="w-5 h-5 text-red-500" />
+                  <div className="flex-1 text-left">
+                    <h3 className="font-['Bebas_Neue',sans-serif] text-lg tracking-wider text-red-400">
+                      CHAT WITH KNOX
+                    </h3>
+                    <p className="text-xs text-zinc-500">
+                      Have a conversation about what's happening on the bus. Knox sees your live frames.
+                    </p>
+                  </div>
+                  {knoxChatMessages.length > 0 && (
+                    <Badge variant="outline" className="border-red-800 text-red-400 text-[10px]">
+                      {knoxChatMessages.length} msgs
+                    </Badge>
+                  )}
+                  {knoxChatOpen ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+                </button>
+
+                {knoxChatOpen && (
+                  <div className="border-t border-zinc-800/50">
+                    {/* Chat messages */}
+                    <div
+                      ref={knoxChatScrollRef}
+                      className="max-h-[400px] overflow-y-auto p-4 space-y-3"
+                    >
+                      {knoxChatMessages.length === 0 && (
+                        <div className="text-center py-8">
+                          <Brain className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+                          <p className="text-xs text-zinc-600">Ask Knox anything about the CAN bus activity.</p>
+                          <p className="text-xs text-zinc-700 mt-1">Knox has live access to your captured frames and can reason across data, specs, and real-world experience.</p>
+                        </div>
+                      )}
+                      {knoxChatMessages.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] ${msg.role === 'user' ? '' : 'space-y-0'}`}>
+                            <div className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                              msg.role === 'user'
+                                ? 'bg-red-900/30 border border-red-800/30 text-zinc-200'
+                                : 'bg-zinc-950/70 border border-zinc-800/30 text-zinc-300'
+                            }`}>
+                              {msg.role === 'assistant' ? (
+                                <div className="prose prose-invert prose-xs max-w-none">
+                                  <Streamdown>{msg.content}</Streamdown>
+                                </div>
+                              ) : msg.content}
+                            </div>
+                            {msg.role === 'assistant' && msg.knoxMeta && (
+                              <KnoxConfidenceDashboard metadata={msg.knoxMeta as any} />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {knoxChatMutation.isPending && (
+                        <div className="flex justify-start">
+                          <div className="bg-zinc-950/70 border border-zinc-800/30 rounded-lg px-3 py-2 flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 text-red-500 animate-spin" />
+                            <span className="text-xs text-zinc-500">Knox is thinking...</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Chat input */}
+                    <div className="flex gap-2 p-3 border-t border-zinc-800/30">
+                      <Input
+                        value={knoxChatInput}
+                        onChange={e => setKnoxChatInput(e.target.value)}
+                        placeholder="Ask Knox about the bus..."
+                        className="flex-1 text-xs bg-zinc-950/50 border-zinc-800 text-zinc-300 font-['Share_Tech_Mono',monospace] h-8"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendKnoxChat();
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={sendKnoxChat}
+                        disabled={knoxChatMutation.isPending || !knoxChatInput.trim()}
+                        className="bg-red-900/50 border border-red-700 text-red-400 hover:bg-red-800/50 h-8 px-3"
+                      >
+                        {knoxChatMutation.isPending ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Send className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
               {/* Module Map */}
               <Card className="bg-zinc-900/50 border-zinc-800/50 p-4">
                 <h4 className="text-xs font-['Share_Tech_Mono',monospace] text-zinc-500 mb-3">DISCOVERED MODULES</h4>
@@ -1672,8 +2345,10 @@ export default function IntelliSpy() {
         </span>
         {totalFrames > 0 && (
           <>
-            <span>CAPTURED: {totalFrames.toLocaleString()}</span>
-            <span>VISIBLE: {filteredFrames.length.toLocaleString()}</span>
+            <span className={totalFrames > 300000 ? 'text-yellow-400' : totalFrames > 450000 ? 'text-red-400' : ''}>
+              BUFFER: {totalFrames.toLocaleString()} / 500K {totalFrames > 300000 ? '⚠' : ''}
+            </span>
+            <span>VISIBLE: {liveTableFrames.length.toLocaleString()}</span>
             <span>UNIQUE IDs: {arbIdStats.size}</span>
             <span>HIDDEN: {hiddenArbIds.size}</span>
           </>

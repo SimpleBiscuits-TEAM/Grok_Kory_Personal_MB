@@ -6,9 +6,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import DebugReportButton from "./components/DebugReportButton";
 import { lazy, Suspense } from "react";
+import ScreenGuard from "./components/ScreenGuard";
 import { Redirect } from "wouter";
-import AuthGate from "./components/AuthGate";
-
+import AccessGate from "./components/AccessGate";
+import { useAccessTier } from "./hooks/useAccessTier";
 // Lazy-load all heavy pages for code splitting
 const Home = lazy(() => import("./pages/Home"));
 const Advanced = lazy(() => import("./pages/Advanced"));
@@ -19,6 +20,14 @@ const SupportJoin = lazy(() => import("./pages/SupportJoin"));
 const DebugDashboard = lazy(() => import("./pages/DebugDashboard"));
 // Pitch and Tasks now live inside Advanced tab (redirected)
 const Calibrations = lazy(() => import("./pages/Calibrations"));
+const TuneDeployPage = lazy(() => import("./pages/TuneDeploy"));
+const GitMapPage = lazy(() => import("./pages/GitMap"));
+const Strat = lazy(() => import("./pages/Strat"));
+const Weather = lazy(() => import("./pages/Weather"));
+const StormChase = lazy(() => import("./pages/StormChase"));
+const StormChaseOverlay = lazy(() => import("./pages/StormChaseOverlay"));
+const StormChaseViewer = lazy(() => import("./pages/StormChaseViewer"));
+const SharedDyno = lazy(() => import("./pages/SharedDyno"));
 
 // Full-page loading spinner matching PPEI dark theme
 function PageLoader() {
@@ -59,8 +68,18 @@ function PageLoader() {
   );
 }
 
+// Access-code gated router — shows AccessGate if user hasn't entered a valid code.
+// DEV_BYPASS_AUTH=1 on server auto-grants pro access (no gate shown).
+function GatedRouter() {
+  const { hasAccess, loading } = useAccessTier();
+
+  if (loading) return <PageLoader />;
+  if (!hasAccess) return <AccessGate />;
+
+  return <Router />;
+}
+
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Suspense fallback={<PageLoader />}>
       <Switch>
@@ -68,11 +87,20 @@ function Router() {
         <Route path={"/advanced"} component={Advanced} />
         <Route path={"/fleet"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/drag"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/competition"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/weather"}>{() => <Weather />}</Route>
+        <Route path={"/storm-chase"} component={StormChase} />
+        <Route path="/stream/overlay" component={StormChaseOverlay} />
+        <Route path="/stream/:streamKey" component={StormChaseViewer} />
         <Route path={"/community"} component={Community} />
         <Route path={"/pitch"}>{() => <Redirect to="/advanced" />}</Route>
         <Route path={"/tasks"}>{() => <Redirect to="/advanced" />}</Route>
+        <Route path={"/strat"} component={Strat} />
         <Route path={"/calibrations"} component={Calibrations} />
+        <Route path={"/tune-deploy"} component={TuneDeployPage} />
+        <Route path={"/git-map"} component={GitMapPage} />
         <Route path={"/support/join/:inviteLink"} component={SupportJoin} />
+        <Route path="/shared/dyno/:token" component={SharedDyno} />
         <Route path={"/debug"} component={DebugDashboard} />
         <Route path={"/404"} component={NotFound} />
         {/* Final fallback route */}
@@ -91,10 +119,9 @@ function App() {
       >
         <TooltipProvider>
           <Toaster />
-          <AuthGate>
-            <Router />
-            <DebugReportButton />
-          </AuthGate>
+          <GatedRouter />
+          <ScreenGuard active={true} />
+          <DebugReportButton />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

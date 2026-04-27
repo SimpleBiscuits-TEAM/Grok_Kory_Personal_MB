@@ -7,7 +7,6 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { getLoginUrl } from '@/const';
 import PpeiHeader from '@/components/PpeiHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -447,28 +446,20 @@ export default function Community() {
             )}
 
             {/* Reply box */}
-            {isAuthenticated ? (
-              <Card className="ppei-card p-4" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
-                <div className="flex gap-2">
-                  <textarea value={replyContent} onChange={e => setReplyContent(e.target.value)}
-                    placeholder="Write a reply..."
-                    rows={2}
-                    className="flex-1 p-2 rounded ppei-input-focus"
-                    style={{ background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.body, resize: 'vertical' }} />
-                  <Button onClick={() => createPostMut.mutate({ threadId: selectedThreadId!, content: replyContent })}
-                    disabled={!replyContent.trim() || createPostMut.isPending}
-                    className="ppei-btn-red self-end" style={{ fontFamily: sFont.heading }}>
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </Card>
-            ) : (
-              <Card className="ppei-card p-4 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
-                <p style={{ fontFamily: sFont.body, color: sColor.textDim }}>
-                  <a href={getLoginUrl()} style={{ color: sColor.red, textDecoration: 'underline' }}>Sign in</a> to reply
-                </p>
-              </Card>
-            )}
+            <Card className="ppei-card p-4" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
+              <div className="flex gap-2">
+                <textarea value={replyContent} onChange={e => setReplyContent(e.target.value)}
+                  placeholder="Write a reply..."
+                  rows={2}
+                  className="flex-1 p-2 rounded ppei-input-focus"
+                  style={{ background: 'oklch(0.11 0.005 260)', border: `1px solid ${sColor.border}`, color: 'white', fontFamily: sFont.body, resize: 'vertical' }} />
+                <Button onClick={() => createPostMut.mutate({ threadId: selectedThreadId!, content: replyContent })}
+                  disabled={!replyContent.trim() || createPostMut.isPending}
+                  className="ppei-btn-red self-end" style={{ fontFamily: sFont.heading }}>
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </Card>
           </div>
         )}
       </main>

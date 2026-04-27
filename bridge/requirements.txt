@@ -1,0 +1,5 @@
+# PCAN WebSocket bridge (pcan_bridge.py) — install with:
+#   py -3 -m pip install -r requirements.txt
+python-can>=4.0.0
+websockets>=14.0
+cryptography>=42.0.0

@@ -1,6 +1,6 @@
-import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
+import { GUEST_OPEN_ID } from "@shared/guestUser";
 import { useCallback, useEffect, useMemo } from "react";
 
 type UseAuthOptions = {
@@ -9,7 +9,7 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
+  const { redirectOnUnauthenticated = false, redirectPath = "/" } =
     options ?? {};
   const utils = trpc.useUtils();
 
@@ -20,7 +20,7 @@ export function useAuth(options?: UseAuthOptions) {
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
-      utils.auth.me.setData(undefined, null);
+      utils.auth.me.setData(undefined, undefined);
     },
   });
 
@@ -36,7 +36,7 @@ export function useAuth(options?: UseAuthOptions) {
       }
       throw error;
     } finally {
-      utils.auth.me.setData(undefined, null);
+      utils.auth.me.setData(undefined, undefined);
       await utils.auth.me.invalidate();
     }
   }, [logoutMutation, utils]);
@@ -50,7 +50,10 @@ export function useAuth(options?: UseAuthOptions) {
       user: meQuery.data ?? null,
       loading: meQuery.isLoading || logoutMutation.isPending,
       error: meQuery.error ?? logoutMutation.error ?? null,
-      isAuthenticated: Boolean(meQuery.data),
+      /** True only for a real OAuth session — `auth.me` still returns a synthetic guest when logged out. */
+      isAuthenticated: Boolean(
+        meQuery.data && meQuery.data.openId !== GUEST_OPEN_ID
+      ),
     };
   }, [
     meQuery.data,

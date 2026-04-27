@@ -1,0 +1,79 @@
+# ============================================================================
+# CODEOWNERS — V-OP Project
+# ============================================================================
+# These rules require review/approval from the project owner (simplebiscuits)
+# before any PR can merge changes to protected files.
+#
+# See TOBI_PROTECTED_FILES.md for the full rationale.
+# ============================================================================
+
+# ── Category 1: Flash Engine & Transport (CRITICAL) ──
+client/src/lib/pcanFlashEngine.ts           @simplebiscuits
+client/src/lib/pcanConnection.ts            @simplebiscuits
+client/src/lib/pcanConnection.test.ts       @simplebiscuits
+client/src/lib/vopCan2UsbConnection.ts      @simplebiscuits
+client/src/lib/flashBridgeConnection.ts     @simplebiscuits
+shared/pcanFlashOrchestrator.ts             @simplebiscuits
+shared/flashFileValidator.ts                @simplebiscuits
+shared/flashVerify.ts                       @simplebiscuits
+shared/flashVerify.test.ts                  @simplebiscuits
+shared/flashLogRecommendations.ts           @simplebiscuits
+shared/flashLogRecommendations.test.ts      @simplebiscuits
+shared/ecuContainerMatch.ts                 @simplebiscuits
+shared/ecuSoftwareSlotMask.ts               @simplebiscuits
+
+# ── Category 2: Flash UI Components (CRITICAL) ──
+client/src/components/FlashContainerPanel.tsx   @simplebiscuits
+client/src/components/FlashDashboard.tsx         @simplebiscuits
+client/src/components/FlashMissionControl.tsx    @simplebiscuits
+client/src/components/EcuScanPanel.tsx            @simplebiscuits
+
+# ── Category 3: Flash Support Libraries ──
+client/src/lib/ecuContainerSessionStorage.ts    @simplebiscuits
+client/src/lib/ecuScanner.ts                     @simplebiscuits
+client/src/lib/flashContainerParser.ts           @simplebiscuits
+client/src/lib/flashLogExcelExport.ts            @simplebiscuits
+client/src/lib/computeSecurityKeyClient.ts      @simplebiscuits
+client/src/lib/ecuChecksums.ts                  @simplebiscuits
+client/src/lib/ecuDetection.ts                  @simplebiscuits
+client/src/lib/ecuReference.ts                  @simplebiscuits
+shared/ecuDatabase.ts                           @simplebiscuits
+
+# ── Category 4: Flash Server/Database ──
+server/routers/flash.ts                     @simplebiscuits
+server/routers/flash.test.ts                @simplebiscuits
+server/routers/flash-integration.test.ts    @simplebiscuits
+server/flashDb.ts                           @simplebiscuits
+server/flash.test.ts                        @simplebiscuits
+
+# ── Category 5: Datalogging ──
+client/src/components/DataloggerPanel.tsx    @simplebiscuits
+client/src/lib/obdConnection.ts             @simplebiscuits
+client/src/lib/obdConnection.test.ts        @simplebiscuits
+server/routers/datalogCache.ts              @simplebiscuits
+server/routers/datalogNaming.ts             @simplebiscuits
+
+# ── Category 6: Tune Deploy ──
+server/tuneDeployRoutes.ts                  @simplebiscuits
+server/tuneDeployDb.ts                      @simplebiscuits
+server/routers/tuneDeploy.ts                @simplebiscuits
+server/routers/tuneDeploy.test.ts           @simplebiscuits
+server/lib/tuneDeployParser.ts              @simplebiscuits
+server/lib/tuneDeployParser.test.ts         @simplebiscuits
+shared/tuneDeploySchemas.ts                 @simplebiscuits
+
+# ── Category 7: Firmware ──
+firmware/                                   @simplebiscuits
+
+# ── Category 8: Infrastructure Dependencies ──
+# Changes here have previously broken flash. Owner review required.
+server/_core/index.ts                       @simplebiscuits
+server/_core/loadEnv.ts                     @simplebiscuits
+server/_core/vite.ts                        @simplebiscuits
+server/_core/vopDevServerArgv.ts            @simplebiscuits
+
+# ── Category 9: Flash Scripts ──
+scripts/find-containers-for-ecu.ts          @simplebiscuits
+scripts/fix-flash-tables.mjs                @simplebiscuits
+scripts/generate-flash-fix-pdf.ts           @simplebiscuits
+scripts/ingest-reference-container.ts       @simplebiscuits

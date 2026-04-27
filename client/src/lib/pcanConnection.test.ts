@@ -3,6 +3,7 @@
  * Tests the WebSocket bridge protocol, CAN frame construction, and ISO-TP handling
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { defaultBridgeWebSocketCandidates } from './pcanConnection';
 
 // ─── CAN Frame Construction Tests ──────────────────────────────────────────
 
@@ -355,6 +356,13 @@ describe('Adapter Selection Logic', () => {
 // ─── Bridge Availability Check Tests ──────────────────────────────────────
 
 describe('Bridge Availability', () => {
+  it('should prefer 127.0.0.1 before localhost in default candidates', () => {
+    const c = defaultBridgeWebSocketCandidates();
+    expect(c[0]).toBe('wss://127.0.0.1:8766');
+    expect(c).toContain('wss://localhost:8766');
+    expect(c.indexOf('wss://127.0.0.1:8766')).toBeLessThan(c.indexOf('wss://localhost:8766'));
+  });
+
   it('should have correct default secure URL', () => {
     const secureUrl = 'wss://localhost:8766';
     expect(secureUrl).toMatch(/^wss:\/\/localhost:\d+$/);
@@ -367,7 +375,7 @@ describe('Bridge Availability', () => {
 
   it('should try secure URL before insecure URL', () => {
     // The connection flow should try wss:// first, then ws://
-    const urlOrder = ['wss://localhost:8766', 'ws://localhost:8765'];
+    const urlOrder = ['wss://127.0.0.1:8766', 'ws://127.0.0.1:8765'];
     expect(urlOrder[0]).toMatch(/^wss:\/\//);
     expect(urlOrder[1]).toMatch(/^ws:\/\//);
   });

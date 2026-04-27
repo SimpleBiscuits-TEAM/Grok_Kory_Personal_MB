@@ -928,7 +928,7 @@ export function generateHealthReportPdf(
       label: 'EXHAUST GAS TEMPERATURE',
       unit: '°F',
       color: [220, 120, 20],
-      thresholdHigh: 1300,
+      thresholdHigh: 1475,
       speedData: speedRef,
       rpmData: rpmRef,
     });

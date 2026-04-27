@@ -6,15 +6,15 @@
  * Layout: Full-width dark panels, red left-border accents, sharp corners
  */
 
-import { useState, useRef, useCallback } from 'react';
-import { SignInModal, SignInBanner } from '@/components/SignInPrompt';
+import React, { useState, useRef, useCallback, Suspense } from 'react';
+import { useFullscreen } from '@/hooks/useFullscreen';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag } from 'lucide-react';
-import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
+import { Upload, AlertCircle, CheckCircle, Loader2, FileDown, Cpu, Search, Activity, Gauge, Zap, BarChart3, Brain, Flag, Lock, Rocket, Maximize2, Minimize2, ArrowLeft } from 'lucide-react';
+import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { trpc } from '@/lib/trpc';
-import { StatsSummary } from '@/components/Charts';
+import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
@@ -22,8 +22,8 @@ import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
 import HealthReport from '@/components/HealthReport';
 import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
-import EcuReferencePanel from '@/components/EcuReferencePanel';
-import DtcSearch from '@/components/DtcSearch';
+const EcuReferencePanel = React.lazy(() => import('@/components/EcuReferencePanel'));
+const DtcSearch = React.lazy(() => import('@/components/DtcSearch'));
 import { usePdfExport } from '@/hooks/usePdfExport';
 import { FeedbackPanel, FeedbackTrigger } from '@/components/FeedbackPanel';
 import { ReasoningPanel } from '@/components/ReasoningPanel';
@@ -31,13 +31,19 @@ import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
-import CompareView from '@/components/CompareView';
+
 import { APP_VERSION } from '@/lib/version';
+import { PPEI_DATALOG_SUPPORT_EMAIL } from '@shared/const';
 import { ShareCard, buildDynoShareData, buildDiagnosticShareData, buildHealthShareData } from '@/components/ShareCard';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { WhatsNewPanel, useWhatsNew } from '@/components/WhatsNewPanel';
 import { useAuth } from '@/_core/hooks/useAuth';
 import PpeiHeader from '@/components/PpeiHeader';
+import GitHubCommitHistory from '@/components/GitHubCommitHistory';
+import VehicleCoding from '@/components/VehicleCoding';
+import TireSizeCorrection from '@/components/TireSizeCorrection';
+import DataloggerPanel from '@/components/DataloggerPanel';
+import { Settings } from 'lucide-react';
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -47,7 +53,8 @@ export default function Home() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
   const [healthReport, setHealthReport] = useState<HealthReportData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** Set when CSV/WP8 parse fails — we notify PPEI and ask the user to email the file. */
+  const [unsupportedFile, setUnsupportedFile] = useState<{ name: string } | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [manualVin, setManualVin] = useState('');
@@ -55,7 +62,15 @@ export default function Home() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [reasoningReport, setReasoningReport] = useState<ReasoningReport | null>(null);
   const [dragAnalysis, setDragAnalysis] = useState<DragAnalysis | null>(null);
-  const [mode, setMode] = useState<'analyze' | 'compare'>('analyze');
+  const [showProTeaser, setShowProTeaser] = useState(false);
+  const [liteTab, setLiteTab] = useState<'analyze' | 'basic-editor' | 'datalogger'>('analyze');
+  const [editorSubTab, setEditorSubTab] = useState<'vehicle-coding' | 'tire-correction'>('vehicle-coding');
+  // App-level fullscreen (covers entire page — works across all tabs)
+  const { isFullscreen: appFs, containerRef: appFsRef, toggleFullscreen: toggleAppFs } = useFullscreen();
+  // Track when analyzer was opened from datalogger's ANALYZE LIVE button
+  const [cameFromDatalogger, setCameFromDatalogger] = useState(false);
+  // Injected CSV from datalogger's ANALYZE LIVE
+  const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bugReportMutation = trpc.feedback.submit.useMutation();
   const cacheDatalogMutation = trpc.datalogCache.cacheDatalog.useMutation();
@@ -83,9 +98,9 @@ export default function Home() {
 
   const processFile = useCallback(async (file: File) => {
     setLoading(true);
-    setError(null);
+    setUnsupportedFile(null);
     try {
-      // Detect .wp8 files (Dynojet Power Vision datalogs)
+      // Detect .wp8 binary datalogs (WP8 / Power Vision style)
       // On the Home page, always generate a general health report (no redirect to Honda Talon Tuner)
       if (file.name.toLowerCase().endsWith('.wp8')) {
         const { parseWP8, wp8ToDuramaxData } = await import('@/lib/wp8Parser');
@@ -124,7 +139,7 @@ export default function Home() {
           });
         }
 
-        // Cache datalog (fire-and-forget)
+         // Cache datalog (fire-and-forget)
         try {
           const reader = new FileReader();
           reader.onload = () => {
@@ -136,7 +151,7 @@ export default function Home() {
           };
           reader.readAsDataURL(file);
         } catch { /* silent */ }
-
+        setShowProTeaser(true);
         setLoading(false);
         return;
       }
@@ -195,9 +210,10 @@ export default function Home() {
         };
         reader.readAsDataURL(file);
       } catch { /* silent — caching is best-effort */ }
+      setShowProTeaser(true);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setError('File load error \u2014 This file format has been reported to the PPEI team for review. We\'ll update the tool to support it.');
+      setUnsupportedFile({ name: file.name });
       setData(null);
       setBinnedData(undefined);
       setDiagnostics(null);
@@ -279,13 +295,89 @@ export default function Home() {
     setHealthReport(report);
   }, [data, manualVin]);
 
-  return (
-    <div className="min-h-screen" style={{ background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
-      <SignInModal />
-      <SignInBanner />
+  // Process injected CSV from datalogger's ANALYZE LIVE
+  const processInjectedCSV = useCallback(() => {
+    if (!injectedCSV) return;
+    try {
+      const rawData = parseCSV(injectedCSV.csv);
+      const processed = processData(rawData);
+      const downsampled = downsampleData(processed, 2000);
+      const binned = createBinnedData(processed, 40);
+      setData(downsampled);
+      setBinnedData(binned);
+      setFileName(injectedCSV.filename);
+      const diagnosticReport = analyzeDiagnostics(downsampled);
+      setDiagnostics(diagnosticReport);
+      const reasoning = runReasoningEngine(downsampled, diagnosticReport);
+      setReasoningReport(reasoning);
+      const drag = analyzeDragRuns(processed);
+      setDragAnalysis(drag);
+      const report = generateHealthReport(downsampled, undefined);
+      setHealthReport(report);
+      setShowProTeaser(true);
+      setInjectedCSV(null);
+    } catch { /* silent */ }
+  }, [injectedCSV]);
 
+  // Auto-process injected CSV when it arrives
+  React.useEffect(() => {
+    if (injectedCSV) processInjectedCSV();
+  }, [injectedCSV, processInjectedCSV]);
+
+  return (
+    <div ref={appFsRef} className="min-h-screen" style={appFs ? { background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)', overflow: 'auto', height: '100vh' } : { background: 'oklch(0.10 0.005 260)', color: 'oklch(0.95 0.005 260)' }}>
       {/* ── PPEI Header (shared across all pages) ── */}
       <PpeiHeader />
+
+      {/* ── VOP LITE Sub-Tab Bar ── */}
+      <div style={{
+        background: 'oklch(0.12 0.005 260)',
+        borderBottom: '1px solid oklch(0.20 0.008 260)',
+      }}>
+        <div className="container mx-auto px-4">
+          <div style={{ display: 'flex', gap: '2px', overflowX: 'auto', alignItems: 'center' }}>
+            {[
+              { id: 'analyze' as const, label: 'ANALYZE', icon: <BarChart3 style={{ width: 15, height: 15 }} /> },
+              { id: 'basic-editor' as const, label: 'BASIC EDITOR', icon: <Settings style={{ width: 15, height: 15 }} /> },
+              { id: 'datalogger' as const, label: 'DATALOGGER', icon: <Gauge style={{ width: 15, height: 15 }} /> },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setLiteTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '10px 16px',
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '0.85rem', letterSpacing: '0.06em',
+                  color: liteTab === tab.id ? 'white' : 'oklch(0.63 0.010 260)',
+                  background: liteTab === tab.id ? 'oklch(0.16 0.008 260)' : 'transparent',
+                  border: 'none',
+                  borderBottom: liteTab === tab.id ? '2px solid oklch(0.52 0.22 25)' : '2px solid transparent',
+                  cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap',
+                }}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+            {/* App-level Fullscreen Toggle */}
+            <button
+              onClick={toggleAppFs}
+              title={appFs ? 'Exit Fullscreen (ESC)' : 'Enter Fullscreen'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto',
+                padding: '6px 12px', background: appFs ? 'oklch(0.18 0.04 200 / 0.3)' : 'transparent',
+                border: `1px solid ${appFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.25 0.008 260)'}`,
+                borderRadius: '3px', color: appFs ? 'oklch(0.70 0.14 200)' : 'oklch(0.63 0.010 260)',
+                fontFamily: '"Bebas Neue", "Impact", sans-serif', fontSize: '0.8rem', letterSpacing: '0.08em',
+                cursor: 'pointer', transition: 'all 0.2s ease', whiteSpace: 'nowrap',
+              }}
+            >
+              {appFs ? <Minimize2 style={{ width: 13, height: 13 }} /> : <Maximize2 style={{ width: 13, height: 13 }} />}
+              {appFs ? 'EXIT' : 'FULLSCREEN'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <main className="container mx-auto px-4 py-8">
         {/* What's New Panel */}
@@ -293,7 +385,53 @@ export default function Home() {
           <WhatsNewPanel onClose={() => setShowWhatsNew(false)} autoHide={false} />
         )}
 
-        {!data ? (
+        {/* ── BASIC EDITOR Tab ── */}
+        {liteTab === 'basic-editor' && (
+          <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', overflow: 'auto' }}>
+            {/* Editor Sub-tabs */}
+            <div style={{ display: 'flex', gap: '2px', marginBottom: '12px', padding: '2px', background: 'rgba(24,24,27,0.8)', borderRadius: '8px', border: '1px solid rgba(63,63,70,0.3)', width: 'fit-content' }}>
+              {[
+                { id: 'vehicle-coding' as const, label: 'VEHICLE CODING' },
+                { id: 'tire-correction' as const, label: 'TIRE SIZE CORRECTION' },
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  onClick={() => setEditorSubTab(sub.id)}
+                  style={{
+                    padding: '6px 16px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontFamily: "'Share_Tech_Mono', monospace",
+                    letterSpacing: '0.05em',
+                    transition: 'all 0.2s',
+                    background: editorSubTab === sub.id ? '#b91c1c' : 'transparent',
+                    color: editorSubTab === sub.id ? '#fff' : '#71717a',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+            {editorSubTab === 'vehicle-coding' && <VehicleCoding />}
+            {editorSubTab === 'tire-correction' && <TireSizeCorrection />}
+          </div>
+        )}
+
+        {/* ── DATALOGGER Tab ── */}
+        {liteTab === 'datalogger' && (
+          <div className="ppei-anim-fade-up">
+            <DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => {
+              setInjectedCSV({ csv, filename });
+              setCameFromDatalogger(true);
+              setLiteTab('analyze');
+            }} />
+          </div>
+        )}
+
+        {/* ── ANALYZE Tab (original content) ── */}
+        {liteTab === 'analyze' && !data ? (
           /* ── Upload Section ── */
           <div className="max-w-3xl mx-auto">
 
@@ -317,61 +455,73 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Mode Toggle: Analyze vs Compare */}
-            <div className="ppei-anim-fade-up" style={{
-              display: 'flex',
-              justifyContent: 'center',
-              gap: '0',
-              marginBottom: '1.5rem',
-            }}>
-              <button
-                onClick={() => setMode('analyze')}
-                style={{
-                  background: mode === 'analyze' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'analyze' ? 'white' : 'oklch(0.68 0.010 260)',
-                  fontFamily: '"Bebas Neue", sans-serif',
-                  fontSize: '1rem',
-                  letterSpacing: '0.08em',
-                  padding: '10px 28px',
-                  border: mode === 'analyze' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
-                  borderRadius: '3px 0 0 3px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <BarChart3 style={{ width: '16px', height: '16px' }} />
-                ANALYZE
-              </button>
-              <button
-                onClick={() => setMode('compare')}
-                style={{
-                  background: mode === 'compare' ? 'oklch(0.52 0.22 25)' : 'oklch(0.14 0.006 260)',
-                  color: mode === 'compare' ? 'white' : 'oklch(0.68 0.010 260)',
-                  fontFamily: '"Bebas Neue", sans-serif',
-                  fontSize: '1rem',
-                  letterSpacing: '0.08em',
-                  padding: '10px 28px',
-                  border: mode === 'compare' ? '1px solid oklch(0.52 0.22 25)' : '1px solid oklch(0.48 0.008 260)',
-                  borderRadius: '0 3px 3px 0',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  borderLeft: 'none',
-                }}
-              >
-                <Gauge style={{ width: '16px', height: '16px' }} />
-                COMPARE
-              </button>
-            </div>
+            {/* V-OP Pro Upgrade Teaser */}
+            {showProTeaser && (
+              <div className="ppei-anim-fade-up" style={{
+                background: 'linear-gradient(135deg, oklch(0.12 0.015 25) 0%, oklch(0.10 0.005 260) 60%, oklch(0.12 0.012 200) 100%)',
+                border: '1px solid oklch(0.52 0.22 25 / 0.4)',
+                borderRadius: '4px',
+                padding: '1.5rem',
+                marginBottom: '1.5rem',
+                position: 'relative',
+                overflow: 'hidden',
+              }}>
+                {/* Animated corner accent */}
+                <div style={{ position: 'absolute', top: 0, right: 0, width: '120px', height: '120px', background: 'radial-gradient(circle at top right, oklch(0.52 0.22 25 / 0.15), transparent 70%)', pointerEvents: 'none' }} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                  <div style={{
+                    width: '48px', height: '48px', borderRadius: '4px',
+                    background: 'oklch(0.52 0.22 25 / 0.15)', border: '1px solid oklch(0.52 0.22 25 / 0.4)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <Rocket style={{ width: '24px', height: '24px', color: 'oklch(0.52 0.22 25)' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1.3rem', letterSpacing: '0.08em', color: 'white', margin: 0, marginBottom: '4px' }}>
+                      YOU'RE RUNNING ON STOCK BOOST
+                    </h3>
+                    <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.92rem', color: 'oklch(0.72 0.010 260)', margin: 0, lineHeight: 1.5, marginBottom: '12px' }}>
+                      This analyzer is great for quick checks — but V-OP Pro unlocks the <span style={{ color: 'oklch(0.52 0.22 25)', fontWeight: 600 }}>full dyno</span>. Side-by-side tune comparison, calibration editing, live gauges, AI diagnostics, flash tools, and more. It's like going from a stock tune to a PPEI custom — same truck, completely different animal.
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <Link href="/advanced">
+                        <button style={{
+                          background: 'oklch(0.52 0.22 25)', color: 'white', fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.95rem', letterSpacing: '0.08em', padding: '8px 24px', borderRadius: '3px',
+                          border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                        }}>
+                          <Rocket style={{ width: '14px', height: '14px' }} />
+                          UNLOCK V-OP PRO
+                        </button>
+                      </Link>
+                      <button
+                        onClick={() => setShowProTeaser(false)}
+                        style={{
+                          background: 'transparent', color: 'oklch(0.55 0.008 260)', fontFamily: '"Bebas Neue", sans-serif',
+                          fontSize: '0.85rem', letterSpacing: '0.06em', padding: '8px 16px', borderRadius: '3px',
+                          border: '1px solid oklch(0.25 0.008 260)', cursor: 'pointer',
+                        }}
+                      >
+                        MAYBE LATER
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', gap: '16px', marginTop: '14px', flexWrap: 'wrap' }}>
+                      {['Tune Compare', 'Calibration Editor', 'Live Gauges', 'AI Chat', 'Flash Tools'].map(feat => (
+                        <span key={feat} style={{
+                          fontFamily: '"Share Tech Mono", monospace', fontSize: '0.7rem', letterSpacing: '0.05em',
+                          color: 'oklch(0.58 0.008 260)', padding: '3px 10px',
+                          background: 'oklch(0.14 0.006 260)', border: '1px solid oklch(0.22 0.008 260)',
+                          borderRadius: '2px',
+                        }}>
+                          {feat}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
-            {mode === 'compare' ? (
-              <CompareView onBack={() => setMode('analyze')} />
-            ) : (
             <>
 
             {/* Drop zone */}
@@ -422,7 +572,27 @@ export default function Home() {
                     Drag &amp; drop your datalog file here, or click to browse
                   </p>
                   <p style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.62 0.010 260)', fontSize: '0.75rem', marginTop: '0.5rem', letterSpacing: '0.05em' }}>
-                    CSV &amp; WP8 (DYNOJET) SUPPORTED
+                    CSV &amp; WP8 SUPPORTED
+                  </p>
+                  <p style={{
+                    fontFamily: '"Rajdhani", sans-serif',
+                    color: 'oklch(0.60 0.010 260)',
+                    fontSize: '0.8rem',
+                    marginTop: '0.4rem',
+                    lineHeight: 1.45,
+                    textAlign: 'center',
+                    maxWidth: '22rem',
+                    marginLeft: 'auto',
+                    marginRight: 'auto',
+                  }}>
+                    Other datalog formats or errors — please email{' '}
+                    <a
+                      href={`mailto:${PPEI_DATALOG_SUPPORT_EMAIL}`}
+                      style={{ color: 'oklch(0.62 0.18 25)', fontWeight: 600 }}
+                    >
+                      {PPEI_DATALOG_SUPPORT_EMAIL}
+                    </a>
+                    .
                   </p>
 
                 </div>
@@ -626,9 +796,9 @@ export default function Home() {
                 POWERED BY PPEI · CUSTOM TUNING · REDEFINING THE LIMITS
               </p>
             </div>
-            </>)}
+            </>
           </div>
-        ) : (
+        ) : liteTab === 'analyze' && data ? (
           /* ── Dashboard Section ── */
           <div className="space-y-6 ppei-anim-fade-in">
 
@@ -662,6 +832,9 @@ export default function Home() {
                     margin: 0
                   }}>
                     {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
+                    {data.vehicleMeta?.combustionInference
+                      ? <span> · {formatCombustionInferenceSummary(data.vehicleMeta.combustionInference)}</span>
+                      : null}
                     {hasFaults
                       ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {(diagnostics?.issues.length ?? 0) + (hasReasoningFaults ? 1 : 0)} potential fault area(s) detected</span>
                       : <span style={{ color: 'oklch(0.65 0.20 145)' }}> · No fault areas detected</span>
@@ -696,7 +869,7 @@ export default function Home() {
                   )}
                 </button>
                 <button
-                  onClick={() => { setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setFileName(null); }}
+                  onClick={() => { setData(null); setBinnedData(undefined); setDiagnostics(null); setHealthReport(null); setFileName(null); setCameFromDatalogger(false); }}
                   style={{
                     background: 'transparent',
                     color: 'oklch(0.65 0.010 260)',
@@ -714,6 +887,32 @@ export default function Home() {
                 >
                   NEW FILE
                 </button>
+                {/* Back to Datalogger — shown when analyzer was opened via ANALYZE LIVE */}
+                {cameFromDatalogger && (
+                  <button
+                    onClick={() => {
+                      setCameFromDatalogger(false);
+                      setLiteTab('datalogger');
+                    }}
+                    style={{
+                      background: 'oklch(0.15 0.04 200 / 0.3)',
+                      color: 'oklch(0.70 0.14 200)',
+                      fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                      fontSize: '0.95rem',
+                      letterSpacing: '0.08em',
+                      padding: '8px 16px',
+                      borderRadius: '3px',
+                      border: '1px solid oklch(0.70 0.14 200)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <ArrowLeft style={{ width: 14, height: 14 }} /> BACK TO DATALOGGER
+                  </button>
+                )}
                 {/* Share to Facebook */}
                 {data && (
                   <ShareCard
@@ -899,6 +1098,21 @@ export default function Home() {
               <StatsSummary data={data} />
             </div>
 
+            {/* RPM vs MAF */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <RPMvMAFChart data={data} binnedData={binnedData} />
+            </div>
+
+            {/* HP vs RPM */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <HPvsRPMChart data={data} binnedData={binnedData} />
+            </div>
+
+            {/* Time-Series Overview */}
+            <div className="ppei-section-reveal ppei-delay-200">
+              <TimeSeriesChart data={data} />
+            </div>
+
             {/* Drag Racing Analyzer */}
             {dragAnalysis && (
               <div className="ppei-section-reveal ppei-delay-250">
@@ -969,19 +1183,21 @@ export default function Home() {
             {/* DTC Code Search */}
             <div>
               <SectionHeader icon={<Search style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="DIAGNOSTIC CODE LOOKUP" />
-              <DtcSearch />
+              <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'oklch(0.50 0.008 260)', fontFamily: 'Rajdhani, sans-serif' }}>Loading DTC database...</div>}>
+                <DtcSearch />
+              </Suspense>
             </div>
 
-            {/* Subsystem Reference */}
-            <div>
-              <SectionHeader icon={<Cpu style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />} title="SUBSYSTEM REFERENCE" />
-              <EcuReferencePanel />
-            </div>
           </div>
-        )}
+        ) : null}
+
+        {/* Recent commits — always at bottom (upload view + after analyze) */}
+        <div className="max-w-3xl mx-auto w-full">
+          <GitHubCommitHistory />
+        </div>
 
         {/* Error toast — positioned above the feedback button */}
-        {(error || exportError) && (
+        {(unsupportedFile || exportError) && (
           <div style={{
             position: 'fixed',
             bottom: '5rem',
@@ -994,18 +1210,52 @@ export default function Home() {
             display: 'flex',
             alignItems: 'flex-start',
             gap: '12px',
-            maxWidth: '420px',
+            maxWidth: '440px',
             zIndex: 1000,
             boxShadow: '0 4px 20px oklch(0 0 0 / 0.5)'
           }}>
             <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)', flexShrink: 0, marginTop: '2px' }} />
-            <div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontFamily: '"Bebas Neue", sans-serif', fontSize: '1rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
-                {error ? 'FILE LOAD ERROR' : 'PDF EXPORT FAILED'}
+                {unsupportedFile ? 'DATALOG NOT SUPPORTED' : 'PDF EXPORT FAILED'}
               </p>
-              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
-                {error || exportError}
-              </p>
+              {unsupportedFile ? (
+                <>
+                  <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: '0.35rem 0 0', lineHeight: 1.45 }}>
+                    We could not read <span style={{ fontFamily: '"Share Tech Mono", monospace', color: 'oklch(0.78 0.008 260)' }}>{unsupportedFile.name}</span>.
+                    A report was sent to the PPEI team. Please email this datalog to{' '}
+                    <a
+                      href={`mailto:${PPEI_DATALOG_SUPPORT_EMAIL}?subject=${encodeURIComponent(`Unsupported datalog: ${unsupportedFile.name}`)}&body=${encodeURIComponent(`Attached is a datalog file that did not open in V-OP (${unsupportedFile.name}).\n\nTuning tool / vehicle (optional):\n\n`)}`}
+                      style={{ color: 'oklch(0.62 0.18 25)', fontWeight: 600 }}
+                    >
+                      {PPEI_DATALOG_SUPPORT_EMAIL}
+                    </a>
+                    {' '}so we can add support. There is no automatic conversion for unknown formats yet.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setUnsupportedFile(null)}
+                    style={{
+                      marginTop: '0.65rem',
+                      background: 'transparent',
+                      color: 'oklch(0.55 0.008 260)',
+                      fontFamily: '"Bebas Neue", sans-serif',
+                      fontSize: '0.8rem',
+                      letterSpacing: '0.06em',
+                      padding: '6px 12px',
+                      borderRadius: '3px',
+                      border: '1px solid oklch(0.28 0.008 260)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    DISMISS
+                  </button>
+                </>
+              ) : (
+                <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.85rem', color: 'oklch(0.65 0.010 260)', margin: 0 }}>
+                  {exportError}
+                </p>
+              )}
             </div>
           </div>
         )}

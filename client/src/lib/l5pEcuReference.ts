@@ -1,6 +1,9 @@
 /**
  * L5P ECU Reference Module — E41 Controller Knowledge Base
- * 
+ *
+ * Full quasi-A2L for 2017 L5P (ECM_E41): `test_files/E41_L5P_2017/E41_a171711502_quasi.a2l`
+ * (extracted from `E41_a171711502_quasi_2017 L5P a2L.zip`; companion: `E41_a171711502_L5P_150227_1.ptp`).
+ *
  * Built from the E41 A2L calibration definition (71,246 unique parameters).
  * Maps GM internal naming conventions to human-readable descriptions and
  * provides calibration structure context for smarter diagnostic analysis.
@@ -62,7 +65,7 @@ export const L5P_SUBSYSTEMS: Record<string, SubsystemInfo> = {
     tableCount: 287,
     keyTables: [
       'PresSetPt (15×16) — Desired rail pressure vs RPM and fuel quantity. Multiple altitude variants. This determines what rail pressure the ECM targets for any given operating condition.',
-      'GovnProp/Intgl/Deriv — PID gains for the pressure regulator. Controls how the ECM adjusts PCV duty cycle to hit the target.',
+      'GovnProp/Intgl/Deriv — PID gains for the pressure regulator. Controls how the ECM adjusts **FPR/inlet metering commanded current (mA)** to hit the target (often mislabeled "PCV duty").',
       'PmpEff (5×8) — Pump efficiency map. The ECM uses this to predict how much pump drive is needed.',
       'MaxFuelSysPresCmd (33×1) — Absolute maximum commanded rail pressure by RPM. The hard ceiling.',
     ],
@@ -267,7 +270,7 @@ export const L5P_KEY_DTCS: DtcDefinition[] = [
   // Fuel System
   { gmCode: 'FRP_TooLo', description: 'Fuel Rail Pressure Too Low', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'Rail pressure dropped below the minimum threshold. Could indicate a weak HP4 pump, failing pressure relief valve, fuel supply restriction, or the tune is commanding more fuel than the pump can deliver.' },
   { gmCode: 'FRP_TooHi', description: 'Fuel Rail Pressure Too High', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'Rail pressure exceeded the maximum threshold. Could indicate a stuck pressure control valve, faulty rail pressure sensor, or calibration issue commanding excessive pressure.' },
-  { gmCode: 'FuelPresReg1Perf', description: 'Fuel Pressure Regulator Performance', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FHPC', whatItMeans: 'The pressure regulator (PCV) is not maintaining commanded pressure within tolerance. Often seen when PCV duty cycle is maxed out or hunting.' },
+  { gmCode: 'FuelPresReg1Perf', description: 'Fuel Pressure Regulator Performance', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FHPC', whatItMeans: 'The pressure regulator (FPR/inlet metering, often called PCV) is not maintaining commanded pressure within tolerance. Often seen when commanded current (mA) is pinned at an extreme or hunting vs rail error.' },
   { gmCode: 'FuelInjQuantLoExptd', description: 'Fuel Injection Quantity Lower Than Expected', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FULC', whatItMeans: 'The ECM detected less fuel being delivered than commanded. Could indicate worn injectors, low rail pressure, or injector learning at its limit.' },
   { gmCode: 'FuelInjQuantHiExptd', description: 'Fuel Injection Quantity Higher Than Expected', category: 'Fuel System', severity: 'warning', relatedSubsystem: 'FULC', whatItMeans: 'More fuel delivered than commanded. Could indicate leaking injectors or injector learning compensation maxed out in the positive direction.' },
   { gmCode: 'FuelOvrPresVlvAct', description: 'Fuel Over-Pressure Valve Activated', category: 'Fuel System', severity: 'critical', relatedSubsystem: 'FHPC', whatItMeans: 'The mechanical over-pressure relief valve opened. Rail pressure exceeded the hardware safety limit. This is a last-resort protection — something is seriously wrong with pressure control.' },
@@ -427,25 +430,25 @@ export function getCalibrationContext(
     },
     rail_pressure_high: {
       title: 'Elevated Rail Pressure — FHPC Subsystem',
-      context: 'Rail pressure setpoints come from the FHPC 15×16 table (RPM × fuel quantity). Higher fuel demand = higher pressure needed for atomization. The L5P HP4 pump peaks around 29,000 PSI from the factory. The MaxFuelSysPresCmd table (33×1) sets the absolute ceiling per RPM. Going 3,000+ PSI above OEM peak accelerates HP4 wear and increases the risk of fuel system failure. The PCV duty cycle shows how hard the system is working to maintain pressure.',
+      context: 'Rail pressure setpoints come from the FHPC 15×16 table (RPM × fuel quantity). Higher fuel demand = higher pressure needed for atomization. The L5P HP4 pump peaks around 29,000 PSI from the factory. The MaxFuelSysPresCmd table (33×1) sets the absolute ceiling per RPM. Going 3,000+ PSI above OEM peak accelerates HP4 wear and increases the risk of fuel system failure. **FPR current (mA)** — not a PWM duty % — shows how aggressively the ECM is driving the inlet metering valve; compare to desired vs actual rail.',
       subsystem: 'FHPC',
       relevance: 'high',
     },
     rail_pressure_hunting: {
       title: 'Rail Pressure Oscillation — FHPC PID Tuning',
-      context: 'The FHPC subsystem uses separate PID gains for the pressure regulator valve (PRV) and metering unit (MU). Hunting/oscillation typically means the proportional or integral gains are mismatched for the current fuel system setup. On modified trucks with different injectors or pump modifications, the factory PID gains may not be optimal. Watch PCV duty cycle — if it\'s oscillating in sync with rail pressure, the PID loop is the culprit.',
+      context: 'The FHPC subsystem uses separate PID gains for the pressure regulator valve (PRV) and metering unit (MU). Hunting/oscillation typically means the proportional or integral gains are mismatched for the current fuel system setup. On modified trucks with different injectors or pump modifications, the factory PID gains may not be optimal. Watch **FPR current (mA)** — if it oscillates in sync with rail pressure, the PID loop is a prime suspect.',
       subsystem: 'FHPC',
       relevance: 'high',
     },
     high_egt: {
       title: 'Elevated EGT — EGTC/FULC Interaction',
-      context: 'The L5P monitors 5 EGT positions (B1S1 pre-turbo through B1S5 tailpipe). High EGT is primarily driven by fuel quantity and timing. The FULC subsystem\'s injection timing tables control when fuel enters the cylinder — more advance = more cylinder pressure but potentially higher EGT. The EGTC subsystem has protection thresholds that will reduce torque if EGT exceeds limits. During DPF regen (DPFC), target EGT is 1100-1200°F — this is normal. Sustained EGT above 1300°F under load is getting aggressive.',
+      context: 'The L5P monitors 5 EGT positions (B1S1 pre-turbo through B1S5 tailpipe). High EGT is primarily driven by fuel quantity and timing. The FULC subsystem\'s injection timing tables control when fuel enters the cylinder — more advance = more cylinder pressure but potentially higher EGT. The EGTC subsystem has protection thresholds that will reduce torque if EGT exceeds limits. During DPF regen (DPFC), target EGT is 1100-1200°F — this is normal. Sustained EGT above 1475°F under load for more than 14 seconds is getting aggressive. Brief spikes to 1800-2000°F are acceptable during racing pulls (<12 seconds).',
       subsystem: 'EGTC/FULC',
       relevance: 'high',
     },
     injector_pulse_high: {
       title: 'High Injector Pulse Width — FULC ET_InjTbl',
-      context: 'Injector pulse width comes from the FULC ET_InjTbl (22×20 RPM × fuel quantity). The L5P uses piezo injectors — pulse widths above 1.5ms are race territory with high EGT risk. The FADC subsystem monitors per-cylinder fuel delivery via crankshaft acceleration patterns and adapts individual injector trims. If injector learning (FSA_LrnMap) is hitting its limits, the injectors may be worn or mismatched for the fuel demand. OEM duration or lower for desired horsepower is the rule of thumb for injector sizing.',
+      context: 'Injector pulse width comes from the FULC ET_InjTbl (22×20 RPM × fuel quantity). The L5P uses piezo injectors — pulse widths above 1.5ms are race territory with high EGT risk. For solenoid injectors (LB7/LBZ/LMM), 2500+ µs is where you start paying attention and 3000 µs is basically maxed out — 2100 µs is well within normal range. The FADC subsystem monitors per-cylinder fuel delivery via crankshaft acceleration patterns and adapts individual injector trims. If injector learning (FSA_LrnMap) is hitting its limits, the injectors may be worn or mismatched for the fuel demand. OEM duration or lower for desired horsepower is the rule of thumb for injector sizing.',
       subsystem: 'FULC/FADC',
       relevance: 'high',
     },
@@ -474,8 +477,8 @@ export function getCalibrationContext(
       relevance: 'high',
     },
     pcv_maxed: {
-      title: 'PCV Current High — Fuel Pressure Regulator at Limit',
-      context: 'The PCV (Pressure Control Valve) regulates fuel rail pressure by controlling how much fuel bypasses back to the tank. PCV values are measured in milliamps (mA), not percentage. Higher mA = more fuel bypassed (lower rail pressure). Lower mA = more fuel flowing to the rail (higher pressure). At ~400 mA, the CP3 is receiving roughly 97% of available fuel. When PCV current stays very low under load, the fuel system is at its maximum delivery capacity. On tuned trucks, this means fuel demand exceeds what the stock fuel system can supply. Solutions: check lift pump output, inspect fuel filter, upgrade to larger injectors matched to desired HP, or add a lift pump to improve CP3 inlet pressure. Note: HP4 pumps are only on 2017+ L5P trucks. LB7 through LMM use CP3, LML uses CP4.2.',
+      title: 'FPR Current at Extreme — Inlet Metering vs Rail Demand',
+      context: 'The high-pressure pump inlet metering valve is often labeled "PCV" in tools, but the live signal is **commanded current (mA)**, not PWM duty %. Rule of thumb: ~400 mA ≈ ~95% regulator opening (more effective flow toward the rail), ~1800 mA ≈ ~10% opening. When current stays very **low** (~400–700 mA) for long stretches while actual rail still lags desired, the low-pressure supply or pump may be at its limit. When rail is high vs desired with current stuck **high** (~1800 mA regime), investigate regulator/tuning/sensor. HP4 is 2017+ L5P; LBZ/LMM use CP3, LML uses CP4.2.',
       subsystem: 'FHPC',
       relevance: 'high',
     },

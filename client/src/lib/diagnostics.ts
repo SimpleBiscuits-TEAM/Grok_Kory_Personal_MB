@@ -12,6 +12,8 @@
  *   ControlledOn with converging slip = normal torque multiplication during acceleration.
  */
 
+import { shouldApplyDieselAnalyzerRules } from './combustionInference';
+
 export interface DiagnosticIssue {
   code: string;
   severity: 'critical' | 'warning' | 'info';
@@ -92,12 +94,10 @@ function buildDecelMask(
 function getVehicleFuelType(meta?: import('./dataProcessor').VehicleMeta): string {
   if (!meta) return 'unknown';
   if (meta.fuelType && meta.fuelType !== 'any') return meta.fuelType;
-  // Infer from manufacturer if fuelType not explicit
-  if (meta.manufacturer === 'gm') {
-    // GM in this tool context is Duramax diesel
-    return 'diesel';
-  }
-  // BMW XM, Ford Raptor gas, etc.
+  const fam = meta.combustionInference?.family;
+  if (fam === 'diesel') return 'diesel';
+  if (fam === 'spark') return 'gasoline';
+  // BMW XM, Ford Raptor gas, etc. — do not assume GM = diesel (Silverado gas, etc.).
   if (meta.engineType) {
     const et = meta.engineType.toLowerCase();
     if (et.includes('diesel') || et.includes('duramax')) return 'diesel';
@@ -107,37 +107,23 @@ function getVehicleFuelType(meta?: import('./dataProcessor').VehicleMeta): strin
   return 'unknown';
 }
 
-/**
- * Check if a diagnostic check category is relevant for this vehicle.
- * Diesel-specific checks (rail pressure, boost, VGT, EGT, DPF, DEF) should
- * NOT run on gasoline or hybrid vehicles.
- */
-function isDieselCheck(checkName: string): boolean {
-  const dieselChecks = [
-    'rail_pressure', 'boost', 'vgt', 'egt',
-    'fuel_pressure_regulator', 'high_rail_decel',
-  ];
-  return dieselChecks.includes(checkName);
-}
-
 export function analyzeDiagnostics(data: any): DiagnosticReport {
   const issues: DiagnosticIssue[] = [];
 
   // ── Vehicle-aware filtering ────────────────────────────────────────────
   const vehicleMeta: import('./dataProcessor').VehicleMeta | undefined = data.vehicleMeta;
   const vehicleFuel = getVehicleFuelType(vehicleMeta);
-  const isDiesel = vehicleFuel === 'diesel' || vehicleFuel === 'unknown';
-  // When fuel type is unknown (no VIN), run all checks for backward compat.
-  // When fuel type is explicitly non-diesel, skip diesel-specific checks.
+  const dieselDiagnosticsEnabled = shouldApplyDieselAnalyzerRules(vehicleMeta);
 
-  if (vehicleMeta && vehicleFuel !== 'unknown') {
+  if (vehicleMeta) {
     console.log('[Diagnostics] Vehicle-aware mode:', {
       vin: vehicleMeta.vin,
       make: vehicleMeta.make,
       model: vehicleMeta.model,
       fuelType: vehicleFuel,
       manufacturer: vehicleMeta.manufacturer,
-      dieselChecksEnabled: isDiesel,
+      combustionFamily: vehicleMeta.combustionInference?.family,
+      dieselDiagnosticsEnabled,
     });
   }
 
@@ -190,7 +176,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   const throttleTransientMask = buildThrottleTransientMask(throttlePosition);
 
   // Check for Low Rail Pressure (P0087) — diesel only
-  if (isDiesel && railPressureActual.length > 0) {
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
     const lowRailIssues = checkLowRailPressure(
       railPressureActual,
       railPressureDesired,
@@ -204,7 +190,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // Check for High Rail Pressure (P0088) — diesel only
-  if (isDiesel && railPressureActual.length > 0) {
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
     const highRailIssues = checkHighRailPressure(
       railPressureActual,
       railPressureDesired,
@@ -218,7 +204,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
 
   // Check for Low Boost Pressure (P0299) — diesel only (VGT turbo-specific thresholds)
   const boostActualAvailable = data.boostActualAvailable !== false;
-  if (isDiesel && boostActual.length > 0 && boostActualAvailable) {
+  if (dieselDiagnosticsEnabled && boostActual.length > 0 && boostActualAvailable) {
     const lowBoostIssues = checkLowBoostPressure(
       boostActual,
       boostDesired,
@@ -229,7 +215,7 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
       throttleTransientMask
     );
     issues.push(...lowBoostIssues);
-  } else if (isDiesel && boostDesired.length > 0 && !boostActualAvailable && boostDesired.some((v: number) => v > 0)) {
+  } else if (dieselDiagnosticsEnabled && boostDesired.length > 0 && !boostActualAvailable && boostDesired.some((v: number) => v > 0)) {
     issues.push({
       code: 'INFO-MAP-NOT-LOGGED',
       severity: 'info',
@@ -239,18 +225,23 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     });
   }
 
+  // Check for Rail Pressure Surge (rapid actual overshoot vs desired) — diesel only
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
+    issues.push(...checkRailPressureSurge(railPressureActual, railPressureDesired, rpm, decelMask, throttleTransientMask));
+  }
+
   // Check Exhaust Gas Temperature (unified: sensor faults + high-temp, deduplicated)
-  // Diesel EGT thresholds (1300°F+) are NOT applicable to gasoline engines.
+  // Diesel EGT thresholds (1475°F sustained) are NOT applicable to gasoline engines.
   // Gasoline EGT is typically 1400-1600°F under load — normal for gas, critical for diesel.
   // GUARD: Only run EGT checks if the channel has actual observed data (non-zero values).
   // An all-zero array means the EGT channel was not logged or not populated.
   const egtHasRealData = exhaustGasTemp.length > 0 && exhaustGasTemp.some((v: number) => v > 0);
-  if (isDiesel && egtHasRealData) {
+  if (dieselDiagnosticsEnabled && egtHasRealData) {
     issues.push(...checkAllEgtIssues(exhaustGasTemp));
   }
 
   // Check Mass Airflow (P0101) — diesel-specific MAF/RPM ratios
-  if (isDiesel && maf.length > 0 && rpm.length > 0) {
+  if (dieselDiagnosticsEnabled && maf.length > 0 && rpm.length > 0) {
     const mafIssues = checkMassAirflow(maf, rpm);
     issues.push(...mafIssues);
   }
@@ -272,12 +263,12 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   // zero-filled arrays when no VGT PID exists
   const vgtHasRealData = turboVanePosition.length > 0 && turboVaneDesired.length > 0
     && turboVanePosition.some((v: number) => v > 0) && turboVaneDesired.some((v: number) => v > 0);
-  if (isDiesel && vgtHasRealData) {
+  if (dieselDiagnosticsEnabled && vgtHasRealData) {
     issues.push(...checkVgtTracking(turboVanePosition, turboVaneDesired, rpm));
   }
 
   // P0089 - Fuel Pressure Regulator Performance —
-  if (isDiesel && railPressureActual.length > 0) {
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
     issues.push(...checkFuelPressureRegulatorPerformance(railPressureActual, railPressureDesired, rpm));
   }
 
@@ -292,18 +283,18 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
   }
 
   // P1089 - Rail Pressure High on Decel — diesel only
-  if (isDiesel && railPressureActual.length > 0) {
+  if (dieselDiagnosticsEnabled && railPressureActual.length > 0) {
     issues.push(...checkHighRailOnDecel(railPressureActual, railPressureDesired, rpm));
   }
 
   // TURBO SURGE / TURBO BRAKING — diesel VGT only
-  if (isDiesel && vgtHasRealData && boostActual.length > 0) {
+  if (dieselDiagnosticsEnabled && vgtHasRealData && boostActual.length > 0) {
     issues.push(...checkTurboSurge(boostActual, boostDesired, turboVanePosition, turboVaneDesired, throttlePosition, rpm));
   }
 
   // EXHAUST BACKPRESSURE vs BOOST ANALYSIS — diesel turbo only
   const exhHasData = exhaustPressure.length > 0 && exhaustPressure.some((v: number) => v > 0);
-  if (isDiesel && exhHasData && boostActual.length > 0) {
+  if (dieselDiagnosticsEnabled && exhHasData && boostActual.length > 0) {
     issues.push(...checkBackpressureVsBoost(exhaustPressure, boostActual, throttlePosition, rpm, vehicleSpeed));
   }
 
@@ -609,7 +600,7 @@ function checkHighRailPressure(
     }
   }
 
-  // Check idle condition — only when PCV data is actually logged
+  // Check idle condition — only when FPR/PCV current (mA) is logged
   const hasPcvData = pcv.some((v: number) => v > 0);
   if (desired.length > 0 && hasPcvData) {
     const idleIndices = desired
@@ -624,10 +615,10 @@ function checkHighRailPressure(
           issues.push({
             code: 'HIGH-IDLE-RAIL-PRESSURE',
             severity: 'info',
-            title: 'High Idle Rail Pressure - PCV Adjustment Needed',
-            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. PCV current is ${avgIdlePcv.toFixed(0)} mA (below 1600 mA). Higher mA = more fuel bypass, lower mA = more fuel flowing to rail.`,
+            title: 'High Idle Rail Pressure - FPR Current Adjustment Needed',
+            description: `At idle, desired pressure is under 5kpsi but actual is ${avgIdleActual.toFixed(0)}psi. FPR/inlet metering current is ${avgIdlePcv.toFixed(0)} mA (below 1600 mA). Rule of thumb: ~400 mA ≈ high regulator opening (more flow toward rail), ~1800 mA ≈ low opening — not a PWM duty %.`,
             recommendation:
-              'An adjustment in tuning can resolve this. Contact your tuner to adjust PCV current at idle for better pressure control.',
+              'An adjustment in tuning can resolve this. Contact your tuner to adjust FPR commanded current at idle for better pressure control.',
           });
         }
       }
@@ -657,9 +648,9 @@ function checkLowBoostPressure(
   throttleTransientMask: boolean[]
 ): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
-  const ABS_THRESHOLD = 10;     // psi absolute offset (raised from 8)
-  const PCT_THRESHOLD = 0.30;   // 30% relative deviation required
-  const minDuration = 15;       // seconds sustained (raised from 10)
+  const ABS_THRESHOLD = 15;     // psi absolute offset (raised from 10 — loosened to reduce false positives)
+  const PCT_THRESHOLD = 0.40;   // 40% relative deviation required (raised from 30% — loosened per user feedback)
+  const minDuration = 20;       // seconds sustained (raised from 15 — more time for turbo to respond)
   const sampleRate = 10;
   const minSamples = minDuration * sampleRate;
   const MIN_RPM = 1500;         // turbo needs RPM to spool
@@ -771,11 +762,14 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   const issues: DiagnosticIssue[] = [];
   if (!egt.length) return issues;
 
-  const HIGH_THRESHOLD = 1750;
+  const HIGH_THRESHOLD = 1475;     // Sustained street/towing limit — flag if EGTs stay above this
+  const RACING_THRESHOLD = 1800;   // Racing conditions — brief spikes OK, sustained = problem
   const CRITICAL_THRESHOLD = 2100;  // Raised from 1900 -- aftermarket sensors can read higher
-  const MIN_DURATION_SEC = 5;
+  const MIN_DURATION_SEC = 14;     // User requirement: flag if sustained more than 14 seconds
+  const RACING_DURATION_SEC = 12;  // Racing: 1800-2000°F for <12s is acceptable, >12s = problem
   const SAMPLE_RATE = 10;
   const MIN_SAMPLES = MIN_DURATION_SEC * SAMPLE_RATE;
+  const RACING_SAMPLES = RACING_DURATION_SEC * SAMPLE_RATE;
 
   let sensorFaulty = false;
 
@@ -815,14 +809,30 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   // AND for a very long time (150+ samples = 15+ seconds at 10Hz).
   // Short runs with slowly-changing EGT are normal, not a sensor fault.
   if (maxStuck > 150 && stuckValue > 400) {
-    issues.push({
-      code: 'EGT-SENSOR-STUCK',
-      severity: 'warning',
-      title: 'EGT Sensor Stuck/Frozen',
-      description: `EGT sensor reading was frozen at ${stuckValue.toFixed(0)}F (< 1F change) for ${maxStuck} consecutive samples (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). A stuck sensor cannot protect the DPF from overtemperature events.`,
-      recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
-    });
-    sensorFaulty = true;
+    // Special case: 1832°F (999.9°C) is the open-circuit default reading.
+    // When someone removes emissions equipment and tunes the sensor out to
+    // avoid a DTC, the ECM reports ~1832°F as if the circuit is open.
+    // This is NOT a real temperature — it's a disconnected/tuned-out sensor.
+    const isOpenCircuit = Math.abs(stuckValue - 1832) < 5; // within 5°F of 1832
+    if (isOpenCircuit) {
+      issues.push({
+        code: 'EGT-SENSOR-OPEN-CIRCUIT',
+        severity: 'info',
+        title: 'EGT Sensor Disconnected — Open Circuit (1832°F)',
+        description: `EGT sensor is flatlined at ${stuckValue.toFixed(0)}°F for the entire log (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). 1832°F (999.9°C) is the open-circuit default value — this indicates the EGT sensor is disconnected or the circuit has been tuned out. This is common on vehicles with emissions equipment removed and a tune that disables the EGT DTC.`,
+        recommendation: 'This is not a real temperature reading. The EGT sensor is disconnected or open circuit. If the vehicle has had emissions equipment removed, this is expected behavior with the current tune. EGT-based diagnostics will be skipped for this log.',
+      });
+      sensorFaulty = true;
+    } else {
+      issues.push({
+        code: 'EGT-SENSOR-STUCK',
+        severity: 'warning',
+        title: 'EGT Sensor Stuck/Frozen',
+        description: `EGT sensor reading was frozen at ${stuckValue.toFixed(0)}°F (< 1°F change) for ${maxStuck} consecutive samples (${(maxStuck / SAMPLE_RATE).toFixed(0)}s). A stuck sensor cannot protect the DPF from overtemperature events.`,
+        recommendation: 'Replace the EGT sensor. Inspect sensor wiring and connector for damage or corrosion.',
+      });
+      sensorFaulty = true;
+    }
   }
 
   let erraticCount = 0;
@@ -841,6 +851,28 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
   }
 
   if (!sensorFaulty) {
+    // ── Racing EGT check (1800-2000°F sustained >12s) ──
+    let consecutiveRacing = 0;
+    let racingReported = false;
+    for (let i = 0; i < egt.length; i++) {
+      if (egt[i] > RACING_THRESHOLD) {
+        consecutiveRacing++;
+        if (consecutiveRacing >= RACING_SAMPLES && !racingReported) {
+          issues.push({
+            code: 'EGT-RACING-SUSTAINED',
+            severity: 'warning',
+            title: 'Sustained Racing-Level EGT',
+            description: `EGT exceeded ${RACING_THRESHOLD}°F for more than ${RACING_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}°F). Brief spikes to 1800-2000°F are normal during racing pulls, but sustained temps at this level indicate insufficient airflow or excessive fueling.`,
+            recommendation: 'Reduce pull duration or increase airflow (larger turbo, better intercooler). Consider water-methanol injection for sustained high-load use. These temps are acceptable for short drag passes (<12 seconds) but not for extended pulls.',
+          });
+          racingReported = true;
+        }
+      } else {
+        consecutiveRacing = 0;
+      }
+    }
+
+    // ── Street/towing EGT check (>1475°F sustained >14s) ──
     let consecutiveHighTemp = 0;
     let egtHighReported = false;
     for (let i = 0; i < egt.length; i++) {
@@ -851,8 +883,8 @@ function checkAllEgtIssues(egt: number[]): DiagnosticIssue[] {
             code: 'EGT-HIGH',
             severity: 'warning',
             title: 'High Exhaust Gas Temperature',
-            description: `EGT exceeded ${HIGH_THRESHOLD}F for more than ${MIN_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}F).`,
-            recommendation: 'High EGT indicates aggressive tuning or fuel issues. Contact your tuner. Ensure fuel quality and check for engine knock.',
+            description: `EGT exceeded ${HIGH_THRESHOLD}°F for more than ${MIN_DURATION_SEC} seconds (peak: ${maxEgt.toFixed(0)}°F). Sustained temps above 1475°F accelerate component wear.`,
+            recommendation: 'Monitor EGTs during towing or sustained pulls. If EGTs are consistently above 1475°F, discuss fueling and boost targets with your tuner. Ensure intercooler is not heat-soaked.',
           });
           egtHighReported = true;
         }
@@ -909,7 +941,7 @@ function checkMassAirflow(maf: number[], rpm: number[]): DiagnosticIssue[] {
         title: 'Low MAF at Idle',
         description: `MAF flow drops below 2 lb/min at idle for extended periods (minimum: ${minIdleMaf.toFixed(1)} lb/min).`,
         recommendation:
-          'Check MAF sensor for contamination or blockage. Contact tuner to verify MAF calibration. May indicate intake restriction or sensor fault.',
+          'If an aftermarket intake is installed or the OEM baffle has been removed, the MAF sensor may be under-reading due to the larger pre-MAF tube diameter — this is expected physics, not a sensor fault. The fix is a MAF scaling tune revision to recalibrate the transfer function for the new tube geometry. If the intake is stock, check MAF sensor for contamination or blockage and contact tuner to verify MAF calibration.',
       });
     }
   }
@@ -1670,6 +1702,90 @@ export function checkTurboSurge(
         recommendation: 'Inspect VGT vanes for carbon buildup or sticking. Check unison ring for wear. Test VGT actuator movement. If the vehicle has a tow tune, verify turbo braking settings with the tuner.',
       });
     }
+  }
+
+  return issues;
+}
+
+
+// ── RAIL PRESSURE SURGE DETECTION ──────────────────────────────────────────
+/**
+ * Detects rapid fuel rail pressure surges where actual pressure spikes
+ * significantly above desired pressure in a short time window.
+ *
+ * Pattern: actual jumps from ~24-26k to 30k+ while desired holds at ~29k.
+ * This is NOT the same as the sustained high-rail check (P0088) — this catches
+ * rapid transient spikes that indicate fuel pump overshoot or regulator issues.
+ *
+ * Detection strategy:
+ *   1. Compute rate of change of actual rail pressure (psi/sec)
+ *   2. Flag when actual surges >2000 psi above desired in a short window
+ *   3. Exclude decel and throttle transients
+ */
+function checkRailPressureSurge(
+  actual: number[],
+  desired: number[],
+  rpm: number[],
+  decelMask: boolean[],
+  throttleTransientMask: boolean[]
+): DiagnosticIssue[] {
+  const issues: DiagnosticIssue[] = [];
+  if (actual.length < 20) return issues;
+
+  const SAMPLE_RATE = 10; // 10 Hz
+  const MIN_RPM = 1200;
+  const SURGE_OVERSHOOT = 2000;    // psi above desired = surge
+  const RATE_THRESHOLD = 30000;    // psi/sec rate of rise = rapid surge
+  const RATE_LOOKBACK = 5;         // 0.5 seconds lookback for rate calc
+  const MIN_SURGE_EVENTS = 2;      // need at least 2 surge events to flag
+  const MIN_DESIRED_PRESSURE = 10000; // only check when desired is meaningful
+
+  let surgeEvents = 0;
+  let maxOvershoot = 0;
+  let maxRate = 0;
+  let worstActual = 0;
+  let worstDesired = 0;
+  // Cooldown: don't count multiple samples from the same surge event
+  let cooldown = 0;
+
+  for (let i = RATE_LOOKBACK; i < actual.length; i++) {
+    if (cooldown > 0) { cooldown--; continue; }
+    if (decelMask[i] || throttleTransientMask[i]) continue;
+    if (rpm[i] < MIN_RPM) continue;
+    if (desired[i] < MIN_DESIRED_PRESSURE) continue;
+    if (actual[i] <= 0 || desired[i] <= 0) continue;
+
+    const overshoot = actual[i] - desired[i];
+    const rateOfRise = (actual[i] - actual[i - RATE_LOOKBACK]) * (SAMPLE_RATE / RATE_LOOKBACK);
+
+    if (overshoot > SURGE_OVERSHOOT && rateOfRise > RATE_THRESHOLD) {
+      surgeEvents++;
+      if (overshoot > maxOvershoot) {
+        maxOvershoot = overshoot;
+        worstActual = actual[i];
+        worstDesired = desired[i];
+      }
+      if (rateOfRise > maxRate) maxRate = rateOfRise;
+      cooldown = 20; // 2 seconds cooldown between events
+    }
+  }
+
+  if (surgeEvents >= MIN_SURGE_EVENTS) {
+    issues.push({
+      code: 'RAIL-PRESSURE-SURGE',
+      severity: 'warning',
+      title: 'Fuel Rail Pressure Surge Detected',
+      description: `Detected ${surgeEvents} rapid rail pressure surge event(s) where actual pressure spiked ${maxOvershoot.toFixed(0)} psi above desired (actual: ${worstActual.toFixed(0)} psi, desired: ${worstDesired.toFixed(0)} psi). Rate of pressure rise reached ${maxRate.toFixed(0)} psi/sec. This indicates the high-pressure fuel pump is overshooting the target — the pressure regulator is not responding fast enough to control the surge.`,
+      recommendation: 'Contact your tuner to review fuel pressure regulator PID gains (proportional/integral response). The pump is building pressure faster than the regulator can bleed it off. This can also indicate a mechanical issue with the pressure control valve (PCV/FPR solenoid) or a fuel system that is over-pressurizing during rapid load changes.',
+    });
+  } else if (surgeEvents === 1) {
+    issues.push({
+      code: 'RAIL-PRESSURE-SURGE',
+      severity: 'info',
+      title: 'Minor Rail Pressure Surge',
+      description: `Detected 1 rail pressure surge event where actual spiked ${maxOvershoot.toFixed(0)} psi above desired (actual: ${worstActual.toFixed(0)} psi, desired: ${worstDesired.toFixed(0)} psi). Rate: ${maxRate.toFixed(0)} psi/sec. A single event may be transient, but monitor for recurrence.`,
+      recommendation: 'Monitor for recurrence. If surges happen consistently, have the tuner review fuel pressure regulator calibration.',
+    });
   }
 
   return issues;

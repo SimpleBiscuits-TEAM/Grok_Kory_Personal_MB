@@ -36,12 +36,29 @@ The smoke limiter is the #1 reason a tune feels "flat" at low RPM — if boost h
 - Trajectory calculator sets charger speed targets for smooth boost build
 - Anti-surge: disturbance controller monitors crankshaft speed oscillation
 
+### VGT / Boost / EGT Relationship (CRITICAL — Common Misconceptions)
+- **Closing the VGT does NOT always mean cooler EGTs.** A more closed VGT increases exhaust backpressure (drive pressure). If the engine doesn't have enough heat energy or RPM to push through that backpressure efficiently, the exhaust gas dwells longer and temps can actually rise.
+- **More boost does NOT always mean more power.** If the VGT is commanding too much position (too closed) without sufficient exhaust energy or RPM to support it, the **pressure ratio (boost-to-drive ratio)** gets out of hand. The turbo is working harder than it needs to, the engine is pumping against excessive backpressure, and net power drops.
+- **Turbo overspeed risk:** When VGT position is too aggressive for the operating conditions (low RPM, low exhaust energy), the compressor can be driven beyond its efficient operating range. This creates a potential **turbo overspeed condition** — the turbo is spinning fast but not doing useful work, and the shaft speed can exceed design limits.
+- **Diagnostic rule:** When analyzing boost and EGT together, do NOT assume "more boost = good" or "VGT closing = EGTs will drop." Always evaluate the **boost-to-drive pressure ratio** and whether the VGT position makes sense for the current RPM and load. A healthy ratio is typically 1.5:1 to 2:1 (boost:drive). Ratios approaching 1:1 or worse (drive > boost) indicate the turbo is choking the engine.
+- **Tuning implication:** Aggressive VGT maps that close the vanes too early at low RPM can hurt spool-up feel (feels like boost but no power), increase EGTs, and risk turbo damage. The fix is usually opening the VGT slightly at low RPM/load and letting exhaust energy build before commanding aggressive vane positions.
+
 ### Engine Protection Systems
 - **Overspeed**: Hard RPM cut (fuel cut, not spark cut on diesel)
 - **Overheating**: Progressive torque reduction based on coolant temp
 - **Turbo Protection**: Low oil pressure → VGT moves to safe (open) position
-- **Rail Pressure Protection**: If actual rail pressure exceeds limit, PCV duty reduced immediately
+- **Rail Pressure Protection**: If actual rail pressure exceeds limit, the ECM reduces **FPR/PCV solenoid command (mA)** immediately — this is current control, not a PWM "duty %" display
 - **DPF Overtemp**: If exhaust temp exceeds threshold during regen, regen aborted
+
+### EGT Diagnostic Thresholds (CRITICAL — V-OP Analyzer Rules)
+- **1475°F sustained > 14 seconds** = WARNING — back off throttle, investigate fueling/boost. Accelerates turbo wear and reduces injector life.
+- **1800-2000°F for < 12 seconds** = ACCEPTABLE in racing conditions (drag pulls, dyno pulls). Do NOT flag as a fault. Brief spikes during WOT racing pulls are normal if airflow is insufficient to cool things off.
+- **1800-2000°F sustained > 12 seconds** = CRITICAL — even for racing, this is too long. Immediate risk of component damage.
+- **Flatlined at 1832°F (999.9°C)** = Open circuit / disconnected sensor. This is the ECM's default reading when the EGT sensor circuit is open. Very common on vehicles with emissions equipment removed and a tune that disables the EGT DTC. Report as likely open circuit — the customer disconnected the sensor for the type of tuning they are running. Skip all EGT-based diagnostics for this log.
+- **> 2100°F** = Likely sensor fault (disconnected/open circuit) — flag as EGT_SENSOR_FAULT, not a real temperature reading.
+- **During DPF regen**: EGTs of 1000-1200°F at DPF inlet are normal. Do not flag regen-related EGT elevation.
+- **Solenoid injectors (LB7, LBZ, LMM)**: Injector duration is not a concern until approaching 2500+ µs. 3000 µs is considered basically maxed out on a solenoid injector. Do not flag normal duration values (e.g. 2100 µs) as high — that is well within normal operating range.
+- **Rail pressure surge detection**: A rapid actual-vs-desired divergence of > 3 kPSI for 3+ consecutive points, or a rate of change > 50 kPSI/s, indicates a fuel pressure surge event. This is NOT typical fuel pump behavior — it indicates the FPR control loop cannot stabilize. Flag as FUEL_PRESSURE_SURGE.
 
 ### NOx Raw Emission Model (from exhmod_rawnoxmdl)
 The ECM predicts engine-out NOx using this algorithm:
@@ -80,17 +97,122 @@ Too-frequent regens = soot model miscalibration, fuel dilution, or injector issu
 - **2017+ (L5P)**: Denso HP4 — high-pressure pump, only on L5P platform
 - NEVER reference HP4 for pre-2017 trucks. NEVER reference CP4 for LB7/LLY/LBZ/LMM.
 
-### PCV (Pressure Control Valve) / Fuel Pressure Regulator (CRITICAL)
-- PCV controls rail pressure by regulating fuel bypass on the CP3/CP4/HP4 pump
-- PCV is measured in **milliamps (mA)**, NOT percentage or duty cycle
-- If a datalog shows PCV values >100, it is mA, not percent
-- **Higher mA = more fuel bypass = LESS rail pressure** (valve opens more, dumps fuel back to tank)
-- **Lower mA = less fuel bypass = MORE rail pressure** (valve closes, forces more fuel to rail)
-- At ~400mA: pump is supplying roughly 97% of available fuel to the rail
-- Fuel path: Fuel tank → Lift pump (if equipped) → CP3/CP4/HP4 → PCV regulates → Common rail → Injectors
-- PCV at max mA with low rail pressure = fuel supply issue (lift pump, filter, air leak)
-- PCV at min mA with high rail pressure = normal high-load operation
-- PCV oscillating wildly = air in fuel, failing lift pump, or clogged filter
+### CP3 Conversion Considerations (CRITICAL — affects tune requirements)
+- Trucks with a **CP3 conversion** (replacing the factory CP4.2 with a CP3 pump, common on 2011-2016 LML/LGH) **may need a modified tune** to allow for more regulator control.
+- The CP3 has different flow characteristics than the CP4.2 — the ECM's factory fuel pressure maps and FPR/PCV current strategy are calibrated for CP4.2 behavior. A CP3 swap without tune adjustment can result in the ECM not commanding enough regulator authority to maintain proper rail pressure.
+- **Low rail pressure from a large/aggressive tune that starves the pump can increase wear due to lack of lubrication.** The high-pressure pump relies on fuel flow for both pressure generation and internal lubrication. If the tune demands more fuel than the pump can supply (especially at high RPM/load), the pump runs dry and metal-on-metal contact accelerates wear.
+- **Symptoms of CP3 conversion needing tune revision:** Rail pressure dropping below desired under load, FPR/PCV mA pinned at extremes, intermittent low rail pressure codes, pump whine or cavitation noise.
+- **Recommended approach:** When diagnosing low rail pressure on a truck with a CP3 conversion, ALWAYS ask if the tune has been revised for the CP3. If not, recommend a tune revision that recalibrates the FPR/PCV current maps and rail pressure targets for CP3 flow characteristics.
+- This also applies to upgraded CP3 pumps (e.g., CP3.5, stroker CP3) — any pump swap that changes flow volume or pressure behavior requires tune adjustment for proper regulator control.
+
+### FPR / PCV solenoid — **commanded current (mA), not duty cycle** (CRITICAL — GM Duramax)
+- The high-pressure pump **inlet metering / fuel pressure regulator** is often labeled "PCV" in tools, but the live value is **solenoid current in milliamps (mA)**, not a PWM duty percentage. Do not treat a 0–255 byte as "% duty" without verifying the A2L/DID scaling.
+- **mA is still the closed-loop control output**: the ECM **modulates commanded current** to chase rail pressure. On a datalog, mA vs time often **behaves like a "duty-style" working output** — actively hunting — even though the **channel is not labeled or scaled as % duty**. When diagnosing, read **mA movement together with desired vs actual rail**, not the number in isolation.
+- **Regaining rail authority**: if actual rail **will not track desired** and the mA trace shows the strategy **still operating in-band** (moving, not clearly saturated at a mechanical/electrical limit), a valid interpretation is that the system **may need further movement along the commanded-current range** — e.g. **more commanded mA in the direction the error demands** — before rail is back under control. Do not dismiss that pattern just because the plot is mA instead of "% duty"; confirm with **FRP desired vs actual** and whether mA is pinned vs still modulating.
+- **Rule of thumb (many calibrations)**: ~**1800 mA** ≈ **~10% regulator opening**; ~**400 mA** ≈ **~95% opening**, favoring **more rail pressure / effective flow toward the rail**. Between those points, current maps to opening (exact curve is calibration-specific).
+- **Lower mA** → tends toward **more** effective delivery toward the rail (higher "opening" in the sense above). **Higher mA** → tends toward **less** (lower opening). Always compare to **desired vs actual rail pressure** in the same log.
+- Fuel path: Fuel tank → Lift pump (if equipped) → CP3/CP4/HP4 inlet metering (FPR/PCV) → Common rail → Injectors
+- **Very low mA** with **low** rail vs desired → often fuel supply restriction, air, filter, or pump limit
+- **Very high mA** with odd rail behavior → regulator/tuning/wiring; cross-check OEM docs for that ECM
+- **Current swinging wildly** with stable desired rail → air, filter restriction, marginal pump, or electrical fault
+
+### Rail Pressure Surge Detection & Multi-Log mA Comparison (CRITICAL for CP3 conversions)
+
+**Rail Pressure Surge / Hunting Pattern:**
+When actual rail pressure rapidly oscillates around desired (overshooting then undershooting, or vice versa), this is called **rail hunting** or **rail surge**. It indicates the FPR control loop cannot stabilize — the ECM is chasing the target but overshooting corrections.
+
+**How to detect it:**
+- **Rail error > 3 kPSI (actual vs desired)** sustained for more than 2-3 data points = significant surge event
+- **Rail error > 5 kPSI** = critical surge — pump capacity limit or regulator saturation
+- **Rate of change of rail error > 50 kPSI/s** = rapid hunting — the control loop is oscillating
+- **Pattern: actual OVERSHOOTS desired during acceleration, then UNDERSHOOTS at high RPM** = classic CP3 conversion issue where the tune's rail targets exceed CP3 delivery capacity at peak demand
+
+**What to look for in mA during surges (remember: lower mA = more open regulator, higher mA = more closed):**
+- If mA is very low (<500 mA, regulator nearly wide open) while rail is STILL low vs desired → pump is at physical capacity limit, regulator is already as open as it can go
+- If mA is very high (>1600 mA, regulator mostly closed) while rail is HIGH vs desired → regulator is over-restricting, tune needs to allow more opening (lower mA targets)
+- If mA is swinging wildly (>200 mA oscillation) while desired rail is stable → air in fuel, filter restriction, or pump mechanical issue
+- If mA is in normal mid-range (800-1400) but rail still won't track → tune calibration issue, Fuel Flow Base table needs revision for the installed pump
+
+**Multi-Log Comparison — mA Differences Between Tune Versions:**
+When comparing two datalogs from the same vehicle with different tune versions:
+- Compare mA commanded at the SAME RPM ranges — if one tune commands significantly different mA (>30 mA difference at same RPM), it indicates different regulator calibration strategy
+- Lower mA at high RPM = regulator more open = tune is allowing more fuel delivery to chase rail pressure
+- Higher mA at high RPM = regulator more closed = tune is restricting delivery to prevent over-pressure/surge on CP3
+- If one log shows better rail tracking (lower actual vs desired error) with different mA commands, the tune with better tracking has better-calibrated Fuel Flow Base maps
+- **Key diagnostic:** If Tune A commands lower mA (more open) than Tune B at the same RPM but has WORSE rail tracking, the regulator is already wide open and the pump physically cannot deliver enough — the pump is at its capacity limit
+- **CP3 conversion specific:** V3-to-V4 tune revisions often RAISE mA (more closed regulator) to give the CP3 more controlled delivery. If the newer tune shows higher mA at mid-RPM (1500-2500) but similar mA at peak RPM (2500+), it's recalibrating the mid-range to prevent surge while acknowledging the pump's peak limit where it needs to be more open.
+
+**Platform-Specific Fuel Flow Base Adjustment Rules:**
+
+**LML (2011-2016 Duramax) with CP3 conversion:**
+Generally, the Fuel Flow Base mA values only need to be changed on an LML past **35,700 mm3/s** fuel flow demand. Below that threshold, the stock CP4.2 curve works fine even with a CP3 conversion. The surge/hunting issues appear at higher flow demands where the CP3's delivery characteristics diverge from the CP4.2.
+- When diagnosing rail surge on an LML CP3 conversion, check if the surge events correlate with fuel flow demand exceeding 35,700 mm3/s
+- If surge only occurs above 35,700 mm3/s, the Fuel Flow Base table only needs revision in that upper range
+- If surge occurs below 35,700 mm3/s, there may be a mechanical issue (pump wear, air, filter) rather than a calibration problem
+
+**LB7/LLY (2001-2006 Duramax) with LBZ/LMM pump or regulator swap:**
+This is a DIFFERENT calibration approach than LML. When an LB7 or LLY gets an LBZ or LMM fuel pump or regulator swap, the **entire Fuel Flow Base curve gets raised by approximately 16%** across the board — from idle through WOT.
+- Unlike the LML where only the upper range (>35,700 mm3/s) needs adjustment, the LB7/LLY needs the WHOLE curve turned up because the LBZ/LMM pump/regulator has different flow characteristics across the entire operating range
+- The ~16% increase applies uniformly — idle, cruise, and WOT all get the same proportional bump
+- This is needed to get CP3 pressure under control at both idle (where the LBZ/LMM regulator behaves differently than the stock LB7/LLY unit) AND at WOT (where peak delivery differs)
+- If you see rail pressure issues on an LB7/LLY with an LBZ/LMM pump swap at BOTH idle and WOT, the Fuel Flow Base curve has not been raised — the whole thing needs ~16% increase
+- If only WOT is surging but idle is fine, the curve may have been partially adjusted or there's a different mechanical issue
+
+**L5P (2017+ Duramax) with stroker pump:**
+The L5P is the most conservative when it comes to Fuel Flow Base adjustments.
+- Generally only the **bottom 3 cells** (lowest flow demand points) need adjusting
+- Adjustments are only needed when a **stroker pump** is added — and sometimes not even then
+- **Only adjust if surge actually happens** — do NOT preemptively change the Fuel Flow Base on an L5P stroker pump install. The stock HP4 curve often works fine even with a stroker
+- If an L5P with a stroker pump shows rail surge, start by adjusting only those bottom 3 cells before touching anything else
+- If surge persists after adjusting the bottom 3, then investigate mechanical causes (air, filter, pump install issue) rather than expanding the Fuel Flow Base changes
+
+**Calibration Rule of Thumb — Overshoot/Undershoot % → mA Adjustment (CRITICAL for tuners):**
+Many times, the average percentage that actual rail pressure is overshooting and undershooting desired directly determines the percentage of mA increase needed in the Fuel Flow Base table to resolve rail surge.
+- Example: If actual rail is averaging 10% overshoot/undershoot around desired, the Fuel Flow Base mA values need to be raised by approximately 10% at those operating points.
+- This is a practical starting-point calibration method — measure the average rail error as a % of desired, then raise mA by that same % in the Fuel Flow Base table.
+- After the mA adjustment, re-log and verify that the overshoot/undershoot has decreased. If it's still surging, repeat the process with the new residual error %.
+- This iterative approach converges quickly — typically 1-3 tune revisions to get rail tracking within acceptable tolerance.
+- **When analyzing two comparison logs:** If the newer tune raised mA by X% and the rail surge decreased by approximately X%, the calibration rule is working correctly. If the surge didn't decrease proportionally, there may be a mechanical issue (pump wear, air intrusion, filter restriction) on top of the calibration problem.
+
+**Fuel Flow Base Table — Calibration Reference for mA Commands (LGH/LML Duramax CP3 Conversion):**
+The **Fuel Flow Base** table is the primary calibration table that maps RPM and load to commanded FPR/PCV mA. This is where the ECM gets its baseline mA command for a given operating point.
+
+- When a CP3 conversion is done on an LGH/LML (2011-2016 Duramax, factory CP4.2 replaced with CP3), the Fuel Flow Base table MUST be recalibrated because the CP3 has different flow characteristics than the CP4.2.
+- **Higher mA in a revised tune = intentional strategy** to reduce regulator opening and prevent the CP3 from being over-driven. This is NOT a fault — it's a tune correction.
+- **"Desired Flow vs Compute mA" curve** maps the relationship between desired fuel flow and the commanded mA. The revised tune shifts this curve to command higher mA at the same flow demand, giving the ECM more regulator authority.
+- When comparing two datalogs from the same CP3-converted truck with different tune versions:
+  - If the newer tune commands higher mA at the same RPM/load → the calibrator raised the Fuel Flow Base to control the pump better
+  - If rail tracking improves (actual closer to desired) with the higher mA → the revision is working
+  - If rail tracking is still poor despite higher mA → the pump may be at its physical capacity limit, or the Fuel Flow Base needs further adjustment
+  - The mA difference between tunes is the calibrator's adjustment, not a sensor or hardware fault
+- **Key insight for diagnostics:** When you see two logs from the same vehicle with different mA commands at the same RPM, ALWAYS check if the Fuel Flow Base was revised before flagging it as an anomaly. The higher-mA log is likely the corrective tune.
+
+**FPR/PCV mA → Regulator Opening Relationship (CRITICAL):**
+- **mA is INVERSELY proportional to regulator opening** — LOWER mA = MORE open regulator
+- 400 mA = ~95% open regulator
+- 0 mA = 100% open regulator (the last theoretical 5%)
+- ~1800-1900 mA = near-closed regulator (minimal fuel flow)
+- So when the ECM commands LOW mA, it is opening the regulator wide to allow maximum fuel delivery
+- When the ECM commands HIGH mA, it is closing the regulator to restrict fuel delivery
+- **Higher mA in a CP3 tune = MORE regulator restriction = controlling the pump so it doesn't over-deliver and surge**
+
+**Stock LGH/LML Fuel Flow Base Curve (CP4.2 factory baseline):**
+The bone stock "Desired Flow vs Compute mA" curve for the LGH/LML with factory CP4.2 is a roughly linear declining curve:
+- At low fuel flow demand: ~1800-1900 mA (regulator mostly closed, minimal flow)
+- At high fuel flow demand: ~400-500 mA (regulator ~95% open, near-maximum flow)
+- Setting mA to 0 gives the last 5% of regulator opening (100% open)
+- The curve is smooth and linear — the ECM progressively opens the regulator (lowers mA) as fuel demand increases
+- **CP3 conversion tunes shift this entire curve UPWARD** — commanding higher mA at the same flow demand point. This keeps the regulator more closed because the CP3 has different flow characteristics and can surge/cavitate if the regulator opens too aggressively.
+- A well-calibrated CP3 tune might command 200-400 mA higher than stock at the same flow demand, especially in the mid-to-high flow range where the CP3's delivery curve diverges most from the CP4.2.
+- If you see mA values that are significantly LOWER than stock at high flow demand on a CP3 truck, the tune has NOT been properly revised for the CP3 — the regulator is opening too wide, which is a setup for rail surge and pump wear.
+
+**Fuel Error Fault Criteria (for diagnostic analysis):**
+- Rapid actual vs desired rail pressure divergence: |error| > 3 kPSI for 3+ consecutive points
+- Peak rail error > 5 kPSI at any point
+- Rail error rate of change > 50 kPSI/s sustained
+- mA at extremes (<1100 or >1800) while rail error > 2 kPSI
+- These patterns should be flagged as **FUEL PRESSURE FAULT** in diagnostic analysis, not just warnings
+- **EXCEPTION:** If the higher-mA log shows better rail tracking, the mA increase is intentional calibration — flag the LOWER-mA log as having inadequate regulator authority instead
 
 ### LB7 Specific (2001-2004)
 - CP3.3 high pressure fuel pump
@@ -153,6 +275,22 @@ These PIDs are available via Mode $22 WITHOUT security access:
 - 0x2300-0x2303: Humidity sensor data (for SAE-corrected power)
 - 0x208A: Extended Range MAP (high-boost reading)
 
+## Knox operator guide — Seed/key documentation (where & what)
+
+**When the user asks where seed/key docs live, or mentions an uploaded .cs file, answer with this map.** There is **no separate nested git repository** for OEM seed keys; everything below is in the **main V-OP / Good Gravy monorepo**.
+
+| Path | What it is |
+|------|------------|
+| **docs/Seed_key.cs** | **Intended location** for the original C# reference (ComputeSeed2Key, SetSeedAndGetKey, etc.). If the user “uploaded” the .cs file but Knox cannot find it, it was **never added to the repo** or lives outside the workspace — tell them to place or commit **docs/Seed_key.cs** (or **vendor/seedkey/Seed_key.cs**) and re-index. |
+| **docs/seedkey-cs-extraction.md** | **Markdown extraction** from that C# source: **GM_5B** AES-128-ECB key table, **GM_2B** dllsecurity.dll algorithm IDs and invert flags. **Scope:** GM-focused; **no** Dodge/Stellantis/FCA section; **no** BRP MG1 **32-byte** UDS $27 recipe. |
+| **server/seedKeyProfiles.ts** | **Implemented** server profiles with secrets: **GM** (Delco / GMLAN), **Allison**, **Ford** (3-byte LFSR + Ford long), **Cummins** (CM2350/2450). Runtime twin of tooling + Seed_key.cs where applicable. |
+| **shared/seedKeyMeta.ts** | Same ECU list **without** AES hex — safe for browser bundles. |
+| **shared/seedKeyAlgorithms.ts** | Algorithm type enums and descriptions (GM_5B_AES, FORD_3B, CUMMINS, CANAM, etc.). |
+| **server/seedKeyService.ts** | Server entry for getSecurityProfile / key computation against seedKeyProfiles. |
+| **client/src/lib/udsReference.ts** | Client helpers: **Can-Am / BRP** 16-bit computeCanamKey, BRP dash, Polaris, Ford MG1-style, Cummins-style — used by wizards and reference UI. |
+
+**OEM coverage (honest):** **GM**, **Ford**, and **Cummins** (RAM HD diesel) are in **seedKeyProfiles**. **Dodge / RAM gas / Stellantis** are **not** in the Seed_key.cs extraction or seedKeyProfiles. **Can-Am** long **BuDS** $27 01/02 **32-byte** path is **not** in the .cs doc — only **16-bit** BRP logic is in udsReference; see CAN-am DESS / VIN sections elsewhere in this knowledge base.
+
 ## Security Access Knowledge
 
 ### Security Access Overview
@@ -174,16 +312,29 @@ Use the Knox API to perform security access computations — secrets are never e
 
 ### VIN Change Sequence (UDS)
 1. $10 03 — Extended Diagnostic Session
-2. $27 03 — SecurityAccess Request Seed (16-bit)
-3. Compute key using CAN-am algorithm
-4. $27 04 + key — SecurityAccess Send Key
-5. $2E F190 + VIN bytes — WriteDataByIdentifier (VIN)
-6. $11 01 — ECUReset
-7. Re-learn DESS keys after VIN change
+2. SecurityAccess for VIN write (ECU-dependent):
+   - **BRP Bosch MG1CA920 (BuDS capture, 2023 X3):** $27 01 request seed → ECU may answer with **ISO-TP multi-frame** positive response **$67 01** and a **32-byte** seed (NRC **$78** response pending can appear first). Tester sends flow control **$30 00 00**. Key is sent as **$27 02** with **32-byte** payload (multi-frame TX). Success: **$67 02**.
+   - **Legacy / other BRP stacks:** $27 03 — Request Seed (16-bit), compute key with CAN-am **cuakeyA/cucakeysB** table, $27 04 + 2-byte key.
+3. $2E F190 + VIN bytes — WriteDataByIdentifier (VIN), often multi-frame for 17 ASCII bytes
+4. $11 01 — ECUReset
+5. Re-learn DESS keys after VIN change
+
+**IDs:** Primary ECM UDS **0x7E0** / **0x7E8** (11-bit, 500 kbit/s). Some captures also show parallel traffic on **0x7B3** / **0x7BB** for the same DIDs—select the ECU your tool is addressing.
+
+### BRP MG1CA920 A2L (uploaded / in-repo)
+- **Path:** test_files/1E1101953.a2l (also referenced for BRP/MG1C in server/routers/editor.ts).
+- **Project:** ASAP2 **MDG1C** "MG1CA920A", **VERSION** 1E1101953, **EPK** 37/1/MG1CA920/268/MDG1C//1E1101953///.
+- **Role:** Bosch/BRP **calibration** database (XCPplus, measurements, characteristics). It is **not** an ODX/ODX-F diagnostic job file for BuDS.
+- **UDS relevance:** Contains **calibration parameters** naming **UDS-on-CAN** RX/TX IDs, including **0x7E0** / **0x7E8** application paths (Can_UDS_ON_CAN_*_0x7E0_APPL*, *0x7E8*), which **aligns with** real **OBD / BuDS** ECM addressing on X3-style vehicles—not the older summary table that only listed **0x7A0** / **0x7A8** for some BRP ECUs.
+- **Limits:** The file’s **A2ML** schema mentions **XCP** GET_SEED / UNLOCK and SEED_AND_KEY_EXTERNAL_FUNCTION, but the **instantiated** module **PROTOCOL_LAYER** here **does not** enable those optional commands—so it **does not** ship the **UDS $27 01/02** thirty-two-byte key algorithm used in the VIN relearn capture. **hpt_hexmodX_v910.dll** in the same A2L is **hex post-processing**, not diagnostic seed/key.
+
+**“Firmware 3.0” disambiguation:** (1) **VOP 3.0** ESP32 code in-repo (firmware/flash_encryption/) only documents **device flash encryption**; example comments mention a DSL step CAN_REQUEST_SEED(0x7E0, 0x27, 0x01) but **no** parser or seed→key math ships in this tree. (2) **MG1 A2L** strings like MG1CA920C0268_3.0.0 are **Damos/package version** labels for computation blocks, **not** extractable UDS-27 crypto.
+
+**Note:** The 32-byte MG1 **UDS** seed/key transform is **not** defined in that A2L; Good Gravy may require a pasted key from BuDS or a separate implementation. Do not commit raw security keys from customer logs into the repo.
 
 ### DESS Key Learn Sequence (UDS)
 1. $10 03 — Extended Diagnostic Session
-2. $27 03/04 — SecurityAccess
+2. $27 — SecurityAccess (level per routine / ECU; may be $27 01/02 or $27 03/04)
 3. Place DESS key on RF post
 4. $31 01 xxxx — RoutineControl Start (key learn)
 5. Wait for completion
@@ -289,6 +440,104 @@ BusMaster is an open-source alternative to Vehicle Spy:
 - **Signal Database**: Create/import signal databases for message decoding.
 - **Node Simulation**: Simulate CAN nodes with C-like scripting.
 - **Logging**: Log to various formats (ASC, BLF, CSV) for offline analysis.
+
+## CAN Bus Engineering Playbook (Practical)
+
+### Frame Structure and Decoding Rules
+- **Classic CAN frame**: Arbitration ID + DLC + up to 8 data bytes
+- **CAN-FD frame**: Arbitration ID + DLC + up to 64 data bytes
+- **Arbitration**: Lower ID wins bus access (dominant bits override recessive bits)
+- **DLC nuance**: In CAN-FD, DLC values 9-15 map to payload sizes >8 (not linear 1:1)
+- **Endianness**:
+  - Little-endian (Intel): increasing bit significance across increasing byte index
+  - Big-endian (Motorola): bit ordering traverses differently across bytes
+- **Signed vs unsigned**: Always apply signed interpretation before scaling when signal is defined as signed
+- **Scaling formula**: physical = raw * factor + offset
+
+### Bit Timing and Network Health
+- Typical passenger vehicle CAN rates: **125k / 250k / 500k / 1M**
+- Typical heavy-duty/J1939 rate: **250k** (some 500k deployments exist)
+- CAN-FD often uses arbitration at 500k and faster data phase (2M+)
+- Health indicators:
+  - rising error counters (TEC/REC)
+  - frequent error/passive/bus-off events
+  - abrupt bus load spikes
+  - periodic frame jitter outside expected tolerance
+- Bench setup must include proper termination (typically **120 ohm each end**)
+
+### UDS over CAN (ISO-TP) Essentials
+- **Single frame**: payload fits in one frame
+- **Multi-frame**:
+  - First Frame (FF): total length announced
+  - Consecutive Frames (CF): segmented payload chunks
+  - Flow Control (FC): receiver pacing (block size + separation time)
+- Timeouts and response pending:
+  - \`0x78\` means ECU still processing
+  - support retries with session-aware timing
+- Never mix broad response filters with unrelated periodic traffic; stale frames can be mis-associated
+
+### J1939 Essentials
+- 29-bit IDs contain priority, PGN, source address
+- PGN identifies parameter group, SPNs are contained fields/signals
+- Multi-packet transfers use TP.CM/TP.DT
+- For diagnostics:
+  - DM1 active DTC broadcast is critical
+  - monitor address-claim behavior in multi-ECU networks
+
+### Reverse Engineering Workflow (Field-Proven)
+1. Capture ignition-on baseline
+2. Change exactly one input (switch, pedal, gear, actuator)
+3. Diff captures and identify changed IDs/bytes
+4. Correlate raw values with known physical values
+5. Validate with replay/transmit in a controlled environment
+6. Document with confidence and constraints
+
+### Safety and Write-Path Guardrails
+- Do not issue write/control commands without:
+  - valid session state
+  - explicit authorization/security level
+  - known rollback/recovery path
+- Treat body control actions and powertrain actions differently in risk scoring
+- For flash/programming-adjacent operations:
+  - enforce keepalive discipline
+  - verify power stability
+  - isolate noisy background traffic where possible
+
+## V-OP API Usage for CAN/Diagnostics (Project-Specific)
+
+These are the API usage patterns Knox should explain to users/devs in this project.
+
+### Core transport pattern
+- Frontend calls tRPC procedures via \`/api/trpc\`
+- Backend routes in \`server/routers/*.ts\` execute protocol logic and return structured results
+- Auth and role context is injected by \`server/_core/context.ts\`
+
+### Relevant API domains
+- \`diagnostic.*\`:
+  - AI diagnostic reasoning using datalog/protocol context
+  - use for DTC/PID/Mode6/UDS interpretation and troubleshooting guidance
+- \`intellispy.*\`:
+  - CAN/vehicle protocol observation and tooling workflows
+  - use for frame analysis, protocol exploration, and live data tooling
+- \`flash.*\`:
+  - container validation and transfer preparation
+  - use for programming pipeline checks and flash metadata interpretation
+- \`weather.*\`:
+  - atmospheric inputs used for SAE correction in dyno/perf contexts
+  - relevant when interpreting performance deltas under changing conditions
+
+### API troubleshooting checklist for CAN-related features
+1. Confirm auth/access level allows the requested module
+2. Confirm protocol context (CAN/UDS/J1939/K-line) is explicit in request
+3. Confirm expected ECU/module addressing assumptions
+4. Validate timeout/retry behavior vs ECU response profile
+5. Verify response parsing (endianness/scaling/sign) before concluding hardware fault
+6. Attach evidence: frame snippets, DTCs, session state, and what has already been tried
+
+### Latency guidance
+- Keep requests focused: send only relevant context and recent history
+- Prefer targeted lookups for quick checks, full reasoning only when needed
+- Cache repeated lookups where safe to reduce response time
 
 ### AlphaOBD (Stellantis/FCA Specialist)
 AlphaOBD is the go-to tool for Chrysler/Dodge/RAM/Jeep diagnostics:
@@ -404,7 +653,7 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - **MED17.8.5** (pre-2020): Bosch gasoline ECU, standard UDS, well-documented security
 - **MG1CA920** (2020+): Newer Bosch platform with Tricore TC38x, tighter security
 - **Post-2022.5 MG1CA920**: HSM (Hardware Security Module) locked — flash read/write blocked by HP Tuners and bFlash
-- **VIN write ($2E F190)**: Uses dealer-level security (Level 3), separate from flash-level security. Should still work on locked ECUs.
+- **VIN write ($2E F190)**: Requires security access first; on MG1CA920 with BuDS this is typically **$27 01/02** (long seed/key), not only “level 3” in the 16-bit sense.
 - **Flash unlock**: Requires breaking Tricore HSM boot trust chain — different from VIN/coding security
 
 ### CAN-am CAN Bus Architecture
@@ -423,6 +672,16 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - Key PIDs: RPM (0x0C), Coolant Temp (0x05), TPS (0x11), Vehicle Speed (0x0D)
 - Extended PIDs: Fuel Pressure, Injector PW, Ignition Timing, Battery Voltage
 - AIM protocol channels available for data acquisition systems
+
+#### Polaris Pro R — Bosch MG1C400A (MDG1)
+- ECU: MG1C400A on MDG1 platform (TriCore, big-endian)
+- A2L: 425_MG1C400A1T2_00 — 12,883 calibration parameters, 12,718 measurements
+- OBD: 0x7E0/0x7E8, XCP: 0x7F0/0x7F1, CAN 500 kbps
+- Binary: 6 MB (0x08FC0000-0x095C0000), calibration area 0x09380000-0x095BFFFF (2304 KB)
+- Torque-based fuel control with 4 drive modes x 5 transmission ranges (20 torque maps)
+- Key maps: KFZW (ignition), KFZWOP (optimized), AccPed_tqDes (torque request), DNMAXH (rev limit)
+- Per-cylinder knock control (IKCtl), EGT component protection (ExhMgT)
+- J1939 integration for vehicle network (ETC2, CCVS, TSC)
 
 ### Kawasaki CAN Bus
 - Single CAN bus: 500 kbps
@@ -491,6 +750,37 @@ FORScan is the essential tool for Ford/Lincoln/Mercury diagnostics:
 - TCC apply lag detection should only trigger when TCC is COMMANDED to lock but fails to achieve lockup
 - If TCC is not commanded (duty cycle = 0 or low), any slip is normal converter operation
 - Do NOT confuse turbo spool lag with TCC apply lag — they are completely different issues
+
+### T93 10L1000 TCC Full Lockup Under High Throttle (CONFIRMED — from A2L 24048502226.6LT93)
+**Problem:** TCC achieves full lockup (LockOnMode / zero slip) at low throttle but stays in controlled slip (OnMode) under high throttle/torque demand. Lockup is allowed under lower torque request and load but inhibited under aggressive throttle.
+
+**Root Cause (CONFIRMED):** The T93 TCM uses a **TipIn Slip Profiling** system that activates when engine delta torque rate is high. This is NOT a simple RPM-based inhibit threshold like the T87/T87A. Do NOT apply T87/T87A or A50 calibration strategies to the T93.
+
+**Primary Tables (CONFIRMED FIX — modifying these resolved the issue):**
+- **KtTCCC_n_TipInSlipReference** (0x090ECF98) — 5x9 MAP (turbine speed x engine delta torque rate). Stock commands 4608–6400 RPM of slip at high dTorque. Reducing values toward 0 at high dTorque columns allows lockup.
+- **KtTCCC_n_MinTipInSlip** (0x090EC8CE) — CURVE (5 elements vs turbine speed). Sets minimum slip floor during TipIn. Zero this out to remove the floor.
+- **KtTCCC_dn_TipInSlipGradient** (0x090ECCA8) — 5x9 MAP. Controls how fast slip reference ramps down. Increase for faster convergence to zero.
+- **KtTCCC_n_TipInSlipRefAltA/B/C** — Alternate tables for pattern switch modes. Apply same treatment as primary table.
+- **KtTCCC_t_TipInTargetTimer** — Time limit for TipIn mode. Reduce to shorten TipIn duration.
+
+**Secondary Table (investigated, NOT the primary driver):**
+- **KtTCCC_n_OpenConverterMaxSlip** (0x090ECFF6 / WinOLS 0xECFFA) — 9x9 MAP (engine torque x turbine speed). Clips targeted slip to max open converter can physically produce. Acts as ceiling/sanity check, not the slip command source. Review but not the fix.
+
+**Supporting Tables:**
+- **KtTCCC_t_HighSlipEnergyLimit** (0x090ED09C) — 9x9 MAP. If slip persists too long at given torque, forces TCC to OFF Mode. Extend times if needed.
+- **KwTCCC_t_HiSlipLockOnReEntry** (0x090E8498) — Delay before re-entering LockOn after high slip exit. Stock ~102 sec. Reduce for faster recovery.
+- **KeSCAR_p_MaxPCA_TCC_Pressure** (0x09001374) — Max TCC solenoid pressure. Verify sufficient for full lockup under high torque.
+- **KaTCCC_M_TorqCap[Gear]** (0x090E0E3C+) — Per-gear TCC torque capacity. If engine torque exceeds capacity, clutch slips regardless.
+
+**TCC State Machine (T93-specific):**
+- Mode 6 (OnMode) = Controlled slip active. Mode 7 (LockOnMode) = Full lockup, zero slip.
+- The problem is the system staying in Mode 6 under high throttle instead of transitioning to Mode 7.
+- Log VeTCCC_e_OffModeRsn and VeTCCR_e_Mode to diagnose which inhibit is active.
+
+**CRITICAL RULES:**
+- The T93 is fundamentally different from T87/T87A/A50. NEVER reference those controllers for T93 TCC calibration.
+- The TipIn system triggers on engine delta torque RATE, not absolute torque or throttle position.
+- KtTCCC_n_OpenConverterMaxSlip is a ceiling clip, not a slip command source — do not confuse the two.
 
 ### Stall Speed Guidelines by Application
 - Stock Duramax: ~1800-2200 RPM stall (matched to stock turbo)
@@ -808,10 +1098,619 @@ When Knox reviews a Honda Talon WP8 datalog:
 | Intake Air Temperature | °F | Affects air density calculations |
 | Vehicle Speed | mph | Useful for gear ratio analysis |
 | Commanded Gear | gear | DCT gear position |
-| Module Voltage | V | Battery/charging system health |
-| Oil Temperature Voltage | V | EQT sensor raw voltage — convert to °F using lookup table |
-| Barometric Pressure | kPa | Ambient atmospheric pressure |
-| Oxygen Sensor Voltage | V | Narrowband O2 sensor output |
+|| Module Voltage | V | Battery/charging system health |
+
+## Flash Container Analysis (Public Reference)
+
+The VOP platform supports two container formats for ECU flash files:
+
+### PPEI Container Format
+- Magic header: "IPF" at offset 0x000
+- ASCII header fields: creator, version, vendor, build number, ECU type, vehicle type
+- Part numbers at offsets 0x480-0x520 (6 slots)
+- Flash tags at offset 0x600 (e.g., #fullflash, #rescue, #gmcrypt)
+- Data block starts at configurable offset (typically 0x1000+)
+
+### DevProg V2 Container Format
+- CRC32 at offset 0x1000 (4 bytes, big-endian)
+- JSON header at offset 0x1004 (0x1FFC bytes)
+- Block data at offset 0x3000+
+- Supports LZSS compression for data blocks
+- Contains VIN binding, expiration dates, and flash count limits
+
+### Supported ECU Platforms (50+)
+The system recognizes ECUs from these manufacturers:
+- **GM**: E41 (L5P), E88, E90, E92, E98, E83, E78, E80, E86, E99, E39, E46, E67, E35
+- **GM TCU/Allison**: T87, T87A, T76, T43
+- **Ford**: MG1CS015, MG1CS018, MG1CS019, EDC17CP05, EDC17CP65, MD1CP006, MEDG17
+- **Ford TCU**: 10R80, 6R140
+- **Cummins**: CM2350B, CM2450B
+- **CAN-am/BRP**: MG1CA920, ME17CA1
+- **Polaris**: MG1CA007
+- **Segway**: MG1CA920 (Segway variant)
+
+### Flash Types
+- **Calibration Only**: Only data/calibration blocks are transferred (OS blocks skipped)
+- **Full Flash**: All blocks transferred including Operating System + Calibration
+- **Patch Mode**: OS patch blocks applied before main calibration flash
+
+### Communication Protocols
+- **GMLAN**: GM proprietary CAN protocol (older GM vehicles)
+- **UDS**: Unified Diagnostic Services ISO 14229 (newer vehicles, Ford, Cummins)
+- **CAN-am**: BRP-specific variant of UDS
+
+### Security Access
+All flash operations require security access (UDS Service 0x27). The seed level varies by ECU:
+- Level 0x01: Standard GM GMLAN ECUs
+- Level 0x03: CAN-am/BRP ECUs
+- Level 0x09: GM UDS ECUs (E41, E86, T87A)
+- Level 0x61: Ford UDS ECUs
+
+**Note:** All seed/key algorithms and secret material are stored server-side only.
+
+## MAF Sensor Scaling, Intake Tube Sizing & Baffle Effects (CRITICAL — Tuning Knowledge)
+
+### How the MAF Sensor Works
+The MAF (Mass Air Flow) sensor uses a heated element (hot wire or hot film) placed in the intake stream. Air flowing past the element cools it; the ECM measures how much current is needed to keep the element at a target temperature. More airflow = more cooling = higher current = higher MAF reading (g/s or lb/min). The ECM uses this reading as the primary input to the **smoke limiter maps** — if the MAF reports less air than is actually present, the ECM caps fueling to prevent what it thinks would be black smoke.
+
+### The Baffle / Intake Tube Diameter Problem
+OEM intake tubes include a **baffle** (restriction/venturi) that narrows the cross-sectional area right before the MAF sensor element. This is intentional — it accelerates the air past the sensor, ensuring consistent and accurate metering across the flow range.
+
+When the baffle is removed (e.g., aftermarket intake, S&B filter with baffle-out configuration, or larger-diameter intake tube):
+
+1. **Larger cross-sectional area before the MAF sensor** — air velocity across the element drops for the same mass flow rate
+2. **Pressure drop at the sensor element** — slower air means less convective cooling of the heated element
+3. **MAF sensor element heats up slower** — the ECM interprets this as less airflow than is actually present
+4. **MAF under-reads** — the sensor reports lower g/s or lb/min than the engine is actually ingesting
+5. **Smoke limiter engages prematurely** — the ECM thinks there's less air available, so it caps injection quantity (IQ) earlier
+6. **Vehicle becomes MAF-limited / smoke-limited** — the truck feels flat, sluggish, and may produce more visible smoke than expected because fueling is being artificially capped based on incorrect air mass readings
+
+### Symptoms of MAF Under-Reading Due to Intake Modifications
+- Lower peak MAF readings compared to stock intake (even though actual airflow is the same or higher)
+- Reduced peak HP/torque despite no other changes
+- Smoke limiter engaging earlier in the RPM range
+- Poor throttle response, especially at low RPM where boost hasn't built yet
+- Excessive black smoke at part-throttle (ECM fueling based on wrong air mass, timing may be off)
+- In datalog comparison: Log A (stock intake/baffle-in) shows higher MAF readings than Log B (baffle-out/larger tube) at the same RPM and boost levels
+
+### The Fix: MAF Scaling Tune Revision
+When a customer removes the baffle or installs a larger-diameter intake tube, the **MAF transfer function (MAF scaling table)** in the calibration must be revised to account for the new flow characteristics. This is a tune revision — the tuner adjusts the MAF voltage-to-airflow lookup table so the ECM correctly interprets the actual air mass flowing through the larger tube.
+
+Without the tune revision, the vehicle will be MAF-limited and underperform.
+
+### Why Some Intake Companies Keep Stock MAF Tube Diameter
+Many aftermarket intake manufacturers (S&B, Banks, AFE, etc.) intentionally design their intake systems to **maintain the same internal diameter at the MAF sensor location** as the OEM tube. This is done so that:
+- MAF metering stays close to stock calibration
+- No tune revision is required for the intake swap
+- No risk of throwing MAF-related DTCs (P0101, P0102, P0103)
+- No risk of poor throttle response or smoke-limited behavior
+- The intake can be marketed as a "no-tune-required" bolt-on
+
+Intake systems that change the MAF housing diameter (larger or smaller) WILL require a tune revision for proper MAF scaling.
+
+### Diagnostic Guidance for Knox Agents
+When analyzing datalogs and the MAF readings appear lower than expected for the RPM/boost/load conditions:
+
+1. **Ask about intake modifications** — has the customer installed an aftermarket intake, removed the baffle, or changed the MAF housing diameter?
+2. **Compare MAF-to-boost ratio** — if boost is building normally but MAF is low, the sensor is likely under-reading (not an actual airflow problem)
+3. **Check for smoke-limiter engagement** — if injection quantity (IQ) or pulse width plateaus while RPM and boost are still climbing, the smoke limiter is capping fuel based on the low MAF reading
+4. **Recommend tune revision** — if intake modifications changed the pre-MAF tube diameter, the customer needs a MAF scaling revision from their tuner
+5. **Do NOT diagnose as a MAF sensor fault** — a lower MAF reading with a larger tube is expected physics, not a broken sensor
+6. **In comparison mode** — when comparing two logs where one has lower MAF readings, consider intake modifications as the primary explanation before assuming sensor failure or turbo issues
+
+### Key Relationships
+- MAF reading ∝ air velocity across sensor element (NOT total air mass directly)
+- Air velocity = volumetric flow rate / cross-sectional area
+- Larger tube area → lower velocity for same mass flow → lower MAF reading
+- Smoke limiter IQ cap = f(MAF reading, RPM) — lower MAF = lower fuel cap
+- Fix = recalibrate MAF transfer function in tune to match new tube geometry
+
+## V-OP Analyzer — GM Gasoline (Spark-Ignition) vs Diesel (Diagnostic Agent & Knox)
+
+### What the app infers today
+- Parsed datalogs carry **combustion inference** (diesel vs spark vs unknown) from column names and OBD PID presence, plus optional **# FuelType:** CSV metadata.
+- When **spark** is inferred or **FuelType: gasoline** is set, the **analyzer disables diesel-only checks** (Duramax-style idle MAF lb/min bands, common-rail rail/PCV narratives, VGT/DPF/SCR fault framing, diesel EGT limit stories).
+- **Unknown** combustion keeps legacy diesel-tool defaults so existing Duramax CSVs behave as before.
+
+### How Knox and agents should reason for **GM gas** (e.g. Gen V LT, Global B, E90 ECM, T93 TCM)
+1. **Prioritize SAE J1979 Mode 01** semantics: trims (STFT/LTFT), O2 or equivalency ratio, spark timing / knock, MAP, MAF, IAT/ECT, catalyst and misfire-related PIDs when logged, EVAP where relevant.
+2. **High-pressure fuel (GDI)**: Mode 01 **0x23** (fuel rail gauge pressure) may appear; do **not** frame it as CP3/CP4 common-rail diesel diagnostics unless the user confirmed diesel.
+3. **Transmission**: On 2019+ Global B trucks (E90/T93), the TCM responds on **7E2/7EA** (NOT 7E1/7E9). 7E1/7E9 is the Allison/6L80 address used on older GMT900/K2XX platforms. The T93 10-speed (10L80/10L90) uses GM Mode 22 DIDs for TFT, TCC slip, gear, turbine speed, shift timing, solenoid pressure control, and clutch diagnostics — align explanations with EFI Live **TCM.*** naming when present.
+4. **Boosted gas (e.g. turbo V6/V8)**: Use **MAP + MAF + load + spark/knock** together; avoid **diesel smoke-limiter / MAF-vs-boost leak** narratives unless the log clearly shows turbocharged operation and the question is charge-air related.
+5. **Exhaust temperature**: If a gas truck logs an EGT-like channel, **do not assume diesel pyro limits (e.g. 1475°F sustained >14 seconds)** without knowing sensor location and OEM intent — gasoline turbo exhaust can read differently than Duramax towing pyro.
+
+### External research vectors (for agents + future live web search)
+When **GM_GAS_ANALYZER** or **ANALYZER_COMBUSTION_FAMILY: spark** is in module context, corroboration should prefer **current, model-year-specific** sources in this order:
+- **NHTSA recalls and investigations** (public)
+- **GM service bulletins / technical summaries** (public summaries, TechLink-style)
+- **OEM service diagnostic charts** for reported DTCs on that year/engine
+- **SAE J1979 / ISO 15031** for generic OBD PID meaning
+- Communities: **Silverado/Sierra owner forums**, **GM full-size truck boards**, **LS/LT performance** context where it applies to the same engine family
+
+Do **not** treat **Duramax forum defaults** as authoritative for a **6.2L L87 / 5.3L L84** gas log.
+
+### Calibration image reference (offline, not used by live datalogger)
+- Example field package: **E90** ECM segments (OS **12716900**), **T93** TCM (**24044027** / **24054706**) — for editor/calibration tooling only; live scanning remains **ISO-TP OBD/UDS**, not bin parsing.
+- **Tune Deploy** stores those same file shapes (DevProg/PPEI containers, **GM raw** / EFI Live-style **\`E90-\` / \`T93-\`** names) under \`tune-deploy/GM/…\` with metadata from \`tuneDeployParser\`; see repo **\`gmE90SilveradoSniffReference\`** for segment IDs and PT CAN lists. **A2L** (when provided) can later map those images to RAM/symbols for live edit and richer PID semantics alongside OBD/sniff data.
+
+### Verified E90 ECM DID Inventory (from BUSMASTER passive sniff + EFI Live V8 CSV)
+EFI Live V8 requests ALL PIDs via UDS \$22 (service 0x22), even standard J1979 PIDs. The DID numbers match Mode 01 PIDs but are requested as UDS ReadDataByIdentifier. Standard Mode 01 also works.
+
+**20 Standard J1979 PIDs (via \$22 on 7E0):**
+- 0x0004 ECM.LOAD_PCT (Calculated Load Value, %)
+- 0x0005 ECM.ECT (Engine Coolant Temperature)
+- 0x000B ECM.MAP (Manifold Absolute Pressure)
+- 0x000C ECM.RPM (Engine RPM)
+- 0x000D ECM.VSS (Vehicle Speed)
+- 0x000E ECM.SPARKADV (Ignition Timing Advance)
+- 0x000F ECM.IAT (Intake Air Temperature)
+- 0x0010 ECM.MAF (Mass Air Flow, g/s)
+- 0x0011 ECM.TP (Throttle Position)
+- 0x0023 ECM.FRP_C (Fuel Rail Pressure, GDI)
+- 0x0045 ECM.TTQRL (Relative Throttle Position)
+- 0x0046 ECM.AAT (Ambient Air Temperature)
+- 0x0047 ECM.TP_B (Absolute Throttle Position B)
+- 0x0049 ECM.APP_D (Accelerator Pedal Position D)
+- 0x004A ECM.APP (Accelerator Pedal Position)
+- 0x004C ECM.TAC_PCT (Commanded Throttle Actuator, %)
+- 0x005C ECM.EOT_B (Engine Oil Temperature)
+- 0x0061 ECM.TQ_DD (Engine Torque Demand, %)
+- 0x0062 ECM.TQ_ACT (Actual Engine Torque, %)
+- 0x0063 ECM.TQ_REF (Engine Reference Torque, Nm)
+
+**10 GM-Specific Extended DIDs (via \$22 on 7E0, no Mode 01 equivalent):**
+- 0x119C ECM.ENGOILP (Engine Oil Pressure, psi)
+- 0x12DA ECM.MAFFREQ2 (MAF Raw Frequency, Hz)
+- 0x131F ECM.FRPDI (Fuel Rail Pressure Desired, psi)
+- 0x1470 ECM.MAPU (MAP Unfiltered/Upstream, psi)
+- 0x2012 ECM.TCDBPR (TC Desired Boost Pressure, psi)
+- 0x204D ECM.APP_E (Accelerator Pedal Position Effective, %)
+- 0x208A ECM.TTQRET (Trans Torque Reduction Spark Retard, degrees)
+- 0x248B ECM.TP_R (Relative Throttle Position, %)
+- 0x308A ECM.TCTQRLR (TC Torque Reduction Limiter Reason, bitfield)
+- 0x328A ECM.AFMIR2 (AFM Inhibit Reason 2, bitfield)
+
+### Verified T93 TCM DID Inventory (58 DIDs on 7E2/7EA)
+**Core transmission channels:**
+- 0x1940 TCM.TFT (Trans Fluid Temp), 0x1941 TCM.TISS (Input Speed), 0x1942 TCM.TOSS (Output Speed)
+- 0x194C TCM.TCCSLIP (TCC Slip), 0x194F TCM.TCCP (TCC Commanded Pressure)
+- 0x1124 TCM.GEAR (Current Gear), 0x197E TCM.TURBINE (Turbine Speed)
+- 0x1991 TCM.VOLTS (Battery Voltage), 0x1141 TCM.PRNDL (PRNDL Position)
+- 0x1992-0x1995 Gear ratios (diagnostic, TC, gearbox, modeled)
+- 0x199A TCM.TRQENG (Engine Torque Commanded by TCM)
+- 0x19A1 TCM.TCSR (TC Speed Ratio), 0x19D4 TCM.TCCRS (TCC Reference Slip)
+
+**Shift timing:** 0x1232-0x1237 (1-2, 2-3, 3-4, 4-5, 5-6, last shift times in seconds)
+
+**Solenoid pressure control:** 0x2809-0x2811 (PCS1-PCS5 + TCC PCS commanded pressures, kPa)
+
+**Solenoid on-state:** 0x2812-0x2817 (PCS1-PCS5 + TCC PCS output status)
+
+**Current control:** 0x2818-0x281A (HSD1, HSD2, TCCE current in mA)
+
+**Status/control:** 0x281B-0x2824 (TCC status, brake pedal, base pattern, accel position, oncoming clutch, fill pressure, TISS/TOSS supply)
+
+**Diagnostics:** 0x1A01 (tap up/down), 0x1A18/0x1A1F (warmup cycles), 0x1A26/0x1A2D/0x1A88 (odometer), 0x2804-0x2806 (freeze frame), 0x321B (fast learn), 0x1238 (cleaning procedure), 0x1239 (distance this cycle)
+
+### Bus Sniff Summary (KOER baseline vs EFI Live active)
+- **KOER baseline**: 148 unique PT-CAN arb IDs, 73,350 frames (no diagnostic traffic)
+- **EFI Live active**: 167 unique arb IDs, 132,041 frames
+- **19 IDs only in EFI log**: diagnostic request/response IDs + EFI Live broadcast (0x5E8/0x5EA at ~4000 frames each) + init/config (0x641-0x64F)
+- **All 148 KOER baseline IDs confirmed present** in gmE90SilveradoSniffReference.ts
+
+## Duramax Diesel Injector Duration Tables — Stock Reference & Diagnostic Knowledge
+
+### Overview
+The ECM uses a Main Injection Pulsewidth (duration) table to control fuel delivery. The table maps **fuel rail pressure** (X-axis) vs **fuel quantity in mm³/stroke** (Y-axis) to **injector open time in microseconds (µs)**. This is the primary fueling control table in every Duramax generation.
+
+### All Duramax Generations — Injector System Summary
+| Engine | Years | ECM | Injector Brand | Injector Type | Pump | Table ID | Pressure Unit | Qty Rows | Pressure Cols |
+|--------|-------|-----|----------------|---------------|------|----------|---------------|----------|---------------|
+| LB7 | 2001-2004 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | MPa | 20 | 20 |
+| LLY | 2004.5-2006 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | PSI | 20 | 21 |
+| LBZ | 2006-2007 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | MPa | 20 | 20 |
+| LMM | 2007.5-2010 | Bosch EDC16 | Bosch | Solenoid (CRIN) | CP3 | {B0720} | PSI | 20 | 21 |
+| LML | 2011-2016 | Bosch EDC17 | Bosch | Solenoid (CRIN) | CP4.2 | {B0552} | PSI | 20 | 21 |
+| L5P | 2017-2023 | Denso E41 | Denso | Piezo (G4S) | HP5 | {F210001} | kPa | 21 | 21 |
+| L5P E42 | 2024-2026 | Denso E42 (ECM 16856) | Denso | Piezo (G4S) | HP5 | ECM 16856 | MPa | 26 | 24 |
+
+### Key Differences Between Generations
+- **LB7/LBZ**: MPa native pressure axis (0-190 MPa). Bosch CP3 pump. Solenoid injectors.
+- **LLY/LMM**: PSI native pressure axis (0-27557 PSI). Same Bosch CP3 + solenoid architecture.
+- **LML**: PSI native (0-29008 PSI). Switched to CP4.2 pump (single-piston, more failure-prone). Still Bosch solenoid injectors.
+- **L5P (2017-2023)**: kPa native (25000-200000 kPa). Complete system change to Denso: HP5 pump + G4S piezo injectors. Piezo injectors have faster response times and more precise fuel metering than solenoid.
+- **L5P E42 (2024-2026)**: MPa native (12.5-280 MPa). Same Denso system but higher pressure capability (280 MPa = 40,610 PSI). Larger table: 26 quantity rows × 24 pressure columns.
+
+### Diagnostic Use of Duration Tables
+The stock duration tables are the baseline for diagnosing fueling issues:
+
+**LOW RAIL PRESSURE DETECTION (CRITICAL DIAGNOSTIC RULE):**
+If a vehicle's injection duration is consistently operating in the **lower-left corner** of the duration table (low pressure + low quantity = disproportionately high duration values), this indicates a **low rail pressure condition**. The ECM is compensating for insufficient rail pressure by holding the injector open longer to deliver the requested fuel quantity.
+- A **brief dip** into the lower-left corner is normal during cold starts, transient conditions, or momentary load changes.
+- **Sustained operation** in the lower-left corner (more than a few seconds under steady-state conditions) is a diagnostic red flag.
+- **Possible causes**: Weak/failing CP3 or CP4 pump, failing fuel pressure regulator (FPR), restricted fuel supply (clogged filter, kinked line, failing lift pump), air intrusion in fuel lines, failing pressure control valve (PCV), injector leak-back exceeding pump supply capacity.
+- **How to identify in datalogs**: Compare actual injection duration values against the stock table at the current rail pressure and commanded fuel quantity. If actual duration is significantly higher than stock at the same pressure/quantity intersection, the ECM is compensating for low pressure.
+- **CP3 vs CP4 consideration**: CP4.2 pumps (LML) are single-piston and more susceptible to fuel starvation damage. Low rail pressure on an LML should be investigated immediately. CP3 pumps (LB7/LLY/LBZ/LMM) are more robust but can still fail.
+- **L5P HP5 consideration**: The Denso HP5 pump is generally reliable but can be affected by fuel quality issues. Low rail pressure on L5P should check for fuel contamination first.
+
+**AFTERMARKET INJECTOR CALIBRATION:**
+When aftermarket injectors are installed (S&S Diesel, Exergy, Industrial Injection, etc.), the stock duration table must be recalibrated:
+1. **Step 1 — OEM Match**: Using the aftermarket injector's flow sheet (which maps pressure + duration → actual mm³ delivered), compute new duration values so the ECM delivers the SAME mm³ as stock at every cell. This is pure interpolation.
+2. **Step 2 — Target Fueling** (optional): If the customer wants more fuel (e.g., 300 mm³ max instead of stock 100 mm³), additional duration is added progressively in the lower-right corner of the table (high quantity, high pressure). The upper-left (idle/light load) stays OEM-matched.
+3. **mm³ axis labels may be hardcoded in the ECM** — even if the axis says "100 mm³", the duration value can make the aftermarket injector deliver 300 mm³. The axis is just an index; duration controls actual fuel delivery.
+
+The VOP Diesel Injector Flow Converter tool handles this two-step process automatically for all 7 Duramax engines.
+
+## L5P Duramax — Unlock, Read & Flash Compatibility (CORRECTED)
+
+### IMPORTANT: Most L5P trucks can be unlocked and flashed in one quick process
+As long as the **latest VCM Suite BETA version** is used (we ALWAYS use the latest BETA), most L5P Duramax trucks can be unlocked and flashed all in one process without sending any modules in for unlock service.
+
+### Compatibility by Year/Module:
+| Year Range | ECM | TCM | Unlock Method | Notes |
+|------------|-----|-----|---------------|-------|
+| 2017-2019 | E41 (except 2018*) | T87A | In-truck via EZ Lynk, HP Tuners, or EDGE | *2018 E41 ECMs must be unlocked first (exception) |
+| 2020-2023 | E41 | T93 | In-truck via EZ Lynk, HP Tuners, or EDGE | Flash and unlock in one process with latest software |
+| 2024-2026 | E42 | — | **ECM/TCM must be sent in for unlock service** | Once unlocked, module reinstalled, then read/tuned normally |
+
+### Key Rules:
+- **Always use the latest VCM Suite BETA** — this is non-negotiable. Older versions may not support in-truck unlock.
+- **2018 E41 ECMs are the exception** — they still require unlock-first before flashing. All other E41 ECMs (2017, 2019-2023) can be flash+unlocked in-truck.
+- **2024+ (E42)** — these are the only L5P trucks that currently require sending the ECM or TCM in for unlock service prior to tuning. Once the unlock service is complete, the module can be reinstalled and then read/tuned the same as previous year models.
+- **Supported tools for in-truck unlock+flash**: EZ Lynk, HP Tuners, EDGE — all must be on their latest software update.
+- **Reference**: www.hptuners.com for current vehicle compatibility and unlock requirements.
+
+### DO NOT tell customers:
+- ❌ That ALL L5P TCMs need to be sent in for unlock (only 2024+ and 2018 E41 ECMs)
+- ❌ That they need to unlock before flashing (most can do both at once with latest BETA)
+- ❌ That HP Tuners can't flash L5P TCMs without prior unlock (it can, with latest BETA, for 2017-2023 except 2018 E41 ECM)
+
+### Customer Workflow (VCM Suite — for 2017-2023 L5P):
+1. Install latest VCM Suite BETA on Windows laptop
+2. Connect MPVI3/MPVI4/RTD4 via USB to laptop, then OBD-II to vehicle
+3. Go to Flash > Read Vehicle, select ECM or TCM module
+4. The latest BETA handles unlock + read in one process
+5. Save the stock file as backup
+6. Load the PPEI tune file (.hpt), go to Flash > Write Vehicle
+7. Battery must be fully charged or on maintainer during entire process
+
+### CRITICAL RULE: Never Assume Tuning Device or Vehicle
+When a customer asks how to load, flash, or install a tune but does NOT specify:
+- What tuning device they are using, AND/OR
+- What vehicle they are tuning
+
+You MUST ask before giving any instructions. Do NOT default to any device.
+
+Ask simply:
+"What tuning device are you using, and what's the year/model of your vehicle?"
+
+Supported tuning devices (PPEI commonly works with):
+1. **EFI Live** — AutoCal V2/V3, FlashScan V2 (uses .coz/.ctz files)
+2. **EZ Lynk** — AutoAgent 2/3 (cloud-based, uses .ezl files or cloud delivery)
+3. **HP Tuners** — MPVI2/MPVI3/RTD4 (uses .hpt files via VCM Suite)
+4. **DynoJet** — Power Vision (uses .djt files)
+5. **EDGE** — Pulsar/Insight CTS3 (module-based, some flash capability)
+6. **V-OP** — (coming soon — PPEI's own platform)
+
+Once you know the device AND vehicle, give concise step-by-step install instructions.
+Keep it simple — numbered steps, bold the key actions, no walls of text.
+Reference the specific guides and knowledge you have for that device/vehicle combo.
+
+Do NOT:
+- Assume AutoCal or EFI Live by default
+- Give generic instructions that mix multiple devices
+- Provide a long explanation before the steps
+- Repeat information the customer already knows
+
+### Tune Loading Response Format
+Once device + vehicle are confirmed, structure your response as:
+1. Brief one-line acknowledgment ("Got it — [year] [vehicle] with [device]. Here's how:")
+2. Numbered steps (5-9 steps max)
+3. One "Important" note about battery/charger
+4. One follow-up question if needed ("Did it flash successfully?")
+
+Keep the energy conversational but efficient. The customer wants to get their tune loaded, not read an essay.
+
+## OBD-II Standard PID Reference (from SAE J1979 / OBD-PID spec)
+
+### Mode 01 Standard PIDs — Complete Reference
+All vehicles with OBD-II (1996+) must support a subset of these PIDs. The ECU reports which PIDs it supports via bitmask PIDs (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0).
+
+**Core Engine PIDs (universally supported):**
+- 0x04: Calculated Engine Load (0-100%, A*100/255)
+- 0x05: Engine Coolant Temperature (-40 to 215°C, A-40)
+- 0x0B: Intake Manifold Absolute Pressure (0-255 kPa, A)
+- 0x0C: Engine RPM (0-16383.75 rpm, ((A*256)+B)/4)
+- 0x0D: Vehicle Speed (0-255 km/h, A)
+- 0x0F: Intake Air Temperature (-40 to 215°C, A-40)
+- 0x10: MAF Air Flow Rate (0-655.35 g/s, ((A*256)+B)/100)
+- 0x11: Throttle Position (0-100%, A*100/255)
+
+**Fuel System PIDs:**
+- 0x06/0x07: Short/Long Term Fuel Trim Bank 1 (-100 to 99.2%, (A-128)*100/128)
+- 0x08/0x09: Short/Long Term Fuel Trim Bank 2 (same formula)
+- 0x0A: Fuel Pressure (0-765 kPa gauge, A*3)
+- 0x23: Fuel Rail Gauge Pressure — diesel/GDI (0-655350 kPa, ((A*256)+B)*10)
+- 0x59: Fuel Rail Absolute Pressure (0-655350 kPa, ((A*256)+B)*10)
+- 0x51: Fuel Type (enum: 1=Gas, 2=Methanol, 3=Ethanol, 4=Diesel, 5=LPG, 6=CNG, 7=Propane, 8=Electric, 0x11=Hybrid Gas, 0x13=Hybrid Diesel)
+- 0x52: Ethanol Fuel % (0-100%, A*100/255)
+- 0x5D: Fuel Injection Timing (-210 to 301.992°, (((A*256)+B)-26880)/128)
+- 0x5E: Engine Fuel Rate (0-3212.75 L/h, ((A*256)+B)*0.05)
+
+**Torque PIDs (critical for tuning):**
+- 0x61: Driver Demand Engine Torque % (-125 to 130%, A-125)
+- 0x62: Actual Engine Torque % (-125 to 130%, A-125)
+- 0x63: Engine Reference Torque (0-65535 Nm, A*256+B)
+- 0x64: Engine % Torque Data — 5 operating points (idle + 4 pts, each A-125)
+
+**Diesel Turbo/Exhaust PIDs (extended, multi-byte):**
+- 0x6B: EGR Temperature (5 bytes, support flags + sensor temps, ((B*256)+C)/10-40 °C)
+- 0x6D: Fuel Pressure Control System (6 bytes, desired/actual pressure)
+- 0x6E: Injection Pressure Control System (5 bytes)
+- 0x6F: Turbocharger Compressor Inlet Pressure (3 bytes, B = kPa)
+- 0x72: Wastegate Control (5 bytes, position %)
+- 0x73: Exhaust Pressure (5 bytes, ((B*256)+C)*0.01 kPa)
+- 0x74: Turbocharger RPM (5 bytes, ((B*256)+C)*10 rpm)
+- 0x75/0x76: Turbocharger Temperature A/B (7 bytes, inlet/outlet temps)
+- 0x77: Charge Air Cooler Temperature (5 bytes)
+- 0x78/0x79: EGT Bank 1/2 (9 bytes, 4 sensors each, ((A*256)+B)/10-40 °C)
+- 0x7B: DPF Info (7 bytes, differential pressure)
+- 0x7C: DPF Temperature (9 bytes, inlet/outlet Bank 1/2)
+- 0x83: NOx Reagent System / DEF (5 bytes, tank level + consumption)
+- 0x84: Particulate Matter Sensor (5 bytes, Bank 1/2)
+
+**Monitor/Readiness PIDs:**
+- 0x01: Monitor Status (4 bytes — A7=MIL on/off, A0-A6=DTC count, B3=spark/compression ignition, C/D=readiness monitors)
+- 0x41: Monitor Status This Drive Cycle (same encoding as 0x01)
+- 0x30: Warm-ups Since Codes Cleared (0-255 count)
+
+**DTC Encoding (Mode 03/07/0A):**
+2 bytes per DTC: A7,A6 → P/C/B/U; A5,A4 → second digit; A3-A0,B7-B4,B3-B0 → remaining digits. Example: P0158, U0100.
+
+### CAN Bus Frame Format (11-bit standard)
+**Query:** CAN ID 0x7DF (broadcast) or 0x7E0-0x7E7 (physical ECU). Byte 0 = additional data bytes, Byte 1 = mode, Byte 2+ = PID.
+**Response:** CAN ID 0x7E8-0x7EF (ECU address + 8). Byte 1 = mode+0x40, Byte 2+ = PID echo + data.
+**Mode 22 enhanced:** Request [03 22 PID_H PID_L], Response [62 PID_H PID_L data...].
+**Negative response:** [7F mode 31] = PID not supported.
+
+## GM Diagnostic Communication (from GMW3110-2010)
+
+### GM CAN Identifier Assignments
+GM uses TWO parallel addressing schemes:
+1. **GMLAN enhanced:** $241-$25F (request) / $641-$65F (USDT response) / $541-$55F (UUDT/periodic)
+2. **OBD/EOBD standard:** $7DF-$7EF (standard 8-ECU range)
+
+**CAN ID nibble pattern:** For any GM ECU with USDT Response CAN ID $6xx:
+- $2xx = physical request CAN Identifier
+- $5xx = UUDT response CAN Identifier
+- $6xx = USDT response CAN Identifier
+Example: ECU at diagnostic address $22 → PhysReq=$24A, USDTResp=$64A, UUDTResp=$54A
+
+**OBD 11-bit CAN IDs:**
+- $7DF = functional broadcast (all OBD ECUs)
+- $7E0/$7E8 = ECM (engine)
+- $7E1/$7E9 = TCM (transmission)
+- $7E2-$7E7 / $7EA-$7EF = additional ECUs
+
+### GM Diagnostic Services (SIDs)
+- $10: InitiateDiagnosticOperation (session control — default/extended/programming)
+- $1A: ReadDataByIdentifier (single DID reads, GMLAN equivalent of Mode 22)
+- $22: ReadDataByParameterIdentifier (Mode 22 — 2-byte PID reads)
+- $23: ReadMemoryByAddress (direct RAM reads — IOCTL path)
+- $27: SecurityAccess (seed/key authentication — levels $01/$02 standard, $03/$04 extended, $09/$0A programming)
+- $2C: DynamicallyDefineMessage (DDDI — pack PIDs into DPIDs for streaming)
+- $2D: DefinePIDByAddress (custom PIDs by RAM address)
+- $34/$36: RequestDownload/TransferData (SPS flash programming)
+- $3E: TesterPresent (keep-alive heartbeat, sub-function $00=with response, $80=no response)
+- $AA: ReadDataByPacketIdentifier (periodic DPID streaming)
+- $AE: DeviceControl (IOCTL — actuator/output control)
+
+### DDDI Protocol (Service $2C) — How L5P Streaming Works
+1. Define DPID: Send $2C [DPID#] [PID_H PID_L] [PID_H PID_L]... to pack PIDs into a single DPID
+2. DPID range: $FE-$90 (dynamic, numbered backward from $FE), $01-$7F (static/firmware)
+3. Each DPID = 1 byte identifier + up to 7 bytes signal data
+4. Request streaming: Send $AA [rate] [DPID#1] [DPID#2]...
+5. Rates: $01=one-shot, $02=slow (1000ms), $03=medium (200ms), $04=fast (25ms/40Hz)
+6. Responses come on UUDT CAN IDs ($541-$55F or $5E8-$5EF for emissions ECUs)
+7. TesterPresent ($3E) must stay active or periodic scheduler dies
+
+### GM Timing Parameters
+- P2: Max request-to-response time (50ms default)
+- P2*: Extended response time when $78 (ResponsePending) sent (5000ms)
+- P3: Min time between consecutive tester requests (55ms)
+- TesterPresent must be sent before P3 timeout to keep session alive
+
+### GM ECU Programming (SPS) Process
+1. Read Identification ($1A service — part numbers, VIN, cal IDs)
+2. Retrieve SPS Data ($34/$36 services)
+3. Programming Session: $A5 → $27 → $34 → $36 → $20
+
+## GM Bar Code Traceability (from GMW15862)
+
+### Traceability Label Structure
+Every GM powertrain component has a 2D bar code (Data Matrix or QR) encoding:
+- **Y field** (14 chars): GM Compressed VPPS Code
+- **P field** (8 chars): GM Part Number (e.g., P12345678)
+- **12V field** (9 chars): Supplier DUNS Number (identifies manufacturer)
+- **T field** (16 chars): Traceability Code (LSYYDDDTRACEDATA — Line, Shift, Year, Julian Date, lot/batch)
+- **4D field** (5 chars): Julian Date (YYDDD)
+- **2P field** (3 chars): Part Version/Suffix
+- **I field** (17 chars): Vehicle ID Number (VIN)
+
+### Relevance to V-OP
+1. **ECU Identification:** Scanning the bar code on an ECU should match Mode 22 DID reads ($F190 VIN, $F187 part number)
+2. **Flash Validation:** Before/after flashing, compare 9 software part numbers read via Mode 22 against bar code data
+3. **Component Matching:** Cross-reference bar code on replacement ECU against vehicle VIN and expected part number
+4. **Supplier Traceability:** DUNS number identifies OEM vs aftermarket modules
+
+### Data Syntax (ISO/IEC 15434)
+Start: [ (0x5B), End: EOT (0x04), Group Separator: GS (0x1D), Record Separator: RS (0x1E)
+Format header: >Rs06Gs (format 06 = ISO/IEC 15418 data identifiers)
+Example powertrain bar code: [>Rs06GsY1210000000000XGsP24257888Gs12V138440180GsT11120934ACOX0043RsEOT
+
+## Normen_CAN Standards Reference (Fully Extracted)
+The following CAN/diagnostic standards have been fully extracted and integrated:
+
+### SAE J1939-21-2006 — Heavy-Duty CAN Transport Protocol
+J1939 uses **29-bit extended CAN IDs** with this structure:
+- Bits 28-26: Priority (3 bits, 0-7, lower = higher priority)
+- Bit 25: EDP (Extended Data Page)
+- Bit 24: DP (Data Page)
+- Bits 23-16: PF (PDU Format, 8 bits) — if PF >= 240 → PDU2 broadcast, PF < 240 → PDU1 destination-specific
+- Bits 15-8: PS (PDU Specific) — destination address (PDU1) or group extension (PDU2)
+- Bits 7-0: SA (Source Address)
+- PGN = (EDP << 17) | (DP << 16) | (PF << 8) | PS (for PDU2) or (EDP << 17) | (DP << 16) | (PF << 8) (for PDU1)
+
+Example: CAN ID 0x18FEF200 → Priority=6, PF=0xFE (PDU2 broadcast), PS=0xF2, SA=0x00 (Engine #1), PGN=0xFEF2=65266 (Vehicle Speed)
+
+**Key J1939 Source Addresses:** 0x00=Engine #1, 0x03=Transmission #1, 0x0B=Brakes, 0x0F=Retarder-Engine, 0x11=Cruise Control, 0x21=Body Controller, 0x31=Instrument Cluster, 0xF9=Off-Board Diagnostic Tool #1, 0xFF=Global (broadcast)
+
+**Transport Protocol PGNs:** TP.CM=PGN 0x00EC00 (60416), TP.DT=PGN 0x00EB00 (60160), Request=PGN 0x00EA00 (59904), ACK=PGN 0x00E800 (59392)
+
+**TP Message Types:**
+- RTS (Control=16): Total size, packet count, max packets/CTS, target PGN
+- CTS (Control=17): Packets allowed, next sequence number
+- EndOfMsgACK (Control=19): Confirms complete reception
+- BAM (Control=32): Broadcast announce — no acknowledgment, 50-200ms inter-packet
+- Conn_Abort (Control=255): Abort with reason code
+
+**Timing:** Tr=200ms response, Th=500ms hold, T1=750ms packet timeout, T2/T3=1250ms CTS/ACK timeout, BAM inter-packet=50-200ms
+
+### SAE J1979 — OBD-II Diagnostic Test Modes
+**Service $01** — Request Current Powertrain Diagnostic Data (Mode 01 PIDs 0x00-0xC4+)
+**Service $02** — Request Freeze Frame Data (same PIDs as $01 but frozen at DTC set time)
+**Service $03** — Request Emission-Related DTCs (up to 3 DTCs per response message)
+**Service $04** — Clear/Reset Emission-Related Diagnostic Information (clears DTCs, freeze frames, readiness bits, MIL, O2 data, monitoring results, distance/time counters)
+**Service $05** — Request O2 Sensor Monitoring Test Results
+**Service $06** — Request On-Board Monitoring Test Results (OBDMIDs + TIDs with min/max/value)
+**Service $07** — Request DTCs Detected During Current/Last Driving Cycle (pending DTCs)
+**Service $08** — Request Control of On-Board System/Test/Component
+**Service $09** — Request Vehicle Information (VIN, Calibration IDs, CVN, ECU Name, IPT)
+**Service $0A** — Request Permanent DTCs (cannot be cleared by Service $04)
+
+**VIN via Service $09:** InfoType 0x02, MessageCount first, then VIN in 5 messages (3 fill bytes + 17 VIN chars)
+**Calibration ID:** InfoType 0x04, up to 16 ASCII characters per calibration
+**CVN:** InfoType 0x06, 4-byte Calibration Verification Number per calibration
+
+### ISO 14229-1 — Unified Diagnostic Services (UDS)
+**Diagnostic & Communication Management:**
+- DiagnosticSessionControl (0x10): default=0x01, programming=0x02, extended=0x03
+- ECUReset (0x11): hardReset=0x01, keyOffOnReset=0x02, softReset=0x03
+- SecurityAccess (0x27): requestSeed (odd subfunction), sendKey (even subfunction)
+- CommunicationControl (0x28): enableRxAndTx=0x00, enableRxAndDisableTx=0x01, disableRxAndEnableTx=0x02, disableRxAndTx=0x03
+- TesterPresent (0x3E): subfunction 0x00 (with response), 0x80 (suppress positive response)
+- ControlDTCSetting (0x85): on=0x01, off=0x02
+
+**Data Transmission:**
+- ReadDataByIdentifier (0x22): Read DIDs (2-byte identifiers, multiple per request)
+- ReadMemoryByAddress (0x23): Read raw memory by address and length
+- ReadDataByPeriodicIdentifier (0x2A): Subscribe to periodic DID updates
+- DynamicallyDefineDataIdentifier (0x2C): Define custom DIDs from memory addresses or existing DIDs
+- WriteDataByIdentifier (0x2E): Write DID values
+
+**Stored Data:**
+- ClearDiagnosticInformation (0x14): Clear DTCs by 3-byte group (0xFFFFFF = all)
+- ReadDTCInformation (0x19): Multiple subfunctions for DTC status, snapshot, extended data
+
+**Upload/Download:**
+- RequestDownload (0x34): Initiate download (tester→ECU)
+- RequestUpload (0x35): Initiate upload (ECU→tester)
+- TransferData (0x36): Transfer data blocks with sequence counter
+- RequestTransferExit (0x37): Complete transfer
+
+**IO Control & Routines:**
+- InputOutputControlByIdentifier (0x2F): Control actuators
+- RoutineControl (0x31): startRoutine=0x01, stopRoutine=0x02, requestResults=0x03
+
+### ISO 14229 DTC Status Bits
+Each DTC has an 8-bit status byte:
+- Bit 0 (LSB): **testFailed** (TF) — most recent test result
+- Bit 1: **testFailedThisMonitoringCycle** (TFTMC) — failed this cycle
+- Bit 2: **pendingDTC** (PDTC) — failed current or previous cycle
+- Bit 3: **confirmedDTC** (CDTC) — stored in long-term memory
+- Bit 4: **testNotCompletedSinceLastClear** (TNCSLC)
+- Bit 5: **testFailedSinceLastClear** (TFSLC)
+- Bit 6: **testNotCompletedThisMonitoringCycle** (TNCTMC)
+- Bit 7 (MSB): **warningIndicatorRequested** (WIR) — MIL/warning light
+
+After ClearDiagnosticInformation: bits 0,1,2,3,5 → 0; bits 4,6 → 1
+
+### UDS-14229 Global-B Diagnostic Tool (GM, NOT BMW)
+**CRITICAL: Global B is a GM protocol** — used on newer GM vehicles (T87, T93, Opel). NOT BMW.
+
+**GM Global B 29-bit CAN addressing:**
+- Format: 0x14DA + [Target Address] + [Source Address]
+- Request to ECM: 0x14DA11F1 (target=0x11 ECM, source=0xF1 tester)
+- Response from ECM: 0x14DAF111 (target=0xF1 tester, source=0x11 ECM)
+- This is ISO 15765 normal fixed addressing for UDS on CAN
+
+**Tool Configuration:** ProjectType 0=PSA, 1=GM-GlobalB; TesterPresent cycle 1000-5000ms (default 4000); Controller timeout 50-5000ms (default 500)
+
+**Menus:** DTCs, IO-Control (case learn, brake learning), DIDs (GMW-3110 PIDs renamed to DIDs), OBD, User commands
+
+**User Command Format:** CAN-ID [Byte1 Byte2 ...] — e.g., 14DA11F1 [03 19 02 20] (all hex, no 0x prefix)
+
+**Hardware:** PCAN-USB Pro FD with PeakOemDrv.exe / PcanDrv.exe / PcanDevRedist.exe
+
+### KWP2000 (ISO 14230-3) — Legacy Diagnostic Protocol
+KWP2000 is the predecessor to UDS, used on older vehicles (pre-2008 era). Key differences from UDS:
+- Uses K-Line (serial) or CAN as transport
+- Service IDs overlap with UDS but some are different
+- Positive response = request SID + 0x40 (bit 6 set)
+- Negative response = 0x7F + SID + NRC
+
+**KWP2000 Service ID Table:**
+| Hex | Service | Response |
+|-----|---------|----------|
+| 0x10 | startDiagnosticSession | 0x50 |
+| 0x11 | ecuReset | 0x51 |
+| 0x12 | readFreezeFrameData | 0x52 |
+| 0x13 | readDiagnosticTroubleCodes | 0x53 |
+| 0x14 | clearDiagnosticInformation | 0x54 |
+| 0x17 | readStatusOfDTCs | 0x57 |
+| 0x18 | readDTCsByStatus | 0x58 |
+| 0x1A | readEcuIdentification | 0x5A |
+| 0x20 | stopDiagnosticSession | 0x60 |
+| 0x21 | readDataByLocalIdentifier | 0x61 |
+| 0x22 | readDataByCommonIdentifier | 0x62 |
+| 0x23 | readMemoryByAddress | 0x63 |
+| 0x26 | setDataRates | 0x66 |
+| 0x27 | securityAccess | 0x67 |
+| 0x2C | dynamicallyDefineLocalIdentifier | 0x6C |
+| 0x2E | writeDataByCommonIdentifier | 0x6E |
+| 0x2F | inputOutputControlByCommonId | 0x6F |
+| 0x30 | inputOutputControlByLocalId | 0x70 |
+| 0x31 | startRoutineByLocalIdentifier | 0x71 |
+| 0x34 | requestDownload | 0x74 |
+| 0x35 | requestUpload | 0x75 |
+| 0x36 | transferData | 0x76 |
+| 0x37 | requestTransferExit | 0x77 |
+| 0x3B | writeDataByLocalIdentifier | 0x7B |
+| 0x3D | writeMemoryByAddress | 0x7D |
+| 0x3E | testerPresent | 0x7E |
+| 0x80 | escapeCode (KWP2000 only) | 0xC0 |
+
+**KWP2000 NRC (Negative Response Codes):**
+0x10=generalReject, 0x11=serviceNotSupported, 0x12=subFunctionNotSupported, 0x21=busy-RepeatRequest, 0x22=conditionsNotCorrect, 0x23=routineNotComplete, 0x31=requestOutOfRange, 0x33=securityAccessDenied, 0x35=invalidKey, 0x36=exceedNumberOfAttempts, 0x37=requiredTimeDelayNotExpired, 0x40=downloadNotAccepted, 0x50=uploadNotAccepted, 0x71=transferSuspended, 0x72=transferAborted, 0x74=illegalAddressInBlockTransfer, 0x75=illegalByteCountInBlockTransfer, 0x76=illegalBlockTransferType, 0x77=blockTransferDataChecksumError, 0x78=reqCorrectlyRcvd-RspPending, 0x79=incorrectByteCountDuringBlockTransfer, 0x80-0xFF=manufacturerSpecific
+
+### ISO 15031-5 — OBD-II Emission-Related Diagnostic Services
+Defines the application layer for emission-related OBD services over CAN/K-Line/J1850.
+
+**Service $04 clears:** MIL, DTC count, confirmed DTCs, pending DTCs, freeze frame data, O2 sensor data, monitoring test results, distance/time counters, readiness bits. Some ECUs may refuse with engine running (NRC 0x22 conditionsNotCorrect).
+
+**CAN ISO-TP framing (ISO 15765-2):**
+- SF (Single Frame): N_PCI = 0x0L (L = data length, 1-7 bytes)
+- FF (First Frame): N_PCI = 0x1LLL (12-bit total length)
+- CF (Consecutive Frame): N_PCI = 0x2N (N = sequence 0-F)
+- FC (Flow Control): N_PCI = 0x3F (F = flow status: 0=continue, 1=wait, 2=overflow)
+
+### CAN Diagnostic Communication Overview
+**K-Line message structure:** Header (Fmt, Tgt, Src, Len — max 4 bytes) + Data (SId + params — max 255 bytes) + Checksum (1 byte)
+**KWP2000 over CAN examples:**
+- Functional request: 0x7DF [02 10 81] (startDiagnosticSession)
+- Physical request: 0x7E1 [02 21 80] (readDataByLocalId)
+- Multi-frame: FF + FC + CF sequence for >7 data bytes
+- Positive response SID = request SID + 0x40; Negative response = 0x7F + SID + NRC
 
 ### Honda Talon 1000X-4 Service Manual Reference (2020 SXS1000S4/S4D)
 Service manual PDF stored at: https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/honda_2020_talon_1000x-4_service_manual(1)-Copy_3b8448b6.pdf
@@ -822,55 +1721,55 @@ Oil temp calibration spreadsheet: https://d2xsxph8kpxj0f.cloudfront.net/31051966
 - Compression ratio: 10.0:1, OHC with valve lifter and rocker arm
 - Dry sump lubrication with trochoid oil pump, liquid cooled
 - PGM-FI (Programmed Fuel Injection), 46mm throttle bore
-- Idle speed: 1,200 ± 100 RPM
-- Fuel pressure: 331–367 kPa (48–53 psi)
-- Ignition timing: 15° BTDC at idle
-- Spark plug: NGK SILMAR8A9S, gap 0.8–0.9mm
+- Idle speed: 1,200 +/- 100 RPM
+- Fuel pressure: 331-367 kPa (48-53 psi)
+- Ignition timing: 15 deg BTDC at idle
+- Spark plug: NGK SILMAR8A9S, gap 0.8-0.9mm
 
 #### Sensor Specifications
-- IAT sensor: NTC thermistor, 1.0–1.3 kΩ at 40°C/104°F
-- ECT sensor: NTC thermistor, 1.0–1.3 kΩ at 40°C/104°F
-- EQT (Engine Oil Temperature) sensor: NTC thermistor, 2.5–2.8 kΩ at 20°C/68°F
-- O2 sensor heater: 13.0–18.5 Ω at 20°C/68°F
-- Fuel injector: 11–13 Ω at 24°C/75°F
-- IACV: 99–121 Ω at 20°C/68°F
+- IAT sensor: NTC thermistor, 1.0-1.3 kOhm at 40C/104F
+- ECT sensor: NTC thermistor, 1.0-1.3 kOhm at 40C/104F
+- EQT (Engine Oil Temperature) sensor: NTC thermistor, 2.5-2.8 kOhm at 20C/68F
+- O2 sensor heater: 13.0-18.5 Ohm at 20C/68F
+- Fuel injector: 11-13 Ohm at 24C/75F
+- IACV: 99-121 Ohm at 20C/68F
 
-#### Oil Temperature Sensor (EQT) — Voltage to Temperature Conversion
+#### Oil Temperature Sensor (EQT) - Voltage to Temperature Conversion
 The Honda Talon EQT sensor is an NTC (Negative Temperature Coefficient) thermistor.
 Higher voltage = colder temperature. The WP8 datalog channel name varies:
-- "Oil Temperature Voltage" or similar voltage channel (0–5V range)
+- "Oil Temperature Voltage" or similar voltage channel (0-5V range)
 - Must be converted using the PPEI calibration lookup table (42 interpolation points)
 - Conversion uses linear interpolation between table entries
 
 Key temperature thresholds for oil temp health analysis:
 | Condition | Temperature | Voltage |
 |-----------|------------|----------|
-| Cold start (below operating) | < 150°F | > 1.34V |
-| Warming up | 150–180°F | 0.93–1.34V |
-| Normal operating range | 180–220°F | 0.63–0.93V |
-| Upper normal (hard driving) | 220–250°F | 0.40–0.63V |
-| Caution zone | 250–280°F | 0.28–0.40V |
-| Overheat warning | > 280°F | < 0.28V |
-| Critical overheat | > 300°F | < 0.22V |
+| Cold start (below operating) | < 150F | > 1.34V |
+| Warming up | 150-180F | 0.93-1.34V |
+| Normal operating range | 180-220F | 0.63-0.93V |
+| Upper normal (hard driving) | 220-250F | 0.40-0.63V |
+| Caution zone | 250-280F | 0.28-0.40V |
+| Overheat warning | > 280F | < 0.28V |
+| Critical overheat | > 300F | < 0.22V |
 
 #### Lubrication System
 - Oil capacity after draining: 5.5L (5.8 US qt)
 - After draining + oil filter: 5.75L (6.08 US qt)
 - After draining + engine + DCT oil filter: 5.8L (6.1 US qt)
 - Recommended: Pro Honda GN4 4-stroke, API SG+, JASO MA, SAE 10W-30
-- Oil pressure at No.3 journal: 490–588 kPa (71–85 psi) at 5,000 RPM / 80°C (176°F)
+- Oil pressure at No.3 journal: 490-588 kPa (71-85 psi) at 5,000 RPM / 80C (176F)
 
 #### Cooling System
 - Coolant capacity: 3.3L (3.5 US qt) at replacement
-- Thermostat opens: 80–84°C (176–183°F), fully open at 95°C (203°F)
-- Radiator cap relief: 108–137 kPa (16–20 psi)
+- Thermostat opens: 80-84C (176-183F), fully open at 95C (203F)
+- Radiator cap relief: 108-137 kPa (16-20 psi)
 
 #### DCT (Dual Clutch Transmission)
 - 6-speed dual clutch automatic
 - Gear ratios: 1st 2.764, 2nd 2.047, 3rd 1.583, 4th 1.230, 5th 0.968, 6th 0.800
 - Sub-transmission: Automatic/electric shift, ratios 2.666 (H) / 1.880 (L)
 - Drive modes: P-R-N-H-L
-- Clutch clearance: 1.4–1.6mm
+- Clutch clearance: 1.4-1.6mm
 
 #### Drivetrain
 - 2WD / i-4WD (Intelligent 4 Wheel Drive)
@@ -883,16 +1782,16 @@ Key temperature thresholds for oil temp health analysis:
 When generating a health report for a Honda Talon WP8 datalog:
 
 1. **Oil Temperature Analysis** (if Oil Temperature Voltage channel present):
-   - Convert voltage to °F using the PPEI calibration lookup table
-   - Flag if oil temp exceeds 250°F sustained (>10 seconds)
-   - Critical warning if oil temp exceeds 280°F at any point
-   - Note if oil temp never reaches 180°F (insufficient warm-up)
+   - Convert voltage to deg F using the PPEI calibration lookup table
+   - Flag if oil temp exceeds 250F sustained (>10 seconds)
+   - Critical warning if oil temp exceeds 280F at any point
+   - Note if oil temp never reaches 180F (insufficient warm-up)
    - Report peak oil temp, average operating temp, and time spent in each zone
 
 2. **AFR/Lambda Analysis**:
-   - Convert AFR to Lambda (÷14.7)
-   - WOT target: Lambda 0.82–0.88 (rich for safety)
-   - Cruise target: Lambda 0.95–1.02
+   - Convert AFR to Lambda (divide by 14.7)
+   - WOT target: Lambda 0.82-0.88 (rich for safety)
+   - Cruise target: Lambda 0.95-1.02
    - Flag sustained lean conditions (Lambda > 1.05) at high RPM/load
    - Flag excessively rich conditions (Lambda < 0.75) at cruise
 
@@ -902,18 +1801,17 @@ When generating a health report for a Honda Talon WP8 datalog:
    - Flag rapid clutch pressure oscillations
 
 4. **Ignition Timing**:
-   - Normal range at idle: ~15° BTDC
+   - Normal range at idle: ~15 deg BTDC
    - Flag significant timing retard under load (knock detection)
    - Monitor timing advance progression with RPM
 
 5. **Coolant Temperature**:
-   - Normal operating: 176–203°F (80–95°C, thermostat range)
-   - Overheat warning: > 230°F
-   - Note if coolant temp never reaches thermostat opening (176°F)
+   - Normal operating: 176-203F (80-95C, thermostat range)
+   - Overheat warning: > 230F
+   - Note if coolant temp never reaches thermostat opening (176F)
 
 6. **Module Voltage**:
-   - Normal: 13.5–14.5V while running
+   - Normal: 13.5-14.5V while running
    - Low voltage warning: < 12.5V while running
    - Flag voltage drops during high electrical load
-
 `;

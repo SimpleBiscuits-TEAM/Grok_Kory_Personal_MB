@@ -259,9 +259,15 @@ function drawChart(
     const yMin = trace.min;
     const yMax = trace.max;
     const yRange = yMax - yMin || 1;
-    const yPad = yRange * 0.05;
-    const effectiveMin = yMin - yPad;
-    const effectiveMax = yMax + yPad;
+    // Calm down sensitivity: use at least 15% padding, and enforce a minimum Y range
+    // based on the PID's defined range so small fluctuations don't fill the whole chart
+    const pidFullRange = (trace.pid.max ?? 0) - (trace.pid.min ?? 0);
+    const minRange = pidFullRange > 0 ? pidFullRange * 0.10 : Math.max(yRange * 3, 5);
+    const displayRange = Math.max(yRange, minRange);
+    const center = (yMin + yMax) / 2;
+    const yPad = displayRange * 0.15;
+    const effectiveMin = center - displayRange / 2 - yPad;
+    const effectiveMax = center + displayRange / 2 + yPad;
     const effectiveRange = effectiveMax - effectiveMin;
 
     ctx.strokeStyle = trace.color;
@@ -309,9 +315,13 @@ function drawChart(
   if (visibleTraces.length > 0) {
     const pt = visibleTraces[0];
     const yRange = pt.max - pt.min || 1;
-    const yPad = yRange * 0.05;
-    const eMin = pt.min - yPad;
-    const eMax = pt.max + yPad;
+    const pidFullRangeLabel = (pt.pid.max ?? 0) - (pt.pid.min ?? 0);
+    const minRangeLabel = pidFullRangeLabel > 0 ? pidFullRangeLabel * 0.10 : Math.max(yRange * 3, 5);
+    const displayRangeLabel = Math.max(yRange, minRangeLabel);
+    const centerLabel = (pt.min + pt.max) / 2;
+    const yPadLabel = displayRangeLabel * 0.15;
+    const eMin = centerLabel - displayRangeLabel / 2 - yPadLabel;
+    const eMax = centerLabel + displayRangeLabel / 2 + yPadLabel;
 
     ctx.fillStyle = pt.color;
     ctx.font = '10px "Share Tech Mono", monospace';
@@ -459,6 +469,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
   const animFrameRef = useRef<number>(0);
   const mouseXRef = useRef<number | null>(null);
   const mouseYRef = useRef<number | null>(null);
+  const dirtyRef = useRef(true);
 
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(30);
   const [expanded, setExpanded] = useState(false);
@@ -731,11 +742,13 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     const rect = e.currentTarget.getBoundingClientRect();
     mouseXRef.current = e.clientX - rect.left;
     mouseYRef.current = e.clientY - rect.top;
+    dirtyRef.current = true;
   }, []);
 
   const handleMouseLeave = useCallback(() => {
     mouseXRef.current = null;
     mouseYRef.current = null;
+    dirtyRef.current = true;
   }, []);
 
   // Reset viewport
@@ -775,7 +788,19 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     });
   }, []);
 
-  // Animation loop
+  // Animation loop — draw once per dependency change instead of every frame.
+  // Re-draw is triggered when traces, viewport, expanded, or isDragging change.
+  // Mouse hover triggers re-draw via the mousemove handler below.
+  const tracesRef = useRef(traces);
+  tracesRef.current = traces;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const isDraggingRef = useRef(isDragging);
+  isDraggingRef.current = isDragging;
+
+  // Mark dirty when dependencies change
+  useEffect(() => { dirtyRef.current = true; }, [traces, expanded, isDragging]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -783,7 +808,10 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
     let running = true;
     const render = () => {
       if (!running) return;
-      drawChart(canvas, traces, viewportRef.current, mouseXRef.current, mouseYRef.current, expanded, isDragging);
+      if (dirtyRef.current) {
+        drawChart(canvas, tracesRef.current, viewportRef.current, mouseXRef.current, mouseYRef.current, expandedRef.current, isDraggingRef.current);
+        dirtyRef.current = false;
+      }
       animFrameRef.current = requestAnimationFrame(render);
     };
     render();
@@ -792,7 +820,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
       running = false;
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [traces, expanded, isDragging]);
+  }, []);
 
   const chartHeight = expanded ? 500 : 280;
   const timeWindowOptions: { value: TimeWindow; label: string }[] = [

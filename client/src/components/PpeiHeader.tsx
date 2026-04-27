@@ -6,11 +6,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { useAuth } from '@/_core/hooks/useAuth';
-import { getLoginUrl } from '@/const';
+import { GUEST_OPEN_ID } from '@shared/guestUser';
 import { NotificationBell } from '@/components/AdminNotificationPanel';
 import { APP_VERSION } from '@/lib/version';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
+import { getLoginUrl } from '@/const';
+import { toast } from 'sonner';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 const sFont = {
   heading: '"Bebas Neue", "Impact", "Arial Black", sans-serif',
@@ -29,6 +30,9 @@ const sColor = {
   navText: 'oklch(0.65 0.010 260)',
   navActive: 'oklch(0.52 0.22 25)',
   navActiveBg: 'oklch(0.18 0.02 25)',
+  devBadge: 'oklch(0.72 0.14 85)',
+  devBadgeBg: 'rgba(255, 180, 60, 0.12)',
+  devBadgeBorder: 'rgba(255, 180, 60, 0.35)',
 };
 
 interface NavItem {
@@ -40,14 +44,17 @@ interface NavItem {
   admin?: boolean;
   /** If set, opens an external URL instead of navigating internally */
   external?: string;
+  /** Experimental / developer tooling — shows a small badge next to the label */
+  devFeature?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { label: 'ANALYZE', path: '/' },
-  { label: 'ADVANCED', path: '/advanced' },
+  { label: 'VOP LITE', path: '/' },
+  { label: 'VOP PRO', path: '/advanced' },
   { label: 'SHOP', path: '/shop', external: 'https://ppei.com/' },
-  { label: 'SUPPORT', path: '/support', external: 'https://ppei.com/' },
+  { label: 'SUPPORT', path: '/strat' },
   { label: 'COMMUNITY', path: '/community' },
+  { label: 'GIT-MAP', path: '/git-map', devFeature: true },
 ];
 
 export default function PpeiHeader() {
@@ -70,6 +77,19 @@ export default function PpeiHeader() {
   }, [showUserMenu]);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const isGuest = user?.openId === GUEST_OPEN_ID;
+  const oauthLoginUrl = getLoginUrl();
+  // GOD MODE always shows — Manus platform OAuth handles access control
+  const isGodMode = true;
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || oauthLoginUrl) return;
+    console.info(
+      "[V-OP] Sign-in: add VITE_APP_ID to the .env file next to package.json, then restart `pnpm dev`. " +
+        "(GitHub device login in the terminal is only for `git push`, not this app.)"
+    );
+  }, [oauthLoginUrl]);
+
   const visibleItems = navItems.filter(item => {
     if (item.admin && !isAdmin) return false;
     if (item.auth && !isAuthenticated) return false;
@@ -88,6 +108,44 @@ export default function PpeiHeader() {
     : '?';
 
   return (
+    <>
+    {isGodMode && (
+      <div style={{
+        background: 'linear-gradient(90deg, oklch(0.65 0.28 30) 0%, oklch(0.55 0.25 25) 50%, oklch(0.65 0.28 30) 100%)',
+        padding: '6px 0',
+        textAlign: 'center',
+        position: 'relative',
+        zIndex: 100,
+        borderBottom: '2px solid oklch(0.75 0.3 50)',
+        boxShadow: '0 2px 12px oklch(0.65 0.28 30 / 0.4)',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+        }}>
+          <span style={{
+            fontFamily: sFont.heading,
+            fontSize: '0.85rem',
+            fontWeight: 900,
+            letterSpacing: '0.25em',
+            color: 'white',
+            textShadow: '0 1px 4px oklch(0 0 0 / 0.5)',
+          }}>
+            ⚡ GOD MODE ⚡
+          </span>
+          <span style={{
+            fontFamily: sFont.mono,
+            fontSize: '0.6rem',
+            color: 'oklch(1 0 0 / 0.75)',
+            letterSpacing: '0.05em',
+          }}>
+            ALL ACCESS — GOD MODE
+          </span>
+        </div>
+      </div>
+    )}
     <header style={{
       background: sColor.bg,
       borderBottom: `1px solid ${sColor.border}`,
@@ -181,8 +239,28 @@ export default function PpeiHeader() {
               }
               return (
                 <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                  <div className="ppei-btn-hover" style={navStyle}>
+                  <div className="ppei-btn-hover" style={{ ...navStyle, gap: '6px' }}>
                     {item.label}
+                    {item.devFeature && (
+                      <span
+                        title="Developer / experimental feature"
+                        style={{
+                          fontFamily: sFont.mono,
+                          fontSize: '0.45rem',
+                          fontWeight: 'bold',
+                          letterSpacing: '0.06em',
+                          color: sColor.devBadge,
+                          background: sColor.devBadgeBg,
+                          border: `1px solid ${sColor.devBadgeBorder}`,
+                          borderRadius: '3px',
+                          padding: '1px 5px',
+                          lineHeight: 1.4,
+                          flexShrink: 0,
+                        }}
+                      >
+                        dev
+                      </span>
+                    )}
                   </div>
                 </Link>
               );
@@ -214,33 +292,7 @@ export default function PpeiHeader() {
                     userSelect: 'none',
                     whiteSpace: 'nowrap',
                   }}>{tierLabel}</span>
-                  {/* Upgrade prompt for non-admin users on Advanced */}
-                  {isAdvanced && !isAdmin && (
-                    <span
-                      style={{
-                        fontFamily: sFont.mono,
-                        fontSize: '0.5rem',
-                        letterSpacing: '0.06em',
-                        color: 'oklch(0.78 0.15 80)',
-                        background: 'rgba(255,200,0,0.08)',
-                        border: '1px solid rgba(255,200,0,0.25)',
-                        borderRadius: '3px',
-                        padding: '2px 8px',
-                        lineHeight: 1.4,
-                        cursor: 'default',
-                        whiteSpace: 'nowrap',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                      title="Upgrade to V-OP Pro for full access to Advanced tools and features"
-                    >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'oklch(0.78 0.15 80)' }}>
-                        <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
-                      </svg>
-                      UPGRADE TO PRO
-                    </span>
-                  )}
+                  {/* User is already in VOP PRO if they're on /advanced — no upgrade prompt needed */}
                 </div>
               );
             })()}
@@ -257,8 +309,10 @@ export default function PpeiHeader() {
             }}>{APP_VERSION}</span>
             {isAuthenticated && <NotificationBell />}
 
-            {/* User menu or Sign In */}
-            {isAuthenticated ? (
+            {/* SIGN IN button removed — MAIN branch uses access code gate only, no OAuth sign-in */}
+
+            {/* User menu */}
+            {isAuthenticated && (
               <div ref={menuRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
@@ -337,7 +391,8 @@ export default function PpeiHeader() {
                       )}
                     </div>
 
-                    {/* Logout button */}
+                    {/* Logout — hidden for local guest session */}
+                    {!isGuest && (
                     <button
                       onClick={handleLogout}
                       style={{
@@ -366,31 +421,10 @@ export default function PpeiHeader() {
                       </svg>
                       SIGN OUT
                     </button>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <a
-                href={getLoginUrl()}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '5px 14px',
-                  background: `${sColor.red}1f`,
-                  border: `1px solid ${sColor.red}4d`,
-                  borderRadius: '2px',
-                  fontFamily: sFont.heading,
-                  fontSize: '0.78rem',
-                  letterSpacing: '0.08em',
-                  color: sColor.red,
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                SIGN IN
-              </a>
             )}
           </div>
         </div>
@@ -433,8 +467,27 @@ export default function PpeiHeader() {
             }
             return (
               <Link key={item.path} href={item.path} style={{ textDecoration: 'none' }}>
-                <div style={mobileNavStyle}>
+                <div style={{ ...mobileNavStyle, gap: '4px' }}>
                   {item.label}
+                  {item.devFeature && (
+                    <span
+                      title="Developer / experimental feature"
+                      style={{
+                        fontFamily: sFont.mono,
+                        fontSize: '0.4rem',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.05em',
+                        color: sColor.devBadge,
+                        background: sColor.devBadgeBg,
+                        border: `1px solid ${sColor.devBadgeBorder}`,
+                        borderRadius: '2px',
+                        padding: '0 4px',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      dev
+                    </span>
+                  )}
                 </div>
               </Link>
             );
@@ -442,5 +495,6 @@ export default function PpeiHeader() {
         </div>
       </div>
     </header>
+    </>
   );
 }

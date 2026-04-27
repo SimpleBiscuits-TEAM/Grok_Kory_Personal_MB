@@ -3,6 +3,13 @@
  * Handles CSV parsing for both HP Tuners and EFILIVE formats
  */
 
+import {
+  extractColumnTokensForCombustionInference,
+  extractObdPidNumbersFromText,
+  resolveCombustionFromLogContext,
+  type CombustionInferenceResult,
+} from './combustionInference';
+
 /**
  * Audit record for the boost absolute-vs-gauge calibration pass.
  * Stored on every processed log so the UI can explain what was corrected.
@@ -35,7 +42,15 @@ export interface VehicleMeta {
   manufacturer?: string;  // 'gm' | 'ford' | 'bmw' | 'universal'
   fuelType?: string;      // 'diesel' | 'gasoline' | 'hybrid' | 'any'
   displacement?: string;
+  cylinders?: number;
   protocol?: string;
+  /** Session metadata from V-OP datalog export headers */
+  sessionName?: string;
+  durationSec?: number;
+  sampleRateMs?: number;
+  channelCount?: number;
+  /** Heuristic diesel vs spark-ignition classification from columns/PIDs (see combustionInference). */
+  combustionInference?: CombustionInferenceResult;
 }
 
 export interface DuramaxData {
@@ -50,6 +65,7 @@ export interface DuramaxData {
   offset: number[];
   railPressureActual: number[];
   railPressureDesired: number[];
+  /** GM diesel FPR / inlet metering (often labeled PCV): commanded **current in mA**, not PWM duty %. */
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
@@ -134,6 +150,7 @@ export interface ProcessedMetrics {
   timeMinutes: number[];
   railPressureActual: number[];
   railPressureDesired: number[];
+  /** GM diesel FPR / inlet metering (often labeled PCV): commanded **current in mA**, not PWM duty %. */
   pcvDutyCycle: number[];
   boostDesired: number[];
   turboVanePosition: number[];
@@ -263,7 +280,12 @@ function extractVehicleMeta(lines: string[]): VehicleMeta | undefined {
       case 'manufacturer': meta.manufacturer = v; break;
       case 'fueltype': meta.fuelType = v; break;
       case 'displacement': meta.displacement = v; break;
+      case 'cylinders': meta.cylinders = parseInt(v, 10) || undefined; break;
       case 'protocol': meta.protocol = v; break;
+      case 'session': meta.sessionName = v; break;
+      case 'duration': meta.durationSec = parseFloat(v) || undefined; break;
+      case 'samplerate': meta.sampleRateMs = parseInt(v, 10) || undefined; break;
+      case 'channels': meta.channelCount = parseInt(v, 10) || undefined; break;
     }
   }
 
@@ -347,6 +369,18 @@ export function parseCSV(content: string): DuramaxData {
     result.vehicleMeta = vehicleMeta;
   }
 
+  const columnTokens = extractColumnTokensForCombustionInference(content);
+  const pidNums = extractObdPidNumbersFromText(content.slice(0, 24000));
+  const combustionInference = resolveCombustionFromLogContext(
+    result.vehicleMeta,
+    columnTokens,
+    pidNums
+  );
+  result.vehicleMeta = {
+    ...(result.vehicleMeta || {}),
+    combustionInference,
+  };
+
   return result;
 }
 
@@ -426,18 +460,113 @@ const DATALOGGER_CHANNEL_MAP: Record<string, string> = {
   'RUN_TIME': '_run_time',
   'MIL_DIST': '_mil_dist',
   'CLR_DIST': '_clr_dist',
-  'INJ_TMG': '_inj_tmg',
+  'INJ_TMG': 'injectionTiming',
   'EGR_FLOW': '_egr_flow',
-  // GM extended PIDs (Mode 22)
+  // DDDI virtual channels (HPT Common mode)
+  'INJ_PW_DDDI': 'injectorPulseWidth',  // 0xDD03 Injector Pulse Width from DDDI float32
+  'INJ_PW': 'injectorPulseWidth',        // alias used by storeVal
+  'CYL_AIRMASS': '_cyl_airmass',          // 0xDD04 Cylinder Airmass
+  'BOOST_DES_DDDI': 'boostDesired',       // 0xDD07 Desired Boost from DDDI
+  'BOOST_VAC_DDDI': 'boost',              // 0xDD08 Boost/Vacuum from DDDI
+  'BOOST_VAC': 'boost',                   // alias used by storeVal
+  'FUEL_INJ_QTY_TEST': 'fuelQuantity',    // 0x245D Fuel Injection Qty (test)
+  'METER_VALVE': '_meter_valve',           // 0xDD00 Metering Unit Valve Current
+  'LAMBDA_SMOKE': '_lambda_smoke',         // 0xDD02 Lambda Smoke Limit
+  'IAT_EXT': 'intakeAirTemp',             // 0x68 Intake Air Temp Extended
+  'FRPDI': 'railPressureDesired',         // 0xDD06/0x131F Desired FRP from DDDI
+  'FRP_DES': 'railPressureDesired',       // alias used by storeVal
+  'EGR_CMD': 'egrPosition',               // 0x2C Commanded EGR
+  'EGR_A_CMD': '_egr_a_cmd',              // 0x20B4 Commanded EGR A (raw)
+  'IOCTL_SLOT5': '_ioctl_slot5',          // Unknown IOCTL slot 5
+  // GM extended PIDs (Mode 22) — HPT-verified replacements
+  'FP_SAE': '_fp_sae',           // 0x208A Fuel Pressure SAE (low-side)
+  'INJ_COR': '_inj_cor',         // 0x208B Injection Timing Correction
+  'ACT_VANE': 'turboVanePosition',// 0x1543 Actual Turbo Vane Position
+  'DES_VANE': 'turboVaneDesired', // 0x1540 Desired Turbo Vane Position
+  'IAT_DSL': 'intakeAirTemp',    // 0x114D Intake Air Temp Diesel
+  'ECT_HPT': 'coolantTemp',      // 0x13C8 Engine Coolant Temp HPT
+  'AAT_DSL': '_aat_dsl',          // 0x232C Ambient Air Temp Diesel
+  'EGR_PINTLE': 'egrPosition',   // 0x1502 EGR Pintle Position
+  'NOX_1': '_nox_1',             // 0x11F8 NOx Sensor 1
+  'NOX_2': '_nox_2',             // 0x11FA NOx Sensor 2
+  // Injector Pulse Widths (HPT-verified 0x20AC-0x20B3)
+  'IPW_1': 'injectorPulseWidth', // Map Cyl 1 as primary
+  'IPW_2': '_ipw_2',
+  'IPW_3': '_ipw_3',
+  'IPW_4': '_ipw_4',
+  'IPW_5': '_ipw_5',
+  'IPW_6': '_ipw_6',
+  'IPW_7': '_ipw_7',
+  'IPW_8': '_ipw_8',
+  // Legacy aliases (old 0x05xx names — keep for backward compat with old CSV exports)
+  'BOOST_CMD': 'boostDesired',
+  'BOOST_ACT': 'boost',
+  'VGT_CMD': 'turboVaneDesired',
+  'VGT_ACT': 'turboVanePosition',
+  'EGT_PRE': 'exhaustGasTemp',
+  'EGT_POST': '_egt_post',
+  'EGT1': 'exhaustGasTemp',
+  'EGT_EXT': '_egt_ext',
+  'FRP_DES_SS': 'railPressureDesired',
+  'FRP_ACT_SS': 'railPressureActual',
+  'FRP_DEV': '_frp_dev',
   'DPF_SOOT': '_dpf_soot',
+  'DPF_SOOT_PCT': '_dpf_soot_pct',
+  'DPF_DP': '_dpf_dp',
   'DPF_REGEN': '_dpf_regen',
+  // 0x328A is now FRP_ACT (was DPF_REGEN_PCT — misidentified)
+  'DPF_REGEN_CT': '_dpf_regen_ct',
+  'DPF_DIST': '_dpf_dist',
+  'DPF_IN_T': '_dpf_in_t',
+  'DPF_OUT_T': '_dpf_out_t',
   'DEF_LVL': '_def_lvl',
+  'DEF_LVL2': '_def_lvl2',
+  'DEF_DOSE': '_def_dose',
   'DEF_RATE': '_def_rate',
   'DEF_QUAL': '_def_qual',
-  'PCV_DC': 'pcvDutyCycle',
-  'PCV_ACT': 'pcvDutyCycle',
-  'FUEL_QTY': 'fuelQuantity',
+  'DEF_TEMP': '_def_temp',
+  'NOX_IN': '_nox_in',
+  'NOX_OUT': '_nox_out',
+  'NOX_CONC': '_nox_conc',
+  'SCR_TEMP': '_scr_temp',
   'INJ_QTY': 'fuelQuantity',
+  'FUEL_QTY': 'fuelQuantity',
+  'INJ_PAT': '_inj_pat',
+  'INJ_TMG_SAE': 'injectionTiming',
+  'INJ_TMG_STD': 'injectionTiming',
+  'IBR_1': '_ibr_1',
+  'IBR_2': '_ibr_2',
+  'IBR_3': '_ibr_3',
+  'IBR_4': '_ibr_4',
+  'IBR_5': '_ibr_5',
+  'IBR_6': '_ibr_6',
+  'IBR_7': '_ibr_7',
+  'IBR_8': '_ibr_8',
+  'THRTL_CMD': 'throttlePosition',
+  'BARO_DSL': 'barometricPressure',
+  'CAC_OUT': '_cac_out',
+  'EGR_BYP': 'egrPosition',
+  'ECT_DSL': 'coolantTemp',
+  'EOT_STD': 'oilTemp',
+  'TURBO_RPM': 'turboSpeed',
+  'EXH_PRESS': 'exhaustPressure',
+  'TRANS_IN': 'turbineRpm',
+  'TRANS_OUT': 'outputShaftRpm',
+  'TCC_CMD': 'converterDutyCycle',
+  // T87A TCM PIDs (confirmed Mode 22 on 0x7E2)
+  'TIS_T87A': 'turbineRpm',           // 0x1941 Trans Input Speed → turbine RPM
+  'TOS_T87A': 'outputShaftRpm',       // 0x1942 Trans Output Speed
+  'TCCP_T87A': 'converterPressure',   // 0x194F TCC Commanded Pressure
+  'TCCRS_T87A': 'converterSlip',      // 0x19D4 TCC Reference Slip
+  'TCCLP_T87A': '_tcc_line_pressure',  // 0x281C TCC Line Pressure
+  'PRNDL_T87A': 'currentGear',        // 0x1141 PRNDL Position (mapped to gear for analyzer)
+  'TRQENG_T87A': '_tq_eng_tcm',       // 0x199A Engine Torque Commanded (TCM)
+  'VOLTS_T87A': '_voltage_tcm',        // 0x1991 Battery Voltage (TCM)
+  'OIL_LIFE': '_oil_life',
+  'FUEL_FILT': '_fuel_filt',
+  'VIN_CNT': '_vin_cnt',
+  'TQ_REF': '_tq_ref',
+  'TQ_ACT': '_tq_act',
 };
 
 /**
@@ -798,17 +927,53 @@ function parseHPTunersCSV(content: string): DuramaxData {
     // Priority 1: exact SAE lb/min channel
     const sae = headers.findIndex(h => h === 'Mass Airflow (SAE)');
     if (sae !== -1) return sae;
-    // Priority 2: any column with 'Mass Airflow' that is NOT 'Sensor' (Hz)
-    const nonSensor = headers.findIndex(h => h.includes('Mass Airflow') && !h.includes('Sensor'));
+    // Priority 2: "Mass Air Flow" (DST/HP Tuners) or "Mass Airflow" — not Hz/sensor columns
+    const nonSensor = headers.findIndex(
+      h =>
+        /mass\s*air\s*flow/i.test(h) &&
+        !/sensor|hz|frequency/i.test(h),
+    );
     if (nonSensor !== -1) return nonSensor;
-    // Priority 3: fallback to any Mass Airflow column
-    return headers.findIndex(h => h.includes('Mass Airflow'));
+    // Priority 3: legacy substring
+    const legacy = headers.findIndex(h => h.includes('Mass Airflow'));
+    if (legacy !== -1) return legacy;
+    return headers.findIndex(h => /mass\s*air\s*flow/i.test(h));
   })();
 
   // Boost actual: prefer direct gauge psi channels
   // 'Boost/Vacuum' = gauge psi (HP Tuners full-description export)
   // 'Boost Pressure' = gauge psi (HP Tuners short-name export)
-  const boostGaugePsigIdx = getColumnIndex(['Boost/Vacuum', 'Boost Pressure', 'Boost (psi)', 'Boost Gauge']);
+  // HP Tuners may label turbo vane / actuator command as "Boost Pressure Actuator Pressure" (PSI units) —
+  // that is NOT intake boost; substring match on "Boost Pressure" must skip those columns.
+  const boostGaugePsigIdx = (() => {
+    // Exclude HP Tuners mislabels: Status/OL columns, actuator DC%, desired/commanded targets, vane.
+    // Ford "Boost Pressure A/B (SAE)" is manifold-side absolute (psia-like), not PSIG — use MAP−baro instead.
+    const skipFalseBoostGauge = (h: string) =>
+      /actuator/i.test(h) ||
+      /status/i.test(h) ||
+      /\bdesired\s+boost\b/i.test(h) ||
+      /\bcommanded\s+boost\b/i.test(h) ||
+      /\bboost\s+pressure\b.*\(sae\)/i.test(h) ||
+      (/vane/i.test(h) && /boost|turbo/i.test(h));
+    const exactKeys = [
+      'Boost/Vacuum',
+      'Boost (psi)',
+      'Boost Gauge',
+      'Boost Pressure',
+    ] as const;
+    for (const keyword of exactKeys) {
+      const idx = headers.findIndex((h) => h === keyword && !skipFalseBoostGauge(h));
+      if (idx !== -1) return idx;
+    }
+    const substringKeys = ['Boost/Vacuum', 'Boost (psi)', 'Boost Gauge', 'Boost Pressure'] as const;
+    for (const keyword of substringKeys) {
+      const idx = headers.findIndex(
+        (h) => h.includes(keyword) && !skipFalseBoostGauge(h),
+      );
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  })();
 
   // MAP absolute: used as fallback when no direct boost gauge channel exists
   // Prefer Hi-Res A/B channel, then standard SAE MAP.
@@ -817,7 +982,7 @@ function parseHPTunersCSV(content: string): DuramaxData {
   const boostIdx = (() => {
     // Helper: check if a column index has at least one non-empty numeric value
     // in the first few data rows after the header.
-    const colHasData = (colIdx: number): boolean => {
+    const colHasData = (colIdx: number, requirePositiveSignal = false): boolean => {
       if (colIdx === -1) return false;
       // Find the first data row (skip units row / blanks)
       let sampleStart = headerIndex + 1;
@@ -825,25 +990,70 @@ function parseHPTunersCSV(content: string): DuramaxData {
         const fv = parseFloat(lines[s].split(',')[0]);
         if (!isNaN(fv)) { sampleStart = s; break; }
       }
-      // Check up to 5 data rows for a non-empty numeric value
-      for (let s = sampleStart; s < Math.min(sampleStart + 5, lines.length); s++) {
+      let maxSeen = -Infinity;
+      for (let s = sampleStart; s < Math.min(sampleStart + 40, lines.length); s++) {
         const cols = lines[s].split(',');
         if (colIdx < cols.length) {
           const val = cols[colIdx].trim();
-          if (val !== '' && !isNaN(parseFloat(val))) return true;
+          const v = parseFloat(val);
+          if (val !== '' && !isNaN(v)) maxSeen = Math.max(maxSeen, v);
         }
       }
-      return false;
+      if (maxSeen === -Infinity) return false;
+      // Hi-res MAP slots often read 0 when unused; skip so we fall back to "Manifold Absolute Pressure"
+      if (requirePositiveSignal && maxSeen <= 0) return false;
+      return true;
     };
 
+    // Ford / HP Tuners: primary MAP without "Intake" prefix — reliable when Hi-Res columns are zero-filled
+    const manifoldAbsIdx = headers.findIndex((h) => h === 'Manifold Absolute Pressure');
+    if (manifoldAbsIdx !== -1 && colHasData(manifoldAbsIdx)) return manifoldAbsIdx;
+
     const hiResA = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure A (SAE) (Hi Res)');
-    if (hiResA !== -1 && colHasData(hiResA)) return hiResA;
+    if (hiResA !== -1 && colHasData(hiResA, true)) return hiResA;
     // L5P logs use "B" variant for the high-resolution MAP channel
     const hiResB = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure B (SAE) (Hi Res)');
-    if (hiResB !== -1 && colHasData(hiResB)) return hiResB;
+    if (hiResB !== -1 && colHasData(hiResB, true)) return hiResB;
+    // Duplicate Hi-Res headers: pick the column with the strongest signal (2025 Powerstroke logs)
+    const hiResAllIdxs = headers
+      .map((h, i) => ({ h, i }))
+      .filter(
+        ({ h }) =>
+          h.includes('Intake Manifold Absolute Pressure') &&
+          h.includes('Hi Res') &&
+          !/exhaust/i.test(h),
+      )
+      .map(({ i }) => i);
+    if (hiResAllIdxs.length > 1) {
+      let bestI = -1;
+      let bestMax = -Infinity;
+      for (const i of hiResAllIdxs) {
+        let mx = -Infinity;
+        let sampleStart = headerIndex + 1;
+        for (let s = headerIndex + 1; s < Math.min(headerIndex + 6, lines.length); s++) {
+          const fv = parseFloat(lines[s].split(',')[0]);
+          if (!isNaN(fv)) {
+            sampleStart = s;
+            break;
+          }
+        }
+        for (let s = sampleStart; s < Math.min(sampleStart + 80, lines.length); s++) {
+          const cols = lines[s].split(',');
+          if (i < cols.length) {
+            const v = parseFloat(cols[i].trim());
+            if (!isNaN(v)) mx = Math.max(mx, v);
+          }
+        }
+        if (mx > bestMax) {
+          bestMax = mx;
+          bestI = i;
+        }
+      }
+      if (bestI !== -1 && bestMax > 0) return bestI;
+    }
     // Generic Hi-Res fallback (any variant letter)
     const hiResAny = headers.findIndex(h => h.includes('Intake Manifold Absolute Pressure') && h.includes('Hi Res'));
-    if (hiResAny !== -1 && colHasData(hiResAny)) return hiResAny;
+    if (hiResAny !== -1 && colHasData(hiResAny, true)) return hiResAny;
     const sae = headers.findIndex(h => h === 'Intake Manifold Absolute Pressure (SAE)');
     if (sae !== -1) return sae;
     // IMPORTANT: Exclude exhaust-side pressure columns ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")
@@ -974,6 +1184,14 @@ function parseHPTunersCSV(content: string): DuramaxData {
     const conv = hptConverters[idx];
     return conv ? conv(v) : v;
   };
+
+  // When there is no units row, infer MAF scaling from the header (e.g. "Mass Air Flow (g/s)")
+  if (mafIdx !== -1 && hptUnits.length === 0) {
+    const hl = headers[mafIdx].toLowerCase();
+    if ((hl.includes('g/s') || hl.includes('gram')) && !hl.includes('lb/min')) {
+      hptConverters[mafIdx] = (v: number) => v * 0.132277;
+    }
+  }
   const rpm: number[] = [];
   const maf: number[] = [];
   const boost: number[] = [];
@@ -1040,7 +1258,9 @@ function parseHPTunersCSV(content: string): DuramaxData {
     railPressureActual.push(railActualIdx !== -1 ? hptConvert(railActualIdx, values[railActualIdx]) : 0);
     railPressureDesired.push(railDesiredIdx !== -1 ? hptConvert(railDesiredIdx, values[railDesiredIdx]) : 0);
     pcvDutyCycle.push(pcvIdx !== -1 ? values[pcvIdx] : 0);
-    boostDesired.push(boostDesiredIdx !== -1 ? hptConvert(boostDesiredIdx, values[boostDesiredIdx]) : 0);
+    // Desired Boost: subtract baro to get gauge pressure (same as actual boost calculation)
+    const rawDesiredBoost = boostDesiredIdx !== -1 ? hptConvert(boostDesiredIdx, values[boostDesiredIdx]) : 0;
+    boostDesired.push(rawDesiredBoost > 0 ? Math.max(0, rawDesiredBoost - baroVal) : 0);
     turboVanePosition.push(turboVaneIdx !== -1 ? values[turboVaneIdx] : 0);
     turboVaneDesired.push(turboVaneDesiredIdx !== -1 ? values[turboVaneDesiredIdx] : 0);
     exhaustGasTemp.push(egtIdx !== -1 ? hptConvert(egtIdx, values[egtIdx]) : 0);
@@ -1953,7 +2173,7 @@ function parseBanksPowerCSV(content: string): DuramaxData {
   const fuelRateIdx = getColumnIndex(['Fuel Flow Rate', 'Cylinder Fuel Rate']);
   const railActualIdx = getColumnIndex(['Fuel Rail Pressure']);
   const railDesiredIdx = getColumnIndex(['FRP Commanded']);
-  const pcvIdx = -1; // Banks Power does not log PCV duty cycle — leave unmapped
+  const pcvIdx = -1; // Banks Power does not log FPR/PCV current — leave unmapped
   // MAP Commanded is absolute (PSIA); subtract ambient to get gauge
   const mapCommandedIdx = getColumnIndex(['MAP Commanded']);
   const ambientIdx = getColumnIndex(['Ambient Air Pressure', 'B-Bus Ambient Air Pressure']);
@@ -2337,6 +2557,16 @@ function parseEZLynkCSV(content: string): DuramaxData {
   if (rpmIdx === -1) pidsMissing.push('Engine RPM');
   if (mafIdx === -1) pidsMissing.push('Mass Air Flow');
 
+  // MAF: DST / EZ Lynk headers are usually "Mass Air Flow (g/s)"; internal model + HP math expect lb/min.
+  const mafHeaderLower = mafIdx !== -1 ? headers[mafIdx].toLowerCase() : '';
+  const mafToLbPerMin = (raw: number): number => {
+    if (isNaN(raw)) return 0;
+    if (mafHeaderLower.includes('lb/min') || mafHeaderLower.includes('lb min')) return raw;
+    if (mafHeaderLower.includes('g/s') || mafHeaderLower.includes('gram')) return raw * 0.132277;
+    // Default for this format (documented as g/s above)
+    return raw * 0.132277;
+  };
+
   // Detect if torque column is in Ft-lbf (actual) vs percentage
   // Check header for "Ft-lbf" or "ft-lbf" to determine
   const torqueIsAbsolute = torqueActualIdx !== -1 &&
@@ -2386,7 +2616,7 @@ function parseEZLynkCSV(content: string): DuramaxData {
     if (!hasAnyData) continue; // skip rows with no data at all
 
     rpm.push(!isNaN(rpmVal) ? rpmVal : 0);
-    maf.push(!isNaN(mafVal) ? mafVal : 0);
+    maf.push(mafToLbPerMin(mafVal));
     // EZ Lynk boost is already gauge PSI
     boost.push(!isNaN(boostVal) ? Math.max(0, boostVal) : 0);
     mapAbsolute.push(!isNaN(boostVal) ? boostVal + 14.696 : 14.696);
@@ -2929,12 +3159,15 @@ export function downsampleData(data: ProcessedMetrics, targetPoints: number = 10
   };
 }
 /**
- * Create binned data for trend liness
+ * Create binned data for trend lines (RPM histogram means).
+ * Includes `rpm` (same value as `rpmBin`) so Recharts XAxis dataKey="rpm" works when a
+ * Line uses `data={binnedData}` alongside the raw scatter series.
  */
 export function createBinnedData(
   data: ProcessedMetrics,
   binCount: number = 30
 ): Array<{
+  rpm: number;
   rpmBin: number;
   mafMean: number;
   hpTorqueMean: number;
@@ -2942,30 +3175,41 @@ export function createBinnedData(
   boostMean: number;
   count: number;
 }> {
+  if (!data.rpm.length) return [];
+
   const rpmMin = data.stats.rpmMin;
   const rpmMax = data.stats.rpmMax;
-  const binSize = (rpmMax - rpmMin) / binCount;
-  
+  if (!Number.isFinite(rpmMin) || !Number.isFinite(rpmMax)) return [];
+
+  let binSize = (rpmMax - rpmMin) / binCount;
+  if (!Number.isFinite(binSize) || binSize <= 0) {
+    binSize = 1;
+  }
+
   const bins: Map<number, { maf: number[]; hpTorque: number[]; hpMaf: number[]; boost: number[] }> = new Map();
-  
+
   for (let i = 0; i < data.rpm.length; i++) {
-    const binIndex = Math.floor((data.rpm[i] - rpmMin) / binSize);
+    const rpm = data.rpm[i];
+    if (!Number.isFinite(rpm)) continue;
+
+    const binIndex = Math.floor((rpm - rpmMin) / binSize);
     const binKey = rpmMin + binIndex * binSize + binSize / 2;
-    
+
     if (!bins.has(binKey)) {
       bins.set(binKey, { maf: [], hpTorque: [], hpMaf: [], boost: [] });
     }
-    
+
     const bin = bins.get(binKey)!;
-    bin.maf.push(data.maf[i]);
-    bin.hpTorque.push(data.hpTorque[i]);
-    bin.hpMaf.push(data.hpMaf[i]);
-    bin.boost.push(data.boost[i]);
+    bin.maf.push(data.maf[i] ?? 0);
+    bin.hpTorque.push(data.hpTorque[i] ?? 0);
+    bin.hpMaf.push(data.hpMaf[i] ?? 0);
+    bin.boost.push(data.boost[i] ?? 0);
   }
-  
+
   return Array.from(bins.entries())
     .sort((a, b) => a[0] - b[0])
     .map(([rpmBin, values]) => ({
+      rpm: rpmBin,
       rpmBin,
       mafMean: values.maf.reduce((a, b) => a + b, 0) / values.maf.length,
       hpTorqueMean: values.hpTorque.reduce((a, b) => a + b, 0) / values.hpTorque.length,
@@ -2974,3 +3218,17 @@ export function createBinnedData(
       count: values.maf.length,
     }));
 }
+
+// ─── Combustion family (diesel vs spark) — re-export for analyzer / diagnostics ──
+export type { CombustionFamily, CombustionInferenceResult } from './combustionInference';
+export {
+  extractColumnTokensForCombustionInference,
+  extractObdPidNumbersFromText,
+  formatCombustionInferenceSummary,
+  getCombustionFamilyFromProcessedVehicleMeta,
+  inferCombustionFromColumnTokens,
+  inferCombustionFromObdPids,
+  resolveCombustionFromLogContext,
+  shouldApplyDieselAnalyzerRules,
+} from './combustionInference';
+export type { AnalyzerVehicleMetaLike } from './combustionInference';

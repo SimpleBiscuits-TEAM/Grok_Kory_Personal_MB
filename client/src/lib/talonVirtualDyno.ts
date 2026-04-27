@@ -15,7 +15,8 @@
  *   - ID1050X injectors (1050cc)
  *   - ID1300X injectors (1300cc)
  *   - Fuel types: Pump Gas, UTV96, E85, E90, Ignite Red
- *   - Turbo and NA configurations
+ *   - Turbo kits: Jackson Racing (JR), Full Performance (FP), Kraftwerks (KW)
+ *   - Power Commander piggyback detection (uses Primary Inj PW 1)
  *   - Dyno calibration learning from dyno WP8 logs
  */
 
@@ -23,11 +24,17 @@ import { WP8ParseResult, getHondaTalonKeyChannels } from './wp8Parser';
 
 // ─── Injector Definitions ─────────────────────────────────────────────────────
 
-export type InjectorType = 'stock' | 'id1050' | 'id1300';
+export type InjectorType = 'stock' | 'jr_kit' | 'kw800' | 'id1050' | 'id1300';
 
 /** Injector flow rates in cc/min at 3 bar (43.5 psi) base fuel pressure */
 export const INJECTOR_FLOW_RATES: Record<InjectorType, number> = {
   stock: 310,    // Honda Talon OEM injectors ~310cc
+  jr_kit: 345,   // Jackson Racing turbo kit injectors ~345cc (~15% more than stock)
+                 // Believed to be the same injector used in Honda 700cc single-cylinder engines
+                 // Default for JR turbo when no explicit injector model in filename
+  kw800: 800,    // FIC (Fuel Injector Clinic) 800cc — Kraftwerks turbo kit injectors
+                 // Flow-tested: #1 = 798 cc/min, #8 = 801 cc/min (0.5% match)
+                 // Average flow: 800 cc/min at 43.5 psi / 76 lb/hr
   id1050: 1050,  // Injector Dynamics ID1050X
   id1300: 1300,  // Injector Dynamics ID1300X
 };
@@ -45,9 +52,19 @@ export interface FuelProfile {
 }
 
 /**
- * BSFC values calibrated from 1,043 real Honda Talon dyno WP8 logs.
- * Median measured BSFC (cc/min per HP) = 0.3438 for pump gas.
- * Adjusted per fuel type based on energy density ratios.
+ * BSFC values calibrated from real Honda Talon dyno WP8 logs.
+ *
+ * Pump gas: 1,043 NA dyno logs, median measured BSFC = 0.3438, adjusted to 0.45
+ * E85:     1 turbo dyno run (Kory_Talon_e85_JR_3bar_BRR_ID1050), measured BSFC = 1.02
+ * E90:     1 turbo dyno run (Kory_JR_IgniteRed_ID1050_GravesSARemoved), measured BSFC = 1.04
+ *
+ * E85/E90/IGNITE RED are all ethanol fuels:
+ *   - E85 = ~85% ethanol, 15% gasoline (stoich 9.8:1, ~108 RON)
+ *   - E90 = ~90% ethanol, 10% gasoline (stoich 9.5:1, ~109 RON)
+ *   - IGNITE RED = branded E90 race fuel (same properties as E90)
+ *   - All require ~30-35% more fuel volume than gasoline for same energy
+ *   - Primary advantage: high octane allows 30-35° timing (vs 20-25° pump gas)
+ *   - Net power gain from timing advance exceeds energy density penalty
  */
 export const FUEL_PROFILES: Record<FuelType, FuelProfile> = {
   pump: {
@@ -79,11 +96,11 @@ export const FUEL_PROFILES: Record<FuelType, FuelProfile> = {
     energyDensity: 12400,
   },
   ignite_red: {
-    name: 'Ignite Red',
-    stoichAFR: 14.0,
-    density: 0.770,
-    bsfc: 0.43,       // premium race fuel — best BSFC
-    energyDensity: 18600,
+    name: 'Ignite Red (E90)',
+    stoichAFR: 9.5,   // IGNITE RED is E90 — same stoich as E90, NOT gasoline
+    density: 0.793,   // same density as E90 (ethanol-based)
+    bsfc: 0.60,       // same BSFC as E90 (same fuel chemistry)
+    energyDensity: 12400,  // same energy density as E90
   },
 };
 
@@ -93,12 +110,72 @@ const TALON_CYLINDERS = 2;
 const GRAMS_PER_POUND = 453.592;
 const SECONDS_PER_HOUR = 3600;
 
+/** Standard atmospheric pressure in kPa */
+const ATM_KPA = 101.325;
+
+// ─── Turbo Kit Definitions ──────────────────────────────────────────────────────────────
+
+/**
+ * Turbo kit type detected from filename.
+ *
+ * 'na'            — Naturally aspirated (no turbo)
+ * 'jr'            — Jackson Racing supercharger/turbo kit (least efficient of the three)
+ * 'kw'            — Kraftwerks turbo kit (mid-efficiency, between JR and FP)
+ * 'fp'            — Full Performance turbo kit (most efficient of the three)
+ * 'generic_turbo' — Turbo detected from MAP > 100 kPa but kit not identified from filename
+ */
+export type TurboType = 'na' | 'jr' | 'kw' | 'fp' | 'generic_turbo';
+
+/**
+ * Turbo BSFC multipliers — turbo-kit × fuel specific.
+ *
+ * Each turbo kit has different compressor efficiency, which affects how much
+ * excess fuel is needed for cooling and how much of the injected fuel actually
+ * produces power. More efficient turbos have lower BSFC factors.
+ *
+ * Calibration data:
+ *   JR pump:    21 runs (58,351 pts), ID1050, 93 octane → factor 1.40
+ *   JR ethanol:  2 runs (4,225 pts), ID1050, E85/IGNITE RED, conservative timing 20-23° → factor 1.76
+ *   FP ethanol: 19 runs (31,000+ pts), ID1300, IGNITE RED, proper timing 29.5°, Power Commander → factor 1.83
+ *   KW:         placeholder (awaiting reference files) — estimated between JR and FP
+ *   Generic:    average of JR and FP for unknown turbo kits
+ *
+ * The higher BSFC for turbo reflects:
+ *   - Rich AFR targets for combustion chamber cooling (lambda ~0.80)
+ *   - Excess fuel that doesn't produce power (cooling duty)
+ *   - Large injector oversizing (ID1050/ID1300 vs stock 310cc)
+ *   - Turbo compressor efficiency differences between kits
+ */
+const TURBO_BSFC_MATRIX: Record<Exclude<TurboType, 'na'>, { pump: number; ethanol: number }> = {
+  jr:            { pump: 1.40, ethanol: 1.76 },  // JR: 21 pump runs + 2 ethanol runs (conservative timing)
+  kw:            { pump: 1.73, ethanol: 1.80 },  // KW: 9 pump runs (150-162 kPa MAP, 23° timing, 800cc inj)
+  fp:            { pump: 1.60, ethanol: 1.64 },  // FP: 19 ethanol runs (proper timing 29.5°), pump estimated
+  generic_turbo: { pump: 1.50, ethanol: 1.80 },  // Generic: average of JR and FP for unknown turbo kits
+};
+
+/** Helper to get turbo-kit × fuel BSFC factor */
+function getTurboBsfcFactor(turboType: TurboType, fuelType: FuelType): number {
+  if (turboType === 'na') return 1.0;  // NA = no turbo correction
+  const entry = TURBO_BSFC_MATRIX[turboType];
+  switch (fuelType) {
+    case 'e85':
+    case 'e90':
+    case 'ignite_red':
+      return entry.ethanol;
+    default:
+      return entry.pump;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface VirtualDynoConfig {
   injectorType: InjectorType;
   fuelType: FuelType;
+  /** @deprecated Use turboType instead. Kept for backward compatibility. */
   isTurbo: boolean;
+  /** Turbo kit type — determines kit-specific BSFC factor. Defaults to generic_turbo when isTurbo=true. */
+  turboType?: TurboType;
   /** Optional correction factor learned from dyno log (default 1.0) */
   dynoCalibrationFactor: number;
 }
@@ -129,11 +206,16 @@ export interface VirtualDynoResult {
   /** Detected configuration */
   detectedInjector: InjectorType;
   detectedFuel: FuelType;
+  detectedTurboType: TurboType;
   isDynoLog: boolean;
   /** Calibration factor (actual/estimated) from dyno log */
   calibrationFactor: number;
   /** Confidence level based on data quality */
   confidence: 'high' | 'medium' | 'low';
+  /** 3-bar MAP sensor detected: baro < 70 kPa OR baro voltage < 1.8V */
+  has3BarMapSensor: boolean;
+  /** When true, MAP readings are not accurate — awaiting correction formula */
+  mapReadingsInaccurate: boolean;
   /** Warnings */
   warnings: string[];
 }
@@ -141,7 +223,16 @@ export interface VirtualDynoResult {
 // ─── Metadata Detection ──────────────────────────────────────────────────────
 
 /**
- * Detect injector type from filename, part number, and channel names
+ * Detect injector type from filename, part number, and channel names.
+ *
+ * Priority order:
+ *   1. Explicit injector model in filename (ID1050, ID1300) — always wins
+ *   2. Explicit FIC 800cc mention
+ *   3. Turbo kit default injector (JR → jr_kit ~345cc, KW → kw800 800cc)
+ *   4. Stock (~310cc)
+ *
+ * This means a file like "KW_ID1050_Run_1.wp8" uses ID1050 (not KW 800cc),
+ * and "JR_ID1300_Run_1.wp8" uses ID1300 (not JR kit injector).
  */
 export function detectInjectorType(
   fileName: string,
@@ -149,11 +240,29 @@ export function detectInjectorType(
 ): InjectorType {
   const combined = `${fileName} ${partNumber}`.toLowerCase();
 
+  // Priority 1: Explicit aftermarket injector model always wins
   if (combined.includes('id1300') || combined.includes('1300x') || combined.includes('1300cc')) {
     return 'id1300';
   }
   if (combined.includes('id1050') || combined.includes('1050x') || combined.includes('1050cc')) {
     return 'id1050';
+  }
+
+  // Priority 2: Explicit FIC 800cc mention
+  if (combined.includes('fic800') || combined.includes('800cc') || combined.includes('fic 800')) {
+    return 'kw800';
+  }
+
+  // Priority 3: Turbo kit default injectors (only when no explicit model above)
+  // KW turbo kit ships with FIC 800cc injectors
+  if (combined.includes('kraftwerks') || /(^|[^a-z])kw([^a-z]|$)/.test(combined)) {
+    return 'kw800';
+  }
+  // JR turbo kit ships with its own ~345cc injectors (~15% more than stock)
+  // Believed to be the same injector from Honda 700cc single-cylinder engines
+  if (combined.includes('jackson') || combined.includes('jacksonracing')
+      || /(^|[^a-z])jr([^a-z]|$)/.test(combined)) {
+    return 'jr_kit';
   }
 
   return 'stock';
@@ -171,12 +280,53 @@ export function detectFuelType(
   // Check specific fuels first (more specific matches)
   if (combined.includes('e90')) return 'e90';
   if (combined.includes('e85')) return 'e85';
-  if (combined.includes('ignite red') || combined.includes('ignitered') || combined.includes('ignite_red')) {
+  // IGNITE RED is a branded E90 race fuel — match various filename patterns
+  if (combined.includes('ignite red') || combined.includes('ignitered') || combined.includes('ignite_red') || combined.includes('ignitred') || combined.includes('ignite')) {
     return 'ignite_red';
   }
   if (combined.includes('utv96') || combined.includes('utv 96')) return 'utv96';
 
   return 'pump';
+}
+
+/**
+ * Detect turbo kit type from filename.
+ *
+ * Returns 'na' if no turbo kit pattern is found in the filename.
+ * The caller should also check MAP data — if MAP > 100 kPa and this
+ * returns 'na', the caller should upgrade to 'generic_turbo'.
+ *
+ * Filename patterns:
+ *   JR, Jackson Racing, JacksonRacing → 'jr'
+ *   FP, FPTurbo, Full Performance    → 'fp'
+ *   KW, Kraftwerks                    → 'kw'
+ */
+export function detectTurboType(
+  fileName: string,
+  partNumber: string,
+): TurboType {
+  const combined = `${fileName} ${partNumber}`.toLowerCase();
+
+  // FP turbo — check before JR because some filenames may have both
+  // Use [^a-z] boundaries instead of \b because \b treats _ as a word char
+  if (combined.includes('fpturbo') || combined.includes('fp turbo') || combined.includes('fp_turbo')
+      || /(^|[^a-z])fp([^a-z]|$)/.test(combined) || combined.includes('full performance')) {
+    return 'fp';
+  }
+
+  // Jackson Racing
+  if (combined.includes('jacksonracing') || combined.includes('jackson racing') || combined.includes('jackson_racing')
+      || /(^|[^a-z])jr([^a-z]|$)/.test(combined)) {
+    return 'jr';
+  }
+
+  // Kraftwerks
+  if (combined.includes('kraftwerks') || combined.includes('kraft werks')
+      || /(^|[^a-z])kw([^a-z]|$)/.test(combined)) {
+    return 'kw';
+  }
+
+  return 'na';
 }
 
 /**
@@ -236,6 +386,68 @@ export function estimateHP(fuelFlowGPerSec: number, bsfc: number): number {
 }
 
 /**
+ * Estimate HP with BSFC corrections for turbo and NA oversized injector setups.
+ *
+ * The base BSFC (0.45 for pump gas) was calibrated from 1,043 real Dynojet
+ * dyno runs with STOCK injectors (~310 cc/min). When the injector flow rate
+ * is significantly larger than stock, the fuel flow calculation is inflated
+ * because the oversized injectors deliver more fuel per ms of pulse width.
+ *
+ * Turbo correction:
+ *   Turbo setups use kit-specific BSFC multipliers calibrated from real dyno
+ *   data (JR=1.40, KW=1.73, FP=1.60). These factors account for rich running,
+ *   cooling duty, and injector oversizing inherent to each turbo kit.
+ *
+ * NA oversized injector correction:
+ *   For NA setups with oversized injectors (e.g., ID1050 on stock NA engine),
+ *   the ECU commands similar pulse widths as stock but the injectors deliver
+ *   2-4x more fuel. The engine can't burn the excess (runs rich, AFR 10.8-12.0).
+ *
+ *   The correction uses sqrt(injectorRatio) as the BSFC multiplier:
+ *     effectiveBSFC = baseBSFC × sqrt(injectorFlowRate / stockFlowRate)
+ *
+ *   The sqrt relationship accounts for two competing effects:
+ *   1. Larger injectors increase fuel flow per ms of PW (linear with flow rate)
+ *   2. The ECU tune reduces PW to partially compensate (roughly proportional
+ *      to sqrt of the flow rate increase)
+ *   The net fuel flow inflation is approximately sqrt(ratio), not the full ratio.
+ *
+ *   Validation: NA ID1050 (1050/310 = 3.39x ratio, sqrt = 1.84)
+ *   - Uncorrected peak: ~173 HP
+ *   - Corrected: 173 / 1.84 = 94 HP (matches expected ~95-100 HP for NA Talon)
+ *   - Physics check: 999cc @ 9000 RPM, 90% VE, stoich = 99 HP ✓
+ */
+export function estimateHPWithBoost(
+  fuelFlowGPerSec: number,
+  bsfc: number,
+  turboType: TurboType,
+  _mapKpa: number,  // reserved for future RPM-dependent BSFC
+  fuelType: FuelType = 'pump',
+  _afr: number = 0,  // measured AFR — reserved for future per-point correction
+  injectorFlowRate: number = 0,  // cc/min — 0 means not provided
+): number {
+  if (fuelFlowGPerSec <= 0 || bsfc <= 0) return 0;
+
+  let effectiveBsfc = bsfc;
+
+  if (turboType !== 'na') {
+    // Turbo: apply kit-specific BSFC factor (calibrated from real dyno data)
+    const turboFactor = getTurboBsfcFactor(turboType, fuelType);
+    effectiveBsfc = bsfc * turboFactor;
+  } else if (injectorFlowRate > STOCK_FLOW_RATE_THRESHOLD) {
+    // NA with oversized injectors: apply sqrt(ratio) BSFC correction
+    // sqrt accounts for ECU PW reduction partially offsetting larger injectors
+    const oversizingRatio = injectorFlowRate / INJECTOR_FLOW_RATES.stock;
+    effectiveBsfc = bsfc * Math.sqrt(oversizingRatio);
+  }
+
+  return estimateHP(fuelFlowGPerSec, effectiveBsfc);
+}
+
+/** Stock injector flow rate threshold — injectors above this are considered "oversized" for NA */
+const STOCK_FLOW_RATE_THRESHOLD = 400;  // cc/min (stock = 310, JR kit = 345)
+
+/**
  * Calculate torque from HP and RPM
  * Torque (ft-lb) = HP × 5252 / RPM
  */
@@ -258,9 +470,18 @@ export function computeVirtualDyno(
   const warnings: string[] = [];
   const hasDyno = isDynoLog(wp8);
 
-  // Get fuel profile
-  const fuel = FUEL_PROFILES[config.fuelType];
-  const injFlowRate = INJECTOR_FLOW_RATES[config.injectorType];
+  // Auto-detect injector, fuel, and turbo from filename/partNumber as fallbacks
+  const detectedInjector = detectInjectorType(fileName, wp8.partNumber);
+  const detectedFuel = detectFuelType(fileName, wp8.partNumber);
+  const detectedTurboType = detectTurboType(fileName, wp8.partNumber);
+
+  // Use config values if provided, otherwise fall back to auto-detected values
+  const effectiveFuelType = config.fuelType ?? detectedFuel;
+  const effectiveInjectorType = config.injectorType ?? detectedInjector;
+
+  // Get fuel profile and injector flow rate
+  const fuel = FUEL_PROFILES[effectiveFuelType];
+  const injFlowRate = INJECTOR_FLOW_RATES[effectiveInjectorType];
 
   // Validate required channels
   const hasRPM = keys.engineSpeed >= 0;
@@ -270,12 +491,59 @@ export function computeVirtualDyno(
   const hasAFR = keys.afr1 >= 0 || keys.lambda1 >= 0;
   const hasIgnition = keys.ignitionTiming >= 0;
 
+  // Power Commander detection: when a PC piggyback is installed, it multiplies
+  // the ECU's injector pulsewidth based on manifold pressure. The ECU's
+  // 'Injector Pulsewidth Final' is the un-multiplied command (~5 ms), while
+  // 'Primary Injector Pulsewidth 1' is the actual injector on-time after the
+  // PC multiplier (~10 ms). We MUST use Primary PW for fuel flow calculation.
+  const hasPowerCommander = keys.primaryInjPw1 >= 0;
+  const primaryInjPWIdx = keys.primaryInjPw1;
+
   if (!hasRPM) warnings.push('Missing Engine Speed channel — cannot estimate power');
-  if (!hasInjPW) warnings.push('Missing Injector Pulsewidth channel — using TPS-based estimation');
+  if (!hasInjPW && !hasPowerCommander) warnings.push('Missing Injector Pulsewidth channel — using TPS-based estimation');
+  if (hasPowerCommander) {
+    warnings.push('Power Commander detected — using Primary Injector Pulsewidth 1 for fuel flow calculation');
+  }
+
+  // ─── 3-bar MAP sensor detection ──────────────────────────────────────────
+  // If barometric pressure < 70 kPa OR baro sensor voltage < 1.8V,
+  // a 3-bar MAP sensor is installed and MAP readings are NOT accurate.
+  // The 3-bar sensor rescales the MAP voltage range, so the ECU's
+  // MAP interpretation (calibrated for the stock 1-bar sensor) is wrong.
+  let has3BarMapSensor = false;
+  const baroIdx = keys.baroPressure;
+  const baroVoltageIdx = keys.baroSensorVoltage;
+  if (baroIdx >= 0 || baroVoltageIdx >= 0) {
+    // Sample first 50 rows to check baro readings
+    for (let i = 0; i < Math.min(50, wp8.rows.length); i++) {
+      const row = wp8.rows[i];
+      if (baroIdx >= 0) {
+        const baro = row.values[baroIdx];
+        // Baro in kPa: if < 70, it's a 3-bar sensor reading
+        // (real atmospheric pressure is always > 85 kPa even at high altitude)
+        if (baro > 0 && baro < 70) { has3BarMapSensor = true; break; }
+      }
+      if (baroVoltageIdx >= 0) {
+        const baroV = row.values[baroVoltageIdx];
+        // Baro voltage < 1.8V indicates 3-bar sensor
+        if (baroV > 0 && baroV < 1.8) { has3BarMapSensor = true; break; }
+      }
+    }
+  }
+  // Also detect from filename: "3bar" or "3 bar" in filename
+  if (fileName.toLowerCase().includes('3bar') || fileName.toLowerCase().includes('3 bar')) {
+    has3BarMapSensor = true;
+  }
+  if (has3BarMapSensor) {
+    warnings.push('3-bar MAP sensor detected — MAP readings may not be accurate (awaiting correction formula)');
+  }
 
   // Select channel indices
   const rpmIdx = keys.engineSpeed;
-  const injPWIdx = keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired;
+  // Use Primary Inj PW 1 when Power Commander is present, otherwise use Inj PW Final/Desired
+  const injPWIdx = hasPowerCommander
+    ? primaryInjPWIdx
+    : (keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired);
   const tpsIdx = keys.throttlePosition;
   const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
   const ignIdx = keys.ignitionTiming;
@@ -322,11 +590,13 @@ export function computeVirtualDyno(
       injPW, rpm, injFlowRate, fuel.density,
     );
 
-    // Estimate HP
-    let estHP = estimateHP(fuelFlowGPerSec, fuel.bsfc);
+    // Estimate HP (with boost correction for turbo setups)
+    // Use turboType if set, otherwise fall back to legacy isTurbo boolean
+    const effectiveTurboType: TurboType = config.turboType ?? detectedTurboType;
+    let estHP = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, effectiveFuelType, afr, injFlowRate);
 
-    // Apply dyno calibration factor
-    estHP *= config.dynoCalibrationFactor;
+    // Apply dyno calibration factor (default 1.0 if not set)
+    estHP *= config.dynoCalibrationFactor ?? 1.0;
 
     // Calculate torque
     const estTorque = calculateTorque(estHP, rpm);
@@ -352,11 +622,20 @@ export function computeVirtualDyno(
     dataPoints.push(point);
   }
 
-  // ─── Build RPM-binned HP/Torque curve ────────────────────────────────
+  // ─── Build RPM-binned HP/Torque curve ────────────────────────────────────
+  // Only use WOT points (TPS > 60°) for peak HP/Torque binning.
+  // Non-WOT points (cruise, decel, transient) produce inflated HP estimates
+  // because the AFR correction doesn't apply at stoich/lean AFR, but the
+  // fuel flow with oversized injectors is still enormously inflated.
+  // Honda Talon TPS is in degrees: full throttle ≈ 80-85°, WOT threshold = 60°
+  const WOT_BIN_THRESHOLD = 60; // degrees for Honda Talon TPS
   const RPM_BIN_SIZE = 250;
   const rpmBins = new Map<number, { hpSum: number; torqueSum: number; count: number; maxHP: number; maxTorque: number }>();
 
   for (const pt of dataPoints) {
+    // Only bin WOT points for peak power curve
+    if (pt.tps < WOT_BIN_THRESHOLD) continue;
+
     const bin = Math.round(pt.rpm / RPM_BIN_SIZE) * RPM_BIN_SIZE;
     const existing = rpmBins.get(bin) || { hpSum: 0, torqueSum: 0, count: 0, maxHP: 0, maxTorque: 0 };
 
@@ -370,6 +649,22 @@ export function computeVirtualDyno(
     existing.maxHP = Math.max(existing.maxHP, hp);
     existing.maxTorque = Math.max(existing.maxTorque, torque);
     rpmBins.set(bin, existing);
+  }
+
+  // Fallback: if no WOT points found, use all data points
+  if (rpmBins.size === 0) {
+    for (const pt of dataPoints) {
+      const bin = Math.round(pt.rpm / RPM_BIN_SIZE) * RPM_BIN_SIZE;
+      const existing = rpmBins.get(bin) || { hpSum: 0, torqueSum: 0, count: 0, maxHP: 0, maxTorque: 0 };
+      const hp = pt.actualHP ?? pt.estimatedHP;
+      const torque = pt.actualTorque ?? pt.estimatedTorque;
+      existing.hpSum += hp;
+      existing.torqueSum += torque;
+      existing.count++;
+      existing.maxHP = Math.max(existing.maxHP, hp);
+      existing.maxTorque = Math.max(existing.maxTorque, torque);
+      rpmBins.set(bin, existing);
+    }
   }
 
   // Build curve using peak values per bin (dyno-style — peak, not average)
@@ -427,9 +722,7 @@ export function computeVirtualDyno(
     warnings.push('No injector pulsewidth data — power estimates are rough approximations');
   }
 
-  // Auto-detect injector and fuel from metadata
-  const detectedInjector = detectInjectorType(fileName, wp8.partNumber);
-  const detectedFuel = detectFuelType(fileName, wp8.partNumber);
+   // Auto-detected values (computed at top of function, reused here for return)
 
   return {
     dataPoints,
@@ -440,9 +733,12 @@ export function computeVirtualDyno(
     peakTorqueRpm,
     detectedInjector,
     detectedFuel,
+    detectedTurboType,
     isDynoLog: hasDyno,
     calibrationFactor: Math.round(calibrationFactor * 1000) / 1000,
     confidence,
+    has3BarMapSensor,
+    mapReadingsInaccurate: has3BarMapSensor, // Until correction formula is provided
     warnings,
   };
 }

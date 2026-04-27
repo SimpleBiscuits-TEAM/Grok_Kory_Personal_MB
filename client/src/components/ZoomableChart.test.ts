@@ -94,8 +94,8 @@ function panDrag(
   dataLength: number
 ): { startIndex: number; endIndex: number } {
   const count = dragStartRange.end - dragStartRange.start + 1;
-  let ns = dragStartRange.start - indexDelta;
-  let ne = dragStartRange.end - indexDelta;
+  let ns = dragStartRange.start + indexDelta;
+  let ne = dragStartRange.end + indexDelta;
   if (ns < 0) { ns = 0; ne = count - 1; }
   if (ne > dataLength - 1) { ne = dataLength - 1; ns = Math.max(0, ne - count + 1); }
   return { startIndex: ns, endIndex: ne };
@@ -212,33 +212,33 @@ describe('ZoomableChart wheel zoom', () => {
 });
 
 describe('ZoomableChart drag pan', () => {
-  it('pans right when dragging left (positive indexDelta)', () => {
-    const result = panDrag({ start: 20, end: 80 }, -10, 100);
+  it('drag right (positive indexDelta) shows later samples', () => {
+    const result = panDrag({ start: 20, end: 80 }, 10, 100);
     expect(result.startIndex).toBe(30);
     expect(result.endIndex).toBe(90);
   });
 
-  it('pans left when dragging right (negative indexDelta)', () => {
-    const result = panDrag({ start: 20, end: 80 }, 10, 100);
+  it('drag left (negative indexDelta) shows earlier samples', () => {
+    const result = panDrag({ start: 20, end: 80 }, -10, 100);
     expect(result.startIndex).toBe(10);
     expect(result.endIndex).toBe(70);
   });
 
   it('clamps at left boundary', () => {
-    const result = panDrag({ start: 5, end: 65 }, 20, 100);
+    const result = panDrag({ start: 5, end: 65 }, -25, 100);
     expect(result.startIndex).toBe(0);
     expect(result.endIndex).toBe(60); // preserves window size
   });
 
   it('clamps at right boundary', () => {
-    const result = panDrag({ start: 40, end: 95 }, -20, 100);
+    const result = panDrag({ start: 40, end: 95 }, 20, 100);
     expect(result.endIndex).toBe(99);
     expect(result.startIndex).toBe(44); // preserves window size (56 points: 40..95)
   });
 
   it('preserves window size during pan', () => {
     const windowSize = 61; // 20 to 80 inclusive
-    const result = panDrag({ start: 20, end: 80 }, -5, 100);
+    const result = panDrag({ start: 20, end: 80 }, 5, 100);
     expect(result.endIndex - result.startIndex + 1).toBe(windowSize);
   });
 });

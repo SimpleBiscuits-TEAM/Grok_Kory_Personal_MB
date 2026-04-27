@@ -254,6 +254,7 @@ export default function KnoxDiagnosticAgent({
   const [acceptedPidSets, setAcceptedPidSets] = useState<Set<string>>(new Set());
   const [vehicleYear, setVehicleYear] = useState<number | undefined>();
   const [vehicleEngine, setVehicleEngine] = useState<string | undefined>();
+  const [engineFuel, setEngineFuel] = useState<'unknown' | 'diesel' | 'gasoline'>('unknown');
   const [datalogFile, setDatalogFile] = useState<File | null>(null);
   const [showDatalogUpload, setShowDatalogUpload] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -304,6 +305,7 @@ export default function KnoxDiagnosticAgent({
         complaint: userMessage,
         vehicleYear,
         vehicleEngine,
+        engineFuel,
       });
 
       addMessage({
@@ -323,7 +325,7 @@ export default function KnoxDiagnosticAgent({
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, mapComplaint, vehicleYear, vehicleEngine, addMessage]);
+  }, [input, isLoading, mapComplaint, vehicleYear, vehicleEngine, engineFuel, addMessage]);
 
   const handleDatalogUpload = useCallback(async (file: File) => {
     setDatalogFile(file);
@@ -372,6 +374,7 @@ export default function KnoxDiagnosticAgent({
         dataSummary: stats.join('\n'),
         vehicleYear,
         vehicleEngine,
+        engineFuel,
       });
 
       addMessage({
@@ -396,7 +399,7 @@ export default function KnoxDiagnosticAgent({
     } finally {
       setIsLoading(false);
     }
-  }, [messages, analyzeDatalog, vehicleYear, vehicleEngine, addMessage]);
+  }, [messages, analyzeDatalog, vehicleYear, vehicleEngine, engineFuel, addMessage]);
 
   return (
     <div style={{
@@ -438,6 +441,19 @@ export default function KnoxDiagnosticAgent({
             ))}
           </select>
           <select
+            value={engineFuel}
+            onChange={e => setEngineFuel(e.target.value as 'unknown' | 'diesel' | 'gasoline')}
+            style={{
+              background: sColor.panelLight, color: sColor.text, border: `1px solid ${sColor.border}`,
+              padding: '4px 8px', borderRadius: 3, fontFamily: sFont.mono, fontSize: '0.75rem',
+            }}
+            title="Helps Knox skip diesel-only PIDs and narratives for gasoline trucks"
+          >
+            <option value="unknown">Fuel</option>
+            <option value="gasoline">Gasoline</option>
+            <option value="diesel">Diesel</option>
+          </select>
+          <select
             value={vehicleEngine || ''}
             onChange={e => setVehicleEngine(e.target.value || undefined)}
             style={{
@@ -446,12 +462,20 @@ export default function KnoxDiagnosticAgent({
             }}
           >
             <option value="">Engine</option>
-            <option value="L5P 6.6L">L5P 6.6L (2017+)</option>
-            <option value="LML 6.6L">LML 6.6L (2011-2016)</option>
-            <option value="LBZ 6.6L">LBZ 6.6L (2006-2007)</option>
-            <option value="LLY 6.6L">LLY 6.6L (2004-2006)</option>
-            <option value="LB7 6.6L">LB7 6.6L (2001-2004)</option>
-            <option value="3.0L Duramax">3.0L Duramax (LM2/LZ0)</option>
+            <optgroup label="GM gasoline (examples)">
+              <option value="L87 6.2L (E90)">L87 6.2L (E90)</option>
+              <option value="L84 5.3L">L84 5.3L</option>
+              <option value="L82 5.3L">L82 5.3L</option>
+              <option value="L3B 2.7L turbo">L3B 2.7L turbo</option>
+            </optgroup>
+            <optgroup label="GM diesel">
+              <option value="L5P 6.6L">L5P 6.6L (2017+)</option>
+              <option value="LML 6.6L">LML 6.6L (2011-2016)</option>
+              <option value="LBZ 6.6L">LBZ 6.6L (2006-2007)</option>
+              <option value="LLY 6.6L">LLY 6.6L (2004-2006)</option>
+              <option value="LB7 6.6L">LB7 6.6L (2001-2004)</option>
+              <option value="3.0L Duramax">3.0L Duramax (LM2/LZ0)</option>
+            </optgroup>
           </select>
           {onSwitchToDatalogger && (
             <button

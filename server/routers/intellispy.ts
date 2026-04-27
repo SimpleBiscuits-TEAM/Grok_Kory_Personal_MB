@@ -8,6 +8,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 import { getFullKnoxKnowledge } from "../lib/knoxKnowledgeServer";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 const frameSchema = z.object({
   arbId: z.number(),
@@ -36,7 +37,7 @@ export const intellispyRouter = router({
       question: z.string().optional(),
       context: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { frames, protocol, question, context } = input;
 
       // Build frame summary for Knox
@@ -180,6 +181,105 @@ RESPONSE FORMAT:
       }
 
       return null;
+    }),
+
+  /**
+   * Knox chat for IntelliSpy — conversational AI with live CAN bus context.
+   * Users can ask questions about what they're seeing on the bus in real-time.
+   */
+  knoxChat: protectedProcedure
+    .input(
+      z.object({
+        message: z.string().min(1).max(5000),
+        liveFrames: z.array(frameSchema).max(100).optional(),
+        protocol: z.enum(['obd2', 'j1939', 'uds', 'canfd', 'kline', 'raw']).default('obd2'),
+        busContext: z.string().optional(), // Summary of current bus state
+        history: z
+          .array(
+            z.object({
+              role: z.enum(["user", "assistant"]),
+              content: z.string(),
+            })
+          )
+          .max(20)
+          .optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      // Build live frame context for the agents
+      let frameContext = '';
+      if (input.liveFrames && input.liveFrames.length > 0) {
+        frameContext = input.liveFrames.map(f => {
+          const parts = [`ID: ${f.arbIdHex}`, `Data: [${f.dataHex}]`, `DLC: ${f.dlc}`];
+          if (f.moduleName) parts.push(`Module: ${f.moduleName} (${f.moduleAcronym})`);
+          if (f.direction) parts.push(`Dir: ${f.direction}`);
+          if (f.count) parts.push(`Count: ${f.count}`);
+          if (f.rateHz) parts.push(`Rate: ${f.rateHz.toFixed(1)} Hz`);
+          return parts.join(' | ');
+        }).join('\n');
+      }
+
+      const fullContext = [
+        `Protocol: ${input.protocol.toUpperCase()}`,
+        input.busContext ? `Bus State: ${input.busContext}` : '',
+        frameContext ? `Live CAN Frames:\n${frameContext}` : '',
+      ].filter(Boolean).join('\n\n');
+
+      try {
+        const knoxResult = await queryKnox({
+          question: input.message,
+          accessLevel: effectiveLevel,
+          domain: 'intellispy',
+          moduleContext: fullContext.slice(0, 15000),
+          history: input.history,
+        });
+
+        return {
+          reply: knoxResult.answer,
+          pipeline: knoxResult.pipeline,
+          confidence: knoxResult.confidence,
+          agreement: knoxResult.agreement,
+          agentDetails: knoxResult.agentDetails,
+          durationMs: knoxResult.durationMs,
+        };
+      } catch (err: any) {
+        // Fallback to direct LLM
+        const knoxKnowledge = getFullKnoxKnowledge().slice(0, 15000);
+        try {
+          const response = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: `You are Knox, PPEI's AI-powered CAN bus analysis engine integrated into IntelliSpy.
+You are having a conversation with the user about what they're seeing on the CAN bus.
+
+PROTOCOL: ${input.protocol.toUpperCase()}
+${fullContext ? `\nCURRENT BUS STATE:\n${fullContext}` : ''}
+
+PPEI KNOWLEDGE BASE:\n${knoxKnowledge}
+
+Be concise, technical, and helpful. Reference specific CAN IDs and data bytes when relevant.`,
+              },
+              ...(input.history || []).map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+              { role: "user" as const, content: input.message },
+            ],
+          });
+          return {
+            reply: typeof response.choices?.[0]?.message?.content === 'string'
+              ? response.choices[0].message.content
+              : 'Analysis unavailable.',
+            pipeline: 'fallback' as const,
+          };
+        } catch (fallbackErr: any) {
+          return {
+            reply: `Knox is temporarily unavailable. Error: ${fallbackErr.message || 'Unknown'}`,
+            pipeline: 'error' as const,
+          };
+        }
+      }
     }),
 });
 

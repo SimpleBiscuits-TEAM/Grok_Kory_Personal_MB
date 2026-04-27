@@ -26,8 +26,8 @@ import FuelCorrectionPanel from '@/components/FuelCorrectionPanel';
 import { FuelMapState as CorrectionFuelMapState, MapCorrectionResult } from '@/lib/talonFuelCorrection';
 import DynoSheet, { buildDynoSheetData, DynoSheetData } from '@/components/DynoSheet';
 import {
-  VirtualDynoConfig, InjectorType, FuelType,
-  FUEL_PROFILES, detectInjectorType, detectFuelType, isDynoLog,
+  VirtualDynoConfig, InjectorType, FuelType, TurboType,
+  FUEL_PROFILES, detectInjectorType, detectFuelType, detectTurboType, isDynoLog,
 } from '@/lib/talonVirtualDyno';
 
 /** Tracks which cells were corrected per fuel map, keyed by mapKey */
@@ -1325,9 +1325,11 @@ function WP8DatalogViewer({ wp8Data, onCursorData }: { wp8Data: WP8ParseResult; 
 // ─── Main Honda Talon Tuner Component ───────────────────────────────────────
 export default function HondaTalonTuner({
   wp8Data,
+  wp8FileName: wp8FileNameProp,
   onBack,
 }: {
   wp8Data?: WP8ParseResult | null;
+  wp8FileName?: string;
   onBack?: () => void;
 }) {
   const [localWP8, setLocalWP8] = useState<WP8ParseResult | null>(wp8Data || null);
@@ -1338,7 +1340,7 @@ export default function HondaTalonTuner({
     speedDensity_cyl2: null,
   });
   const [activeSection, setActiveSection] = useState<'datalog' | 'fuelmaps' | 'compare' | 'correct' | 'dyno'>('fuelmaps');
-  const [wp8FileName, setWp8FileName] = useState('');
+  const [wp8FileName, setWp8FileName] = useState(wp8FileNameProp || '');
   const [cursorData, setCursorData] = useState<TalonCursorData | null>(null);
 
   // Track which cells were corrected (for highlighting in fuel map editor)
@@ -1361,6 +1363,11 @@ export default function HondaTalonTuner({
   useEffect(() => {
     if (wp8Data) setLocalWP8(wp8Data);
   }, [wp8Data]);
+
+  // Sync filename from parent prop when it changes
+  useEffect(() => {
+    if (wp8FileNameProp) setWp8FileName(wp8FileNameProp);
+  }, [wp8FileNameProp]);
 
   const handleWP8Upload = useCallback(async (file: File) => {
     const { parseWP8 } = await import('@/lib/wp8Parser');
@@ -1711,12 +1718,57 @@ const dynoSColor = {
 };
 
 function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null; fileName: string }) {
+  // Auto-detect injector type and fuel from filename
   const autoInjector = useMemo(() => detectInjectorType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
   const autoFuel = useMemo(() => detectFuelType(fileName, wp8Data?.partNumber || ''), [fileName, wp8Data]);
 
+  // Auto-detect turbo kit type from filename, with MAP fallback to generic_turbo
+  const autoTurboType = useMemo((): TurboType => {
+    // First try to detect specific turbo kit from filename
+    const fromName = detectTurboType(fileName, wp8Data?.partNumber || '');
+    if (fromName !== 'na') return fromName;
+    // Fallback: check MAP data for boost (generic turbo)
+    if (!wp8Data) return 'na';
+    const keys = getHondaTalonKeyChannels(wp8Data);
+    const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
+    if (mapIdx < 0) return 'na';
+    const maxMAP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[mapIdx]), 0);
+    return maxMAP > 100 ? 'generic_turbo' : 'na';
+  }, [wp8Data, fileName]);
+
+  // Auto-detect Power Commander piggyback from channel presence
+  const hasPowerCommander = useMemo(() => {
+    if (!wp8Data) return false;
+    const keys = getHondaTalonKeyChannels(wp8Data);
+    return keys.primaryInjPw1 >= 0;
+  }, [wp8Data]);
+
+  // Auto-detect 3-bar MAP sensor from baro pressure/voltage
+  const has3BarMapSensor = useMemo(() => {
+    if (!wp8Data) return false;
+    const keys = getHondaTalonKeyChannels(wp8Data);
+    // Check baro pressure < 70 kPa or baro voltage < 1.8V
+    const baroIdx = keys.baroPressure;
+    const baroVIdx = keys.baroSensorVoltage;
+    for (let i = 0; i < Math.min(50, wp8Data.rows.length); i++) {
+      const row = wp8Data.rows[i];
+      if (baroIdx >= 0) {
+        const baro = row.values[baroIdx];
+        if (baro > 0 && baro < 70) return true;
+      }
+      if (baroVIdx >= 0) {
+        const baroV = row.values[baroVIdx];
+        if (baroV > 0 && baroV < 1.8) return true;
+      }
+    }
+    // Also detect from filename
+    if (fileName.toLowerCase().includes('3bar') || fileName.toLowerCase().includes('3 bar')) return true;
+    return false;
+  }, [wp8Data, fileName]);
+
   const [injectorType, setInjectorType] = useState<InjectorType>(autoInjector);
   const [fuelType, setFuelType] = useState<FuelType>(autoFuel);
-  const [isTurbo, setIsTurbo] = useState(false);
+  const [turboType, setTurboType] = useState<TurboType>(autoTurboType);
   const [calibrationFactor, setCalibrationFactor] = useState(1.0);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -1725,24 +1777,16 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
   const [compareFileName, setCompareFileName] = useState('');
   const compareFileRef = useRef<HTMLInputElement>(null);
 
+  // Sync auto-detected values when they change (e.g., new file uploaded while on dyno tab)
   useEffect(() => {
     setInjectorType(autoInjector);
     setFuelType(autoFuel);
-  }, [autoInjector, autoFuel]);
-
-  // Auto-detect turbo from MAP data
-  useEffect(() => {
-    if (!wp8Data) return;
-    const keys = getHondaTalonKeyChannels(wp8Data);
-    const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected : keys.map;
-    if (mapIdx < 0) return;
-    const maxMAP = wp8Data.rows.reduce((max, r) => Math.max(max, r.values[mapIdx]), 0);
-    if (maxMAP > 100) setIsTurbo(true);
-  }, [wp8Data]);
+    setTurboType(autoTurboType);
+  }, [autoInjector, autoFuel, autoTurboType]);
 
   const config = useMemo<VirtualDynoConfig>(() => ({
-    injectorType, fuelType, isTurbo, dynoCalibrationFactor: calibrationFactor,
-  }), [injectorType, fuelType, isTurbo, calibrationFactor]);
+    injectorType, fuelType, isTurbo: turboType !== 'na', turboType, dynoCalibrationFactor: calibrationFactor,
+  }), [injectorType, fuelType, turboType, calibrationFactor]);
 
   const dynoData = useMemo<DynoSheetData | null>(() => {
     if (!wp8Data) return null;
@@ -1850,6 +1894,8 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
               }}
             >
               <option value="stock">Stock (~310cc)</option>
+              <option value="jr_kit">JR Kit (~345cc)</option>
+              <option value="kw800">FIC 800cc (KW)</option>
               <option value="id1050">ID1050X (1050cc)</option>
               <option value="id1300">ID1300X (1300cc)</option>
             </select>
@@ -1876,35 +1922,62 @@ function DynoTabContent({ wp8Data, fileName }: { wp8Data: WP8ParseResult | null;
 
           <div>
             <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
-              CONFIGURATION
+              TURBO KIT {autoTurboType !== 'na' && <span style={{ color: dynoSColor.green }}>(AUTO)</span>}
             </label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                onClick={() => setIsTurbo(false)}
-                style={{
-                  flex: 1, padding: '6px', fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem',
-                  background: !isTurbo ? dynoSColor.red : 'transparent',
-                  color: !isTurbo ? 'white' : dynoSColor.textDim,
-                  border: `1px solid ${!isTurbo ? dynoSColor.red : dynoSColor.border}`,
-                  cursor: 'pointer', borderRadius: '2px',
-                }}
-              >
-                NA
-              </button>
-              <button
-                onClick={() => setIsTurbo(true)}
-                style={{
-                  flex: 1, padding: '6px', fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem',
-                  background: isTurbo ? dynoSColor.red : 'transparent',
-                  color: isTurbo ? 'white' : dynoSColor.textDim,
-                  border: `1px solid ${isTurbo ? dynoSColor.red : dynoSColor.border}`,
-                  cursor: 'pointer', borderRadius: '2px',
-                }}
-              >
-                TURBO
-              </button>
-            </div>
+            <select
+              value={turboType}
+              onChange={e => setTurboType(e.target.value as TurboType)}
+              style={{
+                width: '100%', background: dynoSColor.bg, color: dynoSColor.textWhite,
+                border: `1px solid ${dynoSColor.border}`, padding: '6px 8px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.8rem', borderRadius: '2px',
+              }}
+            >
+              <option value="na">NA (No Turbo)</option>
+              <option value="jr">Jackson Racing (JR)</option>
+              <option value="kw">Kraftwerks (KW)</option>
+              <option value="fp">Full Performance (FP)</option>
+              <option value="generic_turbo">Turbo (Generic)</option>
+            </select>
           </div>
+
+          {hasPowerCommander && (
+            <div>
+              <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+                PIGGYBACK
+              </label>
+              <div style={{
+                padding: '6px 8px', background: 'rgba(255, 165, 0, 0.15)',
+                border: `1px solid rgba(255, 165, 0, 0.4)`, borderRadius: '2px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem',
+                color: '#FFA500', textAlign: 'center',
+              }}>
+                POWER COMMANDER
+                <div style={{ fontSize: '0.6rem', color: dynoSColor.textDim, marginTop: '2px' }}>
+                  Using Primary Inj PW 1
+                </div>
+              </div>
+            </div>
+          )}
+
+          {has3BarMapSensor && (
+            <div>
+              <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>
+                MAP SENSOR
+              </label>
+              <div style={{
+                padding: '6px 8px', background: 'rgba(255, 60, 60, 0.15)',
+                border: `1px solid rgba(255, 60, 60, 0.4)`, borderRadius: '2px',
+                fontFamily: "'Share Tech Mono', monospace", fontSize: '0.75rem',
+                color: '#FF3C3C', textAlign: 'center',
+              }}>
+                3-BAR MAP DETECTED
+                <div style={{ fontSize: '0.6rem', color: dynoSColor.textDim, marginTop: '2px' }}>
+                  MAP readings may be inaccurate
+                </div>
+              </div>
+            </div>
+          )}
 
           <div>
             <label style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.7rem', color: dynoSColor.textDim, display: 'block', marginBottom: '4px' }}>

@@ -16,9 +16,12 @@ import { parseCSV, processData, downsampleData, ProcessedMetrics } from '@/lib/d
 import { compareDatasets, buildComparisonContext, ComparisonReport, EventComparison, PidDelta } from '@/lib/compareEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
+import { ZoomableChart } from '@/components/ZoomableChart';
 
 interface CompareViewProps {
   onBack: () => void;
+  /** When true, hides the back button and header (used when embedded inline in analyze view) */
+  embedded?: boolean;
 }
 
 interface LogSlot {
@@ -31,7 +34,7 @@ interface LogSlot {
 
 const emptySlot: LogSlot = { file: null, fileName: null, data: null, loading: false, error: null };
 
-export default function CompareView({ onBack }: CompareViewProps) {
+export default function CompareView({ onBack, embedded }: CompareViewProps) {
   const [logA, setLogA] = useState<LogSlot>({ ...emptySlot });
   const [logB, setLogB] = useState<LogSlot>({ ...emptySlot });
   const [report, setReport] = useState<ComparisonReport | null>(null);
@@ -116,49 +119,53 @@ export default function CompareView({ onBack }: CompareViewProps) {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={onBack}
-        style={{
-          background: 'transparent',
-          color: 'oklch(0.68 0.010 260)',
-          fontFamily: '"Bebas Neue", sans-serif',
-          fontSize: '0.9rem',
-          letterSpacing: '0.08em',
-          padding: '6px 0',
-          border: 'none',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          marginBottom: '1rem',
-          transition: 'color 0.15s',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.color = 'white')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
-      >
-        ← BACK TO ANALYZER
-      </button>
+      {/* Back button — hidden when embedded inline */}
+      {!embedded && (
+        <button
+          onClick={onBack}
+          style={{
+            background: 'transparent',
+            color: 'oklch(0.68 0.010 260)',
+            fontFamily: '"Bebas Neue", sans-serif',
+            fontSize: '0.9rem',
+            letterSpacing: '0.08em',
+            padding: '6px 0',
+            border: 'none',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginBottom: '1rem',
+            transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'white')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'oklch(0.68 0.010 260)')}
+        >
+          ← BACK TO ANALYZER
+        </button>
+      )}
 
-      {/* Header */}
-      <div className="text-center mb-6">
-        <h2 className="ppei-gradient-text" style={{
-          fontFamily: '"Bebas Neue", "Impact", sans-serif',
-          fontSize: '2.5rem',
-          letterSpacing: '0.1em',
-          marginBottom: '0.4rem'
-        }}>
-          DATALOG COMPARISON
-        </h2>
-        <p style={{
-          fontFamily: '"Rajdhani", sans-serif',
-          fontSize: '0.95rem',
-          color: 'oklch(0.68 0.010 260)',
-          letterSpacing: '0.03em'
-        }}>
-          Upload two datalogs to compare tune changes, tuner differences, or before/after modifications
-        </p>
-      </div>
+      {/* Header — hidden when embedded (parent provides section header) */}
+      {!embedded && (
+        <div className="text-center mb-6">
+          <h2 className="ppei-gradient-text" style={{
+            fontFamily: '"Bebas Neue", "Impact", sans-serif',
+            fontSize: '2.5rem',
+            letterSpacing: '0.1em',
+            marginBottom: '0.4rem'
+          }}>
+            DATALOG COMPARISON
+          </h2>
+          <p style={{
+            fontFamily: '"Rajdhani", sans-serif',
+            fontSize: '0.95rem',
+            color: 'oklch(0.68 0.010 260)',
+            letterSpacing: '0.03em'
+          }}>
+            Upload two datalogs to compare tune changes, tuner differences, or before/after modifications
+          </p>
+        </div>
+      )}
 
       {/* Upload area — two side-by-side drop zones */}
       <div className="grid md:grid-cols-2 gap-4 mb-4">
@@ -463,7 +470,7 @@ const ALL_PID_OPTIONS: PidOption[] = [
   { key: 'currentGear', label: 'Current Gear', unit: '', getA: d => d.currentGear, getB: d => d.currentGear },
   { key: 'exhaustPressure', label: 'Exhaust Backpressure', unit: 'PSI', getA: d => d.exhaustPressure, getB: d => d.exhaustPressure },
   { key: 'barometricPressure', label: 'Barometric Pressure', unit: 'PSI', getA: d => d.barometricPressure, getB: d => d.barometricPressure },
-  { key: 'pcvDutyCycle', label: 'PCV Duty Cycle', unit: '%', getA: d => d.pcvDutyCycle, getB: d => d.pcvDutyCycle },
+  { key: 'pcvDutyCycle', label: 'FPR current', unit: 'mA', getA: d => d.pcvDutyCycle, getB: d => d.pcvDutyCycle },
   { key: 'turboSpeed', label: 'Turbo Speed', unit: 'RPM', getA: d => d.turboSpeed, getB: d => d.turboSpeed },
   { key: 'egrPosition', label: 'EGR Position', unit: '%', getA: d => d.egrPosition, getB: d => d.egrPosition },
   { key: 'calcLoad', label: 'Calculated Load', unit: '%', getA: d => d.calcLoad, getB: d => d.calcLoad },
@@ -476,7 +483,7 @@ function CompareCharts({ dataA, dataB, labelA, labelB }: {
   labelA: string;
   labelB: string;
 }) {
-  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm']);
+  const [selectedPids, setSelectedPids] = useState<string[]>(['boost', 'rpm', 'maf', 'hpTorque']);
   const [showPidPicker, setShowPidPicker] = useState(false);
 
   // Filter to PIDs that have data in at least one log
@@ -656,41 +663,45 @@ function CompareCharts({ dataA, dataB, labelA, labelB }: {
           }}>
             {ds.label} {ds.unit && `(${ds.unit})`}
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={ds.points} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.20 0.005 260)" />
-              <XAxis
-                dataKey="time"
-                tickFormatter={(v: number) => `${v.toFixed(0)}s`}
-                stroke="oklch(0.50 0.005 260)"
-                tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
-              />
-              <YAxis
-                stroke="oklch(0.50 0.005 260)"
-                tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: 'oklch(0.12 0.005 260)',
-                  border: '1px solid oklch(0.30 0.008 260)',
-                  borderRadius: '3px',
-                  fontFamily: '"Share Tech Mono", monospace',
-                  fontSize: '0.75rem',
-                }}
-                labelFormatter={(v: number) => `Time: ${Number(v).toFixed(1)}s`}
-                formatter={(value: number, name: string) => [
-                  `${value?.toFixed(2)} ${ds.unit}`,
-                  name === 'a' ? labelA : labelB,
-                ]}
-              />
-              <Legend
-                formatter={(value: string) => value === 'a' ? labelA : labelB}
-                wrapperStyle={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem' }}
-              />
-              <Line type="monotone" dataKey="a" stroke={PPEI_RED} strokeWidth={2} dot={false} name="a" connectNulls />
-              <Line type="monotone" dataKey="b" stroke={CYAN} strokeWidth={2} dot={false} name="b" connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
+          <ZoomableChart data={ds.points} height={220}>
+            {(visiblePts) => (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={visiblePts} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.20 0.005 260)" />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={(v: number) => `${v.toFixed(0)}s`}
+                    stroke="oklch(0.50 0.005 260)"
+                    tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
+                  />
+                  <YAxis
+                    stroke="oklch(0.50 0.005 260)"
+                    tick={{ fontSize: 10, fontFamily: '"Share Tech Mono", monospace' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'oklch(0.12 0.005 260)',
+                      border: '1px solid oklch(0.30 0.008 260)',
+                      borderRadius: '3px',
+                      fontFamily: '"Share Tech Mono", monospace',
+                      fontSize: '0.75rem',
+                    }}
+                    labelFormatter={(v: number) => `Time: ${Number(v).toFixed(1)}s`}
+                    formatter={(value: number, name: string) => [
+                      `${value?.toFixed(2)} ${ds.unit}`,
+                      name === 'a' ? labelA : labelB,
+                    ]}
+                  />
+                  <Legend
+                    formatter={(value: string) => value === 'a' ? labelA : labelB}
+                    wrapperStyle={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.75rem' }}
+                  />
+                  <Line type="monotone" dataKey="a" stroke={PPEI_RED} strokeWidth={2} dot={false} name="a" connectNulls />
+                  <Line type="monotone" dataKey="b" stroke={CYAN} strokeWidth={2} dot={false} name="b" connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </ZoomableChart>
         </div>
       ))}
 

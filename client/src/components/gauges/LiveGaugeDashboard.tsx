@@ -374,13 +374,13 @@ export default function LiveGaugeDashboard({
       <div style={{
         display: 'grid',
         gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
-        gap: '12px',
+        gap: '16px',
         justifyItems: 'center',
         alignItems: 'center',
-        background: sColor.bg,
-        borderRadius: '6px',
-        padding: '16px',
-        border: `1px solid ${sColor.border}`,
+        background: 'rgba(4, 6, 14, 0.8)',
+        borderRadius: '8px',
+        padding: '20px',
+        border: '1px solid rgba(255,255,255,0.04)',
         minHeight: '200px',
       }}>
         {layout.slots.map(slot => {

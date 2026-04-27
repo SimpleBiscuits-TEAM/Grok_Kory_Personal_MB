@@ -1,22 +1,30 @@
 /*
- * ModuleSidebar — Left panel listing all 18 modules with completion indicators.
- * Each module shows a mini progress bar and task count.
+ * SectionSidebar — Left panel listing the 6 top-level sections with completion indicators.
+ * Each section shows a mini progress bar and task count.
  * On mobile, shows as an overlay panel.
  */
 
-import { type Task } from "@/lib/taskData";
-import { modules } from "@/lib/taskData";
-import { X } from "lucide-react";
+import { type Task, type TopSection, TOP_SECTIONS } from "@/lib/taskData";
+import { X, FlaskConical, Car, Radio, Wrench, Cpu, MoreHorizontal } from "lucide-react";
 
-interface ModuleSidebarProps {
+const SECTION_ICONS: Record<TopSection, typeof FlaskConical> = {
+  "ANALYZER": FlaskConical,
+  "VEHICLE SUPPORT": Car,
+  "LIVE DATALOGGING": Radio,
+  "CALIBRATION EDITOR": Wrench,
+  "REVERSE ENGINEERING": Cpu,
+  "MISC": MoreHorizontal,
+};
+
+interface SectionSidebarProps {
   open: boolean;
   tasks: Task[];
-  activeModule: number | null;
-  onSelectModule: (moduleId: number) => void;
+  activeSection: TopSection | null;
+  onSelectSection: (section: TopSection | null) => void;
   onClose?: () => void;
 }
 
-export function ModuleSidebar({ open, tasks, activeModule, onSelectModule, onClose }: ModuleSidebarProps) {
+export function ModuleSidebar({ open, tasks, activeSection, onSelectSection, onClose }: SectionSidebarProps) {
   return (
     <>
       {/* Mobile overlay backdrop */}
@@ -36,30 +44,53 @@ export function ModuleSidebar({ open, tasks, activeModule, onSelectModule, onClo
         <div className="p-3">
           {/* Header with close button */}
           <div className="flex items-center gap-2 mb-3">
-            <span className="font-mono text-[10px] text-muted-foreground tracking-widest">MODULES</span>
+            <span className="font-mono text-[10px] text-muted-foreground tracking-widest">SECTIONS</span>
             <div className="flex-1 h-px bg-border" />
             <button onClick={onClose} className="lg:hidden p-1 hover:bg-muted rounded-sm">
               <X className="w-4 h-4 text-muted-foreground" />
             </button>
           </div>
 
+          {/* ALL button */}
+          <button
+            onClick={() => {
+              onSelectSection(null);
+              if (onClose && window.innerWidth < 1024) onClose();
+            }}
+            className={`w-full text-left px-2.5 py-2 rounded-sm transition-all group mb-1 ${
+              activeSection === null
+                ? "bg-primary/10 border-l-2 border-primary"
+                : "hover:bg-muted/50 border-l-2 border-transparent"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-bold ${activeSection === null ? "text-primary" : "text-foreground/80"}`}>
+                ALL SECTIONS
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {tasks.filter((t) => t.status === "passed").length}/{tasks.length}
+              </span>
+            </div>
+          </button>
+
           <div className="space-y-0.5">
-            {modules.map((mod) => {
-              const modTasks = tasks.filter((t) => t.module === mod.id);
-              const passed = modTasks.filter((t) => t.status === "passed").length;
-              const failed = modTasks.filter((t) => t.status === "failed").length;
-              const total = modTasks.length;
+            {TOP_SECTIONS.map((sec) => {
+              const secTasks = tasks.filter((t) => t.topSection === sec);
+              const passed = secTasks.filter((t) => t.status === "passed").length;
+              const failed = secTasks.filter((t) => t.status === "failed").length;
+              const total = secTasks.length;
               const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
-              const isActive = activeModule === mod.id;
+              const isActive = activeSection === sec;
+              const Icon = SECTION_ICONS[sec];
 
               return (
                 <button
-                  key={mod.id}
+                  key={sec}
                   onClick={() => {
-                    onSelectModule(mod.id);
+                    onSelectSection(sec);
                     if (onClose && window.innerWidth < 1024) onClose();
                   }}
-                  className={`w-full text-left px-2.5 py-2 rounded-sm transition-all group ${
+                  className={`w-full text-left px-2.5 py-2.5 rounded-sm transition-all group ${
                     isActive
                       ? "bg-primary/10 border-l-2 border-primary"
                       : "hover:bg-muted/50 border-l-2 border-transparent"
@@ -67,12 +98,12 @@ export function ModuleSidebar({ open, tasks, activeModule, onSelectModule, onClo
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span
-                      className={`text-xs font-semibold truncate ${
+                      className={`text-xs font-semibold truncate flex items-center gap-1.5 ${
                         isActive ? "text-primary" : "text-foreground/80 group-hover:text-foreground"
                       }`}
                     >
-                      <span className="font-mono text-[10px] text-muted-foreground mr-1.5">{mod.id}.</span>
-                      {mod.name}
+                      <Icon className="w-3.5 h-3.5 shrink-0" />
+                      {sec}
                     </span>
                     <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-2">
                       {passed}/{total}

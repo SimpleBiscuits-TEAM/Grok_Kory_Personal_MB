@@ -7,7 +7,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { getLoginUrl } from '@/const';
 import PpeiHeader from '@/components/PpeiHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -172,21 +171,13 @@ export default function DragRacing({ embedded = false }: { embedded?: boolean })
               </p>
             </div>
             <div className="flex items-center gap-3">
-              {!isAuthenticated ? (
-                <Button onClick={() => window.location.href = getLoginUrl()} className="ppei-btn-red" style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}>
-                  SIGN IN TO RACE
-                </Button>
-              ) : (
-                <>
-                  <Button onClick={() => { setActiveTab('callouts'); setShowCreateCallout(true); }} className="ppei-btn-red" style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}>
-                    <Swords className="h-4 w-4 mr-2" /> POST CALLOUT
-                  </Button>
-                  <Button onClick={() => { setActiveTab('leagues'); setShowCreateLeague(true); }}
-                    style={{ fontFamily: sFont.heading, letterSpacing: '0.08em', background: 'oklch(0.16 0.008 260)', border: `1px solid ${sColor.border}`, color: 'white' }}>
-                    <Crown className="h-4 w-4 mr-2" /> CREATE LEAGUE
-                  </Button>
-                </>
-              )}
+              <Button onClick={() => { setActiveTab('callouts'); setShowCreateCallout(true); }} className="ppei-btn-red" style={{ fontFamily: sFont.heading, letterSpacing: '0.08em' }}>
+                <Swords className="h-4 w-4 mr-2" /> POST CALLOUT
+              </Button>
+              <Button onClick={() => { setActiveTab('leagues'); setShowCreateLeague(true); }}
+                style={{ fontFamily: sFont.heading, letterSpacing: '0.08em', background: 'oklch(0.16 0.008 260)', border: `1px solid ${sColor.border}`, color: 'white' }}>
+                <Crown className="h-4 w-4 mr-2" /> CREATE LEAGUE
+              </Button>
             </div>
           </div>
         </div>
@@ -784,15 +775,7 @@ export default function DragRacing({ embedded = false }: { embedded?: boolean })
               <Timer className="h-6 w-6" style={{ color: sColor.red }} />
               <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: 'white', margin: 0 }}>MY TIMESLIPS</h2>
             </div>
-            {!isAuthenticated ? (
-              <Card className="ppei-card p-8 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
-                <Shield className="h-12 w-12 mx-auto mb-4" style={{ color: sColor.textDim }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white' }}>SIGN IN TO VIEW YOUR RUNS</p>
-                <Button onClick={() => window.location.href = getLoginUrl()} className="mt-4 ppei-btn-red" style={{ fontFamily: sFont.heading }}>
-                  SIGN IN
-                </Button>
-              </Card>
-            ) : !myProfileQuery.data ? (
+            {!myProfileQuery.data ? (
               <Card className="ppei-card p-8 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
                 <Star className="h-12 w-12 mx-auto mb-4" style={{ color: sColor.textDim }} />
                 <p style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white' }}>CREATE A RACER PROFILE FIRST</p>
@@ -825,15 +808,7 @@ export default function DragRacing({ embedded = false }: { embedded?: boolean })
               <Star className="h-6 w-6" style={{ color: sColor.gold }} />
               <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', color: 'white', margin: 0 }}>RACER PROFILE</h2>
             </div>
-            {!isAuthenticated ? (
-              <Card className="ppei-card p-8 text-center" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
-                <Shield className="h-12 w-12 mx-auto mb-4" style={{ color: sColor.textDim }} />
-                <p style={{ fontFamily: sFont.heading, fontSize: '1.2rem', color: 'white' }}>SIGN IN TO VIEW YOUR PROFILE</p>
-                <Button onClick={() => window.location.href = getLoginUrl()} className="mt-4 ppei-btn-red" style={{ fontFamily: sFont.heading }}>
-                  SIGN IN
-                </Button>
-              </Card>
-            ) : myProfileQuery.data ? (
+            {myProfileQuery.data ? (
               <Card className="ppei-card p-6" style={{ background: sColor.cardBg, border: `1px solid ${sColor.border}` }}>
                 <div className="flex items-center gap-6 mb-6">
                   <div style={{

@@ -1,6 +1,0 @@
-v0.02 Release Notes - Confirmed Working
-- Version badge shows v0.02 in top-right
-- No TypeScript errors
-- 20 new alignment tests passing
-- Dev server running, HMR working
-- All todo items marked complete

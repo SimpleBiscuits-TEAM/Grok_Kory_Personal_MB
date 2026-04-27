@@ -16,6 +16,7 @@
 
 // Re-export the sanitized base (safe for LLM context building)
 import { KNOX_KNOWLEDGE_BASE_SANITIZED } from '@shared/knoxKnowledge';
+import { KNOX_ENGINE_FUNDAMENTALS } from '@shared/knoxEngineKnowledge';
 
 /**
  * Server-only security access secrets.
@@ -730,6 +731,29 @@ These ECU platforms have hardened security that requires the unlock box:
 - Requires hardware-level intervention for programming session access
 - Affects: Chevrolet Silverado 2500HD/3500HD, GMC Sierra 2500HD/3500HD (2017-2023)
 
+=== L5P E41/E42 CONFIRMED PID SCALING (HP Tuners + BUSMASTER Verified April 2026) ===
+All DIDs use UDS Mode 22 (ReadDataByIdentifier) on ECM 0x7E0→0x7E8.
+GM Diesel Proprietary DIDs (0x30xx range) confirmed from BUSMASTER passive sniff:
+- 0x30BC: FRP Desired = (A×256+B) × 1.39 kPa (confirmed: 23346→32451 kPa = 4706 psi)
+- 0x30C1: FRP Actual = (A×256+B) × 1.39 kPa (same scale as 0x30BC)
+- 0x30BE: Diesel Commanded Throttle = (A×256+B) × 0.1 % (confirmed: 1000→100%)
+- 0x30D5: ECT (Diesel) = A - 40 °C (confirmed: 120→80°C ≈ HPT 181.4°F)
+- 0x30D7: DEF Tank Level = (A×100)/255 % (confirmed: 97→38.04%)
+- 0x328A: DPF Regen % = (A×256+B) × 0.01 % (confirmed: 10000→100%)
+- 0x308A: Barometric Pressure = (A×256+B) × 0.03125 kPa (confirmed: 3245→101.4 kPa)
+SAE J1979 PIDs via Mode 22:
+- 0x0062: Actual Engine Torque % = A - 125 %
+- 0x0063: Engine Reference Torque = (A×256+B) Nm
+- 0x005D: Fuel Injection Timing (SAE) = ((A×256+B) - 26880) / 128 °BTDC
+Multi-frame ISO-TP DIDs (require flow control):
+- 0x0069: EGT Bank Extended (7 bytes) — byte1-2: (B×256+C) × 0.1 - 40 °C
+- 0x0071: NOx Concentration (6 bytes) — byte1-2: (B×256+C) × 0.05 ppm
+- 0x007A: NOx O2 (7 bytes) — byte1-2: (B×256+C) × 0.001 - 12 %
+- 0x006A: Exhaust Gas Pressure (5 bytes) — (A×256+B) × 0.03125 kPa
+- 0x008B: Diesel Particulate Matter (7 bytes) — byte1-2: (B×256+C) × 0.01 mg/m³
+HP Tuners polls all 25 DIDs at ~10 Hz aggregate (~0.4 Hz per DID with 25 in loop).
+Full reference: docs/l5p-pid-sniff/L5P_E41_PID_Reference.md
+
 #### GM Gas Trucks (2019+)
 - ECU: E42/E86 (various Bosch MG1 variants)
 - Security: GM Global B with enhanced anti-tamper
@@ -820,6 +844,240 @@ Software Part Numbers:
 Security Status: SEED request returns NEGATIVE RESPONSE on locked units — this confirms the GM Global B security architecture requires the hardware unlock box for programming access. After the unlock box performs the voltage manipulation sequence, the BOOT status changes to UL and the ECU accepts programming commands.
 
 The 6 software segments (SW1-SW6) represent the complete ECU firmware: calibration, operating system, boot loader, and auxiliary modules. All must be read and verified before flashing. The VOP flash scripting language FLASH_BLOCKS command iterates through all segments during a full flash.
+`;
+
+const DEVPROG_FLASH_KNOWLEDGE = `
+## DevProg V2 Flash System Knowledge (CONFIDENTIAL — Server-Only)
+
+### Container File Format
+DevProg V2 uses a binary container format for flash files:
+- Offset 0x0000-0x0FFF: Reserved padding (4096 bytes)
+- Offset 0x1000-0x1003: CRC32 checksum (big-endian) of all data from 0x1004 to EOF
+- Offset 0x1004-0x2FFF: JSON header (0x1FFC bytes, null-terminated ASCII)
+- Offset 0x3000+: Block data (sequential, may be LZSS compressed)
+
+### JSON Header Fields
+The JSON header contains:
+- flashernumber: Unique flasher device ID
+- udid: Device unique identifier
+- vin: Target vehicle VIN (for VIN-locked containers)
+- seed/key: Pre-computed security access values
+- file_id: Unique container identifier
+- create_date/expire_date: Unix timestamps for container validity
+- max_flash_count: Maximum allowed flash attempts
+- block_count: Number of data blocks
+- block_boot/block_erase: Boot and erase block indices
+- file_size: Total file size (hex string)
+- comp_enc: Compression/encryption flags (hex)
+- lzss: "true"/"false" for LZSS compression
+- xferSize: Transfer size per block (hex, e.g., "0xFF8" = 4088 bytes)
+- ForceOS: "true" forces OS blocks to flash (full flash mode)
+- block_struct: Array of block definitions with addresses, lengths, and flags
+- ecu_type: Target ECU type identifier
+- hardware_number: ECU hardware part number
+- sw_c1 through sw_c9: Software calibration part numbers
+- verify: Optional verification config with CAN addresses and speed
+
+### Block Structure
+Each block in block_struct contains:
+- block_id: Sequential block number
+- pri_rc: Primary Routine Control hex data
+- rc34: RequestDownload (0x34) parameters
+- rc36: TransferData (0x36) parameters
+- start_adresse/end_adresse: Memory address range (hex)
+- PrgByAdr: Program-by-address flag
+- block_length: Uncompressed block size (hex)
+- LzssLen: Compressed size if LZSS (hex)
+- post_rc: Post-flash Routine Control hex data
+- comp_enc: Per-block compression flag
+- xferSize: Per-block transfer size override
+- erase: Erase command for this block
+- OS: Block type — "true" (OS), "false" (calibration), "patch" (OS patch), "forcepatch" (forced patch)
+
+### LZSS Compression Format
+When lzss="true", each sub-block in the data area:
+1. 4 bytes: compressed size (big-endian uint32)
+2. N bytes: LZSS compressed data
+3. 2 bytes: LZSS flags (0x0000 = compressed, else raw)
+4. 2 bytes: CRC16-CCITT checksum of decompressed data
+
+LZSS parameters: ring buffer size = 4096, match threshold = 2, lookahead = 18
+
+### Flash Sequence State Machine
+The DevProg flash procedure follows this state machine (FSPARAM enum):
+1. OPENPS_UDS/OPENPS_GMLAN — Open programming session
+2. REQUEST_SEED_PS — Request security seed at configured level
+3. SEND_KEY_PS — Send computed key response
+4. CUSTOM_GM_PRIRC — GM-specific priority routine control (GMLAN only)
+5. FLASH_BLOCKS — Main block transfer loop:
+   a. Write PriRC (primary routine control)
+   b. RequestDownload (0x34) with block address/length
+   c. TransferData (0x36) in xferSize chunks
+   d. RequestTransferExit (0x37) if protocol requires it
+   e. Write PostRC (post routine control)
+6. ECU_RESET_UDS — Hard reset (0x11 0x01)
+7. CLEAR_DTCS — Clear diagnostic trouble codes (0x14)
+
+For ECUs with patchNecessary=true (e.g., E88, E90, E92, E98):
+- Patch sequence runs first: OPENPS_GMLAN → SEED → KEY → PRIRC → FLASH_PATCH
+- Then main flash sequence runs
+
+### Complete ECU Database (50+ platforms)
+The system supports these ECU families with full CAN configuration:
+
+#### GM GMLAN ECUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed | Transfer Size |
+|-----|------|----|----|-----------|-----------|---------------|
+| E41 | Bosch MG1CS111 (L5P) | 0x7E0 | 0x7E8 | 0x09 | 500 | 0xFFE |
+| E88 | GM-DELCO E88 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E90 | GM-DELCO E90 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E92 | GM-DELCO E92 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E98 | GM-DELCO E98 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E83 | GM-DELCO E83 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E78 | GM-DELCO E78 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E80 | GM-DELCO E80 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E39 | GM-DELCO E39 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E67 | GM-DELCO E67 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E86 | GM E86 | 0x7E0 | 0x7E8 | 0x09 | 500 | 0xFFE |
+| E99 | GM E99 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E35 | GM E35 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+| E46 | GM E46 | 0x7E0 | 0x7E8 | 0x01 | 500 | 0xFF8 |
+
+#### GM TCU/Allison
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| T87 | Allison TCM T87 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+| T87A | Allison TCM T87A | 0x7E1 | 0x7E9 | 0x09 | 500 |
+| T76 | Allison TCM T76 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+| T43 | Allison TCM T43 | 0x7E1 | 0x7E9 | 0x01 | 500 |
+
+#### Ford UDS ECUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| MG1CS015 | Bosch MG1CS015 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MG1CS018 | Bosch MG1CS018 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MG1CS019 | Bosch MG1CS019 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| EDC17CP05 | Bosch EDC17CP05 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| EDC17CP65 | Bosch EDC17CP65 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MD1CP006 | Bosch MD1CP006 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+| MEDG17 | Bosch MEDG17 | 0x7E0 | 0x7E8 | 0x61 | 500 |
+
+#### Ford TCUs
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| TCU10R80 | Ford 10R80 TCU | 0x7E1 | 0x7E9 | 0x61 | 500 |
+| TCU6R140 | Ford 6R140 TCU | 0x7E1 | 0x7E9 | 0x61 | 500 |
+
+#### Cummins
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| CM2350B | Cummins CM2350B | 0x18DA00FA | 0x18DAFA00 | 0x01 | 250 |
+| CM2450B | Cummins CM2450B | 0x18DA00FA | 0x18DAFA00 | 0x01 | 250 |
+
+#### CAN-am / BRP
+| ECU | Name | TX | RX | Seed Level | CAN Speed |
+|-----|------|----|----|-----------|----------|
+| MG1CA920 | BRP MG1CA920 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| ME17CA1 | BRP ME17CA1 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| MG1CA007 | Polaris MG1CA007 | 0x7A0 | 0x7A8 | 0x03 | 500 |
+| MG1C400A | Polaris Pro R MG1C400A (MDG1) | 0x7E0 | 0x7E8 | TBD | 500 |
+
+**Polaris Pro R MG1C400A (MDG1) — A2L/S-Record Analysis:**
+The Polaris Pro R uses a Bosch MG1C400A ECU (MDG1 platform, TriCore processor, big-endian).
+- A2L Version: 425_MG1C400A1T2_00
+- XCP: Master 0x7F0, Slave 0x7F1 (calibration protocol)
+- OBD: Standard 0x7E0/0x7E8
+- Binary: 6 MB S-record (0x08FC0000-0x095C0000), cal area 0x09380000-0x095BFFFF (2304 KB)
+- 12,883 calibration parameters: 428 2D MAPs, 604 1D CURVEs, 10,676 VALUEs, 1,166 VAL_BLKs
+- 12,718 live measurements
+- Key ignition maps: KFZW (base timing @ 0x939BF3C), KFZWOP (optimized @ 0x939C2DE), KFZWMN (minimum/burning limit @ 0x939C1F2)
+- Torque-based fuel control: 4 drive modes x 5 transmission ranges = 20 torque request maps (AccPed_tqDes_DrvModX_TraRngY_MAP)
+- Component protection: ExhMgT_tqLimnCptProtn_M (torque limit @ 0x938F230), ExhMgT_ratLamCptProtn_GM (lambda vs RPM/load @ 0x938EA5E)
+- Rev limit: DNMAXH (fuel cutoff @ 0x939B1E0), TCD_nMaxGearOilTRnge_T (temp/gear dependent @ 0x939B316)
+- Per-cylinder knock control: IKCtl_FacKnockDetThdPhy1-4_GM, IKCtl_facKnkRtdt_M (retard step @ 0x9391FFC)
+- J1939 vehicle network integration (ETC2, CCVS, TSC messages)
+- Full analysis document: docs/polaris-pro-r/knox_knowledge_polaris_pro_r_mg1.md
+
+**Polaris Pro R MG1C400A — Torque & Airflow Logic (from A2L+Binary Disassembly):**
+Torque Structure: Torque-based EMS where pedal input → torque demand → throttle/ignition/fuel coordination.
+- MoF_trqNorm_C = 300 Nm (normalization), MoF_trqInrMaxStrt_C = 300 Nm, MoF_trqAdap_C = 16 Nm
+- 20 torque demand maps: AccPed_tqDes_DrvMod{1-4}_TraRng{Dft/Hi/Lo/Rev/Still}_MAP (16x16 RPM×Pedal)
+- Peak torque: DrvMod3_TraRngHi = 252 Nm @ 6500-8500 RPM (WOT), DrvMod1 = 240 Nm, DrvMod2 = 220 Nm
+- Pedal saturates at ~80% in DrvMod3 (252 Nm reached at 80% pedal, 80-100% is dead zone)
+Ignition: KFZW (20x16, RPM 520-9000 × Charge Air 9.8-95.3%) = -0.75° to 50.25° BTDC.
+- WOT timing: 33° at low RPM → 26.3° at 9000 RPM (conservative)
+- KFZWOP (optimal/MBT): 12.2°-66.8° — gap of 10-30° above KFZW at WOT = significant timing headroom
+- KFZWMN (minimum): -29.3° to 21.0° (knock safety floor)
+- Per-cylinder offsets: IgCtl_offsCyl{1-4}Phy_M all zeros in stock cal
+- Altitude comp: IgCtl_HiAltiCmp_M adds 0-6° advance at altitude
+Rev Limits: NMAXESP/NMAXREV1/NMAXREV2 = 8650 RPM, CoPT_nMax_C = 8800 RPM (hard ceiling)
+- DNMAXH = 200 RPM hysteresis (fuel cut 8650, resume 8450)
+- NMAXGLL = 1250 RPM (idle), NMAXSBSW = 5000 RPM (sideband)
+Component Protection: ExhMgT_tExhDsVlvCptProtnMax_C = 850°C (exhaust valve), ExhMgT_tCat1CptProtnMax_C = 880°C (cat), ExhMgT_tCat1MaxCptProtnMax_C = 950°C (cat max), ExhMgT_tExhFrtPipCptProtnMax_C = 1200°C (exhaust pipe)
+Tuning Priority: (1) Raise torque demand maps 252→270-285 Nm, (2) Advance KFZW 2-4° at WOT >5000 RPM, (3) Raise rev limit 8650→8800-9000 RPM, (4) Reshape pedal sensitivity, (5) Raise component protection temps with aftermarket exhaust
+- Full ECU logic flow report: docs/polaris-pro-r/polaris_pro_r_ecu_report.md
+
+**MG1CA920 (OBD / BuDS vs A2L):** Real **VIN relearn / UDS** traces for X3-style vehicles often use **0x7E0 / 0x7E8** with **SecurityAccess $27 01** (multi-frame **32-byte** seed) and **$27 02** key—the table above is **XCP/calibration-oriented** addressing. The in-repo BRP A2L **test_files/1E1101953.a2l** (MDG1C MG1CA920A, version **1E1101953**) includes **calibration constants** for **UDS-on-CAN** naming **0x7E0** / **0x7E8**, which matches those OBD captures. That A2L does **not** embed the **UDS** long seed/key formula (it is calibration/XCP focused).
+
+### Seed/Key Algorithm Details
+
+#### GM 5-Byte AES (E88/E90/E92/E98/T87)
+- 5-byte seed, 5-byte key
+- Algorithm: AES-128 ECB encryption
+- Key schedule: derived from fixed 16-byte AES key
+- Process: pad seed to 16 bytes → AES-128 ECB encrypt → extract 5 bytes from result
+- The AES key is ECU-family specific (stored in dllsecurity.dll CSecurity class)
+
+#### GM UDS (E41/E86/T87A)
+- Uses UDS SecurityAccess at level 0x09
+- 5-byte seed, 5-byte key with AES-128
+- E41 additionally requires hardware unlock box for CMAC authentication
+
+#### Ford LFSR 3-Byte
+- 3-byte seed, 3-byte key
+- Linear Feedback Shift Register algorithm
+- 5 secret bytes per ECU variant determine the LFSR taps
+- Process: extract bits from seed → shift through LFSR → XOR chain → 3-byte key
+
+#### Cummins 32-bit
+- 4-byte seed, 4-byte key
+- Byte-swap seed → rotate left 11 bits → XOR with two 32-bit constants
+- Constants are ECU-variant specific
+
+#### CAN-am/BRP 16-bit
+- 2-byte seed, 2-byte key
+- Lookup table with 8x4 matrix (cucakeysB)
+- Seed bits select matrix indices → multiply → shift
+
+#### CAN-am/BRP MG1CA920 long seed (BuDS / OBD)
+- **32-byte** seed, **32-byte** key over **UDS $27 01 / $27 02** (ISO-TP multi-frame; NRC **0x78** possible)
+- Used for **VIN write** path on captured **2023 X3** BuDS sessions; algorithm is **not** in **1E1101953.a2l**
+- Until implemented server-side or in-app, operators may supply the key from BuDS or another approved tool
+
+#### Polaris 16-bit
+- 2-byte seed, 2-byte key
+- Polynomial with rotating 8-byte coefficient array
+
+### Datalogging Protocol
+DevProg supports three PID transmission types:
+1. REQUESTBYID (0x22): UDS ReadDataByIdentifier — standard diagnostic read
+2. REQUESTBYADRESS (0x23): UDS ReadMemoryByAddress — direct memory access
+3. BROADCAST: Passive CAN bus monitoring — no request needed
+
+Each PID has:
+- DSI (Data Storage Identifier): UDS DID for the parameter
+- Factor/Offset: Linear conversion (value = raw * factor + offset)
+- Adjustment points: Non-linear correction table
+- Metric/Imperial units: Dual-unit support
+- SAE standard bitmasks: 4 x 32-bit visibility masks (vsb0, vsb20, vsb40, vsb60)
+
+### Recovery Mode
+DevProg supports recovery flashing for bricked ECUs:
+- Recovery detection via IS_RECOVERY check in flash script
+- Separate recovery flash sequence with different block ordering
+- Boot block (block_boot) is flashed first in recovery
+- Erase block (block_erase) handles sector erase before write
+- Recovery can be triggered by "Start_Recovery" BLE command
 `;
 
 const VOP3_FLASH_ENCRYPTION = `
@@ -934,11 +1192,222 @@ Uses the 'cryptography' Python package with identical HKDF and AES-GCM parameter
 `;
 
 /**
+ * PCAN Flash Engine — Operational Knowledge from Bench Testing (April 2026)
+ * Learned from 10+ dry run iterations on HPTuners-unlocked E41 (L5P Duramax, Bosch MG1CS111)
+ */
+const PCAN_FLASH_ENGINE_KNOWLEDGE = `
+## PCAN Flash Engine — Operational Knowledge
+
+### TesterPresent Keepalive (0x3E 0x80)
+- MUST send TesterPresent (0x3E with suppressPositiveResponse 0x80) every 2 seconds to maintain diagnostic session
+- Use raw CAN send (fire-and-forget) — do NOT wait for response, as NRC responses to keepalive can interfere with other UDS exchanges
+- MUST pause keepalive during active UDS request/response exchanges to prevent NRC 0x12 (subFunctionNotSupported) from being captured as a response to the actual command
+- Resume keepalive after each UDS exchange completes (success or failure)
+- Stop keepalive during KEY_OFF (ECU powers down), restart after WAIT_BOOT + session re-establishment
+- The "seed" 7F 3E 12 is NOT a real seed — it's an NRC response to TesterPresent that was incorrectly captured by an overly broad response filter
+
+### UDS Response Filtering for GMLAN
+- GMLAN positive responses have service byte = (request_service + 0x40)
+- Response filter MUST match the exact expected positive response service byte, not just any byte >= 0x40
+- Stale frames from previous DID reads (e.g., DID 0xC1 response) can be captured as responses to later commands (e.g., DID 0x90) if the filter is too broad
+- Drain period between commands: 150ms minimum to clear stale CAN frames from the bus
+- NRC responses (0x7F) must also be filtered to match the service byte of the sent command
+
+### E41 / L5P / MG1CS111 Specific Behavior
+- ECU responds intermittently on bench setups — approximately 50% of first attempts timeout, but retries succeed
+- Programming session (0x10 0x02): often returns NRC 0x12 on first attempt, succeeds on retry
+- DID 0x1A 0x90 (ReadECUIdentification): consistently times out on this ECU — may not be supported or requires security access
+- DID 0xC1: responds with 5 bytes (C1 00 C1 A5 4A) — this is the CalID
+- DID 0xA0: responds with 2 bytes (A0 00) — minimal data
+- ClearDTC (0x14): MUST use physical addressing (0x7E0) for GMLAN, NOT functional addressing (0x7DF) — functional times out
+- ECU Reset (0x11): returns NRC 0x11 (serviceNotSupported) — expected for GMLAN, not fatal
+- Security access seed: consistently 5 bytes (e.g., 57 09 FD 6C 06) — uses GM Algorithm 41 (AES-128)
+- HPTuners-unlocked ECUs still require a valid key — dummy key (0x00 x5) is rejected (timeout, not NRC)
+- The AES-128 key is stored in the ECU's HSM/OTP area, not in firmware or container files
+
+### Post-Key-Cycle Recovery
+- After WAIT_BOOT completes, MUST wait 2 seconds for ECU to stabilize before attempting session switch
+- Re-enter programming session with 5 retries and 1.5s backoff
+- On 3rd attempt, try GMLAN ProgrammingMode (0xA5 0x01) as fallback before standard 0x10 0x02
+- After session re-established, wait 1 second before attempting security access
+- Full seed/key exchange must be repeated after key cycle
+
+### Retry Strategy
+- Progressive backoff: 1.0s → 1.5s → 2.0s → 2.5s between retries (not flat delays)
+- Initial ECU settle delay: 3 seconds after bridge connect before first command
+- Session switch retry: 3 attempts with 1.5s backoff for initial connect
+- Post-key-cycle commands: 8s timeout with 3-5 retries
+
+### CAN Bus Hardware Notes
+- 120Ω termination resistor is REQUIRED for bench setups — without it, communication is unreliable
+- Bench ECU communication is inherently less stable than in-vehicle due to lack of other bus participants
+- Signal integrity issues (wiring length, connector quality, ground reference) cause intermittent timeouts
+- ECU power supply voltage dips can cause brief communication dropouts
+
+### Container File Format
+- PPEI containers for E41 do NOT include a verify section with pri_key
+- The AES key for E41 security access is NOT embedded in container files
+- Container header is JSON at offset 0x1004, preceded by a 4-byte header length
+- Header contains: CanAdr, CrtlType, xferSize, file_size, block_count, block_struct, ecu_type, hardware_number, sw_c1-c6
+- The PPEI Converter (V832) builds E41 containers without security key material
+- Other ECU types (e.g., Ford AT6R140) DO include verify sections with pri_key in their containers
+
+### Flash State Machine Phases
+1. IGNITION CHECK — confirm key on before any CAN communication
+2. BRIDGE CONNECT — establish WebSocket connection to PCAN bridge
+3. PRE_CHECK — TesterPresent, session switch, security access probe, read DIDs
+4. SESSION_OPEN — functional broadcast: ReturnToNormal → ReadB0 → DiagSession 0x02 → DisableComm → ProgrammedState → ProgrammingMode 01 → ProgrammingMode 03 → TesterPresent x7 (all on 0x101)
+5. SECURITY_ACCESS — seed request (0x27 0x01) + key send (0x27 0x02) on physical (0x7E0)
+6. BLOCK_TRANSFER — RequestDownload (0x34) + TransferData (0x36) x N + TransferExit (0x37)
+7. KEY_CYCLE — KEY_OFF prompt → wait 5s → KEY_ON prompt → wait boot 10s → re-session → re-security
+8. VERIFICATION — read CalID C1-C6, VIN (0x90), Unlock Status (0xD0), Prog Counter (0xCC), Finalize (0xAE 0x28 0x80)
+9. CLEANUP — ClearDTC (0x14) + ReturnToNormal (0x20) via functional broadcast (0x101)
+10. COMPLETE — stop keepalive, disconnect bridge
+
+### Proven BUSMASTER Flash Sequences (E41 L5P)
+Analyzed from 3 successful flash logs: stock full flash, mod full flash, and short (cal-only) flash.
+
+#### Seed/Key Pairs (Static — HPTuners/VOP Unlocked ECUs)
+- Bench ECU: Seed A0 9A 34 9B 06 → Key AF 72 2A 51 7E (HPTuners unlock)
+- Truck ECU: Seed CE DA F9 83 06 → Key 59 2E F4 0F 33 (VOP OBD voltage unlock)
+- Both seeds are STATIC (same value every request) because ECUs are unlocked
+- Unlocked ECUs still validate the key — dummy keys (0x00 x5) are rejected
+
+#### Functional Broadcast Sequence (0x101)
+The proven SPS/VOP3 sequence uses functional broadcast on CAN ID 0x101 (not 0x7DF) for session setup:
+1. ReturnToNormal (0x20) on 0x101 — reset all ECUs to normal mode
+2. ReadDID 0xB0 on 0x101 — broadcast SW version request
+3. DiagSession 0x02 on 0x101 — enter programming session (all ECUs)
+4. DisableNormalComm (0x28 0x03 0x03) on 0x101 — silence the bus
+5. ReportProgrammedState (0xA2 0x01) on 0x101 — check programming state
+6. ProgrammingMode 0x01 (0xA5 0x01) on 0x101 — enable programming
+7. ProgrammingMode 0x03 (0xA5 0x03) on 0x101 — complete programming mode
+8. TesterPresent x7 (0x3E 0x01) on 0x101 — ~500ms interval, 5s total keepalive burst
+
+#### Short Flash (Cal-Only) vs Full Flash
+- Short flash: 6 blocks, ~2 minutes, no key cycle needed
+- Full flash (stock): 6 blocks, ~4 minutes, key cycle required
+- Full flash (mod/unlock): 7 blocks (includes unlock OS), key cycle required
+- Short flash ends with 0xAE 0x28 0x80 (finalize) instead of key cycle
+
+#### Block Transfer Timing
+- Stock flash: 6 blocks, 2048-byte chunks, ~4 minutes total
+- Each TransferData (0x36) uses sequence counter (wraps at 0xFF)
+- RequestDownload (0x34) specifies memory address and length
+- TransferExit (0x37) after each block
+
+#### Bank Files (L5P Calibration Tunes)
+- 6 calibration files: STOCK, 30hp, 45hp, 80hp, 125hp, 145hp
+- Each ~5.6 MB (full calibration)
+- Short flash swaps only the calibration blocks, not OS/bootloader
+`;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLOUD NETWORK & WEATHER INTELLIGENCE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLOUD_NETWORK_KNOWLEDGE = `
+## V-OP Cloud Network Intelligence
+
+Knox manages the V-OP Cloud Network — a crowd-sourced vehicle analytics platform where VOP-connected vehicles
+contribute anonymized performance data and receive real-world fleet averages in return.
+
+### Cloud Network Overview
+- **Opt-in system**: Users choose to join the cloud network per-vehicle
+- **Same-type averaging**: Data is aggregated by vehicle type (year, make, model, engine, tune level)
+- **Real-world analytics**: No forum guesswork — actual data from the VOP sensor network
+- **Privacy-first**: All data is anonymized; no personally identifiable information is shared
+
+### Data Points Collected & Averaged
+- **Fuel Economy**: Average MPG, city/highway split, MPG by driving mode
+- **Engine Health**: Coolant temp averages, oil pressure trends, boost pressure profiles
+- **Performance**: 0-60 times, quarter mile data, peak HP/TQ readings
+- **Emissions**: DPF soot load averages, regen frequency, DEF consumption rates
+- **Transmission**: Shift quality scores, TCC slip averages, fluid temp trends
+- **Reliability**: DTC frequency by code, common failure patterns, mileage at failure
+
+### Fleet Benchmarking
+- Fleet operators can compare their entire fleet against cloud averages
+- Fleet-vs-fleet efficiency comparison (MPG, maintenance costs, uptime)
+- "Best for Fleet" rankings: which vehicle types perform best in fleet use based on real data
+- Helps fleet managers make purchasing decisions based on actual performance, not manufacturer specs
+
+### Knox's Role in Cloud Network
+- Knox ingests all vehicle data flowing in (streamed live or uploaded datalogs)
+- Computes fleet-wide averages by vehicle type, tune level, and operating conditions
+- Answers questions like "What's the average MPG for a stock L5P?" with real data
+- Identifies outliers: "Your truck is getting 15% worse fuel economy than similar L5Ps — here's why"
+- Provides trend analysis: "L5P fuel economy drops 8% on average above 7000ft altitude"
+- Cross-references cloud data with diagnostic findings for better troubleshooting
+
+### Weather Integration (Laura AI)
+- Laura is the PPEI Weather AI Agent — sister to Knox
+- Trained on historical weather patterns, atmospheric science, storm chasing
+- VOP-equipped vehicles act as mobile weather stations, reporting:
+  * Temperature, humidity, barometric pressure, altitude
+  * GPS coordinates for geographic mapping
+- SAE J1349 correction factor calculation using real atmospheric data from the VOP network
+- Storm chaser streaming: live vehicle telemetry + atmospheric data for weather broadcasters
+- Dyno competitions use averaged area weather conditions for fair SAE corrections
+
+### Knox + Laura Collaboration
+- Knox provides vehicle performance context; Laura provides atmospheric context
+- Together they answer: "How does today's weather affect my dyno numbers?"
+- Knox can factor weather data into diagnostic analysis: "Your low boost may be altitude-related"
+- Cloud network weather data feeds into Laura's predictions and Knox's performance analysis
+`;
+
+const FLASH_RESCUE_AND_E41_KNOWLEDGE = `
+## Flash Rescue Feature (Tobi — Apr 2026)
+
+### Flash Rescue UX
+When a flash operation FAILS on real hardware (PCAN or VOP USB), the system now offers an automatic rescue dialog:
+- Stores last successful flash container metadata (fileName, fileHash, ecuType) in localStorage via flashRescueMeta.ts
+- On failure, presents AlertDialog with option to automatically retry with the same container
+- rescueRetryChosenRef prevents USB disconnect when user chooses automatic retry
+- The rescue flow reuses the existing PCANFlashEngine instance and container data
+
+### GM E41 (L5P Duramax) Flash Procedure
+The E41 is the primary engine control module for GM L5P Duramax (6.6L diesel).
+
+**Protocol:** GMLAN (not standard UDS) — uses functional broadcast on 0x101 (UUDT) for session entry.
+**Addresses:** TX 0x7E0 / RX 0x7E8 (physical ECM request/response).
+**Transfer size:** 0xFFE — matches BUSMASTER RequestDownload form.
+**No TransferExit:** usesTransferExit = false — no service 0x37 between blocks. Next block's 0x34 implicitly continues.
+
+**Session Open Sequence (UUDT on 0x101):**
+1. ReturnToNormal (FE 01 20)
+2. ReadDID 0xB0 — SW versions (FE 02 1A B0, ~1000ms delay)
+3. DiagnosticSessionControl programming (FE 02 10 02)
+4. DisableNormalCommunication (FE 01 28)
+5. ReportProgrammedState (FE 01 A2)
+6. ProgrammingMode enable (FE 02 A5 01, ~1000ms delay)
+7. ProgrammingMode complete (FE 02 A5 03) — ECU transitions to bootloader
+8. Start cyclic UUDT TesterPresent (FE 01 3E, every 500ms)
+
+**Critical E41 differences from standard UDS:**
+- TesterPresent 0x3E 0x00 on physical address yields NRC 0x12 — use UUDT keepalive instead
+- No standalone RoutineControl erase (0x31) — erase is implicit in 0x34 with NRC 0x78 pending
+- PriRC (bootloader entry): single frame 05 34 00 00 0F FE after security, before first per-block 0x34
+- ECUReset 0x11 often NRC 0x11 — ignition cycle does the reset
+- Post-flash verification: ReturnToNormal, then 0xAE 0x28 0x80 on 0x7E0 (ECU may stay silent ~12s during reboot)
+
+### Container Block JSON Normalization
+DevProg container block_struct JSON uses inconsistent property casings (rc36 vs Rc_36, block_id vs Block_id).
+The containerBlockJson.ts module normalizes these with case-insensitive key lookup and canonical field copying.
+GMLAN containers often repeat the same rc36 on every block — resolveRc36TemplateForBlock() falls back to any block's rc36.
+
+### Datalogger Transport Parity
+The datalogger now shares the same CAN transport layer as the flash engine (canTransportTiming.ts).
+This ensures consistent timing behavior between datalogging and flashing operations.
+`;
+
+/**
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + VOP3_FLASH_ENCRYPTION;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE;
 }
 
 /**
@@ -946,5 +1415,5 @@ export function getFullKnoxKnowledge(): string {
  * Safe to use in any context, including client-facing responses.
  */
 export function getSanitizedKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS;
 }

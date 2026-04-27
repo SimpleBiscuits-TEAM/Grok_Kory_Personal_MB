@@ -6,11 +6,9 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { getLoginUrl } from '@/const';
 import PpeiHeader from '@/components/PpeiHeader';
 import { AIChatBox, type Message } from '@/components/AIChatBox';
-import { Button } from '@/components/ui/button';
-import { Briefcase, TrendingUp, Users, DollarSign, Lightbulb, Lock } from 'lucide-react';
+import { Briefcase, TrendingUp, Users, DollarSign, Lightbulb } from 'lucide-react';
 import { usePitchAnalytics } from '@/hooks/usePitchAnalytics';
 
 const sFont = {
@@ -44,7 +42,7 @@ const SUGGESTED_PROMPTS = [
  * PitchContent — Embeddable version for use inside Advanced tabs (no header/wrapper)
  */
 export function PitchContent() {
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const { trackChatMessage, trackPromptClick } = usePitchAnalytics();
 
@@ -74,7 +72,6 @@ export function PitchContent() {
   }, [chatMut, trackChatMessage, trackPromptClick]);
 
   if (authLoading) return <div style={{ fontFamily: sFont.mono, color: sColor.textDim, fontSize: '0.8rem', padding: '2rem', textAlign: 'center' }}>LOADING...</div>;
-  if (!isAuthenticated) return <div style={{ fontFamily: sFont.body, color: sColor.textDim, fontSize: '0.9rem', padding: '2rem', textAlign: 'center' }}>Sign in to access Pitch.</div>;
 
   return (
     <div className="max-w-4xl mx-auto" style={{ padding: '1rem 0' }}>
@@ -97,7 +94,7 @@ export function PitchContent() {
 }
 
 export default function Pitch() {
-  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { loading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
 
   const chatMutation = trpc.pitch.chat.useMutation({
@@ -232,51 +229,7 @@ export default function Pitch() {
               letterSpacing: '0.1em',
             }}>LOADING...</div>
           </div>
-        ) : !isAuthenticated ? (
-          /* Login Required */
-          <div className="flex flex-col items-center justify-center py-20 gap-6">
-            <div style={{
-              background: sColor.cardBg,
-              border: `1px solid ${sColor.border}`,
-              borderRadius: '8px',
-              padding: '3rem',
-              textAlign: 'center',
-              maxWidth: '500px',
-            }}>
-              <Lock size={48} style={{ color: sColor.gold, margin: '0 auto 1rem', opacity: 0.6 }} />
-              <h2 style={{
-                fontFamily: sFont.heading,
-                fontSize: '1.5rem',
-                color: 'white',
-                letterSpacing: '0.06em',
-                marginBottom: '0.5rem',
-              }}>SIGN IN TO CHAT WITH PITCH</h2>
-              <p style={{
-                fontFamily: sFont.body,
-                fontSize: '0.85rem',
-                color: sColor.textDim,
-                marginBottom: '1.5rem',
-              }}>
-                Log in to access the AI Business Chat and start exploring money-making opportunities 
-                with the V-OP Innovator Program.
-              </p>
-              <Button
-                onClick={() => window.location.href = getLoginUrl()}
-                style={{
-                  background: sColor.gold,
-                  color: 'black',
-                  fontFamily: sFont.heading,
-                  fontSize: '0.9rem',
-                  letterSpacing: '0.06em',
-                  padding: '8px 24px',
-                }}
-              >
-                SIGN IN
-              </Button>
-            </div>
-          </div>
         ) : (
-          /* Chat Interface */
           <div className="max-w-4xl mx-auto">
             <AIChatBox
               messages={messages}

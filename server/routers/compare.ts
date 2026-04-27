@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
+import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
 
 /**
  * Compare Router — LLM-powered datalog comparison analysis.
@@ -26,8 +27,29 @@ function buildCompareSystemPrompt(): string {
     `- At 2500μs+ pulse width, timing should be 27°+ to efficiently burn the fuel`,
     `- Negative timing (-20° to -7°) = regen mode, 80+ HP loss`,
     `- High pulse width is hard on pistons (wide spray patterns), not the injectors themselves`,
-    `- Rail pressure deviation = actual vs desired gap; watch for PCV saturation`,
+    `- Rail pressure deviation = actual vs desired gap; watch for FPR/inlet metering current (mA) pinned at an extreme vs demand — not a "% duty" channel on GM diesel`,
+    `- mA is INVERSELY proportional to regulator opening: 400 mA = ~95% open, 0 mA = 100% open, ~1800 mA = near-closed. Lower mA = more open regulator = more fuel delivery`,
+    `- CP3 conversion tunes RAISE mA (more closed regulator) to control delivery and prevent surge/cavitation`,
+    `- On LML, Fuel Flow Base mA adjustments for CP3 conversion only matter past 35,700 mm3/s fuel flow demand — below that, stock curve works fine`,
+    `- On LB7/LLY with LBZ/LMM pump or regulator swap: the ENTIRE Fuel Flow Base curve gets raised ~16% across the board (idle through WOT) — different approach than LML`,
+    `- On L5P with stroker pump: only bottom 3 cells of Fuel Flow Base need adjusting, and only if surge actually happens — stock HP4 curve often works fine even with stroker`,
+    `- Calibration rule of thumb: the average % that actual rail overshoots/undershoots desired = the approximate % that Fuel Flow Base mA needs to be raised to fix the surge`,
+    `- When comparing two logs with different mA at same RPM: check if Fuel Flow Base was revised (intentional tune correction, not a fault)`,
+    `- CRITICAL mA COMPARISON RULE: When two logs show different FPR/PCV mA at the same RPM and load, this is a KEY diagnostic finding. Explicitly call it out in the Fuel System section. Possible causes: (1) Fuel Flow Base mA table was revised between tunes (intentional), (2) Regulator is compensating for a mechanical change (injectors, pump, lines), (3) Regulator is drifting (wear/contamination). If mA is HIGHER in the newer log at same conditions, the regulator is closing more = less fuel delivery = possible restriction or intentional lean-out. If mA is LOWER, regulator is opening more = more fuel delivery = possible pump upgrade or intentional enrichment.`,
+    `- mA DELTA THRESHOLD: Flag any mA difference > 50 mA at the same RPM/load point between logs. This is significant enough to warrant investigation. Under 50 mA is normal variation.`,
     `- TCC slip > 100 RPM sustained = potential converter issue`,
+    ``,
+    `MAF & Intake Tube Knowledge (CRITICAL):`,
+    `- OEM intake tubes have a baffle/venturi that narrows the cross-section before the MAF sensor, accelerating air past the heated element for accurate metering`,
+    `- When the baffle is removed or a larger-diameter intake tube is installed, the pre-MAF area increases, air velocity drops, and the MAF sensor under-reads`,
+    `- The MAF sensor measures air VELOCITY across its element, not total mass directly — larger tube = lower velocity for same mass flow = lower reading`,
+    `- MAF under-reading causes the smoke limiter to engage prematurely (it caps IQ based on reported air mass), making the vehicle MAF-limited/smoke-limited`,
+    `- Symptoms: lower peak MAF than expected, reduced HP, poor throttle response, smoke limiter engaging early, flat feeling at low RPM`,
+    `- The fix is a MAF scaling tune revision — recalibrate the MAF transfer function (voltage-to-airflow table) to match the new tube geometry`,
+    `- Do NOT diagnose low MAF with a larger tube as a sensor fault — it is expected physics from the larger cross-sectional area`,
+    `- Many intake companies (S&B, Banks, AFE) intentionally keep stock MAF tube diameter so no tune revision is needed — "no-tune-required" bolt-on`,
+    `- When comparing two logs where one has lower MAF: consider intake modifications (baffle out, larger tube) BEFORE assuming sensor failure or turbo issues`,
+    `- If boost is building normally but MAF is low, the sensor is under-reading, not an actual airflow problem`,
     ``,
     `Format your response as a structured analysis with these sections:`,
     `## Summary`,
@@ -67,8 +89,27 @@ export const compareRouter = router({
         userContext: z.string().max(2000).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { comparisonContext, userContext } = input;
+      const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
+      const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
+
+      const question = userContext
+        ? `Comparison analysis — user says: "${userContext}"\n\nDoes the data support the expected outcome?`
+        : `Analyze this datalog comparison and identify key differences, implications, and concerns.`;
+
+      // Try quad-agent pipeline first
+      try {
+        const knoxResult = await queryKnox({
+          question,
+          accessLevel: effectiveLevel,
+          domain: 'diagnostics',
+          moduleContext: comparisonContext.slice(0, 20000),
+        });
+        return { analysis: knoxResult.answer, usage: null, pipeline: knoxResult.pipeline, confidence: knoxResult.confidence };
+      } catch {
+        // Fallback
+      }
 
       const userMessage = userContext
         ? `Here is the comparison data:\n\n${comparisonContext}\n\nThe user described the following changes between tests:\n"${userContext}"\n\nPlease analyze the comparison and evaluate whether the data supports the expected outcome of those changes.`

@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE `generated_a2l` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`osNumber` varchar(32) NOT NULL,\n\t`ecuFamily` varchar(64) NOT NULL,\n\t`version` varchar(32) NOT NULL DEFAULT '1.0.0',\n\t`a2lContent` text NOT NULL,\n\t`fileSize` int NOT NULL,\n\t`mapCount` int NOT NULL,\n\t`confidence` decimal(3,2) NOT NULL,\n\t`binaryHash` varchar(64),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `generated_a2l_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `generated_a2l_osNumber_unique` UNIQUE(`osNumber`)\n)",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute CREATE TABLE `generated_a2l` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`osNumber` varchar(32) NOT NULL,\n\t`ecuFamily` varchar(64) NOT NULL,\n\t`version` varchar(32) NOT NULL DEFAULT '1.0.0',\n\t`a2lContent` text NOT NULL,\n\t`fileSize` int NOT NULL,\n\t`mapCount` int NOT NULL,\n\t`confidence` decimal(3,2) NOT NULL,\n\t`binaryHash` varchar(64),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\tCONSTRAINT `generated_a2l_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `generated_a2l_osNumber_unique` UNIQUE(`osNumber`)\n)",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 207
-}

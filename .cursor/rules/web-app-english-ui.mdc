@@ -1,0 +1,12 @@
+---
+description: All user-visible text in the web app must be English
+alwaysApply: true
+---
+
+# Web application language (English only)
+
+- **User-facing UI** in the client (labels, buttons, toasts, banners, dialogs, flash prompts, errors, empty states, placeholders, `aria-label`s, and any copy shown in the browser) MUST be written in **English**, even when the user or developer communicates with the AI in another language.
+- **Developer-facing** comments in code may stay as the team prefers; this rule targets **what end users see in the app**.
+- When adding or editing strings in `client/**`, default to concise, technical English consistent with existing flash/diagnostic terminology.
+
+**Note:** Browsers cannot reliably prevent tab switches or opening new tabs; use Page Visibility, notifications, and on-screen warnings — never promise impossible restrictions in the UI.

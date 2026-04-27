@@ -6,7 +6,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { trpc } from '@/lib/trpc';
-import { getLoginUrl } from '@/const';
 import PpeiHeader from '@/components/PpeiHeader';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -128,28 +127,6 @@ export default function Fleet({ embedded = false }: { embedded?: boolean }) {
         {!embedded && <PpeiHeader />}
         <div className="flex items-center justify-center h-[60vh]">
           <Loader2 className="h-8 w-8 animate-spin" style={{ color: sColor.red }} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className={embedded ? '' : 'min-h-screen'} style={{ background: sColor.bg }}>
-        {!embedded && <PpeiHeader />}
-        <div className="flex flex-col items-center justify-center h-[60vh] gap-6">
-          <div className="ppei-section-header">
-            <Shield className="h-8 w-8" style={{ color: sColor.red }} />
-            <h2 style={{ fontFamily: sFont.heading, fontSize: '1.8rem', letterSpacing: '0.06em', color: 'white', margin: 0 }}>
-              FLEET ACCESS REQUIRED
-            </h2>
-          </div>
-          <p style={{ fontFamily: sFont.body, color: sColor.textDim, maxWidth: '400px', textAlign: 'center' }}>
-            Sign in to access V-OP Fleet Management. Monitor your vehicles, track drivers, and get AI-powered fleet intelligence.
-          </p>
-          <Button onClick={() => window.location.href = getLoginUrl()} className="ppei-btn-red" style={{ fontFamily: sFont.heading, letterSpacing: '0.1em' }}>
-            SIGN IN TO FLEET
-          </Button>
         </div>
       </div>
     );

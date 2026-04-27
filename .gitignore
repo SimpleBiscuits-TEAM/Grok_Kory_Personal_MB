@@ -2,6 +2,9 @@
 **/node_modules
 .pnpm-store/
 
+# Local dev object storage (tune uploads, etc. when Forge is unset)
+.data/
+
 # Build outputs
 dist/
 build/
@@ -15,7 +18,9 @@ build/
 .env.production.local
 
 # IDE and editor files
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo
@@ -29,6 +34,8 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+# Windows default new-document name (avoid accidental commits)
+New Text Document.txt
 
 # Logs
 logs
@@ -100,6 +107,7 @@ jspm_packages/
 # Temporary folders
 tmp/
 temp/
+.canam_sniff_temp/
 
 # Database
 *.db
@@ -111,3 +119,11 @@ temp/
 
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json
+
+# Git graph HTML (npm run git-map / git-map:watch)
+docs/git-repository-map.html
+
+# Local bridge / Python artifacts (do not commit)
+docs/.certs/
+docs/__pycache__/
+client/public/__pycache__/

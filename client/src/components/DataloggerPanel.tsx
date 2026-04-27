@@ -2,7 +2,8 @@
  * DataloggerPanel — Live OBD-II Datalogger
  * 
  * Features:
- * - WebSerial connection to ELM327-compatible adapters (OBDLink EX, MX+, SX, STN2xx)
+ * - WebSerial: ELM327 adapters (OBDLink EX, MX+, SX, STN2xx)
+ * - Raw CAN: PCAN-USB via local Python WebSocket bridge; V-OP Can2USB USB–CAN bridge (Web Serial)
  * - Standard Mode 01 + GM Mode 22 extended PIDs (diesel-specific)
  * - PID selection with built-in and user-customizable preset groups
  * - Real-time gauge display with live values
@@ -11,7 +12,8 @@
  * - Direct handoff to Analyzer tab
  */
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+// Fullscreen is now handled at the app level (Home.tsx / Advanced.tsx)
 import { trpc } from '@/lib/trpc';
 import {
   Wifi, WifiOff, Play, Square, Download, BarChart3,
@@ -19,12 +21,22 @@ import {
   Activity, Zap, ChevronDown, ChevronRight, RefreshCw,
   Trash2, Terminal, Radio, Cpu, Plus, Edit2, Save, X,
   Flame, Droplets, Wind, Thermometer, Star,
-  Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser
+  Search, Radar, ShieldAlert, ShieldCheck, ShieldX, Info, Eraser,
+  Copy, Check, Upload, Share2, Clock, FolderOpen
 } from 'lucide-react';
 import type { DTCReadResult, DTCCode, DTCSeverity } from '@/lib/dtcReader';
+import { downloadPresetAsJSON, importPresetFromFile, copyPresetToClipboard } from '@/lib/presetSharing';
+import { saveSession, loadSessionIndex, loadSession, deleteSession as deleteHistorySession, updateSessionName, getStorageUsage, type SessionMeta } from '@/lib/sessionHistory';
+import {
+  PCAN_BRIDGE_PY_DOWNLOAD_FILENAME,
+  PCAN_BRIDGE_PY_DOWNLOAD_HREF,
+  PCAN_BRIDGE_PY_DOWNLOAD_TITLE,
+} from '@/lib/bridgeDownload';
 import { PCANConnection } from '@/lib/pcanConnection';
+import { VopCan2UsbConnection, getSharedVopCan2UsbConnection } from '@/lib/vopCan2UsbConnection';
 import { DTC_SYSTEM_LABELS, DTC_SEVERITY_LABELS } from '@/lib/dtcReader';
 import LiveChart from '@/components/LiveChart';
+import OBDDatalogViewer from '@/components/OBDDatalogViewer';
 import LiveGaugeDashboard from '@/components/gauges/LiveGaugeDashboard';
 import {
   OBDConnection, ConnectionState, PIDDefinition, PIDReading,
@@ -33,7 +45,7 @@ import {
   exportSessionToCSV, sessionToAnalyzerCSV,
   loadCustomPresets, saveCustomPresets, createCustomPreset,
   deleteCustomPreset, updateCustomPreset, getAllPresets,
-  VehicleInfo, PIDManufacturer, FuelType,
+  VehicleInfo, PIDManufacturer, FuelType, PIDCategory,
   FORD_EXTENDED_PIDS, CHRYSLER_EXTENDED_PIDS, TOYOTA_EXTENDED_PIDS, HONDA_EXTENDED_PIDS,
   MANUFACTURER_PIDS, getPidsForVehicle, getPresetsForVehicle,
 } from '@/lib/obdConnection';
@@ -52,57 +64,134 @@ const sColor = {
 
 // ─── Gauge Component ───────────────────────────────────────────────────────
 
-function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefinition }) {
+// Category display config
+const CATEGORY_CONFIG: Record<PIDCategory, { label: string; color: string; icon: string }> = {
+  engine: { label: 'ENGINE', color: 'oklch(0.52 0.22 25)', icon: '⚡' },
+  turbo: { label: 'TURBO', color: 'oklch(0.65 0.20 55)', icon: '🌀' },
+  fuel: { label: 'FUEL', color: 'oklch(0.65 0.20 145)', icon: '⛽' },
+  exhaust: { label: 'EXHAUST', color: 'oklch(0.60 0.20 25)', icon: '🔥' },
+  transmission: { label: 'TRANS', color: 'oklch(0.60 0.20 300)', icon: '⚙️' },
+  emissions: { label: 'EMISSIONS', color: 'oklch(0.65 0.18 200)', icon: '🌿' },
+  electrical: { label: 'ELECTRICAL', color: 'oklch(0.75 0.18 60)', icon: '🔋' },
+  def: { label: 'DEF', color: 'oklch(0.70 0.14 200)', icon: '💧' },
+  oxygen: { label: 'O2 SENSORS', color: 'oklch(0.65 0.18 220)', icon: '🫧' },
+  catalyst: { label: 'CATALYST', color: 'oklch(0.70 0.20 155)', icon: '🧪' },
+  evap: { label: 'EVAP', color: 'oklch(0.60 0.15 260)', icon: '💨' },
+  ignition: { label: 'IGNITION', color: 'oklch(0.75 0.18 70)', icon: '🔌' },
+  cooling: { label: 'COOLING', color: 'oklch(0.70 0.18 220)', icon: '❄️' },
+  intake: { label: 'INTAKE', color: 'oklch(0.65 0.18 200)', icon: '🌬️' },
+  other: { label: 'OTHER', color: 'oklch(0.58 0.008 260)', icon: '📊' },
+};
+const CATEGORY_ORDER: PIDCategory[] = ['engine', 'turbo', 'fuel', 'exhaust', 'transmission', 'emissions', 'electrical', 'def', 'oxygen', 'catalyst', 'evap', 'ignition', 'cooling', 'intake', 'other'];
+
+const LiveGauge = React.memo(function LiveGauge({ reading, pid }: { reading: PIDReading | null; pid: PIDDefinition }) {
   const value = reading?.value ?? 0;
   const range = pid.max - pid.min;
   const pct = Math.max(0, Math.min(100, ((value - pid.min) / range) * 100));
   const isMode22 = (pid.service ?? 0x01) === 0x22;
-  
-  const getColor = (p: number) => {
-    if (p < 25) return sColor.blue;
-    if (p < 50) return sColor.green;
-    if (p < 75) return sColor.yellow;
-    return sColor.red;
-  };
+
+  // Tesla-style color: subtle accent based on value zone
+  const accentColor = pct < 30 ? 'oklch(0.70 0.14 200)' // cool blue
+    : pct < 60 ? 'oklch(0.70 0.16 155)' // teal-green
+    : pct < 80 ? 'oklch(0.72 0.16 70)' // amber
+    : 'oklch(0.58 0.22 25)'; // red
+
+  // Arc gauge SVG (180° sweep, bottom-center)
+  const arcRadius = 28;
+  const arcStroke = 3;
+  const arcCx = 36;
+  const arcCy = 32;
+  const startAngle = Math.PI; // left (180°)
+  const endAngle = 0; // right (0°)
+  const valueAngle = startAngle - (pct / 100) * Math.PI;
+  const bgArcD = `M ${arcCx + arcRadius * Math.cos(startAngle)} ${arcCy - arcRadius * Math.sin(startAngle)} A ${arcRadius} ${arcRadius} 0 1 1 ${arcCx + arcRadius * Math.cos(endAngle)} ${arcCy - arcRadius * Math.sin(endAngle)}`;
+  const valArcD = pct > 0.5
+    ? `M ${arcCx + arcRadius * Math.cos(startAngle)} ${arcCy - arcRadius * Math.sin(startAngle)} A ${arcRadius} ${arcRadius} 0 ${pct > 50 ? 1 : 0} 1 ${arcCx + arcRadius * Math.cos(valueAngle)} ${arcCy - arcRadius * Math.sin(valueAngle)}`
+    : '';
 
   return (
     <div style={{
-      background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
-      backdropFilter: 'blur(10px)',
-      border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: '12px',
-      padding: '14px',
-      minWidth: '160px',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+      background: 'oklch(0.11 0.006 260)',
+      border: `1px solid oklch(0.20 0.008 260)`,
+      borderRadius: '10px',
+      padding: '8px 10px 6px',
+      minWidth: '130px',
+      maxWidth: '160px',
+      position: 'relative',
+      overflow: 'hidden',
+      backdropFilter: 'blur(8px)',
+      transition: 'border-color 0.3s ease, box-shadow 0.3s ease',
+      boxShadow: reading ? `0 0 12px -4px ${accentColor}33` : 'none',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+      {/* Subtle top accent line */}
+      <div style={{
+        position: 'absolute', top: 0, left: '10%', right: '10%', height: '1px',
+        background: `linear-gradient(90deg, transparent, ${accentColor}66, transparent)`,
+      }} />
+
+      {/* Header: badge + name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
         {isMode22 && (
-          <span style={{ fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.orange, background: 'rgba(255,127,0,0.2)', padding: '2px 6px', borderRadius: '3px', fontWeight: 700 }}>
+          <span style={{
+            fontFamily: sFont.mono, fontSize: '0.42rem', color: sColor.orange,
+            background: 'oklch(0.15 0.06 55 / 0.4)', padding: '1px 4px', borderRadius: '3px',
+            fontWeight: 700, letterSpacing: '0.04em',
+          }}>
             M22
           </span>
         )}
-        <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, letterSpacing: '0.08em', textTransform: 'uppercase', flex: 1 }}>
+        <span style={{
+          fontFamily: sFont.body, fontSize: '0.56rem', color: 'oklch(0.60 0.008 260)',
+          letterSpacing: '0.06em', textTransform: 'uppercase', flex: 1,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          fontWeight: 600,
+        }}>
           {pid.shortName}
         </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '10px' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '1.9rem', fontWeight: 700, color: getColor(pct), lineHeight: 1, transition: 'color 0.3s ease-out' }}>
-          {reading ? (Number.isInteger(value) ? value : value.toFixed(1)) : '---'}
-        </span>
-        <span style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textDim }}>
-          {pid.unit}
-        </span>
+
+      {/* Arc gauge + value */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+        <svg width="72" height="36" viewBox="0 0 72 36" style={{ flexShrink: 0 }}>
+          {/* Background arc */}
+          <path d={bgArcD} fill="none" stroke="oklch(0.18 0.006 260)" strokeWidth={arcStroke} strokeLinecap="round" />
+          {/* Value arc */}
+          {valArcD && (
+            <path d={valArcD} fill="none" stroke={accentColor} strokeWidth={arcStroke} strokeLinecap="round"
+              style={{ transition: 'stroke 0.3s ease-out', filter: `drop-shadow(0 0 3px ${accentColor}66)` }} />
+          )}
+          {/* Center value */}
+          <text x={arcCx} y={arcCy - 4} textAnchor="middle" dominantBaseline="central"
+            fill="oklch(0.96 0.005 260)" fontSize="14" fontFamily='"Share Tech Mono", monospace' fontWeight="700">
+            {reading ? (Number.isInteger(value) ? value.toString() : value.toFixed(1)) : '---'}
+          </text>
+          {/* Unit below */}
+          <text x={arcCx} y={arcCy + 8} textAnchor="middle" dominantBaseline="central"
+            fill="oklch(0.50 0.008 260)" fontSize="7" fontFamily='"Rajdhani", sans-serif' letterSpacing="0.06em">
+            {pid.unit}
+          </text>
+        </svg>
       </div>
-      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden', marginBottom: '8px' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: getColor(pct), transition: 'width 0.2s ease-out', borderRadius: '3px', boxShadow: `0 0 12px ${getColor(pct)}80` }} />
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.min}</span>
-        <span style={{ fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textMuted }}>{pid.max}</span>
+
+      {/* Bottom bar — thin accent */}
+      <div style={{
+        width: '100%', height: '2px', borderRadius: '1px', marginTop: '4px',
+        background: 'oklch(0.15 0.005 260)', overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${pct}%`, height: '100%', borderRadius: '1px',
+          background: `linear-gradient(90deg, ${accentColor}88, ${accentColor})`,
+          transition: 'width 0.2s ease-out',
+        }} />
       </div>
     </div>
   );
-}
+}, (prev, next) => {
+  // Only re-render if the value or unit actually changed
+  return prev.reading?.value === next.reading?.value
+    && prev.reading?.unit === next.reading?.unit
+    && prev.pid.pid === next.pid.pid;
+});
 
 // ─── Mini Chart (last N readings) ──────────────────────────────────────────
 
@@ -423,6 +512,7 @@ function CustomPresetDialog({
 function PIDSelector({
   selectedPids, onTogglePid, onApplyPreset, supportedPids, disabled,
   customPresets, onCreatePreset, onEditPreset, onDeletePreset,
+  onExportPreset, onImportPreset,
   manufacturer, fuelType
 }: {
   selectedPids: Set<number>;
@@ -434,11 +524,14 @@ function PIDSelector({
   onCreatePreset: () => void;
   onEditPreset: (preset: PIDPreset) => void;
   onDeletePreset: (presetId: string) => void;
+  onExportPreset: (preset: PIDPreset) => void;
+  onImportPreset: () => void;
   manufacturer: PIDManufacturer;
   fuelType: FuelType;
 }) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>('engine');
   const [pidSource, setPidSource] = useState<'all' | 'mode01' | 'extended' | 'vehicle'>('vehicle');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Get vehicle-specific PIDs
   const vehiclePids = useMemo(() => getPidsForVehicle(manufacturer, fuelType), [manufacturer, fuelType]);
@@ -458,13 +551,25 @@ function PIDSelector({
       case 'vehicle': pidsToShow = vehiclePids; break;
       default: pidsToShow = ALL_PIDS; break;
     }
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      pidsToShow = pidsToShow.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.shortName.toLowerCase().includes(q) ||
+        `0x${p.pid.toString(16)}`.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q)
+      );
+    }
     for (const pid of pidsToShow) {
       const list = cats.get(pid.category) || [];
       list.push(pid);
       cats.set(pid.category, list);
     }
     return cats;
-  }, [pidSource, vehiclePids, extendedPids]);
+  }, [pidSource, vehiclePids, extendedPids, searchQuery]);
+  // Auto-expand all categories when searching
+  const isSearching = searchQuery.trim().length > 0;
 
   const categoryIcons: Record<string, React.ReactNode> = {
     engine: <Cpu style={{ width: 14, height: 14 }} />,
@@ -502,6 +607,32 @@ function PIDSelector({
           </span>
         </div>
       )}
+
+      {/* Search Input */}
+      <div style={{ position: 'relative', marginBottom: '8px' }}>
+        <Search style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: sColor.textMuted }} />
+        <input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search PIDs by name, shortName, or hex..."
+          style={{
+            width: '100%', padding: '6px 8px 6px 28px', background: 'oklch(0.08 0.004 260)',
+            border: `1px solid ${searchQuery ? sColor.red : sColor.border}`, borderRadius: '3px',
+            fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.text, outline: 'none',
+            boxSizing: 'border-box',
+          }}
+          onFocus={e => { e.target.style.borderColor = sColor.red; }}
+          onBlur={e => { if (!searchQuery) e.target.style.borderColor = sColor.border; }}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: sColor.textMuted, cursor: 'pointer', padding: '2px' }}
+          >
+            <X style={{ width: 12, height: 12 }} />
+          </button>
+        )}
+      </div>
 
       {/* Source Filter */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '10px' }}>
@@ -556,19 +687,34 @@ function PIDSelector({
           <span style={{ fontFamily: sFont.heading, fontSize: '0.75rem', color: sColor.orange, letterSpacing: '0.1em' }}>
             MY PRESETS
           </span>
-          <button
-            onClick={onCreatePreset}
-            disabled={disabled}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '3px',
-              padding: '2px 6px', background: 'oklch(0.15 0.02 55 / 0.3)',
-              border: `1px solid ${sColor.orange}`, borderRadius: '3px',
-              color: sColor.orange, fontFamily: sFont.mono, fontSize: '0.6rem',
-              cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-            }}
-          >
-            <Plus style={{ width: 10, height: 10 }} /> NEW
-          </button>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button
+              onClick={onImportPreset}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px',
+                padding: '2px 6px', background: 'oklch(0.12 0.01 260)',
+                border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                color: sColor.textDim, fontFamily: sFont.mono, fontSize: '0.6rem',
+                cursor: 'pointer',
+              }}
+              title="Import preset from JSON file"
+            >
+              <Upload style={{ width: 10, height: 10 }} /> IMPORT
+            </button>
+            <button
+              onClick={onCreatePreset}
+              disabled={disabled}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px',
+                padding: '2px 6px', background: 'oklch(0.15 0.02 55 / 0.3)',
+                border: `1px solid ${sColor.orange}`, borderRadius: '3px',
+                color: sColor.orange, fontFamily: sFont.mono, fontSize: '0.6rem',
+                cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+              }}
+            >
+              <Plus style={{ width: 10, height: 10 }} /> NEW
+            </button>
+          </div>
         </div>
         {customPresets.length === 0 ? (
           <div style={{ fontFamily: sFont.body, fontSize: '0.7rem', color: sColor.textMuted, padding: '6px 0' }}>
@@ -602,6 +748,13 @@ function PIDSelector({
                   </span>
                 </button>
                 <button
+                  onClick={() => onExportPreset(preset)}
+                  style={{ background: 'transparent', border: 'none', color: sColor.textDim, cursor: 'pointer', padding: '2px' }}
+                  title="Export preset as JSON"
+                >
+                  <Share2 style={{ width: 11, height: 11 }} />
+                </button>
+                <button
                   onClick={() => onEditPreset(preset)}
                   style={{ background: 'transparent', border: 'none', color: sColor.textDim, cursor: 'pointer', padding: '2px' }}
                   title="Edit preset"
@@ -621,6 +774,13 @@ function PIDSelector({
         )}
       </div>
 
+      {/* Search results count */}
+      {isSearching && (
+        <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, marginBottom: '6px', padding: '0 4px' }}>
+          {Array.from(categories.values()).reduce((sum, pids) => sum + pids.length, 0)} results for "{searchQuery}"
+        </div>
+      )}
+
       {/* Category groups */}
       {Array.from(categories.entries()).map(([category, pids]) => (
         <div key={category} style={{ marginBottom: '4px' }}>
@@ -633,14 +793,14 @@ function PIDSelector({
               textTransform: 'uppercase', letterSpacing: '0.06em',
             }}
           >
-            {expandedCategory === category ? <ChevronDown style={{ width: 12, height: 12 }} /> : <ChevronRight style={{ width: 12, height: 12 }} />}
+            {(isSearching || expandedCategory === category) ? <ChevronDown style={{ width: 12, height: 12 }} /> : <ChevronRight style={{ width: 12, height: 12 }} />}
             {categoryIcons[category] || null}
             {category}
             <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginLeft: 'auto' }}>
               {pids.filter(p => selectedPids.has(p.pid)).length}/{pids.length}
             </span>
           </button>
-          {expandedCategory === category && (
+          {(isSearching || expandedCategory === category) && (
             <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
               {pids.map(pid => {
                 const isMode22 = (pid.service ?? 0x01) === 0x22;
@@ -698,8 +858,9 @@ function PIDSelector({
 
 // ─── Console Log ───────────────────────────────────────────────────────────
 
-function ConsoleLog({ logs }: { logs: string[] }) {
+function ConsoleLog({ logs, onCopy, onExport }: { logs: string[]; onCopy?: () => void; onExport?: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -707,40 +868,109 @@ function ConsoleLog({ logs }: { logs: string[] }) {
     }
   }, [logs]);
 
+  const handleCopy = async () => {
+    const text = logs.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select all text in the console
+      if (scrollRef.current) {
+        const range = document.createRange();
+        range.selectNodeContents(scrollRef.current);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+    onCopy?.();
+  };
+
+  const handleExport = () => {
+    const text = logs.join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `vop-console-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    onExport?.();
+  };
+
   return (
-    <div
-      ref={scrollRef}
-      style={{
-        background: 'oklch(0.06 0.003 260)', border: `1px solid ${sColor.borderLight}`,
-        borderRadius: '3px', padding: '8px', maxHeight: '150px', overflowY: 'auto',
-        fontFamily: sFont.mono, fontSize: '0.65rem', lineHeight: 1.6, color: sColor.textDim,
-      }}
-    >
-      {logs.length === 0 ? (
-        <span style={{ color: sColor.textMuted }}>No log entries yet. Connect to a device to begin.</span>
-      ) : (
-        logs.map((log, i) => {
-          const isError = log.includes('ERROR') || log.includes('error');
-          const isIncompatible = log.includes('INCOMPATIBLE ADAPTER');
-          const isSuccess = log.includes('ready') || log.includes('Ready') || log.includes('OK');
-          const color = isError ? 'oklch(0.60 0.20 25)' : isSuccess ? sColor.green : sColor.textDim;
-          return (
-            <div key={i} style={{
-              color,
-              ...(isIncompatible ? {
-                background: 'oklch(0.12 0.04 25 / 0.3)',
-                border: '1px solid oklch(0.35 0.12 25)',
-                borderRadius: '3px',
-                padding: '8px 10px',
-                margin: '4px 0',
-                whiteSpace: 'pre-wrap' as const,
-              } : {}),
-            }}>
-              <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
-            </div>
-          );
-        })
+    <div style={{ position: 'relative' }}>
+      {logs.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '4px', right: '8px', zIndex: 2,
+          display: 'flex', gap: '4px',
+        }}>
+          <button
+            onClick={handleCopy}
+            title="Copy to clipboard"
+            style={{
+              background: 'oklch(0.15 0.005 260)', border: `1px solid ${sColor.borderLight}`,
+              borderRadius: '3px', padding: '3px 6px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: copied ? sColor.green : sColor.textDim,
+            }}
+          >
+            {copied ? <Check style={{ width: 10, height: 10 }} /> : <Copy style={{ width: 10, height: 10 }} />}
+            {copied ? 'COPIED' : 'COPY'}
+          </button>
+          <button
+            onClick={handleExport}
+            title="Download as .txt"
+            style={{
+              background: 'oklch(0.15 0.005 260)', border: `1px solid ${sColor.borderLight}`,
+              borderRadius: '3px', padding: '3px 6px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '3px',
+              fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim,
+            }}
+          >
+            <Download style={{ width: 10, height: 10 }} />
+            EXPORT
+          </button>
+        </div>
       )}
+      <div
+        ref={scrollRef}
+        style={{
+          background: 'oklch(0.06 0.003 260)', border: `1px solid ${sColor.borderLight}`,
+          borderRadius: '3px', padding: '8px', paddingTop: logs.length > 0 ? '26px' : '8px',
+          maxHeight: '200px', overflowY: 'auto',
+          fontFamily: sFont.mono, fontSize: '0.65rem', lineHeight: 1.6, color: sColor.textDim,
+          userSelect: 'text', WebkitUserSelect: 'text',
+        }}
+      >
+        {logs.length === 0 ? (
+          <span style={{ color: sColor.textMuted }}>No log entries yet. Connect to a device to begin.</span>
+        ) : (
+          logs.map((log, i) => {
+            const isError = log.includes('ERROR') || log.includes('error');
+            const isIncompatible = log.includes('INCOMPATIBLE ADAPTER');
+            const isSuccess = log.includes('ready') || log.includes('Ready') || log.includes('OK');
+            const isDddi = log.includes('[DDDI');
+            const color = isError ? 'oklch(0.60 0.20 25)' : isDddi ? 'oklch(0.70 0.15 250)' : isSuccess ? sColor.green : sColor.textDim;
+            return (
+              <div key={i} style={{
+                color,
+                ...(isIncompatible ? {
+                  background: 'oklch(0.12 0.04 25 / 0.3)',
+                  border: '1px solid oklch(0.35 0.12 25)',
+                  borderRadius: '3px',
+                  padding: '8px 10px',
+                  margin: '4px 0',
+                  whiteSpace: 'pre-wrap' as const,
+                } : {}),
+              }}>
+                <span style={{ color: sColor.textMuted }}>[{new Date().toLocaleTimeString()}]</span> {log}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -836,20 +1066,53 @@ export interface DataloggerPanelProps {
   injectedPids?: { pid: number; service: number; name: string; shortName: string }[];
 }
 
+/** UI order: PCAN-USB (WS bridge) → V-OP Can2USB (USB CAN bridge) → ELM327 (WebSerial AT). */
+export type DataloggerAdapterType = 'pcan' | 'can2usb' | 'elm327';
+
 export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: DataloggerPanelProps) {
+  const isDefaultQuickSelection = (pids: Set<number>) => (
+    pids.size === 4 &&
+    pids.has(0x0C) &&
+    pids.has(0x0D) &&
+    pids.has(0x05) &&
+    pids.has(0x04)
+  );
+
+  const isE42DuramaxVehicle = (info: VehicleInfo | null) => {
+    if (!info?.year || info.year < 2024) return false;
+    const make = (info.make || '').toLowerCase();
+    const model = (info.model || '').toLowerCase();
+    const engine = (info.engineType || '').toLowerCase();
+    return (
+      info.manufacturer === 'gm' &&
+      info.fuelType === 'diesel' &&
+      (
+        engine.includes('duramax') ||
+        engine.includes('l5p') ||
+        model.includes('2500') ||
+        model.includes('3500') ||
+        make.includes('chevrolet') ||
+        make.includes('gmc')
+      )
+    );
+  };
+
   // Connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo | null>(null);
   const [detectedManufacturer, setDetectedManufacturer] = useState<PIDManufacturer>('universal');
   const [detectedFuelType, setDetectedFuelType] = useState<FuelType>('any');
   const [supportedPids, setSupportedPids] = useState<Set<number> | null>(null);
-  const connectionRef = useRef<OBDConnection | PCANConnection | null>(null);
-  const [adapterType, setAdapterType] = useState<'elm327' | 'pcan'>('elm327');
+  const connectionRef = useRef<OBDConnection | PCANConnection | VopCan2UsbConnection | null>(null);
+  const [adapterType, setAdapterType] = useState<DataloggerAdapterType>('can2usb');
+  const usesWebSerial = adapterType === 'elm327' || adapterType === 'can2usb';
+  const usesOrangeAdapterUi = adapterType === 'pcan' || adapterType === 'can2usb';
   const [bridgeAvailable, setBridgeAvailable] = useState<boolean | null>(null);
   const [checkingBridge, setCheckingBridge] = useState(false);
 
   // PID selection
-  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04, 0x11]));
+  const [selectedPids, setSelectedPids] = useState<Set<number>>(new Set([0x0C, 0x0D, 0x05, 0x04]));
+  const autoAppliedE42PresetRef = useRef(false);
 
   // Handle PIDs injected from Knox Diagnostic Agent
   useEffect(() => {
@@ -871,6 +1134,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [isLogging, setIsLogging] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);  // Live view without recording
   const [isRecording, setIsRecording] = useState(false);    // Actively capturing data for saving
+  const isRecordingRef = useRef(false); // Ref mirror — avoids stale closure in onData callback
   const [liveReadings, setLiveReadings] = useState<Map<number, PIDReading>>(new Map());
   const [readingHistory, setReadingHistory] = useState<Map<number, PIDReading[]>>(new Map());
   const [recordedReadings, setRecordedReadings] = useState<Map<number, PIDReading[]>>(new Map()); // Only captured during recording
@@ -892,8 +1156,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [isAutoNaming, setIsAutoNaming] = useState(false);
   const autoNameMutation = trpc.datalogNaming.autoName.useMutation();
 
-  // Sample rate
-  const [sampleRateMs, setSampleRateMs] = useState(200);
+  // Sample rate (0 = no pacing between poll rounds — next loop starts immediately after last response)
+  const [sampleRateMs, setSampleRateMs] = useState(0);
 
   // Console logs
   const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
@@ -905,6 +1169,11 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   const [showConsole, setShowConsole] = useState(true);
   const [showPidSelector, setShowPidSelector] = useState(true);
   const [liveViewMode, setLiveViewMode] = useState<'list' | 'gauges'>('list');
+  // Fullscreen is now handled at the app level — no per-panel fullscreen
+  // Drag-to-rearrange PID gauge blocks
+  const [pidGaugeOrder, setPidGaugeOrder] = useState<number[]>([]); // PID numbers in user-chosen order
+  const dragPidRef = useRef<number | null>(null);
+  const dragOverPidRef = useRef<number | null>(null);
 
   // DID Scan state
   const [isScanning, setIsScanning] = useState(false);
@@ -929,10 +1198,30 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     setConsoleLogs(prev => [...prev.slice(-200), msg]);
   }, []);
 
+  // Auto-apply a known-good E42 preset once per connection so 2024+ Duramax
+  // sessions start with directed-addressing-safe Mode 22 channels.
+  // (Must run after addLog is defined — not above with other effects.)
+  useEffect(() => {
+    if (!isE42DuramaxVehicle(vehicleInfo)) return;
+    if (autoAppliedE42PresetRef.current) return;
+
+    const e42Preset = getPresetsForVehicle('gm', 'diesel').find((p) =>
+      p.name.toLowerCase().includes('2024-2026 l5p banks idash full')
+    );
+    if (!e42Preset) return;
+
+    setSelectedPids((prev) => {
+      if (!isDefaultQuickSelection(prev)) return prev;
+      autoAppliedE42PresetRef.current = true;
+      addLog(`Auto-applied E42 preset: ${e42Preset.name}`);
+      return new Set(e42Preset.pids);
+    });
+  }, [vehicleInfo, addLog]);
+
   const [detectedBridgeUrl, setDetectedBridgeUrl] = useState<string | null>(null);
 
-  const handleCheckBridge = useCallback(async () => {
-    setCheckingBridge(true);
+  /** Probe local WebSocket bridge; returns URL when available (same discovery CONNECT uses). */
+  const probePcanBridge = useCallback(async (): Promise<string | null> => {
     try {
       const result = await PCANConnection.isBridgeAvailable();
       setBridgeAvailable(result.available);
@@ -940,31 +1229,57 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         setDetectedBridgeUrl(result.url);
         const proto = result.url.startsWith('wss') ? 'wss (secure)' : 'ws';
         addLog(`PCAN-USB bridge detected via ${proto}: ${result.url}`);
-      } else {
-        setDetectedBridgeUrl(null);
-        addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
-        addLog('If bridge IS running, you may need to accept the TLS certificate:');
-        addLog('  Open https://localhost:8766 in Chrome → Advanced → Proceed');
+        return result.url;
       }
+      setDetectedBridgeUrl(null);
+      addLog('PCAN-USB bridge not detected. Make sure pcan_bridge.py is running.');
+      addLog('If bridge IS running, you may need to accept the TLS certificate:');
+      addLog('  Open https://127.0.0.1:8766 (or https://localhost:8766) in Chrome → Advanced → Proceed');
+      return null;
     } catch {
       setBridgeAvailable(false);
       setDetectedBridgeUrl(null);
-    } finally {
-      setCheckingBridge(false);
+      return null;
     }
   }, [addLog]);
 
+  const handleCheckBridge = useCallback(async () => {
+    setCheckingBridge(true);
+    try {
+      await probePcanBridge();
+    } finally {
+      setCheckingBridge(false);
+    }
+  }, [probePcanBridge]);
+
+  /** While on PCAN and idle, refresh bridge status (CONNECT also probes if needed — same flow as V-OP: one action). */
+  useEffect(() => {
+    if (adapterType !== 'pcan') return;
+    if (connectionState !== 'disconnected' && connectionState !== 'error') return;
+    void probePcanBridge();
+  }, [adapterType, connectionState, probePcanBridge]);
+
   const handleConnect = useCallback(async () => {
-    let conn: OBDConnection | PCANConnection;
+    let conn: OBDConnection | PCANConnection | VopCan2UsbConnection;
 
     if (adapterType === 'pcan') {
-      // PCAN-USB via WebSocket bridge — use detected URL or auto-detect
-      conn = new PCANConnection(
-        detectedBridgeUrl ? { bridgeUrl: detectedBridgeUrl } : {}
-      );
-      addLog('Connecting via PCAN-USB bridge...');
+      let bridgeUrl = detectedBridgeUrl;
+      if (!bridgeUrl) {
+        setCheckingBridge(true);
+        try {
+          bridgeUrl = await probePcanBridge();
+        } finally {
+          setCheckingBridge(false);
+        }
+        if (!bridgeUrl) return;
+      }
+      conn = new PCANConnection({ bridgeUrl });
+      addLog('Connecting via PCAN-USB WebSocket bridge...');
+    } else if (adapterType === 'can2usb') {
+      conn = getSharedVopCan2UsbConnection();
+      conn.clearEventListeners();
+      addLog('Connecting to V-OP Can2USB (USB–CAN bridge)…');
     } else {
-      // ELM327 via WebSerial
       conn = new OBDConnection({
         protocol: '6',
         adaptiveTiming: 2,
@@ -973,7 +1288,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         spaces: false,
       });
       addLog('Connecting to ELM327-compatible adapter...');
-      addLog('NOTE: Select your adapter from the browser port picker. Raw CAN interfaces (PCAN-USB) will NOT appear — use the PCAN-USB mode instead.');
+      addLog('NOTE: In ELM mode, pick your OBD adapter in the port list. For PCAN-USB use the PCAN tab; for V-OP Can2USB use the V-OP tab.');
     }
 
     conn.on('stateChange', (e) => {
@@ -1011,15 +1326,30 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     connectionRef.current = conn;
 
     const success = await conn.connect();
+    // Sync React UI with transport (needed when reusing an already-open V-OP bridge: stateChange may not update UI reliably).
+    setConnectionState(conn.getState());
     if (success) {
       setSupportedPids(conn.getSupportedPids());
       const stdCount = conn.getAvailablePids().length;
-      const extPids = MANUFACTURER_PIDS[detectedManufacturer] || [];
-      const extCount = extPids.length;
-      const mfgLabel = detectedManufacturer === 'universal' ? 'universal' : detectedManufacturer.toUpperCase();
-      addLog(`Connected via ${adapterType === 'pcan' ? 'PCAN-USB bridge' : 'ELM327 WebSerial'}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
+      const vi =
+        typeof (conn as { getVehicleInfo?: () => VehicleInfo }).getVehicleInfo === 'function'
+          ? (conn as { getVehicleInfo: () => VehicleInfo }).getVehicleInfo()
+          : {};
+      const mfr = (vi.manufacturer as PIDManufacturer | undefined) ?? detectedManufacturer;
+      const extCount =
+        typeof conn.getAvailableExtendedPids === 'function'
+          ? conn.getAvailableExtendedPids().length
+          : (MANUFACTURER_PIDS[mfr] || []).length;
+      const mfgLabel = mfr === 'universal' ? 'universal' : mfr.toUpperCase();
+      const via =
+        adapterType === 'pcan'
+          ? 'PCAN-USB bridge'
+          : adapterType === 'can2usb'
+            ? 'V-OP Can2USB'
+            : 'ELM327 WebSerial';
+      addLog(`Connected via ${via}! ${stdCount} standard PIDs + ${extCount} ${mfgLabel} extended PIDs available`);
     }
-  }, [addLog, adapterType]);
+  }, [addLog, adapterType, detectedBridgeUrl, probePcanBridge]);
 
   const handleDisconnect = useCallback(async () => {
     if (isLogging) {
@@ -1030,18 +1360,28 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       connectionRef.current = null;
     }
     setVehicleInfo(null);
+    autoAppliedE42PresetRef.current = false;
     setSupportedPids(null);
     addLog('Disconnected');
   }, [isLogging, addLog]);
 
   // ─── Logging handlers ────────────────────────────────────────────────
 
+  // Vehicle-filtered PID list — excludes gas PIDs on diesel trucks (and vice versa)
+  // This prevents shared DIDs (e.g. 0x208A = FP_SAE on diesel, TTQRET on gas)
+  // from resolving to the wrong definition.
+  const vehicleFilteredPids = useMemo(
+    () => getPidsForVehicle(detectedManufacturer, detectedFuelType),
+    [detectedManufacturer, detectedFuelType]
+  );
+
   // Helper: prepare PIDs and force-add unsupported ones
   const preparePidsForLogging = useCallback(() => {
     const conn = connectionRef.current;
     if (!conn) return null;
 
-    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+    // Use vehicle-filtered PIDs to avoid gas/diesel DID collisions
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
     if (pidsToLog.length === 0) {
       addLog('ERROR: No PIDs selected. Select at least one PID from the list below.');
       return null;
@@ -1063,7 +1403,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       }
     }
     return pidsToLog;
-  }, [selectedPids, addLog]);
+  }, [selectedPids, addLog, vehicleFilteredPids]);
 
   // ─── MONITOR: Start live data view WITHOUT recording ─────────────────
   const handleStartMonitoring = useCallback(async () => {
@@ -1078,7 +1418,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
     const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
     const mode01Count = pidsToLog.length - mode22Count;
-    addLog(`Starting live monitor: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs}ms`);
+    addLog(
+      `Starting live monitor: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext) @ ${sampleRateMs > 0 ? `${sampleRateMs}ms` : 'max rate'}`,
+    );
 
     // Reset live data
     setLiveReadings(new Map());
@@ -1118,31 +1460,34 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
           consecutiveFailsRef.current = 0;
         }
 
-        const newLive = new Map<number, PIDReading>();
-        for (const r of readings) newLive.set(r.pid, r);
-        setLiveReadings(newLive);
-
+        // React 18 auto-batches setState calls inside event handlers and effects,
+        // but this callback fires from an async CAN bus read (outside React lifecycle).
+        // We combine related updates to minimize re-render passes.
+        // Merge live + history + sample count in one setState to reduce re-renders.
+        setLiveReadings(prev => {
+          const merged = new Map(prev);
+          for (const r of readings) merged.set(r.pid, r);
+          return merged;
+        });
         setReadingHistory(prev => {
           const next = new Map(prev);
           for (const r of readings) {
-            const arr = next.get(r.pid) || [];
+            let arr = next.get(r.pid);
+            if (!arr) { arr = []; next.set(r.pid, arr); }
             arr.push(r);
-            if (arr.length > 1000) arr.shift();
-            next.set(r.pid, [...arr]);
+            if (arr.length > 1200) next.set(r.pid, arr.slice(-1000));
           }
           return next;
         });
-
         setSampleCount(prev => prev + 1);
-
         // If recording, also capture into recorded readings
-        if (isRecording) {
+        if (isRecordingRef.current) {
           setRecordedReadings(prev => {
             const next = new Map(prev);
             for (const r of readings) {
-              const arr = next.get(r.pid) || [];
+              let arr = next.get(r.pid);
+              if (!arr) { arr = []; next.set(r.pid, arr); }
               arr.push(r);
-              next.set(r.pid, [...arr]);
             }
             return next;
           });
@@ -1162,7 +1507,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         durationIntervalRef.current = null;
       }
     }
-  }, [connectionState, preparePidsForLogging, sampleRateMs, addLog, isRecording, ecuLostReason]);
+  }, [connectionState, preparePidsForLogging, sampleRateMs, addLog, ecuLostReason]);
 
   // ─── RECORD: Start capturing data for saving (while monitoring) ──────
   const handleStartRecording = useCallback(() => {
@@ -1174,12 +1519,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       setRecordDuration(Math.floor((Date.now() - recordStartRef.current) / 1000));
     }, 1000);
     setIsRecording(true);
+    isRecordingRef.current = true;
     addLog('⏺ RECORDING STARTED — capturing data for session save');
   }, [addLog]);
 
   // ─── STOP RECORD: Save session + AI auto-name ───────────────────────
   const handleStopRecording = useCallback(async () => {
     setIsRecording(false);
+    isRecordingRef.current = false;
     if (recordIntervalRef.current) {
       clearInterval(recordIntervalRef.current);
       recordIntervalRef.current = null;
@@ -1187,7 +1534,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
     const endTime = Date.now();
     const duration = (endTime - recordStartRef.current) / 1000;
-    const pidsToLog = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
     // Build session from recorded readings
     const session: LogSession = {
@@ -1201,7 +1548,14 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     };
 
     setCompletedSessions(prev => [session, ...prev]);
-    addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples`);
+    // Persist to session history (localStorage)
+    const savedMeta = saveSession(session);
+    if (savedMeta) {
+      setSessionHistory(loadSessionIndex());
+      addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples · Saved to history`);
+    } else {
+      addLog(`⏹ Recording stopped: ${duration.toFixed(1)}s · ${recordSampleCount} samples (history save skipped — too large)`);
+    }
 
     // AI Auto-Name the session
     try {
@@ -1238,6 +1592,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
         session.name = result.name;
         // Update the session in state
         setCompletedSessions(prev => prev.map(s => s.id === session.id ? { ...s, name: result.name } : s));
+        // Also update in persistent history
+        updateSessionName(session.id, result.name);
+        setSessionHistory(loadSessionIndex());
         addLog(`🤖 AI named session: "${result.name}"`);
       }
     } catch (err) {
@@ -1290,6 +1647,107 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     addLog(`Applied preset: ${preset.name}`);
   }, [addLog]);
 
+  // ─── Auto-repoll: restart polling when PIDs change during monitoring ──
+  // Uses a ref to track the previous selectedPids set and a debounce timer
+  // to avoid rapid stop/start cycles when toggling multiple PIDs quickly.
+  const prevSelectedPidsRef = useRef<Set<number>>(selectedPids);
+  const repollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // Only auto-repoll when monitoring but NOT recording
+    if (!isMonitoring || isRecording) {
+      prevSelectedPidsRef.current = selectedPids;
+      return;
+    }
+    // Check if selectedPids actually changed
+    const prev = prevSelectedPidsRef.current;
+    const changed = prev.size !== selectedPids.size || [...selectedPids].some(p => !prev.has(p));
+    if (!changed) return;
+    prevSelectedPidsRef.current = selectedPids;
+    // Debounce: wait 600ms after last PID change before restarting
+    if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
+    repollTimerRef.current = setTimeout(async () => {
+      repollTimerRef.current = null;
+      const conn = connectionRef.current;
+      if (!conn) return;
+      // Stop current polling loop
+      conn.stopLogging();
+      // Brief pause to let the loop exit cleanly
+      await new Promise(resolve => setTimeout(resolve, 100));
+      // Prepare new PID list
+      const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
+      if (pidsToLog.length === 0) {
+        addLog('All PIDs deselected — monitoring paused. Select PIDs to resume.');
+        return;
+      }
+      const mode22Count = pidsToLog.filter(p => (p.service ?? 0x01) === 0x22).length;
+      const mode01Count = pidsToLog.length - mode22Count;
+      addLog(`PID selection changed — restarting poll: ${pidsToLog.length} PIDs (${mode01Count} std + ${mode22Count} ext)`);
+      // Force-add unsupported PIDs
+      if ('filterSupportedPids' in conn && typeof (conn as any).filterSupportedPids === 'function') {
+        const { unsupported } = (conn as any).filterSupportedPids(pidsToLog);
+        if (unsupported.length > 0 && 'supportedPids' in conn) {
+          for (const pid of unsupported) (conn as any).supportedPids.add(pid.pid);
+        }
+      }
+      try {
+        // Re-set state to logging (connection may have gone to 'ready' after stopLogging)
+        conn.startLogging(pidsToLog, sampleRateMs, (readings) => {
+          if (!readings || readings.length === 0) {
+            consecutiveFailsRef.current++;
+            if (consecutiveFailsRef.current >= ECU_FAIL_THRESHOLD && !ecuLostReason) {
+              const reason = 'ECU stopped responding after PID change.';
+              setEcuLostReason(reason);
+              addLog(`⚠ ECU COMMUNICATION LOST: ${reason}`);
+            }
+            return;
+          }
+          if (consecutiveFailsRef.current > 0) {
+            if (ecuLostReason) {
+              addLog('✓ ECU communication restored.');
+              setEcuLostReason(null);
+            }
+            consecutiveFailsRef.current = 0;
+          }
+          setLiveReadings(prev => {
+            const merged = new Map(prev);
+            for (const r of readings) merged.set(r.pid, r);
+            return merged;
+          });
+          setReadingHistory(prev => {
+            const next = new Map(prev);
+            for (const r of readings) {
+              let arr = next.get(r.pid);
+              if (!arr) { arr = []; next.set(r.pid, arr); }
+              arr.push(r);
+              if (arr.length > 1200) {
+                next.set(r.pid, arr.slice(-1000));
+              }
+            }
+            return next;
+          });
+          setSampleCount(prev => prev + 1);
+          if (isRecordingRef.current) {
+            setRecordedReadings(prev => {
+              const next = new Map(prev);
+              for (const r of readings) {
+                let arr = next.get(r.pid);
+                if (!arr) { arr = []; next.set(r.pid, arr); }
+                arr.push(r);
+              }
+              return next;
+            });
+            setRecordSampleCount(prev => prev + 1);
+          }
+        });
+      } catch (err) {
+        addLog(`ERROR restarting poll: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    }, 600);
+    return () => {
+      if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
+    };
+  }, [selectedPids, isMonitoring, isRecording, vehicleFilteredPids, sampleRateMs, addLog, ecuLostReason]);
+
   // ─── Custom Preset handlers ─────────────────────────────────────────
 
   const handleCreatePreset = useCallback(() => {
@@ -1324,8 +1782,33 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     setEditingPreset(null);
   }, [editingPreset, customPresets, addLog]);
 
-  // ─── DID Scan handlers ──────────────────────────────────────────────
+   // ─── Preset Export/Import handlers ──────────────────────────────────
+  const presetImportRef = useRef<HTMLInputElement>(null);
+  const handleExportPreset = useCallback((preset: PIDPreset) => {
+    downloadPresetAsJSON(preset);
+    addLog(`Exported preset: ${preset.name}`);
+  }, [addLog]);
+  const handleImportPreset = useCallback(() => {
+    presetImportRef.current?.click();
+  }, []);
+  const handleImportPresetFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const imported = await importPresetFromFile(file);
+    if (imported) {
+      setCustomPresets(loadCustomPresets());
+      addLog(`Imported preset: ${imported.name} (${imported.pids.length} PIDs)`);
+    } else {
+      addLog('ERROR: Failed to import preset — invalid JSON format');
+    }
+    e.target.value = '';
+  }, [addLog]);
 
+  // ─── Session History ─────────────────────────────────────────────────
+  const [sessionHistory, setSessionHistory] = useState<SessionMeta[]>(() => loadSessionIndex());
+  const [showSessionHistory, setShowSessionHistory] = useState(false);
+
+  // ─── DID Scan handlers ──────────────────────────────────────────────
   const handleStartScan = useCallback(async () => {
     const conn = connectionRef.current;
     if (!conn || connectionState !== 'ready') return;
@@ -1459,7 +1942,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   }, [addLog]);
 
   const handleOpenInAnalyzer = useCallback((session: LogSession) => {
-    const csv = sessionToAnalyzerCSV(session);
+    const csv = exportSessionToCSV(session);
     const filename = `datalog_${new Date(session.startTime).toISOString().replace(/[:.]/g, '-')}.csv`;
     if (onOpenInAnalyzer) {
       onOpenInAnalyzer(csv, filename);
@@ -1475,6 +1958,38 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
     addLog('Session sent to Analyzer');
   }, [onOpenInAnalyzer, addLog]);
 
+  // ─── AUTO-EXPORT: Build session from current live data and send to analyzer ──
+  const handleAutoExportToAnalyzer = useCallback(() => {
+    if (readingHistory.size === 0) {
+      addLog('No data to export — start monitoring first');
+      return;
+    }
+    const pidsToLog = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
+    // Find earliest and latest timestamps across all readings
+    let earliest = Infinity, latest = -Infinity;
+    readingHistory.forEach(readings => {
+      if (readings.length > 0) {
+        earliest = Math.min(earliest, readings[0].timestamp);
+        latest = Math.max(latest, readings[readings.length - 1].timestamp);
+      }
+    });
+    const session: LogSession = {
+      id: `live_export_${Date.now()}`,
+      startTime: earliest === Infinity ? Date.now() : earliest,
+      endTime: latest === -Infinity ? Date.now() : latest,
+      sampleRate: sampleRateMs,
+      pids: pidsToLog,
+      readings: new Map(readingHistory),
+      vehicleInfo: vehicleInfo || undefined,
+    };
+    const csv = exportSessionToCSV(session);
+    const filename = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    if (onOpenInAnalyzer) {
+      onOpenInAnalyzer(csv, filename);
+    }
+    addLog('Live data exported and sent to Analyzer');
+  }, [readingHistory, vehicleFilteredPids, selectedPids, sampleRateMs, vehicleInfo, onOpenInAnalyzer, addLog]);
+
   const handleDeleteSession = useCallback((id: string) => {
     setCompletedSessions(prev => prev.filter(s => s.id !== id));
   }, []);
@@ -1484,6 +1999,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
   useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
+      if (recordIntervalRef.current) clearInterval(recordIntervalRef.current);
+      if (repollTimerRef.current) clearTimeout(repollTimerRef.current);
       if (connectionRef.current) {
         connectionRef.current.disconnect();
       }
@@ -1492,7 +2009,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
 
   // ─── Render ──────────────────────────────────────────────────────────
 
-  const activePids = ALL_PIDS.filter(p => selectedPids.has(p.pid));
+  const activePids = vehicleFilteredPids.filter(p => selectedPids.has(p.pid));
 
   return (
     <div>
@@ -1545,6 +2062,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 borderRadius: '2px', color: sColor.text,
               }}
             >
+              <option value={0}>Max (no pacing)</option>
               <option value={100}>100ms (10Hz)</option>
               <option value={200}>200ms (5Hz)</option>
               <option value={500}>500ms (2Hz)</option>
@@ -1557,31 +2075,34 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>ADAPTER:</span>
             <select
               value={adapterType}
-              onChange={e => setAdapterType(e.target.value as 'elm327' | 'pcan')}
+              onChange={e => setAdapterType(e.target.value as DataloggerAdapterType)}
               disabled={connectionState !== 'disconnected' && connectionState !== 'error'}
               style={{
                 fontFamily: sFont.mono, fontSize: '0.7rem', padding: '2px 6px',
                 background: 'oklch(0.10 0.005 260)', border: `1px solid ${sColor.border}`,
-                borderRadius: '2px', color: adapterType === 'pcan' ? sColor.orange : sColor.text,
+                borderRadius: '2px', color: usesOrangeAdapterUi ? sColor.orange : sColor.text,
               }}
             >
+              <option value="pcan">PCAN-USB (WS bridge)</option>
+              <option value="can2usb">V-OP Can2USB</option>
               <option value="elm327">ELM327 (WebSerial)</option>
-              <option value="pcan">PCAN-USB (Bridge)</option>
             </select>
           </div>
+
+          {/* Fullscreen toggle moved to app-level (Home.tsx tab bar) */}
 
           {/* Connect/Disconnect */}
           {connectionState === 'disconnected' || connectionState === 'error' ? (
             <button
               onClick={handleConnect}
-              disabled={adapterType === 'elm327' ? !isWebSerialSupported : false}
+              disabled={usesWebSerial ? !isWebSerialSupported : false}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '6px 14px', background: sColor.green, border: 'none',
                 borderRadius: '3px', color: 'oklch(0.10 0.005 260)',
                 fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
-                cursor: (adapterType === 'elm327' && !isWebSerialSupported) ? 'not-allowed' : 'pointer',
-                opacity: (adapterType === 'elm327' && !isWebSerialSupported) ? 0.5 : 1,
+                cursor: (usesWebSerial && !isWebSerialSupported) ? 'not-allowed' : 'pointer',
+                opacity: (usesWebSerial && !isWebSerialSupported) ? 0.5 : 1,
               }}
             >
               <Wifi style={{ width: 14, height: 14 }} /> CONNECT
@@ -1691,6 +2212,23 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               }}
             >
               <Square style={{ width: 14, height: 14 }} /> STOP REC · {recordDuration}s · {recordSampleCount} samples
+            </button>
+          )}
+          {/* AUTO EXPORT TO ANALYZER — available when there's live data */}
+          {(isMonitoring || readingHistory.size > 0) && onOpenInAnalyzer && (
+            <button
+              onClick={handleAutoExportToAnalyzer}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 14px', background: 'oklch(0.15 0.04 200 / 0.3)',
+                border: `1px solid oklch(0.70 0.14 200)`, borderRadius: '3px',
+                color: 'oklch(0.70 0.14 200)',
+                fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.1em',
+                cursor: 'pointer',
+              }}
+              title="Send current live data to Analyzer tab"
+            >
+              <BarChart3 style={{ width: 14, height: 14 }} /> ANALYZE LIVE
             </button>
           )}
           {/* AI Auto-Naming indicator */}
@@ -2246,6 +2784,18 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Protocol</span>
             <div style={{ fontFamily: sFont.mono, fontSize: '0.8rem', color: sColor.text }}>{vehicleInfo.protocol || 'Auto'}</div>
           </div>
+          {(vehicleInfo.vopDeviceName || vehicleInfo.vopDeviceSerial) && (
+            <div style={{ opacity: 0.85 }}>
+              <span style={{ fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>USB bridge</span>
+              <div
+                style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textMuted, maxWidth: '280px', wordBreak: 'break-all' }}
+                title={[vehicleInfo.vopDeviceName, vehicleInfo.vopDeviceSerial].filter(Boolean).join(' · ')}
+              >
+                {vehicleInfo.vopDeviceName ? `Device: ${vehicleInfo.vopDeviceName}` : 'Device: —'}
+                {vehicleInfo.vopDeviceSerial ? ` · Serial: ${vehicleInfo.vopDeviceSerial}` : ''}
+              </div>
+            </div>
+          )}
           <div>
             <span style={{ fontFamily: sFont.body, fontSize: '0.65rem', color: sColor.textDim, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Voltage</span>
             <div style={{
@@ -2301,11 +2851,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
               onTogglePid={handleTogglePid}
               onApplyPreset={handleApplyPreset}
               supportedPids={supportedPids}
-              disabled={isLogging}
+              disabled={isRecording}
               customPresets={customPresets}
               onCreatePreset={handleCreatePreset}
               onEditPreset={handleEditPreset}
               onDeletePreset={handleDeletePreset}
+              onExportPreset={handleExportPreset}
+              onImportPreset={handleImportPreset}
               manufacturer={detectedManufacturer}
               fuelType={detectedFuelType}
             />
@@ -2358,27 +2910,128 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             </div>
           </div>
 
-          {/* === LIST VIEW (original layout) === */}
+          {/* === LIST VIEW (category-grouped layout) === */}
           {liveViewMode === 'list' && (
             <>
-              {/* Live Gauges */}
-              {(isLogging || liveReadings.size > 0) && (
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em', marginBottom: '8px' }}>
-                    LIVE DATA
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {activePids.map(pid => (
-                      <LiveGauge key={`${pid.service}-${pid.pid}`} pid={pid} reading={liveReadings.get(pid.pid) || null} />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Live Gauges — grouped by category with drag-to-rearrange */}
+              {(isLogging || liveReadings.size > 0) && (() => {
+                // Build ordered PID list: use user's custom order, appending any new PIDs at end
+                const activePidNums = activePids.map(p => p.pid);
+                const ordered: PIDDefinition[] = [];
+                const seen = new Set<number>();
+                for (const pidNum of pidGaugeOrder) {
+                  if (activePidNums.includes(pidNum) && !seen.has(pidNum)) {
+                    const def = activePids.find(p => p.pid === pidNum);
+                    if (def) { ordered.push(def); seen.add(pidNum); }
+                  }
+                }
+                for (const pid of activePids) {
+                  if (!seen.has(pid.pid)) { ordered.push(pid); seen.add(pid.pid); }
+                }
 
-              {/* Real-Time Chart */}
+                // Group by category
+                const groups = new Map<PIDCategory, PIDDefinition[]>();
+                for (const pid of ordered) {
+                  const cat = pid.category || 'other';
+                  if (!groups.has(cat)) groups.set(cat, []);
+                  groups.get(cat)!.push(pid);
+                }
+                // Sort categories by CATEGORY_ORDER
+                const sortedCategories = CATEGORY_ORDER.filter(c => groups.has(c));
+
+                const handleDragStart = (pidNum: number) => { dragPidRef.current = pidNum; };
+                const handleDragOver = (e: React.DragEvent, pidNum: number) => {
+                  e.preventDefault();
+                  dragOverPidRef.current = pidNum;
+                };
+                const handleDrop = () => {
+                  const from = dragPidRef.current;
+                  const to = dragOverPidRef.current;
+                  if (from === null || to === null || from === to) return;
+                  const currentOrder = ordered.map(p => p.pid);
+                  const fromIdx = currentOrder.indexOf(from);
+                  const toIdx = currentOrder.indexOf(to);
+                  if (fromIdx < 0 || toIdx < 0) return;
+                  currentOrder.splice(fromIdx, 1);
+                  currentOrder.splice(toIdx, 0, from);
+                  setPidGaugeOrder(currentOrder);
+                  dragPidRef.current = null;
+                  dragOverPidRef.current = null;
+                };
+
+                return (
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      marginBottom: '10px',
+                    }}>
+                      <div style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.text, letterSpacing: '0.1em' }}>
+                        LIVE DATA
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.48rem', color: sColor.textMuted, marginLeft: '8px' }}>
+                          drag to rearrange
+                        </span>
+                      </div>
+                      <span style={{
+                        fontFamily: sFont.mono, fontSize: '0.55rem', color: sColor.textDim,
+                        background: 'oklch(0.12 0.005 260)', padding: '2px 8px', borderRadius: '3px',
+                        border: `1px solid ${sColor.border}`,
+                      }}>
+                        {ordered.length} PIDs · {sortedCategories.length} groups
+                      </span>
+                    </div>
+
+                    {sortedCategories.map(cat => {
+                      const catConfig = CATEGORY_CONFIG[cat];
+                      const pidsInCat = groups.get(cat)!;
+                      return (
+                        <div key={cat} style={{ marginBottom: '12px' }}>
+                          {/* Category header */}
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: '6px',
+                            marginBottom: '6px', paddingBottom: '4px',
+                            borderBottom: `1px solid oklch(0.18 0.006 260)`,
+                          }}>
+                            <span style={{ fontSize: '0.7rem' }}>{catConfig.icon}</span>
+                            <span style={{
+                              fontFamily: sFont.heading, fontSize: '0.72rem', color: catConfig.color,
+                              letterSpacing: '0.12em',
+                            }}>
+                              {catConfig.label}
+                            </span>
+                            <span style={{
+                              fontFamily: sFont.mono, fontSize: '0.48rem', color: sColor.textMuted,
+                            }}>
+                              ({pidsInCat.length})
+                            </span>
+                            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, ${catConfig.color}33, transparent)` }} />
+                          </div>
+                          {/* PID blocks */}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {pidsInCat.map(pid => (
+                              <div
+                                key={`${pid.service}-${pid.pid}`}
+                                draggable
+                                onDragStart={() => handleDragStart(pid.pid)}
+                                onDragOver={(e) => handleDragOver(e, pid.pid)}
+                                onDrop={handleDrop}
+                                onDragEnd={() => { dragPidRef.current = null; dragOverPidRef.current = null; }}
+                                style={{ cursor: 'grab' }}
+                              >
+                                <LiveGauge pid={pid} reading={liveReadings.get(pid.pid) || null} />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Real-Time Datalog Viewer (Erik-style multi-section) */}
               {(isLogging || readingHistory.size > 0) && (
                 <div style={{ marginBottom: '16px' }}>
-                  <LiveChart
+                  <OBDDatalogViewer
                     pids={activePids}
                     readingHistory={readingHistory}
                     liveReadings={liveReadings}
@@ -2398,10 +3051,10 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 allAvailablePids={ALL_PIDS}
                 isLogging={isLogging}
               />
-              {/* Still show the chart below gauges */}
+              {/* Datalog Viewer below gauges */}
               {(isLogging || readingHistory.size > 0) && (
                 <div style={{ marginTop: '16px' }}>
-                  <LiveChart
+                  <OBDDatalogViewer
                     pids={activePids}
                     readingHistory={readingHistory}
                     liveReadings={liveReadings}
@@ -2423,33 +3076,46 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                 CONNECT YOUR OBD-II ADAPTER
               </div>
 
-              {/* Adapter Mode Tabs */}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0', marginBottom: '20px', maxWidth: '440px', margin: '0 auto 20px' }}>
-                <button
-                  onClick={() => setAdapterType('elm327')}
-                  style={{
-                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
-                    borderRadius: '3px 0 0 3px', cursor: 'pointer',
-                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
-                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-                    color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
-                  }}
-                >
-                  <div>ELM327 / OBDLINK</div>
-                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>WebSerial (USB)</div>
-                </button>
+              {/* Adapter Mode Tabs — order: PCAN-USB, V-OP Can2USB, ELM327 */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '20px', maxWidth: '720px', margin: '0 auto 20px', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setAdapterType('pcan')}
                   style={{
-                    flex: 1, padding: '10px 16px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
-                    borderRadius: '0 3px 3px 0', cursor: 'pointer',
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'pcan' ? sColor.orange : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
                     background: adapterType === 'pcan' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.28 0.005 260)',
-                    fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
                     color: adapterType === 'pcan' ? sColor.orange : sColor.textDim,
                   }}
                 >
                   <div>PCAN-USB</div>
-                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Bridge (WebSocket)</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>Python bridge (WS)</div>
+                </button>
+                <button
+                  onClick={() => setAdapterType('can2usb')}
+                  style={{
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'can2usb' ? sColor.orange : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
+                    background: adapterType === 'can2usb' ? 'oklch(0.12 0.04 55 / 0.4)' : 'oklch(0.28 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+                    color: adapterType === 'can2usb' ? sColor.orange : sColor.textDim,
+                  }}
+                >
+                  <div>V-OP Can2USB</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>USB CAN bridge</div>
+                </button>
+                <button
+                  onClick={() => setAdapterType('elm327')}
+                  style={{
+                    flex: '1 1 160px', padding: '10px 12px', border: `1px solid ${adapterType === 'elm327' ? sColor.green : sColor.border}`,
+                    borderRadius: '3px', cursor: 'pointer',
+                    background: adapterType === 'elm327' ? 'oklch(0.12 0.03 145 / 0.4)' : 'oklch(0.28 0.005 260)',
+                    fontFamily: sFont.heading, fontSize: '0.75rem', letterSpacing: '0.06em',
+                    color: adapterType === 'elm327' ? sColor.green : sColor.textDim,
+                  }}
+                >
+                  <div>ELM327 / OBDLINK</div>
+                  <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, marginTop: '2px' }}>WebSerial AT</div>
                 </button>
               </div>
 
@@ -2489,16 +3155,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                     <br />{'•'} Try unplugging and re-plugging the USB cable
                     <br />{'•'} Select your device from the list — it may appear as "USB Serial Device" or "COM port"
                     <br />{'•'} On Windows, check Device Manager {'→'} Ports (COM & LPT) to confirm the device is recognized
-                    <br />{'•'} <strong style={{ color: sColor.orange }}>Have a PCAN-USB?</strong> Switch to the PCAN-USB tab above to use the bridge mode
+                    <br />{'•'} <strong style={{ color: sColor.orange }}>Raw CAN on USB?</strong> Use the <strong>PCAN-USB</strong> or <strong>V-OP Can2USB</strong> tab above (not ELM327).
                   </div>
                 </>
               )}
 
-              {/* PCAN-USB Mode Instructions */}
+              {/* PCAN-USB — WebSocket bridge only */}
               {adapterType === 'pcan' && (
                 <>
                   <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto' }}>
-                    The PCAN-USB connects through a <strong style={{ color: sColor.orange }}>local Python bridge</strong> that translates raw CAN frames to OBD-II. You need to run the bridge script on your computer first.
+                    <strong style={{ color: sColor.text }}>PCAN-USB</strong> uses the <strong style={{ color: sColor.orange }}>local Python bridge</strong> (WebSocket). It translates raw CAN to OBD-II. Run the VOP Bridge installer or <code style={{ fontSize: '0.8em' }}>pcan_bridge.py</code> on your PC first — not the V-OP Can2USB serial path.
                   </div>
 
                   {/* Bridge Status */}
@@ -2532,14 +3198,19 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                           {checkingBridge ? 'CHECKING...' : 'CHECK'}
                         </button>
                       </div>
+                      <div style={{ fontFamily: sFont.body, fontSize: '0.68rem', color: sColor.textDim, marginTop: '6px' }}>
+                        <strong style={{ color: sColor.text }}>CONNECT</strong> finds the bridge automatically (same as V-OP — no separate step required).{' '}
+                        <strong>CHECK</strong> only refreshes status.
+                      </div>
                       {bridgeAvailable === true && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.green, marginTop: '6px' }}>
-                          Bridge detected and ready. Click <strong>CONNECT</strong> above to start.
+                          Bridge reachable. Click <strong>CONNECT</strong> above to start (VIN + PID init runs after connect).
                         </div>
                       )}
                       {bridgeAvailable === false && (
                         <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, marginTop: '6px' }}>
-                          Bridge not found. <strong style={{ color: sColor.text }}>Download the VOP Bridge installer below</strong> to get started.
+                          Bridge not found — install or run the bridge, then use <strong>CONNECT</strong> (it will retry discovery).{' '}
+                          <strong style={{ color: sColor.text }}>Download the VOP Bridge installer below</strong> or run <code style={{ fontSize: '0.75em' }}>pcan_bridge.py</code>.
                         </div>
                       )}
                     </div>
@@ -2585,8 +3256,9 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                           ⬇ DOWNLOAD BRIDGE
                         </a>
                         <a
-                          href="https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/pcan_bridge_dbcd85c1.py"
-                          download="pcan_bridge.py"
+                          href={PCAN_BRIDGE_PY_DOWNLOAD_HREF}
+                          download={PCAN_BRIDGE_PY_DOWNLOAD_FILENAME}
+                          title={PCAN_BRIDGE_PY_DOWNLOAD_TITLE}
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: '6px',
                             padding: '8px 14px', background: 'transparent',
@@ -2595,9 +3267,11 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                             textDecoration: 'none', cursor: 'pointer',
                           }}
                         >
-                          .py only
+                          pcan_bridge.py
                         </a>
-                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim }}>ZIP: bridge + quickstart + installer · 17 KB</span>
+                        <span style={{ fontFamily: sFont.mono, fontSize: '0.62rem', color: sColor.textDim, lineHeight: 1.4 }}>
+                          ZIP: installer bundle (~17 KB) · .py: same protocol as this web app (~75 KB, served locally)
+                        </span>
                       </div>
                     </div>
 
@@ -2617,8 +3291,8 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                         </div>
                         <div style={{ fontFamily: sFont.heading, fontSize: '1.1rem', color: 'oklch(0.52 0.22 25)', textAlign: 'center' }}>3</div>
                         <div style={{ fontFamily: sFont.body, fontSize: '0.76rem', color: sColor.text, paddingTop: '2px' }}>
-                          <strong>Click CHECK</strong> above, then <strong>CONNECT</strong> — you're live!
-                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time? Accept the certificate at <strong style={{ color: sColor.text }}>https://localhost:8766</strong></div>
+                          <strong>Click CONNECT</strong> in the header — same flow as V-OP Can2USB (bridge is discovered automatically).
+                          <div style={{ fontSize: '0.68rem', color: sColor.textDim }}>First time with TLS? Accept the certificate at <strong style={{ color: sColor.text }}>https://127.0.0.1:8766</strong> (or localhost)</div>
                         </div>
                       </div>
                     </div>
@@ -2651,13 +3325,19 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
                       <div style={{ padding: '10px 12px', marginTop: '6px', background: 'oklch(0.08 0.005 260)', border: `1px solid ${sColor.border}`, borderRadius: '3px', fontFamily: sFont.mono, fontSize: '0.7rem' }}>
                         <div style={{ color: sColor.textMuted, marginBottom: '4px' }}># 1. Install dependencies (one-time)</div>
                         <div style={{ color: sColor.green }}>pip install python-can websockets</div>
-                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in PCAN-USB, then run the bridge</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 2. Plug in USB-CAN adapter, then run the bridge</div>
                         <div style={{ color: sColor.green }}>python pcan_bridge.py</div>
-                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CHECK above to verify, then CONNECT</div>
+                        <div style={{ color: sColor.textMuted, marginTop: '8px', marginBottom: '4px' }}># 3. Click CONNECT in the app — bridge discovery runs automatically</div>
                       </div>
                     </details>
                   </div>
                 </>
+              )}
+
+              {adapterType === 'can2usb' && (
+                <div style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, lineHeight: 1.6, maxWidth: '520px', margin: '0 auto', textAlign: 'center' }}>
+                  <strong style={{ color: sColor.text }}>V-OP Can2USB</strong> is a <strong style={{ color: sColor.orange }}>USB–CAN bridge</strong>. Connect it to your PC, turn the vehicle ignition <strong>ON</strong>, then click <strong style={{ color: sColor.green }}>CONNECT</strong> and pick the device when the browser asks (Chrome or Edge).
+                </div>
               )}
             </div>
           )}
@@ -2686,9 +3366,117 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
             onOpenInAnalyzer={handleOpenInAnalyzer}
             onDelete={handleDeleteSession}
           />
+          {/* Session History (persisted) */}
+          <div style={{ marginTop: '16px' }}>
+            <button
+              onClick={() => setShowSessionHistory(!showSessionHistory)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px', width: '100%',
+                fontFamily: sFont.heading, fontSize: '0.8rem', color: sColor.textDim,
+                letterSpacing: '0.1em', background: 'transparent', border: 'none',
+                cursor: 'pointer', marginBottom: '6px', padding: 0,
+              }}
+            >
+              {showSessionHistory ? <ChevronDown style={{ width: 14, height: 14 }} /> : <ChevronRight style={{ width: 14, height: 14 }} />}
+              <Clock style={{ width: 14, height: 14 }} /> SESSION HISTORY
+              <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, marginLeft: 'auto' }}>
+                {sessionHistory.length} saved · {getStorageUsage().sizeKB} KB
+              </span>
+            </button>
+            {showSessionHistory && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {sessionHistory.length === 0 ? (
+                  <div style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textMuted, padding: '12px', textAlign: 'center' }}>
+                    No saved sessions yet. Record a session and it will appear here.
+                  </div>
+                ) : sessionHistory.map(meta => {
+                  const dateStr = new Date(meta.startTime).toLocaleString();
+                  return (
+                    <div key={meta.id} style={{
+                      background: sColor.bgCard, border: `1px solid ${sColor.border}`,
+                      borderRadius: '3px', padding: '10px 14px',
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.text }}>
+                          {meta.name || dateStr}
+                        </div>
+                        <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim, marginTop: '2px' }}>
+                          {meta.name ? dateStr + ' · ' : ''}{meta.durationSec.toFixed(1)}s · {meta.channelCount} ch · {meta.totalSamples} samples
+                        </div>
+                        {meta.vehicle && (
+                          <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.orange, marginTop: '2px' }}>
+                            {meta.vehicle}{meta.vin ? ` · ${meta.vin}` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          const session = loadSession(meta.id);
+                          if (session) {
+                            handleOpenInAnalyzer(session);
+                            addLog(`Loaded session from history: ${meta.name || 'unnamed'}`);
+                          } else {
+                            addLog('ERROR: Failed to load session from history');
+                          }
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '4px 10px', background: 'oklch(0.15 0.01 25 / 0.4)',
+                          border: `1px solid ${sColor.red}`, borderRadius: '3px',
+                          color: sColor.red, fontFamily: sFont.body, fontSize: '0.7rem',
+                          cursor: 'pointer', letterSpacing: '0.06em',
+                        }}
+                        title="Open in Analyzer"
+                      >
+                        <BarChart3 style={{ width: 12, height: 12 }} /> ANALYZE
+                      </button>
+                      <button
+                        onClick={() => {
+                          const session = loadSession(meta.id);
+                          if (session) handleExportCSV(session);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '4px 10px', background: 'oklch(0.15 0.008 260)',
+                          border: `1px solid ${sColor.border}`, borderRadius: '3px',
+                          color: sColor.text, fontFamily: sFont.body, fontSize: '0.7rem',
+                          cursor: 'pointer',
+                        }}
+                        title="Export CSV"
+                      >
+                        <Download style={{ width: 12, height: 12 }} /> CSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          deleteHistorySession(meta.id);
+                          setSessionHistory(loadSessionIndex());
+                          addLog('Deleted session from history');
+                        }}
+                        style={{
+                          padding: '4px 6px', background: 'transparent', border: 'none',
+                          color: sColor.textMuted, cursor: 'pointer',
+                        }}
+                        title="Delete from history"
+                      >
+                        <Trash2 style={{ width: 14, height: 14 }} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
+      {/* Hidden file input for preset import */}
+      <input
+        ref={presetImportRef}
+        type="file"
+        accept=".json"
+        onChange={handleImportPresetFile}
+        style={{ display: 'none' }}
+      />
       {/* Console */}
       <div style={{ marginTop: '16px' }}>
         <button

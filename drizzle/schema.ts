@@ -1104,6 +1104,91 @@ export const knoxFiles = mysqlTable("knox_files", {
 export type KnoxFile = typeof knoxFiles.$inferSelect;
 export type InsertKnoxFile = typeof knoxFiles.$inferInsert;
 
+// ── Tune Deploy — calibration binary library (R2 + searchable metadata) ────
+/**
+ * Indexed metadata for uploaded calibrations. Files live in object storage (R2 via storage proxy);
+ * this table powers search, filters, and future vehicle-connected auto-match.
+ * NOTE: Stack uses MySQL today; JSON columns mirror how you would model this in Postgres.
+ */
+export const tuneDeployCalibrations = mysqlTable("tune_deploy_calibrations", {
+  id: int("id").autoincrement().primaryKey(),
+  uploadedByUserId: int("uploadedByUserId").notNull(),
+  fileName: varchar("fileName", { length: 512 }).notNull(),
+  r2Key: varchar("r2Key", { length: 512 }).notNull(),
+  storageUrl: text("storageUrl"),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  sizeBytes: int("sizeBytes").notNull(),
+  vehicleFamily: varchar("vehicleFamily", { length: 128 }).notNull(),
+  vehicleSubType: varchar("vehicleSubType", { length: 128 }).notNull(),
+  modelYear: int("modelYear"),
+  osVersion: varchar("osVersion", { length: 256 }),
+  ecuType: varchar("ecuType", { length: 128 }),
+  ecuHardwareId: varchar("ecuHardwareId", { length: 128 }),
+  /** Denormalized for SQL LIKE search; also stored inside parsedMeta JSON */
+  partNumbersCsv: text("partNumbersCsv"),
+  /** Full Zod-validated parse result + extras */
+  parsedMeta: json("parsedMeta").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TuneDeployCalibrationRow = typeof tuneDeployCalibrations.$inferSelect;
+export type InsertTuneDeployCalibration = typeof tuneDeployCalibrations.$inferInsert;
+
+// ── Tune Deploy Devices (V-OP / PCAN serial targeting) ──────────────────────
+/**
+ * Registered flash devices. Each device is identified by its serial number
+ * (V-OP serial or PCAN serial). Tunes are assigned to specific devices so
+ * the correct calibration is deployed to the right hardware.
+ */
+export const tuneDeployDevices = mysqlTable("tune_deploy_devices", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 'vop' = V-OP programmer, 'pcan' = PCAN USB adapter */
+  deviceType: mysqlEnum("deviceType", ["vop", "pcan"]).notNull(),
+  /** Hardware serial number (unique per device) */
+  serialNumber: varchar("serialNumber", { length: 128 }).notNull().unique(),
+  /** Friendly label for the device, e.g. "Shop VOP #1", "Customer Truck" */
+  label: varchar("label", { length: 255 }),
+  /** Vehicle this device is typically connected to */
+  vehicleDescription: varchar("vehicleDescription", { length: 512 }),
+  /** VIN of the target vehicle (optional) */
+  vin: varchar("vin", { length: 17 }),
+  /** ECU / module serial when known — links to cloud enrollment `ecuSerial` for MY VEHICLE */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
+  /** Last time this device checked in / was seen online */
+  lastSeenAt: timestamp("lastSeenAt"),
+  /** Whether this device is active and should receive deployments */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployDevice = typeof tuneDeployDevices.$inferSelect;
+export type InsertTuneDeployDevice = typeof tuneDeployDevices.$inferInsert;
+
+// ── Tune Deploy Assignments (calibration → device mapping) ──────────────────
+/**
+ * Links a calibration from the library to a target device.
+ * When the device connects, it checks for pending assignments and
+ * deploys the matching tune.
+ */
+export const tuneDeployAssignments = mysqlTable("tune_deploy_assignments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id */
+  calibrationId: int("calibrationId").notNull(),
+  /** FK to tune_deploy_devices.id */
+  deviceId: int("deviceId").notNull(),
+  /** pending = waiting for device, deployed = sent to device, failed = deploy error */
+  status: mysqlEnum("status", ["pending", "deployed", "failed", "cancelled"]).default("pending").notNull(),
+  /** Notes about this assignment */
+  notes: text("notes"),
+  /** When the tune was actually deployed to the device */
+  deployedAt: timestamp("deployedAt"),
+  assignedBy: int("assignedBy"), // FK to users.id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TuneDeployAssignment = typeof tuneDeployAssignments.$inferSelect;
+export type InsertTuneDeployAssignment = typeof tuneDeployAssignments.$inferInsert;
+
 
 // ── CASTING MODE — Live Streaming & Virtual Dyno Events ─────────────────────
 
@@ -1364,3 +1449,921 @@ export const geofenceUserOverrides = mysqlTable("geofence_user_overrides", {
 
 export type GeofenceUserOverride = typeof geofenceUserOverrides.$inferSelect;
 export type InsertGeofenceUserOverride = typeof geofenceUserOverrides.$inferInsert;
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FLASH SYSTEM TABLES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Flash sessions — records each flash attempt (simulator or real PCAN).
+ */
+export const flashSessions = mysqlTable("flash_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Unique session UUID for client reference */
+  uuid: varchar("uuid", { length: 64 }).notNull().unique(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** ECU type string (e.g., "E88", "E41") */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** ECU display name */
+  ecuName: varchar("ecuName", { length: 128 }),
+  /** Flash mode: full_flash, calibration, patch_only */
+  flashMode: mysqlEnum("flashMode", ["full_flash", "calibration", "patch_only"]).notNull(),
+  /** Connection mode: simulator, PCAN bridge, or V-OP USB2CAN (Web Serial) */
+  connectionMode: mysqlEnum("connectionMode", ["simulator", "pcan", "vop_usb"]).notNull(),
+  /** Session status */
+  status: mysqlEnum("status", ["pending", "running", "success", "failed", "aborted"]).default("pending").notNull(),
+  /** File hash (FNV-1a) for duplicate detection */
+  fileHash: varchar("fileHash", { length: 64 }),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** File size in bytes */
+  fileSize: int("fileSize"),
+  /** VIN from container header */
+  vin: varchar("vin", { length: 32 }),
+  /** File ID from container header */
+  fileId: varchar("fileId", { length: 128 }),
+  /** Total blocks in flash plan */
+  totalBlocks: int("totalBlocks").default(0),
+  /** Total bytes to transfer */
+  totalBytes: int("totalBytes").default(0),
+  /** Final progress percentage (0-100) */
+  progress: int("progress").default(0),
+  /** Duration in milliseconds */
+  durationMs: int("durationMs"),
+  /** Error message if failed */
+  errorMessage: text("errorMessage"),
+  /** NRC code if failed */
+  nrcCode: int("nrcCode"),
+  /** JSON metadata (flash plan summary, recovery info, etc.) */
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashSession = typeof flashSessions.$inferSelect;
+export type InsertFlashSession = typeof flashSessions.$inferInsert;
+
+/**
+ * Flash session logs — individual log entries for a flash session.
+ */
+export const flashSessionLogs = mysqlTable("flash_session_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to flash_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Log timestamp (ms since session start) */
+  timestampMs: int("timestampMs").notNull(),
+  /** Flash phase */
+  phase: varchar("phase", { length: 32 }).notNull(),
+  /** Log type: info, success, warning, error, can_tx, can_rx, nrc */
+  type: varchar("type", { length: 16 }).notNull(),
+  /** Log message */
+  message: text("message").notNull(),
+  /** Block ID if applicable */
+  blockId: int("blockId"),
+  /** NRC code if applicable */
+  nrcCode: int("nrcCode"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FlashSessionLog = typeof flashSessionLogs.$inferSelect;
+export type InsertFlashSessionLog = typeof flashSessionLogs.$inferInsert;
+
+/**
+ * Flash queue — pending flash jobs.
+ */
+export const flashQueue = mysqlTable("flash_queue", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Flash mode */
+  flashMode: mysqlEnum("flashMode", ["full_flash", "calibration", "patch_only"]).notNull(),
+  /** Queue status */
+  status: mysqlEnum("status", ["queued", "processing", "completed", "failed", "cancelled"]).default("queued").notNull(),
+  /** Priority (lower = higher priority) */
+  priority: int("priority").default(10).notNull(),
+  /** File hash for the container */
+  fileHash: varchar("fileHash", { length: 64 }),
+  /** S3 URL for the uploaded container */
+  fileUrl: varchar("fileUrl", { length: 512 }),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** FK to flash_sessions.id when processing starts */
+  sessionId: int("sessionId"),
+  /** JSON metadata */
+  metadata: json("metadata"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashQueueItem = typeof flashQueue.$inferSelect;
+export type InsertFlashQueueItem = typeof flashQueue.$inferInsert;
+
+/**
+ * ECU snapshots — captured ECU state before/after flash.
+ */
+export const ecuSnapshots = mysqlTable("ecu_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to flash_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Snapshot type: pre_flash or post_flash */
+  snapshotType: mysqlEnum("snapshotType", ["pre_flash", "post_flash"]).notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** VIN at time of snapshot */
+  vin: varchar("vin", { length: 32 }),
+  /** Software version identifiers (JSON array) */
+  softwareVersions: json("softwareVersions"),
+  /** Hardware number */
+  hardwareNumber: varchar("hardwareNumber", { length: 64 }),
+  /** DTC snapshot (JSON array of codes) */
+  dtcSnapshot: json("dtcSnapshot"),
+  /** Raw DID responses (JSON object) */
+  didResponses: json("didResponses"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type EcuSnapshot = typeof ecuSnapshots.$inferSelect;
+export type InsertEcuSnapshot = typeof ecuSnapshots.$inferInsert;
+
+/**
+ * Flash stats — aggregated statistics per ECU type.
+ */
+export const flashStats = mysqlTable("flash_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Total flash attempts */
+  totalAttempts: int("totalAttempts").default(0).notNull(),
+  /** Successful flashes */
+  successCount: int("successCount").default(0).notNull(),
+  /** Failed flashes */
+  failCount: int("failCount").default(0).notNull(),
+  /** Average duration in ms */
+  avgDurationMs: int("avgDurationMs").default(0),
+  /** Last flash timestamp */
+  lastFlashAt: timestamp("lastFlashAt"),
+  /** Most common NRC code */
+  commonNrc: int("commonNrc"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FlashStat = typeof flashStats.$inferSelect;
+export type InsertFlashStat = typeof flashStats.$inferInsert;
+
+/**
+ * File fingerprints — for duplicate detection and flash history.
+ */
+export const fileFingerprints = mysqlTable("file_fingerprints", {
+  id: int("id").autoincrement().primaryKey(),
+  /** File hash (FNV-1a) */
+  fileHash: varchar("fileHash", { length: 64 }).notNull(),
+  /** ECU type */
+  ecuType: varchar("ecuType", { length: 32 }).notNull(),
+  /** Original filename */
+  fileName: varchar("fileName", { length: 256 }),
+  /** File size in bytes */
+  fileSize: int("fileSize"),
+  /** Number of times this file has been flashed */
+  flashCount: int("flashCount").default(0).notNull(),
+  /** Last flash session ID */
+  lastSessionId: int("lastSessionId"),
+  /** Last flash result */
+  lastResult: mysqlEnum("lastResult", ["success", "failed"]),
+  /** FK to users.id — who first uploaded this file */
+  uploadedBy: int("uploadedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type FileFingerprint = typeof fileFingerprints.$inferSelect;
+export type InsertFileFingerprint = typeof fileFingerprints.$inferInsert;
+
+// ── Weather Reports (Vehicle-Reported Atmospheric Data) ─────────────────────
+/**
+ * Individual weather reports from vehicles with VOP plugged in.
+ * Vehicles calculate atmospheric conditions from onboard sensors:
+ * - IAT (Intake Air Temperature) → ambient temperature
+ * - MAP/BARO (Manifold/Barometric Pressure) → barometric pressure
+ * - Calculated humidity from intake conditions
+ * - GPS coordinates for location
+ */
+export const weatherReports = mysqlTable("weather_reports", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — vehicle owner who submitted the report */
+  userId: int("userId"),
+  /** Vehicle identifier (VIN or fleet tag) */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vehicleName: varchar("vehicleName", { length: 128 }),
+  /** GPS coordinates */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  /** City/region (reverse geocoded or user-provided) */
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  country: varchar("country", { length: 64 }),
+  /** Atmospheric measurements from vehicle sensors */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }).notNull(), // Fahrenheit
+  temperatureC: decimal("temperatureC", { precision: 6, scale: 2 }).notNull(), // Celsius
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }).notNull(), // inches of mercury
+  baroPressureKpa: decimal("baroPressureKpa", { precision: 7, scale: 2 }).notNull(), // kilopascals
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }), // relative humidity %
+  altitudeFt: decimal("altitudeFt", { precision: 8, scale: 1 }), // feet above sea level
+  /** Derived values */
+  dewPointF: decimal("dewPointF", { precision: 6, scale: 2 }), // dew point Fahrenheit
+  densityAltitudeFt: decimal("densityAltitudeFt", { precision: 8, scale: 1 }), // density altitude
+  airDensityLbFt3: decimal("airDensityLbFt3", { precision: 8, scale: 6 }), // lb/ft³
+  /** SAE J1349 correction factor computed from these conditions */
+  saeCorrectionFactor: decimal("saeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** Sensor source info */
+  sensorSource: mysqlEnum("sensorSource", ["obd2", "j1939", "kline", "manual"]).default("obd2"),
+  /** Data quality score (0-100) based on sensor consistency */
+  qualityScore: int("qualityScore").default(100),
+  /** Timestamp of the actual measurement (may differ from createdAt) */
+  measuredAt: timestamp("measuredAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WeatherReport = typeof weatherReports.$inferSelect;
+export type InsertWeatherReport = typeof weatherReports.$inferInsert;
+
+// ── Weather Stations (Aggregated Area Conditions) ───────────────────────────
+/**
+ * Virtual weather stations — aggregated atmospheric conditions from multiple
+ * vehicle reports within a geographic area. Updated periodically.
+ * These provide the "actual weather" for a region based on real vehicle data.
+ */
+export const weatherStations = mysqlTable("weather_stations", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Station name (auto-generated from location) */
+  name: varchar("name", { length: 128 }).notNull(),
+  /** Center coordinates of the aggregation area */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  /** Aggregation radius in miles */
+  radiusMiles: decimal("radiusMiles", { precision: 6, scale: 2 }).default("25").notNull(),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  country: varchar("country", { length: 64 }),
+  /** Aggregated atmospheric conditions (averaged from vehicle reports) */
+  avgTemperatureF: decimal("avgTemperatureF", { precision: 6, scale: 2 }),
+  avgBaroPressureInHg: decimal("avgBaroPressureInHg", { precision: 6, scale: 3 }),
+  avgHumidityPct: decimal("avgHumidityPct", { precision: 5, scale: 2 }),
+  avgAltitudeFt: decimal("avgAltitudeFt", { precision: 8, scale: 1 }),
+  avgDensityAltitudeFt: decimal("avgDensityAltitudeFt", { precision: 8, scale: 1 }),
+  avgAirDensityLbFt3: decimal("avgAirDensityLbFt3", { precision: 8, scale: 6 }),
+  avgSaeCorrectionFactor: decimal("avgSaeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** Number of vehicle reports in this aggregation window */
+  reportCount: int("reportCount").default(0).notNull(),
+  /** Number of unique vehicles contributing */
+  vehicleCount: int("vehicleCount").default(0).notNull(),
+  /** Time window for aggregation */
+  windowStartAt: timestamp("windowStartAt"),
+  windowEndAt: timestamp("windowEndAt"),
+  /** Last time this station was recalculated */
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WeatherStation = typeof weatherStations.$inferSelect;
+export type InsertWeatherStation = typeof weatherStations.$inferInsert;
+
+// ── Dyno Sessions (Competition Dyno Runs with SAE Corrections) ──────────────
+/**
+ * Individual dyno runs with full atmospheric data and SAE correction factors.
+ * Links to weather data so corrections are based on ACTUAL conditions,
+ * not guessed standard values. This enables fair dyno competitions.
+ */
+export const dynoSessions = mysqlTable("dyno_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id */
+  userId: int("userId").notNull(),
+  /** Vehicle info */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vehicleName: varchar("vehicleName", { length: 128 }),
+  vehicleYear: int("vehicleYear"),
+  vehicleMake: varchar("vehicleMake", { length: 64 }),
+  vehicleModel: varchar("vehicleModel", { length: 64 }),
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // e.g., "stock", "bolt-on", "built", "open"
+  /** Dyno results — observed (uncorrected) */
+  peakHpObserved: decimal("peakHpObserved", { precision: 7, scale: 2 }),
+  peakTqObserved: decimal("peakTqObserved", { precision: 7, scale: 2 }),
+  peakHpRpm: int("peakHpRpm"),
+  peakTqRpm: int("peakTqRpm"),
+  /** Dyno results — SAE corrected */
+  peakHpCorrected: decimal("peakHpCorrected", { precision: 7, scale: 2 }),
+  peakTqCorrected: decimal("peakTqCorrected", { precision: 7, scale: 2 }),
+  /** SAE correction factor used (from real weather data) */
+  saeCorrectionFactor: decimal("saeCorrectionFactor", { precision: 6, scale: 4 }).notNull(),
+  /** Atmospheric conditions at time of run (from weather system) */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }).notNull(),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }).notNull(),
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  densityAltitudeFt: decimal("densityAltitudeFt", { precision: 8, scale: 1 }),
+  airDensityLbFt3: decimal("airDensityLbFt3", { precision: 8, scale: 6 }),
+  /** FK to weather_reports.id — the specific weather report used for correction */
+  weatherReportId: int("weatherReportId"),
+  /** FK to weather_stations.id — the station area used */
+  weatherStationId: int("weatherStationId"),
+  /** Location of the dyno run */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  facilityName: varchar("facilityName", { length: 128 }), // dyno shop name
+  /** Dyno type */
+  dynoType: mysqlEnum("dynoType", ["chassis", "engine", "hub"]).default("chassis"),
+  dynoBrand: varchar("dynoBrand", { length: 64 }), // e.g., "DynoJet", "Mustang", "Mainline"
+  /** FK to dyno_competitions.id — if this run is part of a competition */
+  competitionId: int("competitionId"),
+  /** Run metadata */
+  runNumber: int("runNumber").default(1),
+  notes: text("notes"),
+  /** S3 URL for dyno sheet image/PDF */
+  dynoSheetUrl: text("dynoSheetUrl"),
+  /** Full HP/TQ curve data as JSON array of {rpm, hp, tq} */
+  curveData: json("curveData"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type DynoSession = typeof dynoSessions.$inferSelect;
+export type InsertDynoSession = typeof dynoSessions.$inferInsert;
+
+// ── Dyno Competitions (Events with Weather-Linked Conditions) ───────────────
+/**
+ * Competition events where multiple vehicles compete on the dyno.
+ * Each competition is linked to real atmospheric conditions from the weather system,
+ * ensuring all participants are corrected with the SAME actual conditions.
+ * No more guessing the correction factor — we KNOW the conditions.
+ */
+export const dynoCompetitions = mysqlTable("dyno_competitions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Competition details */
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  /** Location */
+  facilityName: varchar("facilityName", { length: 128 }),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  /** Competition rules */
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // e.g., "stock", "bolt-on", "built", "open"
+  dynoType: mysqlEnum("dynoType", ["chassis", "engine", "hub"]).default("chassis"),
+  maxParticipants: int("maxParticipants"),
+  /** Atmospheric conditions for this competition (from weather system) */
+  avgTemperatureF: decimal("avgTemperatureF", { precision: 6, scale: 2 }),
+  avgBaroPressureInHg: decimal("avgBaroPressureInHg", { precision: 6, scale: 3 }),
+  avgHumidityPct: decimal("avgHumidityPct", { precision: 5, scale: 2 }),
+  avgSaeCorrectionFactor: decimal("avgSaeCorrectionFactor", { precision: 6, scale: 4 }),
+  /** FK to weather_stations.id — the station providing conditions */
+  weatherStationId: int("weatherStationId"),
+  /** Status */
+  status: mysqlEnum("status", ["upcoming", "active", "completed", "cancelled"]).default("upcoming").notNull(),
+  /** Organizer */
+  createdBy: int("createdBy").notNull(), // FK to users.id
+  /** Schedule */
+  startDate: timestamp("startDate"),
+  endDate: timestamp("endDate"),
+  /** Stats */
+  participantCount: int("participantCount").default(0).notNull(),
+  runCount: int("runCount").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type DynoCompetition = typeof dynoCompetitions.$inferSelect;
+export type InsertDynoCompetition = typeof dynoCompetitions.$inferInsert;
+
+// ── Cloud Network — Crowd-Sourced Vehicle Analytics ─────────────────────────
+/**
+ * Cloud network enrollment. Users opt-in their vehicles to contribute
+ * anonymized data (MPG, health, performance) to the crowd-sourced network.
+ * Data is aggregated by vehicle type so owners and fleets can see real-world
+ * averages instead of relying on forums or manufacturer specs.
+ */
+export const cloudEnrollments = mysqlTable("cloud_enrollments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the vehicle owner */
+  userId: int("userId").notNull(),
+  /** Vehicle identification */
+  vehicleId: varchar("vehicleId", { length: 64 }),
+  vin: varchar("vin", { length: 17 }),
+  /** V-OP / PCAN programmer serial — matches `tune_deploy_devices.serialNumber` for Tune Deploy → Cloud MY VEHICLE */
+  programmerSerial: varchar("programmerSerial", { length: 128 }),
+  /** ECU serial — matches `tune_deploy_devices.ecuSerial` when set */
+  ecuSerial: varchar("ecuSerial", { length: 128 }),
+  /** Vehicle classification for grouping */
+  vehicleYear: int("vehicleYear"),
+  vehicleMake: varchar("vehicleMake", { length: 64 }),
+  vehicleModel: varchar("vehicleModel", { length: 64 }),
+  vehicleEngine: varchar("vehicleEngine", { length: 64 }), // e.g., "6.6L Duramax L5P", "5.3L Vortec"
+  vehicleClass: varchar("vehicleClass", { length: 64 }), // "stock", "bolt-on", "built", "deleted", "tuned"
+  /** Normalized vehicle type key for aggregation (e.g., "2020_chevrolet_silverado_l5p") */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Optional fleet link */
+  fleetOrgId: int("fleetOrgId"), // FK to fleet_orgs.id — null for individual owners
+  /** Enrollment status */
+  isActive: boolean("isActive").default(true).notNull(),
+  /** What data the user consents to share */
+  shareMpg: boolean("shareMpg").default(true).notNull(),
+  shareHealth: boolean("shareHealth").default(true).notNull(),
+  sharePerformance: boolean("sharePerformance").default(true).notNull(),
+  shareDtcs: boolean("shareDtcs").default(true).notNull(),
+  /** Region for geographic aggregation */
+  region: varchar("region", { length: 64 }), // "US-South", "US-Midwest", etc.
+  state: varchar("state", { length: 2 }),
+  /** Timestamps */
+  enrolledAt: timestamp("enrolledAt").defaultNow().notNull(),
+  unenrolledAt: timestamp("unenrolledAt"),
+  lastReportAt: timestamp("lastReportAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CloudEnrollment = typeof cloudEnrollments.$inferSelect;
+export type InsertCloudEnrollment = typeof cloudEnrollments.$inferInsert;
+
+/**
+ * Periodic vehicle data snapshots submitted by enrolled vehicles.
+ * Each snapshot captures a moment-in-time reading from the vehicle's sensors.
+ * All data is anonymized — no PII, just vehicle type + metrics.
+ */
+export const cloudVehicleSnapshots = mysqlTable("cloud_vehicle_snapshots", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to cloud_enrollments.id */
+  enrollmentId: int("enrollmentId").notNull(),
+  /** Denormalized vehicle type key for fast aggregation */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Fleet org ID (null for individual) */
+  fleetOrgId: int("fleetOrgId"),
+  /** Fuel economy */
+  avgMpg: decimal("avgMpg", { precision: 6, scale: 2 }),
+  instantMpg: decimal("instantMpg", { precision: 6, scale: 2 }),
+  totalMiles: decimal("totalMiles", { precision: 10, scale: 1 }),
+  totalGallons: decimal("totalGallons", { precision: 10, scale: 2 }),
+  /** Engine health metrics */
+  coolantTempF: decimal("coolantTempF", { precision: 6, scale: 1 }),
+  oilTempF: decimal("oilTempF", { precision: 6, scale: 1 }),
+  oilPressurePsi: decimal("oilPressurePsi", { precision: 6, scale: 1 }),
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  batteryVoltage: decimal("batteryVoltage", { precision: 5, scale: 2 }),
+  /** Performance metrics */
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 1 }),
+  egtF: decimal("egtF", { precision: 7, scale: 1 }), // exhaust gas temp
+  fuelRailPsi: decimal("fuelRailPsi", { precision: 8, scale: 1 }),
+  airflowGps: decimal("airflowGps", { precision: 7, scale: 2 }), // MAF g/s
+  /** Health score (0-100, computed from diagnostics) */
+  healthScore: int("healthScore"),
+  /** Active DTC count */
+  activeDtcCount: int("activeDtcCount").default(0),
+  /** Common DTCs (JSON array of codes, no PII) */
+  activeDtcs: text("activeDtcs"), // JSON: ["P0300", "P0171"]
+  /** Odometer reading */
+  odometerMiles: int("odometerMiles"),
+  /** Atmospheric conditions at time of snapshot */
+  ambientTempF: decimal("ambientTempF", { precision: 6, scale: 1 }),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  altitudeFt: int("altitudeFt"),
+  /** Snapshot timestamp */
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CloudVehicleSnapshot = typeof cloudVehicleSnapshots.$inferSelect;
+export type InsertCloudVehicleSnapshot = typeof cloudVehicleSnapshots.$inferInsert;
+
+/**
+ * Pre-computed fleet aggregates by vehicle type.
+ * Updated periodically from cloud_vehicle_snapshots.
+ * Provides the "real-world averages" that users and fleets compare against.
+ */
+export const cloudFleetAggregates = mysqlTable("cloud_fleet_aggregates", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Vehicle type key for grouping (e.g., "2020_chevrolet_silverado_l5p") */
+  vehicleTypeKey: varchar("vehicleTypeKey", { length: 128 }).notNull(),
+  /** Human-readable vehicle type label */
+  vehicleTypeLabel: varchar("vehicleTypeLabel", { length: 255 }).notNull(),
+  /** Period for this aggregate (e.g., "2026-Q1", "all-time", "last-30d") */
+  period: varchar("period", { length: 32 }).default("all-time").notNull(),
+  /** Fleet vs individual breakdown */
+  isFleetOnly: boolean("isFleetOnly").default(false).notNull(), // true = fleet vehicles only
+  /** Fuel economy averages */
+  avgMpg: decimal("avgMpg", { precision: 6, scale: 2 }),
+  minMpg: decimal("minMpg", { precision: 6, scale: 2 }),
+  maxMpg: decimal("maxMpg", { precision: 6, scale: 2 }),
+  medianMpg: decimal("medianMpg", { precision: 6, scale: 2 }),
+  /** Health averages */
+  avgHealthScore: decimal("avgHealthScore", { precision: 5, scale: 1 }),
+  avgCoolantTempF: decimal("avgCoolantTempF", { precision: 6, scale: 1 }),
+  avgOilTempF: decimal("avgOilTempF", { precision: 6, scale: 1 }),
+  avgTransTemp: decimal("avgTransTemp", { precision: 6, scale: 1 }),
+  avgBatteryVoltage: decimal("avgBatteryVoltage", { precision: 5, scale: 2 }),
+  /** Performance averages */
+  avgBoostPsi: decimal("avgBoostPsi", { precision: 6, scale: 1 }),
+  avgEgtF: decimal("avgEgtF", { precision: 7, scale: 1 }),
+  /** DTC statistics */
+  avgDtcCount: decimal("avgDtcCount", { precision: 5, scale: 2 }),
+  topDtcs: text("topDtcs"), // JSON: [{ code: "P0300", count: 42, pct: 12.5 }]
+  /** Mileage statistics */
+  avgOdometerMiles: int("avgOdometerMiles"),
+  minOdometerMiles: int("minOdometerMiles"),
+  maxOdometerMiles: int("maxOdometerMiles"),
+  /** Network size */
+  vehicleCount: int("vehicleCount").default(0).notNull(),
+  snapshotCount: int("snapshotCount").default(0).notNull(),
+  fleetVehicleCount: int("fleetVehicleCount").default(0).notNull(),
+  individualVehicleCount: int("individualVehicleCount").default(0).notNull(),
+  /** Last computed */
+  computedAt: timestamp("computedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CloudFleetAggregate = typeof cloudFleetAggregates.$inferSelect;
+export type InsertCloudFleetAggregate = typeof cloudFleetAggregates.$inferInsert;
+
+
+// ─── Live Weather Streams (Storm Chaser / Weather Streamer Telemetry) ────────
+
+export const liveWeatherStreams = mysqlTable("live_weather_streams", {
+  id: int("id").autoincrement().primaryKey(),
+  /** User who owns this stream */
+  userId: int("userId").notNull(),
+  /** Stream key for authentication */
+  streamKey: varchar("streamKey", { length: 64 }).notNull().unique(),
+  /** Display name for the stream (e.g. "Ryan Hall Y'all - Oklahoma Chase") */
+  title: varchar("title", { length: 256 }).notNull(),
+  /** Stream description / mission */
+  description: text("description"),
+  /** Vehicle type (e.g. "2018 L5P Duramax") */
+  vehicleType: varchar("vehicleType", { length: 128 }),
+  /** Vehicle identifier / callsign */
+  callsign: varchar("callsign", { length: 64 }),
+  /** Stream status */
+  status: mysqlEnum("status", ["testing", "live", "paused", "ended"]).default("testing").notNull(),
+  /** Current latitude */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  /** Current longitude */
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  /** Current heading (degrees) */
+  heading: decimal("heading", { precision: 5, scale: 1 }),
+  /** Current speed (mph) */
+  speedMph: decimal("speedMph", { precision: 6, scale: 1 }),
+  /** Latest atmospheric: temperature (°F) */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }),
+  /** Latest atmospheric: barometric pressure (inHg) */
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  /** Latest atmospheric: humidity (%) */
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  /** Latest atmospheric: wind speed (mph) */
+  windSpeedMph: decimal("windSpeedMph", { precision: 6, scale: 1 }),
+  /** Latest atmospheric: wind direction (degrees) */
+  windDirection: decimal("windDirection", { precision: 5, scale: 1 }),
+  /** Latest vehicle: engine RPM */
+  engineRpm: int("engineRpm"),
+  /** Latest vehicle: throttle position (%) */
+  throttlePct: decimal("throttlePct", { precision: 5, scale: 2 }),
+  /** Latest vehicle: engine load (%) */
+  engineLoadPct: decimal("engineLoadPct", { precision: 5, scale: 2 }),
+  /** Latest vehicle: boost pressure (psi) */
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 2 }),
+  /** Latest vehicle: transmission temp (°F) */
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: coolant temp (°F) */
+  coolantTemp: decimal("coolantTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: intake air temp (°F) */
+  intakeAirTemp: decimal("intakeAirTemp", { precision: 6, scale: 1 }),
+  /** Latest vehicle: fuel rate (gal/hr) */
+  fuelRateGph: decimal("fuelRateGph", { precision: 6, scale: 2 }),
+  /** Whether storm chase active mode is engaged */
+  stormChaseActive: boolean("stormChaseActive").default(false).notNull(),
+  /** Emergency override: DTC clear every 7s for 10 min */
+  emergencyOverrideActive: boolean("emergencyOverrideActive").default(false).notNull(),
+  emergencyOverrideStartedAt: timestamp("emergencyOverrideStartedAt"),
+  /** User toggle preferences — JSON: { peakGauges, healthPulse, viewerCount, audioAlert } */
+  streamSettings: json("streamSettings"),
+  /** Post-session summary — JSON: { totalDistance, maxSpeed, maxGForce, dtcsEncountered, overridesUsed, duration, ... } */
+  sessionSummary: json("sessionSummary"),
+  /** Vehicle health status: green, yellow, red */
+  healthStatus: mysqlEnum("healthStatus", ["green", "yellow", "red"]).default("green"),
+  /** Peak values during session — JSON: { maxMph, maxRpm, maxGForce, maxBoost } */
+  peakValues: json("peakValues"),
+  /** Viewer count */
+  peakViewerCount: int("peakViewerCount").default(0).notNull(),
+  /** Viewer count */
+  viewerCount: int("viewerCount").default(0).notNull(),
+  /** Total data points received */
+  totalDataPoints: int("totalDataPoints").default(0).notNull(),
+  /** External stream URL (YouTube, Twitch, etc.) for video embed */
+  externalStreamUrl: varchar("externalStreamUrl", { length: 512 }),
+  /** OBS overlay embed URL (generated) */
+  overlayUrl: varchar("overlayUrl", { length: 512 }),
+  /** Tags for categorization (JSON array: ["storm-chase", "tornado", "hurricane"]) */
+  tags: json("tags"),
+  /** Stream started at */
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  /** Stream ended at */
+  endedAt: timestamp("endedAt"),
+  /** Last telemetry update */
+  lastUpdateAt: timestamp("lastUpdateAt").defaultNow().onUpdateNow().notNull(),
+});
+export type LiveWeatherStream = typeof liveWeatherStreams.$inferSelect;
+export type InsertLiveWeatherStream = typeof liveWeatherStreams.$inferInsert;
+
+export const streamTelemetryPoints = mysqlTable("stream_telemetry_points", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Parent stream */
+  streamId: int("streamId").notNull(),
+  /** GPS coordinates */
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  heading: decimal("heading", { precision: 5, scale: 1 }),
+  speedMph: decimal("speedMph", { precision: 6, scale: 1 }),
+  /** Atmospheric data */
+  temperatureF: decimal("temperatureF", { precision: 6, scale: 2 }),
+  baroPressureInHg: decimal("baroPressureInHg", { precision: 6, scale: 3 }),
+  humidityPct: decimal("humidityPct", { precision: 5, scale: 2 }),
+  windSpeedMph: decimal("windSpeedMph", { precision: 6, scale: 1 }),
+  windDirection: decimal("windDirection", { precision: 5, scale: 1 }),
+  /** Vehicle telemetry */
+  engineRpm: int("engineRpm"),
+  throttlePct: decimal("throttlePct", { precision: 5, scale: 2 }),
+  engineLoadPct: decimal("engineLoadPct", { precision: 5, scale: 2 }),
+  boostPsi: decimal("boostPsi", { precision: 6, scale: 2 }),
+  transTemp: decimal("transTemp", { precision: 6, scale: 1 }),
+  coolantTemp: decimal("coolantTemp", { precision: 6, scale: 1 }),
+  intakeAirTemp: decimal("intakeAirTemp", { precision: 6, scale: 1 }),
+  fuelRateGph: decimal("fuelRateGph", { precision: 6, scale: 2 }),
+  /** Timestamp of this data point */
+  capturedAt: timestamp("capturedAt").defaultNow().notNull(),
+});
+export type StreamTelemetryPoint = typeof streamTelemetryPoints.$inferSelect;
+export type InsertStreamTelemetryPoint = typeof streamTelemetryPoints.$inferInsert;
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STRAT — Post-Sale Tech Support Agent Feedback
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const stratFeedback = mysqlTable("strat_feedback", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — nullable for unauthenticated users */
+  userId: int("userId"),
+  /** Star rating 1-5 */
+  rating: int("rating").notNull(),
+  /** Detailed comment from the user */
+  comment: text("comment"),
+  /** What product the user was asking about (auto-detected from conversation) */
+  productCategory: varchar("productCategory", { length: 64 }),
+  /** Whether the issue was resolved by Strat */
+  resolved: boolean("resolved"),
+  /** Number of messages in the conversation when feedback was given */
+  messageCount: int("messageCount"),
+  /** Summary of the conversation topics (auto-generated) */
+  conversationSummary: text("conversationSummary"),
+  /** Full chat log — JSON array of {role, content} messages */
+  chatLog: json("chatLog"),
+  /** Session duration in seconds */
+  sessionDuration: int("sessionDuration"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type StratFeedback = typeof stratFeedback.$inferSelect;
+export type InsertStratFeedback = typeof stratFeedback.$inferInsert;
+
+
+// ── Task Overrides (persists task status, notes, section moves) ────────────
+export const taskOverrides = mysqlTable("task_overrides", {
+  /** The task ID from taskData.ts (e.g. "analyzer-parse-efilive") */
+  taskId: varchar("taskId", { length: 128 }).primaryKey(),
+  /** Override status: not_started, in_progress, passed */
+  status: varchar("status", { length: 32 }),
+  /** Debugging / progress notes written by the user */
+  notes: text("notes"),
+  /** Section override if user moved the task to a different top section */
+  sectionOverride: varchar("sectionOverride", { length: 64 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type TaskOverride = typeof taskOverrides.$inferSelect;
+export type InsertTaskOverride = typeof taskOverrides.$inferInsert;
+
+
+// ── Storm Chaser Live Stream ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Stream sessions — each storm chase session creates one record.
+ * Tracks connection state, settings (toggle prefs), and post-session summary.
+ */
+export const streamSessions = mysqlTable("stream_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the driver/streamer */
+  userId: int("userId").notNull(),
+  /** Unique share key for viewer/overlay URLs */
+  shareKey: varchar("shareKey", { length: 64 }).notNull().unique(),
+  /** Session status */
+  status: mysqlEnum("streamStatus", ["connecting", "scanning", "live", "paused", "ended"]).default("connecting").notNull(),
+  /** Whether storm chase active mode is engaged */
+  stormChaseActive: boolean("stormChaseActive").default(false).notNull(),
+  /** User toggle preferences — JSON: { peakGauges, healthPulse, viewerCount, audioAlert } */
+  settings: json("settings"),
+  /** Post-session summary — JSON: { totalDistance, maxSpeed, maxGForce, dtcsEncountered, overridesUsed, duration, ... } */
+  summary: json("summary"),
+  /** Emergency override state */
+  emergencyOverrideActive: boolean("emergencyOverrideActive").default(false).notNull(),
+  emergencyOverrideStartedAt: timestamp("emergencyOverrideStartedAt"),
+  /** Total viewers who connected during this session */
+  peakViewerCount: int("peakViewerCount").default(0).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  endedAt: timestamp("endedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StreamSession = typeof streamSessions.$inferSelect;
+export type InsertStreamSession = typeof streamSessions.$inferInsert;
+
+/**
+ * Stream events — timestamped log of everything that happens during a chase.
+ * Types: event_marker, code_clear, code_read, override_start, override_end, connection, error
+ */
+export const streamEvents = mysqlTable("stream_events", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to stream_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** Event type */
+  type: mysqlEnum("eventType", [
+    "event_marker",     // Driver-tagged moment (tornado spotted, hail impact, etc.)
+    "code_clear",       // DTC code clear attempt
+    "code_read",        // DTC read — codes broadcast to viewers
+    "override_start",   // Emergency override activated
+    "override_end",     // Emergency override ended (timer expired or manual stop)
+    "connection",       // Vehicle connected/disconnected
+    "error",            // OBD error or connection issue
+  ]).notNull(),
+  /** Event-specific data — JSON */
+  data: json("data"),
+  /** Optional label (for event markers) */
+  label: varchar("label", { length: 255 }),
+  /** Whether this event was successful (for code_clear attempts) */
+  success: boolean("success"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export type StreamEvent = typeof streamEvents.$inferSelect;
+export type InsertStreamEvent = typeof streamEvents.$inferInsert;
+
+/**
+ * Stream telemetry snapshots — periodic snapshots of PID data for replay.
+ * Stored at ~1Hz for replay (live data streams via WebSocket at higher rate).
+ */
+export const streamTelemetry = mysqlTable("stream_telemetry", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to stream_sessions.id */
+  sessionId: int("sessionId").notNull(),
+  /** PID snapshot — JSON: { rpm, mph, throttlePct, brakePct, gForceX, gForceY, ... } */
+  data: json("data"),
+  /** Vehicle health status at this moment: green, yellow, red */
+  healthStatus: mysqlEnum("healthStatus", ["green", "yellow", "red"]).default("green"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+});
+
+export type StreamTelemetry = typeof streamTelemetry.$inferSelect;
+export type InsertStreamTelemetry = typeof streamTelemetry.$inferInsert;
+
+
+// ── Tune Deploy — Auto-Deploy Calibration Folder Hierarchy ──────────────────
+/**
+ * Hierarchical folder structure for organizing calibrations:
+ *   Vehicle Type (L5P) → OS → Part Number
+ * Admin-managed. parentId = null means root-level folder.
+ */
+export const calibrationFolders = mysqlTable("calibration_folders", {
+  id: int("id").autoincrement().primaryKey(),
+  parentId: int("parentId"), // FK to self — null = root
+  name: varchar("name", { length: 255 }).notNull(),
+  /** 'vehicle_type' | 'os' | 'part_number' | 'custom' */
+  folderType: mysqlEnum("folderType", ["vehicle_type", "os", "part_number", "custom"]).default("custom").notNull(),
+  /** Breadcrumb path for display, e.g. "L5P / E41 / 12709844" */
+  fullPath: text("fullPath"),
+  /** Sort order within parent */
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationFolder = typeof calibrationFolders.$inferSelect;
+export type InsertCalibrationFolder = typeof calibrationFolders.$inferInsert;
+
+// ── Tune Deploy — Auto-Deploy Metadata (extends tune_deploy_calibrations) ───
+/**
+ * Additional auto-deploy fields for calibrations. Stored in a separate table
+ * to avoid altering the existing tune_deploy_calibrations table.
+ * One-to-one with tune_deploy_calibrations.id.
+ */
+export const calibrationAutoDeployMeta = mysqlTable("calibration_auto_deploy_meta", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id */
+  calibrationId: int("calibrationId").notNull().unique(),
+  /** FK to calibration_folders.id — which folder this calibration lives in */
+  folderId: int("folderId"),
+  /** ECM or TCM — identifies which module this calibration targets */
+  moduleType: mysqlEnum("moduleType", ["ecm", "tcm"]).default("ecm").notNull(),
+  /** Whether this calibration is flagged for auto-deploy */
+  autoDeploy: boolean("autoDeploy").default(false).notNull(),
+  /** Minimum access level required (maps to users.accessLevel 0-3) */
+  autoDeployAccessLevel: int("autoDeployAccessLevel").default(1).notNull(),
+  /** Admin notes about this calibration's deployment */
+  notes: text("notes"),
+  /** Who last modified the auto-deploy settings */
+  updatedBy: int("updatedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationAutoDeployMeta = typeof calibrationAutoDeployMeta.$inferSelect;
+export type InsertCalibrationAutoDeployMeta = typeof calibrationAutoDeployMeta.$inferInsert;
+
+// ── Tune Deploy — ECM + TCM Combo Pairings ──────────────────────────────────
+/**
+ * Pairs an ECM calibration with a TCM calibration for 1-shot combo deploy.
+ * When the V-OP tool requests auto-deploy, if a combo exists for the matched
+ * ECM calibration, the TCM calibration is also returned (and vice versa).
+ */
+export const calibrationCombos = mysqlTable("calibration_combos", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to tune_deploy_calibrations.id — the ECM calibration */
+  ecmCalibrationId: int("ecmCalibrationId").notNull(),
+  /** FK to tune_deploy_calibrations.id — the TCM calibration */
+  tcmCalibrationId: int("tcmCalibrationId").notNull(),
+  /** Label for this combo, e.g. "L5P Stage 2 — E41 + T93" */
+  label: varchar("label", { length: 512 }),
+  /** Whether this combo is active for auto-deploy */
+  isActive: boolean("isActive").default(true).notNull(),
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CalibrationCombo = typeof calibrationCombos.$inferSelect;
+export type InsertCalibrationCombo = typeof calibrationCombos.$inferInsert;
+
+// ── Tune Deploy — Auto-Deploy Audit Log ─────────────────────────────────────
+/**
+ * Records every auto-deploy event for auditing.
+ */
+export const autoDeployLog = mysqlTable("auto_deploy_log", {
+  id: int("id").autoincrement().primaryKey(),
+  /** FK to users.id — the customer who received the deployment */
+  userId: int("userId"),
+  /** FK to tune_deploy_devices.id */
+  deviceId: int("deviceId"),
+  /** 'combo' | 'ecm_only' | 'tcm_only' */
+  deployType: mysqlEnum("deployType", ["combo", "ecm_only", "tcm_only"]).notNull(),
+  /** FK to calibration_combos.id (if combo deploy) */
+  comboId: int("comboId"),
+  /** FK to tune_deploy_calibrations.id — ECM calibration deployed */
+  ecmCalibrationId: int("ecmCalibrationId"),
+  /** FK to tune_deploy_calibrations.id — TCM calibration deployed */
+  tcmCalibrationId: int("tcmCalibrationId"),
+  /** Vehicle OS reported by tool */
+  vehicleEcmOs: varchar("vehicleEcmOs", { length: 256 }),
+  vehicleTcmOs: varchar("vehicleTcmOs", { length: 256 }),
+  /** Part numbers reported by tool (CSV) */
+  vehiclePartNumbers: text("vehiclePartNumbers"),
+  /** User's access level at time of deploy */
+  userAccessLevel: int("userAccessLevel"),
+  /** 'success' | 'no_match' | 'access_denied' | 'error' */
+  result: mysqlEnum("result", ["success", "no_match", "access_denied", "error"]).notNull(),
+  resultMessage: text("resultMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AutoDeployLog = typeof autoDeployLog.$inferSelect;
+export type InsertAutoDeployLog = typeof autoDeployLog.$inferInsert;
+
+// ── Shared Dyno Results ─────────────────────────────────────────────────
+/**
+ * Stores shared virtual dyno PDF results with metadata.
+ * Each record represents a shareable link to a dyno result PDF stored in S3.
+ */
+export const sharedDynos = mysqlTable("shared_dynos", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Unique share token used in the public URL */
+  shareToken: varchar("shareToken", { length: 32 }).notNull().unique(),
+  /** FK to users.id — who shared this dyno result */
+  userId: int("userId"),
+  /** S3 URL of the exported PDF */
+  pdfUrl: text("pdfUrl").notNull(),
+  /** Peak HP value for display */
+  peakHp: decimal("peakHp", { precision: 6, scale: 1 }),
+  /** Peak Torque value for display */
+  peakTorque: decimal("peakTorque", { precision: 6, scale: 1 }),
+  /** Peak HP RPM */
+  peakHpRpm: int("peakHpRpm"),
+  /** Peak Torque RPM */
+  peakTorqueRpm: int("peakTorqueRpm"),
+  /** Turbo type: na, jr, kw, fp, generic_turbo */
+  turboType: varchar("turboType", { length: 32 }),
+  /** Fuel type: pump, utv96, e85 */
+  fuelType: varchar("fuelType", { length: 32 }),
+  /** Injector type: stock, jr_kit, kw800, id1050, id1300 */
+  injectorType: varchar("injectorType", { length: 32 }),
+  /** Whether 3-bar MAP sensor was detected */
+  has3BarMap: boolean("has3BarMap").default(false),
+  /** Original WP8 filename */
+  fileName: varchar("fileName", { length: 512 }),
+  /** View count */
+  views: int("views").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SharedDyno = typeof sharedDynos.$inferSelect;
+export type InsertSharedDyno = typeof sharedDynos.$inferInsert;

@@ -6,7 +6,7 @@
  *  2. Identify ECU (MED17.8.5 vs MG1CA920)
  *  3. Read current VIN (DID F190)
  *  4. Enter new VIN
- *  5. Security access (seed/key level 3)
+ *  5. Security access (BRP/BuDS-style level 1 on MG1CA920: $27 01/02, long seed; legacy 2-byte level 3 fallback)
  *  6. Write new VIN ($2E F190)
  *  7. ECU reset
  *  8. DESS key re-learn guidance
@@ -21,8 +21,23 @@ import {
   ArrowLeft, RotateCcw, Cpu, Radio, Fingerprint, Edit3,
   RefreshCw, Info, AlertCircle, ChevronDown, ChevronRight, Zap
 } from 'lucide-react';
-import { UDSTransport } from '@/lib/udsTransport';
-import { computeCanamKey, computeBrpDashKey } from '@/lib/udsReference';
+import { UDSTransport, type UDSResponse } from '@/lib/udsTransport';
+import { computeCanamKey } from '@/lib/udsReference';
+
+function parseHexKeyBytes(hex: string, expectedLen: number): number[] | null {
+  const cleaned = hex.replace(/\s+/g, '');
+  if (cleaned.length !== expectedLen * 2 || !/^[0-9a-fA-F]+$/.test(cleaned)) return null;
+  const out: number[] = [];
+  for (let i = 0; i < cleaned.length; i += 2) out.push(parseInt(cleaned.slice(i, i + 2), 16));
+  return out;
+}
+
+/** UDS SecurityAccess request sub that produced the active unlock (01 = BuDS long seed, 03 = legacy 16-bit). */
+function securityUnlockSummary(seedRequestSub: number | null): string {
+  if (seedRequestSub === 0x01) return 'Level 1 ($27 01/02) unlocked ✓';
+  if (seedRequestSub === 0x03) return 'Level 3 ($27 03/04) unlocked ✓';
+  return 'Security access unlocked ✓';
+}
 
 // ─── Styles (matching PPEI industrial theme) ────────────────────────────────
 
@@ -175,8 +190,12 @@ export default function CanAmVinChanger() {
 
   // Security state
   const [securityUnlocked, setSecurityUnlocked] = useState(false);
-  const [seed, setSeed] = useState<number | null>(null);
-  const [computedKey, setComputedKey] = useState<number | null>(null);
+  /** Seed request sub-function that succeeded (1 = BuDS/MG1 long seed path, 3 = legacy 16-bit path). */
+  const [securitySeedSub, setSecuritySeedSub] = useState<number | null>(null);
+  const [seedShort, setSeedShort] = useState<number | null>(null);
+  const [seedLongHex, setSeedLongHex] = useState<string | null>(null);
+  const [computedKeyHex, setComputedKeyHex] = useState<string | null>(null);
+  const [manualSecurityKeyHex, setManualSecurityKeyHex] = useState('');
 
   // Write state
   const [writeSuccess, setWriteSuccess] = useState(false);
@@ -294,7 +313,7 @@ export default function CanAmVinChanger() {
 
       if (ecuType === 'MG1CA920') {
         addLog('identify', '⚠ MG1CA920 detected — post-2022.5 models may have locked security access', 'warning');
-        addLog('identify', 'VIN write uses dealer-level security (Level 3), which may still work', 'info');
+        addLog('identify', 'BuDS VIN relearn uses $27 01/02 (long seed) on 0x7E0 — wizard matches that sequence', 'info');
       }
 
       setStep('read-vin');
@@ -378,79 +397,120 @@ export default function CanAmVinChanger() {
     if (!transport) return;
     setLoading(true);
     setError(null);
+    setComputedKeyHex(null);
+
+    const handleSeedFailure = (seedResp: UDSResponse, levelLabel: string) => {
+      setSeedShort(null);
+      setSeedLongHex(null);
+      setSecuritySeedSub(null);
+      if (seedResp.nrc === 0x37) {
+        addLog('security', 'requiredTimeDelayNotExpired — ECU needs cooldown. Wait 10 seconds and retry.', 'warning');
+        setError('ECU security cooldown active. Wait 10 seconds and try again.');
+      } else if (seedResp.nrc === 0x36) {
+        addLog('security', 'exceededNumberOfAttempts — ECU locked out. Power cycle the vehicle.', 'error');
+        setError('Security access locked out. Power cycle the vehicle and try again.');
+      } else if (seedResp.nrc === 0x12) {
+        addLog('security', `subFunctionNotSupported — ${levelLabel}`, 'error');
+        setError(`ECU rejected seed request (${levelLabel}).`);
+      } else {
+        addLog('security', `Seed request failed: ${seedResp.nrcDescription || `NRC 0x${(seedResp.nrc || 0).toString(16)}`}`, 'error');
+        setError(`Security access failed: ${seedResp.nrcDescription || 'Unknown error'}`);
+      }
+    };
 
     try {
-      // Request seed at level 3
-      addLog('security', 'Requesting security seed ($27 03)...');
-      const seedResp = await transport.securityAccessRequestSeed(0x03);
+      // BuDS / 2023 X3 capture: $27 01 (level 1) + ISO-TP multi-frame seed, then $27 02 + 32-byte key.
+      addLog('security', 'Requesting security seed ($27 01 — BRP/BuDS style)...');
+      let seedResp = await transport.securityAccessRequestSeed(0x01);
+      let seedSub = 0x01;
+
+      if (!seedResp.success && seedResp.nrc === 0x12) {
+        addLog('security', 'Level 1 not supported — trying legacy $27 03 (2-byte seed)...', 'warning');
+        seedResp = await transport.securityAccessRequestSeed(0x03);
+        seedSub = 0x03;
+      }
 
       if (!seedResp.success) {
-        if (seedResp.nrc === 0x37) {
-          addLog('security', 'requiredTimeDelayNotExpired — ECU needs cooldown. Wait 10 seconds and retry.', 'warning');
-          setError('ECU security cooldown active. Wait 10 seconds and try again.');
-        } else if (seedResp.nrc === 0x36) {
-          addLog('security', 'exceededNumberOfAttempts — ECU locked out. Power cycle the vehicle.', 'error');
-          setError('Security access locked out. Power cycle the vehicle and try again.');
-        } else if (seedResp.nrc === 0x12) {
-          addLog('security', 'subFunctionNotSupported — This ECU may not support Level 3 security', 'error');
-          setError('ECU does not support security access Level 3. This may be a locked MG1CA920.');
-        } else {
-          addLog('security', `Seed request failed: ${seedResp.nrcDescription || `NRC 0x${(seedResp.nrc || 0).toString(16)}`}`, 'error');
-          setError(`Security access failed: ${seedResp.nrcDescription || 'Unknown error'}`);
-        }
+        handleSeedFailure(seedResp, seedSub === 0x01 ? 'level 1' : 'level 3');
         setLoading(false);
         return;
       }
 
-      // Extract 16-bit seed from response
-      // Response data: [subFunction, seedHi, seedLo]
-      if (seedResp.data.length < 3) {
+      const d = seedResp.data;
+      if (d.length < 2) {
         addLog('security', 'Seed response too short', 'error');
         setError('Invalid seed response from ECU');
         setLoading(false);
         return;
       }
 
-      const seedValue = (seedResp.data[1] << 8) | seedResp.data[2];
-      setSeed(seedValue);
-      addLog('security', `Seed received: 0x${seedValue.toString(16).padStart(4, '0')}`, 'data',
-        seedResp.data.map(b => b.toString(16).padStart(2, '0')).join(' '));
+      const seedBody = d.slice(1);
+      addLog('security', `Seed RX (${seedBody.length} bytes, request sub 0x${seedSub.toString(16)})`, 'data',
+        d.map(b => b.toString(16).padStart(2, '0')).join(' '));
 
-      if (seedValue === 0x0000) {
-        addLog('security', 'Seed is 0x0000 — ECU is already unlocked!', 'success');
-        setSecurityUnlocked(true);
-        setStep('write-vin');
+      setSecuritySeedSub(seedSub);
+
+      // Already unlocked (some stacks return zero seed)
+      if (seedBody.length === 2) {
+        const seedValue = (seedBody[0] << 8) | seedBody[1];
+        setSeedShort(seedValue);
+        if (seedValue === 0x0000) {
+          addLog('security', 'Seed is 0x0000 — ECU reports already unlocked', 'success');
+          setSecurityUnlocked(true);
+          setStep('write-vin');
+          setLoading(false);
+          return;
+        }
+      }
+
+      let keyBytes: number[];
+
+      if (seedBody.length === 32) {
+        setSeedLongHex(seedBody.map(b => b.toString(16).padStart(2, '0')).join(''));
+        const manual = parseHexKeyBytes(manualSecurityKeyHex, 32);
+        if (!manual) {
+          addLog('security', '32-byte seed — paste the 64-character security key (hex) from BuDS / your tool, then retry.', 'warning');
+          setError('This ECU sent a 32-byte seed (BuDS/MG1 style). Enter the computed key hex (64 characters) below, then run security again.');
+          setLoading(false);
+          return;
+        }
+        keyBytes = manual;
+        setComputedKeyHex(manual.map(b => b.toString(16).padStart(2, '0')).join(''));
+        addLog('security', 'Using pasted 32-byte key (not auto-computed).', 'info');
+      } else if (seedBody.length === 2) {
+        const seedValue = (seedBody[0] << 8) | seedBody[1];
+        setSeedShort(seedValue);
+        const levelForAlgo = seedSub === 0x03 ? 3 : 1;
+        const key = computeCanamKey(seedValue, levelForAlgo);
+        keyBytes = [(key >> 8) & 0xFF, key & 0xFF];
+        setComputedKeyHex(`${keyBytes.map(b => b.toString(16).padStart(2, '0')).join(' ')} (16-bit)`);
+        addLog('security', `Key computed (16-bit, level ${levelForAlgo}): 0x${key.toString(16).padStart(4, '0')}`, 'data');
+      } else {
+        addLog('security', `Unexpected seed length ${seedBody.length} — need 2 or 32 bytes`, 'error');
+        setError(`Unsupported seed length (${seedBody.length} bytes). Capture a bus log and report ECU behavior.`);
         setLoading(false);
         return;
       }
 
-      // Compute key using CAN-am algorithm
-      const key = computeCanamKey(seedValue, 3);
-      setComputedKey(key);
-      addLog('security', `Key computed: 0x${key.toString(16).padStart(4, '0')}`, 'data');
-
-      // Send key ($27 04)
-      const keyHi = (key >> 8) & 0xFF;
-      const keyLo = key & 0xFF;
-      addLog('security', `Sending key ($27 04 ${keyHi.toString(16).padStart(2, '0')} ${keyLo.toString(16).padStart(2, '0')})...`);
-      const keyResp = await transport.securityAccessSendKey(0x03, [keyHi, keyLo]);
+      const sendSub = seedSub + 1;
+      addLog('security', `Sending key ($27 ${sendSub.toString(16).padStart(2, '0')}, ${keyBytes.length} bytes)...`);
+      const keyResp = await transport.securityAccessSendKey(seedSub, keyBytes);
 
       if (keyResp.success) {
-        addLog('security', 'Security access GRANTED — Level 3 unlocked', 'success');
+        addLog('security', `Security access GRANTED ($27 01/02 or 03/04 path, seed sub 0x${seedSub.toString(16)})`, 'success');
         setSecurityUnlocked(true);
         setStep('write-vin');
+      } else if (keyResp.nrc === 0x35) {
+        addLog('security', 'invalidKey — ECU rejected the key', 'error');
+        setError(seedBody.length === 32
+          ? 'Key rejected. Verify the pasted key matches the current seed (request security again after a failed attempt).'
+          : 'Security key rejected. ECU may use a different algorithm or security level.');
+      } else if (keyResp.nrc === 0x36) {
+        addLog('security', 'exceededNumberOfAttempts — Too many failed attempts. Power cycle required.', 'error');
+        setError('Too many failed security attempts. Power cycle the vehicle.');
       } else {
-        if (keyResp.nrc === 0x35) {
-          addLog('security', 'invalidKey — The computed key was rejected by the ECU', 'error');
-          addLog('security', 'This may indicate a different seed/key algorithm (newer MG1CA920 firmware)', 'warning');
-          setError('Security key rejected. The ECU may use an updated algorithm not yet supported.');
-        } else if (keyResp.nrc === 0x36) {
-          addLog('security', 'exceededNumberOfAttempts — Too many failed attempts. Power cycle required.', 'error');
-          setError('Too many failed security attempts. Power cycle the vehicle.');
-        } else {
-          addLog('security', `Key rejected: ${keyResp.nrcDescription || `NRC 0x${(keyResp.nrc || 0).toString(16)}`}`, 'error');
-          setError(`Key rejected: ${keyResp.nrcDescription || 'Unknown error'}`);
-        }
+        addLog('security', `Key rejected: ${keyResp.nrcDescription || `NRC 0x${(keyResp.nrc || 0).toString(16)}`}`, 'error');
+        setError(`Key rejected: ${keyResp.nrcDescription || 'Unknown error'}`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -458,7 +518,7 @@ export default function CanAmVinChanger() {
       addLog('security', `Error: ${msg}`, 'error');
     }
     setLoading(false);
-  }, [addLog]);
+  }, [addLog, manualSecurityKeyHex]);
 
   // ─── Step 6: Write VIN ──────────────────────────────────────────────────
 
@@ -560,8 +620,11 @@ export default function CanAmVinChanger() {
     setNewVin('');
     setVinValidation(null);
     setSecurityUnlocked(false);
-    setSeed(null);
-    setComputedKey(null);
+    setSecuritySeedSub(null);
+    setSeedShort(null);
+    setSeedLongHex(null);
+    setComputedKeyHex(null);
+    setManualSecurityKeyHex('');
     setWriteSuccess(false);
     setResetDone(false);
     setConfirmWrite(false);
@@ -793,28 +856,59 @@ export default function CanAmVinChanger() {
         {step === 'security' && (
           <div>
             <h3 style={{ fontFamily: sFont.heading, fontSize: '1.1rem', letterSpacing: '0.06em', margin: '0 0 12px', color: sColor.text }}>
-              STEP 5: SECURITY ACCESS (LEVEL 3)
+              STEP 5: SECURITY ACCESS
             </h3>
             <p style={{ fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim, margin: '0 0 16px', lineHeight: '1.6' }}>
-              The ECU requires security access before allowing VIN writes. This sends a seed request ($27 03),
-              computes the key using the CAN-am algorithm, and sends it back ($27 04).
+              Matches BuDS / BRP on X3: request seed with <span style={{ fontFamily: sFont.mono }}>$27 01</span> (ISO-TP multi-frame),
+              respond with <span style={{ fontFamily: sFont.mono }}>$27 02</span> and a 32-byte key. Older ECUs may answer a 2-byte seed on <span style={{ fontFamily: sFont.mono }}>$27 03</span> — then the built-in 16-bit CAN-am key is used.
             </p>
 
-            {seed !== null && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontFamily: sFont.mono, fontSize: '0.7rem', color: sColor.textDim, marginBottom: '6px' }}>
+                Optional: 64 hex chars (32 bytes) security key — required when the ECU returns a 32-byte seed
+              </label>
+              <textarea
+                value={manualSecurityKeyHex}
+                onChange={(e) => setManualSecurityKeyHex(e.target.value.replace(/[^0-9a-fA-F\s]/g, ''))}
+                placeholder="e.g. paste key from BuDS / external calculator"
+                rows={2}
+                style={{
+                  width: '100%', padding: '10px 12px', background: 'oklch(0.08 0.003 260)',
+                  border: `1px solid ${sColor.border}`, borderRadius: '2px', fontFamily: sFont.mono, fontSize: '0.7rem',
+                  color: sColor.text, resize: 'vertical', outline: 'none',
+                }}
+              />
+            </div>
+
+            {(seedShort !== null || seedLongHex || securitySeedSub !== null) && (
               <div style={{
                 background: 'oklch(0.08 0.003 260)', border: `1px solid ${sColor.borderLight}`,
                 borderRadius: '2px', padding: '12px 16px', marginBottom: '16px',
               }}>
                 <table style={{ fontFamily: sFont.mono, fontSize: '0.75rem', borderCollapse: 'collapse' }}>
                   <tbody>
-                    <tr>
-                      <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim }}>Seed</td>
-                      <td style={{ color: sColor.blue }}>0x{seed.toString(16).padStart(4, '0').toUpperCase()}</td>
-                    </tr>
-                    {computedKey !== null && (
+                    {securitySeedSub !== null && (
                       <tr>
-                        <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim }}>Key</td>
-                        <td style={{ color: sColor.purple }}>0x{computedKey.toString(16).padStart(4, '0').toUpperCase()}</td>
+                        <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim }}>Seed request</td>
+                        <td style={{ color: sColor.blue }}>$27 {securitySeedSub.toString(16).padStart(2, '0').toUpperCase()}</td>
+                      </tr>
+                    )}
+                    {seedShort !== null && (
+                      <tr>
+                        <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim }}>Seed (16-bit)</td>
+                        <td style={{ color: sColor.blue }}>0x{seedShort.toString(16).padStart(4, '0').toUpperCase()}</td>
+                      </tr>
+                    )}
+                    {seedLongHex && (
+                      <tr>
+                        <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim, verticalAlign: 'top' }}>Seed (32 B)</td>
+                        <td style={{ color: sColor.blue, wordBreak: 'break-all', maxWidth: '280px' }}>{seedLongHex}</td>
+                      </tr>
+                    )}
+                    {computedKeyHex && (
+                      <tr>
+                        <td style={{ padding: '3px 12px 3px 0', color: sColor.textDim, verticalAlign: 'top' }}>Key</td>
+                        <td style={{ color: sColor.purple, wordBreak: 'break-all' }}>{computedKeyHex}</td>
                       </tr>
                     )}
                     <tr>
@@ -864,7 +958,7 @@ export default function CanAmVinChanger() {
                   </tr>
                   <tr>
                     <td style={{ padding: '6px 16px 6px 0', color: sColor.textDim }}>Security</td>
-                    <td style={{ color: sColor.green }}>Level 3 Unlocked ✓</td>
+                    <td style={{ color: sColor.green }}>{securityUnlockSummary(securitySeedSub)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -1045,9 +1139,9 @@ export default function CanAmVinChanger() {
         <div style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textMuted, lineHeight: '1.6' }}>
           <strong style={{ color: sColor.textDim }}>Protocol:</strong> UDS (ISO 14229) over CAN (ISO 15765-4) · 500kbps · 11-bit addressing
           <br />
-          <strong style={{ color: sColor.textDim }}>ECU:</strong> Bosch MED17.8.5 / MG1CA920 · ECM @ 0x7E0/0x7E8
+          <strong style={{ color: sColor.textDim }}>ECU:</strong> Bosch MED17.8.5 / MG1CA920 · ECM @ 0x7E0/0x7E8 · BRP A2L ref <span style={{ color: sColor.textMuted }}>test_files/1E1101953.a2l</span> (MG1CA920A / MDG1C — calibration; UDS IDs as cal constants)
           <br />
-          <strong style={{ color: sColor.textDim }}>Security:</strong> Level 3 ($27 03/04) · CAN-am seed/key algorithm (cuakeyA/cucakeysB lookup)
+          <strong style={{ color: sColor.textDim }}>Security:</strong> BuDS-style $27 01/02 (32-byte seed/key, ISO-TP) on MG1CA920; legacy $27 03/04 + 16-bit cuakey when ECU supports it
           <br />
           <strong style={{ color: sColor.textDim }}>VIN DID:</strong> F190 (standard UDS) · WriteDataByIdentifier ($2E)
           <br />

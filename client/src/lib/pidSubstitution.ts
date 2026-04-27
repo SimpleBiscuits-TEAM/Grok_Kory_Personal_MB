@@ -106,7 +106,17 @@ export function resolvePids(
   // ─── Boost Pressure ──────────────────────────────────────────────────────
   // Priority: direct gauge PID → MAP absolute (subtract idle baseline) → zero
   {
-    const directIdx = find(['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M']);
+    const skipFalseBoostGauge = (h: string) =>
+      /actuator/i.test(h) ||
+      /status/i.test(h) ||
+      /\bdesired\s+boost\b/i.test(h) ||
+      /\bcommanded\s+boost\b/i.test(h) ||
+      /\bboost\s+pressure\b.*\(sae\)/i.test(h) ||
+      (/vane/i.test(h) && /boost|turbo/i.test(h));
+    const directIdx = find(
+      ['Boost Pressure', 'Boost (psi)', 'Boost (PSI)', 'ECM.BOOST', 'PCM.BOOST_M'],
+      skipFalseBoostGauge,
+    );
     // IMPORTANT: Exclude exhaust-side headers ("Exhaust MAP", "Exhaust Manifold Absolute Pressure")
     // which are backpressure, NOT intake boost.
     const isExhaust = (h: string) => /exhaust/i.test(h);
@@ -279,11 +289,11 @@ export function resolvePids(
     }
   }
 
-  // ─── PCV / Fuel Pressure Regulator ───────────────────────────────────────
-  // Primary: PCV measured current (mA). Fallback: PCV desired current or duty %
+  // ─── FPR / PCV (inlet metering) ───────────────────────────────────────────
+  // Primary: measured current (mA). Fallback: desired current (still mA on GM diesel; not PWM duty %)
   {
     const pcvMeasIdx = find(['ECM.FRPVAC', 'PCM.FRPACOM', 'PCV Measured', 'PCV Current Actual']);
-    const pcvDesIdx  = find(['ECM.FRPVDC', 'PCM.FRPACOM', 'PCV', 'Pressure Regulator', 'PCV Duty']);
+    const pcvDesIdx  = find(['ECM.FRPVDC', 'PCM.FRPACOM', 'PCV', 'Pressure Regulator', 'PCV Duty', 'Fuel Pressure Regulator']);
     const pcvMeasArr = pcvMeasIdx !== -1 ? col(pcvMeasIdx) : [];
     const pcvDesArr  = pcvDesIdx  !== -1 ? col(pcvDesIdx)  : [];
 

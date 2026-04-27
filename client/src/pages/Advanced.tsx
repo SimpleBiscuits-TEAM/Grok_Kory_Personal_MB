@@ -10,17 +10,15 @@
  */
 
 import React, { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
-import { SignInBanner } from '@/components/SignInPrompt';
-import { Link } from 'wouter';
 import {
   Search, Lock, ArrowLeft, Database, BookOpen,
   Hash, Terminal, ChevronDown, ChevronRight, X, Zap,
   FileText, Activity, AlertCircle, Clock, ShieldX, Users,
   Layers, Info, Brain, Upload, Loader2, Gauge, Cpu,
   BarChart3, Flag, Car, MessageSquare, FileCode2, CheckCircle, FileDown,
-  Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin
+  Radio, Wrench, Key, Settings, Inbox, Fuel, Truck, ShieldCheck, MapPin,
+  CloudSun, Trophy, Cloud, Bell
 } from 'lucide-react';
-import { getLoginUrl } from '@/const';
 import { useLocation } from 'wouter';
 import { getSearchEngine, SearchResult, QueryIntent } from '@/lib/searchEngine';
 import {
@@ -34,7 +32,7 @@ import type { Message } from '@/components/AIChatBox';
 import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 
 // Normal mode imports for merged analyzer
-import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics } from '@/lib/dataProcessor';
+import { parseCSV, processData, downsampleData, createBinnedData, ProcessedMetrics, formatCombustionInferenceSummary } from '@/lib/dataProcessor';
 import { analyzeDiagnostics, DiagnosticReport } from '@/lib/diagnostics';
 import { runReasoningEngine, ReasoningReport } from '@/lib/reasoningEngine';
 import { generateHealthReport, HealthReportData } from '@/lib/healthReport';
@@ -42,17 +40,18 @@ import { extractVinFromFilename, decodeVinNhtsa } from '@/lib/vinLookup';
 import { analyzeDragRuns, DragAnalysis } from '@/lib/dragAnalyzer';
 import { generateHealthReportPdf } from '@/lib/healthReportPdf';
 import { DynoHPChart, DynoChartHandle, BoostEfficiencyChart, RailPressureFaultChart, BoostFaultChart, EgtFaultChart, MafFaultChart, TccFaultChart, VgtFaultChart, RegulatorFaultChart, CoolantFaultChart, IdleRpmFaultChart, ConverterStallChart } from '@/components/DynoCharts';
-import { StatsSummary } from '@/components/Charts';
+import { StatsSummary, RPMvMAFChart, HPvsRPMChart, TimeSeriesChart } from '@/components/Charts';
 import { DiagnosticReportComponent } from '@/components/DiagnosticReport';
 import HealthReport from '@/components/HealthReport';
-import DtcSearch from '@/components/DtcSearch';
-import EcuReferencePanel from '@/components/EcuReferencePanel';
+const DtcSearch = React.lazy(() => import('@/components/DtcSearch'));
+const EcuReferencePanel = React.lazy(() => import('@/components/EcuReferencePanel'));
 import { ReasoningPanel } from '@/components/ReasoningPanel';
 import PidAuditPanel from '@/components/PidAuditPanel';
 import DragTimeslip from '@/components/DragTimeslip';
 import { usePdfExport } from '@/hooks/usePdfExport';
 import DataloggerPanel from '@/components/DataloggerPanel';
 import BinaryUploadPanel from '@/components/BinaryUploadPanel';
+import FlashContainerPanel from '@/components/FlashContainerPanel';
 import CalibrationEditor from '@/pages/CalibrationEditor';
 import IntelliSpy from '@/components/IntelliSpy';
 import VehicleCoding from '@/components/VehicleCoding';
@@ -63,6 +62,7 @@ import AdminNotificationPanel from '@/components/AdminNotificationPanel';
 import NotificationPrefsPanel from '@/components/NotificationPrefsPanel';
 import VoiceCommandButton from '@/components/VoiceCommandButton';
 import OffsetCalibrationPanel from '@/components/OffsetCalibrationPanel';
+import CompareView from '@/components/CompareView';
 import ReverseEngineeringPanel from '@/components/ReverseEngineeringPanel';
 import SupportAdminPanel from '@/components/SupportAdminPanel';
 import UserManagementPanel from '@/components/UserManagementPanel';
@@ -74,16 +74,20 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { APP_VERSION } from '@/lib/version';
 
 import PpeiHeader from '@/components/PpeiHeader';
+import { PpeiFlashContainerPanel } from '@/components/ppei-flash';
+import { PpeiDataloggerPanel } from '@/components/ppei-datalogger';
+import DieselInjectorFlowConverter from '@/components/DieselInjectorFlowConverter';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 // Lazy-load Pitch and Tasks panels (moved from top-level nav to Advanced tabs)
 const PitchPanel = React.lazy(() => import('@/pages/Pitch').then(m => ({ default: m.PitchContent })));
+const StratPanel = React.lazy(() => import('@/pages/Strat').then(m => ({ default: m.StratContent })));
 const TasksPanel = React.lazy(() => import('@/pages/Tasks').then(m => ({ default: m.TasksContent })));
 // Lazy-load Fleet and Drag panels (moved from top-level nav to Advanced tabs)
 const FleetPanel = React.lazy(() => import('@/pages/Fleet').then(m => ({ default: m.FleetContent })));
-const DragPanel = React.lazy(() => import('@/pages/DragRacing').then(m => ({ default: m.DragContent })));
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
-const STORAGE_KEY = 'ppei_advanced_unlocked';
+const CompetitionPanel = React.lazy(() => import('@/pages/Competition').then(m => ({ default: m.CompetitionContent })));
+const WeatherPanel = React.lazy(() => import('@/pages/Weather').then(m => ({ default: m.WeatherContent })));
+const CloudPanel = React.lazy(() => import('@/pages/Cloud').then(m => ({ default: m.CloudContent })));
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
 
@@ -95,155 +99,6 @@ const sColor = {
   yellow: 'oklch(0.75 0.18 60)', text: 'oklch(0.95 0.005 260)', textDim: 'oklch(0.68 0.010 260)',
   textMuted: 'oklch(0.58 0.008 260)',
 };
-
-// ─── V-OP Pro Access Gate ────────────────────────────────────────────────────
-
-/**
- * AccessGate — KingKong access code gate for V-OP Pro
- * Enter the correct code to unlock the Advanced section.
- * Once unlocked, persists in localStorage until cleared.
- */
-const ADVANCED_CODE = 'KINGKONG';
-
-function AccessGate({ onUnlock }: { onUnlock: () => void }) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState(false);
-  const [shake, setShake] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  const handleSubmit = () => {
-    if (code.toUpperCase() === ADVANCED_CODE) {
-      localStorage.setItem(STORAGE_KEY, 'true');
-      onUnlock();
-    } else {
-      setError(true);
-      setShake(true);
-      setAttempts(prev => prev + 1);
-      setTimeout(() => setShake(false), 500);
-      setTimeout(() => setError(false), 2000);
-    }
-  };
-
-  const funnyMessages = [
-    "Wrong code. The ECU is judging you right now.",
-    "Nope. Even your mom's minivan has better security than your guesses.",
-    "Access denied. Try turning the key off and back on... oh wait, wrong tool.",
-    "That ain't it chief. The turbo just spooled down in disappointment.",
-    "Incorrect. The injectors are crying.",
-    "Wrong again. At this rate, you'll need a flash tool just to unlock the door.",
-    "Still no. Your ECU called — it wants a competent operator.",
-    "Denied. Even the DPF has more flow than your password game.",
-  ];
-
-  return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: sColor.bgDark }}>
-      <div className="ppei-anim-scale-in" style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        textAlign: 'center', padding: '2rem', maxWidth: '480px', width: '100%', margin: '0 1rem',
-      }}>
-        {/* Big lock icon with glow */}
-        <div style={{
-          width: '80px', height: '80px', borderRadius: '50%',
-          background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
-        }}>
-          <Lock style={{ width: 36, height: 36, color: sColor.red }} />
-        </div>
-
-        <h2 style={{
-          fontFamily: sFont.heading, fontSize: '2rem', letterSpacing: '0.12em',
-          color: 'white', marginBottom: '0.5rem',
-        }}>
-          V-OP PRO
-        </h2>
-
-        <p style={{
-          fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim,
-          maxWidth: '400px', marginBottom: '0.5rem',
-        }}>
-          This area is restricted. Enter the access code to proceed.
-        </p>
-
-        <p style={{
-          fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)',
-          maxWidth: '400px', marginBottom: '2rem', fontStyle: 'italic',
-        }}>
-          "I asked my ECU for the password. It said 'knock knock.' I said 'who's there?' It threw a P0300."
-        </p>
-
-        <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
-          <div style={{
-            display: 'flex', gap: '8px', marginBottom: '12px',
-          }}>
-            <input
-              ref={inputRef}
-              type="password"
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-              placeholder="Enter access code..."
-              style={{
-                flex: 1, padding: '12px 16px',
-                fontFamily: sFont.mono, fontSize: '1rem', letterSpacing: '0.15em',
-                background: sColor.bgDark,
-                border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
-                borderRadius: '3px', color: 'white', outline: 'none',
-                textAlign: 'center', textTransform: 'uppercase',
-                transition: 'border-color 0.2s',
-              }}
-            />
-            <button
-              onClick={handleSubmit}
-              style={{
-                padding: '12px 20px',
-                background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
-                borderRadius: '3px', color: sColor.red,
-                fontFamily: sFont.heading, fontSize: '0.9rem', letterSpacing: '0.08em',
-                cursor: 'pointer', transition: 'all 0.15s',
-              }}
-            >
-              UNLOCK
-            </button>
-          </div>
-
-          {error && attempts > 0 && (
-            <p style={{
-              fontFamily: sFont.body, fontSize: '0.8rem',
-              color: sColor.red, marginTop: '8px',
-              animation: 'fadeIn 0.3s ease',
-            }}>
-              {funnyMessages[(attempts - 1) % funnyMessages.length]}
-            </p>
-          )}
-        </div>
-
-        {attempts >= 3 && (
-          <p style={{
-            fontFamily: sFont.mono, fontSize: '0.7rem',
-            color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
-          }}>
-            Hint: Think big. Think primate. Think chest-pounding dominance.
-          </p>
-        )}
-
-        <div style={{ marginTop: '2rem' }}>
-          <Link href="/" style={{ textDecoration: 'none' }}>
-            <span style={{
-              fontFamily: sFont.heading, fontSize: '0.8rem', letterSpacing: '0.08em',
-              color: sColor.textMuted, cursor: 'pointer',
-            }}>
-              ← BACK TO V-OP LITE
-            </span>
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Category Config ────────────────────────────────────────────────────────
 
@@ -902,7 +757,8 @@ function VehiclePanel() {
 
 // ─── Analyzer Panel (Merged Normal Mode) ────────────────────────────────────
 
-function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult) => void }) {
+function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { injectedCSV?: { csv: string; filename: string } | null; onInjectedConsumed?: () => void; onWP8Detected?: (wp8: WP8ParseResult, fileName: string) => void }) {
+  const [analyzerMode, setAnalyzerMode] = useState<'analyze' | 'compare'>('analyze');
   const [data, setData] = useState<ProcessedMetrics | null>(null);
   const [binnedData, setBinnedData] = useState<any[] | undefined>(undefined);
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport | null>(null);
@@ -957,7 +813,8 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
       setDragAnalysis(drag);
       const reportNoVin = generateHealthReport(downsampled, undefined);
       setHealthReport(reportNoVin);
-      const detectedVin = extractVinFromFilename(name);
+      // Try to find VIN: first from filename, then from CSV metadata headers (# VIN: ...)
+      const detectedVin = extractVinFromFilename(name) || rawData.vehicleMeta?.vin || null;
       setVinFromFile(detectedVin);
       if (detectedVin) {
         decodeVinNhtsa(detectedVin).then(vehicleInfo => {
@@ -994,7 +851,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
         // If Honda Talon detected, switch to Talon tab
         if (wp8Result.vehicleType === 'HONDA_TALON' && onWP8Detected) {
-          onWP8Detected(wp8Result);
+          onWP8Detected(wp8Result, file.name);
           // Cache datalog (fire-and-forget)
           try {
             const reader = new FileReader();
@@ -1088,6 +945,42 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
   ) ?? false;
   const hasFaults = (diagnostics && diagnostics.issues.length > 0) || hasReasoningFaults;
 
+  // Mode toggle component (shared between upload and results views)
+  const ModeToggle = () => (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 0, marginBottom: '1.5rem' }}>
+      <button onClick={() => setAnalyzerMode('analyze')} style={{
+        background: analyzerMode === 'analyze' ? sColor.red : 'oklch(0.14 0.006 260)',
+        color: analyzerMode === 'analyze' ? 'white' : sColor.textDim,
+        fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em', padding: '10px 28px',
+        border: analyzerMode === 'analyze' ? `1px solid ${sColor.red}` : `1px solid oklch(0.48 0.008 260)`,
+        borderRadius: '3px 0 0 3px', cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: '8px',
+      }}>
+        <BarChart3 style={{ width: 16, height: 16 }} />ANALYZE
+      </button>
+      <button onClick={() => setAnalyzerMode('compare')} style={{
+        background: analyzerMode === 'compare' ? sColor.red : 'oklch(0.14 0.006 260)',
+        color: analyzerMode === 'compare' ? 'white' : sColor.textDim,
+        fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.08em', padding: '10px 28px',
+        border: analyzerMode === 'compare' ? `1px solid ${sColor.red}` : `1px solid oklch(0.48 0.008 260)`,
+        borderRadius: '0 3px 3px 0', cursor: 'pointer', transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: '8px', borderLeft: 'none',
+      }}>
+        <Gauge style={{ width: 16, height: 16 }} />COMPARE
+      </button>
+    </div>
+  );
+
+  // When no data loaded and compare mode — show standalone CompareView with upload zones
+  if (!data && analyzerMode === 'compare') {
+    return (
+      <div>
+        <ModeToggle />
+        <CompareView onBack={() => setAnalyzerMode('analyze')} />
+      </div>
+    );
+  }
+
   if (!data) {
     return (
       <div className="max-w-3xl mx-auto">
@@ -1095,6 +988,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
           <h2 className="ppei-gradient-text" style={{ fontFamily: sFont.heading, fontSize: '2.2rem', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>DATALOG ANALYZER</h2>
           <p style={{ fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim }}>Upload your CSV datalog for full diagnostic analysis, dyno chart, and PDF report</p>
         </div>
+        <ModeToggle />
         <div
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -1142,6 +1036,7 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
   return (
     <div className="space-y-6">
+      <ModeToggle />
       {/* File info bar */}
       <div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: hasFaults ? `4px solid ${sColor.red}` : `4px solid ${sColor.green}`, borderRadius: '3px', padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1150,6 +1045,9 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
             <p style={{ fontFamily: sFont.mono, fontSize: '0.85rem', color: 'white', fontWeight: 600, margin: 0 }}>{fileName}</p>
             <p style={{ fontFamily: sFont.body, fontSize: '0.8rem', color: sColor.textDim, margin: 0 }}>
               {data.stats.duration.toFixed(1)}s · {data.rpm.length.toLocaleString()} samples
+              {data.vehicleMeta?.combustionInference
+                ? <span> · {formatCombustionInferenceSummary(data.vehicleMeta.combustionInference)}</span>
+                : null}
               {hasFaults ? <span style={{ color: 'oklch(0.65 0.18 25)' }}> · {diagnostics!.issues.length} potential fault area(s)</span> : <span style={{ color: sColor.green }}> · No fault areas detected</span>}
             </p>
           </div>
@@ -1215,6 +1113,10 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
       <div ref={statsRef}><StatsSummary data={data} /></div>
 
+      <div><RPMvMAFChart data={data} binnedData={binnedData} /></div>
+      <div><HPvsRPMChart data={data} binnedData={binnedData} /></div>
+      <div><TimeSeriesChart data={data} /></div>
+
       {dragAnalysis && <div><SectionHeader icon={<Flag style={{ width: 18, height: 18, color: sColor.red }} />} title="DRAG RACING ANALYZER" /><div style={{ background: sColor.bgCard, border: `1px solid ${sColor.border}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1.25rem' }}><DragTimeslip analysis={dragAnalysis} /></div></div>}
 
       <div><SectionHeader icon={<BarChart3 style={{ width: 18, height: 18, color: sColor.red }} />} title="LOG DETAILS" /><div ref={dynoContainerRef}><DynoHPChart ref={dynoRef} data={data} binnedData={binnedData} /></div></div>
@@ -1239,8 +1141,18 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
         </div>
       )}
 
-      <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><DtcSearch /></div>
-      <div><SectionHeader icon={<Cpu style={{ width: 18, height: 18, color: sColor.red }} />} title="ENGINE REFERENCE DATABASE" /><EcuReferencePanel /></div>
+      <div><SectionHeader icon={<Search style={{ width: 18, height: 18, color: sColor.red }} />} title="DIAGNOSTIC CODE LOOKUP" /><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>Loading DTC database...</div>}><DtcSearch /></React.Suspense></div>
+
+      {/* Compare section — shown when compare mode is active, data already loaded above */}
+      {analyzerMode === 'compare' && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '0.75rem', borderBottom: `1px solid ${sColor.red}4d`, marginBottom: '1rem' }}>
+            <Gauge style={{ width: 20, height: 20, color: sColor.red }} />
+            <h2 style={{ fontFamily: sFont.heading, fontSize: '1.4rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>DATALOG COMPARISON</h2>
+          </div>
+          <CompareView onBack={() => setAnalyzerMode('analyze')} embedded />
+        </div>
+      )}
 
       {(error || exportError) && (
         <div style={{ position: 'fixed', bottom: '1rem', right: '1rem', background: sColor.bgCard, border: `1px solid ${sColor.red}`, borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '1rem 1.25rem', display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '420px', zIndex: 50 }}>
@@ -1257,11 +1169,13 @@ function AnalyzerPanel({ injectedCSV, onInjectedConsumed, onWP8Detected }: { inj
 
 // ─── Editor Passcode Gate ───────────────────────────────────────────────────
 
-const EDITOR_CODE = 'KINGKONG';
+const EDITOR_CODE = 'KINGKONG1';
 const EDITOR_STORAGE_KEY = 'ppei_editor_unlocked';
 
 function EditorGate() {
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(EDITOR_STORAGE_KEY) === 'true');
+  const [editorSubTab, setEditorSubTab] = useState<'calibration' | 'diesel'>('calibration');
+  // Access code gates removed — Manus platform OAuth handles access control
+  const [unlocked, setUnlocked] = useState(true);
   const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
@@ -1297,7 +1211,34 @@ function EditorGate() {
   if (unlocked) {
     return (
       <div className="flex flex-col" style={{ height: '100vh', overflow: 'hidden' }}>
-        <CalibrationEditor />
+        {/* Editor sub-tab bar */}
+        <div style={{ display: 'flex', gap: '0', borderBottom: `1px solid ${sColor.border}`, background: sColor.bgDark, flexShrink: 0 }}>
+          {[
+            { id: 'calibration' as const, label: 'CALIBRATION EDITOR' },
+            { id: 'diesel' as const, label: 'DIESEL' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setEditorSubTab(tab.id)}
+              style={{
+                padding: '8px 20px',
+                fontFamily: sFont.heading,
+                fontSize: '0.85rem',
+                letterSpacing: '0.08em',
+                background: editorSubTab === tab.id ? sColor.bgCard : 'transparent',
+                color: editorSubTab === tab.id ? sColor.red : sColor.textDim,
+                border: 'none',
+                borderBottom: editorSubTab === tab.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {editorSubTab === 'calibration' && <CalibrationEditor />}
+        {editorSubTab === 'diesel' && <DieselPanel />}
       </div>
     );
   }
@@ -1396,9 +1337,75 @@ function EditorGate() {
   );
 }
 
+// ─── Diesel Panel (DIESEL > DURAMAX / POWERSTROKE / CUMMINS) ────────────────
+
+function DieselPanel() {
+  const [dieselBrand, setDieselBrand] = useState<'duramax' | 'powerstroke' | 'cummins'>('duramax');
+
+  const brands: { id: 'duramax' | 'powerstroke' | 'cummins'; label: string; years: string; enabled: boolean }[] = [
+    { id: 'duramax', label: 'DURAMAX', years: '2001–2026 · GM/Chevrolet', enabled: true },
+    { id: 'powerstroke', label: 'POWERSTROKE', years: 'Ford · Coming Soon', enabled: false },
+    { id: 'cummins', label: 'CUMMINS', years: 'Ram/Dodge · Coming Soon', enabled: false },
+  ];
+
+  return (
+    <div style={{ padding: '0' }}>
+      {/* Brand sub-tab bar */}
+      <div style={{ display: 'flex', gap: '0', borderBottom: `1px solid ${sColor.border}`, background: sColor.bgDark, flexShrink: 0 }}>
+        {brands.map(brand => (
+          <button
+            key={brand.id}
+            onClick={() => brand.enabled && setDieselBrand(brand.id)}
+            disabled={!brand.enabled}
+            style={{
+              padding: '10px 24px',
+              fontFamily: sFont.heading,
+              fontSize: '0.9rem',
+              letterSpacing: '0.08em',
+              background: dieselBrand === brand.id ? sColor.bgCard : 'transparent',
+              color: !brand.enabled ? sColor.textMuted : dieselBrand === brand.id ? sColor.red : sColor.textDim,
+              border: 'none',
+              borderBottom: dieselBrand === brand.id ? `2px solid ${sColor.red}` : '2px solid transparent',
+              cursor: brand.enabled ? 'pointer' : 'not-allowed',
+              transition: 'all 0.2s',
+              opacity: brand.enabled ? 1 : 0.5,
+            }}
+          >
+            {brand.label}
+            <span style={{ display: 'block', fontFamily: sFont.body, fontSize: '0.6rem', color: sColor.textMuted, letterSpacing: '0.02em', marginTop: '1px' }}>
+              {brand.years}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Content area */}
+      {dieselBrand === 'duramax' && (
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <DieselInjectorFlowConverter />
+        </div>
+      )}
+      {dieselBrand === 'powerstroke' && (
+        <div style={{ padding: '4rem 2rem', textAlign: 'center' }}>
+          <Fuel style={{ width: 48, height: 48, color: sColor.textMuted, margin: '0 auto 1rem' }} />
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.1em', color: sColor.textMuted }}>POWERSTROKE</h2>
+          <p style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.textDim }}>Ford Powerstroke support coming soon</p>
+        </div>
+      )}
+      {dieselBrand === 'cummins' && (
+        <div style={{ padding: '4rem 2rem', textAlign: 'center' }}>
+          <Fuel style={{ width: 48, height: 48, color: sColor.textMuted, margin: '0 auto 1rem' }} />
+          <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.1em', color: sColor.textMuted }}>CUMMINS</h2>
+          <p style={{ fontFamily: sFont.body, fontSize: '1rem', color: sColor.textDim }}>Ram/Dodge Cummins support coming soon</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Advanced Dashboard ────────────────────────────────────────────────
 
-type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'drag' | 'diagnostic' | 'pitch' | 'tasks';
+type TabId = 'analyzer' | 'datalogger' | 'editor' | 'binary' | 'ai' | 'search' | 'vehicles' | 'a2l' | 'pids' | 'mode6' | 'uds' | 'services' | 'intellispy' | 'coding' | 'canam' | 'procedures' | 'talon' | 'reverseeng' | 'qa' | 'notifications' | 'notifprefs' | 'offsets' | 'support' | 'users' | 'flash' | 'fleet' | 'competition' | 'weather' | 'cloud' | 'diagnostic' | 'pitch' | 'tasks' | 'devtools' | 'ppei-flash' | 'ppei-datalogger';
 
 /* ── User-facing tabs (visible to all users) ── */
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -1408,9 +1415,17 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'editor', label: 'EDITOR', icon: <FileCode2 style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
   { id: 'intellispy', label: 'INTELLISPY', icon: <Radio style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'flash', label: 'FLASH', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'ppei-flash' as TabId, label: 'PPEI FLASHER', icon: <Zap style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 280)' }} /> },
+  { id: 'ppei-datalogger' as TabId, label: 'PPEI DATALOGGER', icon: <Gauge style={{ width: 16, height: 16, color: 'oklch(0.72 0.18 170)' }} /> },
+
   { id: 'fleet', label: 'FLEET', icon: <Truck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
-  { id: 'drag' as TabId, label: 'DRAG', icon: <Flag style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
+  { id: 'weather' as TabId, label: 'WEATHER', icon: <CloudSun style={{ width: 16, height: 16, color: 'oklch(0.72 0.16 210)' }} /> },
+  { id: 'competition' as TabId, label: 'COMPETITION', icon: <Trophy style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 40)' }} /> },
+  { id: 'cloud' as TabId, label: 'CLOUD', icon: <Cloud style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'pitch', label: 'PITCH', icon: <MessageSquare style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
+  { id: 'notifications', label: 'NOTIFICATIONS', icon: <Bell style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
+  { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.72 0.15 200)' }} /> },
 ];
 
 /* ── Internal/dev tabs (admin only) ── */
@@ -1423,16 +1438,14 @@ const devTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 16, height: 16 }} /> },
   { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 16, height: 16 }} /> },
   { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 16, height: 16 }} /> },
-  { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
+  { id: 'coding', label: 'BASIC EDITS', icon: <Settings style={{ width: 16, height: 16, color: 'oklch(0.70 0.18 200)' }} /> },
   { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 16, height: 16, color: 'oklch(0.75 0.18 60)' }} /> },
   { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 16, height: 16 }} /> },
-  { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> },
 ];
 
 const adminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'tasks', label: 'TASKS', icon: <CheckCircle style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 145)' }} /> },
   { id: 'diagnostic', label: 'DIAGNOSTIC', icon: <ShieldCheck style={{ width: 16, height: 16, color: 'oklch(0.65 0.20 30)' }} /> },
-  { id: 'devtools' as TabId, label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
+  { id: 'devtools', label: 'DEV TOOLS', icon: <Wrench style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
 ];
 
 function AdvancedDashboard({ onLock }: { onLock: () => void }) {
@@ -1442,23 +1455,23 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
   const isSuperAdmin = user?.role === 'super_admin';
-  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = isSuperAdmin ? [
-    { id: 'support' as TabId, label: 'SUPPORT', icon: <Inbox style={{ width: 16, height: 16, color: 'oklch(0.52 0.22 25)' }} /> },
-  ] : [];
+  const superAdminTabs: { id: TabId; label: string; icon: React.ReactNode }[] = [];
   const [devSubTab, setDevSubTab] = useState<string>('search');
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
   const [categoryFilter, setCategoryFilter] = useState<KBCategory | 'all'>('all');
   const [a2lData, setA2lData] = useState<A2LParseResult | null>(null);
   const [injectedCSV, setInjectedCSV] = useState<{ csv: string; filename: string } | null>(null);
   const [injectedWP8, setInjectedWP8] = useState<WP8ParseResult | null>(null);
+  const [injectedWP8FileName, setInjectedWP8FileName] = useState('');
   const [diagnosticPids, setDiagnosticPids] = useState<{ pid: number; service: number; name: string; shortName: string }[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Dynamically add Honda Talon tab when WP8 data is loaded or activeTab is talon
   const talonTab = { id: 'talon' as TabId, label: 'HONDA TALON', icon: <Fuel style={{ width: 16, height: 16, color: 'oklch(0.70 0.20 40)' }} /> };
   const showTalonTab = activeTab === 'talon' || injectedWP8 !== null;
   const allTabs = isAdmin
-    ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...adminTabs, ...superAdminTabs]
+    ? [...tabs, ...(showTalonTab ? [talonTab] : []), ...devTabs, ...adminTabs, ...superAdminTabs]
     : [...tabs, ...(showTalonTab ? [talonTab] : [])];
+  const mainTabCountBeforeAdmin = tabs.length + (showTalonTab ? 1 : 0);
 
   // Pick up WP8 data from sessionStorage (set by Home.tsx on .wp8 upload)
   useEffect(() => {
@@ -1479,7 +1492,11 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             }));
           }
           setInjectedWP8(parsed as WP8ParseResult);
+          // Also restore the filename if stored
+          const storedFileName = sessionStorage.getItem('pendingWP8FileName') || '';
+          if (storedFileName) setInjectedWP8FileName(storedFileName);
           sessionStorage.removeItem('pendingWP8');
+          sessionStorage.removeItem('pendingWP8FileName');
         } catch { /* ignore parse errors */ }
       }
       // Clean URL params
@@ -1503,7 +1520,6 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
 
   return (
     <div className="min-h-screen" style={{ background: sColor.bg, color: sColor.text }}>
-      <SignInBanner />
       {/* Shared PPEI Header */}
       <PpeiHeader />
 
@@ -1537,7 +1553,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
           {allTabs.map((tab, idx) => (
             <Fragment key={tab.id}>
               {/* Admin section divider */}
-              {isAdmin && idx === tabs.length && (
+              {isAdmin && idx === mainTabCountBeforeAdmin && (
                 <div style={{ width: '1px', background: 'oklch(0.30 0.010 260)', margin: '4px 6px', alignSelf: 'stretch' }} />
               )}
               <button onClick={() => { setActiveTab(tab.id); }} style={{
@@ -1555,12 +1571,13 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
         </div>
 
         {/* Tab content */}
-        {activeTab === 'analyzer' && <div className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8) => { setInjectedWP8(wp8); setActiveTab('talon'); }} /></div>}
+        {/* Analyzer, Datalogger, PPEI Datalogger: kept mounted (CSS hidden) so state persists across tab switches */}
+        <div style={{ display: activeTab === 'analyzer' ? 'block' : 'none' }} className="ppei-anim-fade-up"><AnalyzerPanel injectedCSV={injectedCSV} onInjectedConsumed={() => setInjectedCSV(null)} onWP8Detected={(wp8, fileName) => { setInjectedWP8(wp8); setInjectedWP8FileName(fileName); setActiveTab('talon'); }} /></div>
 
         {activeTab === 'ai' && <div className="ppei-anim-fade-up"><AIChatPanel a2lData={a2lData} /></div>}
 
         {/* DEV TOOLS — consolidated admin panel */}
-        {activeTab === ('devtools' as TabId) && isAdmin && (
+        {activeTab === 'devtools' && isAdmin && (
           <div className="ppei-anim-fade-up">
             {/* Dev sub-tab navigation */}
             <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', borderBottom: `1px solid oklch(0.20 0.008 260)`, overflowX: 'auto', flexWrap: 'wrap' }}>
@@ -1573,7 +1590,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
                 { id: 'mode6', label: 'MODE 6', icon: <Activity style={{ width: 13, height: 13 }} /> },
                 { id: 'uds', label: 'UDS', icon: <Terminal style={{ width: 13, height: 13 }} /> },
                 { id: 'services', label: 'SERVICES', icon: <BookOpen style={{ width: 13, height: 13 }} /> },
-                { id: 'coding', label: 'CODING', icon: <Settings style={{ width: 13, height: 13 }} /> },
+                { id: 'coding', label: 'BASIC EDITS', icon: <Settings style={{ width: 13, height: 13 }} /> },
                 { id: 'canam', label: 'CAN-AM VIN', icon: <Key style={{ width: 13, height: 13 }} /> },
                 { id: 'procedures', label: 'PROCEDURES', icon: <Wrench style={{ width: 13, height: 13 }} /> },
                 { id: 'talon', label: 'HONDA TALON', icon: <Fuel style={{ width: 13, height: 13 }} /> },
@@ -1665,7 +1682,7 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
             {devSubTab === 'coding' && <div style={{ height: 'calc(100vh - 280px)' }}><VehicleCoding /></div>}
             {devSubTab === 'canam' && <div style={{ height: 'calc(100vh - 280px)' }}><CanAmVinChanger /></div>}
             {devSubTab === 'procedures' && <div style={{ height: 'calc(100vh - 280px)' }}><ServiceProcedures /></div>}
-            {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} />}
+            {devSubTab === 'talon' && <HondaTalonTuner wp8Data={injectedWP8} wp8FileName={injectedWP8FileName} onBack={() => setActiveTab('analyzer')} />}
             {devSubTab === 'users' && <UserManagementPanel />}
             {devSubTab === 'geofence' && <GeofencePanel />}
             {devSubTab === 'qa' && <QAChecklistPanel />}
@@ -1676,51 +1693,27 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
           </div>
         )}
         {activeTab === 'diagnostic' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 120px)' }}><KnoxDiagnosticAgent onInjectPids={(pids) => { setDiagnosticPids(pids); setActiveTab('datalogger'); }} onSwitchToDatalogger={() => setActiveTab('datalogger')} onSwitchToAnalyzer={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'datalogger' && <div className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>}
-        <div className="ppei-anim-fade-up" style={{ display: activeTab === 'editor' ? 'block' : 'none', height: activeTab === 'editor' ? 'auto' : '0', overflow: activeTab === 'editor' ? 'visible' : 'hidden' }}><EditorGate /></div>
+        <div style={{ display: activeTab === 'datalogger' ? 'block' : 'none' }} className="ppei-anim-fade-up"><DataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>
+        {activeTab === 'editor' && (
+          <div className="ppei-anim-fade-up">
+            <EditorGate />
+          </div>
+        )}
 
         {activeTab === 'intellispy' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)' }}><IntelliSpy /></div>}
-        {activeTab === 'flash' && <div className="ppei-anim-fade-up">
-          <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' }}>
-            <div style={{ background: 'oklch(0.13 0.008 260)', border: '1px solid oklch(0.22 0.010 260)', borderLeft: `4px solid ${sColor.red}`, borderRadius: '3px', padding: '2rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem' }}>
-                <ShieldCheck style={{ width: 32, height: 32, color: sColor.red }} />
-                <h2 style={{ fontFamily: sFont.heading, fontSize: '1.5rem', letterSpacing: '0.08em', color: 'white', margin: 0 }}>PPEI EXCLUSIVE FLASH</h2>
-              </div>
-              <div style={{ fontFamily: sFont.body, fontSize: '0.95rem', color: sColor.textDim, lineHeight: 1.7 }}>
-                <p style={{ marginBottom: '1rem' }}>This is a <strong style={{ color: 'white' }}>bespoke product built for and by PPEI</strong> for the exclusive use of PPEI calibrations and OEM flashes.</p>
-                <p style={{ marginBottom: '1rem' }}>V-OP Flash <strong style={{ color: 'white' }}>does not flash any third-party tunes</strong>. Only aftermarket calibrations approved and built by PPEI will be flashed by this device.</p>
-                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1.5rem' }}>
-                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: sColor.red, marginBottom: '0.75rem' }}>WHAT V-OP FLASH SUPPORTS</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                    {['PPEI Custom Calibrations', 'OEM Stock Flashes', 'PPEI Performance Tunes', 'PPEI Economy Tunes', 'PPEI Tow Tunes', 'Multi-Tune Switching'].map(item => (
-                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.65 0.20 145)' }}>
-                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ background: 'oklch(0.10 0.005 260)', border: '1px solid oklch(0.25 0.010 260)', borderRadius: '3px', padding: '1.25rem', marginTop: '1rem' }}>
-                  <h3 style={{ fontFamily: sFont.heading, fontSize: '1rem', letterSpacing: '0.06em', color: 'oklch(0.75 0.18 60)', marginBottom: '0.75rem' }}>OPEN TO ALL USERS</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-                    {['Datalogger', 'Diagnostics / Health Analysis', 'AI Chat (Knox)', 'IntelliSpy Live Monitor', 'Drag Racing Terminal', 'Community Forums'].map(item => (
-                      <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: sFont.mono, fontSize: '0.8rem', color: 'oklch(0.70 0.18 200)' }}>
-                        <CheckCircle style={{ width: 14, height: 14, flexShrink: 0 }} /> {item}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <p style={{ marginTop: '1.5rem', fontFamily: sFont.mono, fontSize: '0.75rem', color: 'oklch(0.58 0.010 260)', textAlign: 'center' }}>V-OP Flash requires a connected V-OP OBD device and an active PPEI account.</p>
-              </div>
-            </div>
-          </div>
-        </div>}
-        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} onBack={() => setActiveTab('analyzer')} /></div>}
-        {activeTab === 'support' && isSuperAdmin && <div className="ppei-anim-fade-up"><SupportAdminPanel /></div>}
+        {activeTab === 'flash' && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><FlashContainerPanel /></div>}
+        {activeTab === ('ppei-flash' as TabId) && <div className="ppei-anim-fade-up" style={{ height: 'calc(100vh - 200px)', padding: '1rem' }}><PpeiFlashContainerPanel /></div>}
+
+        <div style={{ display: activeTab === ('ppei-datalogger' as TabId) ? 'block' : 'none' }} className="ppei-anim-fade-up"><PpeiDataloggerPanel onOpenInAnalyzer={(csv: string, filename: string) => { setInjectedCSV({ csv, filename }); setActiveTab('analyzer'); }} injectedPids={diagnosticPids} /></div>
+        {activeTab === 'talon' && <div className="ppei-anim-fade-up"><HondaTalonTuner wp8Data={injectedWP8} wp8FileName={injectedWP8FileName} onBack={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'notifications' && <div className="ppei-anim-fade-up"><AdminNotificationPanel onClose={() => setActiveTab('analyzer')} /></div>}
+        {activeTab === 'support' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><StratPanel /></React.Suspense>{isSuperAdmin && <div style={{ marginTop: '2rem', borderTop: '1px solid oklch(0.25 0.008 260)', paddingTop: '1.5rem' }}><SupportAdminPanel /></div>}</div>}
         {activeTab === 'pitch' && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><PitchPanel /></React.Suspense></div>}
-        {activeTab === 'tasks' && isAdmin && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><TasksPanel /></React.Suspense></div>}
+        {activeTab === 'tasks' && <div className="ppei-anim-fade-up"><TasksGate /></div>}
         {activeTab === ('fleet' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><FleetPanel /></React.Suspense></div>}
-        {activeTab === ('drag' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><DragPanel /></React.Suspense></div>}
+        {activeTab === ('competition' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><CompetitionPanel /></React.Suspense></div>}
+        {activeTab === ('weather' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><WeatherPanel /></React.Suspense></div>}
+        {activeTab === ('cloud' as TabId) && <div className="ppei-anim-fade-up"><React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}><CloudPanel /></React.Suspense></div>}
       </main>
 
       {/* Voice Command Button */}
@@ -1739,12 +1732,128 @@ function AdvancedDashboard({ onLock }: { onLock: () => void }) {
   );
 }
 
+// ─── Tasks Access Gate ──────────────────────────────────────────────────────
+
+const TASKS_CODE = 'KINGKONG1';
+
+function TasksGate() {
+  // Access code gates removed — Manus platform OAuth handles access control
+  const [unlocked, setUnlocked] = useState(true);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState(false);
+  const [shake, setShake] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const handleSubmit = () => {
+    if (code.toUpperCase() === TASKS_CODE) {
+      setUnlocked(true);
+    } else {
+      setError(true);
+      setShake(true);
+      setAttempts(prev => prev + 1);
+      setTimeout(() => setShake(false), 500);
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  const funnyMessages = [
+    "Wrong code. The task tracker doesn't trust you yet.",
+    "Nope. Even the bug backlog has better luck than your guesses.",
+    "Access denied. Try reading the sprint notes... oh wait.",
+    "That ain't it chief. The CI pipeline just failed in sympathy.",
+    "Incorrect. The unit tests are weeping.",
+  ];
+
+  if (unlocked) {
+    return (
+      <React.Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', fontFamily: sFont.mono, color: sColor.textDim }}>LOADING...</div>}>
+        <TasksPanel />
+      </React.Suspense>
+    );
+  }
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', padding: '3rem 2rem', minHeight: '400px',
+    }}>
+      <div style={{
+        width: '64px', height: '64px', borderRadius: '50%',
+        background: 'oklch(0.14 0.008 260)', border: `2px solid ${sColor.red}4d`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: '1.5rem', boxShadow: `0 0 30px ${sColor.red}1a`,
+      }}>
+        <Lock style={{ width: 28, height: 28, color: sColor.red }} />
+      </div>
+
+      <h3 style={{
+        fontFamily: sFont.heading, fontSize: '1.6rem', letterSpacing: '0.12em',
+        color: 'white', marginBottom: '0.5rem',
+      }}>QA TASK TRACKER</h3>
+
+      <p style={{
+        fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim,
+        maxWidth: '360px', marginBottom: '2rem',
+      }}>Enter the access code to view the task tracker.</p>
+
+      <div className={shake ? 'ppei-shake' : ''} style={{ width: '100%', maxWidth: '320px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <input
+            ref={inputRef}
+            type="password"
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+            placeholder="Enter access code..."
+            style={{
+              flex: 1, padding: '10px 14px',
+              fontFamily: sFont.mono, fontSize: '0.95rem', letterSpacing: '0.15em',
+              background: sColor.bgDark,
+              border: `2px solid ${error ? sColor.red : 'oklch(0.25 0.008 260)'}`,
+              borderRadius: '3px', color: 'white', outline: 'none',
+              textAlign: 'center', textTransform: 'uppercase',
+              transition: 'border-color 0.2s',
+            }}
+          />
+          <button
+            onClick={handleSubmit}
+            style={{
+              padding: '10px 18px',
+              background: `${sColor.red}33`, border: `1px solid ${sColor.red}80`,
+              borderRadius: '3px', color: sColor.red,
+              fontFamily: sFont.heading, fontSize: '0.85rem', letterSpacing: '0.08em',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >UNLOCK</button>
+        </div>
+
+        {error && attempts > 0 && (
+          <p style={{
+            fontFamily: sFont.body, fontSize: '0.8rem',
+            color: sColor.red, marginTop: '8px',
+            animation: 'fadeIn 0.3s ease',
+          }}>
+            {funnyMessages[(attempts - 1) % funnyMessages.length]}
+          </p>
+        )}
+      </div>
+
+      {attempts >= 3 && (
+        <p style={{
+          fontFamily: sFont.mono, fontSize: '0.7rem',
+          color: 'oklch(0.55 0.008 260)', marginTop: '2rem',
+        }}>Hint: Think big. Think primate. Think chest-pounding dominance.</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Export ──────────────────────────────────────────────────────────────────
 
 export default function Advanced() {
-  const [unlocked, setUnlocked] = useState(() => localStorage.getItem(STORAGE_KEY) === 'true');
-  const handleLock = () => { localStorage.removeItem(STORAGE_KEY); setUnlocked(false); };
-
-  if (!unlocked) return <AccessGate onUnlock={() => setUnlocked(true)} />;
-  return <AdvancedDashboard onLock={handleLock} />;
+  const [, navigate] = useLocation();
+  return <AdvancedDashboard onLock={() => navigate('/')} />;
 }

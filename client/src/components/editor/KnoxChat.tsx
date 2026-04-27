@@ -18,6 +18,7 @@ import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 import { EcuDefinition, CalibrationMap } from '@/lib/editorEngine';
 import { trpc } from '@/lib/trpc';
 import { Streamdown } from 'streamdown';
+import KnoxConfidenceDashboard, { type KnoxMetadata } from '@/components/KnoxConfidenceDashboard';
 import { buildMapSearchIndex, searchMaps, formatSearchResultsForContext, MapSearchIndex } from '@/lib/knoxMapSearch';
 import type { DiagnosticReport } from '@/lib/diagnostics';
 import type { ReasoningReport } from '@/lib/reasoningEngine';
@@ -38,6 +39,14 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** Knox pipeline metadata (only on assistant messages from quad-agent pipeline) */
+  knoxMeta?: {
+    pipeline?: string;
+    confidence?: 'high' | 'medium' | 'low';
+    agreement?: string;
+    durationMs?: number;
+    agentDetails?: Record<string, unknown>;
+  };
 }
 
 /** Max characters for the context string sent to the LLM */
@@ -333,6 +342,13 @@ export default function KnoxChat({
         role: 'assistant',
         content: String(response.reply),
         timestamp: Date.now(),
+        knoxMeta: {
+          pipeline: response.pipeline,
+          confidence: response.confidence as 'high' | 'medium' | 'low' | undefined,
+          agreement: response.agreement,
+          durationMs: response.durationMs,
+          agentDetails: response.agentDetails as Record<string, unknown> | undefined,
+        },
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch (err: any) {
@@ -438,14 +454,19 @@ export default function KnoxChat({
                 <Bot className="w-3.5 h-3.5 text-ppei-red" />
               </div>
             )}
-            <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-ppei-red/20 text-white'
-                  : 'bg-zinc-800/60 text-zinc-300'
-              }`}
-            >
-              <Streamdown>{msg.content}</Streamdown>
+            <div className={`max-w-[85%] ${msg.role === 'user' ? '' : 'space-y-0'}`}>
+              <div
+                className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                  msg.role === 'user'
+                    ? 'bg-ppei-red/20 text-white'
+                    : 'bg-zinc-800/60 text-zinc-300'
+                }`}
+              >
+                <Streamdown>{msg.content}</Streamdown>
+              </div>
+              {msg.role === 'assistant' && msg.knoxMeta && (
+                <KnoxConfidenceDashboard metadata={msg.knoxMeta as KnoxMetadata} />
+              )}
             </div>
             {msg.role === 'user' && (
               <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center shrink-0 mt-0.5">

@@ -602,6 +602,18 @@ export function getHondaTalonKeyChannels(result: WP8ParseResult) {
     speed1: find('Speed 1'),
     speed2: find('Speed 2'),
     gearRatio: find('Gear Ratio'),
+    // Power Commander piggyback channels
+    // When a Power Commander is installed, it multiplies the ECU's injector pulsewidth
+    // based on manifold pressure. 'Injector Pulsewidth Final' shows the ECU's command
+    // (lower than actual), while 'Primary Injector Pulsewidth 1' shows the actual
+    // injector on-time after the PC multiplier. Virtual dyno MUST use Primary PW
+    // when these channels are present.
+    primaryInjPw1: find('Primary Injector Pulsewidth 1'),
+    primaryInjPw2: find('Primary Injector Pulsewidth 2'),
+    primaryInjDuty1: find('Primary Injector Duty 1'),
+    primaryInjDuty2: find('Primary Injector Duty 2'),
+    injAdjustment1: find('Injector Adjustment 1'),
+    injAdjustment2: find('Injector Adjustment 2'),
     // Talon-specific channels discovered from 2,792 dyno logs
     talonClutchSlip5th: find('Talon_HL6_Clutch Slip_5th Gear'),
     hondaAddPw1: find('Honda_Add PW_0801EB0402'),
@@ -721,11 +733,13 @@ export function wp8ToDuramaxData(result: WP8ParseResult): import('./dataProcesso
 
     rpm[i] = getVal(row, rpmI);
     throttlePosition[i] = getVal(row, tpI);
-    vehicleSpeed[i] = getVal(row, vsI);
+    // Vehicle Speed: WP8 stores in km/h — convert to mph
+    vehicleSpeed[i] = getVal(row, vsI) * 0.621371;
 
-    // Coolant temp — WP8 Honda Talon logs are typically in °F already
-    coolantTemp[i] = getVal(row, ectI);
-    intakeAirTemp[i] = getVal(row, iatI);
+    // Coolant temp — WP8 stores in °C, convert to °F
+    coolantTemp[i] = getVal(row, ectI) * 9 / 5 + 32;
+    // Intake Air Temp — WP8 stores in °C, convert to °F
+    intakeAirTemp[i] = getVal(row, iatI) * 9 / 5 + 32;
 
     // MAP: use corrected if available, otherwise raw
     const mapVal = mapCorrI !== -1 ? getVal(row, mapCorrI) : getVal(row, mapI);

@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE users SET role = 'super_admin', advancedAccess = 'approved', accessLevel = 3 WHERE openId = 'V2pCAkSwLyG7ZZ2xtxe89a'; UPDATE users SET role = 'admin', advancedAccess = 'approved', accessLevel = 3 WHERE openId IN ('ksBHGV5iqfKpCgoi3TKgYG', 'nWh2tQUgLAjdSidvActMnF', 'firEtjYyGRNJ9ENvVTrCq3');",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway05.us-east-1.prod.aws.tidbcloud.com --port 4000 --user fZHarJdB59o6HX6.root --database S5fEZ6uPndYXxpVXwwyEPy --execute UPDATE users SET role = 'super_admin', advancedAccess = 'approved', accessLevel = 3 WHERE openId = 'V2pCAkSwLyG7ZZ2xtxe89a'; UPDATE users SET role = 'admin', advancedAccess = 'approved', accessLevel = 3 WHERE openId IN ('ksBHGV5iqfKpCgoi3TKgYG', 'nWh2tQUgLAjdSidvActMnF', 'firEtjYyGRNJ9ENvVTrCq3');",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 186
-}

@@ -21,6 +21,7 @@
 
 import type { ProcessedMetrics } from './dataProcessor';
 import type { DiagnosticReport } from './diagnostics';
+import { shouldApplyDieselAnalyzerRules } from './combustionInference';
 
 export interface ReasoningFinding {
   id: string;
@@ -79,6 +80,7 @@ export function runReasoningEngine(
 ): ReasoningReport {
   const findings: ReasoningFinding[] = [];
   const betaImprovements: BetaImprovement[] = [];
+  const dieselRules = shouldApplyDieselAnalyzerRules(data.vehicleMeta);
 
   // ── Step 1: Build operating context ──────────────────────────────────────
   const ctx = buildOperatingContext(data);
@@ -86,26 +88,32 @@ export function runReasoningEngine(
   // ── Step 2: TCC / Transmission reasoning ─────────────────────────────────
   findings.push(...analyzeTccBehavior(data, ctx, diagnostics));
 
-  // ── Step 3: Rail pressure / fuel system reasoning ─────────────────────────
-  findings.push(...analyzeRailPressure(data, ctx, diagnostics));
+  // ── Step 3: Rail pressure / fuel system reasoning (common-rail diesel) ───
+  if (dieselRules) {
+    findings.push(...analyzeRailPressure(data, ctx, diagnostics));
+  }
 
   // ── Step 4: Thermal management reasoning ─────────────────────────────────
   findings.push(...analyzeThermalManagement(data, ctx));
 
-  // ── Step 5: Boost / VGT correlation reasoning ────────────────────────────
+  // ── Step 5: Boost / VGT correlation reasoning (VGT sections no-op without vane PIDs)
   findings.push(...analyzeBoostSystem(data, ctx));
 
-  // ── Step 5b: Converter stall vs turbo spool mismatch ─────────────────────
-  findings.push(...analyzeConverterStallVsTurboSpool(data, ctx));
+  // ── Step 5b: Converter stall vs turbo spool (diesel turbo / smoke narrative)
+  if (dieselRules) {
+    findings.push(...analyzeConverterStallVsTurboSpool(data, ctx));
+  }
 
-  // ── Step 5c: Boost leak detection ────────────────────────────────────────
-  findings.push(...analyzeBoostLeak(data, ctx));
+  // ── Step 5c: Boost leak via MAF vs boost heuristics (diesel-calibrated)
+  if (dieselRules) {
+    findings.push(...analyzeBoostLeak(data, ctx));
+  }
 
   // ── Step 5d: Performance recommendations ─────────────────────────────────
-  findings.push(...generatePerformanceRecommendations(data, ctx));
+  findings.push(...generatePerformanceRecommendations(data, ctx, dieselRules));
 
   // ── Step 6: Beta improvement suggestions ─────────────────────────────────
-  betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics));
+  betaImprovements.push(...generateBetaImprovements(data, ctx, findings, diagnostics, dieselRules));
 
   // ── Step 7: Generate summary ──────────────────────────────────────────────
   const summary = generateSummary(findings, ctx, diagnostics);
@@ -392,7 +400,7 @@ function analyzeRailPressure(
 
   if (warmSamples.length < 10) return findings;
 
-  // Detect PCV format: EFILive logs mA (typical range 800-1400 mA), HP Tuners logs %
+  // Detect channel format: most Duramax logs use FPR/PCV **mA** (~400–1800); some tools mislabel a column as "% duty"
   const maxPcv = Math.max(...warmSamples.map(s => s.pcv).filter(v => v > 0));
   const isEFILivePcvMa = maxPcv > 200; // mA values >> 100%
 
@@ -635,12 +643,16 @@ function analyzeBoostSystem(
   // VGT-EGT correlation analysis
   // VGT position semantics: Higher % = more CLOSED = more boost.
   // Lower % = more OPEN = less boost = potentially HIGHER EGTs.
-  // When VGT opens up (low %), exhaust energy bypasses the turbine wheel,
-  // meaning less energy is extracted from exhaust gas. This can lead to:
-  //   1. Higher EGTs downstream because the exhaust retains more heat
-  //   2. Less boost because less exhaust energy drives the compressor
-  // This is OPPOSITE to what you might intuitively think -- opening VGT
-  // does NOT cool the exhaust, it actually means hotter exhaust exits.
+  // CRITICAL NUANCE: The relationship is NOT linear or simple.
+  //   - Opening VGT: less energy extracted → hotter exhaust downstream, less boost.
+  //   - Closing VGT: more backpressure (drive pressure). If the engine doesn't have
+  //     enough heat/RPM to push through that backpressure, exhaust dwells longer and
+  //     EGTs can ALSO rise. Closing VGT does NOT always mean cooler EGTs.
+  //   - More boost does NOT always mean more power. If VGT is too closed for the
+  //     operating conditions, the pressure ratio (boost-to-drive) gets out of hand,
+  //     hurting horsepower and risking turbo overspeed.
+  //   - Healthy boost-to-drive ratio: 1.5:1 to 2:1. Ratios approaching 1:1 or worse
+  //     (drive > boost) = turbo is choking the engine.
   const egtVals = data.exhaustGasTemp.filter(v => v > 0);
   if (vane.length > 20 && egtVals.length > 20) {
     // Find periods where VGT is relatively open (< 40%) under load
@@ -667,15 +679,16 @@ function analyzeBoostSystem(
           `When the VGT vanes are more open (< 40% closed), less exhaust energy is ` +
           `extracted by the turbine, which means the exhaust gas retains more heat. ` +
           `This log shows ${openVgtHighEgt} samples where VGT was open and EGT exceeded 1200F. ` +
-          `This is expected behavior -- an open VGT produces less boost but allows hotter ` +
-          `exhaust to pass through. If EGTs are a concern, a more closed VGT position ` +
-          `(higher boost target) can actually help cool exhaust by extracting more energy.`,
+          `Note: closing the VGT does NOT always fix high EGTs — if the VGT is too closed ` +
+          `without enough heat or RPM, the boost-to-drive pressure ratio gets out of hand, ` +
+          `which can hurt horsepower and risk turbo overspeed. The fix depends on the ` +
+          `operating conditions and whether the VGT position makes sense for the current RPM/load.`,
         evidence: [
           `Open VGT + high EGT samples: ${openVgtHighEgt}`,
           `Closed VGT + normal EGT samples: ${closedVgtNormalEgt}`,
           `Max boost: ${maxBoost.toFixed(1)} psi`,
         ],
-        suggestion: 'This is normal VGT behavior. If sustained high EGTs are a concern, discuss boost targets with your tuner.',
+        suggestion: 'Evaluate VGT position relative to RPM and load. Closing the VGT more is not always the answer — if the boost-to-drive pressure ratio is already poor, more VGT closure can hurt power and risk turbo overspeed. Discuss VGT mapping and boost targets with your tuner.',
       });
     }
   }
@@ -1045,7 +1058,12 @@ function analyzeBoostLeak(
         `appear worse than either would be in isolation.`,
       evidence,
       suggestion:
-        'Perform a boost leak test on the charge system. Check all intercooler boots, clamps, ' +
+        'IMPORTANT: Before assuming a boost leak, check if the vehicle has an aftermarket intake ' +
+        'or if the OEM MAF baffle has been removed. A larger pre-MAF tube diameter causes the ' +
+        'MAF sensor to under-read (lower air velocity across the heated element = lower reported ' +
+        'airflow), which makes the smoke limiter engage prematurely and limits power. In this case, ' +
+        'the fix is a MAF scaling tune revision, not a mechanical repair. If the intake is stock, ' +
+        'perform a boost leak test on the charge system. Check all intercooler boots, clamps, ' +
         'intercooler end tanks, up-pipe connections, and turbo outlet. Even a small leak can ' +
         'significantly reduce peak boost. If the vehicle also has a converter stall concern, ' +
         'address the boost leak first — restoring full boost pressure may partially compensate ' +
@@ -1086,20 +1104,21 @@ function getToolDisplayName(fileFormat: string): string {
 
 function generatePerformanceRecommendations(
   data: ProcessedMetrics,
-  ctx: OperatingContext
+  ctx: OperatingContext,
+  dieselRules: boolean
 ): ReasoningFinding[] {
   const findings: ReasoningFinding[] = [];
 
-  // ── Injector pulse width analysis ──
-  const ipwNonZero = data.injectorPulseWidth.filter(v => v > 0);
+  // ── Injector pulse width analysis (direct-injection diesel framing) ──
+  const ipwNonZero = dieselRules ? data.injectorPulseWidth.filter(v => v > 0) : [];
   const maxIpw = ipwNonZero.length > 0 ? Math.max(...ipwNonZero) : 0;
   const avgIpw = ipwNonZero.length > 0 ? ipwNonZero.reduce((a, b) => a + b, 0) / ipwNonZero.length : 0;
 
-  // Solenoid injectors: > 2500 uS is race-level
+  // Solenoid injectors: 3000 µs is basically maxed out, 2500+ is where you start paying attention
   // Piezo injectors: > 1.5 ms is race-level
-  const isPiezo = ctx.platform === 'LML' || ctx.platform === 'L5P';
-  const raceThreshold = isPiezo ? 1.5 : 2.5;
-  const highThreshold = isPiezo ? 1.2 : 2.0;
+  const isPiezo = dieselRules && (ctx.platform === 'LML' || ctx.platform === 'L5P');
+  const raceThreshold = isPiezo ? 1.5 : 3.0;
+  const highThreshold = isPiezo ? 1.2 : 2.5;
 
   if (maxIpw > raceThreshold) {
     findings.push({
@@ -1120,7 +1139,7 @@ function generatePerformanceRecommendations(
       ],
       suggestion: isPiezo
         ? 'For builds over 600 HP, consider aftermarket piezo injectors with higher flow rates to reduce pulse width and EGTs.'
-        : 'For builds over 500 HP, consider larger solenoid injectors (e.g., SAC nozzles) to reduce pulse width below 2000 µs.',
+        : 'For builds over 500 HP, consider larger solenoid injectors (e.g., SAC nozzles) to reduce pulse width below 2500 µs. 3000 µs is considered basically maxed out on a solenoid injector.',
     });
   } else if (maxIpw > highThreshold) {
     findings.push({
@@ -1137,20 +1156,20 @@ function generatePerformanceRecommendations(
         `Peak injector pulse width: ${maxIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
         `Average pulse width: ${avgIpw.toFixed(2)} ${isPiezo ? 'ms' : 'µs'}`,
       ],
-      suggestion: 'Keep EGTs below 1300°F sustained. If EGTs are consistently high, discuss injector sizing with your tuner.',
+      suggestion: 'Keep EGTs below 1475°F sustained. If EGTs are consistently above 1475°F for more than 14 seconds, discuss injector sizing and boost targets with your tuner.',
     });
   }
 
-  // ── Rail pressure headroom analysis ──
-  const rpActual = data.railPressureActual.filter(v => v > 0);
-  const rpDesired = data.railPressureDesired.filter(v => v > 0);
+  // ── Rail pressure headroom analysis (CP3 / common-rail diesel) ──
+  const rpActual = dieselRules ? data.railPressureActual.filter(v => v > 0) : [];
+  const rpDesired = dieselRules ? data.railPressureDesired.filter(v => v > 0) : [];
   const maxRpActual = rpActual.length > 0 ? Math.max(...rpActual) : 0;
   const maxRpDesired = rpDesired.length > 0 ? Math.max(...rpDesired) : 0;
 
   // Detect if rail pressure is at the CP3 pump's physical limit
   // Stock CP3 typically maxes out around 26,000-27,000 psi
   const cp3Limit = 26500;
-  if (maxRpActual > cp3Limit && maxRpDesired > maxRpActual + 500) {
+  if (dieselRules && maxRpActual > cp3Limit && maxRpDesired > maxRpActual + 500) {
     findings.push({
       id: 'perf-cp3-limit',
       category: 'fuel_system',
@@ -1171,10 +1190,10 @@ function generatePerformanceRecommendations(
     });
   }
 
-  // ── Boost-to-power efficiency ──
+  // ── Boost-to-power efficiency (Duramax-oriented thresholds) ──
   const maxBoost = data.stats.boostMax;
   const maxHp = Math.max(data.stats.hpTorqueMax, data.stats.hpMafMax, data.stats.hpAccelMax);
-  if (maxBoost > 0 && maxHp > 100) {
+  if (dieselRules && maxBoost > 0 && maxHp > 100) {
     const hpPerPsi = maxHp / maxBoost;
     // Typical efficiency: 10-15 HP/psi for stock turbo, 15-25 for aftermarket
     if (hpPerPsi < 8 && maxBoost > 25) {
@@ -1199,14 +1218,14 @@ function generatePerformanceRecommendations(
     }
   }
 
-  // ── EGT management recommendations ──
-  const egtNonZero = data.exhaustGasTemp.filter(v => v > 0);
+  // ── EGT management recommendations (diesel thermal limits; gas EGT differs) ──
+  const egtNonZero = dieselRules ? data.exhaustGasTemp.filter(v => v > 0) : [];
   const maxEgt = egtNonZero.length > 0 ? Math.max(...egtNonZero) : 0;
   const avgEgt = egtNonZero.length > 10
     ? egtNonZero.reduce((a, b) => a + b, 0) / egtNonZero.length
     : 0;
 
-  if (maxEgt > 1400 && avgEgt > 900) {
+  if (dieselRules && maxEgt > 1475 && avgEgt > 900) {
     findings.push({
       id: 'perf-high-egt',
       category: 'thermal',
@@ -1215,11 +1234,11 @@ function generatePerformanceRecommendations(
       title: 'Elevated Exhaust Gas Temperatures',
       reasoning:
         `Peak EGT of ${maxEgt.toFixed(0)}°F with an average of ${avgEgt.toFixed(0)}°F indicates ` +
-        `significant thermal loading. Sustained EGTs above 1300°F accelerate turbo wear, can crack ` +
-        `exhaust manifolds, and reduce injector life. ` +
-        (maxEgt > 1500
-          ? `At ${maxEgt.toFixed(0)}°F, piston/head damage becomes a risk on extended pulls.`
-          : `Current levels are manageable for short bursts but should not be sustained.`),
+        `significant thermal loading. Sustained EGTs above 1475°F accelerate turbo wear and reduce injector life. ` +
+        `Brief spikes to 1800-2000°F are acceptable during racing pulls (<12 seconds), but sustained temps at this level indicate a problem. ` +
+        (maxEgt > 1800
+          ? `At ${maxEgt.toFixed(0)}°F, this is racing-level heat — acceptable for short drag passes but not for sustained pulls.`
+          : `Current levels should be monitored during towing or sustained pulls.`),
       evidence: [
         `Peak EGT: ${maxEgt.toFixed(0)}°F`,
         `Average EGT: ${avgEgt.toFixed(0)}°F`,
@@ -1284,7 +1303,8 @@ function generateBetaImprovements(
   data: ProcessedMetrics,
   ctx: OperatingContext,
   findings: ReasoningFinding[],
-  diagnostics: DiagnosticReport
+  diagnostics: DiagnosticReport,
+  dieselRules: boolean
 ): BetaImprovement[] {
   const improvements: BetaImprovement[] = [];
   const toolName = getToolDisplayName(ctx.fileFormat);
@@ -1299,7 +1319,9 @@ function generateBetaImprovements(
   const isLb7ByPids = ctx.fileFormat === 'efilive' && data.fileFormat === 'efilive' &&
     data.exhaustGasTemp.every(v => v === 0) && data.turboVanePosition.every(v => v === 0);
   const hasNoFactoryEgt = isLb7ByPlatform || isLb7ByPids;
-  if (data.exhaustGasTemp.every(v => v === 0) && !hasNoFactoryEgt) missingPids.push('Exhaust Gas Temperature (EGT)');
+  if (dieselRules && data.exhaustGasTemp.every(v => v === 0) && !hasNoFactoryEgt) {
+    missingPids.push('Exhaust Gas Temperature (EGT)');
+  }
   if (data.oilPressure.every(v => v === 0)) missingPids.push('Oil Pressure');
   if (data.oilTemp.every(v => v === 0)) missingPids.push('Oil Temperature');
   if (data.transFluidTemp.every(v => v === 0)) missingPids.push('Transmission Fluid Temperature');
@@ -1313,7 +1335,7 @@ function generateBetaImprovements(
       suggestion:
         `Adding these parameters to your ${toolName} configuration would enable more comprehensive ` +
         `diagnostics.` +
-        (hasEgt ? ` EGT is particularly valuable for detecting fueling issues and exhaust system health.` : '') +
+        (hasEgt && dieselRules ? ` EGT is particularly valuable for detecting fueling issues and exhaust system health.` : '') +
         ` Oil pressure and temperature help identify lubrication system concerns under load.`,
       priority: hasEgt ? 'high' : 'medium',
     });
@@ -1344,13 +1366,16 @@ function generateBetaImprovements(
   const sampleRateHz = logDurationSec > 0 ? sampleCount / logDurationSec : 0;
 
   if (sampleRateHz > 0 && sampleRateHz < 8) {
+    const dieselSampleDetail = dieselRules
+      ? 'brief slip events, rail pressure spikes, and boost transients. '
+      : 'brief TCC slip events and boost transients. ';
     improvements.push({
       id: 'sample-rate',
       area: 'Data Quality',
       observation: `Estimated sample rate: ~${sampleRateHz.toFixed(1)} Hz. Higher sample rates improve transient event detection.`,
       suggestion:
         `Increasing your ${toolName} sample rate to 10+ Hz will improve detection of ` +
-        `brief slip events, rail pressure spikes, and boost transients. ` +
+        dieselSampleDetail +
         `Short-duration events (<300ms) may be missed at lower sample rates.`,
       priority: 'medium',
     });

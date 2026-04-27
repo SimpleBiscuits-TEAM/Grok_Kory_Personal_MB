@@ -1,0 +1,25 @@
+{
+  "ecu": {
+    "platform": "Bosch MG1C400A (MDG1)",
+    "vehicle": "Polaris Pro R",
+    "engine": "ProStar 925cc Turbo (or similar)",
+    "protocol": "XCP on CAN",
+    "xcp_master_id": "0x7F0",
+    "xcp_slave_id": "0x7F1",
+    "obd_rx": "0x7E0",
+    "obd_tx": "0x7E8",
+    "can_baudrate": 500000
+  },
+  "stats": {
+    "total_characteristics": 12883,
+    "maps_2d": 0,
+    "curves_1d": 0,
+    "values": 0,
+    "val_blks": 0,
+    "total_measurements": 12718
+  },
+  "map_categories": {},
+  "curve_categories": {},
+  "all_maps": [],
+  "all_curves": []
+}

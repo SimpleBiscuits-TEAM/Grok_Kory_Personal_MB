@@ -18,6 +18,7 @@
  */
 
 import { NRC_CODES } from './udsReference';
+import { defaultBridgeWebSocketCandidates } from './pcanConnection';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,9 @@ export class UDSTransport {
   private listeners: EventCallback[] = [];
   private testerPresentInterval: ReturnType<typeof setInterval> | null = null;
   private connected = false;
+  /** When false, fall back to raw `can_send` (single-frame RX only — no ISO-TP reassembly). */
+  private preferNativeIsoTp = true;
+  private nativeIsoTpRejected = false;
 
   constructor(config: Partial<UDSTransportConfig> = {}) {
     this.config = {
@@ -89,9 +93,7 @@ export class UDSTransport {
   // ─── Connection ───────────────────────────────────────────────────────────
 
   async connect(bridgeUrl?: string): Promise<boolean> {
-    const urlsToTry = bridgeUrl
-      ? [bridgeUrl]
-      : ['wss://localhost:8766', 'ws://localhost:8765'];
+    const urlsToTry = bridgeUrl ? [bridgeUrl] : defaultBridgeWebSocketCandidates();
 
     for (const url of urlsToTry) {
       try {
@@ -198,10 +200,129 @@ export class UDSTransport {
       this.ws.send(JSON.stringify({
         type: 'can_send',
         id,
-        arb_id: this.config.requestId,
+        arb_id: arbId,
         data,
       }));
     });
+  }
+
+  /**
+   * Send `uds_request` so the PCAN bridge performs full ISO-TP (multi-frame, flow control, NRC 0x78).
+   * The reference bridge expects `sub`, not `sub_function`.
+   */
+  private async sendUdsRequestNative(
+    serviceId: number,
+    sub: number | undefined,
+    data: number[],
+  ): Promise<BridgeMessage> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('Not connected to PCAN bridge'));
+        return;
+      }
+
+      const id = this.nextId();
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error('UDS response timeout'));
+      }, this.config.timeout);
+
+      this.pendingRequests.set(id, { resolve, reject, timer });
+
+      const msg: Record<string, unknown> = {
+        type: 'uds_request',
+        id,
+        service: serviceId,
+        data,
+        target: this.config.requestId,
+      };
+      if (sub !== undefined) msg.sub = sub;
+      this.ws.send(JSON.stringify(msg));
+    });
+  }
+
+  private mapNativeUdsResponse(msg: BridgeMessage, expectedServiceId: number): UDSResponse {
+    if (msg.type === 'error') {
+      return {
+        success: false,
+        serviceId: expectedServiceId,
+        data: [],
+        nrc: 0x10,
+        nrcName: 'bridgeError',
+        nrcDescription: (msg.message as string) || 'Bridge error',
+      };
+    }
+
+    if (msg.type !== 'uds_response') {
+      return {
+        success: false,
+        serviceId: expectedServiceId,
+        data: [],
+        nrcDescription: `Unexpected bridge response: ${String(msg.type)}`,
+      };
+    }
+
+    const positive = msg.positive !== false;
+    const raw = (msg.data as number[]) || [];
+    const nrcVal = msg.nrc as number | undefined;
+
+    if (!positive || nrcVal != null) {
+      const nrc = nrcVal ?? 0x10;
+      const nrcInfo = NRC_CODES[nrc] || { name: 'unknown', description: `Unknown NRC: 0x${nrc.toString(16)}` };
+      const rejected = raw.length > 1 ? raw[1] : expectedServiceId;
+      return {
+        success: false,
+        serviceId: rejected,
+        data: raw,
+        nrc,
+        nrcName: (msg.nrc_name as string) || nrcInfo.name,
+        nrcDescription: nrcInfo.description,
+      };
+    }
+
+    const syntheticPayload = [expectedServiceId + 0x40, ...raw];
+    return {
+      success: true,
+      serviceId: expectedServiceId,
+      subFunction: syntheticPayload[1],
+      data: syntheticPayload.slice(1),
+      rawFrame: undefined,
+    };
+  }
+
+  /**
+   * Try native ISO-TP UDS on the bridge; fall back to raw `can_send` if unsupported or failed once.
+   */
+  private async exchangeUds(
+    expectedServiceId: number,
+    serviceId: number,
+    sub: number | undefined,
+    payload: number[],
+  ): Promise<UDSResponse> {
+    if (this.preferNativeIsoTp && !this.nativeIsoTpRejected) {
+      try {
+        const msg = await this.sendUdsRequestNative(serviceId, sub, payload);
+        if (msg.type === 'error') {
+          const m = String((msg as BridgeMessage).message || '');
+          if (/unknown|not supported|uds_request/i.test(m)) {
+            this.nativeIsoTpRejected = true;
+          } else {
+            return this.mapNativeUdsResponse(msg, expectedServiceId);
+          }
+        } else {
+          return this.mapNativeUdsResponse(msg, expectedServiceId);
+        }
+      } catch (e) {
+        this.log(`Native UDS exchange failed: ${e instanceof Error ? e.message : String(e)}`);
+        this.nativeIsoTpRejected = true;
+      }
+    }
+
+    const frame = sub !== undefined
+      ? this.buildSingleFrame(serviceId, sub, ...payload)
+      : this.buildSingleFrame(serviceId, ...payload);
+    const response = await this.sendRaw(this.config.requestId, frame);
+    return this.parseResponse(response, expectedServiceId);
   }
 
   // ─── UDS Frame Builder ────────────────────────────────────────────────────
@@ -294,10 +415,7 @@ export class UDSTransport {
   async diagnosticSessionControl(session: UDSSessionType): Promise<UDSResponse> {
     const subFn = session === 'default' ? 0x01 : session === 'programming' ? 0x02 : 0x03;
     this.log(`$10 DiagnosticSessionControl → ${session} (sub=${subFn.toString(16)})`);
-
-    const frame = this.buildSingleFrame(0x10, subFn);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x10);
+    return this.exchangeUds(0x10, 0x10, subFn, []);
   }
 
   /**
@@ -305,22 +423,21 @@ export class UDSTransport {
    * Returns the seed bytes from the ECU for the given level.
    */
   async securityAccessRequestSeed(level: number): Promise<UDSResponse> {
-    this.log(`$27 SecurityAccess RequestSeed (level=${level})`);
-    const frame = this.buildSingleFrame(0x27, level);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x27);
+    this.log(`$27 SecurityAccess RequestSeed (sub=0x${level.toString(16)})`);
+    return this.exchangeUds(0x27, 0x27, level, []);
   }
 
   /**
    * $27 — SecurityAccess: Send Key
    * Send the computed key back to the ECU.
    */
-  async securityAccessSendKey(level: number, key: number[]): Promise<UDSResponse> {
-    const sendKeyLevel = level + 1;
-    this.log(`$27 SecurityAccess SendKey (level=${sendKeyLevel}, key=[${key.map(b => b.toString(16).padStart(2, '0')).join(' ')}])`);
-    const frame = this.buildSingleFrame(0x27, sendKeyLevel, ...key);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x27);
+  /**
+   * @param seedRequestSub — Sub-function used for RequestSeed (e.g. 0x01 for level 1). SendKey uses seedRequestSub + 1.
+   */
+  async securityAccessSendKey(seedRequestSub: number, key: number[]): Promise<UDSResponse> {
+    const sendKeySub = seedRequestSub + 1;
+    this.log(`$27 SecurityAccess SendKey (sub=0x${sendKeySub.toString(16)}, ${key.length} key bytes)`);
+    return this.exchangeUds(0x27, 0x27, sendKeySub, key);
   }
 
   /**
@@ -331,9 +448,7 @@ export class UDSTransport {
     const didHi = (did >> 8) & 0xFF;
     const didLo = did & 0xFF;
     this.log(`$22 ReadDataByIdentifier (DID=0x${did.toString(16).toUpperCase().padStart(4, '0')})`);
-    const frame = this.buildSingleFrame(0x22, didHi, didLo);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x22);
+    return this.exchangeUds(0x22, 0x22, undefined, [didHi, didLo]);
   }
 
   /**
@@ -344,6 +459,10 @@ export class UDSTransport {
     const didHi = (did >> 8) & 0xFF;
     const didLo = did & 0xFF;
     this.log(`$2E WriteDataByIdentifier (DID=0x${did.toString(16).toUpperCase().padStart(4, '0')}, ${data.length} bytes)`);
+
+    if (this.preferNativeIsoTp && !this.nativeIsoTpRejected) {
+      return this.exchangeUds(0x2E, 0x2E, undefined, [didHi, didLo, ...data]);
+    }
 
     // For short writes (fits in single frame: 8 - 1(PCI) - 1(SID) - 2(DID) = 4 bytes max)
     if (data.length <= 4) {
@@ -412,9 +531,7 @@ export class UDSTransport {
     const routineLo = routineId & 0xFF;
     const subNames = { 0x01: 'Start', 0x02: 'Stop', 0x03: 'GetResult' };
     this.log(`$31 RoutineControl ${subNames[subFunction]} (routine=0x${routineId.toString(16).padStart(4, '0')})`);
-    const frame = this.buildSingleFrame(0x31, subFunction, routineHi, routineLo, ...params);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x31);
+    return this.exchangeUds(0x31, 0x31, subFunction, [routineHi, routineLo, ...params]);
   }
 
   /**
@@ -424,9 +541,7 @@ export class UDSTransport {
   async ecuReset(resetType: 0x01 | 0x02 | 0x03 = 0x01): Promise<UDSResponse> {
     const names = { 0x01: 'Hard Reset', 0x02: 'Key Off/On', 0x03: 'Soft Reset' };
     this.log(`$11 ECUReset → ${names[resetType]}`);
-    const frame = this.buildSingleFrame(0x11, resetType);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x11);
+    return this.exchangeUds(0x11, 0x11, resetType, []);
   }
 
   /**
@@ -434,10 +549,8 @@ export class UDSTransport {
    * Keeps the diagnostic session alive.
    */
   async testerPresent(): Promise<UDSResponse> {
-    const frame = this.buildSingleFrame(0x3E, 0x00);
     try {
-      const response = await this.sendRaw(this.config.requestId, frame);
-      return this.parseResponse(response, 0x3E);
+      return await this.exchangeUds(0x3E, 0x3E, 0x00, []);
     } catch {
       return { success: false, serviceId: 0x3E, data: [] };
     }
@@ -471,9 +584,7 @@ export class UDSTransport {
    */
   async clearDTCs(): Promise<UDSResponse> {
     this.log('$14 ClearDiagnosticInformation (all DTCs)');
-    const frame = this.buildSingleFrame(0x14, 0xFF, 0xFF, 0xFF);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x14);
+    return this.exchangeUds(0x14, 0x14, undefined, [0xFF, 0xFF, 0xFF]);
   }
 
   /**
@@ -484,9 +595,7 @@ export class UDSTransport {
     const didHi = (did >> 8) & 0xFF;
     const didLo = did & 0xFF;
     this.log(`$2F IOControl (DID=0x${did.toString(16).padStart(4, '0')}, option=${controlOption})`);
-    const frame = this.buildSingleFrame(0x2F, didHi, didLo, controlOption, ...controlData);
-    const response = await this.sendRaw(this.config.requestId, frame);
-    return this.parseResponse(response, 0x2F);
+    return this.exchangeUds(0x2F, 0x2F, undefined, [didHi, didLo, controlOption, ...controlData]);
   }
 
   // ─── High-Level Helpers ───────────────────────────────────────────────────

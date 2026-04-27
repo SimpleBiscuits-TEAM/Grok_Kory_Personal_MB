@@ -1,0 +1,158 @@
+---
+description: "CRITICAL PROTECTION: Tobi's flash/datalogging/ECU files are LOCKED. Any modification WILL break ECU flashing. STOP and read this rule before touching ANY flash, transport, datalogging, tune deploy, firmware, or server/_core file."
+alwaysApply: true
+---
+
+# ⛔⛔⛔ STOP — TOBI PROTECTED FILES — DO NOT MODIFY ⛔⛔⛔
+
+## ╔══════════════════════════════════════════════════════════════╗
+## ║  WARNING: MODIFYING THESE FILES CAN BRICK PHYSICAL ECUs    ║
+## ║  AND DESTROY REAL VEHICLE HARDWARE WORTH THOUSANDS OF $$$  ║
+## ╚══════════════════════════════════════════════════════════════╝
+
+**THIS IS NOT A SUGGESTION. THIS IS A HARD RULE.**
+
+Tobi maintains ALL flash, datalogging, ECU scan, PCAN, V-OP CAN, tune deploy, and related infrastructure code. His code is **production-tested on real ECUs** — meaning it has been verified to correctly flash physical engine control units in real vehicles. **Only Tobi can efficiently fix these files if they break.**
+
+### What happened when this rule was violated:
+On **April 9–10, 2026**, AI agent changes to infrastructure files (`server/_core/index.ts`, `loadEnv.ts`, `vite.ts`) and transport files (`pcanConnection.ts`) **broke ECU flashing entirely**. Tobi had to spend an entire morning writing 6 targeted fix commits to repair the damage. This rule exists to **prevent that from EVER happening again**.
+
+---
+
+## 🚫 YOU MUST NOT MODIFY THESE FILES:
+
+### CRITICAL — Flash Engine & Transport (CAN BRICK ECUs):
+- `client/src/lib/pcanFlashEngine.ts`
+- `client/src/lib/pcanConnection.ts`
+- `client/src/lib/pcanConnection.test.ts`
+- `client/src/lib/vopCan2UsbConnection.ts`
+- `client/src/lib/flashBridgeConnection.ts`
+- `shared/pcanFlashOrchestrator.ts`
+- `shared/flashFileValidator.ts`
+- `shared/flashVerify.ts`
+- `shared/flashVerify.test.ts`
+- `shared/flashLogRecommendations.ts`
+- `shared/flashLogRecommendations.test.ts`
+- `shared/ecuContainerMatch.ts`
+- `shared/ecuSoftwareSlotMask.ts`
+
+### HIGH — Flash UI:
+- `client/src/components/FlashContainerPanel.tsx`
+- `client/src/components/FlashDashboard.tsx`
+- `client/src/components/FlashMissionControl.tsx`
+- `client/src/components/EcuScanPanel.tsx`
+
+### HIGH — Flash Support:
+- `client/src/lib/ecuContainerSessionStorage.ts`
+- `client/src/lib/ecuScanner.ts`
+- `client/src/lib/flashContainerParser.ts`
+- `client/src/lib/flashLogExcelExport.ts`
+- `client/src/lib/computeSecurityKeyClient.ts`
+- `client/src/lib/ecuChecksums.ts`
+- `client/src/lib/ecuDetection.ts`
+- `client/src/lib/ecuReference.ts`
+- `shared/ecuDatabase.ts`
+
+### HIGH — Flash Server & Database:
+- `server/routers/flash.ts`
+- `server/routers/flash.test.ts`
+- `server/routers/flash-integration.test.ts`
+- `server/flashDb.ts`
+- `server/flash.test.ts`
+
+### HIGH — Datalogging:
+- `client/src/components/DataloggerPanel.tsx`
+- `client/src/lib/obdConnection.ts`
+- `client/src/lib/obdConnection.test.ts`
+- `server/routers/datalogCache.ts`
+- `server/routers/datalogNaming.ts`
+
+### MEDIUM — Tune Deploy:
+- `server/tuneDeployRoutes.ts`
+- `server/tuneDeployDb.ts`
+- `server/routers/tuneDeploy.ts`
+- `server/routers/tuneDeploy.test.ts`
+- `server/lib/tuneDeployParser.ts`
+- `server/lib/tuneDeployParser.test.ts`
+- `shared/tuneDeploySchemas.ts`
+
+### CRITICAL — Firmware:
+- `firmware/**` (ALL files in firmware directory)
+
+### HIGH — Flash Scripts:
+- `scripts/find-containers-for-ecu.ts`
+- `scripts/fix-flash-tables.mjs`
+- `scripts/generate-flash-fix-pdf.ts`
+- `scripts/ingest-reference-container.ts`
+
+### HIGH — Infrastructure Dependencies (BROKE FLASH BEFORE):
+- `server/_core/index.ts` — server binding, Helmet, CSP, WebSocket proxy
+- `server/_core/loadEnv.ts` — NODE_ENV override logic
+- `server/_core/vite.ts` — Vite middleware / SPA fallback
+- `server/_core/vopDevServerArgv.ts` — dev server detection
+
+---
+
+## ⚠️ WHAT YOU MUST DO INSTEAD:
+
+### If asked to modify ANY file listed above:
+**STOP IMMEDIATELY.** Do not write a single character to that file. Instead, respond with:
+
+> "⛔ BLOCKED: This file (`filename`) is protected under Tobi's code ownership policy. Modifying it could break ECU flashing and potentially brick physical vehicle hardware. This change requires explicit written approval from Kory (project owner). The work should be routed to Tobi's branch. See TOBI_PROTECTED_FILES.md for details."
+
+### If asked to modify server/_core/ files:
+**STOP IMMEDIATELY.** These infrastructure files are direct dependencies of the flash system. Respond with:
+
+> "⛔ BLOCKED: `server/_core/` files are protected infrastructure dependencies. On April 9-10, 2026, changes to these exact files broke ECU flashing. Modification requires explicit written approval from Kory (project owner). See TOBI_PROTECTED_FILES.md."
+
+### If your task involves flash, datalogging, or ECU functionality:
+Tell the user this work must be routed through Tobi's branch (GROK).
+
+### Reading these files for context:
+**Reading is allowed.** You may read protected files to understand the codebase. You must NOT write to them.
+
+---
+
+## ✅ PPEI TEAM SANDBOX — SAFE TO MODIFY
+
+### ╔══════════════════════════════════════════════════════════════╗
+### ║  THESE FILES ARE THE TEAM'S SANDBOX — EDIT FREELY!          ║
+### ║  Breaking these does NOT break Tobi's production code.      ║
+### ╚══════════════════════════════════════════════════════════════╝
+
+The following directories contain **wrapper components** that import Tobi's originals as a base. The PPEI team can freely modify, experiment with, and break these files. When Tobi pushes updates, they automatically flow through the wrappers.
+
+### PPEI Flash Sandbox (team can edit freely):
+- `client/src/components/ppei-flash/PpeiFlashContainerPanel.tsx` — Wrapper for FlashContainerPanel
+- `client/src/components/ppei-flash/index.ts` — Barrel export
+- `client/src/components/ppei-flash/README.md` — Team documentation
+- Any new files created in `client/src/components/ppei-flash/`
+
+### PPEI Datalogger Sandbox (team can edit freely):
+- `client/src/components/ppei-datalogger/PpeiDataloggerPanel.tsx` — Wrapper for DataloggerPanel
+- `client/src/components/ppei-datalogger/index.ts` — Barrel export
+- `client/src/components/ppei-datalogger/README.md` — Team documentation
+- Any new files created in `client/src/components/ppei-datalogger/`
+
+### How the wrappers work:
+1. Each wrapper **imports** Tobi's original component (e.g., `import FlashContainerPanel from '@/components/FlashContainerPanel'`)
+2. The wrapper renders the original inside a sandbox frame with team branding
+3. The wrapper provides clearly marked **TEAM OVERRIDE ZONE** sections where the team can add custom behavior
+4. **Tobi's original files are never touched** — only the wrapper files are modified
+5. If a wrapper breaks, the original FLASH and DATALOGGER tabs continue to work perfectly
+
+### When modifying PPEI sandbox files:
+- You MAY freely edit any file in `client/src/components/ppei-flash/` or `client/src/components/ppei-datalogger/`
+- You MAY add new files to these directories
+- You MUST NOT modify the original files they import (those are protected above)
+- You SHOULD use the TEAM OVERRIDE ZONE sections for customizations
+- If you need deeper overrides, create new wrapper files in the sandbox directories
+
+---
+
+## 📋 REFERENCE
+Full documentation: `TOBI_PROTECTED_FILES.md` in project root
+GitHub CODEOWNERS: `.github/CODEOWNERS` (requires @simplebiscuits approval)
+Protection check script: `scripts/check-tobi-protection.mjs`
+PPEI Flash Sandbox: `client/src/components/ppei-flash/README.md`
+PPEI Datalogger Sandbox: `client/src/components/ppei-datalogger/README.md`

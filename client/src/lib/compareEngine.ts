@@ -318,7 +318,7 @@ const PID_CONFIGS: PidConfig[] = [
   { key: 'turboVanePosition', label: 'Turbo Vane Position', unit: '%' },
   { key: 'turboVaneDesired', label: 'Turbo Vane Desired', unit: '%' },
   { key: 'converterSlip', label: 'TCC Slip', unit: 'RPM' },
-  { key: 'pcvDutyCycle', label: 'PCV Duty Cycle', unit: '%' },
+  { key: 'pcvDutyCycle', label: 'FPR current', unit: 'mA' },
   { key: 'vehicleSpeed', label: 'Vehicle Speed', unit: 'MPH' },
   { key: 'coolantTemp', label: 'Coolant Temp', unit: '°F' },
   { key: 'oilTemp', label: 'Oil Temp', unit: '°F' },
@@ -696,13 +696,38 @@ export function buildComparisonContext(report: ComparisonReport, userContext?: s
   lines.push('');
 
   lines.push(`=== MATCHED EVENT COMPARISONS (${report.events.length} events) ===`);
+  const maDeltaFlags: string[] = [];
+  const railSurgeFlags: string[] = [];
   for (const ec of report.events) {
     lines.push(`--- ${ec.event.description} ---`);
     lines.push(`  Samples: A=${ec.event.aIndices.length}, B=${ec.event.bIndices.length}`);
     for (const d of ec.deltas) {
       if (d.available !== 'both') continue;
       lines.push(`  ${d.label}: avg ${d.aAvg.toFixed(1)} → ${d.bAvg.toFixed(1)} (${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(1)} ${d.unit}, ${d.deltaPct >= 0 ? '+' : ''}${d.deltaPct.toFixed(1)}%) | peak ${d.aMax.toFixed(1)} → ${d.bMax.toFixed(1)}`);
+      // Flag significant mA differences
+      if (d.label === 'FPR current' && Math.abs(d.delta) > 50) {
+        maDeltaFlags.push(`  ⚠️ mA DELTA: ${ec.event.description} — FPR current changed ${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(0)} mA (${d.aAvg.toFixed(0)} → ${d.bAvg.toFixed(0)} mA). ${d.delta > 0 ? 'Regulator closing more (less fuel delivery)' : 'Regulator opening more (more fuel delivery)'}. Investigate: Fuel Flow Base revision, pump/injector change, or regulator drift.`);
+      }
+      // Flag rail pressure surge patterns
+      if (d.label === 'Rail Pressure (Actual)' && d.label === 'Rail Pressure (Actual)') {
+        const desiredDelta = ec.deltas.find(dd => dd.label === 'Rail Pressure (Desired)');
+        if (desiredDelta && desiredDelta.available === 'both') {
+          const overshootA = d.aMax - desiredDelta.aMax;
+          const overshootB = d.bMax - desiredDelta.bMax;
+          if (overshootB > 2000 && overshootB > overshootA + 500) {
+            railSurgeFlags.push(`  ⚠️ RAIL SURGE: ${ec.event.description} — Log B peak actual exceeds desired by ${overshootB.toFixed(0)} psi (was ${overshootA.toFixed(0)} psi in Log A). Possible pump overshoot or regulator issue.`);
+          }
+        }
+      }
     }
+    lines.push('');
+  }
+
+  // Append flagged findings
+  if (maDeltaFlags.length > 0 || railSurgeFlags.length > 0) {
+    lines.push(`=== FLAGGED FUEL SYSTEM FINDINGS ===`);
+    for (const f of maDeltaFlags) lines.push(f);
+    for (const f of railSurgeFlags) lines.push(f);
     lines.push('');
   }
 

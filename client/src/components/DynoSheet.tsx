@@ -18,20 +18,23 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, Maximize2, Minimize2, AlertTriangle, FileDown, Loader2 } from 'lucide-react';
+import { Download, Maximize2, Minimize2, AlertTriangle, FileDown, Loader2, Share2, Check, Link2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { trpc } from '@/lib/trpc';
 import { APP_VERSION } from '@/lib/version';
 import { WP8ParseResult, getHondaTalonKeyChannels } from '@/lib/wp8Parser';
 import {
   VirtualDynoConfig,
+  TurboType,
   FUEL_PROFILES,
   INJECTOR_FLOW_RATES,
   calculateFuelFlow,
   estimateHP,
+  estimateHPWithBoost,
   calculateTorque,
   smoothCurve,
+  detectTurboType,
 } from '@/lib/talonVirtualDyno';
-
-const PPEI_LOGO_URL = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663472908899/S5fEZ6uPndYXxpVXwwyEPy/PPEI Logo _b0d26c0f.png';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +66,8 @@ export interface DynoSheetData {
   hasWideband: boolean;
   hasDynoData: boolean;
   isTurbo: boolean;
+  turboType: TurboType;
+  has3BarMapSensor: boolean;
   fileName: string;
   warnings: string[];
   qualified: boolean;
@@ -210,9 +215,13 @@ export function buildDynoSheetData(
 
   // Honda 3-bar MAP for turbo detection
   const honda3BarIdx = keys.honda3BarMap;
-  if (honda3BarIdx >= 0 && !config.isTurbo) {
+  const has3BarMapSensor = honda3BarIdx >= 0;
+  if (has3BarMapSensor && !config.isTurbo) {
     warnings.push('Honda 3-bar MAP sensor detected — vehicle may be turbocharged.');
   }
+
+  // Resolve turbo type from config or detection
+  const resolvedTurboType: TurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' : 'na');
 
   if (!hasWideband) {
     warnings.push('No wideband AFR/Lambda data available — HP numbers may not be accurate. Install a wideband O2 sensor for more precise results.');
@@ -222,6 +231,7 @@ export function buildDynoSheetData(
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
+      turboType: resolvedTurboType, has3BarMapSensor,
       fileName, warnings: ['Missing Engine Speed channel — cannot generate dyno sheet'],
       qualified: false, disqualifyReason: 'Missing Engine Speed channel',
     };
@@ -231,6 +241,7 @@ export function buildDynoSheetData(
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
+      turboType: resolvedTurboType, has3BarMapSensor,
       fileName, warnings: ['Missing Injector Pulsewidth channel — cannot estimate power'],
       qualified: false, disqualifyReason: 'Missing Injector Pulsewidth channel',
     };
@@ -278,6 +289,7 @@ export function buildDynoSheetData(
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
+      turboType: resolvedTurboType, has3BarMapSensor,
       fileName, warnings,
       qualified: false,
       disqualifyReason: `No full-throttle run detected (need ${WOT_MIN_DURATION_SEC}+ seconds at ${WOT_TPS_THRESHOLD}\u00B0+ TPS)`,
@@ -317,6 +329,7 @@ export function buildDynoSheetData(
     return {
       runs: [], hpCurve: [], peakHP: 0, peakHPRpm: 0,
       peakTorque: 0, peakTorqueRpm: 0, hasWideband, hasDynoData, isTurbo: config.isTurbo,
+      turboType: resolvedTurboType, has3BarMapSensor,
       fileName, warnings,
       qualified: false,
       disqualifyReason: `No acceleration pull detected within WOT segments`,
@@ -378,6 +391,8 @@ export function buildDynoSheetData(
     hasWideband,
     hasDynoData,
     isTurbo: config.isTurbo,
+    turboType: resolvedTurboType,
+    has3BarMapSensor,
     fileName,
     warnings,
     qualified: true,
@@ -403,7 +418,11 @@ function buildWOTRun(
 ): WOTRun {
   const rpmIdx = keys.engineSpeed;
   const tpsIdx = keys.throttlePosition;
-  const injPWIdx = keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired;
+  // Power Commander override: use Primary Inj PW 1 when PC channels are present
+  const hasPowerCommander = keys.primaryInjPw1 >= 0;
+  const injPWIdx = hasPowerCommander
+    ? keys.primaryInjPw1
+    : (keys.injPwFinal >= 0 ? keys.injPwFinal : keys.injPwDesired);
   const mapIdx = keys.mapCorrected >= 0 ? keys.mapCorrected
     : keys.honda3BarMap >= 0 ? keys.honda3BarMap
     : keys.map;
@@ -455,7 +474,8 @@ function buildWOTRun(
       if (hp > 500) hp = 0;
       if (torque > 500) torque = 0;
     } else {
-      hp = estimateHP(fuelFlowGPerSec, fuel.bsfc);
+      const effectiveTurboType = config.turboType ?? (config.isTurbo ? 'generic_turbo' as const : 'na' as const);
+      hp = estimateHPWithBoost(fuelFlowGPerSec, fuel.bsfc, effectiveTurboType, map, config.fuelType, afr, injFlowRate);
       hp *= config.dynoCalibrationFactor;
       torque = calculateTorque(hp, rpm);
     }
@@ -493,8 +513,10 @@ import {
   Legend,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceDot,
 } from 'recharts';
 import { ZoomableChart } from './ZoomableChart';
+import { PPEI_LOGO_URL } from '@shared/constants';
 
 interface DynoSheetProps {
   data: DynoSheetData;
@@ -520,6 +542,13 @@ const COLORS = {
 // ─── Custom Dyno Tooltip ───────────────────────────────────────────────────────
 const DynoTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
+  // Shorten labels for cleaner tooltip display
+  const shortName = (name: string) => {
+    if (name === 'Torque (ft-lb)') return 'TQ (ft-lb)';
+    if (name === 'Torque (Baseline)') return 'TQ (Base)';
+    if (name === 'HP (Baseline)') return 'HP (Base)';
+    return name;
+  };
   return (
     <div style={{
       background: 'rgba(13,15,20,0.97)',
@@ -530,15 +559,16 @@ const DynoTooltip = ({ active, payload, label }: any) => {
       fontSize: '12px',
       color: '#e0e0e0',
       boxShadow: '0 0 12px rgba(255,77,0,0.3)',
-      minWidth: 160,
+      minWidth: 200,
+      whiteSpace: 'nowrap' as const,
     }}>
       <div style={{ color: '#ff4d00', fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>
         {label != null ? `${Number(label).toLocaleString()} RPM` : ''}
       </div>
       {payload.map((p: any, i: number) => (
         p.value != null && (
-          <div key={i} style={{ color: p.color || p.stroke, marginBottom: 3, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <span>{p.name}:</span>
+          <div key={i} style={{ color: p.color || p.stroke, marginBottom: 3, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+            <span>{shortName(p.name)}</span>
             <span style={{ color: '#fff', fontWeight: 'bold' }}>{Number(p.value).toFixed(1)}</span>
           </div>
         )
@@ -554,6 +584,25 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
   const chartAreaRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const shareMutation = trpc.dyno.shareDyno.useMutation();
+
+  // Human-readable labels for turbo types and injector types
+  const TURBO_LABELS: Record<string, string> = {
+    na: 'N/A',
+    jr: 'Jackson Racing (JR)',
+    kw: 'Kraftwerks (KW)',
+    fp: 'Full Performance (FP)',
+    generic_turbo: 'Turbo (Generic)',
+  };
+  const INJECTOR_LABELS: Record<string, string> = {
+    stock: 'Stock (~310cc)',
+    jr_kit: 'JR Kit (~345cc)',
+    kw800: 'FIC 800cc (KW)',
+    id1050: 'ID1050X (1050cc)',
+    id1300: 'ID1300X (1300cc)',
+  };
 
   // PDF Export handler
   const exportToPdf = useCallback(async () => {
@@ -565,11 +614,37 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       const domtoimage = (await import('dom-to-image-more')).default;
       const { default: jsPDF } = await import('jspdf');
 
-      // Capture the chart + stats area as a high-res image
+      // Pre-load PPEI logo for watermark (do this while waiting for re-render)
+      let logoDataUrl: string | null = null;
+      try {
+        const logoImg = new Image();
+        logoImg.crossOrigin = 'anonymous';
+        logoImg.src = PPEI_LOGO_URL;
+        await new Promise<void>((resolve, reject) => {
+          logoImg.onload = () => resolve();
+          logoImg.onerror = () => reject();
+          setTimeout(() => reject(), 5000);
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = logoImg.naturalWidth;
+        canvas.height = logoImg.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(logoImg, 0, 0);
+          logoDataUrl = canvas.toDataURL('image/png');
+        }
+      } catch {
+        // Logo load failed — fall back to text watermark
+      }
+
+      // Wait a tick for React to re-render with hideControls=true
+      await new Promise(r => setTimeout(r, 200));
+
+      // Capture the chart area as a high-res image (zoom controls now hidden)
       const dataUrl = await domtoimage.toPng(chartAreaRef.current, {
         scale: 2.5,
-        bgcolor: '#0a0a0a',
-        style: { background: '#0a0a0a' },
+        bgcolor: '#0d0f14',
+        style: { background: '#0d0f14' },
       });
 
       // Create landscape PDF
@@ -582,71 +657,227 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       doc.setFillColor(10, 10, 10);
       doc.rect(0, 0, pageW, pageH, 'F');
 
-      // PPEI header
-      doc.setFontSize(22);
-      doc.setTextColor(255, 77, 0);
-      doc.setFont('helvetica', 'bold');
-      doc.text('PPEI VIRTUAL DYNO', margin, 16);
+      // ── PPEI Logo watermark (drawn FIRST so chart image overlays with transparency) ──
+      // The watermark must be placed before the chart image so it shows through
+      // the chart's dark background at reduced opacity
+      const drawWatermark = () => {
+        if (logoDataUrl) {
+          // @ts-ignore — jsPDF supports opacity via GState
+          doc.setGState(new doc.GState({ opacity: 0.06 }));
+          const wmW = 150;
+          const wmH = 150;
+          doc.addImage(logoDataUrl, 'PNG', (pageW - wmW) / 2, (pageH - wmH) / 2, wmW, wmH);
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 1 }));
+        } else {
+          doc.setFontSize(70);
+          doc.setTextColor(255, 255, 255);
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 0.04 }));
+          doc.text('PPEI', pageW / 2, pageH / 2, { align: 'center', angle: 30 });
+          // @ts-ignore
+          doc.setGState(new doc.GState({ opacity: 1 }));
+        }
+      };
+      // We'll call drawWatermark() later, after the header but before the chart
 
-      // Badge
+      // ── Header Row 1: "Virtual Dyno by" + PPEI Logo (larger) + Badge + Version ──
+      doc.setFontSize(14);
+      doc.setTextColor(160, 160, 160);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Virtual Dyno by', margin, 15);
+
+      // PPEI Logo next to title — larger size
+      if (logoDataUrl) {
+        const logoH = 16;
+        const logoW = 16;
+        doc.addImage(logoDataUrl, 'PNG', margin + 38, 4, logoW, logoH);
+      } else {
+        doc.setFontSize(16);
+        doc.setTextColor(255, 77, 0);
+        doc.setFont('helvetica', 'bold');
+        doc.text('PPEI', margin + 38, 15);
+      }
+
+      // Badge — shifted right to accommodate larger logo
       const badgeText = data.hasDynoData ? 'MEASURED' : 'ESTIMATED';
       const badgeColor: [number, number, number] = data.hasDynoData ? [34, 197, 94] : [245, 158, 11];
       doc.setFillColor(...badgeColor);
-      doc.roundedRect(margin + 95, 9, 28, 8, 2, 2, 'F');
-      doc.setFontSize(8);
+      doc.roundedRect(margin + 58, 8, 26, 7, 2, 2, 'F');
+      doc.setFontSize(7);
       doc.setTextColor(0, 0, 0);
       doc.setFont('helvetica', 'bold');
-      doc.text(badgeText, margin + 97, 15);
+      doc.text(badgeText, margin + 60, 13.5);
 
-      // Version + date
+      // Version + date (right-aligned)
       doc.setFontSize(8);
-      doc.setTextColor(120, 120, 120);
+      doc.setTextColor(100, 100, 100);
       doc.setFont('helvetica', 'normal');
-      doc.text(`V-OP BETA ${APP_VERSION}  |  ${new Date().toLocaleDateString()}`, pageW - margin, 12, { align: 'right' });
+      doc.text(`V-OP ${APP_VERSION}  |  ${new Date().toLocaleDateString()}`, pageW - margin, 12, { align: 'right' });
 
-      // Config info
+      // ── Header Row 2: Config details (Fuel, Injector, Turbo, MAP) ──
+      const turboLabel = TURBO_LABELS[data.turboType] || data.turboType;
+      const injectorLabel = INJECTOR_LABELS[config.injectorType] || config.injectorType;
+      const fuelLabelMap: Record<string, string> = {
+        pump: 'Pump 91/93',
+        utv96: 'UTV96',
+        e85: 'E85',
+        e90: 'E90',
+        ignite_red: 'Ignite Red',
+      };
+      const fuelLabel = fuelLabelMap[config.fuelType] || config.fuelType.toUpperCase();
+
       doc.setFontSize(8);
-      doc.setTextColor(160, 160, 160);
-      const configText = `Fuel: ${config.fuelType.toUpperCase()}  |  Injector: ${config.injectorType}  |  CF: SAE  |  Smoothing: 5`;
-      doc.text(configText, margin, 23);
+      doc.setTextColor(140, 140, 140);
+      doc.setFont('helvetica', 'normal');
 
-      // Embed the chart image
+      const configParts: string[] = [
+        `Fuel: ${fuelLabel}`,
+        `Injector: ${injectorLabel}`,
+      ];
+      if (data.isTurbo) {
+        configParts.push(`Turbo: ${turboLabel}`);
+      }
+      if (data.has3BarMapSensor) {
+        configParts.push('MAP: 3-Bar Detected');
+      }
+      configParts.push('CF: SAE', 'Smoothing: 5');
+      doc.text(configParts.join('  |  '), margin, 21);
+
+      // Filename (row 2.5 — below config, above chart)
+      if (data.fileName) {
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        doc.setFont('helvetica', 'normal');
+        const displayName = data.fileName.length > 80 ? data.fileName.slice(0, 77) + '...' : data.fileName;
+        doc.text(`File: ${displayName}`, margin, 25.5);
+      }
+
+      // Watermark will be drawn AFTER the chart image so it overlays on top
+
+      // ── Chart Image (vertically centered in available space) ──
+      const headerBottom = 24;
+      const footerTop = pageH - 8;
+      const suggestionsHeight = 22; // reduced — no estimated HP numbers
+      const statsHeight = 10;
+      const availableH = footerTop - headerBottom - suggestionsHeight - statsHeight - 4;
+
       const img = new Image();
       img.src = dataUrl;
       await new Promise<void>((resolve) => { img.onload = () => resolve(); });
       const imgAspect = img.width / img.height;
       const chartW = pageW - 2 * margin;
-      const chartH = Math.min(pageH - 55, chartW / imgAspect);
-      doc.addImage(dataUrl, 'PNG', margin, 27, chartW, chartH);
+      let chartH = Math.min(availableH, chartW / imgAspect);
+      // Vertically center the chart in the available space
+      const chartY = headerBottom + (availableH - chartH) / 2;
+      doc.addImage(dataUrl, 'PNG', margin, chartY, chartW, chartH);
 
-      // Peak stats text below chart
-      const statsY = 27 + chartH + 6;
+      // ── Draw watermark ON TOP of the chart so it's visible through the graph ──
+      drawWatermark();
+
+      // ── Peak Stats Row (below chart) ──
+      const statsY = chartY + chartH + 5;
       doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
+
+      // Peak HP
       doc.setTextColor(255, 77, 0);
       doc.text(`Peak HP: ${data.peakHP.toFixed(1)} @ ${data.peakHPRpm.toLocaleString()} RPM`, margin, statsY);
+
+      // Peak Torque
       doc.setTextColor(0, 200, 255);
       doc.text(`Peak Torque: ${data.peakTorque.toFixed(1)} ft-lb @ ${data.peakTorqueRpm.toLocaleString()} RPM`, margin + 100, statsY);
+
+      // WOT Runs + Best Run
       doc.setTextColor(100, 100, 100);
-      doc.text(`WOT Runs: ${data.runs.length}`, margin + 210, statsY);
+      doc.setFontSize(9);
+      const bestDur = data.runs.length > 0
+        ? data.runs.reduce((a, b) => {
+            const aR = a.points.length > 0 ? a.points[a.points.length - 1].rpm - a.points[0].rpm : 0;
+            const bR = b.points.length > 0 ? b.points[b.points.length - 1].rpm - b.points[0].rpm : 0;
+            return aR >= bR ? a : b;
+          }).durationSec
+        : 0;
+      doc.text(`WOT Runs: ${data.runs.length}  |  Best Run: ${bestDur.toFixed(1)}s`, margin + 210, statsY);
 
-      // V-OP BETA watermark (very light)
-      doc.setFontSize(60);
-      doc.setTextColor(255, 255, 255);
-      // @ts-ignore — jsPDF supports opacity via GState
-      doc.setGState(new doc.GState({ opacity: 0.03 }));
-      doc.text('V-OP BETA', pageW / 2, pageH / 2, { align: 'center', angle: 30 });
-      // @ts-ignore
-      doc.setGState(new doc.GState({ opacity: 1 }));
+      // ── Suggestions & Notes Section ──
+      const sugY = statsY + 8;
 
-      // Disclaimer footer
-      doc.setFontSize(7);
-      doc.setTextColor(80, 80, 80);
+      // Subtle separator line
+      doc.setDrawColor(60, 60, 60);
+      doc.setLineWidth(0.3);
+      doc.line(margin, sugY - 2, pageW - margin, sugY - 2);
+
+      doc.setFontSize(9);
+      doc.setTextColor(255, 77, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SUGGESTIONS & NOTES', margin, sugY + 2);
+
+      doc.setFontSize(7.5);
+      doc.setTextColor(160, 160, 160);
+      doc.setFont('helvetica', 'normal');
+
+      const suggestions: string[] = [];
+      const currentFuel = config.fuelType;
+      const currentTurbo = data.turboType;
+
+      // E85 fuel switch suggestion (only if currently on pump gas) — no estimated HP numbers
+      if (currentFuel === 'pump' || currentFuel === 'utv96') {
+        if (currentTurbo !== 'na') {
+          suggestions.push(
+            `Switching to E85 with ${turboLabel} could yield significant gains. E85 allows 30-35\u00b0 timing vs 20-25\u00b0 on pump gas, unlocking more power from forced induction.`
+          );
+        } else {
+          suggestions.push(
+            'Switching to E85 could provide modest gains from increased timing advance headroom and improved combustion efficiency.'
+          );
+        }
+      }
+
+      // Turbo upgrade suggestion (only if NA) — no estimated HP numbers
+      if (currentTurbo === 'na') {
+        suggestions.push(
+          'Adding a Jackson Racing turbo kit could provide significant power gains over the naturally aspirated setup on pump gas.'
+        );
+      }
+
+      // Injector upgrade suggestion
+      if (config.injectorType === 'stock' && currentTurbo !== 'na') {
+        suggestions.push(
+          'Stock injectors (~310cc) are at capacity with forced induction. Upgrading to ID1050X or ID1300X injectors would support higher boost levels safely.'
+        );
+      }
+
+      // If already on E85 with turbo, suggest boost increase
+      if ((currentFuel === 'e85' || currentFuel === 'e90' || currentFuel === 'ignite_red') && currentTurbo !== 'na') {
+        suggestions.push(
+          'Already running ethanol with forced induction \u2014 consider verifying boost target and timing advance. Each additional 1 PSI of boost typically adds 3-5 HP on this platform.'
+        );
+      }
+
+      // Default suggestion if none apply
+      if (suggestions.length === 0) {
+        suggestions.push(
+          'Current setup appears well-optimized. Consider a dyno session to validate virtual estimates and fine-tune calibration.'
+        );
+      }
+
+      // Render suggestions as bullet points
+      let sugTextY = sugY + 6;
+      for (const s of suggestions) {
+        const lines = doc.splitTextToSize(`\u2022  ${s}`, pageW - 2 * margin - 4);
+        doc.text(lines, margin + 2, sugTextY);
+        sugTextY += lines.length * 3.2;
+      }
+
+      // ── Disclaimer Footer ──
+      doc.setFontSize(6.5);
+      doc.setTextColor(70, 70, 70);
       doc.setFont('helvetica', 'normal');
       doc.text(
-        'Virtual dyno estimates are dependent on tuning setup and conditions — results serve as reference only. Generated by PPEI V-OP.',
+        'Virtual dyno estimates are dependent on tuning setup and conditions \u2014 results serve as reference only. Generated by PPEI V-OP.',
         pageW / 2,
-        pageH - 5,
+        pageH - 4,
         { align: 'center' }
       );
 
@@ -702,17 +933,33 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  // Axis domain calculations
-  const maxHP = useMemo(() => {
-    let max = data.peakHP;
-    if (compareData?.qualified) max = Math.max(max, compareData.peakHP);
-    return Math.ceil((max * 1.15) / 20) * 20;
-  }, [data, compareData]);
+  // Axis domain calculations — unified scale for HP and Torque
+  // Auto-scale Y-axis to fit data range (like Dynojet) instead of starting at 0
+  const { yMin, yMax } = useMemo(() => {
+    // Collect all HP and torque values from main + comparison curves
+    let allValues: number[] = [];
+    for (const pt of data.hpCurve) {
+      allValues.push(pt.hp, pt.torque);
+    }
+    if (compareData?.qualified && compareData.hpCurve.length > 0) {
+      for (const pt of compareData.hpCurve) {
+        allValues.push(pt.hp, pt.torque);
+      }
+    }
+    allValues = allValues.filter(v => Number.isFinite(v) && v > 0);
+    if (allValues.length === 0) return { yMin: 0, yMax: 200 };
 
-  const maxTorque = useMemo(() => {
-    let max = data.peakTorque;
-    if (compareData?.qualified) max = Math.max(max, compareData.peakTorque);
-    return Math.ceil((max * 1.15) / 10) * 10;
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues);
+    const range = dataMax - dataMin;
+    // Add 10% padding above and below, then round to nice tick values
+    const padding = Math.max(range * 0.10, 5);
+    const rawMin = dataMin - padding;
+    const rawMax = dataMax + padding;
+    // Round to nearest 10 for clean axis ticks
+    const roundedMin = Math.max(0, Math.floor(rawMin / 10) * 10);
+    const roundedMax = Math.ceil(rawMax / 10) * 10;
+    return { yMin: roundedMin, yMax: roundedMax };
   }, [data, compareData]);
 
   // Best run stats
@@ -758,15 +1005,15 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
+          <span className="text-base text-zinc-400 tracking-wider" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
+            VIRTUAL DYNO BY
+          </span>
           <img
             src={PPEI_LOGO_URL}
             alt="PPEI"
-            className="w-8 h-8 object-contain"
+            className="h-8 object-contain"
             crossOrigin="anonymous"
           />
-          <h3 className="text-xl font-bold text-white tracking-wider" style={{ fontFamily: 'Bebas Neue, sans-serif' }}>
-            PPEI VIRTUAL DYNO
-          </h3>
           <span
             className="text-[10px] font-bold px-2 py-0.5 rounded"
             style={{
@@ -800,6 +1047,102 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
           <Button
             variant="outline"
             size="sm"
+            onClick={async () => {
+              if (shareUrl) {
+                await navigator.clipboard.writeText(shareUrl);
+                toast.success('Link copied to clipboard!');
+                return;
+              }
+              if (!chartAreaRef.current) return;
+              setIsSharing(true);
+              try {
+                // @ts-ignore
+                const domtoimage = (await import('dom-to-image-more')).default;
+                const { default: jsPDF } = await import('jspdf');
+
+                // Capture chart as image
+                const dataUrl = await domtoimage.toJpeg(chartAreaRef.current, {
+                  scale: 2,
+                  bgcolor: '#0d0f14',
+                  style: { background: '#0d0f14' },
+                  quality: 0.85,
+                });
+
+                // Build PDF in memory (same as export)
+                const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter' });
+                const pageW = doc.internal.pageSize.getWidth();
+                const pageH = doc.internal.pageSize.getHeight();
+                doc.setFillColor(13, 15, 20);
+                doc.rect(0, 0, pageW, pageH, 'F');
+
+                // Header
+                doc.setFontSize(16);
+                doc.setTextColor(255, 77, 0);
+                doc.text('PPEI Virtual Dyno', pageW / 2, 12, { align: 'center' });
+                doc.setFontSize(9);
+                doc.setTextColor(160, 160, 160);
+                const configLine = `${data.peakHP.toFixed(1)} HP @ ${data.peakHPRpm} RPM  |  ${data.peakTorque.toFixed(1)} ft-lb @ ${data.peakTorqueRpm} RPM`;
+                doc.text(configLine, pageW / 2, 18, { align: 'center' });
+
+                // Chart image
+                const img = new Image();
+                img.src = dataUrl;
+                await new Promise<void>((r) => { img.onload = () => r(); });
+                const imgAspect = img.width / img.height;
+                const imgW = pageW - 10;
+                const imgH = imgW / imgAspect;
+                doc.addImage(dataUrl, 'JPEG', 5, 22, imgW, Math.min(imgH, pageH - 35));
+
+                // Disclaimer
+                doc.setFontSize(7);
+                doc.setTextColor(100, 100, 100);
+                doc.text('Virtual dyno estimates are dependent on tuning setup and conditions. Results serve as reference only.', pageW / 2, pageH - 4, { align: 'center' });
+
+                // Convert to base64
+                const pdfBase64 = doc.output('datauristring').split(',')[1];
+
+                // Upload via tRPC
+                const result = await shareMutation.mutateAsync({
+                  pdfBase64,
+                  peakHp: data.peakHP,
+                  peakTorque: data.peakTorque,
+                  peakHpRpm: data.peakHPRpm,
+                  peakTorqueRpm: data.peakTorqueRpm,
+                  turboType: data.turboType,
+                  fuelType: config.fuelType,
+                  injectorType: config.injectorType,
+                  has3BarMap: data.has3BarMapSensor,
+                  fileName: data.fileName,
+                });
+
+                const url = `${window.location.origin}/shared/dyno/${result.shareToken}`;
+                setShareUrl(url);
+                await navigator.clipboard.writeText(url);
+                toast.success('Shareable link copied to clipboard!', {
+                  description: url,
+                  duration: 6000,
+                });
+              } catch (err) {
+                console.error('Share failed:', err);
+                toast.error('Failed to share dyno result. Please try again.');
+              } finally {
+                setIsSharing(false);
+              }
+            }}
+            disabled={isSharing || !data.qualified}
+            className="text-zinc-300 border-zinc-600 hover:bg-zinc-800"
+          >
+            {isSharing ? (
+              <><Loader2 className="w-4 h-4 animate-spin mr-1" /> Sharing...</>
+            ) : shareUrl ? (
+              <><Link2 className="w-4 h-4 mr-1" /> Copy Link</>
+            ) : (
+              <><Share2 className="w-4 h-4 mr-1" /> Share</>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={toggleFullscreen}
             className="text-zinc-300 border-zinc-600 hover:bg-zinc-800"
           >
@@ -808,13 +1151,20 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
         </div>
       </div>
 
+      {/* Filename */}
+      {data.fileName && (
+        <div className="text-xs text-zinc-500 mb-2 font-mono truncate" title={data.fileName}>
+          FILE: <span className="text-zinc-300">{data.fileName}</span>
+        </div>
+      )}
+
       {/* Interactive Chart — wrapped in ref for PDF capture */}
       <div
         ref={chartAreaRef}
         className="rounded-lg overflow-hidden"
         style={{ background: COLORS.bg, border: '1px solid rgba(255,255,255,0.08)' }}
       >
-        <ZoomableChart data={chartData} height={isFullscreen ? '75vh' : 500}>
+        <ZoomableChart data={chartData} height={isFullscreen ? '75vh' : 500} hideControls={isExportingPdf}>
           {(visibleData) => (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
@@ -850,7 +1200,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 <YAxis
                   yAxisId="hp"
                   orientation="left"
-                  domain={[0, maxHP]}
+                  domain={[yMin, yMax]}
                   tick={{ fill: COLORS.hpLine, fontSize: 11, fontFamily: 'monospace' }}
                   axisLine={{ stroke: COLORS.hpLine }}
                   tickLine={{ stroke: COLORS.hpLine }}
@@ -869,7 +1219,7 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                 <YAxis
                   yAxisId="torque"
                   orientation="right"
-                  domain={[0, maxTorque]}
+                  domain={[yMin, yMax]}
                   tick={{ fill: COLORS.torqueLine, fontSize: 11, fontFamily: 'monospace' }}
                   axisLine={{ stroke: COLORS.torqueLine }}
                   tickLine={{ stroke: COLORS.torqueLine }}
@@ -884,23 +1234,44 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                   }}
                 />
 
-                {/* Tooltip */}
-                <Tooltip content={<DynoTooltip />} />
-
-                {/* Peak reference lines */}
-                <ReferenceLine
-                  yAxisId="hp"
+                {/* Peak HP cursor dot */}
+                <ReferenceDot
+                  x={data.peakHPRpm}
                   y={data.peakHP}
-                  stroke={COLORS.hpLine}
-                  strokeDasharray="4 4"
-                  strokeOpacity={0.4}
+                  yAxisId="hp"
+                  r={6}
+                  fill={COLORS.hpLine}
+                  stroke="#fff"
+                  strokeWidth={2}
+                  isFront
+                  label={{
+                    value: `${data.peakHP.toFixed(1)} HP`,
+                    position: 'top',
+                    fill: COLORS.hpLine,
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    offset: 10,
+                  }}
                 />
-                <ReferenceLine
-                  yAxisId="torque"
+
+                {/* Peak Torque cursor dot */}
+                <ReferenceDot
+                  x={data.peakTorqueRpm}
                   y={data.peakTorque}
-                  stroke={COLORS.torqueLine}
-                  strokeDasharray="4 4"
-                  strokeOpacity={0.4}
+                  yAxisId="torque"
+                  r={6}
+                  fill={COLORS.torqueLine}
+                  stroke="#fff"
+                  strokeWidth={2}
+                  isFront
+                  label={{
+                    value: `${data.peakTorque.toFixed(1)} ft-lb`,
+                    position: 'bottom',
+                    fill: COLORS.torqueLine,
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    offset: 10,
+                  }}
                 />
 
                 {/* Comparison curves (behind main) */}
@@ -955,12 +1326,6 @@ export default function DynoSheet({ data, config, compareData }: DynoSheetProps)
                   activeDot={{ r: 5, fill: COLORS.torqueLine, stroke: '#fff', strokeWidth: 2 }}
                 />
 
-                {/* Legend */}
-                <Legend
-                  verticalAlign="top"
-                  height={30}
-                  wrapperStyle={{ fontSize: 11, fontFamily: 'monospace', color: COLORS.text }}
-                />
               </ComposedChart>
             </ResponsiveContainer>
           )}

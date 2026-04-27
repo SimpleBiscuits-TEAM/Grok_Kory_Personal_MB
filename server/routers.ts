@@ -1,4 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
+import { LOCAL_GUEST_USER } from "./_core/guestUser";
+import { ENV } from "./_core/env";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -25,10 +27,23 @@ import { dragRouter } from "./routers/drag";
 import { communityRouter } from "./routers/community";
 import { pitchRouter } from "./routers/pitch";
 import { talonOcrRouter } from "./routers/talonOcr";
+import { injectorOcrRouter } from "./routers/injectorOcr";
 import { calibrationsRouter } from "./routers/calibrations";
 import { intellispyRouter } from "./routers/intellispy";
 import { diagnosticAgentRouter } from "./routers/diagnosticAgent";
 import { geofenceRouter } from "./routers/geofence";
+import { flashRouter } from "./routers/flash";
+import { tuneDeployRouter } from "./routers/tuneDeploy";
+import { weatherRouter } from "./routers/weather";
+import { dynoRouter } from "./routers/dyno";
+import { cloudRouter } from "./routers/cloud";
+import { streamingRouter } from "./routers/streaming";
+import { lauraRouter } from "./routers/laura";
+import { stratRouter } from "./routers/strat";
+import { githubRouter } from "./routers/github";
+import { tasksRouter } from "./routers/tasks";
+import { stormChaseRouter } from "./routers/stormChase";
+import { autoDeployRouter } from "./routers/autoDeploy";
 import { notifyOwner } from "./_core/notification";
 import { insertFeedback, verifyAccessCode, createShareToken, validateShareToken, submitNda, checkNdaStatus, getPendingNdas, verifyNda, getShareTokenId } from "./db";
 import { z } from "zod";
@@ -36,7 +51,7 @@ import { z } from "zod";
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query((opts) => opts.ctx.user),
+    me: publicProcedure.query((opts) => opts.ctx.user ?? LOCAL_GUEST_USER),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -47,22 +62,62 @@ export const appRouter = router({
     verifyAccessCode: publicProcedure
       .input(z.object({ code: z.string().min(1).max(64) }))
       .mutation(async ({ input, ctx }) => {
-        const result = await verifyAccessCode(input.code);
-        if (!result) {
-          return { success: false, message: "Invalid or expired access code" } as const;
+        const isDev = process.env.NODE_ENV === "development";
+        const isDevBypassCode = input.code.trim() === "1234";
+        const trimmedCode = input.code.trim().toUpperCase();
+
+        // ── Tiered access: KINGKONG = lite, KINGKONG1 = pro (full + GOD MODE) ──
+        // Check hardcoded tier codes first, then fall back to DB
+        let tier: "lite" | "pro" = "lite";
+        let label = "";
+
+        if (trimmedCode === "KINGKONG1") {
+          tier = "pro";
+          label = "VOP PRO — Full Access";
+        } else if (trimmedCode === "KINGKONG") {
+          tier = "lite";
+          label = "VOP LITE";
+        } else if (isDev && isDevBypassCode) {
+          tier = "pro";
+          label = "Local Dev Bypass";
+        } else {
+          // Fall back to DB-stored access codes
+          const result = await verifyAccessCode(input.code);
+          if (!result) {
+            return { success: false, message: "Invalid or expired access code" } as const;
+          }
+          label = result.label ?? "Access Granted";
+          // DB codes default to lite unless label contains "pro"
+          tier = (result.label ?? "").toLowerCase().includes("pro") ? "pro" : "lite";
         }
-        // Set a session cookie to mark the user as having access-code entry
+
+        // Set tiered cookie: "lite" or "pro"
         const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie("vop_access", "granted", {
+        ctx.res.cookie("vop_access", tier, {
           ...cookieOptions,
           maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
         });
-        return { success: true, label: result.label } as const;
+        return { success: true, label, tier } as const;
       }),
     checkAccess: publicProcedure.query(({ ctx }) => {
+      // DEV_BYPASS_AUTH=1 — auto-authenticates as pro (owner) on localhost, skips access code gate
+      if (ENV.devBypassAuth) {
+        return { authenticated: true, tier: "pro" as const, method: "dev_bypass" as const, hasOAuth: true };
+      }
+      // Parse cookies from raw header (no cookie-parser middleware)
+      const cookieHeader = ctx.req.headers.cookie || "";
+      const cookies = Object.fromEntries(
+        cookieHeader.split(";").map(c => {
+          const [k, ...v] = c.trim().split("=");
+          return [k, v.join("=")];
+        })
+      );
+      const accessValue = cookies["vop_access"] || "";
+      // Support old "granted" value as "lite" for backward compat
+      const hasAccess = accessValue === "lite" || accessValue === "pro" || accessValue === "granted";
+      const tier = accessValue === "pro" ? "pro" : (hasAccess ? "lite" : "none");
       const hasOAuth = Boolean(ctx.user);
-      const hasAccessCode = ctx.req.cookies?.vop_access === "granted";
-      return { authenticated: hasOAuth || hasAccessCode, method: hasOAuth ? "oauth" : hasAccessCode ? "access_code" : "none" } as const;
+      return { authenticated: hasAccess, tier, method: hasAccess ? "access_code" : "none", hasOAuth } as const;
     }),
 
     // ── Share Token (single-session, single-page guest links) ──
@@ -234,6 +289,9 @@ export const appRouter = router({
   // Honda Talon Screenshot-to-Fuel-Table OCR
   talonOcr: talonOcrRouter,
 
+  // Diesel Injector Flow Sheet OCR
+  injectorOcr: injectorOcrRouter,
+
   // FCA/Stellantis Calibration Supersession Database
   calibrations: calibrationsRouter,
 
@@ -245,6 +303,38 @@ export const appRouter = router({
 
   // Geofence Zone Management
   geofence: geofenceRouter,
+
+  // Flash Container Management & VOP 3.0 Upload Pipeline
+  flash: flashRouter,
+
+  // Tune Deploy — calibration library (R2 + metadata + future vehicle match)
+  tuneDeploy: tuneDeployRouter,
+  autoDeploy: autoDeployRouter,
+
+  // Vehicle-Reported Weather Network
+  weather: weatherRouter,
+
+  // Dyno Competition System (SAE-corrected)
+  dyno: dynoRouter,
+
+  // Vehicle Cloud Network (crowd-sourced analytics)
+  cloud: cloudRouter,
+
+  // Live Weather Streams & Storm Chaser Telemetry
+  streaming: streamingRouter,
+  stormChase: stormChaseRouter,
+
+  // Laura — Weather AI Agent
+  laura: lauraRouter,
+
+  // Strat — Post-Sale Tech Support Agent
+  strat: stratRouter,
+
+  // GitHub Commit History
+  github: githubRouter,
+
+  // Task Override Persistence (Tasks tab status, notes, section moves)
+  tasks: tasksRouter,
 
   // Feedback / Error Reports
   feedback: router({

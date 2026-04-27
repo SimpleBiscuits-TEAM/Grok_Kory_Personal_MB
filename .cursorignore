@@ -1,0 +1,13 @@
+# ============================================================================
+# .cursorignore — Intentionally Empty
+# ============================================================================
+# Cursor is ALLOWED to read all project files for context and understanding.
+# 
+# WRITE PROTECTION is handled by .cursor/rules/ files:
+#   - tobi-protected-files.mdc (alwaysApply: true) — blocks writes to 60+ files
+#   - tobi-flash-glob-guard.mdc (glob-triggered) — warns when viewing protected files
+#
+# Do NOT add Tobi's protected files here. Cursor needs to read them to
+# understand the codebase, suggest correct imports, and avoid breaking
+# interfaces. The rules files handle the "read OK, write BLOCKED" policy.
+# ============================================================================

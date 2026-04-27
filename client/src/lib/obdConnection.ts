@@ -1,11 +1,22 @@
 /**
- * OBDLink EX WebSerial Communication Library
- * Implements ELM327/STN2xx command protocol for OBD-II datalogging.
- * 
+ * V-OP Universal OBD Communication Library
+ * ==========================================
+ * This file powers the universal replacement for every traditional scantool
+ * and code reader. L5P/GMLAN was the hardest platform and is now working.
+ * Everything else (Ford, BMW, Toyota, Honda, Chrysler, powersports) follows
+ * the same architecture.
+ *
+ * Implements ELM327/STN2xx + PCAN bridge protocols for OBD-II datalogging.
  * Based on OBDLink Family Reference and Programming Manual (FRPM) Rev E.
  * Supports ISO 15765-4 CAN (11-bit/500k) for all OBD-II vehicles.
- * Universal PID database with standard Mode 01, manufacturer-specific Mode 22,
- * and automatic VIN-based vehicle identification.
+ *
+ * Features:
+ * - Full SAE J1979 Mode 01 PID set (truly universal)
+ * - Manufacturer-specific Mode 22 extended PIDs (GM, Ford, BMW, Chrysler, etc.)
+ * - Hybrid DDDI + batch polling engine for high-speed data acquisition
+ * - VIN-based auto-detection with manufacturer/engine/fuel type identification
+ * - Preset system with per-vehicle suggested PID configurations
+ * - Live RAM / DDDI-style access where possible (HPTuners-level quality target)
  */
 
 // ─── Known USB Adapter Database ──────────────────────────────────────────────
@@ -135,6 +146,8 @@ export interface PIDReading {
   unit: string;
   rawBytes: number[];
   timestamp: number;
+  /** UDS Negative Response Code — set when the read failed with an NRC (e.g. 0x31 = Request Out Of Range). */
+  nrc?: number;
 }
 
 export interface LogSession {
@@ -152,6 +165,12 @@ export interface VehicleInfo {
   vin?: string;
   protocol?: string;
   protocolNumber?: string;
+  /** V-OP USB bridge: device name from binary bridge protocol (see `bridge/bridge_protocol.py`). */
+  vopDeviceName?: string;
+  /** V-OP USB bridge: serial number from binary bridge protocol (see `bridge/bridge_protocol.py`). */
+  vopDeviceSerial?: string;
+  /** V-OP USB bridge: compact identity summary (e.g. `${name} · ${serial}`). */
+  vopDeviceIdentity?: string;
   voltage?: string;
   ecuCount?: number;
   // Decoded VIN data
@@ -218,13 +237,13 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x05, name: 'Engine Coolant Temperature', shortName: 'ECT',
-    unit: '°C', min: -40, max: 215, bytes: 1, category: 'cooling',
-    formula: ([a]) => a - 40,
+    unit: '°F', min: -40, max: 419, bytes: 1, category: 'cooling',
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0x0B, name: 'Intake Manifold Pressure (MAP)', shortName: 'MAP',
-    unit: 'kPa', min: 0, max: 255, bytes: 1, category: 'intake',
-    formula: ([a]) => a,
+    unit: 'PSI', min: 0.0, max: 37.0, bytes: 1, category: 'intake',
+    formula: ([a]) => (a) * 0.145038,
   },
   {
     pid: 0x0C, name: 'Engine RPM', shortName: 'RPM',
@@ -233,8 +252,8 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x0D, name: 'Vehicle Speed', shortName: 'VSS',
-    unit: 'km/h', min: 0, max: 255, bytes: 1, category: 'engine',
-    formula: ([a]) => a,
+    unit: 'MPH', min: 0, max: 158, bytes: 1, category: 'engine',
+    formula: ([a]) => (a) * 0.621371,
   },
   {
     pid: 0x0E, name: 'Timing Advance', shortName: 'TIMING',
@@ -244,17 +263,18 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x0F, name: 'Intake Air Temperature', shortName: 'IAT',
-    unit: '°C', min: -40, max: 215, bytes: 1, category: 'intake',
-    formula: ([a]) => a - 40,
+    unit: '°F', min: -40, max: 419, bytes: 1, category: 'intake',
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0x10, name: 'Mass Air Flow Rate', shortName: 'MAF',
-    unit: 'g/s', min: 0, max: 655.35, bytes: 2, category: 'engine',
-    formula: ([a, b]) => ((a * 256) + b) / 100,
+    unit: 'lb/min', min: 0, max: 86.7, bytes: 2, category: 'engine',
+    formula: ([a, b]) => ((a * 256) + b) / 100 * 0.132277,  // g/s→lb/min
   },
   {
     pid: 0x11, name: 'Throttle Position', shortName: 'TPS',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    fuelType: 'gasoline', // Diesel ECUs don't respond to Mode 01 TPS — use APP D instead
     formula: ([a]) => (a * 100) / 255,
   },
   {
@@ -269,8 +289,8 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x21, name: 'Distance with MIL On', shortName: 'MIL_DIST',
-    unit: 'km', min: 0, max: 65535, bytes: 2, category: 'emissions',
-    formula: ([a, b]) => (a * 256) + b,
+    unit: 'mi', min: 0, max: 40722, bytes: 2, category: 'emissions',
+    formula: ([a, b]) => ((a * 256) + b) * 0.621371,
   },
   // ── Fuel System ──
   {
@@ -302,18 +322,18 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x0A, name: 'Fuel Pressure (gauge)', shortName: 'FP',
-    unit: 'kPa', min: 0, max: 765, bytes: 1, category: 'fuel',
-    formula: ([a]) => a * 3,
+    unit: 'PSI', min: 0.0, max: 111.0, bytes: 1, category: 'fuel',
+    formula: ([a]) => (a * 3) * 0.145038,
   },
   {
     pid: 0x22, name: 'Fuel Rail Pressure (relative)', shortName: 'FRP_R',
-    unit: 'kPa', min: 0, max: 5177.265, bytes: 2, category: 'fuel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.079,
+    unit: 'PSI', min: 0.0, max: 750.9, bytes: 2, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) * 0.079) * 0.145038,
   },
   {
     pid: 0x23, name: 'Fuel Rail Gauge Pressure (diesel/GDI)', shortName: 'FRP',
-    unit: 'kPa', min: 0, max: 655350, bytes: 2, category: 'fuel',
-    formula: ([a, b]) => ((a * 256) + b) * 10,
+    unit: 'PSI', min: 0.0, max: 95050.7, bytes: 2, category: 'fuel',
+    formula: ([a, b]) => (((a * 256) + b) * 10) * 0.145038,
   },
   {
     pid: 0x2E, name: 'Commanded EVAP Purge', shortName: 'EVAP_PCT',
@@ -328,26 +348,27 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x31, name: 'Distance Since Codes Cleared', shortName: 'CLR_DIST',
-    unit: 'km', min: 0, max: 65535, bytes: 2, category: 'emissions',
-    formula: ([a, b]) => (a * 256) + b,
+    unit: 'mi', min: 0, max: 40722, bytes: 2, category: 'emissions',
+    formula: ([a, b]) => ((a * 256) + b) * 0.621371,
   },
   {
     pid: 0x32, name: 'EVAP System Vapor Pressure', shortName: 'EVAP_VP',
-    unit: 'Pa', min: -8192, max: 8191.75, bytes: 2, category: 'evap',
+    unit: 'PSI', min: -1.2, max: 1.2, bytes: 2, category: 'evap',
     fuelType: 'gasoline',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.25,
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.25 * 0.000145038,  // Pa→PSI
   },
   // ── Intake / Turbo / Boost ──
   {
     pid: 0x33, name: 'Barometric Pressure', shortName: 'BARO',
-    unit: 'kPa', min: 0, max: 255, bytes: 1, category: 'intake',
-    formula: ([a]) => a,
+    unit: 'PSI', min: 0.0, max: 37.0, bytes: 1, category: 'intake',
+    formula: ([a]) => (a) * 0.145038,
   },
   {
     pid: 0x70, name: 'Boost Pressure Control', shortName: 'BOOST_CMD',
-    unit: 'kPa', min: 0, max: 6513.75, bytes: 2, category: 'turbo',
+    unit: 'PSI', min: -15, max: 944.7, bytes: 2, category: 'turbo',
     fuelType: 'diesel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.03125,
+    // Gauge pressure: subtract standard atmosphere (14.696 PSI) from absolute kPa→PSI
+    formula: ([a, b]) => (((a * 256) + b) * 0.03125) * 0.145038 - 14.696,
   },
   // ── Oxygen Sensors (Gas Engine Essential) ──
   {
@@ -435,25 +456,25 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x3C, name: 'Catalyst Temperature (Bank 1, Sensor 1)', shortName: 'CAT_B1S1',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'catalyst',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'catalyst',
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   {
     pid: 0x3D, name: 'Catalyst Temperature (Bank 2, Sensor 1)', shortName: 'CAT_B2S1',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'catalyst',
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'catalyst',
     fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   {
     pid: 0x3E, name: 'Catalyst Temperature (Bank 1, Sensor 2)', shortName: 'CAT_B1S2',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'catalyst',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'catalyst',
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   {
     pid: 0x3F, name: 'Catalyst Temperature (Bank 2, Sensor 2)', shortName: 'CAT_B2S2',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'catalyst',
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'catalyst',
     fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   // ── Electrical ──
   {
@@ -479,8 +500,8 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x46, name: 'Ambient Air Temperature', shortName: 'AAT',
-    unit: '°C', min: -40, max: 215, bytes: 1, category: 'intake',
-    formula: ([a]) => a - 40,
+    unit: '°F', min: -40, max: 419, bytes: 1, category: 'intake',
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0x47, name: 'Absolute Throttle Position B', shortName: 'TPS_B',
@@ -488,14 +509,15 @@ export const STANDARD_PIDS: PIDDefinition[] = [
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x49, name: 'Accelerator Pedal Position D', shortName: 'APP_D',
+    pid: 0x49, name: 'Accelerator Pedal Position D (test)', shortName: 'APP_D',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
-    formula: ([a]) => (a * 100) / 255,
+    // Rescaled: raw 19.2% at idle → 0%, raw 84.7% at WOT → 100%
+    formula: ([a]) => { const raw = (a * 100) / 255; return Math.max(0, Math.min(100, ((raw - 19.2) / (84.7 - 19.2)) * 100)); },
   },
   {
-    pid: 0x4A, name: 'Accelerator Pedal Position E', shortName: 'APP_E',
+    pid: 0x4A, name: 'Accel Pedal Sensor E (raw voltage)', shortName: 'APP_E_RAW',
     unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
-    formula: ([a]) => (a * 100) / 255,
+    formula: ([a]) => (a * 100) / 255,  // Raw sensor %; WOT ≈ 42% on L5P. Use PID 0x5A (REL_APP) for 0-100% pedal travel
   },
   {
     pid: 0x4C, name: 'Commanded Throttle Actuator', shortName: 'TAC',
@@ -510,20 +532,20 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x5C, name: 'Engine Oil Temperature', shortName: 'EOT_STD',
-    unit: '°C', min: -40, max: 210, bytes: 1, category: 'engine',
-    formula: ([a]) => a - 40,
+    unit: '°F', min: -40, max: 410, bytes: 1, category: 'engine',
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   // ── Exhaust Gas Temperature (standard) ──
   {
     pid: 0x78, name: 'Exhaust Gas Temperature Bank 1', shortName: 'EGT1',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'exhaust',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'exhaust',
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   {
     pid: 0x79, name: 'Exhaust Gas Temperature Bank 2', shortName: 'EGT2',
-    unit: '°C', min: -40, max: 6513.5, bytes: 2, category: 'exhaust',
+    unit: '°F', min: -40, max: 11756, bytes: 2, category: 'exhaust',
     fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) / 10 - 40,
+    formula: ([a, b]) => (((a * 256) + b) / 10 - 40) * 1.8 + 32,
   },
   // ── Misfire Monitoring (gas engine critical) ──
   {
@@ -545,15 +567,303 @@ export const STANDARD_PIDS: PIDDefinition[] = [
   },
   // ── Fuel Injection Timing (diesel) ──
   {
-    pid: 0x5D, name: 'Fuel Injection Timing', shortName: 'INJ_TMG_STD',
+    pid: 0x5D, name: 'Fuel Injection Timing (Mode 01)', shortName: 'INJ_TMG_STD',
     unit: '°', min: -210, max: 301.992, bytes: 2, category: 'fuel',
     fuelType: 'diesel',
     formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
   },
   {
-    pid: 0x5E, name: 'Engine Fuel Rate', shortName: 'FUEL_RATE',
-    unit: 'L/h', min: 0, max: 3276.75, bytes: 2, category: 'fuel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.05,
+    pid: 0x5E, name: 'Engine Fuel Flow (total)', shortName: 'ENG_FUEL_FLOW',
+    unit: 'gal/h', min: 0, max: 865.5, bytes: 2, category: 'fuel',
+    formula: ([a, b]) => ((a * 256) + b) * 0.05 * 0.264172,  // L/h→gal/h  (SAE total engine flow, NOT per-injection)
+  },
+  {
+    pid: 0x61, name: 'Driver Demand Engine Torque %', shortName: 'DEM_TQ',
+    unit: '%', min: -125, max: 130, bytes: 1, category: 'engine',
+    formula: ([a]) => a - 125,
+  },
+  {
+    pid: 0x62, name: 'Actual Engine Torque % (Mode 01)', shortName: 'ACT_TQ',
+    unit: '%', min: -125, max: 130, bytes: 1, category: 'engine',
+    formula: ([a]) => a - 125,
+  },
+  {
+    pid: 0x63, name: 'Engine Reference Torque (Mode 01)', shortName: 'REF_TQ',
+    unit: 'Nm', min: 0, max: 65535, bytes: 2, category: 'engine',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  // ── Monitor / Readiness (from OBD-PID spec & GMW3110) ──
+  {
+    pid: 0x01, name: 'Monitor Status (MIL / DTC Count / Readiness)', shortName: 'MON_STAT',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'emissions',
+    formula: ([a, b, c, d]) => a,  // Byte A bit 7 = MIL, bits 0-6 = DTC count; B/C/D = readiness
+  },
+  {
+    pid: 0x30, name: 'Warm-ups Since Codes Cleared', shortName: 'WARMUPS',
+    unit: 'count', min: 0, max: 255, bytes: 1, category: 'emissions',
+    formula: ([a]) => a,
+  },
+  {
+    pid: 0x41, name: 'Monitor Status This Drive Cycle', shortName: 'MON_DRV',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'emissions',
+    formula: ([a, b, c, d]) => a,  // Same bit encoding as 0x01 but for current drive cycle
+  },
+  // ── Fuel System (from OBD-PID spec) ──
+  {
+    pid: 0x51, name: 'Fuel Type', shortName: 'FUEL_TYPE',
+    unit: '', min: 0, max: 23, bytes: 1, category: 'fuel',
+    formula: ([a]) => a,  // Enum: 1=Gas, 2=Methanol, 3=Ethanol, 4=Diesel, 5=LPG, 6=CNG, 8=Electric
+  },
+  {
+    pid: 0x52, name: 'Ethanol Fuel %', shortName: 'ETH_PCT',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'fuel',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x59, name: 'Fuel Rail Absolute Pressure', shortName: 'FRP_ABS',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 2, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b]) => ((a * 256) + b) * 10 * 0.145038,  // kPa→PSI
+  },
+  // ── Throttle / Pedal (from OBD-PID spec) ──
+  {
+    pid: 0x48, name: 'Absolute Throttle Position C', shortName: 'TPS_C',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x4B, name: 'Accelerator Pedal Position F', shortName: 'APP_F',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    pid: 0x5A, name: 'Relative Accelerator Pedal Position', shortName: 'REL_APP',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'engine',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── Torque Data (from OBD-PID spec) ──
+  {
+    pid: 0x64, name: 'Engine % Torque Data (5 points)', shortName: 'TQ_DATA',
+    unit: '%', min: -125, max: 130, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => a - 125,  // Returns idle torque; B-E are other operating points
+  },
+  // ── Hybrid / EV ──
+  {
+    pid: 0x5B, name: 'Hybrid Battery Pack Remaining Life', shortName: 'HYB_BAT',
+    unit: '%', min: 0, max: 100, bytes: 1, category: 'electrical',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  // ── Diesel Turbo / Exhaust (from OBD-PID spec & GMW3110) ──
+  {
+    pid: 0x6B, name: 'EGR Temperature', shortName: 'EGR_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 5, category: 'emissions',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support flags; Bytes B-C = sensor 1 temp
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;  // °C→°F
+    },
+  },
+  {
+    pid: 0x6C, name: 'Commanded Throttle Actuator (extended)', shortName: 'TAC_EXT',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support flags; Bytes B-C = actuator A position
+      return ((b * 256) + c) * 100 / 65535;
+    },
+  },
+  {
+    pid: 0x6D, name: 'Fuel Pressure Control System', shortName: 'FP_CTRL',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 6, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f]) => {
+      // Byte A = support; B-C = desired pressure kPa
+      return ((b * 256) + c) * 10 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x6E, name: 'Injection Pressure Control System', shortName: 'INJ_CTRL',
+    unit: 'PSI', min: 0, max: 95050.7, bytes: 5, category: 'fuel',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = desired pressure kPa
+      return ((b * 256) + c) * 10 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x6F, name: 'Turbocharger Compressor Inlet Pressure', shortName: 'TC_INLET',
+    unit: 'PSI', min: 0, max: 37.0, bytes: 3, category: 'turbo',
+    formula: ([a, b, c]) => {
+      // Byte A = support; B = sensor A pressure kPa
+      return b * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x72, name: 'Wastegate Control', shortName: 'WG_CTRL',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = wastegate A position
+      return ((b * 256) + c) * 100 / 65535;
+    },
+  },
+  {
+    pid: 0x73, name: 'Exhaust Pressure', shortName: 'EXH_PRESS',
+    unit: 'PSI', min: 0, max: 944.7, bytes: 5, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = sensor 1 pressure kPa
+      return ((b * 256) + c) * 0.01 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x74, name: 'Turbocharger RPM', shortName: 'TC_RPM',
+    unit: 'rpm', min: 0, max: 400000, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = turbo A RPM
+      return ((b * 256) + c) * 10;
+    },
+  },
+  {
+    pid: 0x75, name: 'Turbocharger Temperature A', shortName: 'TC_TEMP_A',
+    unit: '°F', min: -40, max: 11756, bytes: 7, category: 'turbo',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B-C = inlet temp, D-E = outlet temp
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;  // °C→°F (inlet temp)
+    },
+  },
+  {
+    pid: 0x76, name: 'Turbocharger Temperature B', shortName: 'TC_TEMP_B',
+    unit: '°F', min: -40, max: 11756, bytes: 7, category: 'turbo',
+    formula: ([a, b, c, d, e, f, g]) => {
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  {
+    pid: 0x77, name: 'Charge Air Cooler Temperature', shortName: 'CAC_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 5, category: 'turbo',
+    formula: ([a, b, c, d, e]) => {
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  // ── DPF / Aftertreatment (from OBD-PID spec) ──
+  {
+    pid: 0x7B, name: 'DPF Info', shortName: 'DPF_INFO',
+    unit: 'PSI', min: 0, max: 37.0, bytes: 7, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B-C = delta pressure sensor 1 kPa
+      return ((b * 256) + c) * 0.01 * 0.145038;  // kPa→PSI
+    },
+  },
+  {
+    pid: 0x7C, name: 'DPF Temperature', shortName: 'DPF_TEMP',
+    unit: '°F', min: -40, max: 11756, bytes: 9, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e, f, g, h, i]) => {
+      // Byte A = support; B-C = inlet temp Bank 1
+      const raw = (b * 256) + c;
+      return (raw / 10 - 40) * 1.8 + 32;
+    },
+  },
+  // ── NOx / PM (from OBD-PID spec) ──
+  {
+    pid: 0x83, name: 'NOx Reagent System (DEF)', shortName: 'DEF_SYS',
+    unit: '%', min: 0, max: 100, bytes: 5, category: 'def',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B = tank level %
+      return (b * 100) / 255;
+    },
+  },
+  {
+    pid: 0x84, name: 'Particulate Matter Sensor', shortName: 'PM_SENS',
+    unit: 'mg/m³', min: 0, max: 655.35, bytes: 5, category: 'exhaust',
+    fuelType: 'diesel',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = Bank 1 sensor
+      return ((b * 256) + c) * 0.01;
+    },
+  },
+  // ── Auxiliary / PTO ──
+  {
+    pid: 0x1E, name: 'Auxiliary Input Status (PTO)', shortName: 'AUX_PTO',
+    unit: '', min: 0, max: 1, bytes: 1, category: 'other',
+    formula: ([a]) => a & 0x01,  // Bit 0 = PTO active
+  },
+  // ── Extended Sensor Pairs (from OBD-PID spec) ──
+  {
+    pid: 0x66, name: 'MAF Sensor (extended, dual)', shortName: 'MAF_EXT',
+    unit: 'lb/min', min: 0, max: 86.7, bytes: 5, category: 'engine',
+    formula: ([a, b, c, d, e]) => {
+      // Byte A = support; B-C = sensor A rate g/s
+      return ((b * 256) + c) * 0.03125 * 0.132277;  // g/s→lb/min
+    },
+  },
+  {
+    pid: 0x67, name: 'Engine Coolant Temperature (extended)', shortName: 'ECT_EXT',
+    unit: '°F', min: -40, max: 419, bytes: 3, category: 'cooling',
+    formula: ([a, b, c]) => {
+      // Byte A = support; B = sensor 1 temp °C
+      return (b - 40) * 1.8 + 32;
+    },
+  },
+  {
+    pid: 0x68, name: 'Intake Air Temperature (extended)', shortName: 'IAT_EXT',
+    unit: '°F', min: -40, max: 419, bytes: 7, category: 'intake',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Byte A = support; B = sensor 1 temp °C
+      return (b - 40) * 1.8 + 32;
+    },
+  },
+  // ── EVAP Extended (from OBD-PID spec) ──
+  {
+    pid: 0x53, name: 'Absolute EVAP System Vapor Pressure', shortName: 'EVAP_ABS',
+    unit: 'PSI', min: 0, max: 47.3, bytes: 2, category: 'evap',
+    formula: ([a, b]) => ((a * 256) + b) / 200 * 0.145038,  // kPa→PSI
+  },
+  {
+    pid: 0x54, name: 'EVAP System Vapor Pressure (wide)', shortName: 'EVAP_WIDE',
+    unit: 'PSI', min: -4.7, max: 4.7, bytes: 2, category: 'evap',
+    formula: ([a, b]) => ((a * 256) + b - 32768) * 0.000145038,  // Pa→PSI
+  },
+  // ── Secondary O2 Trims (from OBD-PID spec) ──
+  {
+    pid: 0x55, name: 'Short Term Sec O2 Trim (B1 & B3)', shortName: 'STO2_B1B3',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,  // Bank 1; Bank 3 = same formula on B
+  },
+  {
+    pid: 0x56, name: 'Long Term Sec O2 Trim (B1 & B3)', shortName: 'LTO2_B1B3',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  {
+    pid: 0x57, name: 'Short Term Sec O2 Trim (B2 & B4)', shortName: 'STO2_B2B4',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  {
+    pid: 0x58, name: 'Long Term Sec O2 Trim (B2 & B4)', shortName: 'LTO2_B2B4',
+    unit: '%', min: -100, max: 99.2, bytes: 2, category: 'oxygen',
+    fuelType: 'gasoline',
+    formula: ([a, b]) => ((a - 128) * 100) / 128,
+  },
+  // ── Max Values (from OBD-PID spec) ──
+  {
+    pid: 0x4F, name: 'Max Values (Eq Ratio, O2V, O2I, MAP)', shortName: 'MAX_VALS',
+    unit: '', min: 0, max: 255, bytes: 4, category: 'other',
+    formula: ([a, b, c, d]) => a,  // A=max eq ratio, B=max O2 voltage, C=max O2 current, D=max MAP*10
+  },
+  {
+    pid: 0x50, name: 'Max MAF Rate', shortName: 'MAX_MAF',
+    unit: 'lb/min', min: 0, max: 338.5, bytes: 4, category: 'engine',
+    formula: ([a, b, c, d]) => a * 10 * 0.132277,  // g/s→lb/min
   },
 ];
 
@@ -575,206 +885,7 @@ export const PID_PRESETS: PIDPreset[] = [
     description: 'RPM, Speed, Coolant, Load, Throttle',
     pids: [0x0C, 0x0D, 0x05, 0x04, 0x11],
   },
-  {
-    name: 'Fuel Trims',
-    description: 'RPM, STFT/LTFT Bank 1 & 2, Lambda, Load',
-    pids: [0x0C, 0x06, 0x07, 0x08, 0x09, 0x44, 0x04],
-  },
-  {
-    name: 'Transmission',
-    description: 'RPM, Speed, Gear, Coolant, Voltage',
-    pids: [0x0C, 0x0D, 0xA4, 0x05, 0x42],
-  },
-  // ── Gas Engine Presets ──
-  {
-    name: 'Gas Engine Monitor',
-    description: 'RPM, MAF, Timing, O2 B1S1, Fuel Trims, Load',
-    pids: [0x0C, 0x10, 0x0E, 0x14, 0x06, 0x07, 0x04],
-  },
-  {
-    name: 'O2 / Lambda Sensors',
-    description: 'All O2 sensor voltages and wideband lambda',
-    pids: [0x0C, 0x14, 0x15, 0x18, 0x19, 0x34, 0x35],
-  },
-  {
-    name: 'Catalyst Efficiency',
-    description: 'RPM, Catalyst temps, O2 pre/post cat, Lambda',
-    pids: [0x0C, 0x3C, 0x3E, 0x14, 0x15, 0x44, 0x04],
-  },
-  {
-    name: 'EVAP System',
-    description: 'RPM, EVAP purge, vapor pressure, fuel level',
-    pids: [0x0C, 0x2E, 0x32, 0x2F, 0x04],
-  },
-  // ── Diesel Engine Presets ──
-  {
-    name: 'Diesel Turbo/Boost',
-    description: 'RPM, MAP/Boost, IAT, MAF, Barometric',
-    pids: [0x0C, 0x0B, 0x0F, 0x10, 0x33],
-  },
-  {
-    name: 'Diesel Fuel System',
-    description: 'RPM, Fuel Rail Pressure, STFT, LTFT, Load',
-    pids: [0x0C, 0x23, 0x06, 0x07, 0x04],
-  },
-  {
-    name: 'Diesel Emissions',
-    description: 'RPM, EGR Cmd, EGR Error, EGT, Catalyst Temp',
-    pids: [0x0C, 0x2C, 0x2D, 0x78, 0x3C],
-  },
-  {
-    name: 'Full Duramax (Gen 1 / 2017-2023)',
-    description: 'RPM, Boost, Rail Pressure, MAF, ECT, EGT, Load — E41 ECM',
-    pids: [0x0C, 0x0B, 0x23, 0x10, 0x05, 0x78, 0x04],
-  },
-  {
-    name: 'Full Duramax (Gen 2 / 2024+)',
-    description: 'RPM, Boost CMD/ACT, FRP CMD/ACT, VGT, EGT, TCC, TFT — E42 ECM',
-    pids: [
-      0x0C,     // RPM (Mode 01)
-      0x0572,   // Commanded Boost (Mode 22 ECM)
-      0x0573,   // Actual Boost (Mode 22 ECM)
-      0x0564,   // Commanded FRP (Mode 22 ECM)
-      0x0565,   // Actual FRP (Mode 22 ECM)
-      0x0574,   // VGT Commanded (Mode 22 ECM)
-      0x0575,   // VGT Actual (Mode 22 ECM)
-      0x0580,   // EGT Pre-Turbo (Mode 22 ECM)
-      0x0576,   // Turbo Speed (Mode 22 ECM)
-      0x05A1,   // TCC Slip (Mode 22 TCM)
-      0x05A0,   // TFT (Mode 22 TCM)
-      0x05A3,   // Trans Output Speed (Mode 22 TCM)
-    ],
-  },
-  {
-    name: '2024-2026 L5P Banks iDash Full',
-    description: 'Complete Banks iDash layout: FRP, Boost, VGT, EGT, EGR, DPF, DEF, NOx, Oil, Trans, IAT — E42 ECM',
-    pids: [
-      0x0C,     // Engine RPM (Mode 01)
-      0x0D,     // Vehicle Speed (Mode 01)
-      0x05,     // Engine Coolant Temp (Mode 01)
-      0x10,     // Mass Air Flow (Mode 01)
-      0x04,     // Calculated Engine Load (Mode 01)
-      0x33,     // Barometric Pressure (Mode 01)
-      0x42,     // ECU Battery Voltage (Mode 01)
-      0x0565,   // Fuel Rail Pressure Actual
-      0x0564,   // FRP Commanded
-      0x054A,   // FRP Deviation
-      0x056C,   // Injection Timing
-      0x056D,   // Injection Quantity
-      0x0572,   // Commanded Boost
-      0x0573,   // Actual Boost
-      0x0574,   // VGT Commanded
-      0x0575,   // VGT Actual
-      0x0576,   // Turbo Speed
-      0x0580,   // EGT Pre-Turbo
-      0x0581,   // EGT Post-Turbo
-      0x057A,   // Charge Air Cooler Outlet Temp
-      0x0590,   // EGR Mass Flow
-      0x05B0,   // Engine Oil Temp
-      0x05B1,   // Engine Oil Pressure
-      0x05A0,   // Transmission Fluid Temp
-      0x05A1,   // TCC Slip
-      0x05A2,   // TCC Commanded Pressure
-      0x05A3,   // Trans Output Speed
-      0x1A10,   // DPF Soot Load
-      0x1A11,   // DPF Differential Pressure
-      0x1A14,   // DPF Regen Status
-      0x1A20,   // DEF Tank Level
-      0x1A21,   // DEF Tank Temperature
-      0x1A22,   // DEF Dosing Rate
-      0x1A23,   // SCR Inlet NOx
-      0x1A24,   // SCR Outlet NOx
-    ],
-  },
-  {
-    name: 'Duramax Fuel System (Extended)',
-    description: 'FRP CMD/ACT/DEV, Injection Timing/Qty, PCV Duty, Injector Balance Rates',
-    pids: [
-      0x0C,     // RPM
-      0x0564,   // FRP Commanded
-      0x0565,   // FRP Actual
-      0x054A,   // FRP Deviation
-      0x056C,   // Injection Timing
-      0x056D,   // Injection Quantity
-      0x0549,   // PCV Duty
-      0x1940, 0x1941, 0x1942, 0x1943, // IBR Cyl 1-4
-      0x1944, 0x1945, 0x1946, 0x1947, // IBR Cyl 5-8
-    ],
-  },
-  {
-    name: 'Duramax DPF / DEF / Emissions',
-    description: 'DPF Soot/Regen/Temps, DEF Level/Dosing, NOx, SCR, EGR',
-    pids: [
-      0x0C,     // RPM
-      0x1A10,   // DPF Soot Load
-      0x1A11,   // DPF Differential Pressure
-      0x1A12,   // DPF Inlet Temp
-      0x1A13,   // DPF Outlet Temp
-      0x1A14,   // DPF Regen Status
-      0x1A20,   // DEF Level
-      0x1A22,   // DEF Dosing Rate
-      0x1A23,   // SCR Inlet NOx
-      0x1A24,   // SCR Outlet NOx
-      0x0590,   // EGR Flow
-    ],
-  },
-  // ── Ford 6.2L Boss V8 (Raptor) Presets ──
-  {
-    name: 'Raptor 6.2L Boss Engine',
-    description: 'RPM, Oil Temp/Press, CHT, Torque, Knock, VCT',
-    pids: [0x0C, 0xF480, 0xF481, 0xF483, 0xF484, 0xF487, 0xF491],
-  },
-  {
-    name: 'Raptor Knock & Misfire',
-    description: 'RPM, Knock Retard Cyl 1-8, Misfire Counts',
-    pids: [0x0C, 0xF489, 0xF48A, 0xF48B, 0xF48C, 0xF48D, 0xF48E, 0xF48F, 0xF490],
-  },
-  {
-    name: 'Raptor 6R80 Transmission',
-    description: 'RPM, Trans Temp, TC Slip, Gear, TCC Duty, Line Press',
-    pids: [0x0C, 0xF4C0, 0xF4C1, 0xF4C5, 0xF4C7, 0xF4C4],
-  },
-  {
-    name: 'Raptor VCT / Cam Timing',
-    description: 'RPM, Intake/Exhaust Cam B1 & B2, Spark Advance',
-    pids: [0x0C, 0xF491, 0xF492, 0xF493, 0xF494, 0xF486],
-  },
-  {
-    name: 'Raptor Fuel System',
-    description: 'RPM, Fuel Rail Press, Fuel Pump Duty, Pulse Width, ETC',
-    pids: [0x0C, 0xF4B0, 0xF4B1, 0xF4B2, 0xF4B5, 0xF4B6],
-  },
-  // ── BMW XM Presets ──
-  {
-    name: 'BMW XM S68 Engine',
-    description: 'RPM, Boost, Oil Temp/Press, Torque, VANOS, Knock',
-    pids: [0xD00C, 0x11B1, 0x110A, 0x110B, 0x1124, 0x112C, 0x1140],
-  },
-  {
-    name: 'BMW XM Hybrid System',
-    description: 'HV SOC, HV Voltage/Current/Temp, Motor Torque/Speed, System Power',
-    pids: [0x1400, 0x1401, 0x1402, 0x1403, 0x1405, 0x1406, 0x140B],
-  },
-  {
-    name: 'BMW XM xDrive',
-    description: 'Front/Rear Torque Split, Yaw Rate, Lat/Lon G, Steering Angle',
-    pids: [0x1300, 0x1301, 0x1303, 0x1304, 0x1305, 0x130B],
-  },
-  {
-    name: 'BMW XM ZF 8HP Trans',
-    description: 'Trans Temp, TC Slip, Gear, Line Pressure, Mechatronic Temp',
-    pids: [0x1200, 0x1201, 0x1205, 0x1204, 0x1207],
-  },
-  {
-    name: 'BMW XM Suspension',
-    description: 'Damper Currents FL/FR/RL/RR, Ride Heights, Roll/Pitch',
-    pids: [0x1500, 0x1501, 0x1502, 0x1503, 0x1504, 0x1509, 0x150A],
-  },
-  {
-    name: 'BMW XM Charging',
-    description: 'SOC, Charging Status/Power, DC-DC Output, Cell Delta, EV Range',
-    pids: [0x1400, 0x140D, 0x140E, 0x1408, 0x140F, 0x140C],
-  },
+  // All other built-in presets removed — users create and share custom presets as needed
 ];
 
 // ─── GM Mode 22 Extended PIDs ─────────────────────────────────────────────
@@ -785,127 +896,272 @@ export const PID_PRESETS: PIDPreset[] = [
 // The 2024+ E42 ECM requires directed addressing (ATSH 7E0) for Mode 22.
 
 export const GM_EXTENDED_PIDS: PIDDefinition[] = [
-  // ── Fuel System (Diesel) ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // L5P E41 Diesel — Fuel System (HPT-verified DIDs from IntelliSpy capture)
+  // OLD 0x05xx DIDs removed — ECU does NOT support them (HPT never reads them)
+  // ══════════════════════════════════════════════════════════════════════════
   {
-    pid: 0x0564, name: 'Commanded Fuel Rail Pressure', shortName: 'FRP_CMD',
-    unit: 'MPa', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    // HPT "Fuel Pressure (SAE)" — low-side fuel pressure (CP4 inlet)
+    // IntelliSpy: DID 0x208A, raw 0x0C8E = 3214, HPT shows 60.05 PSI → scale 0.01868
+    pid: 0x208A, name: 'Fuel Pressure (SAE)', shortName: 'FP_SAE',
+    unit: 'PSI', min: 0.0, max: 120, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.00390625,
+    formula: ([a, b]) => ((a * 256) + b) * 0.01868,
   },
   {
-    pid: 0x0565, name: 'Actual Fuel Rail Pressure', shortName: 'FRP_ACT',
-    unit: 'MPa', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.00390625,
-  },
-  {
-    pid: 0x054A, name: 'Fuel Rail Pressure Deviation', shortName: 'FRP_DEV',
-    unit: 'MPa', min: -50, max: 50, bytes: 2, service: 0x22, category: 'fuel',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.00390625,
-  },
-  {
-    pid: 0x056C, name: 'Fuel Injection Timing', shortName: 'INJ_TMG',
+    // HPT "Fuel Injection Timing" — DID 0x12DA
+    // IntelliSpy: raw 0x0F0B = 3851, HPT shows -1° at idle
+    // Signed 16-bit * 0.001 degrees (negative = BTDC)
+    pid: 0x12DA, name: 'Fuel Injection Timing (GM Extended)', shortName: 'INJ_TMG',
     unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.0078125,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.001; },
   },
   {
-    pid: 0x056D, name: 'Fuel Injection Quantity', shortName: 'INJ_QTY',
-    unit: 'mm³/stroke', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    // DID 0x20E3 — CONFIRMED: Total fuel flow rate, NOT per-injection quantity.
+    // Scales with RPM: idle=1.4-5.4 mm³, 2500RPM=190, 3000RPM=233.
+    // HPT DDDI per-injection: idle=6, 3000RPM=10 — completely different behavior.
+    // This is likely total fuel delivery rate (mm³/s or mm³/rev), not mm³/stroke.
+    // Useful for monitoring total fuel consumption, but NOT for injection diagnostics.
+    pid: 0x20E3, name: 'Fuel Flow Rate (total)', shortName: 'FUEL_FLOW_TOTAL',
+    unit: 'mm³', min: 0, max: 500, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,
   },
+  // DID 0x1638 — REMOVED: Returns NRC 0x22 (conditionsNotCorrect) on L5P E41.
+  // Raw value 32546 (0x7F22) was being misinterpreted as data instead of UDS negative response.
+  // The ECU rejects this DID — it either doesn't exist or requires special session/security.
   {
-    pid: 0x0549, name: 'Pressure Control Valve (PCV) Duty', shortName: 'PCV_DUTY',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    // DID 0x245D — TEST CANDIDATE for per-injection fuel quantity (mm³/stroke)
+    // Decoded from IntelliSpy capture of HPT's DDDI setup command: 2C FE 00 0C 24 5D
+    // HPT maps this into DPID 0xFE byte 3 as 1-byte integer mm³/stroke.
+    // DDDI stream values: idle=6, elevated RPM=8-14 — matches HPT ground truth.
+    // Testing via Mode 22 to see if ECU supports direct DID read (may require DDDI only).
+    pid: 0x245D, name: 'Fuel Inj Qty (test)', shortName: 'FUEL_INJ_QTY_TEST',
+    unit: 'mm³', min: 0, max: 255, bytes: 1, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
+    formula: ([a]) => a,  // 1 byte, no scaling, integer mm³/stroke (per HPT DDDI)
+  },
+  // ── Virtual DIDs for IOCTL-only channels (HPT Common DDDI mode) ──
+  // These channels have NO Mode 22 DID equivalent. They only exist in the
+  // DDDI periodic stream via IOCTL 0x2D RAM address access. The 0xDDxx
+  // DID range is synthetic — used only to key the periodic value map.
+  // When hpt_common mode is active, these values are injected from the
+  // periodic frame parser. When NOT streaming, they show no data.
+  {
+    pid: 0xDD00, name: 'Metering Unit Valve Current', shortName: 'METER_VALVE',
+    unit: 'A', min: 0, max: 5, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
   },
   {
-    pid: 0x1940, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
+    pid: 0xDD02, name: 'Lambda Smoke Limit', shortName: 'LAMBDA_SMOKE',
+    unit: '', min: 0, max: 5, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD03, name: 'Injector Pulse Width (DDDI)', shortName: 'INJ_PW_DDDI',
+    unit: 'ms', min: 0, max: 10, bytes: 4, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD04, name: 'Cylinder Airmass', shortName: 'CYL_AIRMASS',
+    unit: 'g', min: 0, max: 5, bytes: 4, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: () => 0,  // Value comes from DDDI periodic stream only
+  },
+  {
+    pid: 0xDD07, name: 'Desired Boost Pressure (DDDI)', shortName: 'BOOST_DES_DDDI',
+    unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    // ECU responds to Mode 22 with absolute pressure (same scaling as DID 0x1E3B).
+    // Factor 0.00145038 converts from ~10 Pa units to PSI. Subtract 14.696 for gauge.
+    // At idle: raw ~10100 → 10100 × 0.00145038 = 14.65 abs → 14.65 - 14.696 = ~-0.05 PSI gauge ≈ 0
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
+  },
+  {
+    pid: 0xDD08, name: 'Boost / Vacuum (DDDI)', shortName: 'BOOST_VAC_DDDI',
+    unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    // Same scaling as BOOST_DES_DDDI (0xDD07) and BOOST_DES (0x1E3B).
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
+  },
+  {
+    // HPT "Injection Timing Correction" — DID 0x208B
+    // IntelliSpy: raw 0xFFF9 = signed -7, HPT shows -1.109° at idle
+    // Signed 16-bit * 0.01 degrees
+    pid: 0x208B, name: 'Injection Timing Correction', shortName: 'INJ_COR',
+    unit: '°', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
+  },
+  // ── Injector Pulse Widths (HPT-verified, DID 0x20AC-0x20B3) ──
+  {
+    pid: 0x20AC, name: 'Injector Pulse Width Cyl 1', shortName: 'IPW_1',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // raw value is µs
+  },
+  {
+    pid: 0x20AD, name: 'Injector Pulse Width Cyl 2', shortName: 'IPW_2',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20AE, name: 'Injector Pulse Width Cyl 3', shortName: 'IPW_3',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20AF, name: 'Injector Pulse Width Cyl 4', shortName: 'IPW_4',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20B0, name: 'Injector Pulse Width Cyl 5', shortName: 'IPW_5',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20B1, name: 'Injector Pulse Width Cyl 6', shortName: 'IPW_6',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20B2, name: 'Injector Pulse Width Cyl 7', shortName: 'IPW_7',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  {
+    pid: 0x20B3, name: 'Injector Pulse Width Cyl 8', shortName: 'IPW_8',
+    unit: 'µs', min: 0, max: 65000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,
+  },
+  // ── Injector Balance Rates (HPT-verified, DID 0x20B4-0x20BB) ──
+  // IntelliSpy: raw 0xFFF6 = signed -10, scale * 0.01 → -0.10 mm³
+  {
+    pid: 0x20B4, name: 'Injector Balance Rate Cyl 1', shortName: 'IBR_1',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1941, name: 'Injector Balance Rate Cyl 2', shortName: 'IBR_2',
+    pid: 0x20B5, name: 'Injector Balance Rate Cyl 2', shortName: 'IBR_2',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1942, name: 'Injector Balance Rate Cyl 3', shortName: 'IBR_3',
+    pid: 0x20B6, name: 'Injector Balance Rate Cyl 3', shortName: 'IBR_3',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1943, name: 'Injector Balance Rate Cyl 4', shortName: 'IBR_4',
+    pid: 0x20B7, name: 'Injector Balance Rate Cyl 4', shortName: 'IBR_4',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1944, name: 'Injector Balance Rate Cyl 5', shortName: 'IBR_5',
+    pid: 0x20B8, name: 'Injector Balance Rate Cyl 5', shortName: 'IBR_5',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1945, name: 'Injector Balance Rate Cyl 6', shortName: 'IBR_6',
+    pid: 0x20B9, name: 'Injector Balance Rate Cyl 6', shortName: 'IBR_6',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1946, name: 'Injector Balance Rate Cyl 7', shortName: 'IBR_7',
+    pid: 0x20BA, name: 'Injector Balance Rate Cyl 7', shortName: 'IBR_7',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
   {
-    pid: 0x1947, name: 'Injector Balance Rate Cyl 8', shortName: 'IBR_8',
+    pid: 0x20BB, name: 'Injector Balance Rate Cyl 8', shortName: 'IBR_8',
     unit: 'mm³', min: -10, max: 10, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.001,
+    formula: ([a, b]) => { const v = (a * 256) + b; return (v > 32767 ? v - 65536 : v) * 0.01; },
   },
-  // ── Turbo / Boost ──
+  // ── Turbo / Boost (HPT-verified DIDs) ──
   {
-    pid: 0x0572, name: 'Commanded Boost Pressure', shortName: 'BOOST_CMD',
-    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'turbo',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.0078125,
-  },
-  {
-    pid: 0x0573, name: 'Actual Boost Pressure', shortName: 'BOOST_ACT',
-    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'turbo',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.0078125,
-  },
-  {
-    pid: 0x0574, name: 'VGT Turbo Vane Position Commanded', shortName: 'VGT_CMD',
+    // HPT "Actual Turbo Vane Position" — DID 0x1543
+    // IntelliSpy: raw 0xA1 = 161, 161/255*100 = 63.14% → matches HPT "Turbo Vane Position"
+    // DPID 0xFD byte 6 in DDDI stream, also readable via Mode 22
+    pid: 0x1543, name: 'Actual Turbo Vane Position', shortName: 'ACT_VANE',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x0575, name: 'VGT Turbo Vane Position Actual', shortName: 'VGT_ACT',
+    // HPT "Desired Turbo Vane Position" — DID 0x1540
+    // DPID 0xFC byte 6 in DDDI stream, also readable via Mode 22
+    pid: 0x1540, name: 'Desired Turbo Vane Position', shortName: 'DES_VANE',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
-    pid: 0x0576, name: 'Turbo Speed', shortName: 'TURBO_RPM',
-    unit: 'rpm', min: 0, max: 300000, bytes: 2, service: 0x22, category: 'turbo',
+    // HPT "Intake Air Temp" — DID 0x114D
+    // IntelliSpy: raw 0x65 = 101, HPT shows 116.6°F (47°C)
+    // Formula: a * 0.46535 = °C, then °C → °F
+    pid: 0x114D, name: 'Intake Air Temp (Diesel)', shortName: 'IAT_DSL',
+    unit: '°F', min: -40, max: 300, bytes: 1, service: 0x22, category: 'turbo',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 4,
+    formula: ([a]) => (a * 0.46535) * 1.8 + 32,
   },
   {
-    pid: 0x057A, name: 'Charge Air Cooler Outlet Temp', shortName: 'CAC_OUT',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'turbo',
+    // HPT "Engine Coolant Temp" — DID 0x13C8
+    // IntelliSpy: raw 0xB9 = 185, HPT shows 183.2°F (84°C)
+    // Formula: a * 0.454 = °C, then °C → °F
+    pid: 0x13C8, name: 'Engine Coolant Temp (Diesel HPT)', shortName: 'ECT_HPT',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a * 0.454) * 1.8 + 32,
+  },
+  {
+    // HPT "Ambient Air Temp" — DID 0x232C
+    // IntelliSpy: raw 0x45 = 69, (69-40) = 29°C → 84.2°F → EXACT MATCH
+    pid: 0x232C, name: 'Ambient Air Temp (Diesel)', shortName: 'AAT_DSL',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a - 40) * 1.8 + 32,
+  },
+  {
+    // HPT "EGR Pintle Position" — DID 0x1502
+    // IntelliSpy: raw 0x1F = 31, 31/255*100 = 12.16%
+    pid: 0x1502, name: 'EGR Pintle Position', shortName: 'EGR_PINTLE',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a * 100) / 255,
+  },
+  {
+    // HPT "NOx Sensor 1" — DID 0x11F8
+    // IntelliSpy: raw 0x0000 = 0 at idle (sensors not warmed up)
+    pid: 0x11F8, name: 'NOx Sensor 1', shortName: 'NOX_1',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b),
+  },
+  {
+    // HPT "NOx Sensor 2" — DID 0x11FA
+    pid: 0x11FA, name: 'NOx Sensor 2', shortName: 'NOX_2',
+    unit: 'ppm', min: 0, max: 5000, bytes: 2, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b),
   },
   // ── Exhaust / DPF ──
   {
@@ -915,22 +1171,22 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
   {
-    pid: 0x1A11, name: 'DPF Differential Pressure', shortName: 'DPF_DP',
-    unit: 'kPa', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    pid: 0x1A11, name: 'DPF Differential Pressure (GM)', shortName: 'DPF_DP',
+    unit: 'PSI', min: 0.0, max: 14.5, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.145038,
   },
   {
     pid: 0x1A12, name: 'DPF Inlet Temperature', shortName: 'DPF_IN_T',
-    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
   },
   {
     pid: 0x1A13, name: 'DPF Outlet Temperature', shortName: 'DPF_OUT_T',
-    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
+    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
   },
   {
     pid: 0x1A14, name: 'DPF Regen Status', shortName: 'DPF_REGEN',
@@ -946,34 +1202,24 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1A16, name: 'Distance Since Last DPF Regen', shortName: 'DPF_DIST',
-    unit: 'km', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'exhaust',
+    unit: 'mi', min: 0, max: 40722, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => (a * 256) + b,
+    formula: ([a, b]) => ((a * 256) + b) * 0.621371,
   },
-  {
-    pid: 0x0580, name: 'EGT Bank 1 Sensor 1 (Pre-Turbo)', shortName: 'EGT_PRE',
-    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
-  },
-  {
-    pid: 0x0581, name: 'EGT Bank 1 Sensor 2 (Post-Turbo)', shortName: 'EGT_POST',
-    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'exhaust',
-    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
-  },
+  // NOTE: EGT Pre/Post-Turbo (old 0x0580/0x0581) removed — 0x05xx not supported on E41
+  // EGT data available via multi-frame DID 0x0069 (EGT Bank Extended) below
   // ── DEF / SCR ──
   {
-    pid: 0x1A20, name: 'DEF Tank Level', shortName: 'DEF_LVL',
+    pid: 0x1A20, name: 'DEF Tank Level (GM)', shortName: 'DEF_LVL',
     unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
   {
     pid: 0x1A21, name: 'DEF Tank Temperature', shortName: 'DEF_TEMP',
-    unit: '°C', min: -40, max: 120, bytes: 1, service: 0x22, category: 'def',
+    unit: '°F', min: -40, max: 248, bytes: 1, service: 0x22, category: 'def',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0x1A22, name: 'DEF Dosing Rate', shortName: 'DEF_DOSE',
@@ -995,9 +1241,9 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1A25, name: 'SCR Catalyst Temperature', shortName: 'SCR_TEMP',
-    unit: '°C', min: -40, max: 900, bytes: 2, service: 0x22, category: 'def',
+    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'def',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
   },
   {
     pid: 0x1A26, name: 'DEF Quality', shortName: 'DEF_QUAL',
@@ -1005,74 +1251,357 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a]) => (a * 100) / 255,
   },
-  // ── EGR Extended ──
+  // NOTE: EGR Mass Flow (old 0x0590) and EGR Cooler Bypass (old 0x0591) removed — 0x05xx not supported on E41
+  // EGR Pintle Position (0x1502) added above in HPT-verified section
+  // ══════════════════════════════════════════════════════════════════════════
+  // L5P E41 Diesel — Additional DIDs confirmed via HP Tuners + BUSMASTER sniff
+  // Verified 2024-04-21 against BUSMASTERLogFile_FullPIDsChannelListHPT4.21.26
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── SAE J1979 PIDs via UDS $22 (HPT requests these as Mode 22, not Mode 01) ──
   {
-    pid: 0x0590, name: 'EGR Mass Flow Rate', shortName: 'EGR_FLOW',
-    unit: 'kg/h', min: 0, max: 500, bytes: 2, service: 0x22, category: 'emissions',
+    pid: 0x005D, name: 'Fuel Injection Timing (SAE)', shortName: 'INJ_TMG_SAE',
+    unit: '°BTDC', min: -60, max: 60, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) - 26880) / 128,
   },
   {
-    pid: 0x0591, name: 'EGR Cooler Bypass Position', shortName: 'EGR_BYP',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'emissions',
+    pid: 0x0062, name: 'Actual Engine Torque % (HPT)', shortName: 'TQ_ACT',
+    unit: '%', min: -125, max: 130, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
-  },
-  // ── Transmission Extended ──
-  {
-    pid: 0x05A0, name: 'Transmission Fluid Temperature', shortName: 'TFT',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => a - 125,
   },
   {
-    pid: 0x05A1, name: 'TCC Slip Speed', shortName: 'TCC_SLIP',
-    unit: 'rpm', min: -1000, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => (((a * 256) + b) - 32768),
+    pid: 0x0063, name: 'Engine Reference Torque (HPT)', shortName: 'TQ_REF',
+    unit: 'lb·ft', min: 0, max: 1475, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.737562,
+  },
+  // ── GM Diesel Proprietary (0x30xx range) — confirmed from BUSMASTER ──
+  {
+    pid: 0x30BC, name: 'Desired Fuel Rail Pressure (Snapshot)', shortName: 'FRP_DES_SS',
+    unit: 'PSI', min: 0.0, max: 7251.9, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; SNAPSHOT ONLY — does not update on repeated reads
   },
   {
-    pid: 0x05A2, name: 'Commanded TCC Pressure', shortName: 'TCC_CMD',
-    unit: 'kPa', min: 0, max: 2500, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    pid: 0x30C1, name: 'Actual Fuel Rail Pressure (Snapshot)', shortName: 'FRP_ACT_SS',
+    unit: 'PSI', min: 0.0, max: 7251.9, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 1.39 * 0.145038,  // kPa→PSI; SNAPSHOT ONLY — does not update on repeated reads
   },
   {
-    pid: 0x05A3, name: 'Transmission Output Speed', shortName: 'TRANS_OUT',
-    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
+    pid: 0x30BE, name: 'Diesel Commanded Throttle A (Snapshot)', shortName: 'THRTL_CMD',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.1,  // SNAPSHOT — 0x30xx range
+  },
+  {
+    pid: 0x30D5, name: 'Engine Coolant Temp Diesel (Snapshot)', shortName: 'ECT_DSL',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a - 40) * 1.8 + 32,  // SNAPSHOT — 0x30xx range
+  },
+  {
+    pid: 0x30D7, name: 'DEF Tank Level Diesel (Snapshot)', shortName: 'DEF_LVL2',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'def',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => (a * 100) / 255,  // SNAPSHOT — 0x30xx range
+  },
+  {
+    pid: 0x328A, name: 'Fuel Rail Pressure Actual', shortName: 'FRP_ACT',
+    unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.4712,  // Confirmed: 10000 * 0.4712 = 4712 PSI; SNAPSHOT — 0x30xx/0x32xx range only updates on first read after DDDI clear
+  },
+  {
+    pid: 0x30CA, name: 'Injection Pattern Active (Snapshot)', shortName: 'INJ_PAT',
+    unit: '', min: 0, max: 7, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,  // SNAPSHOT — 0x30xx range
+  },
+  {
+    pid: 0x30DA, name: 'DPF Soot Load Percentage (Snapshot)', shortName: 'DPF_SOOT_PCT',
+    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,  // SNAPSHOT — 0x30xx range
+  },
+  {
+    pid: 0x308A, name: 'Barometric Pressure Diesel (Snapshot)', shortName: 'BARO_DSL',
+    unit: 'PSI', min: 7.3, max: 16.7, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.03125 * 0.145038,  // SNAPSHOT — 0x30xx range; 3243 * 0.03125 * 0.145038 = 14.7 PSI
+  },
+  // ── Multi-frame EGT DIDs (ISO-TP, 6-7 data bytes) ──
+  {
+    pid: 0x0069, name: 'EGT Bank Extended (B1S1-S4)', shortName: 'EGT_EXT',
+    unit: '°F', min: -40, max: 1652, bytes: 7, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => {
+      // Multi-byte: byte0=count, bytes1-2=EGT1, bytes3-4=EGT2, etc.
+      // Return primary EGT (B1S1) in °F
+      return (((b * 256) + c) * 0.1 - 40) * 1.8 + 32;
+    },
+  },
+  {
+    pid: 0x0071, name: 'NOx Sensor Concentration', shortName: 'NOX_CONC',
+    unit: 'ppm', min: 0, max: 5000, bytes: 6, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f]) => {
+      // Bytes 1-2: NOx sensor 1 concentration, Bytes 3-4: NOx sensor 2
+      return ((b * 256) + c) * 0.05;
+    },
+  },
+  {
+    pid: 0x006A, name: 'Exhaust Gas Pressure', shortName: 'EXH_PRESS',
+    unit: 'PSI', min: 0.0, max: 72.5, bytes: 5, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e]) => (((a * 256) + b) * 0.03125) * 0.145038,
+  },
+  {
+    pid: 0x007A, name: 'NOx Sensor Oxygen Concentration', shortName: 'NOX_O2',
+    unit: '%', min: -5, max: 25, bytes: 7, service: 0x22, category: 'emissions',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => ((b * 256) + c) * 0.001 - 12,
+  },
+  {
+    pid: 0x008B, name: 'Diesel Particulate Matter', shortName: 'DPM',
+    unit: 'mg/m³', min: 0, max: 1000, bytes: 7, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b, c, d, e, f, g]) => ((b * 256) + c) * 0.01,
+  },
+  // ── Fuel Tank / Misc ──
+  {
+    pid: 0x1141, name: 'Fuel Tank Level (Diesel)', shortName: 'FUEL_LVL',
+    unit: 'gal', min: 0, max: 40, bytes: 1, service: 0x22, category: 'fuel',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a * 0.21832,  // HPT-verified: 143 * 0.21832 = 31.22 gal (matches HPT 31.2177)
+  },
+  {
+    pid: 0x90D6, name: 'VIN Program Counter', shortName: 'VIN_CNT',
+    unit: '', min: 0, max: 255, bytes: 1, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a]) => a,
+  },
+  // NOTE: Transmission (old 0x05A0-0x05A4) and Oil (old 0x05B0-0x05B3) removed — 0x05xx not supported on E41
+  // Transmission data available via T87A TCM DIDs (0x1941-0x1942 on 7E2) defined in TCM section
+  // ══════════════════════════════════════════════════════════════════════════
+  // GM E90 / Global B Gas Truck — ECM Extended DIDs (UDS $22 on 7E0→7E8)
+  // Verified against BUSMASTER passive sniff + EFI Live V8 CSV export
+  // 2021 Sierra/Silverado 6.2L L87 — E90 ECM, T93 TCM
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── ECM: Standard J1979 PIDs accessed via UDS $22 (not Mode 01) ──
+  // Note: On Global B / E90, EFI Live requests ALL PIDs via service $22.
+  // The DID numbers match Mode 01 PIDs but are requested as UDS ReadDataByIdentifier.
+  // Standard Mode 01 also works for these, but $22 is the EFI Live convention.
+  // The following GM-specific ECM DIDs have NO Mode 01 equivalent:
+  {
+    pid: 0x119C, name: 'Engine Oil Pressure (E90)', shortName: 'ENGOILP',
+    unit: 'PSI', min: 0, max: 150, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.0145038,  // kPa * 0.145038 / 10
+  },
+  {
+    pid: 0x12DA, name: 'MAF Raw Frequency', shortName: 'MAFFREQ2',
+    unit: 'Hz', min: 0, max: 12000, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b),
   },
   {
-    pid: 0x05A4, name: 'Transmission Input Speed', shortName: 'TRANS_IN',
-    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E1',
-    formula: ([a, b]) => ((a * 256) + b),
-  },
-  // ── Engine Extended ──
-  {
-    pid: 0x05B0, name: 'Engine Oil Temperature', shortName: 'EOT',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a]) => a - 40,
-  },
-  {
-    pid: 0x05B1, name: 'Engine Oil Pressure', shortName: 'EOP',
-    unit: 'kPa', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
-  },
-  {
-    pid: 0x05B2, name: 'Engine Oil Life Remaining', shortName: 'OIL_LIFE',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'engine',
-    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
-  },
-  {
-    pid: 0x05B3, name: 'Fuel Filter Life Remaining', shortName: 'FUEL_FILT',
-    unit: '%', min: 0, max: 100, bytes: 1, service: 0x22, category: 'fuel',
+    pid: 0x131F, name: 'Fuel Rail Pressure Desired', shortName: 'FRPDI',
+    unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
-    formula: ([a]) => (a * 100) / 255,
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038,  // kPa to psi
+  },
+  {
+    pid: 0x1470, name: 'MAP Unfiltered (Upstream)', shortName: 'MAPU',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'intake',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,  // Pa to psi
+  },
+  {
+    pid: 0x2012, name: 'TC Desired Boost Pressure', shortName: 'TCDBPR',
+    unit: 'PSI', min: 0, max: 40, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,  // Pa to psi
+  },
+  {
+    pid: 0x204D, name: 'Accelerator Pedal Position E', shortName: 'APP_E',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+  },
+  {
+    pid: 0x208A, name: 'Trans Torque Reduction Spark Retard', shortName: 'TTQRET',
+    unit: '°', min: -60, max: 60, bytes: 2, service: 0x22, category: 'ignition',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.01,
+  },
+  {
+    pid: 0x248B, name: 'Relative Throttle Position (GM Extended)', shortName: 'TP_R',
+    unit: '%', min: 0, max: 100, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 100 / 65535,
+  },
+  {
+    pid: 0x308A, name: 'TC Torque Reduction Limiter Reason', shortName: 'TCTQRLR',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // bitfield
+  },
+  {
+    pid: 0x328A, name: 'AFM Inhibit Reason 2', shortName: 'AFMIR2',
+    unit: '', min: 0, max: 65535, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'gasoline', ecuHeader: '7E0',
+    formula: ([a, b]) => (a * 256) + b,  // bitfield
+  },
+  // ── TCM: T87A 10-speed (10L80) via 7E2→7EA ──
+  // CRITICAL: On 2019+ GM Global B trucks, the TCM responds on 7E2/7EA, NOT 7E1/7E9.
+  // 7E1/7E9 is the Allison/6L80 address used on older GMT900/K2XX platforms.
+  // T87A is used on both gas and diesel (5.3L, 6.2L, 6.6L Duramax) light and heavy duty trucks.
+  // T87A, T87, T93, A50, A40, AL5 are all different TCM variants with different protocols.
+  // Verified via IntelliSpy CAN capture + HP Tuners datalog on 2019 L5P Duramax.
+  //
+  // CONFIRMED Mode 22 DIDs (from HP Tuners DDDI source analysis):
+  //   0x1141 = PRNDL Position
+  //   0x1941 = Trans Input Speed
+  //   0x1942 = Trans Output Speed
+  //   0x194F = TCC Commanded Pressure
+  //   0x1991 = Battery Voltage (TCM)
+  //   0x199A = Engine Torque Commanded (TCM)
+  //   0x19D4 = TCC Reference Slip
+  //   0x281C = TCC Line Pressure
+  //
+  // MEMORY-DEFINED DDDIs (T87A RAM addresses, set via service 0x2D):
+  //   FE00 → RAM 0x40014682, 2 bytes (Trans Fluid Temp or Turbine RPM)
+  //   FE01 → RAM 0x40014DB4, 2 bytes (TCC State or related)
+  //   FE02 → RAM 0x400143C2, 2 bytes (Current Gear or related)
+  //   FE03 → RAM 0x40014CC0, 2 bytes (Shift Mode or related)
+  //
+  // HP Tuners combines these into 3 periodic reads:
+  //   DDDI FE: 0x1942 + FE00 + 0x281C + 0x199A
+  //   DDDI FD: 0x1991 + 0x19D4 + FE01 + 0x194F
+  //   DDDI FC: 0x1941 + FE02 + FE03 + 0x1141
+  {
+    // Trans Input Speed — DID 0x1941 (T87A confirmed)
+    // HP Tuners channel 4110 "Trans Input Shaft RPM"
+    // At idle: ~601 rpm, under load: up to ~2048 rpm
+    // Formula: raw 2-byte unsigned, 1 rpm per count
+    pid: 0x1941, name: 'Trans Input Speed (T87A)', shortName: 'TIS_T87A',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.25,
+  },
+  {
+    // Trans Output Speed — DID 0x1942 (T87A confirmed)
+    // HP Tuners channel 4111 "Trans Output Shaft RPM"
+    // At idle in Park: 0 rpm, driving: up to ~183 rpm at low speed
+    // Formula: raw 2-byte unsigned, 1 rpm per count
+    pid: 0x1942, name: 'Trans Output Speed (T87A)', shortName: 'TOS_T87A',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.25,
+  },
+  {
+    // TCC Commanded Pressure — DID 0x194F (T87A confirmed)
+    // HP Tuners channel 4341 "TCC Desired Pressure"
+    // At idle: 0 psi, under load: up to ~7.7 psi
+    // Formula: raw 2-byte unsigned, 0.1 kPa per count → convert to PSI
+    pid: 0x194F, name: 'TCC Commanded Pressure (T87A)', shortName: 'TCCP_T87A',
+    unit: 'PSI', min: 0.0, max: 435.1, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
+  },
+  {
+    // Battery Voltage (TCM) — DID 0x1991 (T87A confirmed)
+    // HP Tuners channel 4102 "Control Module Voltage (TCM)"
+    // Typical: 13.6-14.5V
+    // Formula: raw 2-byte unsigned, 0.001V per count
+    pid: 0x1991, name: 'Battery Voltage TCM (T87A)', shortName: 'VOLTS_T87A',
+    unit: 'V', min: 0, max: 20, bytes: 2, service: 0x22, category: 'electrical',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => ((a * 256) + b) * 0.001,
+  },
+  {
+    // PRNDL Position — DID 0x1141 (T87A confirmed)
+    // HP Tuners channel 17000 "PRNDL Status"
+    // Values: Park, Reverse, Neutral, D1-D10
+    // Formula: raw 1-byte enum
+    pid: 0x1141, name: 'PRNDL Position (T87A)', shortName: 'PRNDL_T87A',
+    unit: '', min: 0, max: 15, bytes: 1, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    // Engine Torque Commanded (TCM) — DID 0x199A (T87A confirmed)
+    // HP Tuners DDDI source DID in FE group
+    // Formula: raw 2-byte signed (offset 32768), 0.1 Nm per count → convert to lb·ft
+    pid: 0x199A, name: 'Engine Torque Commanded TCM (T87A)', shortName: 'TRQENG_T87A',
+    unit: 'lb·ft', min: -738, max: 1475, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => ((((a * 256) + b) - 32768) * 0.1) * 0.737562,
+  },
+  {
+    // TCC Reference Slip — DID 0x19D4 (T87A confirmed)
+    // HP Tuners channel 4311 "TCC Slip"
+    // At idle: ~28 rpm, under load: up to ~925 rpm
+    // Formula: raw 2-byte signed (offset 32768), 0.125 rpm per count
+    pid: 0x19D4, name: 'TCC Reference Slip (T87A)', shortName: 'TCCRS_T87A',
+    unit: 'rpm', min: -2000, max: 2000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.125,
+  },
+  {
+    // TCC Line Pressure — DID 0x281C (T87A confirmed)
+    // HP Tuners channel 4340 "TCC Line Pressure"
+    // In capture: 0 psi throughout (idle/low speed test)
+    // Formula: raw 2-byte unsigned, 0.1 kPa per count → convert to PSI (unverified scaling)
+    pid: 0x281C, name: 'TCC Line Pressure (T87A)', shortName: 'TCCLP_T87A',
+    unit: 'PSI', min: 0, max: 500, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
+  },
+  // ── GM Global A Boost Pressure (commaai/opendbc) ──
+  {
+    // Desired Boost Pressure — DID 0x1E3B
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3B, name: 'Desired Boost Pressure (GM)', shortName: 'BOOST_DES',
+    unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    // Gauge pressure: subtract standard atmosphere (14.696 PSI) from absolute kPa→PSI
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
+  },
+  {
+    // Actual Boost Pressure — DID 0x1E3C
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3C, name: 'Actual Boost Pressure (GM)', shortName: 'BOOST_ACT',
+    unit: 'PSI', min: -15, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    // Gauge pressure: subtract standard atmosphere (14.696 PSI) from absolute kPa→PSI
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038 - 14.696,
+  },
+  {
+    // Engine Torque Actual — DID 0x1E3D
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3D, name: 'Engine Torque Actual (GM)', shortName: 'TQ_ACT_GM',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    // Driver Demand Torque — DID 0x1E3E
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3E, name: 'Driver Demand Torque (GM)', shortName: 'DEM_TQ_GM',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    // Exhaust Gas Temperature Bank 1 — DID 0x1E3F
+    // From commaai/opendbc GM Global A powertrain files
+    pid: 0x1E3F, name: 'EGT Bank 1 (GM Global A)', shortName: 'EGT1_GM',
+    unit: '°F', min: -40, max: 1652, bytes: 2, service: 0x22, category: 'exhaust',
+    manufacturer: 'gm', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
   },
 ];
 
@@ -1085,7 +1614,7 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   // ══════════════════════════════════════════════════════════════════════════
   {
     pid: 0xF441, name: 'Injection Control Pressure', shortName: 'ICP',
-    unit: 'psi', min: 0, max: 4000, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0, max: 4000, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'ford', fuelType: 'diesel',
     formula: ([a, b]) => ((a * 256) + b) * 0.0625,
   },
@@ -1097,13 +1626,13 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF443, name: 'Exhaust Back Pressure', shortName: 'EBP',
-    unit: 'psi', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    unit: 'PSI', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'ford', fuelType: 'diesel',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
   {
     pid: 0xF444, name: 'Turbo Boost Pressure', shortName: 'BOOST_F',
-    unit: 'psi', min: 0, max: 60, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 60, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'ford', fuelType: 'diesel',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
@@ -1121,9 +1650,9 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF44B, name: 'DPF Differential Pressure', shortName: 'DPF_DP_F',
-    unit: 'kPa', min: 0, max: 100, bytes: 2, service: 0x22, category: 'exhaust',
+    unit: 'PSI', min: 0.0, max: 14.5, bytes: 2, service: 0x22, category: 'exhaust',
     manufacturer: 'ford', fuelType: 'diesel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.145038,
   },
   {
     pid: 0xF44C, name: 'DEF Tank Level', shortName: 'DEF_LVL_F',
@@ -1138,14 +1667,14 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Engine Management ──
   {
     pid: 0xF480, name: 'Engine Oil Temperature (Boss)', shortName: 'EOT_BOSS',
-    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'engine',
+    unit: '°F', min: -40, max: 419, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0xF481, name: 'Engine Oil Pressure (Boss)', shortName: 'EOP_BOSS',
-    unit: 'psi', min: 0, max: 150, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'PSI', min: 0, max: 150, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'gasoline',
     formula: ([a, b]) => ((a * 256) + b) * 0.145038, // kPa to psi
     ecuHeader: '7E0',
@@ -1159,23 +1688,23 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF483, name: 'Cylinder Head Temperature (Boss)', shortName: 'CHT_BOSS',
-    unit: '°C', min: -40, max: 250, bytes: 2, service: 0x22, category: 'cooling',
+    unit: '°F', min: -40, max: 482, bytes: 2, service: 0x22, category: 'cooling',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0xF484, name: 'Calculated Engine Torque', shortName: 'TRQ_CALC',
-    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'lb·ft', min: 0, max: 590, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E0',
   },
   {
     pid: 0xF485, name: 'Desired Engine Torque', shortName: 'TRQ_DES',
-    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'lb·ft', min: 0, max: 590, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E0',
   },
   {
@@ -1345,9 +1874,9 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Fuel System ──
   {
     pid: 0xF4B0, name: 'Commanded Fuel Rail Pressure (Boss)', shortName: 'FRP_CMD_B',
-    unit: 'bar', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0.0, max: 2900.8, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 14.5038,
     ecuHeader: '7E0',
   },
   {
@@ -1382,9 +1911,9 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Transmission (6R80 in Raptor) ──
   {
     pid: 0xF4C0, name: 'Transmission Fluid Temp (6R80)', shortName: 'TFT_6R80',
-    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 419, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'ford', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E1',
   },
   {
@@ -1410,7 +1939,7 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF4C4, name: 'Line Pressure (6R80)', shortName: 'LP_6R80',
-    unit: 'psi', min: 0, max: 400, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'PSI', min: 0, max: 400, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'ford', fuelType: 'any',
     formula: ([a, b]) => ((a * 256) + b) * 0.145038,
     ecuHeader: '7E1',
@@ -1452,9 +1981,9 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF4CA, name: 'Transmission Input Torque', shortName: 'TRQ_IN_F',
-    unit: 'Nm', min: 0, max: 800, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'lb·ft', min: 0, max: 590, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'ford', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E1',
   },
   // ── Electrical / Charging ──
@@ -1475,7 +2004,7 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   // ── EcoBoost / Gas Turbo ──
   {
     pid: 0xF450, name: 'Boost Pressure (EcoBoost)', shortName: 'BOOST_EB',
-    unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'ford', fuelType: 'gasoline',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
@@ -1487,16 +2016,16 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF452, name: 'Direct Injection Fuel Pressure', shortName: 'DI_FP',
-    unit: 'bar', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0.0, max: 2900.8, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'ford', fuelType: 'gasoline',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 14.5038,
   },
   // ── Common Ford (all engines) ──
   {
     pid: 0xF460, name: 'Transmission Fluid Temp', shortName: 'TFT_F',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'transmission',
     manufacturer: 'ford', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0xF461, name: 'Transmission Torque Converter Slip', shortName: 'TC_SLIP_F',
@@ -1506,15 +2035,61 @@ export const FORD_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF470, name: 'Engine Oil Temperature', shortName: 'EOT_F',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'engine',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
   {
     pid: 0xF471, name: 'Engine Oil Pressure', shortName: 'EOP_F',
-    unit: 'kPa', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'PSI', min: 0.0, max: 145.0, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'ford', fuelType: 'any',
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
+  },
+  // ══════════════════════════════════════════════════════════════════════
+  // 6.7L Power Stroke (2011–2025) — Community-verified Mode 22 signals
+  // Sourced from Torque Pro verified lists + Ford truck forums
+  // ══════════════════════════════════════════════════════════════════════
+  {
+    pid: 0x2201, name: 'Fuel Rail Pressure (Ford)', shortName: 'FRP_FORD',
+    unit: 'PSI', min: 0, max: 30000, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.145038,
+  },
+  {
+    pid: 0x2203, name: 'Main Injection Quantity', shortName: 'MAIN_INJ_QTY',
+    unit: 'mm³', min: 0, max: 200, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
     formula: ([a, b]) => ((a * 256) + b) * 0.1,
+  },
+  {
+    pid: 0x2205, name: 'Pilot Injection Quantity', shortName: 'PILOT_INJ',
+    unit: 'mm³', min: 0, max: 50, bytes: 2, service: 0x22, category: 'fuel',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+  },
+  {
+    pid: 0x2207, name: 'Desired Boost Pressure (Ford)', shortName: 'BOOST_DES_FORD',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
+  {
+    pid: 0x2208, name: 'Actual Boost Pressure (Ford)', shortName: 'BOOST_ACT_FORD',
+    unit: 'PSI', min: 0, max: 50, bytes: 2, service: 0x22, category: 'turbo',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => ((a * 256) + b) * 0.00145038,
+  },
+  {
+    pid: 0x2209, name: 'Engine Torque (Ford)', shortName: 'TQ_ACT_FORD',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+  },
+  {
+    pid: 0x220A, name: 'Driver Demand Torque (Ford)', shortName: 'DEM_TQ_FORD',
+    unit: '%', min: -125, max: 130, bytes: 2, service: 0x22, category: 'engine',
+    manufacturer: 'ford', fuelType: 'diesel', ecuHeader: '7E0',
+    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
   },
 ];
 
@@ -1525,13 +2100,13 @@ export const CHRYSLER_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Cummins Diesel ──
   {
     pid: 0xF101, name: 'Fuel Rail Pressure (Cummins)', shortName: 'FRP_CUM',
-    unit: 'bar', min: 0, max: 2000, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0.0, max: 29007.6, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'chrysler', fuelType: 'diesel',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 14.5038,
   },
   {
     pid: 0xF102, name: 'Turbo Boost Pressure (Cummins)', shortName: 'BOOST_CUM',
-    unit: 'psi', min: 0, max: 60, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 60, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'chrysler', fuelType: 'diesel',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
@@ -1574,9 +2149,9 @@ export const CHRYSLER_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xF120, name: 'Transmission Fluid Temp', shortName: 'TFT_C',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'transmission',
     manufacturer: 'chrysler', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
   },
 ];
 
@@ -1652,7 +2227,7 @@ export const HONDA_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x3010, name: 'Turbo Boost (1.5T/2.0T)', shortName: 'BOOST_H',
-    unit: 'psi', min: 0, max: 30, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 30, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'honda', fuelType: 'gasoline',
     formula: ([a, b]) => ((a * 256) + b) * 0.01,
   },
@@ -1683,16 +2258,16 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xD005, name: 'Engine Coolant Temp (BMW)', shortName: 'ECT_BMW',
-    unit: '°C', min: -40, max: 215, bytes: 1, service: 0x22, category: 'cooling',
+    unit: '°F', min: -40, max: 419, bytes: 1, service: 0x22, category: 'cooling',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0xD00B, name: 'Intake Manifold Pressure (BMW)', shortName: 'MAP_BMW',
-    unit: 'kPa', min: 0, max: 400, bytes: 2, service: 0x22, category: 'intake',
+    unit: 'PSI', min: 0.0, max: 58.0, bytes: 2, service: 0x22, category: 'intake',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.145038,
     ecuHeader: '7E0',
   },
   {
@@ -1711,16 +2286,16 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xD00F, name: 'Intake Air Temperature (BMW)', shortName: 'IAT_BMW',
-    unit: '°C', min: -40, max: 100, bytes: 1, service: 0x22, category: 'intake',
+    unit: '°F', min: -40, max: 212, bytes: 1, service: 0x22, category: 'intake',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0xD010, name: 'Mass Air Flow (BMW)', shortName: 'MAF_BMW',
-    unit: 'g/s', min: 0, max: 700, bytes: 2, service: 0x22, category: 'intake',
+    unit: 'lb/min', min: 0, max: 92.6, bytes: 2, service: 0x22, category: 'intake',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) / 100,
+    formula: ([a, b]) => ((a * 256) + b) / 100 * 0.132277,  // g/s→lb/min
     ecuHeader: '7E0',
   },
   {
@@ -1733,45 +2308,45 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Engine Oil & Cooling ──
   {
     pid: 0x110A, name: 'Engine Oil Temperature (BMW)', shortName: 'EOT_BMW',
-    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'engine',
+    unit: '°F', min: -40, max: 392, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0x110B, name: 'Engine Oil Pressure (BMW)', shortName: 'EOP_BMW',
-    unit: 'bar', min: 0, max: 10, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'PSI', min: 0.0, max: 145.0, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 14.5038,
     ecuHeader: '7E0',
   },
   {
     pid: 0x1109, name: 'Cylinder Head Temperature (BMW)', shortName: 'CHT_BMW',
-    unit: '°C', min: -40, max: 250, bytes: 2, service: 0x22, category: 'cooling',
+    unit: '°F', min: -40, max: 482, bytes: 2, service: 0x22, category: 'cooling',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   {
     pid: 0x1105, name: 'Engine Coolant Temp Enhanced (BMW)', shortName: 'ECT_ENH_BMW',
-    unit: '°C', min: -40, max: 215, bytes: 2, service: 0x22, category: 'cooling',
+    unit: '°F', min: -40, max: 419, bytes: 2, service: 0x22, category: 'cooling',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   // ── Torque ──
   {
     pid: 0x1124, name: 'Actual Engine Torque (BMW)', shortName: 'TRQ_ACT_BMW',
-    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'lb·ft', min: 0, max: 738, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E0',
   },
   {
     pid: 0x1125, name: 'Desired Engine Torque (BMW)', shortName: 'TRQ_DES_BMW',
-    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'lb·ft', min: 0, max: 738, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E0',
   },
   // ── VANOS (Variable Valve Timing) ──
@@ -1828,23 +2403,23 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x11B1, name: 'Actual Boost Pressure (BMW)', shortName: 'BOOST_ACT_BMW',
-    unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'bmw', fuelType: 'any',
     formula: ([a, b]) => (((a * 256) + b) * 0.296 - 1000) / 1000 * 14.5038,
     ecuHeader: '7E0',
   },
   {
     pid: 0x11B2, name: 'Target Boost Pressure (BMW)', shortName: 'BOOST_TGT_BMW',
-    unit: 'psi', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
+    unit: 'PSI', min: 0, max: 35, bytes: 2, service: 0x22, category: 'turbo',
     manufacturer: 'bmw', fuelType: 'any',
     formula: ([a, b]) => (((a * 256) + b) * 0.296 - 1000) / 1000 * 14.5038,
     ecuHeader: '7E0',
   },
   {
     pid: 0x11B3, name: 'Charge Air Cooler Temp (BMW)', shortName: 'CAC_BMW',
-    unit: '°C', min: -40, max: 120, bytes: 1, service: 0x22, category: 'intake',
+    unit: '°F', min: -40, max: 248, bytes: 1, service: 0x22, category: 'intake',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   // ── Knock Sensors ──
@@ -1865,16 +2440,16 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Fuel System (Direct Injection) ──
   {
     pid: 0x1160, name: 'Fuel Rail Pressure (BMW)', shortName: 'FRP_BMW',
-    unit: 'bar', min: 0, max: 350, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0.0, max: 5076.3, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 14.5038,
     ecuHeader: '7E0',
   },
   {
     pid: 0x1161, name: 'Commanded Fuel Rail Pressure (BMW)', shortName: 'FRP_CMD_BMW',
-    unit: 'bar', min: 0, max: 350, bytes: 2, service: 0x22, category: 'fuel',
+    unit: 'PSI', min: 0.0, max: 5076.3, bytes: 2, service: 0x22, category: 'fuel',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 14.5038,
     ecuHeader: '7E0',
   },
   {
@@ -1894,9 +2469,9 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   // ── Ambient ──
   {
     pid: 0xD146, name: 'Ambient Air Temperature (BMW)', shortName: 'AAT_BMW',
-    unit: '°C', min: -40, max: 60, bytes: 1, service: 0x22, category: 'intake',
+    unit: '°F', min: -40, max: 140, bytes: 1, service: 0x22, category: 'intake',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a]) => a - 40,
+    formula: ([a]) => (a - 40) * 1.8 + 32,
     ecuHeader: '7E0',
   },
   // ══════════════════════════════════════════════════════════════════════════
@@ -1904,9 +2479,9 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   // ══════════════════════════════════════════════════════════════════════════
   {
     pid: 0x1200, name: 'Transmission Fluid Temp (BMW)', shortName: 'TFT_BMW',
-    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 392, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E1',
   },
   {
@@ -1932,9 +2507,9 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1204, name: 'Line Pressure (ZF 8HP)', shortName: 'LP_ZF8HP',
-    unit: 'bar', min: 0, max: 30, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'PSI', min: 0.0, max: 435.1, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 14.5038,
     ecuHeader: '7E1',
   },
   {
@@ -1953,16 +2528,16 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1207, name: 'Mechatronic Temperature (BMW)', shortName: 'MECH_T_BMW',
-    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 392, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E1',
   },
   {
     pid: 0x1208, name: 'Transmission Input Torque (BMW)', shortName: 'TRQ_IN_BMW',
-    unit: 'Nm', min: 0, max: 1000, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'lb·ft', min: 0, max: 738, bytes: 2, service: 0x22, category: 'transmission',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E1',
   },
   {
@@ -2019,37 +2594,37 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1306, name: 'Wheel Speed FL (BMW)', shortName: 'WS_FL_BMW',
-    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    unit: 'MPH', min: 0, max: 186, bytes: 2, service: 0x22, category: 'other',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.621371,
     ecuHeader: '7B0',
   },
   {
     pid: 0x1307, name: 'Wheel Speed FR (BMW)', shortName: 'WS_FR_BMW',
-    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    unit: 'MPH', min: 0, max: 186, bytes: 2, service: 0x22, category: 'other',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.621371,
     ecuHeader: '7B0',
   },
   {
     pid: 0x1308, name: 'Wheel Speed RL (BMW)', shortName: 'WS_RL_BMW',
-    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    unit: 'MPH', min: 0, max: 186, bytes: 2, service: 0x22, category: 'other',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.621371,
     ecuHeader: '7B0',
   },
   {
     pid: 0x1309, name: 'Wheel Speed RR (BMW)', shortName: 'WS_RR_BMW',
-    unit: 'km/h', min: 0, max: 300, bytes: 2, service: 0x22, category: 'other',
+    unit: 'MPH', min: 0, max: 186, bytes: 2, service: 0x22, category: 'other',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 0.621371,
     ecuHeader: '7B0',
   },
   {
     pid: 0x130A, name: 'Brake Pressure (BMW)', shortName: 'BRK_P_BMW',
-    unit: 'bar', min: 0, max: 200, bytes: 2, service: 0x22, category: 'other',
+    unit: 'PSI', min: 0.0, max: 2900.8, bytes: 2, service: 0x22, category: 'other',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => (((a * 256) + b) * 0.01) * 14.5038,
     ecuHeader: '7B0',
   },
   {
@@ -2085,23 +2660,23 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1403, name: 'HV Battery Temperature', shortName: 'HV_TEMP_BMW',
-    unit: '°C', min: -40, max: 80, bytes: 2, service: 0x22, category: 'electrical',
+    unit: '°F', min: -40, max: 176, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '607',
   },
   {
     pid: 0x1404, name: 'Electric Motor Temperature', shortName: 'EMOT_T_BMW',
-    unit: '°C', min: -40, max: 200, bytes: 2, service: 0x22, category: 'electrical',
+    unit: '°F', min: -40, max: 392, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E2',
   },
   {
     pid: 0x1405, name: 'Electric Motor Torque', shortName: 'EMOT_TRQ',
-    unit: 'Nm', min: -500, max: 500, bytes: 2, service: 0x22, category: 'electrical',
+    unit: 'lb·ft', min: -369, max: 369, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => (((a * 256) + b) - 32768) * 0.1,
+    formula: ([a, b]) => ((((a * 256) + b) - 32768) * 0.1) * 0.737562,
     ecuHeader: '7E2',
   },
   {
@@ -2113,9 +2688,9 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x1407, name: 'Inverter Temperature', shortName: 'INV_T_BMW',
-    unit: '°C', min: -40, max: 150, bytes: 2, service: 0x22, category: 'electrical',
+    unit: '°F', min: -40, max: 302, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1 - 40,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1 - 40) * 1.8 + 32,
     ecuHeader: '7E2',
   },
   {
@@ -2134,23 +2709,23 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0x140A, name: 'Regenerative Braking Torque', shortName: 'REGEN_TRQ',
-    unit: 'Nm', min: 0, max: 300, bytes: 2, service: 0x22, category: 'electrical',
+    unit: 'lb·ft', min: 0, max: 221, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.737562,
     ecuHeader: '7E2',
   },
   {
     pid: 0x140B, name: 'Combined System Power', shortName: 'SYS_PWR_BMW',
-    unit: 'kW', min: 0, max: 750, bytes: 2, service: 0x22, category: 'engine',
+    unit: 'HP', min: 0, max: 1006, bytes: 2, service: 0x22, category: 'engine',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => ((a * 256) + b) * 0.1 * 1.34102,  // kW→HP
     ecuHeader: '7E2',
   },
   {
     pid: 0x140C, name: 'Electric Range Remaining', shortName: 'EV_RANGE',
-    unit: 'km', min: 0, max: 100, bytes: 2, service: 0x22, category: 'electrical',
+    unit: 'mi', min: 0, max: 62, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.1,
+    formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.621371,
     ecuHeader: '607',
   },
   {
@@ -2164,7 +2739,7 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
     pid: 0x140E, name: 'Charging Power', shortName: 'CHG_PWR',
     unit: 'kW', min: 0, max: 200, bytes: 2, service: 0x22, category: 'electrical',
     manufacturer: 'bmw', fuelType: 'any',
-    formula: ([a, b]) => ((a * 256) + b) * 0.01,
+    formula: ([a, b]) => ((a * 256) + b) * 0.01,  // Keep kW for EV charging (industry standard)
     ecuHeader: '607',
   },
   {
@@ -2252,6 +2827,14 @@ export const BMW_EXTENDED_PIDS: PIDDefinition[] = [
 // ─── Manufacturer PID Collections ─────────────────────────────────────
 
 import { CANAM_EXTENDED_PIDS, SEADOO_EXTENDED_PIDS, POLARIS_EXTENDED_PIDS, KAWASAKI_EXTENDED_PIDS } from './powersportsPids';
+import {
+  CAN_DATALOGGER_BITMASK_TIMEOUT_MS,
+  CAN_DATALOGGER_VIN_TIMEOUT_MS,
+  CAN_ELM_MODE01_BATCH_COMMAND_TIMEOUT_MS,
+  CAN_LIVE_OBD_MODE01_TIMEOUT_MS,
+  CAN_LIVE_UDS_DID_TIMEOUT_MS,
+  CAN_UDS_PRE_TX_SETTLE_MS,
+} from './canTransportTiming';
 
 export const MANUFACTURER_PIDS: Record<PIDManufacturer, PIDDefinition[]> = {
   universal: [],  // Standard PIDs are universal
@@ -2315,6 +2898,40 @@ export function createCustomPreset(name: string, description: string, pids: numb
   };
 }
 
+/**
+ * Build and persist a datalogger preset from DID-scan results (shared by ELM, PCAN, V-OP transports).
+ */
+export function buildPersistedScanAutoPreset(
+  vehicleInfo: VehicleInfo | undefined,
+  standardSupported: ScanResult[],
+  extendedSupported: ScanResult[],
+): PIDPreset | undefined {
+  const supportedPidNumbers = [
+    ...standardSupported.map(r => r.pid.pid),
+    ...extendedSupported.map(r => r.pid.pid),
+  ];
+  if (supportedPidNumbers.length === 0) return undefined;
+
+  const totalSupported = supportedPidNumbers.length;
+  const vehicleId = vehicleInfo?.vin
+    ? vehicleInfo.vin.slice(-8)
+    : `vehicle_${Date.now()}`;
+
+  const autoPreset = createCustomPreset(
+    `Auto-Scan ${vehicleId}`,
+    `Auto-discovered ${totalSupported} PIDs (${standardSupported.length} std + ${extendedSupported.length} ext) — ${new Date().toLocaleDateString()}`,
+    supportedPidNumbers
+  );
+  autoPreset.id = `autoscan_${vehicleId}_${Date.now()}`;
+
+  const existing = loadCustomPresets();
+  const filtered = existing.filter(p => !p.id?.startsWith(`autoscan_${vehicleId}`));
+  filtered.push(autoPreset);
+  saveCustomPresets(filtered);
+
+  return autoPreset;
+}
+
 export function deleteCustomPreset(presets: PIDPreset[], presetId: string): PIDPreset[] {
   const updated = presets.filter(p => p.id !== presetId);
   saveCustomPresets(updated);
@@ -2354,6 +2971,14 @@ export function getMode22Pids(): PIDDefinition[] {
 
 export function getMode01Pids(): PIDDefinition[] {
   return STANDARD_PIDS;
+}
+
+/**
+ * Placeholder for future .dbc-based PID expansion (commaai/opendbc, etc.).
+ * We will feed actual .dbc content later for automatic signal extraction.
+ */
+export function getPidsFromDbc(manufacturer: PIDManufacturer): PIDDefinition[] {
+  return [];
 }
 
 export function getPidsByManufacturer(manufacturer: PIDManufacturer): PIDDefinition[] {
@@ -2396,12 +3021,23 @@ export function getPresetsForVehicle(manufacturer: PIDManufacturer, fuelType: Fu
     // Manufacturer-specific presets
     if (manufacturer === 'ford' || manufacturer === 'universal') {
       if (name.includes('raptor')) return true;
+      if (name.includes('power stroke') || name.includes('6.7l')) return true;
     }
     if (manufacturer === 'bmw' || manufacturer === 'universal') {
       if (name.includes('bmw') || name.includes('xm')) return true;
     }
     if (manufacturer === 'gm' || manufacturer === 'universal') {
       if (name.includes('duramax')) return true;
+      // PPEI Suggested presets — show for GM diesel vehicles
+      if (name.includes('ppei') && (fuelType === 'diesel' || fuelType === 'any')) return true;
+      // L5P HPT presets — show for GM diesel vehicles
+      if (name.includes('l5p') && (fuelType === 'diesel' || fuelType === 'any')) return true;
+      if (
+        (fuelType === 'gasoline' || fuelType === 'any') &&
+        (name.includes('gm e90') || name.includes('l87'))
+      ) {
+        return true;
+      }
     }
     // Gas-specific presets
     if (fuelType === 'gasoline' || fuelType === 'any') {
@@ -2982,7 +3618,7 @@ export class OBDConnection {
 
       // Step 10: Test connection - request supported PIDs
       this.emit('log', null, 'Testing vehicle connection...');
-      const pidResponse = await this.sendCommand('0100', 10000);
+      const pidResponse = await this.sendCommand('0100', CAN_DATALOGGER_VIN_TIMEOUT_MS);
       
       if (pidResponse.includes('UNABLE TO CONNECT') || pidResponse.includes('NO DATA')) {
         this.emit('error', null, 'Unable to connect to vehicle. Check ignition is ON.');
@@ -2998,15 +3634,15 @@ export class OBDConnection {
 
       // Request additional PID ranges if supported
       if (this.supportedPids.has(0x20)) {
-        const resp20 = await this.sendCommand('0120', 5000);
+        const resp20 = await this.sendCommand('0120', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp20, 0x20);
       }
       if (this.supportedPids.has(0x40)) {
-        const resp40 = await this.sendCommand('0140', 5000);
+        const resp40 = await this.sendCommand('0140', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp40, 0x40);
       }
       if (this.supportedPids.has(0x60)) {
-        const resp60 = await this.sendCommand('0160', 5000);
+        const resp60 = await this.sendCommand('0160', CAN_DATALOGGER_BITMASK_TIMEOUT_MS);
         this.parseSupportedPids(resp60, 0x60);
       }
 
@@ -3023,7 +3659,7 @@ export class OBDConnection {
 
       // Try to get VIN and decode vehicle identity
       try {
-        const vinResp = await this.sendCommand('0902', 8000);
+        const vinResp = await this.sendCommand('0902', CAN_DATALOGGER_VIN_TIMEOUT_MS);
         if (vinResp && !vinResp.includes('NO DATA') && !vinResp.includes('ERROR')) {
           const parsedVin = this.parseVin(vinResp);
           vehicleInfo.vin = parsedVin;
@@ -3123,6 +3759,10 @@ export class OBDConnection {
     return new Set(this.supportedPids);
   }
 
+  getVehicleInfo(): VehicleInfo {
+    return { ...(this.vehicleInfo ?? {}) };
+  }
+
   /**
    * Returns standard (Mode 01) PIDs that the vehicle confirmed it supports
    * via the Mode 01 PID 0x00/0x20/0x40/0x60 bitmask scan.
@@ -3142,11 +3782,12 @@ export class OBDConnection {
   }
 
   /**
-   * Returns all manufacturer-specific extended PIDs (Mode 22).
-   * These are always "available" since support can't be queried via Mode 01 bitmask.
+   * Manufacturer-specific extended PIDs (Mode 22) for the decoded vehicle — same idea as PCAN/V-OP.
    */
   getAvailableExtendedPids(): PIDDefinition[] {
-    return ALL_PIDS.filter(p => (p.service ?? 0x01) === 0x22);
+    const mfr = this.vehicleInfo?.manufacturer ?? 'universal';
+    const fuel = this.vehicleInfo?.fuelType ?? 'any';
+    return getPidsForVehicle(mfr, fuel).filter(p => (p.service ?? 0x01) === 0x22);
   }
 
   getAllAvailablePids(): PIDDefinition[] {
@@ -3211,7 +3852,8 @@ export class OBDConnection {
         // Reset to broadcast for standard Mode 01 PIDs
         await this.setEcuHeader(undefined);
       }
-      const response = await this.sendCommand(command, 3000);
+      const cmdTimeout = service === 0x22 ? CAN_LIVE_UDS_DID_TIMEOUT_MS : CAN_LIVE_OBD_MODE01_TIMEOUT_MS;
+      const response = await this.sendCommand(command, cmdTimeout);
       return this.parsePidResponse(pid, response);
     } catch {
       return null;
@@ -3282,7 +3924,7 @@ export class OBDConnection {
         // Multi-PID request: "01 0C 0D 05 ..."
         const command = '01' + batch.map(p => p.pid.toString(16).padStart(2, '0')).join('');
         try {
-          const response = await this.sendCommand(command, 5000);
+          const response = await this.sendCommand(command, CAN_ELM_MODE01_BATCH_COMMAND_TIMEOUT_MS);
           const readings = this.parseMultiPidResponse(batch, response);
           results.push(...readings);
 
@@ -3500,7 +4142,7 @@ export class OBDConnection {
 
   async startLogging(
     pids: PIDDefinition[],
-    intervalMs = 200,
+    intervalMs = 0,
     onData?: (readings: PIDReading[]) => void
   ): Promise<LogSession> {
     if (this.state !== 'ready') {
@@ -3553,7 +4195,11 @@ export class OBDConnection {
     this.currentSession = session;
     this.loggingActive = true;
     this.setState('logging');
-    this.emit('log', null, `Logging started: ${pidsToUse.map(p => p.shortName).join(', ')} @ ${intervalMs}ms (${pidsToUse.length}/${pids.length} PIDs)`);
+    this.emit(
+      'log',
+      null,
+      `Logging started: ${pidsToUse.map(p => p.shortName).join(', ')} @ ${intervalMs > 0 ? `${intervalMs}ms` : 'max rate'} (${pidsToUse.length}/${pids.length} PIDs)`,
+    );
 
     // Track per-PID failures with soft-disable and periodic retry.
     // Instead of permanently removing PIDs after N failures, we "pause" them
@@ -3699,8 +4345,11 @@ export class OBDConnection {
     const includeExtended = options?.includeExtended ?? true;
     const startTime = Date.now();
 
-    const pidsToScan: PIDDefinition[] = [];
-    if (includeStandard) pidsToScan.push(...STANDARD_PIDS);
+    // Same Mode 01 PID set as PCAN / V-OP (no bitmask placeholder PIDs in the per-PID sweep).
+    const allPids: PIDDefinition[] = [];
+    if (includeStandard) {
+      allPids.push(...STANDARD_PIDS.filter(p => p.pid > 0x00 && p.pid !== 0x20 && p.pid !== 0x40 && p.pid !== 0x60));
+    }
     if (includeExtended) {
       // Sort extended PIDs by ecuHeader so we minimize ATSH switches
       const extPids = [...GM_EXTENDED_PIDS].sort((a, b) => {
@@ -3708,7 +4357,7 @@ export class OBDConnection {
         const hB = b.ecuHeader ?? '7DF';
         return hA.localeCompare(hB);
       });
-      pidsToScan.push(...extPids);
+      allPids.push(...extPids);
     }
 
     const standardSupported: ScanResult[] = [];
@@ -3716,87 +4365,48 @@ export class OBDConnection {
     const standardUnsupported: ScanResult[] = [];
     const extendedUnsupported: ScanResult[] = [];
 
-    this.emit('log', null, `Starting DID discovery scan (${pidsToScan.length} PIDs)...`);
+    this.emit('log', null, `Starting DID discovery scan (${allPids.length} PIDs)...`);
 
-    for (let i = 0; i < pidsToScan.length; i++) {
-      // Check abort
+    let current = 0;
+    const total = allPids.length;
+
+    for (const pid of allPids) {
       if (options?.abortSignal?.aborted) {
         this.emit('log', null, 'Scan aborted by user.');
         break;
       }
 
-      const pid = pidsToScan[i];
+      current++;
+      // Parity with PCAN / V-OP: one read per PID, live timeouts (no 2 s ISO-TP default per Mode 01).
+      const reading = await this.readPid(pid);
       const service = pid.service ?? 0x01;
-      const pidHexLen = service === 0x22 ? 4 : 2;
-      const command = `${service.toString(16).padStart(2, '0')}${pid.pid.toString(16).padStart(pidHexLen, '0')}`;
+      const isExtended = service === 0x22;
+      const supported = !!reading;
 
-      let supported = false;
-      let sampleValue: number | undefined;
-      let rawResponse: string | undefined;
-      let error: string | undefined;
-
-      try {
-        // Switch ECU header for Mode 22 directed addressing
-        if (service === 0x22 && pid.ecuHeader) {
-          await this.setEcuHeader(pid.ecuHeader);
-        } else if (service === 0x01 && this.currentEcuHeader !== null) {
-          await this.setEcuHeader(undefined);
-        }
-
-        const response = await this.sendCommand(command, 3000);
-        rawResponse = response;
-
-        // Check for negative responses
-        const cleaned = response.replace(/[\r\n\s]/g, '').toUpperCase();
-        if (
-          cleaned.includes('NODATA') ||
-          cleaned.includes('ERROR') ||
-          cleaned.includes('UNABLE') ||
-          cleaned.includes('?') ||
-          cleaned.startsWith('7F')  // UDS negative response
-        ) {
-          supported = false;
-        } else {
-          // Try to parse a value
-          const reading = this.parsePidResponse(pid, response);
-          if (reading) {
-            supported = true;
-            sampleValue = reading.value;
-          } else {
-            // Got a response but couldn't parse — still might be supported
-            // Check if the response prefix matches expected (41 for Mode 01, 62 for Mode 22)
-            const expectedPrefix = service === 0x22 ? '62' : '41';
-            supported = cleaned.includes(expectedPrefix.toUpperCase());
-          }
-        }
-      } catch (err) {
-        supported = false;
-        error = err instanceof Error ? err.message : 'Timeout';
-      }
-
-      const result: ScanResult = { pid, supported, sampleValue, rawResponse, error };
-
-      if (service === 0x22) {
-        (supported ? extendedSupported : extendedUnsupported).push(result);
+      if (reading) {
+        const result: ScanResult = { pid, supported: true, sampleValue: reading.value };
+        if (isExtended) extendedSupported.push(result);
+        else standardSupported.push(result);
+        this.supportedPids.add(pid.pid);
       } else {
-        (supported ? standardSupported : standardUnsupported).push(result);
+        const result: ScanResult = { pid, supported: false };
+        if (isExtended) extendedUnsupported.push(result);
+        else standardUnsupported.push(result);
       }
 
-      // Emit progress
       const progress = {
-        current: i + 1,
-        total: pidsToScan.length,
+        current,
+        total,
         pid,
         supported,
-        sampleValue,
+        sampleValue: reading?.value,
       };
       this.emit('scanProgress', progress);
-      if (options?.onProgress) {
-        options.onProgress(i + 1, pidsToScan.length, pid, supported);
-      }
+      options?.onProgress?.(current, total, pid, supported);
 
-      // Small delay between requests to avoid overwhelming the ECU
-      await new Promise(r => setTimeout(r, 50));
+      if (CAN_UDS_PRE_TX_SETTLE_MS > 0) {
+        await new Promise(r => setTimeout(r, CAN_UDS_PRE_TX_SETTLE_MS));
+      }
     }
 
     // Reset ECU header back to broadcast after scan
@@ -3805,35 +4415,15 @@ export class OBDConnection {
     const duration = Date.now() - startTime;
     const totalSupported = standardSupported.length + extendedSupported.length;
 
-    this.emit('log', null, `Scan complete: ${totalSupported}/${pidsToScan.length} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
+    this.emit('log', null, `Scan complete: ${totalSupported}/${current} PIDs supported (${(duration / 1000).toFixed(1)}s)`);
 
-    // Auto-generate a vehicle-specific preset from discovered PIDs
-    const supportedPidNumbers = [
-      ...standardSupported.map(r => r.pid.pid),
-      ...extendedSupported.map(r => r.pid.pid),
-    ];
-
-    let autoPreset: PIDPreset | undefined;
-    if (supportedPidNumbers.length > 0) {
-      const vehicleId = this.vehicleInfo?.vin
-        ? this.vehicleInfo.vin.slice(-8)
-        : `vehicle_${Date.now()}`;
-      
-      autoPreset = createCustomPreset(
-        `Auto-Scan ${vehicleId}`,
-        `Auto-discovered ${totalSupported} PIDs (${standardSupported.length} std + ${extendedSupported.length} ext) — ${new Date().toLocaleDateString()}`,
-        supportedPidNumbers
-      );
-      autoPreset.id = `autoscan_${vehicleId}_${Date.now()}`;
-
-      // Save to localStorage
-      const existing = loadCustomPresets();
-      // Remove any previous autoscan preset for this vehicle
-      const filtered = existing.filter(p => !p.id?.startsWith(`autoscan_${vehicleId}`));
-      filtered.push(autoPreset);
-      saveCustomPresets(filtered);
-
-      this.emit('log', null, `Auto-generated preset "${autoPreset.name}" with ${supportedPidNumbers.length} PIDs saved.`);
+    const autoPreset = buildPersistedScanAutoPreset(
+      this.vehicleInfo,
+      standardSupported,
+      extendedSupported,
+    );
+    if (autoPreset) {
+      this.emit('log', null, `Auto-generated preset "${autoPreset.name}" with ${autoPreset.pids.length} PIDs saved.`);
     }
 
     const report: DIDScanReport = {
@@ -3844,7 +4434,7 @@ export class OBDConnection {
       extendedSupported,
       standardUnsupported,
       extendedUnsupported,
-      totalScanned: pidsToScan.length,
+      totalScanned: current,
       totalSupported,
       autoPreset,
     };
@@ -3868,16 +4458,25 @@ export function exportSessionToCSV(session: LogSession): string {
   
   // Build metadata rows (prefixed with # for easy parsing)
   const metaRows: string[] = [];
-  if (session.vehicleInfo) {
-    const vi = session.vehicleInfo;
-    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
-    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
-    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
-    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
-    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
-    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
-    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
-  }
+  // Session info
+  metaRows.push(`# V-OP Datalog Export`);
+  metaRows.push(`# Date: ${new Date(session.startTime).toISOString()}`);
+  if (session.name) metaRows.push(`# Session: ${session.name}`);
+  const durationSec = ((session.endTime || Date.now()) - session.startTime) / 1000;
+  metaRows.push(`# Duration: ${durationSec.toFixed(1)}s`);
+  metaRows.push(`# SampleRate: ${session.sampleRate}ms`);
+  metaRows.push(`# Channels: ${pids.length}`);
+  // Vehicle info — always write VIN and Vehicle lines so analyzer can identify the vehicle.
+  // When vehicleInfo exists but VIN read failed, we still write whatever we have.
+  const vi = session.vehicleInfo;
+  metaRows.push(`# VIN: ${vi?.vin || 'not available'}`);
+  metaRows.push(`# Vehicle: ${(vi?.make || vi?.model || vi?.year) ? [vi.year, vi.make, vi.model].filter(Boolean).join(' ') : 'unknown'}`);
+  if (vi?.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+  metaRows.push(`# Manufacturer: ${vi?.manufacturer || 'unknown'}`);
+  metaRows.push(`# FuelType: ${vi?.fuelType || 'unknown'}`);
+  if (vi?.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+  if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
+  if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
 
   // Build header
   const header = ['Timestamp (ms)', 'Elapsed (s)', ...pids.map(p => `${p.shortName} (${p.unit})`)];
@@ -3953,16 +4552,24 @@ export function sessionToAnalyzerCSV(session: LogSession): string {
   
   // Build metadata rows (prefixed with # for easy parsing by analyzer)
   const metaRows: string[] = [];
-  if (session.vehicleInfo) {
-    const vi = session.vehicleInfo;
-    if (vi.vin) metaRows.push(`# VIN: ${vi.vin}`);
-    if (vi.make || vi.model || vi.year) metaRows.push(`# Vehicle: ${[vi.year, vi.make, vi.model].filter(Boolean).join(' ')}`);
-    if (vi.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
-    if (vi.manufacturer) metaRows.push(`# Manufacturer: ${vi.manufacturer}`);
-    if (vi.fuelType) metaRows.push(`# FuelType: ${vi.fuelType}`);
-    if (vi.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
-    if (vi.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
-  }
+  // Session info
+  metaRows.push(`# V-OP Datalog Export`);
+  metaRows.push(`# Date: ${new Date(session.startTime).toISOString()}`);
+  if (session.name) metaRows.push(`# Session: ${session.name}`);
+  const durationSec = ((session.endTime || Date.now()) - session.startTime) / 1000;
+  metaRows.push(`# Duration: ${durationSec.toFixed(1)}s`);
+  metaRows.push(`# SampleRate: ${session.sampleRate}ms`);
+  metaRows.push(`# Channels: ${pids.length}`);
+  // Vehicle info — always write VIN and Vehicle lines so analyzer can identify the vehicle.
+  const vi = session.vehicleInfo;
+  metaRows.push(`# VIN: ${vi?.vin || 'not available'}`);
+  metaRows.push(`# Vehicle: ${(vi?.make || vi?.model || vi?.year) ? [vi.year, vi.make, vi.model].filter(Boolean).join(' ') : 'unknown'}`);
+  if (vi?.engineType) metaRows.push(`# Engine: ${vi.engineType}`);
+  metaRows.push(`# Manufacturer: ${vi?.manufacturer || 'unknown'}`);
+  metaRows.push(`# FuelType: ${vi?.fuelType || 'unknown'}`);
+  if (vi?.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
+  if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
+  if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
 
   // HP Tuners format header
   const header = ['Time', ...pids.map(p => p.name)];

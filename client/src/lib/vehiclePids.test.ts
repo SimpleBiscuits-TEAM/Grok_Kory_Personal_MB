@@ -167,13 +167,14 @@ describe('Ford 6.2L Boss Extended PIDs', () => {
 // ─── GM Extended PIDs (2024 Duramax L5P) ─────────────────────────────────
 
 describe('GM Extended PIDs for Duramax', () => {
-  it('contains key Duramax PIDs', () => {
+  it('contains key Duramax PIDs (HPT-verified)', () => {
     const pidNumbers = GM_EXTENDED_PIDS.map(p => p.pid);
-    expect(pidNumbers).toContain(0x0564); // Commanded FRP
-    expect(pidNumbers).toContain(0x0565); // Actual FRP
+    expect(pidNumbers).toContain(0x208A); // Fuel Pressure SAE
+    expect(pidNumbers).toContain(0x12DA); // Injection Timing
     expect(pidNumbers).toContain(0x1A10); // DPF Soot Load
     expect(pidNumbers).toContain(0x1A20); // DEF Tank Level
-    expect(pidNumbers).toContain(0x0576); // Turbo Speed
+    expect(pidNumbers).toContain(0x20AC); // IPW Cyl 1
+    expect(pidNumbers).toContain(0x20B4); // IBR Cyl 1
   });
 
   it('all GM PIDs have manufacturer=gm', () => {
@@ -182,9 +183,9 @@ describe('GM Extended PIDs for Duramax', () => {
     }
   });
 
-  it('all GM PIDs have fuelType diesel or any', () => {
+  it('all GM PIDs have fuelType diesel, gasoline, or any', () => {
     for (const pid of GM_EXTENDED_PIDS) {
-      expect(['diesel', 'any']).toContain(pid.fuelType);
+      expect(['diesel', 'gasoline', 'any']).toContain(pid.fuelType);
     }
   });
 });
@@ -544,14 +545,14 @@ describe('ALL_PIDS', () => {
     }
   });
 
-  it('has no duplicate PID numbers across all manufacturers', () => {
-    // Within each manufacturer, PIDs should be unique
+  it('has no duplicate PID numbers across all manufacturers (per fuelType)', () => {
+    // Within each manufacturer+fuelType combo, PIDs should be unique
     const manufacturers = ['gm', 'ford', 'bmw', 'chrysler', 'toyota', 'honda'] as const;
     for (const mfr of manufacturers) {
       const mfrPids = ALL_PIDS.filter(p => p.manufacturer === mfr);
-      const pidNums = mfrPids.map(p => p.pid);
-      const unique = new Set(pidNums);
-      expect(unique.size).toBe(pidNums.length);
+      const keys = mfrPids.map(p => `${p.pid}-${p.fuelType ?? 'any'}-${p.ecuHeader ?? 'default'}`);
+      const unique = new Set(keys);
+      expect(unique.size).toBe(keys.length);
     }
   });
 });

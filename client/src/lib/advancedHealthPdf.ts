@@ -372,7 +372,7 @@ function getInjectorAnalysis(
       if (isPiezo) {
         commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into race-only territory for piezo injectors.${railContext} With ~800μs shutoff delay, actual fuel delivery is approximately ${effectivePw.toFixed(2)}ms. The piezo needle bottoms out around 1.4-1.6ms — everything past that is extremely inefficient fuel delivery with wide-open spray patterns hammering the piston bowl walls. The injector is basically maxed out and dumping fuel with terrible atomization for ${(effectivePw - piezoBottomedOut).toFixed(2)}ms of that event.`;
       } else {
-        commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into the hard-on-pistons zone.${railContext} Past 2.5ms (2500μs), stock injectors are spraying fuel everywhere — wide spray patterns hammer the piston bowl walls and increase thermal loading on the bottom end.`;
+        commentary = `Peak pulse width of ${maxPw.toFixed(2)}ms is deep into the hard-on-pistons zone.${railContext} Past 3.0ms (3000µs), stock solenoid injectors are basically maxed out — wide spray patterns hammer the piston bowl walls and increase thermal loading on the bottom end. 2500µs+ is where you start paying attention, 3000µs is the ceiling.`;
       }
       commentary += ` ${spicyPct > 5 ? `${spicyPct.toFixed(1)}% of the log was above threshold — that's sustained abuse on the pistons, not just a quick pull.` : ''} This is the big injector argument: matched injectors flow more fuel in less time, keeping spray patterns tight and pistons happy. It's OK to go fast in 1/4 mile bursts... until it isn't. The more horsepower you chase on stock injectors, the harder the pistons have to work. Do the build correctly: keep things cool, efficient, and matched.`;
     }
@@ -536,11 +536,11 @@ function getRailPressureAnalysis(
   } else if (overOem <= 3000) {
     commentary = `Rail pressure peaked at ${maxActual.toFixed(0)} PSI — about ${overOem.toFixed(0)} PSI above the OEM peak of ${oemPeakPsi.toFixed(0)} PSI. Elevated, but within a reasonable range for a tuned truck. The high-pressure pump (HP4 on L5P, CP4.2 on LML, CP3 on older platforms) can handle this.`;
   } else {
-    commentary = `Rail pressure hit ${maxActual.toFixed(0)} PSI — that's ${overOem.toFixed(0)} PSI above OEM peak (${oemPeakPsi.toFixed(0)} PSI). Getting spicy. Past 3,000 PSI above OEM, you're asking a lot of the high-pressure fuel pump and injector seals. If the PCV current (mA) is running high, the regulator is bypassing more fuel and the pump is working overtime to maintain these pressures.`;
+    commentary = `Rail pressure hit ${maxActual.toFixed(0)} PSI — that's ${overOem.toFixed(0)} PSI above OEM peak (${oemPeakPsi.toFixed(0)} PSI). Getting spicy. Past 3,000 PSI above OEM, you're asking a lot of the high-pressure fuel pump and injector seals. Cross-check **FPR / inlet metering current (mA)** with desired vs actual rail in the same log — it is commanded current, not a PWM duty %.`;
   }
 
   if (maxPcv > 80) {
-    commentary += ` PCV current hit ${maxPcv.toFixed(0)} mA — the Pressure Control Valve is commanding significant fuel bypass. Higher mA = more fuel bypassed (less rail pressure), lower mA = more fuel flowing to the rail. At ~400 mA the CP3 is receiving roughly 97% of available fuel. If PCV current stays very low under load, the pump may be at its limit trying to maintain commanded pressure.`;
+    commentary += ` FPR current peaked at ${maxPcv.toFixed(0)} mA. Rule of thumb on many Duramax calibrations: ~400 mA ≈ ~95% regulator opening (more effective flow toward the rail), ~1800 mA ≈ ~10% opening. If current sits very low (~400–700 mA) for long stretches while actual rail still lags desired, suspect fuel supply (lift pump, filter, air) or pump limit.`;
   }
 
   // Check desired vs actual deviation
@@ -1041,7 +1041,7 @@ export function renderAdvancedAnalytics(
     }
   }
 
-  // ── 3. DESIRED vs ACTUAL RAIL PRESSURE + PCV ─────────────────────────────
+  // ── 3. DESIRED vs ACTUAL RAIL PRESSURE + FPR CURRENT ─────────────────────
   if (hasDesiredRail || hasPcv) {
     checkBreak(65);
 
@@ -1066,7 +1066,7 @@ export function renderAdvancedAnalytics(
     if (hasPcv) {
       railSeries.push({
         data: data.pcvDutyCycle,
-        label: 'PCV Current',
+        label: 'FPR current',
         unit: 'mA',
         color: AMBER,
       });
@@ -1075,7 +1075,7 @@ export function renderAdvancedAnalytics(
     if (railSeries.length >= 2) {
       const newY = drawCorrelatedGraph(
         doc, margin, getY(), contentWidth, 55,
-        { title: 'DESIRED vs ACTUAL FUEL RAIL PRESSURE + PCV', series: railSeries, speedData: speedRef, rpmData: rpmRef },
+        { title: 'DESIRED vs ACTUAL FUEL RAIL PRESSURE + FPR (mA)', series: railSeries, speedData: speedRef, rpmData: rpmRef },
         margin, contentWidth,
       );
       setY(newY);
@@ -1233,10 +1233,10 @@ export function renderAdvancedAnalytics(
   let heatWarnings: string[] = [];
 
   if (egtValid.length > 50) {
-    const highEgtCount = egtValid.filter(v => v > 1200).length;
+    const highEgtCount = egtValid.filter(v => v > 1475).length;
     const highEgtPct = (highEgtCount / egtValid.length) * 100;
     if (highEgtPct > 15) {
-      heatWarnings.push(`EGTs were above 1200°F for ${highEgtPct.toFixed(1)}% of the log.`);
+      heatWarnings.push(`EGTs were above 1475°F for ${highEgtPct.toFixed(1)}% of the log.`);
     }
   }
   if (coolantValid.length > 50) {

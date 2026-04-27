@@ -214,9 +214,33 @@ const resolveApiUrl = () =>
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
     : "https://forge.manus.im/v1/chat/completions";
 
+/**
+ * Manus Forge accepts extra fields (e.g. thinking budget, Gemini model id).
+ * OpenAI and most OpenAI-compatible proxies expect a stricter payload — omit those extras.
+ */
+const isOpenAiCompatibleChat = (): boolean => {
+  if (process.env.LLM_OPENAI_COMPAT === "1") return true;
+  const base = ENV.forgeApiUrl.trim().toLowerCase();
+  if (!base) return false;
+  return (
+    base.includes("api.openai.com") ||
+    base.includes("openrouter.ai") ||
+    base.includes("azure.com") ||
+    base.includes("groq.com")
+  );
+};
+
+const defaultChatModel = (): string => {
+  const override = ENV.llmModel.trim();
+  if (override) return override;
+  return isOpenAiCompatibleChat() ? "gpt-4o-mini" : "gemini-2.5-flash";
+};
+
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+    throw new Error(
+      "LLM API key not configured: set BUILT_IN_FORGE_API_KEY in .env (e.g. OpenAI sk-... when using https://api.openai.com). See .env.example."
+    );
   }
 };
 
@@ -273,14 +297,18 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     tools,
     toolChoice,
     tool_choice,
+    maxTokens,
+    max_tokens,
     outputSchema,
     output_schema,
     responseFormat,
     response_format,
   } = params;
 
+  const openAiCompat = isOpenAiCompatibleChat();
+
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: defaultChatModel(),
     messages: messages.map(normalizeMessage),
   };
 
@@ -296,9 +324,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
+  // Keep latency predictable by default; callers can override per use-case.
+  payload.max_tokens = maxTokens ?? max_tokens ?? 4096;
+  // Manus/Forge-only extension — OpenAI returns 400 on unknown fields.
+  if (!openAiCompat) {
+    payload.thinking = {
+      budget_tokens: 96,
+    };
   }
 
   const normalizedResponseFormat = normalizeResponseFormat({

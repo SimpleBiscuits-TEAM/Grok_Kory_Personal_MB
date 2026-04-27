@@ -62,10 +62,10 @@ describe('EZLynk CSV Parser — 2014 Ram 6.7L Cummins', () => {
     expect(maxVane).toBeGreaterThan(0);
   });
 
-  it('should correctly map Mass Air Flow (g/s)', () => {
+  it('should convert Mass Air Flow (g/s) to lb/min for internal pipeline', () => {
     const raw = parseCSV(csvContent);
-    // First row: MAF = 15 g/s
-    expect(raw.maf[0]).toBe(15);
+    // First row: MAF = 15 g/s → lb/min (same scaling as HP Tuners / analyzer)
+    expect(raw.maf[0]).toBeCloseTo(15 * 0.132277, 5);
   });
 
   it('should correctly map Throttle Position (%)', () => {

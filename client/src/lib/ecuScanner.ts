@@ -1,0 +1,1651 @@
+/**
+ * ECU Scanner — Pre-Flash Vehicle Interrogation
+ * ===============================================
+ * 
+ * Polls all known ECU CAN addresses, reads identifying DIDs,
+ * and returns a comprehensive report of what's on the bus.
+ * 
+ * Supports:
+ * - GM GMLAN: ReadDID 0x1A (payload after DID echo), C-slots — no OBD Mode 9 on this path
+ * - Ford UDS: ReadDID 0x22 with Ford-specific DIDs (F111 CVN, F113 Cal SW ID, etc.)
+ * - Cummins UDS: ReadDID 0x22 with Cummins-specific DIDs (F18C ESN, F181/F182, etc.)
+ * - Auto-detection of ECU type from response data
+ * - Security access with key computation from container file
+ * - Comparison against loaded container file
+ * 
+ * IMPORTANT: For GMLAN ECUs, security access (seed/key) MUST be performed
+ * BEFORE reading most DIDs. The ECU will simply timeout on 0x1A reads
+ * without an authenticated session. This was confirmed from the 2017 L5P
+ * SPS log analysis and live bench testing.
+ */
+
+import type { ConnectionState } from './obdConnection';
+import type { UDSResponse } from './pcanConnection';
+import {
+  ECU_DATABASE,
+  type EcuConfig,
+  type Protocol,
+  type Manufacturer,
+  type ContainerFileHeader,
+} from '../../../shared/ecuDatabase';
+import { calibrationSlotsFromEcuScanLike, normalizeCalPartToken } from '../../../shared/ecuContainerMatch';
+import { softwareSlotMaskForEcuType } from '../../../shared/ecuSoftwareSlotMask';
+import { computeGM5B, computeFord3B } from '../../../shared/seedKeyAlgorithms';
+import { getSecurityProfileMeta, type EcuSecurityProfileMeta } from '../../../shared/seedKeyMeta';
+import { decodeVinLocal, type DecodedVehicle } from './universalVinDecoder';
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+/** Minimal CAN transport for {@link EcuScanner} — WebSocket bridge or {@link VopCan2UsbConnection}. */
+export interface EcuScanTransport {
+  getState(): ConnectionState;
+  connect(options?: { skipVehicleInit?: boolean }): Promise<boolean>;
+  sendUDSRequest(
+    service: number,
+    subFunction?: number,
+    data?: number[],
+    targetAddress?: number,
+    timeoutMs?: number,
+    /** When ECU RX ID ≠ tx+8 (e.g. GM 0x241 → 0x641). */
+    responseArbIdOverride?: number,
+  ): Promise<UDSResponse | null>;
+  /** GMLAN UUDT TesterPresent on functional 0x101 — implemented by WebSocket bridge / V-OP. */
+  sendRawCanFrame?(arbId: number, data: number[]): Promise<void>;
+  /** End in-flight UDS wait immediately (used when user stops ECU scan). */
+  cancelInFlightDiagnostics?: () => void;
+}
+
+export interface EcuScanResult {
+  /** CAN TX address that was probed */
+  txAddr: number;
+  /** CAN RX address where response came from */
+  rxAddr: number;
+  /** Whether the ECU responded at all */
+  responding: boolean;
+  /** Detected protocol based on response behavior */
+  detectedProtocol: Protocol | 'unknown';
+  /** Matched ECU config from database (if identifiable) */
+  ecuConfig?: EcuConfig;
+  /** VIN read from this ECU */
+  vin?: string;
+  /** UDS: F191 hardware ASCII. GMLAN: MEMR base model part number (ReadDID 0xCC), not diagnostic address 0xB0 */
+  hardwareId?: string;
+  /** Software number */
+  softwareNumber?: string;
+  /** Programming state (GM: 0xA2 ReportProgrammedState) */
+  programmingState?: string;
+  /** All calibration part numbers (up to 9 for GM) */
+  calibrationPartNumbers: string[];
+  /**
+   * GM GMLAN ReadDID 0x1A: slots 0xC1–0xCC are software/calibration part values (numeric), not CVNs.
+   * Display as decimal; used for sw_c1..sw_c9 alignment.
+   */
+  gmSoftwarePartSlots?: { label: string; did: number; decimal: number }[];
+  /** True CVNs (e.g. OBD Mode 9 PID 0x06), distinct from GM C-slots */
+  cvns: CvnEntry[];
+  /** E41: ReadDID 0xD0 ASCII — unlocked when value is "UL" */
+  tuningUnlock?: { ascii: string; unlocked: boolean };
+  /** Raw DID responses for debugging */
+  rawResponses: RawDIDResponse[];
+  /** Whether security access was attempted */
+  securityAccessAttempted: boolean;
+  /** Whether security access was granted */
+  securityAccessGranted: boolean;
+  /** Notes about ECU state (e.g., HPTuners-unlocked) */
+  notes: string[];
+  /** Scan status */
+  status: 'scanning' | 'complete' | 'timeout' | 'error';
+  /** Error message if scan failed */
+  error?: string;
+  /** Scan duration in ms */
+  scanDurationMs?: number;
+}
+
+export interface CvnEntry {
+  /** CVN index (1-based) */
+  index: number;
+  /** DID that was read (e.g., 0xC1 for GMLAN) */
+  did: number;
+  /** Raw hex value */
+  hex: string;
+  /** Numeric value */
+  value: number;
+}
+
+export interface RawDIDResponse {
+  did: number;
+  didHex: string;
+  service: number;
+  data: number[];
+  dataHex: string;
+  positive: boolean;
+  nrc?: number;
+  nrcName?: string;
+}
+
+export interface VehicleScanReport {
+  /** Timestamp when scan started */
+  startTime: number;
+  /** Timestamp when scan completed */
+  endTime: number;
+  /** Total scan duration in ms */
+  totalDurationMs: number;
+  /** All ECU scan results */
+  ecus: EcuScanResult[];
+  /** Number of ECUs that responded */
+  respondingCount: number;
+  /** VIN consensus (most common VIN across ECUs) */
+  vehicleVin?: string;
+  /** VIN from preflight (before per-address loop), if any */
+  preflightVin?: string;
+  /** Which query produced {@link preflightVin} */
+  preflightVinSource?: string;
+  /** OEM hint from {@link preflightVin} WMI */
+  oemHint?: ScanOemHint;
+  /** One-line decode of {@link preflightVin} for UI (WMI + make + protocol order). */
+  preflightVinDecodeSummary?: string;
+  /** Last Mode 9 payload bytes (space-separated hex) — for debugging incomplete ISO‑TP. */
+  preflightMode9RawHex?: string;
+  /** Set when Mode 9 did not yield a usable VIN (timeout, transport, parse). */
+  preflightMode9Error?: string;
+  /** Whether scan is still in progress */
+  scanning: boolean;
+}
+
+export interface ContainerComparison {
+  /** Container file part numbers (sw_c1-sw_c9) */
+  containerPartNumbers: string[];
+  /** ECU current part numbers */
+  ecuPartNumbers: string[];
+  /** Per-slot comparison */
+  slots: {
+    index: number;
+    containerPart: string;
+    ecuPart: string;
+    match: boolean;
+    changed: boolean;
+    profileRelevant: boolean;
+  }[];
+  /** Overall match status */
+  allMatch: boolean;
+  /** Number of changed calibrations */
+  changedCount: number;
+}
+
+// ── DID Definitions ─────────────────────────────────────────────────────────
+
+/** GMLAN ReadDataByIdentifier (service 0x1A) DIDs */
+const GMLAN_DIDS = {
+  VIN: 0x90,
+  ECU_ID: 0xB0,
+  /** CAN2000 table: OSAR Manufacturers enable counter — decoded here as programming state for UI */
+  PROGRAMMING_STATUS: 0xA0,
+  SW_PART_NUMBER: 0xCB,
+  /** E41 tuning lock / unlock status (ASCII, "UL" = unlocked) */
+  TUNING_LOCK: 0xd0,
+  /** Software/calibration part slots (numeric — display as decimal, not CVN) */
+  CAL_SLOT_1: 0xC1,
+  CAL_SLOT_2: 0xC2,
+  CAL_SLOT_3: 0xC3,
+  CAL_SLOT_4: 0xC4,
+  CAL_SLOT_5: 0xC5,
+  CAL_SLOT_6: 0xC6,
+  CAL_SLOT_7: 0xC9,
+  CAL_SLOT_8: 0xCA,
+  CAL_SLOT_9: 0xCC,
+} as const;
+
+/** Default per-request UDS timeout during ECU scan (same for WebSocket bridge and V-OP USB). */
+const DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS = 650;
+
+/** Hint from preflight VIN WMI — affects GMLAN-first vs UDS-first in {@link EcuScanner.scanAddress}. */
+export type ScanOemHint = 'gm' | 'ford' | 'other';
+
+/** Options for {@link EcuScanner} — third constructor argument. */
+export type EcuScannerOptions = {
+  skipVehicleInit?: boolean;
+  /** Override {@link DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS} (same default for bridge and V-OP). */
+  scanUdsTimeoutMs?: number;
+  /** Delay after GMLAN UUDT @ 0x101 before first physical UDS (bus / bridge settle). */
+  postGmlanUudtDelayMs?: number;
+  /**
+   * Timeout for OBD Mode 9 PID 0x02 @ 0x7DF only — ISO‑TP multi-frame often needs longer than normal UDS on the bridge.
+   * Default: max({@link scanUdsTimeoutMs}, 3000).
+   */
+  obdMode9UdsTimeoutMs?: number;
+  /**
+   * Pause after Mode 9 response is fully assembled — lets the bridge / bus drain before the per-address scan.
+   * Default: 500 ms.
+   */
+  postObdMode9VinSettleMs?: number;
+};
+
+/** GM cal/software DID payload → unsigned integer (big-endian), display as decimal */
+function gmPartBytesToDecimalUnsigned(data: number[]): number {
+  if (data.length === 0) return 0;
+  const n = Math.min(data.length, 4);
+  let v = 0;
+  for (let i = 0; i < n; i++) {
+    v = (v << 8) | (data[i] & 0xff);
+  }
+  return v >>> 0;
+}
+
+/** Standard UDS ReadDataByIdentifier (service 0x22) DIDs */
+const UDS_DIDS = {
+  VIN: 0xF190,
+  ECU_SW_NUMBER: 0xF188,
+  ECU_HW_NUMBER: 0xF191,
+  ECU_HW_VERSION: 0xF193,
+  ECU_SUPPLIER_ID: 0xF18A,
+  ECU_SW_VERSION: 0xF189,
+  SYSTEM_NAME: 0xF197,
+  ECU_SERIAL: 0xF18C,
+  PROGRAMMING_DATE: 0xF199,
+  SPARE_PART_NUMBER: 0xF187,
+  CALIBRATION_ID: 0xF806,
+  ACTIVE_SESSION: 0xF186,
+  BOOT_SW_ID: 0xF180,
+  APP_SW_ID: 0xF181,
+  APP_DATA_ID: 0xF182,
+  APP_SW_FINGERPRINT: 0xF184,
+  APP_DATA_FINGERPRINT: 0xF185,
+} as const;
+
+/** Ford OEM-specific DIDs */
+const FORD_DIDS = {
+  CVN: 0xF111,
+  CAL_SW_ID: 0xF113,
+  MODULE_CONFIG: 0xDE00,
+  AS_BUILT_DATA: 0xDE01,
+  PROGRAMMING_INFO: 0xDD01,
+} as const;
+
+/** CAN address groups to scan — each group has a unique physical address */
+const SCAN_ADDRESSES = [
+  { tx: 0x7E0, rx: 0x7E8, label: 'ECM (Primary)' },
+  { tx: 0x7E1, rx: 0x7E9, label: 'TCU (Ford)' },
+  { tx: 0x7E2, rx: 0x7EA, label: 'TCM (Allison)' },
+] as const;
+
+/** SAE J1979-style physical ECU TX range where GM GMLAN applies — not USDT 0x3E 0x00 (see DevProg `SendTesterPresentGMLAN`). */
+function isGmStylePhysicalTx(tx: number): boolean {
+  return tx >= 0x7e0 && tx <= 0x7e7;
+}
+
+/** Functional broadcast ID for GMLAN UUDT TesterPresent (same bytes as `PcanHardwareService.SendTesterPresentGMLAN`). */
+const GMLAN_TESTER_PRESENT_ARB_ID = 0x101;
+const GMLAN_UUDT_TESTER_PRESENT_DATA = [0xfe, 0x01, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00] as const;
+
+// ── Scanner Class ────────────────────────────────────────────────────────────
+
+export class EcuScanner {
+  private connection: EcuScanTransport;
+  private abortController: AbortController | null = null;
+  /** Optional container header for key computation during security access */
+  private containerHeader?: ContainerFileHeader;
+  /** Passed to {@link EcuScanTransport.connect} — skip slow VIN/PID init when scanning (V-OP / bridge). */
+  private readonly connectOptions?: { skipVehicleInit?: boolean };
+  private readonly scanUdsTimeoutMs: number;
+  private readonly postGmlanUudtDelayMs: number;
+  /** Mode 9 @ 0x7DF — longer timeout for ISO‑TP multi-frame (bridge `can_recv` per CF). */
+  private readonly obdMode9TimeoutMs: number;
+  /** Pause after Mode 9 completes before scanning physical addresses. */
+  private readonly postObdMode9VinSettleMs: number;
+  /** Set by {@link runPreflightVin} before address loop */
+  private scanOemHint: ScanOemHint = 'other';
+
+  constructor(
+    connection: EcuScanTransport,
+    containerHeader?: ContainerFileHeader,
+    options?: EcuScannerOptions,
+  ) {
+    this.connection = connection;
+    this.containerHeader = containerHeader;
+    this.connectOptions = options?.skipVehicleInit !== undefined
+      ? { skipVehicleInit: options.skipVehicleInit }
+      : undefined;
+    this.scanUdsTimeoutMs = options?.scanUdsTimeoutMs ?? DEFAULT_ECU_SCAN_UDS_TIMEOUT_MS;
+    this.postGmlanUudtDelayMs = options?.postGmlanUudtDelayMs ?? 50;
+    this.obdMode9TimeoutMs =
+      options?.obdMode9UdsTimeoutMs ?? Math.max(this.scanUdsTimeoutMs, 3000);
+    this.postObdMode9VinSettleMs = options?.postObdMode9VinSettleMs ?? 500;
+  }
+
+  /**
+   * Scan all known CAN addresses and read ECU information.
+   * Calls onProgress for each ECU as it's scanned.
+   */
+  async scanVehicle(
+    onProgress?: (report: VehicleScanReport) => void,
+  ): Promise<VehicleScanReport> {
+    this.abortController = new AbortController();
+    const startTime = Date.now();
+
+    const report: VehicleScanReport = {
+      startTime,
+      endTime: 0,
+      totalDurationMs: 0,
+      ecus: [],
+      respondingCount: 0,
+      scanning: true,
+    };
+
+    // Ensure connection is open
+    if (this.connection.getState() === 'disconnected' || this.connection.getState() === 'error') {
+      try {
+        await this.connection.connect(this.connectOptions);
+      } catch (err) {
+        report.scanning = false;
+        report.endTime = Date.now();
+        report.totalDurationMs = report.endTime - startTime;
+        return report;
+      }
+    }
+
+    await this.delay(200);
+    if (this.abortController?.signal.aborted) {
+      report.scanning = false;
+      report.endTime = Date.now();
+      report.totalDurationMs = report.endTime - startTime;
+      onProgress?.(report);
+      return report;
+    }
+
+    this.scanOemHint = 'other';
+    await this.runPreflightVin(report);
+    onProgress?.(report);
+    if (this.abortController?.signal.aborted) {
+      report.scanning = false;
+      report.endTime = Date.now();
+      report.totalDurationMs = report.endTime - startTime;
+      onProgress?.(report);
+      return report;
+    }
+
+    // Scan each address group sequentially
+    for (const addr of SCAN_ADDRESSES) {
+      if (this.abortController?.signal.aborted) break;
+
+      const ecuResult = await this.scanAddress(addr.tx, addr.rx, addr.label);
+      report.ecus.push(ecuResult);
+
+      if (ecuResult.responding) {
+        report.respondingCount++;
+      }
+
+      // Preflight Mode 9 may fail on some transports; first physical ECU VIN in the loop still counts.
+      if (ecuResult.vin && ecuResult.vin.length >= 17) {
+        if (!report.preflightVin) {
+          report.preflightVin = ecuResult.vin;
+          report.preflightVinSource = `ECU 0x${addr.tx.toString(16)} (${addr.label})`;
+        }
+        const dec = decodeVinLocal(ecuResult.vin);
+        this.scanOemHint = this.scanOemHintFromDecodedVin(dec);
+        report.oemHint = this.scanOemHint;
+      }
+
+      // Update progress
+      report.endTime = Date.now();
+      report.totalDurationMs = report.endTime - startTime;
+      onProgress?.(report);
+    }
+
+    // Determine VIN consensus
+    const vins = report.ecus
+      .filter(e => e.vin && e.vin.length >= 17)
+      .map(e => e.vin!);
+    if (vins.length > 0) {
+      const vinCounts = new Map<string, number>();
+      for (const v of vins) {
+        vinCounts.set(v, (vinCounts.get(v) || 0) + 1);
+      }
+      report.vehicleVin = [...vinCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    } else if (report.preflightVin && report.preflightVin.length === 17) {
+      report.vehicleVin = report.preflightVin;
+    }
+
+    report.scanning = false;
+    report.endTime = Date.now();
+    report.totalDurationMs = report.endTime - startTime;
+    onProgress?.(report);
+
+    return report;
+  }
+
+  /** Abort an in-progress scan. */
+  abort(): void {
+    this.abortController?.abort();
+    this.connection.cancelInFlightDiagnostics?.();
+  }
+
+  /**
+   * Read VIN once before the per-address loop — **OBD Mode 9 PID 0x02 @ 0x7DF only**.
+   * GMLAN / UDS VIN on 0x7E0+ belongs after TesterPresent + programming session in {@link scanAddress};
+   * doing it here caused bus traces unlike V-OP (e.g. 0x22 F190 NRC 0x31 before 0x101 / 0x10 02).
+   * Sets {@link VehicleScanReport.preflightVin}, {@link scanOemHint}, and report fields.
+   */
+  private async runPreflightVin(report: VehicleScanReport): Promise<void> {
+    if (this.abortController?.signal.aborted) return;
+    const label = 'OBD Mode9 PID0x02 @0x7DF';
+    try {
+      const vin = await this.tryPreflightVinMode9(report);
+      // Let bridge RX queue / bus settle after ISO‑TP before per-address probes.
+      await this.delay(this.postObdMode9VinSettleMs);
+      const normalized = this.normalizeVin17(vin);
+      if (normalized) {
+        report.preflightVin = normalized;
+        report.preflightVinSource = label;
+        const dec = decodeVinLocal(normalized);
+        this.scanOemHint = this.scanOemHintFromDecodedVin(dec);
+        report.oemHint = this.scanOemHint;
+        report.preflightVinDecodeSummary = this.preflightVinSummaryLine(normalized, dec);
+      } else if (!report.preflightMode9RawHex) {
+        if (!report.preflightMode9Error) {
+          report.preflightMode9Error =
+            'No Mode 9 payload (timeout, bridge RX, or transport not ready).';
+        }
+      } else if (!report.preflightMode9Error) {
+        report.preflightMode9Error = 'Mode 9 payload present but VIN could not be decoded.';
+      }
+    } catch (e) {
+      report.preflightMode9Error = e instanceof Error ? e.message : String(e);
+      console.warn('[ECU Scanner] Preflight Mode 9 VIN failed:', e);
+    }
+  }
+
+  /** WMI → {@link scanOemHint}; drives GMLAN-first vs UDS-first in {@link scanAddress}. */
+  private scanOemHintFromDecodedVin(dec: DecodedVehicle): ScanOemHint {
+    const m = dec.manufacturer;
+    if (m === 'gm') return 'gm';
+    if (m === 'ford') return 'ford';
+    return 'other';
+  }
+
+  private preflightVinSummaryLine(vin17: string, dec: DecodedVehicle): string {
+    const wmi = vin17.slice(0, 3);
+    const order = this.scanOemHint === 'ford' ? 'UDS-first' : 'GMLAN-first';
+    return `WMI ${wmi} → ${dec.make} (${dec.manufacturer}) · ${order}`;
+  }
+
+  /** Valid 17-char VIN only — used so a partial/garbled string does not skip fallbacks. */
+  private normalizeVin17(v: string | null | undefined): string | null {
+    if (!v) return null;
+    const t = v.trim().toUpperCase();
+    return /^[A-HJ-NPR-Z0-9]{17}$/.test(t) ? t : null;
+  }
+
+  private async tryPreflightVinMode9(report: VehicleScanReport): Promise<string | null> {
+    let resp: UDSResponse | null = null;
+    try {
+      resp = await this.connection.sendUDSRequest(
+        0x09,
+        undefined,
+        [0x02],
+        0x7df,
+        this.obdMode9TimeoutMs,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      report.preflightMode9Error = msg;
+      console.warn('[ECU Scanner] Preflight Mode9: request failed:', e);
+      return null;
+    }
+    if (!resp?.data?.length) {
+      report.preflightMode9Error =
+        resp == null
+          ? 'Mode 9: no UDS response (timeout or ISO-TP reassembly failed on the bridge).'
+          : 'Mode 9: response had no payload bytes.';
+      console.log(
+        `[ECU Scanner] Preflight Mode9: empty payload (positive=${String(resp?.positiveResponse)} n=${resp?.data?.length ?? 0})`,
+      );
+      return null;
+    }
+    const data = resp.data;
+    const hex = data.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    report.preflightMode9RawHex = hex;
+    // Do not require positiveResponse: ISO-TP payload may still parse as Mode 9 VIN even if flags disagree.
+    const j1979 = this.extractVinFromObdMode9Pid02(data);
+    const loose =
+      this.extractVin17FromAscii(data) ?? this.extractVin17FromBytes(data);
+    const out = j1979 ?? this.normalizeVin17(loose);
+    console.log(
+      `[ECU Scanner] Preflight Mode9: n=${data.length} pos=${String(resp.positiveResponse)} hex=[${hex}] j1979=${j1979 ?? '—'} out=${out ?? '—'}`,
+    );
+    if (out) {
+      const dec = decodeVinLocal(out);
+      const hint = this.scanOemHintFromDecodedVin(dec);
+      console.log(
+        `[ECU Scanner] Preflight Mode9: WMI ${out.slice(0, 3)} → ${dec.make} (${dec.manufacturer}) · scan will use ${hint === 'ford' ? 'UDS-first' : 'GMLAN-first'}`,
+      );
+    }
+    return out;
+  }
+
+  /**
+   * SAE J1979 Mode 09 PID 0x02 — positive response body after 0x49:
+   * `[0x02][0x01][17 VIN bytes]` (some stacks still include leading 0x49 in `data` — strip it).
+   */
+  private extractVinFromObdMode9Pid02(data: number[]): string | null {
+    if (data.length < 3) return null;
+    let i = 0;
+    if (data[0] === 0x49) i = 1;
+    if (data.length < i + 3) return null;
+    if (data[i] === 0x02 && data[i + 1] === 0x01 && data.length >= i + 2 + 17) {
+      const raw = data.slice(i + 2, i + 2 + 17);
+      const s = raw.map(b => String.fromCharCode(b)).join('');
+      return this.normalizeVin17(s);
+    }
+    if (data[i] === 0x02 && data.length >= i + 1 + 17) {
+      const raw = data.slice(i + 1, i + 1 + 17);
+      const s = raw.map(b => String.fromCharCode(b)).join('');
+      return this.normalizeVin17(s);
+    }
+    return null;
+  }
+
+  /** 17-char VIN pattern in printable payload */
+  private extractVin17FromBytes(data: number[]): string | null {
+    const s = data
+      .filter(b => b >= 0x20 && b <= 0x7e)
+      .map(b => String.fromCharCode(b))
+      .join('');
+    const m = s.match(/[A-HJ-NPR-Z0-9]{17}/i);
+    return m ? m[0].toUpperCase() : null;
+  }
+
+  private extractVin17FromAscii(data: number[]): string | null {
+    const ascii = this.extractAscii(data).trim();
+    if (ascii.length >= 17) {
+      const sub = ascii.slice(0, 17);
+      if (/^[A-HJ-NPR-Z0-9]{17}$/i.test(sub)) return sub.toUpperCase();
+    }
+    return this.extractVin17FromBytes(data);
+  }
+
+  /**
+   * Scan a single CAN address and read all available DIDs.
+   */
+  private async scanAddress(
+    txAddr: number,
+    rxAddr: number,
+    label: string,
+  ): Promise<EcuScanResult> {
+    const startMs = Date.now();
+    const result: EcuScanResult = {
+      txAddr,
+      rxAddr,
+      responding: false,
+      detectedProtocol: 'unknown',
+      calibrationPartNumbers: [],
+      cvns: [],
+      rawResponses: [],
+      securityAccessAttempted: false,
+      securityAccessGranted: false,
+      notes: [],
+      status: 'scanning',
+    };
+
+    console.log(`[ECU Scanner] Probing ${label} (TX: 0x${txAddr.toString(16)}, RX: 0x${rxAddr.toString(16)})...`);
+
+    if (this.abortController?.signal.aborted) {
+      result.status = 'complete';
+      result.scanDurationMs = Date.now() - startMs;
+      result.notes.push('Scan aborted by user');
+      return result;
+    }
+
+    // Step 1: Presence / transport probe
+    // GMLAN: USDT TesterPresent (0x3E 0x00 on physical) is wrong — ECUs answer with NRC 0x12. Use UUDT
+    // FE 01 3E on functional 0x101 (matches DevProg `SendTesterPresentGMLAN` + pcanFlashEngine GMLAN keepalive).
+    // Non–GM-style addresses keep standard UDS 0x3E 0x00.
+    let probeResp: UDSResponse | null = null;
+    if (isGmStylePhysicalTx(txAddr)) {
+      result.notes.push('GMLAN: UUDT TesterPresent FE 01 3E @ 0x101 (not USDT 0x3E 0x00 on physical)');
+      if (this.connection.sendRawCanFrame) {
+        try {
+          await this.connection.sendRawCanFrame(GMLAN_TESTER_PRESENT_ARB_ID, [...GMLAN_UUDT_TESTER_PRESENT_DATA]);
+          await this.delay(this.postGmlanUudtDelayMs);
+        } catch (e) {
+          console.warn(`[ECU Scanner] GMLAN UUDT TesterPresent @ 0x101 failed:`, e);
+          result.notes.push('GMLAN UUDT TesterPresent send failed — continuing with session probe');
+        }
+      } else {
+        result.notes.push('No raw CAN send — skip UUDT; use session probe only');
+      }
+      probeResp = null;
+    } else {
+      probeResp = await this.sendAndRecord(result, 0x3E, 0x00, [], txAddr);
+    }
+
+    /** If no USDT TesterPresent response (or GMLAN path), first physical UDS is 0x10 0x02 — never 0x10 0x01 for GM. */
+    let programmingSessionFromFallback = false;
+    if (!probeResp) {
+      const diagProbe = await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
+      if (!diagProbe) {
+        result.status = 'timeout';
+        result.scanDurationMs = Date.now() - startMs;
+        console.log(`[ECU Scanner] ${label}: No response — ECU not present or not powered`);
+        return result;
+      }
+      programmingSessionFromFallback = diagProbe.positiveResponse === true;
+    }
+
+    result.responding = true;
+
+    // Step 2: Enter programming session — required for most DIDs on GM ECUs
+    // The SPS log and bench testing confirm that GMLAN ECUs need 0x10 0x02
+    // (DiagSessionControl Programming) before they'll respond to 0x1A ReadDID.
+    console.log(`[ECU Scanner] ${label}: ECU responding — entering programming session...`);
+    const sessionResp = programmingSessionFromFallback
+      ? null
+      : await this.sendAndRecord(result, 0x10, 0x02, [], txAddr);
+    if (sessionResp?.positiveResponse || programmingSessionFromFallback) {
+      console.log(`[ECU Scanner] ${label}: Programming session active`);
+    }
+    await this.delay(100);
+
+    // Step 3: Attempt security access FIRST — before reading DIDs
+    // GMLAN ECUs require security access before responding to most 0x1A DIDs.
+    // This was confirmed from the 2017 L5P SPS log and live bench testing:
+    // "scan needs key on command" — user confirmed this behavior.
+    const securityGranted = await this.attemptSecurityAccess(result, txAddr);
+    if (securityGranted) {
+      console.log(`[ECU Scanner] ${label}: Security access granted — reading protected DIDs...`);
+    } else {
+      console.log(`[ECU Scanner] ${label}: Security access not granted — reading public DIDs only...`);
+    }
+    await this.delay(100);
+
+    // Step 4: Detect protocol and read DIDs — Ford WMI: UDS VIN first; GM / unknown: GMLAN first (matches DevProg bench).
+    const preferUdsFirst = this.scanOemHint === 'ford';
+    console.log(
+      `[ECU Scanner] ${label}: protocol order (WMI hint=${this.scanOemHint}) → ${preferUdsFirst ? 'UDS-first' : 'GMLAN-first'}`,
+    );
+
+    if (preferUdsFirst) {
+      const udsVinResp = await this.sendAndRecord(
+        result,
+        0x22,
+        undefined,
+        [(UDS_DIDS.VIN >> 8) & 0xff, UDS_DIDS.VIN & 0xff],
+        txAddr,
+      );
+      if (udsVinResp?.positiveResponse) {
+        result.detectedProtocol = 'UDS';
+        const ecuConfig = this.matchEcuConfig(result);
+        result.ecuConfig = ecuConfig;
+        const manufacturer = ecuConfig?.oem;
+        if (manufacturer === 'FORD') {
+          await this.scanFordEcu(result, txAddr);
+        } else if (manufacturer === 'DODGE') {
+          await this.scanCumminsEcu(result, txAddr);
+        } else {
+          await this.scanGenericUdsEcu(result, txAddr);
+        }
+      } else {
+        const gmlanVinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
+        const isGmlan = gmlanVinResp?.positiveResponse === true;
+        if (isGmlan) {
+          result.detectedProtocol = 'GMLAN';
+          await this.scanGmlanEcu(result, txAddr);
+        } else {
+          result.detectedProtocol = 'unknown';
+          if (gmlanVinResp && gmlanVinResp.data?.length > 0) {
+            result.vin = this.extractAscii(gmlanVinResp.data);
+          }
+        }
+      }
+    } else {
+      const gmlanVinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
+      const isGmlan = gmlanVinResp?.positiveResponse === true;
+
+      if (isGmlan) {
+        result.detectedProtocol = 'GMLAN';
+        await this.scanGmlanEcu(result, txAddr);
+      } else {
+        const udsVinResp = await this.sendAndRecord(
+          result,
+          0x22,
+          undefined,
+          [(UDS_DIDS.VIN >> 8) & 0xff, UDS_DIDS.VIN & 0xff],
+          txAddr,
+        );
+        if (udsVinResp?.positiveResponse) {
+          result.detectedProtocol = 'UDS';
+          const ecuConfig = this.matchEcuConfig(result);
+          result.ecuConfig = ecuConfig;
+          const manufacturer = ecuConfig?.oem;
+          if (manufacturer === 'FORD') {
+            await this.scanFordEcu(result, txAddr);
+          } else if (manufacturer === 'DODGE') {
+            await this.scanCumminsEcu(result, txAddr);
+          } else {
+            await this.scanGenericUdsEcu(result, txAddr);
+          }
+        } else {
+          result.detectedProtocol = 'unknown';
+          if (gmlanVinResp && gmlanVinResp.data?.length > 0) {
+            result.vin = this.extractAscii(gmlanVinResp.data);
+          }
+        }
+      }
+    }
+
+    // Step 5: Match against ECU database (if not already matched)
+    if (!result.ecuConfig) {
+      result.ecuConfig = this.matchEcuConfig(result);
+    }
+
+    // Step 6: Add notes about ECU state
+    if (
+      result.responding
+      && result.calibrationPartNumbers.every(s => !s)
+      && result.cvns.length === 0
+      && (!result.gmSoftwarePartSlots || result.gmSoftwarePartSlots.length === 0)
+    ) {
+      result.notes.push('ECU responded but no calibration data read — may need different security level or session');
+    }
+    if (result.securityAccessAttempted && !result.securityAccessGranted) {
+      result.notes.push(
+        'UDS security access (seed/key) not accepted — check container key / algorithm, or ECU may use a different seed level.',
+      );
+    }
+
+    result.status = 'complete';
+    result.scanDurationMs = Date.now() - startMs;
+    console.log(`[ECU Scanner] ${label}: ${result.responding ? 'FOUND' : 'N/A'} — ${result.detectedProtocol} — ${result.ecuConfig?.name || 'unknown ECU'} — ${result.scanDurationMs}ms`);
+
+    return result;
+  }
+
+  // ── GMLAN ECU Scan ──────────────────────────────────────────────────────────
+
+  /**
+   * Full GMLAN ECU scan — reads all GM-specific DIDs.
+   * Security access should already be granted before calling this.
+   */
+  private async scanGmlanEcu(result: EcuScanResult, txAddr: number): Promise<void> {
+    // ── VIN (0x1A 0x90) ──
+    const existingVin = result.rawResponses.find(r => r.service === 0x1A && r.did === 0x90 && r.positive);
+    if (existingVin) {
+      result.vin = this.extractAscii(existingVin.data);
+    } else {
+      const vinResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.VIN], txAddr);
+      if (vinResp?.positiveResponse && vinResp.data?.length > 0) {
+        result.vin = this.extractAscii(vinResp.data);
+      }
+    }
+
+    // ── ECU diagnostic address (0x1A 0xB0) — CAN2000: CANR ECU diagnostic address; logged in raw only, not shown as HW ID
+    await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.ECU_ID], txAddr);
+
+    // ── Programming Status (0x1A 0xA0) ──
+    const progResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.PROGRAMMING_STATUS], txAddr);
+    if (progResp?.positiveResponse && progResp.data?.length > 0) {
+      const status = progResp.data[0];
+      result.programmingState = status === 0x00 ? 'Fully Programmed' :
+        status === 0x01 ? 'Partially Programmed' :
+        status === 0x02 ? 'Not Programmed' :
+        `Unknown (0x${status?.toString(16) || '??'})`;
+    }
+
+    // ── ReportProgrammedState (0xA2) — GM-specific ──
+    const rpsResp = await this.sendAndRecord(result, 0xA2, undefined, [], txAddr);
+    if (rpsResp?.positiveResponse && rpsResp.data?.length > 0) {
+      const state = rpsResp.data[0];
+      if (!result.programmingState || result.programmingState.startsWith('Unknown')) {
+        result.programmingState = state === 0x00 ? 'Fully Programmed' :
+          state === 0x01 ? 'Partially Programmed' :
+          `State 0x${state.toString(16).padStart(2, '0')}`;
+      }
+    }
+
+    // ── GM software/calibration slots 0xC1–0xCC (numeric part numbers) ──
+    const calSlotDids = [
+      { did: GMLAN_DIDS.CAL_SLOT_1, index: 1 },
+      { did: GMLAN_DIDS.CAL_SLOT_2, index: 2 },
+      { did: GMLAN_DIDS.CAL_SLOT_3, index: 3 },
+      { did: GMLAN_DIDS.CAL_SLOT_4, index: 4 },
+      { did: GMLAN_DIDS.CAL_SLOT_5, index: 5 },
+      { did: GMLAN_DIDS.CAL_SLOT_6, index: 6 },
+      { did: GMLAN_DIDS.CAL_SLOT_7, index: 7 },
+      { did: GMLAN_DIDS.CAL_SLOT_8, index: 8 },
+      { did: GMLAN_DIDS.CAL_SLOT_9, index: 9 },
+    ];
+
+    result.gmSoftwarePartSlots = [];
+    const nineSlots: string[] = Array(9).fill('');
+
+    for (const { did, index } of calSlotDids) {
+      if (this.abortController?.signal.aborted) break;
+      const slotResp = await this.sendAndRecord(result, 0x1A, undefined, [did], txAddr);
+      if (slotResp?.positiveResponse && slotResp.data && slotResp.data.length > 0) {
+        const decimal = gmPartBytesToDecimalUnsigned(slotResp.data);
+        const label = `C${index}`;
+        result.gmSoftwarePartSlots.push({ label, did, decimal });
+        nineSlots[index - 1] = String(decimal);
+      }
+    }
+
+    const anyGmSlot = nineSlots.some(s => s.length > 0);
+    if (anyGmSlot) {
+      result.calibrationPartNumbers = [...nineSlots];
+    } else {
+      const swResp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.SW_PART_NUMBER], txAddr);
+      if (swResp?.positiveResponse && swResp.data?.length > 0) {
+        const partNum = this.extractAscii(swResp.data).trim();
+        result.calibrationPartNumbers = partNum.length > 0 ? [partNum] : [];
+      } else {
+        result.calibrationPartNumbers = [];
+      }
+    }
+
+    const ccSlot = result.gmSoftwarePartSlots?.find(s => s.did === GMLAN_DIDS.CAL_SLOT_9);
+    if (ccSlot !== undefined) {
+      result.hardwareId = String(ccSlot.decimal);
+    }
+
+    // GMLAN path: no extra OBD Mode 9 — calibration/CRC-style values come from ReadDID above.
+
+    // ── E41 (primary ECM): tuning lock DID 0xD0 — ASCII "UL" = unlocked (read on all GMLAN 0x7E0; NRC on other ECUs is OK)
+    result.ecuConfig = this.matchEcuConfig(result);
+    if (txAddr === 0x7e0) {
+      const d0Resp = await this.sendAndRecord(result, 0x1A, undefined, [GMLAN_DIDS.TUNING_LOCK], txAddr);
+      if (d0Resp?.positiveResponse && d0Resp.data && d0Resp.data.length > 0) {
+        const ascii = this.extractAscii(d0Resp.data).trim();
+        const unlocked = ascii === 'UL' || ascii.toUpperCase().startsWith('UL');
+        result.tuningUnlock = { ascii, unlocked };
+        if (!unlocked) {
+          result.notes.push(
+            'Tuning lock (DID 0xD0): ECU must be unlocked before flashing a tune (expect ASCII "UL" when unlocked).',
+          );
+        }
+      }
+    }
+  }
+
+  // ── Ford UDS ECU Scan ───────────────────────────────────────────────────────
+
+  /**
+   * Ford-specific UDS ECU scan.
+   * Ford uses standard UDS with Bosch ECUs (MG1/EDC17/MD1).
+   * Typically has 1 OS + 1-3 calibration blocks (NOT 9 like GM).
+   * Key Ford-specific DIDs: F111 (CVN), F113 (Cal SW ID), DE00/DE01 (As-Built).
+   */
+  private async scanFordEcu(result: EcuScanResult, txAddr: number): Promise<void> {
+    // ── VIN (0x22 0xF190) ──
+    const existingVin = result.rawResponses.find(
+      r => r.service === 0x22 && r.did === UDS_DIDS.VIN && r.positive,
+    );
+    if (existingVin) {
+      result.vin = this.extractAscii(existingVin.data);
+    } else {
+      const vinResp = await this.readUdsDid(result, UDS_DIDS.VIN, txAddr);
+      if (vinResp?.positiveResponse && vinResp.data?.length > 0) {
+        result.vin = this.extractAscii(vinResp.data);
+      }
+    }
+
+    // ── ECU Software Number / Ford Calibration Part Number (0xF188) ──
+    const swResp = await this.readUdsDid(result, UDS_DIDS.ECU_SW_NUMBER, txAddr);
+    if (swResp?.positiveResponse && swResp.data?.length > 0) {
+      result.softwareNumber = this.extractAscii(swResp.data).trim();
+    }
+
+    // ── ECU Hardware Number (0xF191) ──
+    const hwResp = await this.readUdsDid(result, UDS_DIDS.ECU_HW_NUMBER, txAddr);
+    if (hwResp?.positiveResponse && hwResp.data?.length > 0) {
+      result.hardwareId = this.extractAscii(hwResp.data).trim();
+    }
+
+    // ── Spare Part Number (0xF187) ──
+    const spareResp = await this.readUdsDid(result, UDS_DIDS.SPARE_PART_NUMBER, txAddr);
+    if (spareResp?.positiveResponse && spareResp.data?.length > 0) {
+      const sparePart = this.extractAscii(spareResp.data).trim();
+      if (sparePart.length > 0) {
+        result.notes.push(`Spare Part Number: ${sparePart}`);
+      }
+    }
+
+    // ── ECU Software Version (0xF189) ──
+    const swVerResp = await this.readUdsDid(result, UDS_DIDS.ECU_SW_VERSION, txAddr);
+    if (swVerResp?.positiveResponse && swVerResp.data?.length > 0) {
+      const swVer = this.extractAscii(swVerResp.data).trim();
+      if (swVer.length > 0) {
+        result.notes.push(`Software Version: ${swVer}`);
+      }
+    }
+
+    // ── System Name / Engine Type (0xF197) ──
+    const sysResp = await this.readUdsDid(result, UDS_DIDS.SYSTEM_NAME, txAddr);
+    if (sysResp?.positiveResponse && sysResp.data?.length > 0) {
+      const sysName = this.extractAscii(sysResp.data).trim();
+      if (sysName.length > 0) {
+        result.notes.push(`System/Engine: ${sysName}`);
+      }
+    }
+
+    // ── ECU Serial Number (0xF18C) ──
+    const serialResp = await this.readUdsDid(result, UDS_DIDS.ECU_SERIAL, txAddr);
+    if (serialResp?.positiveResponse && serialResp.data?.length > 0) {
+      const serial = this.extractAscii(serialResp.data).trim();
+      if (serial.length > 0) {
+        result.notes.push(`ECU Serial: ${serial}`);
+      }
+    }
+
+    // ── Ford-Specific: Application Software Identification (0xF181) ──
+    const appSwResp = await this.readUdsDid(result, UDS_DIDS.APP_SW_ID, txAddr);
+    if (appSwResp?.positiveResponse && appSwResp.data?.length > 0) {
+      const appSw = this.extractAscii(appSwResp.data).trim();
+      if (appSw.length > 0) {
+        result.calibrationPartNumbers.push(appSw);
+      }
+    }
+
+    // ── Ford-Specific: Application Data Identification (0xF182) — cal data ID ──
+    const appDataResp = await this.readUdsDid(result, UDS_DIDS.APP_DATA_ID, txAddr);
+    if (appDataResp?.positiveResponse && appDataResp.data?.length > 0) {
+      const appData = this.extractAscii(appDataResp.data).trim();
+      if (appData.length > 0) {
+        result.calibrationPartNumbers.push(appData);
+      }
+    }
+
+    // ── Ford-Specific: Calibration Software ID (0xF113) ──
+    const calSwResp = await this.readUdsDid(result, FORD_DIDS.CAL_SW_ID, txAddr);
+    if (calSwResp?.positiveResponse && calSwResp.data?.length > 0) {
+      const calSw = this.extractAscii(calSwResp.data).trim();
+      if (calSw.length > 0 && !result.calibrationPartNumbers.includes(calSw)) {
+        result.calibrationPartNumbers.push(calSw);
+      }
+    }
+
+    // ── Ford-Specific: Calibration Verification Number (0xF111) ──
+    const fordCvnResp = await this.readUdsDid(result, FORD_DIDS.CVN, txAddr);
+    if (fordCvnResp?.positiveResponse && fordCvnResp.data?.length > 0) {
+      // Ford CVN can be multi-entry (4 bytes each)
+      const cvnData = fordCvnResp.data;
+      let offset = 0;
+      let index = 1;
+      while (offset + 4 <= cvnData.length) {
+        const cvnBytes = cvnData.slice(offset, offset + 4);
+        const hex = cvnBytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        const value = cvnBytes.reduce((acc, b) => (acc << 8) | b, 0);
+        result.cvns.push({ index, did: FORD_DIDS.CVN, hex, value });
+        index++;
+        offset += 4;
+      }
+    }
+
+    // ── Calibration ID via standard DID (0xF806) ──
+    if (result.calibrationPartNumbers.length === 0) {
+      const calResp = await this.readUdsDid(result, UDS_DIDS.CALIBRATION_ID, txAddr);
+      if (calResp?.positiveResponse && calResp.data?.length > 0) {
+        const calId = this.extractAscii(calResp.data).trim();
+        if (calId.length > 0) {
+          result.calibrationPartNumbers.push(calId);
+        }
+      }
+    }
+
+    // ── OBD Mode 9 fallback for CalIDs and CVNs ──
+    if (result.calibrationPartNumbers.length === 0) {
+      const calIdResp = await this.sendAndRecord(result, 0x09, undefined, [0x04], txAddr);
+      if (calIdResp?.positiveResponse && calIdResp.data?.length > 0) {
+        result.calibrationPartNumbers = this.parseCalibrationIds(calIdResp.data);
+      }
+    }
+
+    if (result.cvns.length === 0) {
+      const cvnResp = await this.sendAndRecord(result, 0x09, undefined, [0x06], txAddr);
+      if (cvnResp?.positiveResponse && cvnResp.data?.length > 0) {
+        result.cvns = this.parseObdCvns(cvnResp.data);
+      }
+    }
+
+    // ── Ford As-Built Data (0xDE01) — informational ──
+    const asBuiltResp = await this.readUdsDid(result, FORD_DIDS.AS_BUILT_DATA, txAddr);
+    if (asBuiltResp?.positiveResponse && asBuiltResp.data?.length > 0) {
+      result.notes.push(`As-Built Data: ${asBuiltResp.data.length} bytes available`);
+    }
+  }
+
+  // ── Cummins UDS ECU Scan ────────────────────────────────────────────────────
+
+  /**
+   * Cummins-specific UDS ECU scan.
+   * Cummins CM2350/CM2450 use standard UDS with security level 0x05.
+   * Typically has 1 OS + 1-2 calibration blocks.
+   * Key Cummins-specific: F18C = Engine Serial Number (ESN).
+   */
+  private async scanCumminsEcu(result: EcuScanResult, txAddr: number): Promise<void> {
+    // ── VIN (0x22 0xF190) ──
+    const existingVin = result.rawResponses.find(
+      r => r.service === 0x22 && r.did === UDS_DIDS.VIN && r.positive,
+    );
+    if (existingVin) {
+      result.vin = this.extractAscii(existingVin.data);
+    } else {
+      const vinResp = await this.readUdsDid(result, UDS_DIDS.VIN, txAddr);
+      if (vinResp?.positiveResponse && vinResp.data?.length > 0) {
+        result.vin = this.extractAscii(vinResp.data);
+      }
+    }
+
+    // ── ECU Software Number (0xF188) ──
+    const swResp = await this.readUdsDid(result, UDS_DIDS.ECU_SW_NUMBER, txAddr);
+    if (swResp?.positiveResponse && swResp.data?.length > 0) {
+      result.softwareNumber = this.extractAscii(swResp.data).trim();
+    }
+
+    // ── ECU Hardware Number (0xF191) ──
+    const hwResp = await this.readUdsDid(result, UDS_DIDS.ECU_HW_NUMBER, txAddr);
+    if (hwResp?.positiveResponse && hwResp.data?.length > 0) {
+      result.hardwareId = this.extractAscii(hwResp.data).trim();
+    }
+
+    // ── Engine Serial Number / ESN (0xF18C) — Cummins-specific ──
+    const esnResp = await this.readUdsDid(result, UDS_DIDS.ECU_SERIAL, txAddr);
+    if (esnResp?.positiveResponse && esnResp.data?.length > 0) {
+      const esn = this.extractAscii(esnResp.data).trim();
+      if (esn.length > 0) {
+        result.notes.push(`Engine Serial Number (ESN): ${esn}`);
+      }
+    }
+
+    // ── System Supplier Identifier (0xF18A) — should return "CUMMINS" ──
+    const supplierResp = await this.readUdsDid(result, UDS_DIDS.ECU_SUPPLIER_ID, txAddr);
+    if (supplierResp?.positiveResponse && supplierResp.data?.length > 0) {
+      const supplier = this.extractAscii(supplierResp.data).trim();
+      if (supplier.length > 0) {
+        result.notes.push(`Supplier: ${supplier}`);
+      }
+    }
+
+    // ── Engine Type / System Name (0xF197) ──
+    const sysResp = await this.readUdsDid(result, UDS_DIDS.SYSTEM_NAME, txAddr);
+    if (sysResp?.positiveResponse && sysResp.data?.length > 0) {
+      const sysName = this.extractAscii(sysResp.data).trim();
+      if (sysName.length > 0) {
+        result.notes.push(`Engine Type: ${sysName}`);
+      }
+    }
+
+    // ── ECU Software Version (0xF189) ──
+    const swVerResp = await this.readUdsDid(result, UDS_DIDS.ECU_SW_VERSION, txAddr);
+    if (swVerResp?.positiveResponse && swVerResp.data?.length > 0) {
+      const swVer = this.extractAscii(swVerResp.data).trim();
+      if (swVer.length > 0) {
+        result.notes.push(`Software Version: ${swVer}`);
+      }
+    }
+
+    // ── Boot Software Identification (0xF180) ──
+    const bootResp = await this.readUdsDid(result, UDS_DIDS.BOOT_SW_ID, txAddr);
+    if (bootResp?.positiveResponse && bootResp.data?.length > 0) {
+      const bootId = this.extractAscii(bootResp.data).trim();
+      if (bootId.length > 0) {
+        result.notes.push(`Boot Software: ${bootId}`);
+      }
+    }
+
+    // ── Application Software Identification (0xF181) — cal ID ──
+    const appSwResp = await this.readUdsDid(result, UDS_DIDS.APP_SW_ID, txAddr);
+    if (appSwResp?.positiveResponse && appSwResp.data?.length > 0) {
+      const appSw = this.extractAscii(appSwResp.data).trim();
+      if (appSw.length > 0) {
+        result.calibrationPartNumbers.push(appSw);
+      }
+    }
+
+    // ── Application Data Identification (0xF182) — calibration data ID ──
+    const appDataResp = await this.readUdsDid(result, UDS_DIDS.APP_DATA_ID, txAddr);
+    if (appDataResp?.positiveResponse && appDataResp.data?.length > 0) {
+      const appData = this.extractAscii(appDataResp.data).trim();
+      if (appData.length > 0) {
+        result.calibrationPartNumbers.push(appData);
+      }
+    }
+
+    // ── Manufacturing Date (0xF18B) ──
+    const mfgResp = await this.readUdsDid(result, 0xF18B, txAddr);
+    if (mfgResp?.positiveResponse && mfgResp.data?.length > 0) {
+      const mfgDate = this.extractAscii(mfgResp.data).trim();
+      if (mfgDate.length > 0) {
+        result.notes.push(`Manufacturing Date: ${mfgDate}`);
+      }
+    }
+
+    // ── Calibration ID via standard DID (0xF806) ──
+    if (result.calibrationPartNumbers.length === 0) {
+      const calResp = await this.readUdsDid(result, UDS_DIDS.CALIBRATION_ID, txAddr);
+      if (calResp?.positiveResponse && calResp.data?.length > 0) {
+        const calId = this.extractAscii(calResp.data).trim();
+        if (calId.length > 0) {
+          result.calibrationPartNumbers.push(calId);
+        }
+      }
+    }
+
+    // ── OBD Mode 9 fallback for CalIDs and CVNs ──
+    if (result.calibrationPartNumbers.length === 0) {
+      const calIdResp = await this.sendAndRecord(result, 0x09, undefined, [0x04], txAddr);
+      if (calIdResp?.positiveResponse && calIdResp.data?.length > 0) {
+        result.calibrationPartNumbers = this.parseCalibrationIds(calIdResp.data);
+      }
+    }
+
+    const cvnResp = await this.sendAndRecord(result, 0x09, undefined, [0x06], txAddr);
+    if (cvnResp?.positiveResponse && cvnResp.data?.length > 0) {
+      result.cvns = this.parseObdCvns(cvnResp.data);
+    }
+  }
+
+  // ── Generic UDS ECU Scan ────────────────────────────────────────────────────
+
+  /**
+   * Generic UDS ECU scan for unknown manufacturer.
+   * Reads standard UDS DIDs and OBD Mode 9.
+   */
+  private async scanGenericUdsEcu(result: EcuScanResult, txAddr: number): Promise<void> {
+    // ── VIN (0x22 0xF190) ──
+    const existingVin = result.rawResponses.find(
+      r => r.service === 0x22 && r.did === UDS_DIDS.VIN && r.positive,
+    );
+    if (existingVin) {
+      result.vin = this.extractAscii(existingVin.data);
+    } else {
+      const vinResp = await this.readUdsDid(result, UDS_DIDS.VIN, txAddr);
+      if (vinResp?.positiveResponse && vinResp.data?.length > 0) {
+        result.vin = this.extractAscii(vinResp.data);
+      }
+    }
+
+    // ── ECU Software Number (0xF188) ──
+    const swResp = await this.readUdsDid(result, UDS_DIDS.ECU_SW_NUMBER, txAddr);
+    if (swResp?.positiveResponse && swResp.data?.length > 0) {
+      result.softwareNumber = this.extractAscii(swResp.data).trim();
+    }
+
+    // ── ECU Hardware Number (0xF191) ──
+    const hwResp = await this.readUdsDid(result, UDS_DIDS.ECU_HW_NUMBER, txAddr);
+    if (hwResp?.positiveResponse && hwResp.data?.length > 0) {
+      result.hardwareId = this.extractAscii(hwResp.data).trim();
+    }
+
+    // ── Calibration ID (0xF806) ──
+    const calResp = await this.readUdsDid(result, UDS_DIDS.CALIBRATION_ID, txAddr);
+    if (calResp?.positiveResponse && calResp.data?.length > 0) {
+      const calId = this.extractAscii(calResp.data).trim();
+      if (calId.length > 0) {
+        result.calibrationPartNumbers.push(calId);
+      }
+    }
+
+    // ── OBD Mode 9 for CalIDs and CVNs ──
+    const calIdResp = await this.sendAndRecord(result, 0x09, undefined, [0x04], txAddr);
+    if (calIdResp?.positiveResponse && calIdResp.data?.length > 0) {
+      const calIds = this.parseCalibrationIds(calIdResp.data);
+      if (calIds.length > 0 && result.calibrationPartNumbers.length === 0) {
+        result.calibrationPartNumbers = calIds;
+      }
+    }
+
+    const cvnResp = await this.sendAndRecord(result, 0x09, undefined, [0x06], txAddr);
+    if (cvnResp?.positiveResponse && cvnResp.data?.length > 0) {
+      result.cvns = this.parseObdCvns(cvnResp.data);
+    }
+  }
+
+  // ── Security Access ─────────────────────────────────────────────────────────
+
+  /**
+   * Attempt security access on the ECU to unlock protected DIDs.
+   * 
+   * Strategy:
+   * 1. Look up the ECU's security profile from the database
+   * 2. Try the profile's seedSubFunction first (e.g., 0x09 for E41)
+   * 3. If that fails, fall back to standard level 0x01
+   * 4. If seed is all zeros, ECU is already unlocked (HPTuners)
+   * 5. If we have a container file with pri_key, compute the key
+   * 6. Send the key and verify security access is granted
+   */
+  private async attemptSecurityAccess(
+    result: EcuScanResult,
+    txAddr: number,
+  ): Promise<boolean> {
+    result.securityAccessAttempted = true;
+
+    // Find security profile for this ECU
+    // Try matching by ECU config first, then by CAN address
+    let profile: EcuSecurityProfileMeta | undefined;
+    const ecuConfig = result.ecuConfig || this.matchEcuConfig(result);
+    if (ecuConfig) {
+      profile = getSecurityProfileMeta(ecuConfig.ecuType);
+    }
+
+    // Determine seed sub-functions to try
+    const seedSubsToTry: number[] = [];
+    if (profile?.seedSubFunction) {
+      seedSubsToTry.push(profile.seedSubFunction);
+    }
+    // Always include standard level 0x01 as fallback
+    if (!seedSubsToTry.includes(0x01)) {
+      seedSubsToTry.push(0x01);
+    }
+    // For Cummins, also try level 0x05
+    // For Cummins ECUs (DODGE OEM), also try security level 0x05
+    const isCummins = profile?.manufacturer === 'Cummins' || ecuConfig?.oem === 'DODGE';
+    if (isCummins && !seedSubsToTry.includes(0x05)) {
+      seedSubsToTry.push(0x05);
+    }
+
+    console.log(`[ECU Scanner] Security access — trying seed levels: ${seedSubsToTry.map(s => '0x' + s.toString(16)).join(', ')}`);
+
+    for (const seedSub of seedSubsToTry) {
+      const keySub = seedSub + 1;
+
+      console.log(`[ECU Scanner] Requesting security seed (sub=0x${seedSub.toString(16)})...`);
+
+      // Request seed
+      const seedResp = await this.sendAndRecord(result, 0x27, seedSub, [], txAddr);
+      if (!seedResp) {
+        console.log(`[ECU Scanner] No response to seed request (sub=0x${seedSub.toString(16)}) — trying next level...`);
+        await this.delay(200);
+        continue;
+      }
+
+      if (!seedResp.positiveResponse) {
+        const nrc = seedResp.nrc ?? 0;
+        console.log(`[ECU Scanner] Seed request NRC 0x${nrc.toString(16)} (sub=0x${seedSub.toString(16)}) — trying next level...`);
+        // NRC 0x12 = subFunctionNotSupported — try next level
+        // NRC 0x22 = conditionsNotCorrect — may need different session
+        // NRC 0x37 = requiredTimeDelayNotExpired — wait and retry
+        if (nrc === 0x37) {
+          result.notes.push('Security access: time delay not expired — ECU may be in lockout');
+          await this.delay(10000); // Wait 10 seconds for lockout to expire
+          continue;
+        }
+        await this.delay(200);
+        continue;
+      }
+
+      // Extract seed data
+      const seedData = seedResp.data || [];
+      // Strip sub-function echo byte if present
+      let rawSeed = seedData;
+      if (rawSeed.length > 0 && rawSeed[0] === seedSub) {
+        rawSeed = rawSeed.slice(1);
+      }
+
+      if (rawSeed.length === 0) {
+        console.log(`[ECU Scanner] Empty seed response — trying next level...`);
+        await this.delay(200);
+        continue;
+      }
+
+      // Check if seed is all zeros (already unlocked)
+      const allZeros = rawSeed.every(b => b === 0);
+      if (allZeros) {
+        console.log(`[ECU Scanner] ECU returned zero seed — already unlocked!`);
+        result.securityAccessGranted = true;
+        result.notes.push('ECU returned zero seed — already unlocked (HPTuners or similar)');
+        return true;
+      }
+
+      const seedHex = rawSeed.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      console.log(`[ECU Scanner] Received seed: ${seedHex} (${rawSeed.length} bytes, level 0x${seedSub.toString(16)})`);
+      result.notes.push(`Seed received (level 0x${seedSub.toString(16)}): ${seedHex}`);
+
+      // Try to compute the key
+      const seedBytes = new Uint8Array(rawSeed);
+      let keyBytes: Uint8Array | null = null;
+
+      // Source 1: Container file pri_key
+      const priKey = this.containerHeader?.verify?.pri_key;
+
+      if (seedBytes.length === 5 && priKey && priKey.length >= 16) {
+        // GM 5-byte AES algorithm
+        try {
+          const aesKeyBytes = new Uint8Array(priKey.map(h => parseInt(h, 16)));
+          keyBytes = await computeGM5B(seedBytes, aesKeyBytes);
+          console.log(`[ECU Scanner] Key computed (GM_5B_AES): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        } catch (err) {
+          console.warn(`[ECU Scanner] GM_5B_AES key computation failed:`, err);
+        }
+      } else if (seedBytes.length === 3 && priKey && priKey.length >= 5) {
+        // Ford 3-byte LFSR algorithm
+        try {
+          const secretBytes = new Uint8Array(priKey.slice(0, 5).map(h => parseInt(h, 16)));
+          keyBytes = computeFord3B(seedBytes, secretBytes);
+          console.log(`[ECU Scanner] Key computed (Ford_3B): ${Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`);
+        } catch (err) {
+          console.warn(`[ECU Scanner] Ford_3B key computation failed:`, err);
+        }
+      }
+
+      // Source 2: Pre-computed seed/key from container header
+      if (!keyBytes && this.containerHeader?.seed && this.containerHeader?.key) {
+        const headerSeed = hexToBytes(this.containerHeader.seed);
+        const headerKey = hexToBytes(this.containerHeader.key);
+        if (arraysEqual(seedBytes, new Uint8Array(headerSeed))) {
+          keyBytes = new Uint8Array(headerKey);
+          console.log(`[ECU Scanner] Using pre-computed key from container header (seed matches)`);
+        }
+      }
+
+      if (!keyBytes) {
+        console.log(`[ECU Scanner] Cannot compute key — no container file or algorithm available`);
+        result.notes.push('Key computation requires container file with pri_key — load a container file and re-scan');
+        continue;
+      }
+
+      // Send key
+      await this.delay(100);
+      const keyResp = await this.sendAndRecord(result, 0x27, keySub, Array.from(keyBytes), txAddr);
+      if (keyResp?.positiveResponse) {
+        console.log(`[ECU Scanner] 🔓 Security access granted (level 0x${seedSub.toString(16)})`);
+        result.securityAccessGranted = true;
+        result.notes.push(`Security access granted (level 0x${seedSub.toString(16)})`);
+        return true;
+      } else {
+        const nrc = keyResp?.nrc ?? 0;
+        console.log(`[ECU Scanner] Key rejected: NRC 0x${nrc.toString(16)} — trying next level...`);
+        result.notes.push(`Key rejected at level 0x${seedSub.toString(16)}: NRC 0x${nrc.toString(16)}`);
+        await this.delay(200);
+      }
+    }
+
+    return false;
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  /** Send UDS DID read (service 0x22) */
+  private async readUdsDid(
+    result: EcuScanResult,
+    did: number,
+    txAddr: number,
+  ): Promise<UDSResponse | null> {
+    return this.sendAndRecord(
+      result, 0x22, undefined,
+      [(did >> 8) & 0xFF, did & 0xFF],
+      txAddr,
+    );
+  }
+
+  /** Send request and record raw response */
+  private async sendAndRecord(
+    result: EcuScanResult,
+    service: number,
+    subFunction: number | undefined,
+    data: number[],
+    txAddr: number,
+    responseArbIdOverride?: number,
+  ): Promise<UDSResponse | null> {
+    if (this.abortController?.signal.aborted) {
+      return null;
+    }
+    try {
+      const resp = await this.connection.sendUDSRequest(
+        service,
+        subFunction,
+        data,
+        txAddr,
+        this.scanUdsTimeoutMs,
+        responseArbIdOverride,
+      );
+      if (resp) {
+        let payload = resp.data || [];
+        // GMLAN ReadDID 0x1A: after 0x5A (stripped by ISO-TP parser), ECU sends [DID echo][payload…].
+        // Only the payload may be interpreted (e.g. part number bytes), not the echoed DID.
+        if (
+          resp.positiveResponse
+          && service === 0x1A
+          && data.length >= 1
+          && payload.length >= 1
+          && (payload[0] & 0xff) === (data[0] & 0xff)
+        ) {
+          payload = payload.slice(1);
+        }
+
+        let did = 0;
+        if (service === 0x1A && data.length >= 1) {
+          did = data[0];
+        } else if (service === 0x22 && data.length >= 2) {
+          did = (data[0] << 8) | data[1];
+        } else if (service === 0x09 && data.length >= 1) {
+          did = data[0];
+        }
+
+        result.rawResponses.push({
+          did,
+          didHex: `0x${did.toString(16).toUpperCase().padStart(service === 0x22 ? 4 : 2, '0')}`,
+          service,
+          data: payload,
+          dataHex: payload.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' '),
+          positive: resp.positiveResponse,
+          nrc: resp.nrc,
+          nrcName: resp.nrcName,
+        });
+        return { ...resp, data: payload };
+      }
+      return resp;
+    } catch (err) {
+      console.warn(`[ECU Scanner] Request failed: svc=0x${service.toString(16)} addr=0x${txAddr.toString(16)}`, err);
+      return null;
+    }
+  }
+
+  // ── Protocol-specific parsers ──────────────────────────────────────────────
+
+  /**
+   * Parse OBD Mode 9 PID 0x04 response into calibration part numbers.
+   * Format: [count] [16-byte ASCII part number] [16-byte] ... repeated
+   */
+  private parseCalibrationIds(data: number[]): string[] {
+    const partNumbers: string[] = [];
+    if (data.length === 0) return partNumbers;
+
+    let offset = 0;
+    const firstByte = data[0];
+
+    // If first byte looks like a count (1-20), skip it
+    if (firstByte >= 1 && firstByte <= 20 && data.length > 16) {
+      offset = 1;
+    }
+
+    // Parse 16-byte blocks
+    while (offset + 16 <= data.length) {
+      const block = data.slice(offset, offset + 16);
+      const ascii = block
+        .filter(b => b >= 0x20 && b <= 0x7E)
+        .map(b => String.fromCharCode(b))
+        .join('')
+        .trim();
+      if (ascii.length > 0) {
+        partNumbers.push(ascii);
+      }
+      offset += 16;
+    }
+
+    // If no 16-byte blocks found, try to parse the whole thing as ASCII
+    if (partNumbers.length === 0 && data.length > 0) {
+      const ascii = this.extractAscii(data).trim();
+      if (ascii.length > 0) {
+        partNumbers.push(ascii);
+      }
+    }
+
+    return partNumbers;
+  }
+
+  /**
+   * Parse OBD Mode 9 PID 0x06 response into CVN entries.
+   * Format: [count] [4-byte CVN] [4-byte CVN] ... repeated
+   */
+  private parseObdCvns(data: number[]): CvnEntry[] {
+    const cvns: CvnEntry[] = [];
+    if (data.length === 0) return cvns;
+
+    let offset = 0;
+    const firstByte = data[0];
+
+    // If first byte looks like a count, skip it
+    if (firstByte >= 1 && firstByte <= 20 && data.length > 4) {
+      offset = 1;
+    }
+
+    let index = 1;
+    while (offset + 4 <= data.length) {
+      const cvnBytes = data.slice(offset, offset + 4);
+      const hex = cvnBytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+      const value = cvnBytes.reduce((acc, b) => (acc << 8) | b, 0);
+      cvns.push({ index, did: 0x06, hex, value });
+      index++;
+      offset += 4;
+    }
+
+    return cvns;
+  }
+
+  /** Extract printable ASCII from a byte array. */
+  private extractAscii(data: number[]): string {
+    return data
+      .filter(b => b >= 0x20 && b <= 0x7E)
+      .map(b => String.fromCharCode(b))
+      .join('');
+  }
+
+  /** Match scan results against the ECU database to identify the specific ECU type. */
+  private matchEcuConfig(result: EcuScanResult): EcuConfig | undefined {
+    const candidates = Object.values(ECU_DATABASE).filter(ecu => {
+      if (ecu.txAddr !== result.txAddr) return false;
+      if (result.detectedProtocol !== 'unknown' && ecu.protocol !== result.detectedProtocol) return false;
+      if (this.scanOemHint === 'gm' && ecu.oem !== 'GM') return false;
+      if (this.scanOemHint === 'ford' && ecu.oem !== 'FORD') return false;
+      return true;
+    });
+
+    if (candidates.length === 0) return undefined;
+    if (candidates.length === 1) return candidates[0];
+
+    // Try to narrow down by hardware ID or software number
+    if (result.hardwareId) {
+      const hwMatch = candidates.find(ecu =>
+        result.hardwareId!.toLowerCase().includes(ecu.ecuType.toLowerCase()),
+      );
+      if (hwMatch) return hwMatch;
+    }
+
+    if (result.softwareNumber) {
+      const swMatch = candidates.find(ecu =>
+        result.softwareNumber!.toLowerCase().includes(ecu.ecuType.toLowerCase()),
+      );
+      if (swMatch) return swMatch;
+    }
+
+    // Return first candidate as best guess
+    return candidates[0];
+  }
+
+  /** Simple delay helper */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+// ── Utility Functions ────────────────────────────────────────────────────────
+
+function hexToBytes(hex: string): number[] {
+  const clean = hex.replace(/\s+/g, '').replace(/^0x/i, '');
+  const bytes: number[] = [];
+  for (let i = 0; i < clean.length; i += 2) {
+    bytes.push(parseInt(clean.substring(i, i + 2), 16));
+  }
+  return bytes;
+}
+
+function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+// ── Container Comparison ─────────────────────────────────────────────────────
+
+/**
+ * Compare scanned ECU calibration data against a loaded container file.
+ * Container slots `sw_c1`..`sw_c9` on `ContainerFileHeader` must be set — historically manual;
+ * FlashContainerPanel now maps DevProg/PPEI header data + Tune Deploy analyze into these fields.
+ *
+ * Matching is **positional**: container `sw_c{i}` vs ECU calibration slot **i** (GM C1…C9).
+ * Uses {@link calibrationSlotsFromEcuScanLike} so GMLAN ReadDID C-slots map by **label** (C1→index 0),
+ * not merely the order of `calibrationPartNumbers[]` (that array can be a loose list on non-GM paths).
+ */
+export function compareWithContainer(
+  scanResult: EcuScanResult,
+  container: ContainerFileHeader,
+): ContainerComparison {
+  const containerSlots: string[] = [];
+  for (let i = 1; i <= 9; i++) {
+    const key = `sw_c${i}` as keyof ContainerFileHeader;
+    const val = container[key];
+    containerSlots.push(typeof val === 'string' && val.trim().length > 0 ? val.trim() : '');
+  }
+
+  const ecuSlots = calibrationSlotsFromEcuScanLike({
+    gmSoftwarePartSlots: scanResult.gmSoftwarePartSlots,
+    calibrationPartNumbers: scanResult.calibrationPartNumbers,
+  });
+
+  const mask = softwareSlotMaskForEcuType(scanResult.ecuConfig?.ecuType);
+  const slots: ContainerComparison['slots'] = [];
+
+  for (let i = 0; i < 9; i++) {
+    const containerPart = containerSlots[i] ?? '';
+    const ecuPart = ecuSlots[i] ?? '';
+    const profileRelevant = mask ? Boolean(mask[i]) : true;
+
+    const both =
+      profileRelevant
+      && containerPart.length > 0
+      && ecuPart.length > 0;
+    const match =
+      both && normalizeCalPartToken(containerPart) === normalizeCalPartToken(ecuPart);
+    const changed =
+      both && normalizeCalPartToken(containerPart) !== normalizeCalPartToken(ecuPart);
+
+    slots.push({
+      index: i + 1,
+      containerPart,
+      ecuPart,
+      match,
+      changed,
+      profileRelevant,
+    });
+  }
+
+  const relevant = slots.filter(s => s.profileRelevant);
+  const changedCount = relevant.filter(s => s.changed).length;
+  const toVerify = relevant.filter(s => s.containerPart.length > 0);
+  const allMatch =
+    toVerify.length > 0
+    && toVerify.every(
+      s =>
+        s.ecuPart.length > 0
+        && normalizeCalPartToken(s.containerPart) === normalizeCalPartToken(s.ecuPart),
+    );
+
+  return {
+    containerPartNumbers: containerSlots.filter(p => p.length > 0),
+    ecuPartNumbers: ecuSlots,
+    slots,
+    allMatch,
+    changedCount,
+  };
+}

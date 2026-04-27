@@ -1,0 +1,44 @@
+Key findings from user's datalog CSV export:
+
+Line 1: # Protocol: CAN 11-bit 500kbps (PCAN-USB)
+Line 2: Timestamp (ms),Elapsed (s),ECT (°F),MAP (PSI),RPM (rpm),VSS (MPH),...
+
+PROBLEM: Only "# Protocol:" metadata line is present. Missing:
+- # VIN: ...
+- # Vehicle: ...
+- # Engine: ...
+- # Manufacturer: ...
+- # FuelType: ...
+- # Displacement: ...
+
+The export function exportSessionToCSV writes these ONLY when session.vehicleInfo is present.
+The session is created with: vehicleInfo: vehicleInfo || undefined
+
+The vehicleInfo state is set from conn.on('vehicleInfo', ...) event.
+PCAN connection emits vehicleInfo at line 832 of pcanConnection.ts.
+
+ROOT CAUSE HYPOTHESIS: The vehicleInfo is emitted but only has protocol set.
+The VIN read may have failed (line 827: "VIN read failed — vehicle may not support Mode 09").
+When VIN read fails, only protocol/protocolNumber are set on vehicleInfo.
+
+The export code uses conditional checks like:
+  if (vi.vin) metaRows.push(...)
+  if (vi.make || vi.model || vi.year) metaRows.push(...)
+  
+So if VIN read fails, only protocol gets written to the export.
+
+FIX NEEDED: 
+1. The export already writes protocol. The issue is VIN read failure.
+2. We should still write whatever vehicle info we have (even partial).
+3. The new code I added writes "# VIN: not available" and "# Vehicle: unknown" 
+   when session.vehicleInfo is falsy, but the real issue is vehicleInfo EXISTS 
+   but has no VIN/make/model.
+4. Need to also handle the case where vehicleInfo exists but VIN is empty.
+
+ALSO: This export was done BEFORE our code changes. The user's current deployed 
+version doesn't have our enhanced headers yet. Our changes will fix this going forward.
+
+ADDITIONAL: The column headers use shortNames like METER_VALVE, LAMBDA_SMOKE, 
+INJ_PW_DDDI, CYL_AIRMASS, BOOST_DES_DDDI, BOOST_VAC_DDDI, INJ_TMG_SAE, 
+FRP_ACT, FRPDI - these are DDDI virtual DIDs, not the renamed turbo vane PIDs.
+The turbo vane PIDs (ACT_VANE, DES_VANE) are NOT in this particular log session.
