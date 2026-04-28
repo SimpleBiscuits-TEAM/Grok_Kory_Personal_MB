@@ -511,7 +511,9 @@ describe('Deceleration Filter', () => {
     colLabel: 'TPS %',
   });
 
-  it('skips samples where TPS=0 and vehicle speed > 0 (deceleration)', () => {
+  it('skips samples where TPS=0 and vehicle speed > 0 (deceleration) + post-decel buffer', () => {
+    // Test data is sequential — after a decel event ends, the next 5 samples
+    // (~0.5s at 10Hz) are also skipped due to AFR sensor transport delay.
     const wp8 = makeWP8Data({
       channelNames: [
         'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
@@ -521,13 +523,13 @@ describe('Deceleration Filter', () => {
       rows: [
         // Normal sample: TPS=20, speed=30 → should be included
         [2000, 20, 80, 14.7, 14.7, 1, 5.0, 30],
-        // Decel sample: TPS=0, speed=50 → should be SKIPPED
+        // Decel sample: TPS=0, speed=50 → SKIPPED (decel), buffer starts at 5
         [4000, 0, 80, 18.0, 18.0, 1, 6.0, 50],
-        // Idle sample: TPS=0, speed=0 → should be INCLUDED (not decel, just idle)
+        // Idle sample: TPS=0, speed=0 → NOT decel, but buffer=5 → SKIPPED (buffer)
         [2000, 0, 80, 14.7, 14.7, 1, 5.0, 0],
-        // Another decel: TPS=0, speed=10 → should be SKIPPED
+        // Another decel: TPS=0, speed=10 → SKIPPED (decel), buffer resets to 5
         [6000, 0, 80, 20.0, 20.0, 1, 7.0, 10],
-        // Normal sample: TPS=40, speed=60 → should be included
+        // Normal sample: TPS=40, speed=60 → buffer=5 → SKIPPED (buffer)
         [4000, 40, 80, 13.0, 13.0, 1, 6.0, 60],
       ],
     });
@@ -542,15 +544,16 @@ describe('Deceleration Filter', () => {
     const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
     const report = computeCorrections(fuelMaps, wp8, config);
 
-    // 2 decel samples should be skipped
-    expect(report.decelSamplesSkipped).toBe(2);
+    // 2 decel + 2 buffer = 4 total decel-skipped
+    // (idle after decel is buffer-skipped, normal after 2nd decel is buffer-skipped)
+    expect(report.decelSamplesSkipped).toBe(4);
 
-    // Only 3 non-decel samples should count (2 Alpha-N + 1 idle Alpha-N)
-    expect(report.alphaNSamples).toBe(3);
+    // Only 1 non-decel sample remains (the first normal sample before any decel)
+    expect(report.alphaNSamples).toBe(1);
 
-    // The Alpha-N map should only have corrections from non-decel samples
+    // The Alpha-N map should only have corrections from the 1 valid sample
     const result = report.results[0];
-    expect(result.totalSamplesUsed).toBe(3);
+    expect(result.totalSamplesUsed).toBe(1);
   });
 
   it('does not filter when vehicle speed channel is missing', () => {

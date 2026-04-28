@@ -11,6 +11,9 @@
  *   - Skip deceleration events (NO corrections during decel):
  *       1. TPS = 0 AND vehicle speed > 0 (closed throttle while moving)
  *       2. Injector PW Final = 0 (ECU has cut fuel entirely)
+ *       3. Post-decel buffer: skip 5 samples (~0.5s at 10Hz) AFTER a decel event
+ *          ends to account for AFR sensor transport delay (O2 sensor reads lean
+ *          for a brief period after fuel is restored)
  *   - When Short Term Fuel Trims (STFT) are present, factor them into the
  *     actual AFR before computing lambda. Negative STFT = ECU pulling fuel,
  *     positive STFT = ECU adding fuel. Corrected AFR = measured AFR / (1 + STFT/100).
@@ -283,6 +286,19 @@ export const TRANSIENT_THRESHOLD_PCT = 15;  // % of desired PW
 export const TRANSIENT_EXCESSIVE_LEAN_LAMBDA = 1.1;
 export const TRANSIENT_EXCESSIVE_RICH_LAMBDA = 0.75;
 
+/**
+ * Post-deceleration buffer: number of samples to skip AFTER a decel event ends.
+ *
+ * AFR sensors have a transport delay — the O2 sensor is physically downstream
+ * of the exhaust port, so after the ECU restores fuel (decel event ends), the
+ * sensor continues reading lean for a brief period as the fresh (fueled) exhaust
+ * gas travels to the sensor. At 10 Hz sample rate, 5 samples ≈ 0.5 seconds,
+ * which is sufficient to cover the sensor transport delay on the Honda Talon.
+ *
+ * During the buffer period, samples are counted as decel-skipped in the report.
+ */
+export const POST_DECEL_BUFFER_SAMPLES = 5;  // ~0.5 seconds at 10 Hz
+
 // ─── Main Correction Engine ─────────────────────────────────────────────────────────
 
 /**
@@ -519,6 +535,8 @@ function computeMapCorrections(
   }
 
   let totalSamples = 0;
+  // Post-decel buffer: counts down from POST_DECEL_BUFFER_SAMPLES after a decel event ends
+  let postDecelBufferRemaining = 0;
 
   for (let i = 0; i < channelData.rpm.length; i++) {
     const rpm = channelData.rpm[i];
@@ -531,17 +549,32 @@ function computeMapCorrections(
     // Skip samples that indicate deceleration/fuel cut:
     //   1. TPS = 0 AND vehicle speed > 0 (closed throttle while moving)
     //   2. Injector PW Final = 0 (ECU has cut fuel entirely)
-    // In both cases, AFR readings are meaningless for correction.
+    //   3. Post-decel buffer: skip N samples after decel event ends (sensor transport delay)
+    // In all cases, AFR readings are meaningless for correction.
     // (Reusable pattern for Kawasaki tool)
     const tpsVal = channelData.tps[i];
     const vSpeed = channelData.vehicleSpeed[i];
+    let isDecel = false;
     if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
-      if (tpsVal === 0 && vSpeed > 0) continue;
+      if (tpsVal === 0 && vSpeed > 0) isDecel = true;
     }
     // Injector PW Final = 0 means ECU has completely cut fuel (decel fuel cut)
-    if (channelData.hasInjPwFinal) {
+    if (!isDecel && channelData.hasInjPwFinal) {
       const injFinal = channelData.injPwFinal[i];
-      if (Number.isFinite(injFinal) && injFinal === 0) continue;
+      if (Number.isFinite(injFinal) && injFinal === 0) isDecel = true;
+    }
+
+    if (isDecel) {
+      // Reset the buffer counter — it will start counting down once decel ends
+      postDecelBufferRemaining = POST_DECEL_BUFFER_SAMPLES;
+      continue;
+    }
+
+    // Post-decel buffer: skip samples while the buffer is counting down
+    // This accounts for AFR sensor transport delay after fuel is restored
+    if (postDecelBufferRemaining > 0) {
+      postDecelBufferRemaining--;
+      continue;
     }
 
     // ── Transient fueling filter: skip samples during transient enrichment ──
@@ -681,28 +714,37 @@ export function computeCorrections(
   const channelData = extractChannelData(wp8Data);
   const isTurboDetected = detectTurbo(wp8Data);
 
-  // Count Alpha-N vs SD samples, and decel-filtered samples
+  // Count Alpha-N vs SD samples, and decel-filtered samples (including post-decel buffer)
   let alphaNSamples = 0;
   let sdSamples = 0;
   let decelSamplesSkipped = 0;
+  let postDecelBufferRemaining = 0;
   for (let i = 0; i < channelData.alphaN.length; i++) {
     // Check decel filter at the top-level count too
     // 1. TPS = 0 AND vehicle speed > 0
     const tpsVal = channelData.tps[i];
     const vSpeed = channelData.vehicleSpeed[i];
+    let isDecel = false;
     if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
-      if (tpsVal === 0 && vSpeed > 0) {
-        decelSamplesSkipped++;
-        continue;
-      }
+      if (tpsVal === 0 && vSpeed > 0) isDecel = true;
     }
     // 2. Injector PW Final = 0 (ECU fuel cut)
-    if (channelData.hasInjPwFinal) {
+    if (!isDecel && channelData.hasInjPwFinal) {
       const injFinal = channelData.injPwFinal[i];
-      if (Number.isFinite(injFinal) && injFinal === 0) {
-        decelSamplesSkipped++;
-        continue;
-      }
+      if (Number.isFinite(injFinal) && injFinal === 0) isDecel = true;
+    }
+
+    if (isDecel) {
+      postDecelBufferRemaining = POST_DECEL_BUFFER_SAMPLES;
+      decelSamplesSkipped++;
+      continue;
+    }
+
+    // 3. Post-decel buffer: skip samples after decel ends (sensor transport delay)
+    if (postDecelBufferRemaining > 0) {
+      postDecelBufferRemaining--;
+      decelSamplesSkipped++;
+      continue;
     }
     // Alpha-N mode check: strictly equals 1 (with float tolerance)
     const alphaNVal = channelData.alphaN[i];

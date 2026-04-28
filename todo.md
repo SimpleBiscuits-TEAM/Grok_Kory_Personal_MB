@@ -2452,3 +2452,4 @@
 - [x] Fix Alpha-N channel check — ensure corrections only apply to Alpha-N table when alphaN channel STRICTLY equals 1
 - [x] Add injPwFinal = 0 check to decel sample counter in computeCorrections() too
 - [x] Verify Alpha-N channel is being read as exact integer 1 vs floating point comparison issue
+- [x] Add ~0.5-second post-deceleration buffer to fuel correction filters (skip N samples after decel event ends to prevent lean AFR from sensor transport delay)
