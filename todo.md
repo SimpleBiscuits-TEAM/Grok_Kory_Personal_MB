@@ -2421,10 +2421,18 @@
 - [x] Verify server compiles and push to GitHub
 
 ## EFI Live Error Codes PDF Integration & $0281 Fix (Apr 28, 2026)
-- [ ] Integrate full EFI Live error codes PDF (57 pages) into Strat's KB as EFILIVE_ERROR_CODES_KB
-- [ ] Fix $0281 KB entry — must be "No data received" OBD communication error, NOT memory/BBX/configuration
-- [ ] Remove any $0281 references to BBX formatting, internal memory clearing, or configuration issues
-- [ ] Add system prompt instruction: reference EFILIVE_ERROR_CODES_KB for any EFI Live $ error code
-- [ ] Ensure $0281 response asks for vehicle/device info FIRST before providing any fix
-- [ ] For 01-05 Duramax (E54/E60/AL5): use PPEI-specific fuse pull + passthrough + escalation steps
-- [ ] For other vehicles: use generic EFI Live PDF guidance (check cables, ignition, vehicle support)
+- [x] Integrate full EFI Live error codes PDF (57 pages) into Strat's KB as EFILIVE_ERROR_CODES_KB
+- [x] Fix $0281 KB entry — must be "No data received" OBD communication error, NOT memory/BBX/configuration
+- [x] Remove any $0281 references to BBX formatting, internal memory clearing, or configuration issues
+- [x] Add system prompt instruction: reference EFILIVE_ERROR_CODES_KB for any EFI Live $ error code
+- [x] Ensure $0281 response asks for vehicle/device info FIRST before providing any fix
+- [x] For 01-05 Duramax (E54/E60/AL5): use PPEI-specific fuse pull + passthrough + escalation steps
+- [x] For other vehicles: use generic EFI Live PDF guidance (check cables, ignition, vehicle support)
+
+## Honda Talon Tuner — Fuel Map Screenshot Upload JSON Parse Error (Apr 28, 2026)
+- [ ] Fix JSON.parse failure on large fuel tables (35x25 = 875 cells) — LLM output truncated
+- [ ] Add JSON repair logic for truncated responses (close brackets, strip incomplete data)
+- [ ] Add chunked extraction fallback — split large tables into left/right halves if single pass fails
+- [ ] Add max_tokens parameter to LLM call to maximize output space
+- [ ] Add better error messages to user when extraction partially fails
+- [ ] Test with large fuel table screenshots

@@ -21,6 +21,89 @@ function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
+/** Attempt to repair truncated JSON from LLM output */
+function repairTruncatedJSON(raw: string): string {
+  // Try parsing as-is first
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch (_) {
+    // noop
+  }
+
+  // Common truncation: JSON cut off mid-array or mid-object
+  let repaired = raw.trim();
+
+  // Remove trailing comma if present
+  repaired = repaired.replace(/,\s*$/, '');
+
+  // Count open/close brackets to figure out what's missing
+  let openBrackets = 0;
+  let openBraces = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < repaired.length; i++) {
+    const ch = repaired[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '[') openBrackets++;
+    if (ch === ']') openBrackets--;
+    if (ch === '{') openBraces++;
+    if (ch === '}') openBraces--;
+  }
+
+  // If we're inside a string, close it
+  if (inString) repaired += '"';
+
+  // Remove any trailing partial number (e.g., "1.23" cut to "1.2")
+  // This handles cases where a number was being written when truncation hit
+  repaired = repaired.replace(/,\s*[\d.]*$/, '');
+  repaired = repaired.replace(/,\s*$/, '');
+
+  // Close all open brackets/braces
+  for (let i = 0; i < openBrackets; i++) repaired += ']';
+  for (let i = 0; i < openBraces; i++) repaired += '}';
+
+  try {
+    JSON.parse(repaired);
+    return repaired;
+  } catch (_) {
+    // Last resort: try to find the last valid array closing and truncate there
+    // Look for the pattern where data array was being written
+    const dataMatch = repaired.match(/"data"\s*:\s*\[/);
+    if (dataMatch && dataMatch.index !== undefined) {
+      // Find the last complete row (ends with ])
+      const dataStart = dataMatch.index + dataMatch[0].length;
+      let lastCompleteRow = -1;
+      let depth = 1;
+      for (let i = dataStart; i < repaired.length; i++) {
+        if (repaired[i] === '[') depth++;
+        if (repaired[i] === ']') {
+          depth--;
+          if (depth === 1) lastCompleteRow = i; // end of a row
+          if (depth === 0) break; // end of data array
+        }
+      }
+      if (lastCompleteRow > 0) {
+        // Truncate after the last complete row and close everything
+        repaired = repaired.substring(0, lastCompleteRow + 1) + ']}';
+        try {
+          JSON.parse(repaired);
+          return repaired;
+        } catch (_) {
+          // fall through
+        }
+      }
+    }
+  }
+
+  // If nothing works, return original (will throw at caller)
+  return raw;
+}
+
 /** Detect suspicious zeros: a zero surrounded by non-zero neighbors */
 function findSuspiciousZeros(
   data: number[][],
@@ -271,8 +354,9 @@ export const talonOcrRouter = router({
       const fileKey = `talon-ocr/${ctx.user.id}-${randomSuffix()}.${ext}`;
       const { url: imageUrl } = await storagePut(fileKey, buf, input.mimeType);
 
-      // 2. PASS 1: Full table extraction
+      // 2. PASS 1: Full table extraction (with high max_tokens for large tables)
       const response = await invokeLLM({
+        max_tokens: 16384,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
@@ -329,7 +413,16 @@ Return the data as structured JSON with:
         );
       }
 
-      const parsed = JSON.parse(contentStr) as {
+      // Check if response was truncated (finish_reason !== 'stop')
+      const finishReason = response.choices?.[0]?.finish_reason;
+      const wasTruncated = finishReason === 'length';
+      if (wasTruncated) {
+        console.log(`[TalonOCR] Response was truncated (finish_reason=length), attempting JSON repair...`);
+      }
+
+      // Attempt JSON parse with repair fallback for truncated responses
+      const jsonToParse = wasTruncated ? repairTruncatedJSON(contentStr) : contentStr;
+      let parsed: {
         tableName: string;
         unit: string;
         colAxisLabel: string;
@@ -338,6 +431,33 @@ Return the data as structured JSON with:
         rowAxis: number[];
         data: number[][];
       };
+
+      try {
+        parsed = JSON.parse(jsonToParse);
+      } catch (parseErr: any) {
+        // Try repair even if not explicitly truncated
+        const repaired = repairTruncatedJSON(contentStr);
+        try {
+          parsed = JSON.parse(repaired);
+          console.log(`[TalonOCR] JSON repair succeeded`);
+        } catch (_) {
+          // If repair fails, try chunked extraction
+          console.error(`[TalonOCR] JSON parse failed even after repair. Raw length: ${contentStr.length}, finish_reason: ${finishReason}`);
+          throw new Error(
+            `Failed to parse fuel table data — the table may be too large for a single extraction. ` +
+            `Try using a smaller screenshot or the CSV paste option instead. ` +
+            `(Parse error: ${parseErr.message})`
+          );
+        }
+      }
+
+      // If data was truncated and repaired, the row count may be short — that's OK,
+      // we'll pad with the dimension fix below
+      if (wasTruncated && parsed.data.length < parsed.rowAxis.length) {
+        console.log(`[TalonOCR] Repaired JSON has ${parsed.data.length}/${parsed.rowAxis.length} rows — will attempt re-extraction of missing rows`);
+      }
+
+
 
       // 3.5. RPM axis auto-scaling: detect if LLM returned RPM/1000 (e.g., 0.8 instead of 800)
       // If all rowAxis values are < 20 but the label says RPM, they're likely scaled by 1000
@@ -420,6 +540,7 @@ Return the data as structured JSON with:
             );
 
             const regionResponse = await invokeLLM({
+              max_tokens: 8192,
               messages: [
                 {
                   role: "system",
