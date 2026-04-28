@@ -331,18 +331,45 @@ function FuelMapCard({
       const previewUrl = URL.createObjectURL(blob);
       setPastedPreview(previewUrl);
 
-      // Convert to base64
-      const buffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
+      // Compress image to reduce payload size while preserving text readability
+      // Uses higher quality (0.92) than typical compression to keep small numbers legible
+      const { base64: compressedBase64, mimeType: compressedMime } = await new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          const MAX_DIM = 2560; // Higher than typical — fuel tables need readable text
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+          if (w > MAX_DIM || h > MAX_DIM) {
+            const scale = MAX_DIM / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          // Use JPEG at high quality for smaller payload while keeping numbers readable
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          const b64 = dataUrl.split(',')[1];
+          resolve({ base64: b64, mimeType: 'image/jpeg' });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('Failed to load image for compression'));
+        };
+        img.src = url;
+      });
+
+      const base64 = compressedBase64;
+      const finalMime = compressedMime;
 
       const result = await extractMutation.mutateAsync({
         imageBase64: base64,
-        mimeType: mimeType || 'image/png',
+        mimeType: finalMime || 'image/jpeg',
         tableName: config.label,
       });
 
@@ -1021,14 +1048,35 @@ function FuelMapCompareSection({
         if (!blob) return;
         setOcrLoading(true);
         try {
-          const buffer = await blob.arrayBuffer();
-          const bytes = new Uint8Array(buffer);
-          let binary = '';
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          const base64 = btoa(binary);
+          // Compress image for smaller payload while preserving text readability
+          const { base64, mimeType: compMime } = await new Promise<{ base64: string; mimeType: string }>((resolve, reject) => {
+            const img = new Image();
+            const url = URL.createObjectURL(blob);
+            img.onload = () => {
+              URL.revokeObjectURL(url);
+              const MAX_DIM = 2560;
+              let w = img.naturalWidth;
+              let h = img.naturalHeight;
+              if (w > MAX_DIM || h > MAX_DIM) {
+                const scale = MAX_DIM / Math.max(w, h);
+                w = Math.round(w * scale);
+                h = Math.round(h * scale);
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
+              ctx.drawImage(img, 0, 0, w, h);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+              resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' });
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Failed to load image')); };
+            img.src = url;
+          });
           const result = await ocrMutation.mutateAsync({
             imageBase64: base64,
-            mimeType: blob.type,
+            mimeType: compMime,
             tableName: FUEL_MAP_CONFIGS.find(c => c.key === selectedMap)?.label,
           });
           if (result.success && result.data && result.rowAxis && result.colAxis) {

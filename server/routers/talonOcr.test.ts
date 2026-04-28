@@ -388,6 +388,89 @@ describe("suspicious zero detection", () => {
   });
 });
 
+describe("repairTruncatedJSON", () => {
+  // Replicate the repair function from the router for testing
+  function repairTruncatedJSON(raw: string): string {
+    try {
+      JSON.parse(raw);
+      return raw;
+    } catch (_) { /* noop */ }
+
+    let repaired = raw.trim();
+    repaired = repaired.replace(/,\s*$/, '');
+
+    let openBrackets = 0;
+    let openBraces = 0;
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (escape) { escape = false; continue; }
+      if (ch === '\\' && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === '[') openBrackets++;
+      if (ch === ']') openBrackets--;
+      if (ch === '{') openBraces++;
+      if (ch === '}') openBraces--;
+    }
+
+    if (inString) repaired += '"';
+    repaired = repaired.replace(/,\s*[\d.]*$/, '');
+    repaired = repaired.replace(/,\s*$/, '');
+
+    for (let i = 0; i < openBrackets; i++) repaired += ']';
+    for (let i = 0; i < openBraces; i++) repaired += '}';
+
+    try {
+      JSON.parse(repaired);
+      return repaired;
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  it("should return valid JSON unchanged", () => {
+    const valid = JSON.stringify({ data: [[1.0, 2.0], [3.0, 4.0]] });
+    expect(repairTruncatedJSON(valid)).toBe(valid);
+    expect(() => JSON.parse(repairTruncatedJSON(valid))).not.toThrow();
+  });
+
+  it("should repair JSON truncated mid-array (missing closing brackets)", () => {
+    const truncated = '{"data":[[1.0,2.0],[3.0,4.0],[5.0,6.';
+    const repaired = repairTruncatedJSON(truncated);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+  });
+
+  it("should repair JSON with trailing comma", () => {
+    const truncated = '{"data":[[1.0,2.0],[3.0,4.0],';
+    const repaired = repairTruncatedJSON(truncated);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+  });
+
+  it("should repair JSON truncated after a complete row", () => {
+    const truncated = '{"colAxis":[0,10,20],"rowAxis":[800,1000],"data":[[1.0,2.0,3.0],[4.0,5.0';
+    const repaired = repairTruncatedJSON(truncated);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+    const parsed = JSON.parse(repaired);
+    expect(parsed.colAxis).toEqual([0, 10, 20]);
+  });
+
+  it("should handle truncation inside a string value", () => {
+    const truncated = '{"tableName":"Desired Injector Pw, Alpha-N';
+    const repaired = repairTruncatedJSON(truncated);
+    expect(() => JSON.parse(repaired)).not.toThrow();
+  });
+
+  it("should handle completely empty or invalid input gracefully", () => {
+    // Returns original if can't repair
+    const result = repairTruncatedJSON("");
+    // Either repairs to valid or returns original
+    expect(typeof result).toBe("string");
+  });
+});
+
 describe("interpolation fallback", () => {
   function interpolateCell(data: number[][], r: number, c: number): number {
     const neighbors: number[] = [];
