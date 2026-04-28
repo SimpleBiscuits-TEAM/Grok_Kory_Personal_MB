@@ -6,9 +6,11 @@
  * Rules:
  *   - AFR1 → Cylinder 1, AFR2 → Cylinder 2
  *   - Correction factor = actual_lambda / target_lambda per cell, averaged
- *   - Alpha-N channel = 1 → only Alpha-N tables; ≠ 1 → only Speed Density tables
+ *   - Alpha-N channel STRICTLY = 1 → only Alpha-N tables; anything else → only Speed Density tables
  *   - Only cells visited in the datalog get corrected
- *   - Skip deceleration events: TPS = 0 AND vehicle speed > 0
+ *   - Skip deceleration events (NO corrections during decel):
+ *       1. TPS = 0 AND vehicle speed > 0 (closed throttle while moving)
+ *       2. Injector PW Final = 0 (ECU has cut fuel entirely)
  *   - When Short Term Fuel Trims (STFT) are present, factor them into the
  *     actual AFR before computing lambda. Negative STFT = ECU pulling fuel,
  *     positive STFT = ECU adding fuel. Corrected AFR = measured AFR / (1 + STFT/100).
@@ -525,14 +527,21 @@ function computeMapCorrections(
 
     if (isNaN(rpm) || isNaN(rawVal) || rawVal <= 0) continue;
 
-    // ── Deceleration filter: skip TPS=0 + vehicle speed > 0 ──
-    // When throttle is closed and vehicle is moving, the engine is in
-    // decel fuel cut or overrun — AFR readings are meaningless.
+    // ── Deceleration filter ──
+    // Skip samples that indicate deceleration/fuel cut:
+    //   1. TPS = 0 AND vehicle speed > 0 (closed throttle while moving)
+    //   2. Injector PW Final = 0 (ECU has cut fuel entirely)
+    // In both cases, AFR readings are meaningless for correction.
     // (Reusable pattern for Kawasaki tool)
     const tpsVal = channelData.tps[i];
     const vSpeed = channelData.vehicleSpeed[i];
     if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
       if (tpsVal === 0 && vSpeed > 0) continue;
+    }
+    // Injector PW Final = 0 means ECU has completely cut fuel (decel fuel cut)
+    if (channelData.hasInjPwFinal) {
+      const injFinal = channelData.injPwFinal[i];
+      if (Number.isFinite(injFinal) && injFinal === 0) continue;
     }
 
     // ── Transient fueling filter: skip samples during transient enrichment ──
@@ -542,7 +551,10 @@ function computeMapCorrections(
     if (transientMask.length > i && transientMask[i]) continue;
 
     // Check if this sample belongs to this map's mode
-    const sampleIsAlphaN = alphaNVal === 1;
+    // Alpha-N channel: 1 = Alpha-N mode active, anything else (0, NaN, undefined) = Speed Density
+    // CRITICAL: Only apply corrections to Alpha-N table when channel STRICTLY equals 1.
+    // Use Math.round to handle floating point precision (e.g., 0.9999 or 1.0001 from sensor)
+    const sampleIsAlphaN = Number.isFinite(alphaNVal) && Math.round(alphaNVal) === 1;
     if (isAlphaN && !sampleIsAlphaN) continue;
     if (!isAlphaN && sampleIsAlphaN) continue;
 
@@ -675,6 +687,7 @@ export function computeCorrections(
   let decelSamplesSkipped = 0;
   for (let i = 0; i < channelData.alphaN.length; i++) {
     // Check decel filter at the top-level count too
+    // 1. TPS = 0 AND vehicle speed > 0
     const tpsVal = channelData.tps[i];
     const vSpeed = channelData.vehicleSpeed[i];
     if (channelData.hasVehicleSpeed && Number.isFinite(tpsVal) && Number.isFinite(vSpeed)) {
@@ -683,7 +696,17 @@ export function computeCorrections(
         continue;
       }
     }
-    if (channelData.alphaN[i] === 1) alphaNSamples++;
+    // 2. Injector PW Final = 0 (ECU fuel cut)
+    if (channelData.hasInjPwFinal) {
+      const injFinal = channelData.injPwFinal[i];
+      if (Number.isFinite(injFinal) && injFinal === 0) {
+        decelSamplesSkipped++;
+        continue;
+      }
+    }
+    // Alpha-N mode check: strictly equals 1 (with float tolerance)
+    const alphaNVal = channelData.alphaN[i];
+    if (Number.isFinite(alphaNVal) && Math.round(alphaNVal) === 1) alphaNSamples++;
     else sdSamples++;
   }
 

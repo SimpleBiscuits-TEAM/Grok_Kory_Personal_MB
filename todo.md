@@ -2446,3 +2446,9 @@
 - [x] Add Powersports-specific troubleshooting for PV3 and HP Tuners
 - [x] Inject PPEI_POWERSPORTS_KB into system prompt alongside other KB references
 - [x] Push to both GitHub repos
+
+## Honda Talon Fuel Correction Logic Bugs
+- [x] Add injector PW final = 0 deceleration filter (skip sample when injPwFinal = 0)
+- [x] Fix Alpha-N channel check — ensure corrections only apply to Alpha-N table when alphaN channel STRICTLY equals 1
+- [x] Add injPwFinal = 0 check to decel sample counter in computeCorrections() too
+- [x] Verify Alpha-N channel is being read as exact integer 1 vs floating point comparison issue
