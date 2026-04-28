@@ -4,8 +4,7 @@
  * tune flashing, data logging, error code troubleshooting, and
  * general product support across PPEI tuning tools and platforms.
  *
- * Features Knox AI collaboration — customers watch Strat and Knox
- * converse in real-time to diagnose and resolve technical issues.
+ * Strat handles all customer support independently.
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -19,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { SpeechToTextButton } from '@/components/SpeechToTextButton';
 import {
   Headphones, BookOpen, MessageCircle, Phone,
-  Star, X, CheckCircle, Send, Brain, Cpu,
+  Star, X, CheckCircle, Send, Cpu,
   Loader2, Sparkles, User,
 } from 'lucide-react';
 
@@ -54,11 +53,10 @@ const SUGGESTED_PROMPTS = [
 const FEEDBACK_THRESHOLD = 5;
 
 /**
- * Extended message type that supports Knox conversation steps.
+ * Extended message type for Strat support chat.
  */
 type StratMessage = Message & {
-  speaker?: 'strat' | 'knox' | 'user';
-  stepType?: 'handoff' | 'thinking' | 'response' | 'banter' | 'final';
+  speaker?: 'strat' | 'user';
 };
 
 /* ─── Feedback Form Component ─────────────────────────────────────────── */
@@ -236,9 +234,8 @@ function StratFeedbackForm({
   );
 }
 
-/* ─── Knox/Strat Message Bubble — distinct styling per speaker ─────────── */
+/* ─── Strat Message Bubble ─────────────────────────────────────────────────────────────── */
 function StratMessageBubble({ msg }: { msg: StratMessage }) {
-  const isKnox = msg.speaker === 'knox';
   const isUser = msg.role === 'user';
 
   if (isUser) {
@@ -262,15 +259,7 @@ function StratMessageBubble({ msg }: { msg: StratMessage }) {
     );
   }
 
-  // Assistant message (Strat or Knox)
-  const avatarBg = isKnox ? 'rgba(147,51,234,0.15)' : 'rgba(0,200,255,0.1)';
-  const avatarBorder = isKnox ? 'rgba(147,51,234,0.4)' : 'rgba(0,200,255,0.3)';
-  const accentColor = isKnox ? sColor.purple : sColor.cyan;
-  const label = isKnox ? 'KNOX' : 'STRAT';
-  const Icon = isKnox ? Brain : Cpu;
-  const bubbleBg = isKnox ? 'rgba(147,51,234,0.06)' : 'rgba(0,200,255,0.04)';
-  const bubbleBorder = isKnox ? 'rgba(147,51,234,0.15)' : 'rgba(0,200,255,0.1)';
-
+  // Assistant message (Strat only)
   return (
     <div
       className="flex gap-3 justify-start items-start"
@@ -279,36 +268,26 @@ function StratMessageBubble({ msg }: { msg: StratMessage }) {
       {/* Avatar */}
       <div style={{
         width: 36, height: 36, borderRadius: '50%',
-        background: avatarBg, border: `1px solid ${avatarBorder}`,
+        background: 'rgba(0,200,255,0.1)', border: '1px solid rgba(0,200,255,0.3)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0, marginTop: 4,
       }}>
-        <Icon size={16} style={{ color: accentColor }} />
+        <Cpu size={16} style={{ color: sColor.cyan }} />
       </div>
 
       {/* Message */}
       <div style={{ maxWidth: '80%' }}>
         {/* Speaker label */}
         <div style={{
-          fontFamily: sFont.mono, fontSize: '0.5rem', color: accentColor,
+          fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.cyan,
           letterSpacing: '0.1em', marginBottom: '4px',
-          display: 'flex', alignItems: 'center', gap: '6px',
         }}>
-          {label}
-          {msg.stepType === 'banter' && (
-            <span style={{ color: sColor.textDim, fontSize: '0.45rem' }}>• entering chat</span>
-          )}
-          {msg.stepType === 'handoff' && (
-            <span style={{ color: sColor.textDim, fontSize: '0.45rem' }}>• consulting knox</span>
-          )}
-          {msg.stepType === 'final' && (
-            <span style={{ color: sColor.textDim, fontSize: '0.45rem' }}>• wrapping up</span>
-          )}
+          STRAT
         </div>
 
         <div style={{
           borderRadius: '10px', padding: '10px 16px',
-          background: bubbleBg, border: `1px solid ${bubbleBorder}`,
+          background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.1)',
           fontFamily: sFont.body, fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)',
         }}>
           <div className="prose prose-sm prose-invert max-w-none">
@@ -320,39 +299,33 @@ function StratMessageBubble({ msg }: { msg: StratMessage }) {
   );
 }
 
-/* ─── Knox Typing Indicator ──────────────────────────────────────────── */
-function KnoxTypingIndicator({ speaker }: { speaker: 'strat' | 'knox' }) {
-  const isKnox = speaker === 'knox';
-  const avatarBg = isKnox ? 'rgba(147,51,234,0.15)' : 'rgba(0,200,255,0.1)';
-  const avatarBorder = isKnox ? 'rgba(147,51,234,0.4)' : 'rgba(0,200,255,0.3)';
-  const accentColor = isKnox ? sColor.purple : sColor.cyan;
-  const label = isKnox ? 'KNOX' : 'STRAT';
-  const Icon = isKnox ? Brain : Cpu;
+/* ─── Strat Typing Indicator ──────────────────────────────────────────────────────────────────── */
+function StratTypingIndicator() {
 
   return (
     <div className="flex gap-3 justify-start items-start" style={{ animation: 'stratFadeIn 0.3s ease-out' }}>
       <div style={{
         width: 36, height: 36, borderRadius: '50%',
-        background: avatarBg, border: `1px solid ${avatarBorder}`,
+        background: 'rgba(0,200,255,0.1)', border: '1px solid rgba(0,200,255,0.3)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0, marginTop: 4,
       }}>
-        <Icon size={16} style={{ color: accentColor }} />
+        <Cpu size={16} style={{ color: sColor.cyan }} />
       </div>
       <div>
         <div style={{
-          fontFamily: sFont.mono, fontSize: '0.5rem', color: accentColor,
+          fontFamily: sFont.mono, fontSize: '0.5rem', color: sColor.cyan,
           letterSpacing: '0.1em', marginBottom: '4px',
         }}>
-          {label}
+          STRAT
           <span style={{ color: sColor.textDim, fontSize: '0.45rem', marginLeft: '6px' }}>
-            • {isKnox ? 'analyzing...' : 'thinking...'}
+            • thinking...
           </span>
         </div>
         <div style={{
           borderRadius: '10px', padding: '10px 16px',
-          background: isKnox ? 'rgba(147,51,234,0.06)' : 'rgba(0,200,255,0.04)',
-          border: `1px solid ${isKnox ? 'rgba(147,51,234,0.15)' : 'rgba(0,200,255,0.1)'}`,
+          background: 'rgba(0,200,255,0.04)',
+          border: '1px solid rgba(0,200,255,0.1)',
           display: 'flex', gap: '4px', alignItems: 'center',
         }}>
           <div style={{ display: 'flex', gap: '3px' }}>
@@ -361,7 +334,7 @@ function KnoxTypingIndicator({ speaker }: { speaker: 'strat' | 'knox' }) {
                 key={i}
                 style={{
                   width: 6, height: 6, borderRadius: '50%',
-                  background: accentColor, opacity: 0.5,
+                  background: sColor.cyan, opacity: 0.5,
                   animation: `stratBounce 1.2s ease-in-out ${i * 0.15}s infinite`,
                 }}
               />
@@ -373,13 +346,12 @@ function KnoxTypingIndicator({ speaker }: { speaker: 'strat' | 'knox' }) {
   );
 }
 
-/* ─── Custom Strat Chat Box (replaces AIChatBox for Knox support) ────── */
+/* ─── Custom Strat Chat Box ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 function StratChatBox({
   messages,
   onSendMessage,
   isLoading,
   isAnimating,
-  animatingSpeaker,
   placeholder,
   height,
   emptyStateMessage,
@@ -389,7 +361,6 @@ function StratChatBox({
   onSendMessage: (content: string) => void;
   isLoading: boolean;
   isAnimating: boolean;
-  animatingSpeaker: 'strat' | 'knox';
   placeholder?: string;
   height?: string | number;
   emptyStateMessage?: string;
@@ -443,11 +414,7 @@ function StratChatBox({
           <div className="flex h-full flex-col p-4">
             <div className="flex flex-1 flex-col items-center justify-center gap-6">
               <div className="flex flex-col items-center gap-3">
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <Cpu size={24} style={{ color: sColor.cyan, opacity: 0.3 }} />
-                  <span style={{ color: sColor.textDim, fontFamily: sFont.mono, fontSize: '0.5rem' }}>+</span>
-                  <Brain size={24} style={{ color: sColor.purple, opacity: 0.3 }} />
-                </div>
+                <Cpu size={28} style={{ color: sColor.cyan, opacity: 0.3 }} />
                 <p style={{
                   fontFamily: sFont.body, fontSize: '0.85rem', color: sColor.textDim,
                   textAlign: 'center', maxWidth: '400px',
@@ -495,7 +462,7 @@ function StratChatBox({
 
               {/* Typing indicator — shows during loading or animation */}
               {(isLoading || isAnimating) && (
-                <KnoxTypingIndicator speaker={isAnimating ? animatingSpeaker : 'strat'} />
+                <StratTypingIndicator />
               )}
             </div>
           </ScrollArea>
@@ -564,61 +531,19 @@ function StratChatBox({
   );
 }
 
-/* ─── Shared chat hook (with Knox conversation support) ──────────────── */
+//* ─── Shared chat hook for Strat support ────────────────────────────────────────────────────────── *//
 function useStratChat() {
   const [messages, setMessages] = useState<StratMessage[]>([]);
   const [userMsgCount, setUserMsgCount] = useState(0);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackDismissed, setFeedbackDismissed] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [animatingSpeaker, setAnimatingSpeaker] = useState<'strat' | 'knox'>('strat');
   const feedbackShownRef = useRef(false);
   const sessionStartRef = useRef(Date.now());
 
-  // Animate conversation steps one at a time with delays
-  const animateSteps = useCallback((steps: Array<{ speaker: string; content: string; type: string }>) => {
-    if (!steps || steps.length === 0) return;
-
-    setIsAnimating(true);
-    const queue = steps.map(s => ({
-      role: 'assistant' as const,
-      content: s.content,
-      speaker: s.speaker as 'strat' | 'knox',
-      stepType: s.type as StratMessage['stepType'],
-    }));
-
-    let idx = 0;
-    const playNext = () => {
-      if (idx >= queue.length) {
-        setIsAnimating(false);
-        return;
-      }
-      const msg = queue[idx];
-      // Show typing indicator for the NEXT speaker before revealing message
-      const nextSpeaker = idx + 1 < queue.length ? queue[idx + 1].speaker : msg.speaker;
-      setAnimatingSpeaker(msg.speaker);
-      setMessages(prev => [...prev, msg]);
-      idx++;
-      // Delay between messages: banter/handoff = 1.2s, response = 1.8s, final = 1s
-      const delay = msg.stepType === 'response' ? 1800 : msg.stepType === 'banter' || msg.stepType === 'handoff' ? 1200 : 1000;
-      if (idx < queue.length) {
-        setAnimatingSpeaker(nextSpeaker);
-      }
-      setTimeout(playNext, delay);
-    };
-    playNext();
-  }, []);
-
   const chatMut = trpc.strat.chat.useMutation({
     onSuccess: (data) => {
-      const steps = (data as any).conversationSteps;
-      if (steps && steps.length > 0) {
-        // Knox-assisted response — animate the conversation
-        animateSteps(steps);
-      } else {
-        // Simple Strat-only response
-        setMessages(prev => [...prev, { role: 'assistant', content: String(data.reply ?? ''), speaker: 'strat' }]);
-      }
+      setMessages(prev => [...prev, { role: 'assistant', content: String(data.reply ?? ''), speaker: 'strat' }]);
     },
     onError: (error) => {
       setMessages(prev => [...prev, {
@@ -681,8 +606,7 @@ function useStratChat() {
     handleSend,
     isLoading: chatMut.isPending,
     isAnimating,
-    animatingSpeaker,
-    showFeedback,
+      showFeedback,
     feedbackMut,
     handleFeedbackSubmit,
     handleFeedbackDismiss,
@@ -694,7 +618,7 @@ function useStratChat() {
 export function StratContent() {
   const { loading: authLoading } = useAuth();
   const {
-    messages, handleSend, isLoading, isAnimating, animatingSpeaker,
+    messages, handleSend, isLoading, isAnimating,
     showFeedback, feedbackMut, handleFeedbackSubmit, handleFeedbackDismiss, userMsgCount,
   } = useStratChat();
 
@@ -723,13 +647,6 @@ export function StratContent() {
           borderRadius: '3px', padding: '2px 6px', letterSpacing: '0.08em',
         }}>
           STRAT
-        </span>
-        <span style={{
-          fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.purple,
-          background: 'rgba(147,51,234,0.1)', border: '1px solid rgba(147,51,234,0.3)',
-          borderRadius: '3px', padding: '2px 6px', letterSpacing: '0.08em',
-        }}>
-          + KNOX
         </span>
       </div>
 
@@ -771,10 +688,9 @@ export function StratContent() {
         onSendMessage={handleSend}
         isLoading={isLoading}
         isAnimating={isAnimating}
-        animatingSpeaker={animatingSpeaker}
         placeholder="Ask Strat about installation, tune flashing, data logging, error codes, or device setup..."
         height="calc(100vh - 320px)"
-        emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. For tough technical questions, I'll pull in Knox to help diagnose. What do you need help with?"
+        emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. I handle installation, tune flashing, data logging, error codes, and device setup. What do you need help with?"
         suggestedPrompts={SUGGESTED_PROMPTS}
       />
     </div>
@@ -787,7 +703,7 @@ export function StratContent() {
 export default function Strat() {
   const { loading: authLoading } = useAuth();
   const {
-    messages, handleSend, isLoading, isAnimating, animatingSpeaker,
+    messages, handleSend, isLoading, isAnimating,
     showFeedback, feedbackMut, handleFeedbackSubmit, handleFeedbackDismiss, userMsgCount,
   } = useStratChat();
 
@@ -821,18 +737,14 @@ export default function Strat() {
               background: 'rgba(0,200,255,0.1)', border: '1px solid rgba(0,200,255,0.3)',
               borderRadius: '3px', padding: '2px 6px', letterSpacing: '0.08em',
             }}>STRAT</span>
-            <span style={{
-              fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.purple,
-              background: 'rgba(147,51,234,0.1)', border: '1px solid rgba(147,51,234,0.3)',
-              borderRadius: '3px', padding: '2px 6px', letterSpacing: '0.08em',
-            }}>+ KNOX</span>
+
           </div>
           <p style={{
             fontFamily: sFont.body, fontSize: '0.9rem', color: sColor.textDim,
             maxWidth: '600px', margin: 0,
           }}>
-            Post-sale tech support powered by Strat + Knox AI collaboration.
-            Watch them work together to diagnose and resolve your issues in real-time.
+            Post-sale tech support powered by Strat AI.
+            Get help with installation, tune flashing, data logging, error codes, and device setup.
           </p>
 
           {/* Stats row */}
@@ -874,10 +786,9 @@ export default function Strat() {
           onSendMessage={handleSend}
           isLoading={isLoading}
           isAnimating={isAnimating}
-          animatingSpeaker={animatingSpeaker}
           placeholder="Ask Strat about installation, tune flashing, data logging, error codes, or device setup..."
           height="calc(100vh - 400px)"
-          emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. For tough technical questions, I'll pull in Knox to help diagnose. What do you need help with?"
+          emptyStateMessage="Hey! I'm Strat — PPEI's tech support AI. I handle installation, tune flashing, data logging, error codes, and device setup. What do you need help with?"
           suggestedPrompts={SUGGESTED_PROMPTS}
         />
       </div>

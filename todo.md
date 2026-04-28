@@ -2394,3 +2394,17 @@
 - [ ] Add 4 memory-defined DDDIs: FE00→RAM 0x40014682, FE01→RAM 0x40014DB4, FE02→RAM 0x400143C2, FE03→RAM 0x40014CC0 (deferred)
 - [ ] Wire DDDI memory streaming into V-OP USB bridge for TCM periodic reads (deferred)
 - [ ] Map memory DDDIs to HP Tuners channels: Trans Fluid Temp, Turbine RPM, Current Gear, TCC State, Shift Mode (deferred)
+
+## Remove Knox from Strat Support Channel (Apr 28, 2026)
+- [x] Remove Knox consultation from Strat's support chat — Strat handles ALL support independently
+- [x] Remove needsKnox detection and Knox-assisted path from strat.ts chat mutation
+- [x] Remove Knox handoff, Knox banter, Knox entry, Knox wrap-up steps from conversation flow
+- [x] Keep Strat's own knowledge base (PPEI_SUPPORT_KB, PPEI_TRAINING_KB) intact — Strat uses these directly
+- [x] Strat still routes diagnostic/tuning questions to Knox tab (tells customer to use AI CHAT tab) but does NOT pull Knox into the support conversation
+- [x] Fix $0281 knowledge — add detailed 2001-2005 Duramax (E54/E60/AL5) flashing troubleshooting
+- [x] Add $0281 KB entries with correct EFI Live communication error explanation (NOT hardcoded — Strat verifies vehicle first)
+- [x] Add fuse pull instructions: LB7 (E54) = Radio, Radio AMP, INFO, SEO1, SEO2; LLY (E60) = INFO, RADIO, RADIO AMP, TBC BATT, TBC IGNITION
+- [x] Add passthrough mode fallback instruction for persistent $0281
+- [x] Add escalation to PPEI live support if all steps fail
+- [x] Update conversationSteps return type — always return empty array (no more Knox steps)
+- [x] Test that error codes still get correct responses without Knox

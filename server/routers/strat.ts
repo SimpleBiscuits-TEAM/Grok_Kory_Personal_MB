@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
-import { queryKnox, type AccessLevel } from "../lib/knoxReconciler";
+// Knox removed from Strat support channel — Strat handles all support independently
 import { getDb } from "../db";
 import { stratFeedback } from "../../drizzle/schema";
 import { webSearch, formatSearchResults } from "../lib/webSearch";
@@ -127,6 +127,64 @@ ${BBX_CONFIG_STEPS}
 ${CUMMINS_CONTROLLER_REF}
 
 Select the controller(s) that match your vehicle in both the F2: Scan and F3: Tune tabs. Let me know if you need help figuring out which one to pick!`;
+
+/**
+ * $0281 reference response for 2001-2005 Duramax trucks.
+ * This is NOT hardcoded/auto-returned — it's used as supplementary KB context.
+ * $0281 causes vary by vehicle, so Strat must verify vehicle/device first.
+ * This response is specifically for E54 (LB7) and E60 (LLY) ECMs and AL5 TCMs.
+ */
+const DURAMAX_0281_REFERENCE = `$0281 is an **EFI Live communication error** — it means the device lost communication with the ECM during a read or flash attempt. This is **not** a diagnostic trouble code (DTC) — it's an EFI Live software error indicating a communication failure between the AutoCal/FlashScan and the vehicle's ECM.
+
+This code is **very common** when working with 2001–2005 GM Duramax trucks equipped with **E54** (LB7) and **E60** (LLY) ECMs and **AL5** TCMs. These trucks have a very busy CAN bus system with constant background chatter that can interrupt communication.
+
+**Common causes:**
+- Aftermarket electronics installed on the vehicle interfering with communication
+- Foreign tuning/programming previously installed on the ECM
+- Internal ECM issue (common on these older ECMs due to CAN bus noise)
+
+**Step 1 — Disconnect Aftermarket Electronics**
+
+Disconnect and/or uninstall **any and all** aftermarket electronics from the vehicle. They can be reinstalled later — but they need to be removed during the flash/read process.
+
+**Step 2 — Ensure Only the AutoCal Is Connected**
+
+Make sure **only** the AutoCal or FlashScan is connected to the OBD-II port. Do not split the port with any other device.
+
+**Step 3 — Pull Fuses**
+
+Pull the following fuses based on your engine:
+
+**If LB7 (2001-2004 — E54 ECM), pull:**
+- Radio
+- Radio AMP
+- INFO
+- SEO 1
+- SEO 2
+
+**If LLY (2004.5-2005 — E60 ECM), pull:**
+- INFO
+- RADIO
+- RADIO AMP
+- TBC BATT
+- TBC IGNITION
+
+**Step 4 — Retry the Flash/Read**
+
+With the fuses pulled and aftermarket electronics disconnected, attempt the flash or read again.
+
+**Step 5 — If It Still Fails: Try Passthrough Mode**
+
+If the flash or read still fails after pulling fuses, you can attempt to do this in **passthrough mode** using the EFI Live software and a Windows laptop inside the vehicle, using the AutoCal as a passthrough device. You'll need a laptop with internet access and the EFI Live V8 software installed.
+
+**Step 6 — If Passthrough Also Fails: Contact PPEI**
+
+If a failure still occurs in passthrough mode, please contact PPEI support directly to work with a live agent. They can arrange a remote desktop session or bench flash your ECM.
+
+- **Call:** (337) 485-7070
+- **Submit a ticket:** [support.ppei.com](https://support.ppei.com)
+
+What year and engine is your truck? That way I can confirm the right fuses for your specific setup.`;
 
 /**
  * Complete PPEI Support Knowledge Base — scraped from support.ppei.com
@@ -1490,7 +1548,18 @@ Please reach out to us at (337) 485-7070 for further assistance.
 $0101 - No Data Received: EFILive device tried to communicate with vehicle and failed. Check USB/OBDII cables, try another USB port, key 2 clicks forward (on position), engine not running, update device.
 $0106 - Received data out of range: Firmware may need updating. Check boot block, firmware, update BBX settings in EFILive V8.
 $0194 - Write failure: Target file system is full. Reformat Config file system, check SD card/internal memory free space.
-$0281 - No data received or key not in run position: Check all cables, ignition in run position, vehicle supported by EFILive, remove aftermarket electronics.
+$0281 - EFI Live Communication Error: This is a communication failure between the AutoCal/FlashScan and the ECM — NOT a UDS/DTC code and NOT a diagnostic trouble code.
+**IMPORTANT: $0281 causes and fixes vary by vehicle. ALWAYS verify what vehicle and device the customer is using before providing a fix.** If the customer only says "$0281" with no other context, ask what year/make/model truck and what device they're using FIRST.
+**For 2001-2005 Duramax trucks (E54/E60 ECMs, AL5 TCMs) — this is the MOST COMMON scenario:**
+These trucks have a very busy CAN bus system with constant background chatter that can interrupt communication. Most commonly caused by: aftermarket electronics interfering, foreign tuning on ECM, or internal ECM issue.
+Fix for 01-05 Duramax:
+1. Disconnect ALL aftermarket electronics from the vehicle.
+2. Ensure ONLY the AutoCal/FlashScan is connected to the OBD-II port (no splitters).
+3. Pull fuses: LB7 (E54) → Radio, Radio AMP, INFO, SEO 1, SEO 2. LLY (E60) → INFO, RADIO, RADIO AMP, TBC BATT, TBC IGNITION.
+4. Retry flash/read.
+5. If still failing → try passthrough mode with Windows laptop + AutoCal as passthrough device.
+6. If passthrough also fails → contact PPEI at (337) 485-7070 for live agent or bench flash.
+**For other vehicles:** Check all cables, verify ignition is in run position, confirm vehicle is supported by EFILive, remove aftermarket electronics, and update firmware/software.
 $0333 - Security Access Denied: Controller not unlocked or re-armed. Try "Assume Lock may be Faulty" and "Try Alt Keys" in V8 pass-thru. For LB7/LLY, remove radio, radio amp, info fuses.
 $0335 - Invalid Key: Controller locked with customer key. Try pass through flash with "Try Common Alternative Keys", "Assume Lock may be Faulty", "Try Alt Keys". May need new ECM if lock is bad.
 $0340 - Download Not Accepted: For Cummins, re-flash ECM with stock file. For others, contact EFILive.
@@ -1543,9 +1612,18 @@ $0280: OBD system is offline — vehicle isn't establishing a connection with th
   Cause: Truck's OBD port may be unpowered or faulty — blown fuse, disconnected wiring harness, or power supply issue.
   Fix: Confirm truck's ignition is fully on (not just accessory mode). Inspect OBD-II fuse in vehicle's fuse box and replace if blown. Test with different OBD cable. Use multimeter to check OBD port for 12V power on pin 16.
 
-$0281: No data coming from the truck — complete silence from the ECM.
-  Cause: Disconnected or faulty cable, dead OBD port, or ECM issue due to power failure or internal fault.
-  Fix: Inspect all cable connections. Verify truck engine is running or at least in 'on' position. Restart Scan and Tune software. Check ECM power supply with multimeter (pins 16 for power, 4/5 for ground).
+$0281: EFI Live Communication Error — the device lost communication with the ECM. NOT a UDS/DTC code.
+  **IMPORTANT: Causes and fixes vary by vehicle. Always verify vehicle year/make/model and device before providing a fix.**
+  **For 2001-2005 Duramax (E54/E60 ECMs, AL5 TCMs) — most common scenario:**
+  Cause: Aftermarket electronics interfering, foreign tuning/programming on ECM, or internal ECM issue (CAN bus background chatter on older Duramax).
+  Fix:
+  1. Disconnect ALL aftermarket electronics.
+  2. Ensure ONLY AutoCal/FlashScan connected to OBD-II port (no splitters).
+  3. Pull fuses based on engine: LB7 (E54) → Radio, Radio AMP, INFO, SEO 1, SEO 2. LLY (E60) → INFO, RADIO, RADIO AMP, TBC BATT, TBC IGNITION.
+  4. Retry flash/read.
+  5. If still failing → try passthrough mode (Windows laptop + AutoCal as passthrough).
+  6. If passthrough fails → contact PPEI at (337) 485-7070 for live agent or bench flash.
+  **For other vehicles:** Check cables, ignition in run position, vehicle supported by EFILive, remove aftermarket electronics, update firmware/software.
 
 $0311: OBD mode is locked — diagnostic mode won't activate.
   Cause: Security lockout, misconfigured settings, or incompatible scan tool profile.
@@ -2203,15 +2281,17 @@ You are NOT a sales agent. You are NOT a diagnostic agent. You are a tech suppor
 - General "I just got my product, now what?" questions
 - "My flash failed" or "I got an error" troubleshooting
 
-### What You DO NOT Handle (Route to Other Agents):
-- Vehicle diagnostics, DTC interpretation, datalog analysis → Tell the customer: "That sounds like a diagnostic question — Knox is our expert for that. You can find Knox in the **AI CHAT** tab or the **DIAGNOSTIC** tab."
+### What You DO NOT Handle (Route to Other Resources):
+- Vehicle diagnostics, DTC interpretation, datalog analysis → Tell the customer: "That sounds like a diagnostic question — you can find Knox in the **AI CHAT** tab or the **DIAGNOSTIC** tab for that."
 - Weather, atmospheric conditions, SAE corrections → Tell the customer: "Laura handles weather — check the **WEATHER** tab."
 - Business opportunities, Innovator Program → Tell the customer: "Pitch is our business strategy AI — check the **PITCH** tab."
 - Fleet management → Tell the customer: "Goose handles fleet — check the **FLEET** tab."
-- Tune calibration questions (what maps to change, how to tune) → Tell the customer: "That's a calibration question — Knox is the expert. Check the **AI CHAT** tab."
+- Tune calibration questions (what maps to change, how to tune) → Tell the customer: "That's a calibration question — Knox is the expert for that. Check the **AI CHAT** tab."
 - Anything about V-OP hardware, VOP 3.0 device, CarPlay integration → Tell the customer: "That's a V-OP platform question — reach out to the team directly or check the community forum."
 
 When routing, be specific about which tab to go to. Don't just say "ask another agent" — tell them exactly where to go.
+
+**IMPORTANT: You do NOT consult Knox or bring Knox into this conversation. You handle all support questions independently. If a question is outside your domain, route the customer to the appropriate tab — but never pull another AI into this chat.**
 
 ## CRITICAL RESPONSE RULES — READ THIS FIRST
 **You MUST follow these rules for EVERY response:**
@@ -2385,6 +2465,12 @@ export const stratRouter = router({
         return { reply: escalationMsg, conversationSteps: [] };
       }
 
+      // ── Hardcoded $0502 detection — bypasses LLM entirely ──
+      const is0502 = /\$0502|\b0502\b/i.test(lowerMsg) && !customerPersists;
+      if (is0502) {
+        return { reply: HARDCODED_0502_RESPONSE, conversationSteps: [] };
+      }
+
       // Check if BBX was already sent in history (don't re-send)
       const bbxAlreadySent = history.some(m => m.role === 'assistant' && (/Download (Duramax|Cummins) BBX File/i.test(m.content) || /AllDieselBBX/i.test(m.content)));
 
@@ -2405,13 +2491,7 @@ export const stratRouter = router({
         };
       }
 
-      // ── Detect if Knox should assist ──
-      // Knox helps with: error codes, diagnostics, technical troubleshooting, ECU questions, flash issues
-      // Also ALWAYS consult Knox when the customer says the issue persists after trying suggested fixes
-      const needsKnox = customerPersists || /error|\$0[0-9]{3}|\$0[0-9a-f]{3}|diagnostic|dtc|pid|ecu|flash|won'?t start|misfire|boost|fuel|injection|turbo|limp|check engine|cel|code|trouble|sensor|voltage|pressure|temp|knock|timing|transmission|tcm|won'?t flash|brick|fail|stuck/i.test(lowerMsg);
-
-      // ── Simple questions — Strat handles alone (no Knox needed) ──
-      const isSimpleQuestion = /^(hey|hi|hello|what do you do|how are you|thanks|thank you|ok|got it|cool|awesome|perfect|great)/i.test(lowerMsg.trim()) && !needsKnox;
+      // ── Strat handles ALL questions independently — no Knox consultation ──
 
       // ── Build BBX context for system prompt ──
       const isDuramax = /duramax|lb7|lly|lbz|lmm|lml|gm|chevy|chevrolet|gmc|silverado|sierra/i.test(fullContext);
@@ -2434,8 +2514,8 @@ export const stratRouter = router({
         historyContext = `\n\n## CONVERSATION CONTEXT\nThis is an ongoing conversation (${historyLen} messages). Skip introductions — the customer already knows who you are. Be direct and efficient. If you've explained something before in this conversation, reference it briefly instead of re-explaining.`;
       }
 
-      // ── Simple path — Strat alone ──
-      if (isSimpleQuestion || !needsKnox) {
+      // ── Strat solo path — handles everything ──
+      {
         let systemContent = STRAT_SYSTEM_PROMPT + bbxContext + historyContext;
         if (customerPersists) {
           systemContent += `\n\n## PERSISTENCE ALERT\nThe customer is telling you that your previous suggestion DID NOT WORK. DO NOT repeat the same fix. Review the conversation history, acknowledge the issue persists, and try a COMPLETELY DIFFERENT approach or ask a specific diagnostic question. If you've already tried 2+ approaches, escalate to phone support at (337) 485-7070.`;
@@ -2464,175 +2544,10 @@ export const stratRouter = router({
         }
       }
 
-      // ── Knox-assisted path — live conversation between Strat and Knox ──
-      type ConversationStep = {
-        speaker: 'strat' | 'knox';
-        content: string;
-        type: 'handoff' | 'thinking' | 'response' | 'banter' | 'final';
-      };
-      const steps: ConversationStep[] = [];
 
-      // Step 1: Strat acknowledges and hands off to Knox with personality
-      const knoxHistoryHint = historyLen >= 5
-        ? `\nIMPORTANT: This is message ${historyLen}+ in the conversation. The customer already knows Strat and Knox. Skip formal introductions. If Knox has appeared before, don't re-introduce him — just get to it. Vary your handoff style: sometimes a quick "Knox, your turn" is better than a full sentence.`
-        : '';
-      try {
-        const handoffResponse = await invokeLLM({
-          messages: [
-            {
-              role: 'system',
-              content: `You are Strat, PPEI's tech support agent. You just received a technical question from a customer that requires Knox's expertise. Write a SHORT, casual one-liner (1-2 sentences max) acknowledging the customer's issue and telling them you're pulling Knox in to help. Be warm and slightly humorous. Examples of tone:
-- "Ooh, that's a good one. Let me grab Knox — he lives for this stuff."
-- "Alright, I know just the guy for this. Hey Knox, you busy?"
-- "Classic error code territory. Let me get Knox on the line — he's the brain around here."
-Do NOT provide any technical answer yet. Just the handoff line.${knoxHistoryHint}`,
-            },
-            { role: 'user', content: input.message },
-          ],
-        });
-        const handoffLine = handoffResponse.choices?.[0]?.message?.content || "Let me pull Knox in on this one — he's our technical wizard.";
-        steps.push({ speaker: 'strat', content: handoffLine, type: 'handoff' });
-      } catch {
-        steps.push({ speaker: 'strat', content: "Let me pull Knox in on this — he's our technical wizard.", type: 'handoff' });
-      }
 
-      // Step 2: Knox enters with humor and provides technical analysis
-      let knoxAnswer = '';
-      try {
-        const userAccessLevel = (ctx.user?.accessLevel || 0) as AccessLevel;
-        const effectiveLevel: AccessLevel = userAccessLevel >= 3 ? 3 : userAccessLevel >= 2 ? 2 : 1;
 
-        const persistenceContext = customerPersists
-          ? `\n\n**IMPORTANT: The customer says the previous fix did NOT work. They have already tried the standard troubleshooting steps shown in the conversation history. Do NOT repeat the same advice. Suggest DIFFERENT approaches, ask diagnostic questions to narrow down WHY the fix isn't working, or recommend escalation to phone support at (337) 485-7070.**`
-          : '';
-        // Attempt web search to supplement Knox's knowledge
-        let webSearchSupplement = '';
-        if (customerPersists) {
-          try {
-            const searchQuery = `PPEI tuning ${input.message.slice(0, 80)}`;
-            const searchResults = await webSearch(searchQuery, 3);
-            if (searchResults.length > 0) {
-              webSearchSupplement = `\n\nWEB SEARCH RESULTS (supplementary):\n${formatSearchResults(searchResults)}`;
-            }
-          } catch { /* non-critical */ }
-        }
-        const knoxResult = await queryKnox({
-          question: input.message,
-          accessLevel: effectiveLevel >= 2 ? effectiveLevel : 2,
-          domain: 'general',
-          moduleContext: `PPEI Tech Support context. Customer issue: ${input.message}${persistenceContext}${webSearchSupplement}\n\nConversation history: ${(input.history || []).map(m => `[${m.role}]: ${m.content}`).join('\n')}`.slice(0, 10000),
-          history: input.history?.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-        });
-        knoxAnswer = knoxResult.answer;
-      } catch (knoxErr: any) {
-        console.warn('[Strat] Knox pipeline failed, falling back to direct LLM:', knoxErr.message);
-        // Fallback: use direct LLM with Knox personality
-        try {
-          // Try web search first to supplement knowledge
-          let webSearchContext = '';
-          try {
-            const searchQuery = `PPEI tuning ${input.message.slice(0, 80)}`;
-            const searchResults = await webSearch(searchQuery, 3);
-            if (searchResults.length > 0) {
-              webSearchContext = `\n\n## WEB SEARCH RESULTS (supplementary — prioritize PPEI KB)\n${formatSearchResults(searchResults)}`;
-            }
-          } catch (searchErr) {
-            console.warn('[Strat] Web search failed:', searchErr);
-          }
-          const fallbackResp = await invokeLLM({
-            messages: [
-              {
-                role: 'system',
-                content: `You are Knox — PPEI's AI diagnostic and technical expert. You've been pulled into a tech support conversation by your colleague Strat. Provide a detailed, accurate technical answer to the customer's question. Use the PPEI knowledge base below for reference.\n\nYour personality: confident, witty, technically deep but approachable. You crack jokes but never at the expense of accuracy. You're the kind of engineer who explains complex things with analogies and humor.\n\n${PPEI_SUPPORT_KB.slice(0, 15000)}\n\n${PPEI_TRAINING_KB.slice(0, 10000)}${bbxContext}${webSearchContext}`,
-              },
-              { role: 'user', content: input.message },
-            ],
-          });
-          knoxAnswer = fallbackResp.choices?.[0]?.message?.content || 'Let me look into this further.';
-        } catch {
-          knoxAnswer = 'Having a bit of trouble connecting to my databases right now. Let me hand this back to Strat.';
-        }
-      }
 
-      // Step 3: Generate Knox's entry banter + technical response
-      try {
-        const knoxEntryResponse = await invokeLLM({
-          messages: [
-            {
-              role: 'system',
-              content: `You are Knox, PPEI's AI diagnostic expert. Strat just pulled you into a tech support conversation. You need to:
-1. Write a SHORT humorous entrance line (1-2 sentences) — like you just walked into the room. Be witty, confident, maybe tease Strat a little. CRITICAL: NEVER repeat an entrance you've used before. Vary your style wildly — sometimes deadpan, sometimes excited, sometimes a one-word reaction, sometimes an analogy. Examples (use these as INSPIRATION, not templates):
-- "*cracks knuckles* Alright, somebody said there's an error code? That's my favorite kind of puzzle."
-- "Strat called me in? Must be serious. Just kidding — I was already eavesdropping."
-- "Did someone say $0502? That's practically my middle name."
-- "Oh this one's fun."
-- "I was hoping someone would ask about this."
-- "Right. Let's get into it."
-${historyLen >= 5 ? 'NOTE: This is a returning customer (message ' + historyLen + '+). Skip the grand entrance — just a quick quip or jump straight to the analysis. They know who you are.' : ''}
-
-2. Then provide your technical analysis/answer based on this Knox research:
-${knoxAnswer.slice(0, 6000)}
-
-Format your response as:
-ENTRANCE: [your humorous entrance line]
-ANALYSIS: [your technical answer, rewritten in Knox's voice — confident, clear, with personality. Include step-by-step instructions if applicable. Reference BBX download links if relevant.]${bbxContext}
-
-Keep the ANALYSIS concise but thorough. Use markdown formatting.`,
-            },
-            { role: 'user', content: input.message },
-          ],
-        });
-        const knoxFull = knoxEntryResponse.choices?.[0]?.message?.content || '';
-
-        // Parse Knox's entrance and analysis
-        const entranceMatch = knoxFull.match(/ENTRANCE:\s*(.+?)(?=\nANALYSIS:|$)/s);
-        const analysisMatch = knoxFull.match(/ANALYSIS:\s*(.+)/s);
-
-        const entrance = entranceMatch?.[1]?.trim() || "*walks in* Alright, what do we got?";
-        const analysis = analysisMatch?.[1]?.trim() || knoxAnswer;
-
-        steps.push({ speaker: 'knox', content: entrance, type: 'banter' });
-        steps.push({ speaker: 'knox', content: analysis, type: 'response' });
-      } catch {
-        steps.push({ speaker: 'knox', content: "*walks in* Alright, let me take a look at this.", type: 'banter' });
-        steps.push({ speaker: 'knox', content: knoxAnswer, type: 'response' });
-      }
-
-      // Step 4: Strat wraps up with a friendly summary/follow-up
-      try {
-        const wrapUpResponse = await invokeLLM({
-          messages: [
-            {
-              role: 'system',
-              content: `You are Strat, PPEI's tech support agent. Knox just provided a technical answer to the customer. Write a SHORT wrap-up (1-3 sentences max) that:
-- Thanks or teases Knox briefly (keep the banter going)
-- Confirms the key action items for the customer in plain language
-- Asks ONE follow-up question if needed
-- Reminds them you're here if they need more help
-
-Examples of tone:
-- "There you go — Knox never misses. Try those steps and let me know how it goes!"
-- "See? I told you he's good. Follow those steps and holler if you hit a snag."
-- "Knox dropping knowledge as usual. Give that a shot and let us know!"
-
-Do NOT repeat Knox's technical steps. Just wrap up warmly.`,
-            },
-            { role: 'user', content: `Customer asked: ${input.message}\n\nKnox's answer summary: ${knoxAnswer.slice(0, 1000)}` },
-          ],
-        });
-        const wrapUp = wrapUpResponse.choices?.[0]?.message?.content || "There you go! Try those steps and let me know how it goes.";
-        steps.push({ speaker: 'strat', content: wrapUp, type: 'final' });
-      } catch {
-        steps.push({ speaker: 'strat', content: "There you go! Try those steps and let me know how it goes. We're here if you need anything else.", type: 'final' });
-      }
-
-      // Build the combined reply (for history/fallback)
-      const combinedReply = steps.map(s => {
-        const label = s.speaker === 'knox' ? '**Knox:**' : '**Strat:**';
-        return `${label} ${s.content}`;
-      }).join('\n\n');
-
-      return { reply: combinedReply, conversationSteps: steps };
     }),
 
   /** Submit feedback after 5+ interactions */
