@@ -2148,6 +2148,123 @@ $0A03-$0A07: Various BBX configuration issues. Reprogram BBX via [F5:BBX].
 `;
 
 /**
+ * PPEI Powersports Tuning Knowledge Base — covers DynoJet PV3, HP Tuners RTD4/MPVi4,
+ * supported vehicles (Can-Am, Honda, Polaris, Kawasaki), and step-by-step instructions.
+ */
+const PPEI_POWERSPORTS_KB = `# PPEI Powersports Tuning — Support Reference
+
+## Overview
+PPEI (ppei.com) offers tuning for a range of powersports vehicles, primarily UTVs/side-by-sides and some ATVs, using two main platforms:
+- **DynoJet Power Vision 3 (PV3)** — handheld flash tuner for direct ECU flashing
+- **HP Tuners** (MPVi4 interface + VCM Suite software, or RTD4 with Tune Delivery Network/TDN app)
+
+## Supported Vehicles
+- **Can-Am**: Maverick X3 (2017–2020 and select newer with MG1 ECU unlock), Maverick R, Defender HD10, Outlander/Commander/Ryker/Spyder (select years)
+- **Polaris**: RZR XP Turbo / Pro XP / Turbo R (2016+), RZR 200 / 570 (2017–2023), RS1 (2018–2022), Pro R / Pro R 4 (select with wideband)
+- **Honda**: Pioneer 1000 (2016–2020), Talon (2019–2024, engine + transmission)
+- **Kawasaki**: KRX 1000 / Teryx KRX (2020+)
+- **Others via HP Tuners** (with MG1 unlock service): select Polaris, Indian Motorcycle, Sea-Doo, CFMOTO, etc.
+
+## What PPEI Provides
+- Model-specific PV3 hardware (with correct 4-pin or 6-pin diagnostic cables)
+- Tuning licenses and custom calibrations
+- HP Tuners hardware/adapters/unlock services
+- Custom tunes for mods (exhaust, intake, injectors, etc.)
+- Wideband kits (single/dual-channel for PV3 or AEM for HP Tuners) — recommended for accurate tuning on modified vehicles
+
+## Important Safety Notes
+- Always follow vehicle-specific safety notes (key-on only, no interruptions during flashes)
+- Contact PPEI support for exact model/calibration — tunes are custom and may require data logs or mod lists
+- PPEI offers remote support
+- Installation videos/guides: ppei.com/pages/ppei-installation-videos
+- HP Tuners RTD4 & TDN App Setup Guide: hp-tuners-rtd4-tdn-ppei-setup-guide.ppei.com/
+
+---
+
+## 1. DynoJet Power Vision 3 (PV3) Instructions
+PV3 is a handheld flash tuner for direct ECU flashing on supported older/compatible powersports ECUs (e.g., pre-MG1 Can-Am, many Polaris/Honda/Kawasaki). PPEI sells the correct model + optional AutoTune kits and wideband sensors.
+
+### Prerequisites
+- Update PV3 firmware first (via USB to PC using DynoJet Power Core software or device menu)
+- Purchase PPEI tuning license if needed for custom calibrations (e.g., Honda-specific licenses)
+- For custom PPEI tunes: Provide your mod list; they email .djt files or license unlocks
+
+### Step-by-Step Usage
+1. **Connect PV3** — Plug the diagnostic cable into your vehicle's OBD-style port (location varies — e.g., under seat or near dash; check your model manual or PPEI product page). Route cable safely away from heat/moving parts. Secure PV3 (optional mount kits available).
+2. **Power on and initial ECU read/pair** — Turn key to ON (do not start engine yet). PV3 scans for files and performs ECU read (File State 1/2/3). This pairs the device to your ECU (only on first read) and generates a PV_info.txt file. It may take 3–15 minutes depending on model. Do not turn off power.
+3. **Load tunes (via USB to PC)**:
+   - For DynoJet base tunes: Upload PV_info.txt to tunes.dynojet.com to download .djt (performance tune) and .stk (stock backup) files. Drag-and-drop onto the POWERVISION drive.
+   - For PPEI calibrations: Use your purchased license (apply via Power Core software > Manage Hardware or drag license/tune files). Custom .djt files from PPEI go the same way.
+4. **Flash the tune**:
+   - Key ON, go to Main Menu > Tuning > Flash Tune.
+   - Select your .djt file > view Tune Info > accept.
+   - Confirm and flash (takes ~3 minutes). **Do not interrupt power or key!**
+   - After flash: Key OFF, wait 45 seconds, then restart vehicle.
+5. **Post-flash & features**:
+   - View gauges, data log (press Log button), clear codes (Vehicle Tools > Diagnostics), reset adaptives/idle trim.
+   - For AutoTune (if you have the kit): Enable via Tuning > Autotune, ride to log data, then Apply Values (repeat 2–3 times). Disable when done.
+   - Monitor real-time with wideband for optimal AFR.
+
+### Model Notes
+- Polaris-specific guides (e.g., RZR XP Turbo) follow the same process but may take longer on initial read
+- Honda Talon/Pioneer and Can-Am X3/Defender use similar connector-specific PV3 units
+- Videos for flashing Can-Am, Polaris, etc., are on YouTube (search "DynoJet PV3 [your model]")
+
+### PV3 Troubleshooting
+- If flash fails: Use Restore ECU or re-flash stock .stk
+- Reformat disk if needed via Device Tools
+- If PV3 won't connect: Check firmware is up to date, verify correct cable for your model
+- If pairing fails: Ensure key is ON (not ACC), engine OFF
+
+---
+
+## 2. HP Tuners MPVi4 / RTD4 with TDN and VCM Suite
+HP Tuners is for advanced read/edit/write on supported powersports ECUs (including newer MG1 units on Can-Am/Polaris after PPEI unlock service). MPVi4 is PC-based (full VCM Editor/Scanner). RTD4 (PPEI-branded version) + TDN app enables simpler app-based tune delivery, flashing, and logging — ideal for field use.
+
+### Prerequisites
+- MPVi4/RTD4 + correct OBDII adapter cable (PPEI sells Honda/Can-Am/Polaris-specific ones)
+- Latest VCM Suite (download from hptuners.com; use BETA if needed for powersports)
+- Universal credits (or TDN licensing) for your ECU
+- For MG1 ECUs (newer Can-Am X3/R, Polaris Pro R, etc.): PPEI MG1 unlock service may be required first
+- Wideband (AEM recommended) for custom tuning
+
+### MPVi4 + VCM Suite (PC-based)
+1. Install VCM Suite on your computer
+2. Connect MPVi4 to vehicle OBD port + PC via USB
+3. License the vehicle/controller in VCM Editor (credits required)
+4. Read stock calibration → save and send to PPEI (with mod list/logs)
+5. Receive PPEI-tuned .hpt file → load, review/edit if desired
+6. Write calibration to ECU
+7. Use VCM Scanner for real-time logging, DTCs, and verification
+
+### RTD4 + TDN App (simpler/mobile)
+PPEI's RTD4 is optimized for their Tune Delivery Network:
+1. Download the TDN app (iOS/Android or PC version via HP Tuners)
+2. Pair RTD4 via Bluetooth to the app
+3. PPEI provides an invite/code to join their TDN network
+4. Plug RTD4 into vehicle diagnostic port
+5. Read ECU/file via app → upload to PPEI network
+6. Receive and flash your custom PPEI calibration directly in the app
+7. Datalog, clear codes, or troubleshoot in real time via phone
+
+### Full Setup Guide
+See PPEI's dedicated guide at hp-tuners-rtd4-tdn-ppei-setup-guide.ppei.com/ (covers pairing, app, flashing, datalogging)
+
+### Model Notes
+- Polaris RZR (2026+ supported), Can-Am MG1, Honda powersports all work with adapters
+- Some require unlock service
+- TDN with RTD4 uses 2–4 credits depending on controller
+- General HP Tuners process: Read → Edit/Apply tune → Write → Log
+
+### HP Tuners Troubleshooting (Powersports)
+- If RTD4 won't pair via Bluetooth: Ensure TDN app is latest version, restart phone Bluetooth
+- If credits not showing: Verify account login in VCM Suite or TDN app, check credit purchase
+- If MG1 ECU won't read: Confirm PPEI unlock service was completed for your specific ECU
+- If flash fails on Can-Am/Polaris: Verify correct adapter cable, key ON engine OFF, battery fully charged
+- For "No ECU detected" errors: Check cable connection, try different USB port (MPVi4), ensure vehicle is in correct key position
+`;
+
+/**
  * PPEI Tech Support Training Document — comprehensive vehicle/platform/troubleshooting reference.
  * Supplements the scraped KB above with structured training content.
  */
@@ -2949,6 +3066,10 @@ Example of BAD response (DO NOT DO THIS):
 === EFI LIVE OFFICIAL ERROR CODES REFERENCE ===
 \${EFILIVE_ERROR_CODES_KB}
 === END EFI LIVE ERROR CODES REFERENCE ===
+
+=== PPEI POWERSPORTS TUNING REFERENCE ===
+\${PPEI_POWERSPORTS_KB}
+=== END POWERSPORTS REFERENCE ===
 
 === PPEI TRAINING REFERENCE ===
 \${PPEI_TRAINING_KB}

@@ -2430,9 +2430,19 @@
 - [x] For other vehicles: use generic EFI Live PDF guidance (check cables, ignition, vehicle support)
 
 ## Honda Talon Tuner — Fuel Map Screenshot Upload JSON Parse Error (Apr 28, 2026)
-- [ ] Fix JSON.parse failure on large fuel tables (35x25 = 875 cells) — LLM output truncated
-- [ ] Add JSON repair logic for truncated responses (close brackets, strip incomplete data)
-- [ ] Add chunked extraction fallback — split large tables into left/right halves if single pass fails
-- [ ] Add max_tokens parameter to LLM call to maximize output space
-- [ ] Add better error messages to user when extraction partially fails
-- [ ] Test with large fuel table screenshots
+- [x] Fix JSON.parse failure on large fuel tables (35x25 = 875 cells) — LLM output truncated
+- [x] Add JSON repair logic for truncated responses (close brackets, strip incomplete data)
+- [x] Add chunked extraction fallback — split large tables into left/right halves if single pass fails
+- [x] Add max_tokens parameter to LLM call to maximize output space
+- [x] Add better error messages to user when extraction partially fails
+- [x] Test with large fuel table screenshots
+
+## Powersports KB Integration (Apr 28, 2026)
+- [x] Add PPEI_POWERSPORTS_KB constant with full DynoJet PV3 and HP Tuners RTD4/MPVi4 instructions
+- [x] Add supported vehicles list (Can-Am, Honda, Polaris, Kawasaki, others)
+- [x] Add step-by-step PV3 flashing instructions
+- [x] Add HP Tuners MPVi4 + VCM Suite PC-based workflow
+- [x] Add RTD4 + TDN App mobile workflow
+- [x] Add Powersports-specific troubleshooting for PV3 and HP Tuners
+- [x] Inject PPEI_POWERSPORTS_KB into system prompt alongside other KB references
+- [x] Push to both GitHub repos
