@@ -130,8 +130,8 @@ describe("strat.chat — BBX file requests (still hardcoded for download links)"
   });
 });
 
-describe("strat.chat — Knox conversation integration", () => {
-  it("returns conversationSteps when Knox is consulted for technical questions", { timeout: 60000 }, async () => {
+describe("strat.chat — Strat handles all support independently (no Knox)", () => {
+  it("returns reply with empty conversationSteps for technical questions", { timeout: 60000 }, async () => {
     const { ctx } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
@@ -139,34 +139,38 @@ describe("strat.chat — Knox conversation integration", () => {
       message: "My LB7 is throwing a $0502 error and I've already tried updating firmware but it still won't flash. What else can I try?",
     }) as any;
 
+    // Should have a reply from Strat
+    expect(result.reply).toBeTruthy();
+    expect(typeof result.reply).toBe("string");
+
+    // conversationSteps should be empty — Strat handles everything solo, no Knox
+    expect(Array.isArray(result.conversationSteps)).toBe(true);
+    expect(result.conversationSteps.length).toBe(0);
+  });
+
+  it("$0281 response should ask for vehicle info, not give immediate fix", { timeout: 60000 }, async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.strat.chat({
+      message: "$0281",
+    }) as any;
+
     // Should have a reply
     expect(result.reply).toBeTruthy();
     expect(typeof result.reply).toBe("string");
 
-    // Should have conversation steps (Knox was consulted)
-    if (result.conversationSteps) {
-      expect(Array.isArray(result.conversationSteps)).toBe(true);
-      expect(result.conversationSteps.length).toBeGreaterThanOrEqual(2);
+    // Reply should NOT contain BBX/Format CONFIG instructions (wrong fix)
+    const replyLower = result.reply.toLowerCase();
+    expect(replyLower).not.toContain("format config");
+    expect(replyLower).not.toContain("internal memory");
 
-      // Each step should have speaker, content, and type
-      for (const step of result.conversationSteps) {
-        expect(step.speaker).toBeDefined();
-        expect(["strat", "knox"]).toContain(step.speaker);
-        expect(step.content).toBeTruthy();
-        expect(step.type).toBeDefined();
-      }
-
-      // Should have at least one Knox step
-      const knoxSteps = result.conversationSteps.filter((s: any) => s.speaker === "knox");
-      expect(knoxSteps.length).toBeGreaterThanOrEqual(1);
-
-      // Should have at least one Strat step
-      const stratSteps = result.conversationSteps.filter((s: any) => s.speaker === "strat");
-      expect(stratSteps.length).toBeGreaterThanOrEqual(1);
-    }
+    // conversationSteps should be empty
+    expect(Array.isArray(result.conversationSteps)).toBe(true);
+    expect(result.conversationSteps.length).toBe(0);
   });
 
-  it("simple questions may not trigger Knox consultation", { timeout: 30000 }, async () => {
+  it("simple questions return reply without Knox", { timeout: 30000 }, async () => {
     const { ctx } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
@@ -174,7 +178,7 @@ describe("strat.chat — Knox conversation integration", () => {
       message: "What is PPEI's phone number?",
     });
 
-    // Should still return a reply
+    // Should return a reply from Strat
     expect(result.reply).toBeTruthy();
     expect(typeof result.reply).toBe("string");
   });

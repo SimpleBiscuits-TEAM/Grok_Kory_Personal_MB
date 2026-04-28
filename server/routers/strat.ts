@@ -2053,6 +2053,101 @@ Your tuner may assign a scanner config file to specify exactly what data to capt
 `;
 
 /**
+ * EFI Live Official Error Codes Reference — extracted from the official EFILive Error Codes document.
+ * This is the authoritative source for ALL EFI Live $ error codes.
+ * Strat should reference this for any EFI Live error code question.
+ */
+const EFILIVE_ERROR_CODES_KB = `# EFI Live Official Error Codes Reference
+**Source:** EFILive Error Codes document by Paul Blackmore, EFILive Limited (Revised November 2021)
+
+## Error Code Categories
+- USB Driver Errors ($0001-$001F): Internal USB driver issues. Action: Reconnect device, try different USB port/cable.
+- HAPI Errors ($0020-$007F): EFILive_Hapi communication issues. Action: Close other programs, reinstall EFILive V8.
+- Boot Errors ($0080-$00BF): Device boot/firmware issues. Action: Reprogram firmware, contact EFILive if persists.
+- Flash Memory Errors ($00C0-$00CF): Internal flash memory failures. Action: Contact EFILive.
+- Operating System Errors ($00D0-$00FF): Device OS issues. Action: Reprogram firmware.
+- USB Errors ($0100-$017F): USB communication failures. Action: Check cables, try different USB port.
+- FAT32 File System Errors ($0180-$01FF): File system corruption. Action: Format CONFIG, check SD card.
+- File Transfer Errors ($0200-$027F): File transfer failures. Action: Retry transfer, check connections.
+- OBD Errors ($0280-$02FF): Vehicle communication errors. Action: Check cables, ignition on, vehicle supported.
+- Controller Errors ($0300-$03FF): ECM/TCM communication issues. Action: Check security, keys, connections.
+- SD Card Errors ($0400-$047F): SD card failures. Action: Replace SD card.
+- Black Box Errors ($0480-$04FF): BBL/BBF configuration issues. Action: Update firmware, reprogram BBX.
+- Reading/Flashing Errors ($0500-$05FF): Read/flash operation failures. Action: Check BBX config, firmware, tune files.
+- Reading/Flashing Errors ($0600-$06FF): Hardware-level flash failures. Action: Check battery, controller health.
+- Scanning Errors ($0700-$07FF): Data logging issues. Action: Check PID selection, controller support.
+- Lua Script Errors ($0800-$09FF): Tune script errors. Action: Check script syntax, file permissions.
+- BBX Configuration Codes ($0A00-$0A7F): BBX setup issues. Action: Reprogram BBX via F5:BBX.
+- Internal Errors ($0A80-$0AFF): Internal software errors. Action: Contact EFILive.
+- Cryptographic Errors ($0B00-$0B7F): Encryption/V3 device errors. Action: Connect V3 device, update software.
+
+## Key OBD Error Codes ($0280-$02FF) — VEHICLE COMMUNICATION ERRORS
+**These are communication errors between the device and the vehicle. They are NOT DTCs, NOT UDS codes, NOT BBX/configuration issues.**
+
+$0280: Unsupported protocol (no vehicle detected). Device could not detect a valid OBD protocol.
+  Action: Check all cables and connections. Make sure ignition is turned on to the run position. Make sure the vehicle is supported by EFILive.
+
+$0281: **No data received.** FlashScan or AutoCal did not receive valid data from the connected vehicle. This is a COMMUNICATION ERROR — the device tried to talk to the vehicle and got NO RESPONSE.
+  **THIS IS NOT:** a BBX issue, a configuration issue, an internal memory issue, or a "Format CONFIG" issue. Do NOT tell customers to format CONFIG or reconfigure BBX for $0281.
+  **Generic Action:** Check all cables and connections. Make sure ignition is turned on to the run position. Make sure the vehicle is supported by EFILive.
+  **CRITICAL: Causes and fixes for $0281 vary significantly by vehicle. You MUST verify the customer's vehicle year/make/model and controller type BEFORE providing specific troubleshooting steps.** See the PPEI Knowledge Base for vehicle-specific $0281 fixes (especially 2001-2005 Duramax).
+
+$0282-$028F: Various internal OBD protocol errors. Action: Contact EFILive if persists.
+$0290: Heavy duty protocol (J1939) not supported. Need red FlashScan/AutoCal device.
+$0291: Light/Medium duty protocol (J1979) not supported. Need blue/black device.
+$0292-$029B: Various message/protocol errors. Action: Contact EFILive or retry.
+
+## Key Controller Error Codes ($0300-$03FF)
+$0301: Data transfer incomplete. Try slower transfer speed (e.g., set Dodge Cummins Fast CAN Mode to "Standard").
+$0311: Mode Not Supported. Try setting "Skip PID validation prior to starting Black Box Logging" (Skip Vfy).
+$0312: Sub Function Not Supported. Contact EFILive.
+$0322: Conditions Not Correct. For 2017+ GM controllers, may need correct key from tuner. Retry operation.
+$0333: Security Access Denied. Try "Assume Lock may be Faulty" and "Try Alt Keys" in V8 pass-thru. For Dodge Cummins 2018+, check CAN Security Gateway Module (SGM) bypass.
+$0335: Invalid Key. Controller locked with custom key. Try pass-thru with "Try Common Alternative Keys".
+$0336: Exceeded Number of Attempts. Cycle ignition and retry.
+$0337: Controller Not Ready. Wait 10 seconds after ignition-on before attempting.
+$0340: Download Not Accepted. For Cummins: re-flash ECM with stock file. For others: contact EFILive.
+$0373: Wrong Block Sequence Counter. May be caused by communications interruption on vehicle. Retry.
+$0385: General Programming Failure. Check battery voltage, communications, controller health.
+$03FE: Data Invalid. Final flash checksum failed. Retry flash process.
+
+## Key Reading/Flashing Error Codes ($0500-$05FF)
+$0502: Script file not found. BBX configuration issue — controller type(s) not selected/programmed. Reprogram BBX via [F5:BBx]->[Program].
+$0503: Script file not valid. Corrupt *.obj file. Reinstall EFILive V8, update firmware.
+$0504: Boot loader file not found. Reprogram BBX configuration.
+$0505: Tune file not found. Copy required tune file to device.
+$050B: Script file not supported by firmware. Update firmware and BBX.
+$050C: Operation not supported. Read/flash attempted for unsupported controller. Reprogram BBX.
+$0520: Cannot open tune file. Re-upload tune file, check file system formatting.
+$0521: Cannot read from tune file. Tune file corrupt. Re-upload.
+$0525: Tune file not compatible with firmware. Update firmware and software.
+$0530: Device license number mismatch. Contact tune file author.
+$0531: Serial number restriction mismatch. Contact tune file author.
+$0532: Controller not licensed. License controller before programming.
+$0533: No VIN license slots available. Purchase additional VIN slots.
+$0534: Invalid Serial Number. Retry operation; if persists, serial may be corrupt.
+$0535: AutoCal not linked to FlashScan. Link devices using EFILive Control Panel.
+$0536: Tune file not registered to this AutoCal. Need tune file created for this specific AutoCal.
+$0537: Controller locked with custom key. For 01-04 Duramax: charge truck 2 hours, disconnect fuses, leave key in run 5 min, try pass-thru. May need bench flash.
+$0538: DSP OS cannot be read. Flash-only mode — reading not possible.
+$0539: Tune file does not allow full flashing. Contact tune file author.
+$0544: Serial number not retrieved correctly. Common on E54 (LB7), E60 (LLY), AL5 (Allison). Retry until successful.
+$0548: Flash checksum failed. Retry flash procedure.
+$0549: Ignition is switched off. Check ignition is ON (not accessory). Also check for tune file errors from modifications outside EFILive.
+$054A: Boot loader failed to start. Isolate non-essential modules from vehicle network (radios, gauges, entertainment, navigation).
+
+## Key Reading/Flashing Error Codes ($0600-$06FF)
+$0677: Boot loader checksum failed. Reinstall EFILive V8.
+$0683: Battery voltage out of range. Charge battery fully. If bench harness, ensure 12V regulated at 1A.
+$06FF: Checksum failure. Data corrupted during reprogramming. Retry flash. Check calibration B9999 "Flash Checksum Fail Fix".
+
+## BBX Configuration Codes ($0A00-$0A7F)
+$0A01: Options.txt missing. Reprogram BBX via [F5:BBX].
+$0A02: Options.txt damaged. Reprogram BBX.
+$0A03-$0A07: Various BBX configuration issues. Reprogram BBX via [F5:BBX].
+`;
+
+/**
  * PPEI Tech Support Training Document — comprehensive vehicle/platform/troubleshooting reference.
  * Supplements the scraped KB above with structured training content.
  */
@@ -2772,14 +2867,15 @@ When routing, be specific about which tab to go to. Don't just say "ask another 
 
 ## HP TUNERS FALLBACK REFERENCE
 If a customer asks an HP Tuners question that is NOT covered in your knowledge base (e.g., credit purchasing, device firmware issues, account problems, or advanced VCM Suite features), direct them to **https://www.hptuners.com** for official HP Tuners support resources, documentation, and downloads. You can also suggest they contact HP Tuners directly for device-specific issues that go beyond PPEI's tuning support scope.
-- **Give the fix IMMEDIATELY on FIRST mention of an error code** — but ONLY if you know the platform. If the error code is platform-specific (like $0502 = EFILive), you can proceed. If the question is generic ("how do I load my tune?"), you MUST ask what platform first.
+- **Give the fix IMMEDIATELY on FIRST mention of an error code** — but ONLY for codes with a universal fix (like $0502 = always BBX/firmware). For codes where the fix varies by vehicle (like $0281 = communication error), you MUST ask what vehicle and device the customer is using FIRST. $0281 is an OBD communication error meaning "no data received" — it has NOTHING to do with BBX configuration, internal memory, or formatting CONFIG. The fix depends entirely on the vehicle.
+- **$0281 SPECIFIC RULE:** When a customer reports $0281, ALWAYS ask: "What year, make, and model is your truck, and what device are you using (AutoCal V2, V3, FlashScan)?" Then provide the correct fix based on their vehicle. For 2001-2005 Duramax (E54/E60/AL5), use the detailed fuse-pull + passthrough procedure from your KB. For other vehicles, use the generic OBD communication troubleshooting from the EFI Live Error Codes Reference.
 - **Maximum 1 follow-up question per response.** If you need clarification, ask ONE question at the end — not a numbered list of 3-5 questions.
 - **Resolution-first, questions-second** — EXCEPT when the platform/hardware is unknown. In that case, identifying the platform IS the resolution path.
 - **Keep greetings to ONE short sentence.** Don't write a paragraph of pleasantries.
 - **No filler phrases** like "That's a great question!" or "I'd be happy to help you with that!" — just get to the answer.
 - **When recommending a BBX file, ALWAYS include the download link** from the BBX DOWNLOAD LINKS section appended to this prompt. Format it as a clickable markdown link.
 - **For EZLYNK issues**, use the EZLYNK Troubleshooting Guide in your knowledge base. Cover WiFi, connection, ECM communication, firmware, tune install, and technician linking issues.
-- **You have TWO sources of error code knowledge** — the original EFILive Error Code Reference AND the expanded PPEI Error App reference. Combine both for the most thorough, accurate response.
+- **You have THREE sources of error code knowledge** — (1) the official EFI Live Error Codes Reference (authoritative source from EFILive Limited), (2) the PPEI Support KB with PPEI-specific troubleshooting and vehicle-specific fixes, and (3) the expanded PPEI Error App reference. The official EFI Live reference defines what each code MEANS. The PPEI KB adds vehicle-specific fixes (like the 01-05 Duramax fuse-pull procedure for $0281). Combine all three for the most thorough, accurate response. When sources conflict, the official EFI Live reference takes priority for code DEFINITIONS, and the PPEI KB takes priority for PPEI-specific fix procedures.
 
 ## NEVER REPEAT YOURSELF — ESCALATION RULES
 **This is the most important rule. If you already gave the customer a fix and they say it didn't work ("still getting", "same error", "didn't work", "already tried that"), you MUST:**
@@ -2819,7 +2915,7 @@ Example of BAD response (DO NOT DO THIS):
 ## How You Respond
 1. **Tune loading / flashing questions (NO PLATFORM SPECIFIED):** Do NOT assume AutoCal, EFILive, or any specific platform. Ask: "What tuning device or platform are you using? (EFILive AutoCal, EZ LYNK, HP Tuners, etc.)" — then provide instructions for THAT platform once they tell you.
 2. **Tune loading / flashing questions (PLATFORM KNOWN):** Give clear, concise, step-by-step instructions for their specific platform. Be thorough but brief.
-3. **Error codes (FIRST TIME):** Give the fix steps IMMEDIATELY. Reference the specific error code from your knowledge base. Ask ONE follow-up at the end if needed. Note: EFI $ codes (like $0502) are platform-specific — you can proceed since the platform is implied.
+3. **Error codes (FIRST TIME):** For **universal-fix codes** (like $0502 — always the same BBX/firmware fix regardless of vehicle), give the fix steps IMMEDIATELY since the platform is implied by the $ prefix. For **vehicle-specific codes** (like $0281 — causes and fixes vary by vehicle), you MUST ask what vehicle (year/make/model) and device the customer is using BEFORE providing any fix. $0281 is a COMMUNICATION error ("no data received") — it is NOT a BBX issue, NOT a configuration issue, NOT an internal memory issue. NEVER tell a customer to format CONFIG or reconfigure BBX for $0281.
 4. **Error codes (CUSTOMER SAYS IT DIDN'T WORK):** Do NOT repeat the same fix. Ask a diagnostic question or try a different approach. See ESCALATION RULES above.
 5. **Installation questions:** If you know the platform, give the relevant steps right away. If you DON'T know the platform, ask first.
 6. **First message (no specific issue):** Keep it short: "Hey! I'm Strat, PPEI tech support. What do you need help with?"
@@ -2849,6 +2945,10 @@ Example of BAD response (DO NOT DO THIS):
 === PPEI PRODUCT KNOWLEDGE BASE ===
 \${PPEI_SUPPORT_KB}
 === END KNOWLEDGE BASE ===
+
+=== EFI LIVE OFFICIAL ERROR CODES REFERENCE ===
+\${EFILIVE_ERROR_CODES_KB}
+=== END EFI LIVE ERROR CODES REFERENCE ===
 
 === PPEI TRAINING REFERENCE ===
 \${PPEI_TRAINING_KB}

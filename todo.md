@@ -2419,3 +2419,12 @@
 - [x] Add enhanced HP Tuners / EFI Live / EZ LYNK troubleshooting with numbered steps
 - [x] Add continuous improvement protocol
 - [x] Verify server compiles and push to GitHub
+
+## EFI Live Error Codes PDF Integration & $0281 Fix (Apr 28, 2026)
+- [ ] Integrate full EFI Live error codes PDF (57 pages) into Strat's KB as EFILIVE_ERROR_CODES_KB
+- [ ] Fix $0281 KB entry — must be "No data received" OBD communication error, NOT memory/BBX/configuration
+- [ ] Remove any $0281 references to BBX formatting, internal memory clearing, or configuration issues
+- [ ] Add system prompt instruction: reference EFILIVE_ERROR_CODES_KB for any EFI Live $ error code
+- [ ] Ensure $0281 response asks for vehicle/device info FIRST before providing any fix
+- [ ] For 01-05 Duramax (E54/E60/AL5): use PPEI-specific fuse pull + passthrough + escalation steps
+- [ ] For other vehicles: use generic EFI Live PDF guidance (check cables, ignition, vehicle support)
