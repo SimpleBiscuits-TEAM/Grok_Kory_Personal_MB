@@ -1281,7 +1281,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       addLog('Connecting to V-OP Can2USB (USB–CAN bridge)…');
     } else {
       conn = new OBDConnection({
-        protocol: '6',
+        protocol: '0',  // Auto-detect: supports CAN (2008+) and pre-CAN (ISO 9141, KWP2000, J1850)
         adaptiveTiming: 2,
         echo: false,
         headers: false,
