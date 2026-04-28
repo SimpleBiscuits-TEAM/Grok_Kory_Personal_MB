@@ -2408,3 +2408,14 @@
 - [x] Add escalation to PPEI live support if all steps fail
 - [x] Update conversationSteps return type — always return empty array (no more Knox steps)
 - [x] Test that error codes still get correct responses without Knox
+
+## Strat Training v2 Integration (Apr 28, 2026)
+- [x] Replace PPEI_TRAINING_KB with full v2 training document content
+- [x] Add conversation frameworks (A: Pre-Tune, B: Install Failure, C: Post-Install, D: Escalation Handoff)
+- [x] Add front-load-everything principle to system prompt
+- [x] Add diagnostic decision tree
+- [x] Add urgency classification (CRITICAL/HIGH/MEDIUM/LOW)
+- [x] Add customer experience standards (tone by channel, language standards)
+- [x] Add enhanced HP Tuners / EFI Live / EZ LYNK troubleshooting with numbered steps
+- [x] Add continuous improvement protocol
+- [x] Verify server compiles and push to GitHub
