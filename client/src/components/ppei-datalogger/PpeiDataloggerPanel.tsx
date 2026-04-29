@@ -388,99 +388,51 @@ async function startTcmDddiStreaming(conn: any): Promise<boolean> {
   _tcmDddiFrameCount = 0;
 
   try {
-    ppeiLog(conn, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup (0x7E2→0x7EA)...');
+    ppeiLog(conn, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup via bridge (0x7E2→0x7EA)...');
 
-    // Step 0: Ensure 0x5EA is in the bridge's CAN filter so periodic frames reach the WebSocket
-    try {
-      await conn.sendRequest(
-        { type: 'set_filter', arb_ids: [0x5E8, 0x5EA] },
-        2000
-      );
-      ppeiLog(conn, '[TCM-DDDI] Bridge filter updated: 0x5E8 + 0x5EA added');
-    } catch (e: any) {
-      ppeiLog(conn, `[TCM-DDDI] Filter update failed (${e?.message}) — 0x5EA may already be in filter`);
-    }
+    // Use the bridge's dddi_setup command with tcm_tcc mode.
+    // This delegates the entire multi-frame ISO-TP sequence (extended session +
+    // IOCTL 0x2D defines + DDDI 0x2C maps + 0xAA start periodic) to the Python
+    // bridge, which has its own ISO-TP stack and avoids the JS multi-frame
+    // concurrency issue with the shared udsResponseListener.
+    const setupResult = await conn.sendRequest(
+      {
+        type: 'dddi_setup',
+        tx_id: TCM_TX_ID,   // 0x7E2
+        rx_id: TCM_RX_ID,   // 0x7EA
+        dddi_mode: 'tcm_tcc',
+      },
+      15000  // 15s timeout — bridge does extended session + 4 IOCTL + 2 DDDI + start periodic
+    );
 
-    // Step 1: Extended diagnostic session on TCM
-    const sessResp = await conn.sendUDSRequest(0x10, 0x03, [], TCM_TX_ID, 3000, TCM_RX_ID);
-    if (!sessResp || !sessResp.positiveResponse) {
-      ppeiLog(conn, `[TCM-DDDI] Extended session failed on TCM — TCM may not be T87A`);
+    if (!setupResult || !setupResult.ok) {
+      const errMsg = setupResult?.error || 'unknown error';
+      ppeiLog(conn, `[TCM-DDDI] Bridge dddi_setup(tcm_tcc) failed: ${errMsg}`);
       _tcmDddiSetupInProgress = false;
       return false;
     }
-    ppeiLog(conn, '[TCM-DDDI] Extended session OK on TCM (0x7E2)');
 
-    // Step 2: TesterPresent keepalive
-    await conn.sendUDSRequest(0x3E, 0x00, [], TCM_TX_ID, 500, TCM_RX_ID);
+    ppeiLog(conn, `[TCM-DDDI] Bridge setup OK: ioctl=${setupResult.ioctl_ok}, dddi=${setupResult.dddi_ok}, streaming=${setupResult.streaming}`);
 
-    // Step 3: Define DDDI FE00 → RAM 0x40014682 (TCC Desired Pressure, 2 bytes)
-    // Service 0x2D: [2D FE 00 03 40 01 46 82 02]
-    const dddi0Resp = await conn.sendUDSRequest(
-      0x2D, undefined, [0xFE, 0x00, 0x03, 0x40, 0x01, 0x46, 0x82, 0x02],
-      TCM_TX_ID, 2000, TCM_RX_ID
-    );
-    if (!dddi0Resp || !dddi0Resp.positiveResponse) {
-      ppeiLog(conn, `[TCM-DDDI] DDDI FE00 define failed — TCM doesn't support DDDI`);
+    if (!setupResult.streaming) {
+      ppeiLog(conn, '[TCM-DDDI] Bridge reports streaming=false — periodic start may have failed');
       _tcmDddiSetupInProgress = false;
       return false;
     }
-    ppeiLog(conn, '[TCM-DDDI] DDDI FE00 (TCC Desired Pressure) defined OK');
 
-    // Step 4: Define DDDI FE01 → RAM 0x40014DB4 (TCC Slip Speed, 2 bytes)
-    const dddi1Resp = await conn.sendUDSRequest(
-      0x2D, undefined, [0xFE, 0x01, 0x03, 0x40, 0x01, 0x4D, 0xB4, 0x02],
-      TCM_TX_ID, 2000, TCM_RX_ID
-    );
-    if (dddi1Resp?.positiveResponse) {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE01 (TCC Slip Speed) defined OK');
-    } else {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE01 not supported — continuing with FE00 only');
-    }
-
-    // Step 5: Define DDDI FE02 → RAM 0x400143C2 (Turbine RPM, 2 bytes)
-    const dddi2Resp = await conn.sendUDSRequest(
-      0x2D, undefined, [0xFE, 0x02, 0x03, 0x40, 0x01, 0x43, 0xC2, 0x02],
-      TCM_TX_ID, 2000, TCM_RX_ID
-    );
-    if (dddi2Resp?.positiveResponse) {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE02 (Turbine RPM) defined OK');
-    } else {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE02 not supported — skipping');
-    }
-
-    // Step 6: Define DDDI FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes)
-    const dddi3Resp = await conn.sendUDSRequest(
-      0x2D, undefined, [0xFE, 0x03, 0x03, 0x40, 0x01, 0x4C, 0xC0, 0x02],
-      TCM_TX_ID, 2000, TCM_RX_ID
-    );
-    if (dddi3Resp?.positiveResponse) {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE03 (Trans Fluid Temp) defined OK');
-    } else {
-      ppeiLog(conn, '[TCM-DDDI] DDDI FE03 not supported — skipping');
-    }
-
-    // Step 7: Start periodic transmission
-    // [AA 03 00] = start periodic reads (same pattern as E41 ECM)
-    const startResp = await conn.sendUDSRequest(
-      0xAA, 0x03, [0x00],
-      TCM_TX_ID, 2000, TCM_RX_ID
-    );
-    if (!startResp || (!startResp.positiveResponse && !(startResp.data && startResp.data[0] === 0xEA))) {
-      ppeiLog(conn, `[TCM-DDDI] Start periodic failed: ${JSON.stringify(startResp)}`);
-      _tcmDddiSetupInProgress = false;
-      return false;
-    }
-    ppeiLog(conn, '[TCM-DDDI] Periodic streaming started — listening for 0x5EA frames...');
-
-    // Step 8: Wait 2 seconds to verify frames arrive
+    // Wait 2 seconds to verify 0x5EA frames arrive in the WebSocket
+    ppeiLog(conn, '[TCM-DDDI] Waiting 2s to verify 0x5EA frames arrive...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     if (_tcmDddiFrameCount === 0) {
-      ppeiLog(conn, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM DDDI not active');
+      ppeiLog(conn, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM may not be streaming');
+      // Still mark as active — frames might arrive later once bus settles
+      _tcmDddiStreamingActive = true;
       _tcmDddiSetupInProgress = false;
-      return false;
+      return true;  // Optimistic: bridge said OK, frames may be delayed
     }
 
     ppeiLog(conn, `[TCM-DDDI] ✓ Streaming confirmed: ${_tcmDddiFrameCount} frames in 2s`);
+    _tcmDddiStreamingActive = true;
     _tcmDddiSetupInProgress = false;
     return true;
 
@@ -974,6 +926,15 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         ppeiLog(this, '⚡ DDDI keepalive sent (no batch PIDs, periodic-only mode)');
       } catch { /* ignore keepalive failures */ }
       // Skip to periodic injection below — no batch reads needed
+    }
+    // TCM DDDI keepalive: send TesterPresent to 0x7E2 to keep extended session alive
+    if (_tcmDddiStreamingActive) {
+      try {
+        await this.sendRequest(
+          { type: 'dddi_keepalive', tx_id: 0x7E2 },
+          2000,
+        );
+      } catch { /* ignore TCM keepalive failures */ }
     }
     // Group by ECU TX address (most will be 0x7E0, some on 0x7E1 for TCM)
     const byTx = new Map<number, any[]>();

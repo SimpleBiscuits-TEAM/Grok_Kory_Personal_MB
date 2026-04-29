@@ -236,7 +236,7 @@ _DDDI_DEFINE_PERIODIC = [
 _PERIODIC_STREAM_IDS = [0xFE, 0xFD]
 
 # Positive response SIDs for each service
-_DDDI_POS_RESP = {0x2D: 0x6D, 0x2C: 0x6C, 0xAA: 0xEA}
+_DDDI_POS_RESP = {0x2D: 0x6D, 0x2C: 0x6C, 0xAA: 0xEA, 0x10: 0x50, 0x3E: 0x7E}
 
 # Periodic response arb ID (ECU streams on this after DDDI setup)
 DDDI_PERIODIC_ARB_ID = 0x5E8
@@ -280,6 +280,22 @@ _HPT_COMMON_DDDI_DEFINE = [
 
 # All 8 DPIDs streaming at 25ms
 _HPT_COMMON_PERIODIC_IDS = [0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8, 0xF7]
+
+# ── TCM TCC Mode: T87A Transmission Controller DDDI (TX=0x7E2, RX=0x7EA, periodic=0x5EA) ──
+# 4 IOCTL slots define RAM addresses for TCM parameters (2 bytes each = uint16/int16)
+DDDI_MODE_TCM_TCC = 'tcm_tcc'
+_TCM_TCC_IOCTL_SETUP = [
+    bytes([0x2D, 0xFE, 0x00, 0x40, 0x01, 0x46, 0x82, 0x02]),  # Slot 0: TCC Desired Pressure (uint16, ×0.018 PSI)
+    bytes([0x2D, 0xFE, 0x01, 0x40, 0x01, 0x4D, 0xB4, 0x02]),  # Slot 1: TCC Slip Speed (int16, ×1 RPM, signed)
+    bytes([0x2D, 0xFE, 0x02, 0x40, 0x01, 0x43, 0xC2, 0x02]),  # Slot 2: Turbine RPM (uint16, ×1 RPM)
+    bytes([0x2D, 0xFE, 0x03, 0x40, 0x01, 0x4C, 0xC0, 0x02]),  # Slot 3: Trans Fluid Temp (int16, ×0.015625 °C)
+]
+# DDDI 0x2C definitions — map periodic IDs to IOCTL data sources
+_TCM_TCC_DDDI_DEFINE = [
+    bytes([0x2C, 0xFE, 0xFE, 0x00, 0xFE, 0x01]),  # Periodic FE = IOCTL FE00 + FE01 (4 bytes)
+    bytes([0x2C, 0xFD, 0xFE, 0x02, 0xFE, 0x03]),  # Periodic FD = IOCTL FE02 + FE03 (4 bytes)
+]
+_TCM_TCC_PERIODIC_IDS = [0xFE, 0xFD]  # 2 DPIDs on 0x5EA
 
 
 async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mode: str = DDDI_MODE_FRP) -> dict:
@@ -334,7 +350,23 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mo
             log.warning(f"[PPEI] Could not update CAN filters: {e}")
 
     # Select DDDI payloads and periodic IDs based on mode
-    if dddi_mode == DDDI_MODE_HPT_COMMON:
+    if dddi_mode == DDDI_MODE_TCM_TCC:
+        ioctl_payloads = _TCM_TCC_IOCTL_SETUP
+        dddi_payloads = _TCM_TCC_DDDI_DEFINE
+        periodic_ids = _TCM_TCC_PERIODIC_IDS
+        mode_label = 'TCM_TCC (TCC pressure/slip/turbine/TFT on 0x5EA)'
+        # TCM requires extended diagnostic session for IOCTL access
+        log.info("[PPEI] TCM TCC: Requesting extended diagnostic session (0x10 0x03) on TCM")
+        ext_resp = await _send_isotp_and_wait(bridge, tx_id, rx_id, bytes([0x10, 0x03]), timeout=1.0)
+        if ext_resp:
+            log.info("[PPEI] TCM TCC: Extended session established")
+        else:
+            log.warning("[PPEI] TCM TCC: Extended session failed — TCM may not support DDDI")
+            return {"type": "dddi_setup_result", "id": req_id, "ok": False,
+                    "manufacturer": MANUFACTURER_GM, "dddi_mode": dddi_mode,
+                    "error": "TCM did not respond to extended diagnostic session request"}
+        await asyncio.sleep(0.020)
+    elif dddi_mode == DDDI_MODE_HPT_COMMON:
         ioctl_payloads = _HPT_COMMON_IOCTL_SETUP
         dddi_payloads = _HPT_COMMON_DDDI_DEFINE
         periodic_ids = _HPT_COMMON_PERIODIC_IDS
@@ -961,7 +993,7 @@ async def _send_isotp_and_wait(bridge, tx_id, rx_id, payload, timeout=1.0):
             await asyncio.sleep(0.001)
 
     # Wait for positive response
-    expected_sid = _DDDI_POS_RESP.get(payload[0])
+    expected_sid = _DDDI_POS_RESP.get(payload[0], payload[0] + 0x40)
     deadline = time.time() + timeout
 
     # For 0xAA, the ECU may not send a positive response
