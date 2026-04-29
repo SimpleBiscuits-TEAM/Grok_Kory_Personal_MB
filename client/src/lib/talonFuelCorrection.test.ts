@@ -1271,7 +1271,7 @@ describe('blendCorrectedMap', () => {
     expect(result.data[3][3]).toBeCloseTo(0.9, 3); // bottom-right
   });
 
-  it('should use 4-connected blending for cells adjacent to grouped corrections', () => {
+  it('should use 8-connected blending for cells adjacent to grouped corrections (including diagonals)', () => {
     // Correct two adjacent cells [2][1] and [2][2] (they form a group)
     const corrections = [
       { row: 2, col: 1, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
@@ -1286,9 +1286,10 @@ describe('blendCorrectedMap', () => {
     // Cardinal neighbors should be blended
     expect(result.data[2][0]).toBeCloseTo(0.9, 3); // left of group
     expect(result.data[2][3]).toBeCloseTo(0.9, 3); // right of group
-    // Diagonal of grouped cells should NOT be blended (4-connected for groups)
-    expect(result.data[1][0]).toBeCloseTo(1.0, 3); // diagonal of [2][1]
-    expect(result.data[3][3]).toBeCloseTo(1.0, 3); // diagonal of [2][2]
+    // Diagonal of grouped cells SHOULD also be blended (8-connected for all cells)
+    // [1][0] is diagonal to [2][1] — has 1 corrected neighbor out of 8, blend = 1 + (0.8-1)*0.5/1 = 0.9
+    expect(result.data[1][0]).toBeCloseTo(0.9, 3); // diagonal of [2][1]
+    expect(result.data[3][3]).toBeCloseTo(0.9, 3); // diagonal of [2][2]
   });
 
   it('should not modify cells far from corrected region', () => {
