@@ -292,27 +292,34 @@ function findSDColumnByPulsewidth(
 }// ─── Transient Fueling Constants ────────────────────────────────────────────────────────
 
 /**
- * Transient fueling detection thresholds.
+ * ─── Transient Fueling Detection ──────────────────────────────────────────
  *
- * "Additional Pulsewidth" = Injector PW Final - Injector PW Desired
+ * Detects transient fueling by looking at the RATE OF CHANGE of Injector PW
+ * Final between consecutive samples. On the Honda Talon, the "Desired" PW is
+ * just the raw fuel map lookup, while "Final" includes ALL ECU corrections
+ * (closed-loop, warmup, altitude, etc.). The steady-state difference between
+ * Final and Desired can be 100-200% of Desired — this is NORMAL, not transient.
  *
- * During steady-state operation, Additional PW is near zero (typically <5% of
- * Desired PW). When the driver makes a sudden throttle change, the ECU adds
- * transient enrichment which shows up as a spike in Additional PW. This
- * enrichment decays back to baseline as the engine stabilizes.
+ * True transient enrichment is characterized by a SUDDEN SPIKE in Final PW
+ * (the ECU dumps extra fuel for a throttle tip-in). We detect this by:
+ *   1. Computing the sample-to-sample change in InjPwFinal
+ *   2. Expressing that change as a % of the current Final PW
+ *   3. If the rate-of-change exceeds the threshold, the sample is transient
+ *   4. A settling window (TRANSIENT_SETTLE_SAMPLES) after each spike is also
+ *      marked transient, since the enrichment decays over several samples.
  *
- * Thresholds (as percentage of Desired PW):
- *   - Normal operation: Additional PW < 15% of Desired
- *   - Transient fueling: Additional PW >= 15% of Desired → skip correction
+ * Thresholds:
+ *   - Normal operation: |ΔFinal/Final| < 20% per sample
+ *   - Transient fueling: |ΔFinal/Final| >= 20% → skip correction + settle
  *   - Excessive transient (lean): lambda > 1.1 during transient → tuner note
  *   - Excessive transient (rich): lambda < 0.75 during transient → tuner note
- *
- * This primarily applies to turbo applications where transient enrichment
- * is more aggressive, but the filter runs on all logs for safety.
  */
-export const TRANSIENT_THRESHOLD_PCT = 15;  // % of desired PW
+export const TRANSIENT_RATE_THRESHOLD_PCT = 20;  // % change in Final PW per sample
+export const TRANSIENT_SETTLE_SAMPLES = 3;       // samples to skip after spike settles
 export const TRANSIENT_EXCESSIVE_LEAN_LAMBDA = 1.1;
 export const TRANSIENT_EXCESSIVE_RICH_LAMBDA = 0.75;
+// Legacy export for backward compatibility (tests may reference this)
+export const TRANSIENT_THRESHOLD_PCT = TRANSIENT_RATE_THRESHOLD_PCT;
 
 /**
  * Post-deceleration buffer: number of samples to skip AFTER a decel event ends.
@@ -356,9 +363,16 @@ export const OUTLIER_THRESHOLD = 0.20;        // >20% error = suspect outlier if
 // ─── Main Correction Engine ─────────────────────────────────────────────────────────────────
 
 /**
- * Compute "Additional Pulsewidth" and detect transient fueling conditions.
+ * Detect transient fueling using rate-of-change of Injector PW Final.
  * Returns per-sample boolean array (true = transient, skip for correction)
  * and collects transient fueling statistics for tuner notes.
+ *
+ * Algorithm:
+ *   1. For each sample, compute ΔFinal = |Final[i] - Final[i-1]|
+ *   2. Express as % of current Final: ratePct = (ΔFinal / Final[i]) * 100
+ *   3. If ratePct >= TRANSIENT_RATE_THRESHOLD_PCT → mark as transient
+ *   4. After a transient spike, mark the next TRANSIENT_SETTLE_SAMPLES as
+ *      transient too (enrichment decay period)
  */
 export function detectTransientFueling(
   injPwDesired: number[],
@@ -377,6 +391,7 @@ export function detectTransientFueling(
   const isTransient: boolean[] = new Array(len).fill(false);
   const additionalPW: number[] = new Array(len).fill(0);
   let transientCount = 0;
+  let settleCountdown = 0;
 
   // Collect transient samples for tuner note analysis
   const transientSamples: { rpm: number; lambda: number; addPW: number }[] = [];
@@ -392,15 +407,28 @@ export function detectTransientFueling(
     const addPW = final_ - desired;
     additionalPW[i] = addPW;
 
-    // Transient = Additional PW exceeds threshold % of Desired PW
-    const pctOfDesired = (addPW / desired) * 100;
-    if (Math.abs(pctOfDesired) >= TRANSIENT_THRESHOLD_PCT) {
+    // Rate-of-change detection: compare to previous sample's Final PW
+    let isSpike = false;
+    if (i > 0) {
+      const prevFinal = injPwFinal[i - 1];
+      if (Number.isFinite(prevFinal) && prevFinal > 0) {
+        const deltaFinal = Math.abs(final_ - prevFinal);
+        const ratePct = (deltaFinal / final_) * 100;
+        if (ratePct >= TRANSIENT_RATE_THRESHOLD_PCT) {
+          isSpike = true;
+          settleCountdown = TRANSIENT_SETTLE_SAMPLES;
+        }
+      }
+    }
+
+    // Mark as transient if this is a spike OR we're in the settle window
+    if (isSpike || settleCountdown > 0) {
       isTransient[i] = true;
       transientCount++;
+      if (!isSpike) settleCountdown--;
 
       // Collect lambda data for this transient sample
       const rpmVal = i < rpm.length ? rpm[i] : NaN;
-      // Use average of both cylinders if available
       let lambda = NaN;
       const l1 = i < cyl1Lambda.length ? cyl1Lambda[i] : NaN;
       const l2 = i < cyl2Lambda.length ? cyl2Lambda[i] : NaN;
