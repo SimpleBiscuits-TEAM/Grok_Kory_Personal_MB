@@ -62,6 +62,9 @@ export interface CorrectionConfig {
   mapSensor: MapSensor;  // Only relevant when vehicleMode === 'turbo'
 }
 
+/** Correction tier classification */
+export type CorrectionTier = 'sandpaper' | 'hammer_chisel' | 'outlier_capped';
+
 /** Per-cell correction result */
 export interface CellCorrection {
   row: number;
@@ -73,6 +76,25 @@ export interface CellCorrection {
   avgActualLambda: number;
   targetLambda: number;
   avgStft?: number;          // average STFT % for this cell (if available)
+  /** Which correction tier was applied */
+  tier: CorrectionTier;
+  /** Original (raw) correction factor before tiered smoothing was applied */
+  rawCorrectionFactor?: number;
+  /** Whether this cell was flagged as an outlier (>20% error, capped to neighbor avg) */
+  isOutlier?: boolean;
+  /** Note explaining outlier capping or regional averaging */
+  tierNote?: string;
+}
+
+/** Outlier note for the correction report */
+export interface OutlierNote {
+  row: number;
+  col: number;
+  mapKey: keyof FuelMapState;
+  rawErrorPct: number;       // original error % before capping
+  cappedErrorPct: number;    // error % after capping to neighbor average
+  neighborAvgFactor: number; // the neighbor average correction factor used
+  message: string;
 }
 
 /** Full correction result for one fuel map */
@@ -82,6 +104,10 @@ export interface MapCorrectionResult {
   totalCellsCorrected: number;
   totalCellsInMap: number;
   totalSamplesUsed: number;
+  /** Cells that were capped as outliers */
+  outlierNotes: OutlierNote[];
+  /** Count of cells in each tier */
+  tierCounts: { sandpaper: number; hammer_chisel: number; outlier_capped: number };
 }
 
 /** Tuner note for transient fueling anomalies */
@@ -117,6 +143,8 @@ export interface CorrectionReport {
   transientSamplesSkipped: number;
   /** Tuner notes about transient fueling anomalies */
   transientNotes: TransientNote[];
+  /** Outlier notes across all maps (cells capped due to >20% isolated error) */
+  outlierNotes: OutlierNote[];
 }
 
 // ─── Target Lambda Presets ──────────────────────────────────────────────────
@@ -299,7 +327,33 @@ export const TRANSIENT_EXCESSIVE_RICH_LAMBDA = 0.75;
  */
 export const POST_DECEL_BUFFER_SAMPLES = 5;  // ~0.5 seconds at 10 Hz
 
-// ─── Main Correction Engine ─────────────────────────────────────────────────────────
+// ─── Tiered Correction Strategy Constants ─────────────────────────────────────────────────
+
+/**
+ * Tiered correction strategy: "Sculpture" approach.
+ *
+ * Hammer & Chisel (error > 5%):
+ *   The fuel map is significantly off in this region. Instead of correcting
+ *   individual cells, we look for patterns in adjacent cells (8-neighbor).
+ *   If multiple adjacent cells show >5% error in the same direction, we
+ *   average the correction across the group and apply the averaged value
+ *   to all cells in the group. This prevents jagged corrections.
+ *
+ * Sandpaper (error ≤ 5%):
+ *   Fine-tuning territory. Corrections are applied cell-by-cell as-is.
+ *   The map is close enough that individual cell precision matters.
+ *
+ * Outlier Fact-Check (error > 20% AND isolated):
+ *   If a cell shows >20% error but its 8 neighbors don't show a similar
+ *   pattern, it's likely bad data (sensor glitch, brief transient). The
+ *   correction is CAPPED to match the neighbor average, and the cell is
+ *   flagged with a note for the tuner.
+ */
+export const SANDPAPER_THRESHOLD = 0.05;      // ≤5% error = fine cell-by-cell
+export const HAMMER_CHISEL_THRESHOLD = 0.05;  // >5% error = regional averaging
+export const OUTLIER_THRESHOLD = 0.20;        // >20% error = suspect outlier if isolated
+
+// ─── Main Correction Engine ─────────────────────────────────────────────────────────────────
 
 /**
  * Compute "Additional Pulsewidth" and detect transient fueling conditions.
@@ -522,6 +576,8 @@ function computeMapCorrections(
       totalCellsCorrected: 0,
       totalCellsInMap: map.data.length * (map.data[0]?.length ?? 0),
       totalSamplesUsed: 0,
+      outlierNotes: [],
+      tierCounts: { sandpaper: 0, hammer_chisel: 0, outlier_capped: 0 },
     };
   }
 
@@ -654,36 +710,245 @@ function computeMapCorrections(
     totalSamples++;
   }
 
-  // Build correction results
-  const corrections: CellCorrection[] = [];
-  for (let r = 0; r < accum.length; r++) {
-    for (let c = 0; c < accum[r].length; c++) {
+  // ─── Build raw correction factors per cell ───────────────────────────────
+  const numRows = accum.length;
+  const numCols = accum[0]?.length ?? 0;
+
+  // rawFactors[r][c] = correction factor (or NaN if cell has no data)
+  const rawFactors: number[][] = [];
+  const rawLambdas: number[][] = [];
+  const rawTargets: number[][] = [];
+  const rawCounts: number[][] = [];
+  const rawStftSum: number[][] = [];
+  const rawStftCount: number[][] = [];
+
+  for (let r = 0; r < numRows; r++) {
+    rawFactors.push([]);
+    rawLambdas.push([]);
+    rawTargets.push([]);
+    rawCounts.push([]);
+    rawStftSum.push([]);
+    rawStftCount.push([]);
+    for (let c = 0; c < numCols; c++) {
       const cell = accum[r][c];
-      if (cell.count === 0) continue; // Cell not used in datalog — no correction
+      if (cell.count === 0) {
+        rawFactors[r].push(NaN);
+        rawLambdas[r].push(NaN);
+        rawTargets[r].push(NaN);
+        rawCounts[r].push(0);
+        rawStftSum[r].push(0);
+        rawStftCount[r].push(0);
+      } else {
+        const avgLambda = cell.sumLambda / cell.count;
+        const target = c < map.targetLambda.length ? map.targetLambda[c] : 0.95;
+        const factor = target > 0 ? avgLambda / target : 1;
+        rawFactors[r].push(factor);
+        rawLambdas[r].push(avgLambda);
+        rawTargets[r].push(target);
+        rawCounts[r].push(cell.count);
+        rawStftSum[r].push(cell.sumStft);
+        rawStftCount[r].push(cell.stftCount);
+      }
+    }
+  }
 
-      const avgLambda = cell.sumLambda / cell.count;
-      const targetLambda = c < map.targetLambda.length ? map.targetLambda[c] : 0.95;
+  // ─── Tiered correction: apply sculpture strategy ─────────────────────────
+  const corrections: CellCorrection[] = [];
+  const outlierNotes: OutlierNote[] = [];
+  const tierCounts = { sandpaper: 0, hammer_chisel: 0, outlier_capped: 0 };
 
-      // Correction factor: actual / target
-      // If actual lambda is 1.0 and target is 0.85, factor = 1.176 → need more fuel
-      // The correction is applied as: new_value = old_value * correction_factor
-      const correctionFactor = targetLambda > 0 ? avgLambda / targetLambda : 1;
+  // Helper: get 8-neighbor correction factors for a cell
+  function getNeighborFactors(r: number, c: number): number[] {
+    const neighbors: number[] = [];
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue; // skip self
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < numRows && nc >= 0 && nc < numCols) {
+          const f = rawFactors[nr][nc];
+          if (Number.isFinite(f)) neighbors.push(f);
+        }
+      }
+    }
+    return neighbors;
+  }
 
+  // Helper: get error percentage from a correction factor (distance from 1.0)
+  function errorPct(factor: number): number {
+    return Math.abs(factor - 1.0);
+  }
+
+  // Helper: check if neighbors show a similar pattern (same direction, >5% error)
+  function neighborsShowPattern(r: number, c: number, factor: number): boolean {
+    const neighbors = getNeighborFactors(r, c);
+    if (neighbors.length === 0) return false;
+    const direction = factor > 1.0 ? 'lean' : 'rich';
+    // Count neighbors with >5% error in the same direction
+    let patternCount = 0;
+    for (const nf of neighbors) {
+      const nErr = errorPct(nf);
+      if (nErr > HAMMER_CHISEL_THRESHOLD) {
+        const nDir = nf > 1.0 ? 'lean' : 'rich';
+        if (nDir === direction) patternCount++;
+      }
+    }
+    // Pattern exists if at least 2 neighbors agree (or 1 if only 1-2 neighbors have data)
+    return patternCount >= Math.min(2, neighbors.length);
+  }
+
+  // First pass: classify each cell into tiers
+  const cellTiers: CorrectionTier[][] = [];
+  for (let r = 0; r < numRows; r++) {
+    cellTiers.push([]);
+    for (let c = 0; c < numCols; c++) {
+      const factor = rawFactors[r][c];
+      if (!Number.isFinite(factor)) {
+        cellTiers[r].push('sandpaper'); // placeholder, won't be used
+        continue;
+      }
+      const err = errorPct(factor);
+      if (err <= SANDPAPER_THRESHOLD) {
+        cellTiers[r].push('sandpaper');
+      } else if (err > OUTLIER_THRESHOLD && getNeighborFactors(r, c).length > 0 && !neighborsShowPattern(r, c, factor)) {
+        // >20% error AND neighbors have data but don't agree → outlier
+        // (If no neighbors have data, we can't fact-check → treat as hammer_chisel)
+        cellTiers[r].push('outlier_capped');
+      } else {
+        // >5% error with pattern (or 5-20% error) → hammer & chisel
+        cellTiers[r].push('hammer_chisel');
+      }
+    }
+  }
+
+  // Second pass: for hammer_chisel cells, find connected groups and average them
+  // Use flood-fill to find groups of adjacent hammer_chisel cells with same direction
+  const visited: boolean[][] = Array.from({ length: numRows }, () => Array(numCols).fill(false));
+
+  function floodFillGroup(startR: number, startC: number): [number, number][] {
+    const group: [number, number][] = [];
+    const direction = rawFactors[startR][startC] > 1.0 ? 'lean' : 'rich';
+    const stack: [number, number][] = [[startR, startC]];
+    while (stack.length > 0) {
+      const [r, c] = stack.pop()!;
+      if (r < 0 || r >= numRows || c < 0 || c >= numCols) continue;
+      if (visited[r][c]) continue;
+      if (!Number.isFinite(rawFactors[r][c])) continue;
+      if (cellTiers[r][c] !== 'hammer_chisel') continue;
+      const cellDir = rawFactors[r][c] > 1.0 ? 'lean' : 'rich';
+      if (cellDir !== direction) continue;
+      visited[r][c] = true;
+      group.push([r, c]);
+      // Check all 8 neighbors
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          stack.push([r + dr, c + dc]);
+        }
+      }
+    }
+    return group;
+  }
+
+  // Build groups of connected hammer_chisel cells
+  const hammerGroups: [number, number][][] = [];
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      if (!visited[r][c] && cellTiers[r][c] === 'hammer_chisel' && Number.isFinite(rawFactors[r][c])) {
+        const group = floodFillGroup(r, c);
+        if (group.length > 0) hammerGroups.push(group);
+      }
+    }
+  }
+
+  // Compute averaged correction factor for each group
+  const groupAvgFactor: Map<string, number> = new Map();
+  for (const group of hammerGroups) {
+    let sumFactor = 0;
+    for (const [r, c] of group) {
+      sumFactor += rawFactors[r][c];
+    }
+    const avgFactor = sumFactor / group.length;
+    for (const [r, c] of group) {
+      groupAvgFactor.set(`${r}-${c}`, avgFactor);
+    }
+  }
+
+  // Third pass: build final corrections with tiered logic
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      const rawFactor = rawFactors[r][c];
+      if (!Number.isFinite(rawFactor) || rawCounts[r][c] === 0) continue;
+
+      const tier = cellTiers[r][c];
       const originalValue = map.data[r][c];
-      const correctedValue = originalValue * correctionFactor;
+      const targetLambda = rawTargets[r][c];
+      let finalFactor: number;
+      let tierNote: string | undefined;
+      let isOutlier = false;
+      let rawCorrectionFactor: number | undefined;
+
+      if (tier === 'sandpaper') {
+        // Fine-tuning: apply cell-by-cell as-is
+        finalFactor = rawFactor;
+      } else if (tier === 'outlier_capped') {
+        // Outlier: cap to neighbor average
+        const neighbors = getNeighborFactors(r, c);
+        const neighborAvg = neighbors.length > 0
+          ? neighbors.reduce((s, v) => s + v, 0) / neighbors.length
+          : 1.0; // If no neighbors have data, don't correct
+        rawCorrectionFactor = rawFactor;
+        finalFactor = neighborAvg;
+        isOutlier = true;
+        const rawErrPct = (errorPct(rawFactor) * 100).toFixed(1);
+        const cappedErrPct = (errorPct(neighborAvg) * 100).toFixed(1);
+        tierNote = `Outlier: ${rawErrPct}% error capped to neighbor avg (${cappedErrPct}%). Possible bad data.`;
+        outlierNotes.push({
+          row: r,
+          col: c,
+          mapKey,
+          rawErrorPct: errorPct(rawFactor) * 100,
+          cappedErrorPct: errorPct(neighborAvg) * 100,
+          neighborAvgFactor: neighborAvg,
+          message: `Cell [${map.rowAxis[r]} RPM, ${map.colAxis[c]} ${map.colLabel}]: ` +
+            `${rawErrPct}% ${rawFactor > 1 ? 'lean' : 'rich'} error is isolated (neighbors don't agree). ` +
+            `Capped to ${cappedErrPct}% correction. Verify data quality for this cell.`,
+        });
+        tierCounts.outlier_capped++;
+      } else {
+        // Hammer & chisel: use group-averaged factor
+        const groupKey = `${r}-${c}`;
+        const avgFactor = groupAvgFactor.get(groupKey);
+        if (avgFactor !== undefined && avgFactor !== rawFactor) {
+          rawCorrectionFactor = rawFactor;
+          finalFactor = avgFactor;
+          tierNote = `Regional avg applied (${(errorPct(rawFactor) * 100).toFixed(1)}% → ${(errorPct(avgFactor) * 100).toFixed(1)}%)`;
+        } else {
+          finalFactor = rawFactor;
+        }
+        tierCounts.hammer_chisel++;
+      }
+
+      if (tier === 'sandpaper') tierCounts.sandpaper++;
+
+      const correctedValue = originalValue * finalFactor;
 
       const correction: CellCorrection = {
         row: r,
         col: c,
         originalValue,
         correctedValue,
-        correctionFactor,
-        sampleCount: cell.count,
-        avgActualLambda: avgLambda,
+        correctionFactor: finalFactor,
+        sampleCount: rawCounts[r][c],
+        avgActualLambda: rawLambdas[r][c],
         targetLambda,
+        tier,
       };
-      if (cell.stftCount > 0) {
-        correction.avgStft = cell.sumStft / cell.stftCount;
+      if (rawCorrectionFactor !== undefined) correction.rawCorrectionFactor = rawCorrectionFactor;
+      if (isOutlier) correction.isOutlier = true;
+      if (tierNote) correction.tierNote = tierNote;
+      if (rawStftCount[r][c] > 0) {
+        correction.avgStft = rawStftSum[r][c] / rawStftCount[r][c];
       }
       corrections.push(correction);
     }
@@ -693,8 +958,10 @@ function computeMapCorrections(
     mapKey,
     corrections,
     totalCellsCorrected: corrections.length,
-    totalCellsInMap: map.data.length * (map.data[0]?.length ?? 0),
+    totalCellsInMap: numRows * numCols,
     totalSamplesUsed: totalSamples,
+    outlierNotes,
+    tierCounts,
   };
 }
 
@@ -813,6 +1080,7 @@ export function computeCorrections(
     decelSamplesSkipped,
     transientSamplesSkipped,
     transientNotes,
+    outlierNotes: results.flatMap(r => r.outlierNotes),
   };
 }
 

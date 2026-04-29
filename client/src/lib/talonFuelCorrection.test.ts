@@ -946,3 +946,245 @@ describe('Single-Sensor Fallback', () => {
     expect(cyl2!.corrections[0].avgActualLambda).toBeCloseTo(0.92, 3);
   });
 });
+
+// ─── Tiered Correction Strategy Tests ─────────────────────────────────────────
+
+describe('Tiered Correction Strategy', () => {
+  // 5x5 map for testing neighbor patterns
+  const bigMap = makeFuelMap({
+    rowAxis: [2000, 3000, 4000, 5000, 6000],
+    colAxis: [10, 20, 30, 40, 50],
+    data: [
+      [4.0, 4.5, 5.0, 5.5, 6.0],
+      [4.5, 5.0, 5.5, 6.0, 6.5],
+      [5.0, 5.5, 6.0, 6.5, 7.0],
+      [5.5, 6.0, 6.5, 7.0, 7.5],
+      [6.0, 6.5, 7.0, 7.5, 8.0],
+    ],
+    targetLambda: [0.95, 0.95, 0.95, 0.95, 0.95],
+    colLabel: 'TPS %',
+  });
+
+  it('applies sandpaper (cell-by-cell) for errors ≤ 5%', () => {
+    // AFR = 14.0 → lambda = 14.0/14.7 = 0.952, target = 0.95
+    // Error = 0.952/0.95 - 1 = 0.002 = 0.2% → sandpaper
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        [3000, 20, 80, 14.0, 14.0, 1, 5.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: bigMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const result = report.results[0];
+    expect(result.corrections.length).toBe(1);
+    expect(result.corrections[0].tier).toBe('sandpaper');
+    expect(result.tierCounts.sandpaper).toBe(1);
+    expect(result.tierCounts.hammer_chisel).toBe(0);
+    expect(result.tierCounts.outlier_capped).toBe(0);
+  });
+
+  it('applies hammer & chisel (regional averaging) for adjacent cells with >5% error', () => {
+    // Create multiple samples hitting adjacent cells, all with ~10% lean error
+    // AFR = 15.4 → lambda = 15.4/14.7 = 1.048, target = 0.95
+    // Factor = 1.048/0.95 = 1.103 → 10.3% error → hammer & chisel
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // Cell [1,1] (3000 RPM, 20 TPS): 10% lean
+        [3000, 20, 80, 15.4, 15.4, 1, 5.0],
+        // Cell [1,2] (3000 RPM, 30 TPS): 12% lean
+        [3000, 30, 80, 15.7, 15.7, 1, 5.5],
+        // Cell [2,1] (4000 RPM, 20 TPS): 8% lean
+        [4000, 20, 80, 15.1, 15.1, 1, 5.5],
+        // Cell [2,2] (4000 RPM, 30 TPS): 11% lean
+        [4000, 30, 80, 15.5, 15.5, 1, 6.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: bigMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const result = report.results[0];
+    expect(result.corrections.length).toBe(4);
+
+    // All should be hammer_chisel tier
+    for (const corr of result.corrections) {
+      expect(corr.tier).toBe('hammer_chisel');
+    }
+    expect(result.tierCounts.hammer_chisel).toBe(4);
+
+    // All corrections in the group should have the SAME averaged factor
+    const factors = result.corrections.map(c => c.correctionFactor);
+    const avgFactor = factors.reduce((s, v) => s + v, 0) / factors.length;
+    for (const f of factors) {
+      expect(f).toBeCloseTo(avgFactor, 6);
+    }
+
+    // The raw factors should differ (they had different AFR values)
+    const rawFactors = result.corrections.map(c => c.rawCorrectionFactor ?? c.correctionFactor);
+    const uniqueRaw = new Set(rawFactors.map(f => f.toFixed(4)));
+    expect(uniqueRaw.size).toBeGreaterThan(1);
+  });
+
+  it('caps outliers (>20% error, isolated) to neighbor average', () => {
+    // One cell with extreme error surrounded by normal cells
+    // Cell [2,2] (4000 RPM, 30 TPS): AFR = 18.0 → lambda = 1.224, factor = 1.289 → 28.9% lean
+    // Neighbors: all normal (~0% error, factor ≈ 1.0)
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // Outlier cell [2,2]: extreme lean
+        [4000, 30, 80, 18.0, 18.0, 1, 6.0],
+        // Surrounding normal cells (AFR ≈ 14.0 → lambda ≈ 0.952 → factor ≈ 1.002)
+        [3000, 20, 80, 14.0, 14.0, 1, 5.0],  // [1,1]
+        [3000, 30, 80, 14.0, 14.0, 1, 5.5],  // [1,2]
+        [3000, 40, 80, 14.0, 14.0, 1, 5.5],  // [1,3]
+        [4000, 20, 80, 14.0, 14.0, 1, 5.5],  // [2,1]
+        [4000, 40, 80, 14.0, 14.0, 1, 6.5],  // [2,3]
+        [5000, 20, 80, 14.0, 14.0, 1, 6.0],  // [3,1]
+        [5000, 30, 80, 14.0, 14.0, 1, 6.5],  // [3,2]
+        [5000, 40, 80, 14.0, 14.0, 1, 6.5],  // [3,3]
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: bigMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const result = report.results[0];
+    // Find the outlier cell [2,2]
+    const outlierCell = result.corrections.find(c => c.row === 2 && c.col === 2);
+    expect(outlierCell).toBeDefined();
+    expect(outlierCell!.tier).toBe('outlier_capped');
+    expect(outlierCell!.isOutlier).toBe(true);
+    expect(outlierCell!.tierNote).toBeDefined();
+    expect(outlierCell!.rawCorrectionFactor).toBeDefined();
+
+    // Raw factor should be ~1.289 (28.9% lean)
+    expect(outlierCell!.rawCorrectionFactor!).toBeGreaterThan(1.2);
+
+    // Capped factor should be close to neighbor average (~1.002)
+    expect(outlierCell!.correctionFactor).toBeLessThan(1.05);
+
+    // Outlier note should exist
+    expect(result.outlierNotes.length).toBeGreaterThan(0);
+    const note = result.outlierNotes.find(n => n.row === 2 && n.col === 2);
+    expect(note).toBeDefined();
+    expect(note!.rawErrorPct).toBeGreaterThan(20);
+
+    // Report-level outlier notes
+    expect(report.outlierNotes.length).toBeGreaterThan(0);
+  });
+
+  it('does NOT cap cells with >20% error when neighbors show same pattern', () => {
+    // All cells in a region are 25% lean → this is a real fueling issue, not an outlier
+    // AFR = 17.5 → lambda = 1.190, factor = 1.253 → 25.3% lean
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // All cells in a 2x2 region are ~25% lean
+        [3000, 20, 80, 17.5, 17.5, 1, 5.0],  // [1,1]
+        [3000, 30, 80, 17.5, 17.5, 1, 5.5],  // [1,2]
+        [4000, 20, 80, 17.5, 17.5, 1, 5.5],  // [2,1]
+        [4000, 30, 80, 17.5, 17.5, 1, 6.0],  // [2,2]
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: bigMap,
+      alphaN_cyl2: null,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const result = report.results[0];
+    // None should be outlier_capped — they all agree, so it's hammer_chisel
+    for (const corr of result.corrections) {
+      expect(corr.tier).toBe('hammer_chisel');
+      expect(corr.isOutlier).toBeFalsy();
+    }
+    expect(result.outlierNotes.length).toBe(0);
+  });
+
+  it('keeps cylinders independent (Cyl2 does not affect Cyl1 tiering)', () => {
+    // Cyl1 has a single lean cell, Cyl2 has normal data in same position
+    // The Cyl1 cell should still be evaluated independently
+    const wp8 = makeWP8Data({
+      channelNames: [
+        'Engine Speed', 'Throttle Position', 'Manifold Absolute Pressure',
+        'Air Fuel Ratio 1', 'Air Fuel Ratio 2', 'Alpha N',
+        'Injector Pulsewidth Desired',
+      ],
+      rows: [
+        // Cyl1 (AFR1) = 18.0 (extreme lean), Cyl2 (AFR2) = 14.0 (normal)
+        [4000, 30, 80, 18.0, 14.0, 1, 6.0],
+      ],
+    });
+
+    const fuelMaps: FuelMapState = {
+      alphaN_cyl1: bigMap,
+      alphaN_cyl2: bigMap,
+      speedDensity_cyl1: null,
+      speedDensity_cyl2: null,
+    };
+
+    const config: CorrectionConfig = { vehicleMode: 'na', mapSensor: 'stock' };
+    const report = computeCorrections(fuelMaps, wp8, config);
+
+    const cyl1 = report.results.find(r => r.mapKey === 'alphaN_cyl1');
+    const cyl2 = report.results.find(r => r.mapKey === 'alphaN_cyl2');
+    expect(cyl1).toBeDefined();
+    expect(cyl2).toBeDefined();
+
+    // Cyl1 has extreme error with no neighbors having data → can't fact-check
+    // so it's treated as hammer_chisel (trusted, no capping)
+    const cyl1Cell = cyl1!.corrections[0];
+    expect(cyl1Cell.tier).toBe('hammer_chisel');
+
+    // Cyl2 is normal → sandpaper
+    const cyl2Cell = cyl2!.corrections[0];
+    expect(cyl2Cell.tier).toBe('sandpaper');
+  });
+});

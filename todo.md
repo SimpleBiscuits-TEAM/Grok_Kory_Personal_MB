@@ -2453,3 +2453,8 @@
 - [x] Add injPwFinal = 0 check to decel sample counter in computeCorrections() too
 - [x] Verify Alpha-N channel is being read as exact integer 1 vs floating point comparison issue
 - [x] Add ~0.5-second post-deceleration buffer to fuel correction filters (skip N samples after decel event ends to prevent lean AFR from sensor transport delay)
+- [x] Implement tiered correction strategy: sandpaper (≤5% cell-by-cell), hammer & chisel (>5% regional averaging)
+- [x] Implement outlier fact-check: cap >20% isolated cells to neighbor average, highlight and add note
+- [x] Pattern recognition: group adjacent cells (8-neighbor) with >5% error, average correction across group
+- [x] Keep cylinders independent (no cross-referencing Cyl1/Cyl2 corrections)
+- [x] Add outlier notes to CorrectionReport for UI display
