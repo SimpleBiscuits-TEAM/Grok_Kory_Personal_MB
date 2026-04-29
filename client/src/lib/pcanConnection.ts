@@ -1223,6 +1223,7 @@ export class PCANConnection {
     // Pre-filter: remove standard PIDs the vehicle doesn't support
     const filteredPids = pids.filter(p => {
       if (p.service === 0x22) return true; // Extended PIDs aren't in the bitmask
+      if (p.service === 0x2D) return true; // TCM DDDI PIDs — passive stream, not polled
       return this.supportedPids.has(p.pid);
     });
 
@@ -1273,6 +1274,7 @@ export class PCANConnection {
     const DDDI_EXEMPT_PIDS = new Set([
       0x328A, 0x131F, 0x245D, // FRP_ACT, FRP_DES, FUEL_INJ_QTY
       0xDD00, 0xDD02, 0xDD03, 0xDD04, 0xDD07, 0xDD08, // Virtual IOCTL-only DIDs (HPT Common DDDI)
+      0xDE00, 0xDE01, 0xDE02, 0xDE03, // T87A TCM DDDI virtual PIDs (0x5EA stream)
     ]);
     let activePids = [...filteredPids];
     let loopCount = 0;

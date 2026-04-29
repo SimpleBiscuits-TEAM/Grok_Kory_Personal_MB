@@ -264,6 +264,233 @@ const _ppeiPeriodicValues = new Map<number, {
   timestamp: number;
 }>();
 
+// ═══════════════════════════════════════════════════════════════════════════
+// T87A TCM DDDI STREAMING (0x5EA) — Allison 1000 6-speed (2017-2019 L5P)
+// ═══════════════════════════════════════════════════════════════════════════
+// The T87A TCM broadcasts 0x5EA frames at ~40Hz after DDDI setup via Service 0x2D.
+// RAM addresses verified from HP Tuners DDDI source analysis:
+//   FE00 → RAM 0x40014682 (TCC Desired Pressure, 2 bytes, ×0.018 = PSI)
+//   FE01 → RAM 0x40014DB4 (TCC Slip, 2 bytes, signed offset 32768, ×0.125 = rpm)
+//   FE02 → RAM 0x400143C2 (Turbine RPM, 2 bytes — formula TBD)
+//   FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes — formula TBD)
+const TCM_DDDI_PERIODIC_ARB_ID = 0x5EA;
+const TCM_TX_ID = 0x7E2;
+const TCM_RX_ID = 0x7EA;
+
+// Module-level state for TCM DDDI streaming
+let _tcmDddiStreamingActive = false;
+let _tcmDddiFrameCount = 0;
+let _tcmDddiSetupInProgress = false;
+const _tcmDddiPeriodicValues = new Map<number, {
+  did: number;
+  shortName: string;
+  value: number;
+  unit: string;
+  rawBytes: number[];
+  timestamp: number;
+}>();
+
+// TCM DDDI virtual PID IDs (match obdConnection.ts definitions)
+const TCM_VDID_TCC_PRESSURE = 0xDE00;
+const TCM_VDID_TCC_SLIP = 0xDE01;
+const TCM_VDID_TURBINE_RPM = 0xDE02;
+const TCM_VDID_TRANS_TEMP = 0xDE03;
+
+/**
+ * Parse a 0x5EA TCM DDDI periodic frame.
+ * Frame format: [sub_frame_id, b1, b2, b3, b4, ...]
+ *   FE sub-frame: TCC Desired Pressure (b1:b2) + TCC Slip Speed (b3:b4)
+ *   FD sub-frame: Turbine RPM (b1:b2) + Trans Fluid Temp (b3:b4)
+ */
+function parseTcmDddiPeriodicFrame(data: number[]): void {
+  if (!data || data.length < 3) return;
+  const subFrame = data[0];
+  const now = Date.now();
+
+  _tcmDddiFrameCount++;
+  _tcmDddiStreamingActive = true;
+
+  if (_tcmDddiFrameCount <= 50 || _tcmDddiFrameCount % 200 === 0) {
+    const hex = data.slice(0, Math.min(8, data.length)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+    console.log(`${PPEI_TAG} [TCM-DDDI-RX] #${_tcmDddiFrameCount} sub=0x${subFrame.toString(16).toUpperCase()} [${hex}]`);
+  }
+
+  if (subFrame === 0xFE && data.length >= 5) {
+    // FE sub-frame: TCC Desired Pressure (b1<<8|b2) × 0.018 = PSI
+    const rawPressure = (data[1] << 8) | data[2];
+    const tccPressure = rawPressure * 0.018;
+    if (Number.isFinite(tccPressure) && tccPressure >= 0 && tccPressure < 500) {
+      _tcmDddiPeriodicValues.set(TCM_VDID_TCC_PRESSURE, {
+        did: TCM_VDID_TCC_PRESSURE,
+        shortName: 'TCCP_DDDI',
+        value: Math.round(tccPressure * 10) / 10,
+        unit: 'PSI',
+        rawBytes: [data[1], data[2]],
+        timestamp: now,
+      });
+    }
+
+    // TCC Slip Speed: ((b3<<8|b4) - 32768) × 0.125 = rpm (signed offset)
+    if (data.length >= 5) {
+      const rawSlip = (data[3] << 8) | data[4];
+      const tccSlip = (rawSlip - 32768) * 0.125;
+      if (Number.isFinite(tccSlip) && Math.abs(tccSlip) < 5000) {
+        _tcmDddiPeriodicValues.set(TCM_VDID_TCC_SLIP, {
+          did: TCM_VDID_TCC_SLIP,
+          shortName: 'TCCS_DDDI',
+          value: Math.round(tccSlip * 10) / 10,
+          unit: 'rpm',
+          rawBytes: [data[3], data[4]],
+          timestamp: now,
+        });
+      }
+    }
+  } else if (subFrame === 0xFD && data.length >= 5) {
+    // FD sub-frame: Turbine RPM (b1:b2) + Trans Fluid Temp (b3:b4)
+    const rawTurbine = (data[1] << 8) | data[2];
+    // Tentative: same 0.125 scaling as turbine speed channels on similar TCMs
+    const turbineRpm = rawTurbine * 0.125;
+    if (Number.isFinite(turbineRpm) && turbineRpm >= 0 && turbineRpm < 15000) {
+      _tcmDddiPeriodicValues.set(TCM_VDID_TURBINE_RPM, {
+        did: TCM_VDID_TURBINE_RPM,
+        shortName: 'TURB_RPM_DDDI',
+        value: Math.round(turbineRpm),
+        unit: 'rpm',
+        rawBytes: [data[1], data[2]],
+        timestamp: now,
+      });
+    }
+
+    if (data.length >= 5) {
+      const rawTemp = (data[3] << 8) | data[4];
+      // Tentative: raw value logged for calibration (formula TBD)
+      _tcmDddiPeriodicValues.set(TCM_VDID_TRANS_TEMP, {
+        did: TCM_VDID_TRANS_TEMP,
+        shortName: 'TFT_DDDI',
+        value: rawTemp,
+        unit: 'raw',
+        rawBytes: [data[3], data[4]],
+        timestamp: now,
+      });
+    }
+  }
+}
+
+/**
+ * Start T87A TCM DDDI streaming via the PCAN bridge.
+ * Sends UDS commands to TCM (0x7E2→0x7EA): extended session, DDDI defines, start periodic.
+ * After setup, 0x5EA frames will arrive passively on the CAN bus.
+ */
+async function startTcmDddiStreaming(conn: any): Promise<boolean> {
+  if (_tcmDddiStreamingActive) return true;
+  if (_tcmDddiSetupInProgress) return false;
+  _tcmDddiSetupInProgress = true;
+  _tcmDddiFrameCount = 0;
+
+  try {
+    ppeiLog(conn, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup (0x7E2→0x7EA)...');
+
+    // Step 0: Ensure 0x5EA is in the bridge's CAN filter so periodic frames reach the WebSocket
+    try {
+      await conn.sendRequest(
+        { type: 'set_filter', arb_ids: [0x5E8, 0x5EA] },
+        2000
+      );
+      ppeiLog(conn, '[TCM-DDDI] Bridge filter updated: 0x5E8 + 0x5EA added');
+    } catch (e: any) {
+      ppeiLog(conn, `[TCM-DDDI] Filter update failed (${e?.message}) — 0x5EA may already be in filter`);
+    }
+
+    // Step 1: Extended diagnostic session on TCM
+    const sessResp = await conn.sendUDSRequest(0x10, 0x03, [], TCM_TX_ID, 3000, TCM_RX_ID);
+    if (!sessResp || !sessResp.positiveResponse) {
+      ppeiLog(conn, `[TCM-DDDI] Extended session failed on TCM — TCM may not be T87A`);
+      _tcmDddiSetupInProgress = false;
+      return false;
+    }
+    ppeiLog(conn, '[TCM-DDDI] Extended session OK on TCM (0x7E2)');
+
+    // Step 2: TesterPresent keepalive
+    await conn.sendUDSRequest(0x3E, 0x00, [], TCM_TX_ID, 500, TCM_RX_ID);
+
+    // Step 3: Define DDDI FE00 → RAM 0x40014682 (TCC Desired Pressure, 2 bytes)
+    // Service 0x2D: [2D FE 00 03 40 01 46 82 02]
+    const dddi0Resp = await conn.sendUDSRequest(
+      0x2D, undefined, [0xFE, 0x00, 0x03, 0x40, 0x01, 0x46, 0x82, 0x02],
+      TCM_TX_ID, 2000, TCM_RX_ID
+    );
+    if (!dddi0Resp || !dddi0Resp.positiveResponse) {
+      ppeiLog(conn, `[TCM-DDDI] DDDI FE00 define failed — TCM doesn't support DDDI`);
+      _tcmDddiSetupInProgress = false;
+      return false;
+    }
+    ppeiLog(conn, '[TCM-DDDI] DDDI FE00 (TCC Desired Pressure) defined OK');
+
+    // Step 4: Define DDDI FE01 → RAM 0x40014DB4 (TCC Slip Speed, 2 bytes)
+    const dddi1Resp = await conn.sendUDSRequest(
+      0x2D, undefined, [0xFE, 0x01, 0x03, 0x40, 0x01, 0x4D, 0xB4, 0x02],
+      TCM_TX_ID, 2000, TCM_RX_ID
+    );
+    if (dddi1Resp?.positiveResponse) {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE01 (TCC Slip Speed) defined OK');
+    } else {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE01 not supported — continuing with FE00 only');
+    }
+
+    // Step 5: Define DDDI FE02 → RAM 0x400143C2 (Turbine RPM, 2 bytes)
+    const dddi2Resp = await conn.sendUDSRequest(
+      0x2D, undefined, [0xFE, 0x02, 0x03, 0x40, 0x01, 0x43, 0xC2, 0x02],
+      TCM_TX_ID, 2000, TCM_RX_ID
+    );
+    if (dddi2Resp?.positiveResponse) {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE02 (Turbine RPM) defined OK');
+    } else {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE02 not supported — skipping');
+    }
+
+    // Step 6: Define DDDI FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes)
+    const dddi3Resp = await conn.sendUDSRequest(
+      0x2D, undefined, [0xFE, 0x03, 0x03, 0x40, 0x01, 0x4C, 0xC0, 0x02],
+      TCM_TX_ID, 2000, TCM_RX_ID
+    );
+    if (dddi3Resp?.positiveResponse) {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE03 (Trans Fluid Temp) defined OK');
+    } else {
+      ppeiLog(conn, '[TCM-DDDI] DDDI FE03 not supported — skipping');
+    }
+
+    // Step 7: Start periodic transmission
+    // [AA 03 00] = start periodic reads (same pattern as E41 ECM)
+    const startResp = await conn.sendUDSRequest(
+      0xAA, 0x03, [0x00],
+      TCM_TX_ID, 2000, TCM_RX_ID
+    );
+    if (!startResp || (!startResp.positiveResponse && !(startResp.data && startResp.data[0] === 0xEA))) {
+      ppeiLog(conn, `[TCM-DDDI] Start periodic failed: ${JSON.stringify(startResp)}`);
+      _tcmDddiSetupInProgress = false;
+      return false;
+    }
+    ppeiLog(conn, '[TCM-DDDI] Periodic streaming started — listening for 0x5EA frames...');
+
+    // Step 8: Wait 2 seconds to verify frames arrive
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (_tcmDddiFrameCount === 0) {
+      ppeiLog(conn, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM DDDI not active');
+      _tcmDddiSetupInProgress = false;
+      return false;
+    }
+
+    ppeiLog(conn, `[TCM-DDDI] ✓ Streaming confirmed: ${_tcmDddiFrameCount} frames in 2s`);
+    _tcmDddiSetupInProgress = false;
+    return true;
+
+  } catch (err) {
+    ppeiLog(conn, `[TCM-DDDI] Setup error: ${err}`);
+    _tcmDddiSetupInProgress = false;
+    return false;
+  }
+}
+
 /**
  * Decode 4 bytes as a big-endian IEEE 754 float32.
  * Used for IOCTL RAM values (FRP, Cylinder Airmass, Inj Pulse Width, etc.)
@@ -529,9 +756,12 @@ function wrapOpenWebSocket(original: Function) {
             const arbId = msg.arb_id ?? msg.arbitration_id ?? 0;
             const dataArr: number[] = Array.isArray(msg.data) ? msg.data : [];
 
-            // ── DDDI periodic frame parsing (0x5E8) ──
+            // ── DDDI periodic frame parsing (0x5E8 ECM + 0x5EA TCM) ──
             if (arbId === DDDI_PERIODIC_ARB_ID && dataArr.length >= 2) {
               parseDddiPeriodicFrame(dataArr);
+            }
+            if (arbId === TCM_DDDI_PERIODIC_ARB_ID && dataArr.length >= 3) {
+              parseTcmDddiPeriodicFrame(dataArr);
             }
 
             // Log first 5 frames to DEVICE CONSOLE, rest only to F12
@@ -549,7 +779,7 @@ function wrapOpenWebSocket(original: Function) {
           originalOnMessage.call(this.ws, event);
         }
       };
-      ppeiLog(this, 'WebSocket interceptor installed (with DDDI 0x5E8 periodic parser)');
+      ppeiLog(this, 'WebSocket interceptor installed (with DDDI 0x5E8 + 0x5EA periodic parsers)');
     }
   };
 }
@@ -867,6 +1097,62 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
         `⚡ DDDI periodic: ${injectedFromPeriodic.join(', ')}`
       );
     }
+
+    // ── Inject TCM DDDI periodic values (0x5EA frames: TCC Pressure, Slip, Turbine RPM, TFT) ──
+    const tcmDddiPids = pids.filter((p: any) => p.service === 0x2D);
+    if (tcmDddiPids.length > 0) {
+      // Trigger TCM DDDI setup if not already streaming
+      if (!_tcmDddiStreamingActive && !_tcmDddiSetupInProgress) {
+        ppeiLog(this, `[TCM-DDDI] Detected ${tcmDddiPids.length} service 0x2D PIDs — initiating TCM DDDI setup...`);
+        // Fire-and-forget: setup runs in background, frames will start arriving
+        startTcmDddiStreaming(this).then(ok => {
+          if (ok) {
+            ppeiLog(this, '[TCM-DDDI] ✓ TCM DDDI streaming active — values will appear next cycle');
+          } else {
+            ppeiLog(this, '[TCM-DDDI] TCM DDDI setup failed — T87A TCM may not be present');
+          }
+        });
+      }
+
+      // Inject cached TCM DDDI values into readings
+      const TCM_PERIODIC_MAX_AGE_MS = 5000;
+      const injectedFromTcm: string[] = [];
+      for (const pid of tcmDddiPids) {
+        const tcmVal = _tcmDddiPeriodicValues.get(pid.pid);
+        if (tcmVal && (now - tcmVal.timestamp) < TCM_PERIODIC_MAX_AGE_MS) {
+          // Don't duplicate if already in readings
+          const existing = readings.findIndex((r: any) => r.pid === pid.pid);
+          if (existing >= 0) {
+            readings[existing] = {
+              pid: tcmVal.did,
+              name: pid.name,
+              shortName: tcmVal.shortName,
+              value: tcmVal.value,
+              unit: tcmVal.unit,
+              rawBytes: tcmVal.rawBytes,
+              timestamp: tcmVal.timestamp,
+            };
+          } else {
+            readings.push({
+              pid: tcmVal.did,
+              name: pid.name,
+              shortName: tcmVal.shortName,
+              value: tcmVal.value,
+              unit: tcmVal.unit,
+              rawBytes: tcmVal.rawBytes,
+              timestamp: tcmVal.timestamp,
+            });
+          }
+          injectedFromTcm.push(`${tcmVal.shortName}=${tcmVal.value}`);
+        }
+      }
+      if (injectedFromTcm.length > 0 && (_tcmDddiFrameCount <= 20 || _tcmDddiFrameCount % 50 === 0)) {
+        ppeiLog(this,
+          `⚡ TCM-DDDI periodic: ${injectedFromTcm.join(', ')}`
+        );
+      }
+    }
+
     return readings;
   };
 }
