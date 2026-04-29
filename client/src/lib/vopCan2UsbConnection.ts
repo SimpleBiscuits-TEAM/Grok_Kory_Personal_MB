@@ -197,11 +197,18 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
   private dddiClearedAt = new Map<number, number>();
   /** TesterPresent keepalive interval handle. */
   private testerPresentTimer: ReturnType<typeof setInterval> | null = null;
-  /** DDDI periodic streaming state. */
+  /** DDDI periodic streaming state (E41 ECM — 0x5E8 frames). */
   private dddiPeriodicActive = false;
   private dddiPeriodicUnsub: (() => void) | null = null;
-  /** Latest DDDI periodic readings keyed by shortName. */
+  /** Latest DDDI periodic readings keyed by shortName (E41 ECM). */
   private dddiPeriodicValues = new Map<string, PIDReading>();
+  /** T87A TCM DDDI streaming state (0x5EA frames, Service 0x2D RAM streaming). */
+  private tcmDddiActive = false;
+  private tcmDddiUnsub: (() => void) | null = null;
+  private tcmDddiFrameCount = 0;
+  private tcmDddiLastLogTime = 0;
+  /** Latest T87A TCM DDDI periodic readings keyed by shortName. */
+  private tcmDddiValues = new Map<string, PIDReading>();
 
   constructor(config: VopCan2UsbConnectionConfig = {}) {
     this.baudRate = config.baudRate ?? 115200;
@@ -881,11 +888,24 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.emit('log', null, `[DDDI-CLEAR] Done: ${okCount}/${DDDI_CLEAR_PERIODIC_IDS.length} OK in ${elapsed}ms`);
   }
 
-  /** Short names of PIDs whose live data comes from DDDI periodic streaming, not direct Mode 22. */
+  /** Short names of PIDs whose live data comes from DDDI periodic streaming (E41 ECM), not direct Mode 22. */
   private static readonly DDDI_PERIODIC_SHORTNAMES = new Set(['FRP_ACT', 'FP_SAE']);
+  /** Short names of PIDs whose live data comes from T87A TCM DDDI streaming (0x5EA), not direct Mode 22. */
+  private static readonly TCM_DDDI_SHORTNAMES = new Set(['TCCP_DDDI', 'TCCS_DDDI', 'TURB_RPM_DDDI', 'TFT_DDDI']);
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
+      // If this PID is served by T87A TCM DDDI streaming, return the latest TCM periodic value
+      if (this.tcmDddiActive && VopCan2UsbConnection.TCM_DDDI_SHORTNAMES.has(pid.shortName)) {
+        const tcmReading = this.getTcmDddiReading(pid.shortName);
+        if (tcmReading) {
+          if (Date.now() - this.tcmDddiLastLogTime > 2000) {
+            console.log(`[TCM-DDDI-READ] ${pid.shortName} = ${tcmReading.value} ${tcmReading.unit} (from 0x5EA stream, age=${Date.now() - tcmReading.timestamp}ms)`);
+          }
+          return tcmReading;
+        }
+        console.log(`[TCM-DDDI-READ] ${pid.shortName}: no TCM DDDI data yet, falling back to Mode 22`);
+      }
       // If this PID is served by DDDI periodic streaming, return the latest periodic value
       if (this.dddiPeriodicActive && VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(pid.shortName)) {
         const periodic = this.getDddiPeriodicReading(pid.shortName);
@@ -1157,6 +1177,22 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
       this.emit('log', null, '[DDDI] No DDDI PIDs selected — skipping periodic streaming');
     }
 
+    // Start T87A TCM DDDI streaming if any TCM DDDI PIDs are selected
+    const tcmDddiShortNames = filteredPids.filter(p => VopCan2UsbConnection.TCM_DDDI_SHORTNAMES.has(p.shortName)).map(p => p.shortName);
+    const hasTcmDddiPids = tcmDddiShortNames.length > 0;
+    this.emit('log', null, `[TCM-DDDI] hasTcmDddiPids=${hasTcmDddiPids} (matched: ${tcmDddiShortNames.join(', ') || 'none'})`);
+    if (hasTcmDddiPids) {
+      this.emit('log', null, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup...');
+      const tcmDddiOk = await this.startTcmDddiStreaming();
+      if (!tcmDddiOk) {
+        this.emit('log', null, '[TCM-DDDI] TCM DDDI setup failed — T87A channels will use Mode 22 fallback');
+      } else {
+        this.emit('log', null, '[TCM-DDDI] T87A TCM DDDI streaming active — 0x5EA frames incoming');
+      }
+    } else {
+      this.emit('log', null, '[TCM-DDDI] No T87A TCM DDDI PIDs selected — skipping TCM DDDI setup');
+    }
+
     const fail = new Map<number, number>();
     const pause = new Map<number, number>();
     // MAXF: pause a DID after this many consecutive failures (was 8, reduced to 2
@@ -1274,6 +1310,7 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     this.loggingActive = false;
     this.stopTesterPresent();
     void this.stopDddiPeriodicStreaming();
+    void this.stopTcmDddiStreaming();
     if (this.currentSession) {
       this.currentSession.endTime = Date.now();
       const s = this.currentSession;
@@ -1693,6 +1730,228 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     const reading = this.dddiPeriodicValues.get(shortName);
     if (!reading) return null;
     // Stale check: periodic frames come every ~25ms, so 500ms means 20 missed frames
+    if (Date.now() - reading.timestamp > 500) return null;
+    return reading;
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────────
+  // T87A TCM DDDI Streaming (0x5EA periodic broadcast, Service 0x2D)
+  // Confirmed from HP Tuners BusMaster capture on 2019 L5P Duramax (Allison 1000 6-speed)
+  // ───────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Start T87A TCM DDDI streaming via Service 0x2D (RAM address reads).
+   *
+   * The T87A TCM (Allison 1000 6-speed, 2017-2019 L5P Duramax) responds to
+   * Service 0x2D DDDI setup by broadcasting 0x5EA frames at ~40Hz.
+   *
+   * DDDI channel mapping (confirmed from HP Tuners BusMaster capture 4/29/26):
+   *   FE00 → RAM 0x40014682 — TCC Desired Pressure (2 bytes, ×0.018 = PSI)
+   *   FE01 → RAM 0x40014DB4 — TCC Slip Speed (2 bytes, signed offset 32768, ×0.125 = rpm)
+   *   FE02 → RAM 0x400143C2 — Turbine RPM (2 bytes — formula TBD, pending truck verification)
+   *   FE03 → RAM 0x40014CC0 — Trans Fluid Temp (2 bytes — formula TBD, pending truck verification)
+   *
+   * 0x5EA frame decode (FE sub-frame, confirmed):
+   *   [FE][b1][b2][b3][b4][b5][b6][b7]
+   *   TCC Desired Pressure: (b1<<8|b2) × 0.018 = PSI
+   *   TCC Slip Speed:       ((b3<<8|b4) - 32768) × 0.125 = rpm (signed offset)
+   *
+   * @returns true if streaming started successfully, false if TCM not present
+   */
+  async startTcmDddiStreaming(): Promise<boolean> {
+    if (this.tcmDddiActive) return true;
+    this.tcmDddiFrameCount = 0;
+    this.tcmDddiLastLogTime = 0;
+
+    const savedTxId = this.obdTxId;
+    const savedRxId = this.obdRxId;
+    const TCM_TX_ID = 0x7E2;
+    const TCM_RX_ID = 0x7EA;
+    const TCM_BROADCAST_ID = 0x5EA;
+
+    try {
+      // Switch ISO-TP to TCM address
+      this.obdTxId = TCM_TX_ID;
+      this.obdRxId = TCM_RX_ID;
+
+      this.emit('log', null, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup (0x7E2→0x7EA)...');
+
+      // Step 1: Extended diagnostic session on TCM
+      const sessResp = await this.isoTpRequest([0x10, 0x03], 3000);
+      if (!sessResp || sessResp[0] !== 0x50) {
+        this.emit('log', null, `[TCM-DDDI] Extended session failed: ${sessResp ? sessResp.map(b => b.toString(16)).join(' ') : 'no response'}`);
+        this.obdTxId = savedTxId;
+        this.obdRxId = savedRxId;
+        return false;
+      }
+      this.emit('log', null, '[TCM-DDDI] Extended session OK');
+
+      // Step 2: TesterPresent keepalive for TCM
+      await this.isoTpRequest([0x3E, 0x00], 500);
+
+      // Step 3: Define DDDI FE00 → RAM 0x40014682 (TCC Desired Pressure, 2 bytes)
+      // Service 0x2D: [2D FE 00 03 40 01 46 82 02]
+      // 03 = memory address type (4-byte addr, 1-byte length)
+      const dddi0Resp = await this.isoTpRequest([0x2D, 0xFE, 0x00, 0x03, 0x40, 0x01, 0x46, 0x82, 0x02], 2000);
+      if (!dddi0Resp || dddi0Resp[0] !== 0x6D) {
+        this.emit('log', null, `[TCM-DDDI] DDDI FE00 define failed: ${dddi0Resp ? dddi0Resp.map(b => b.toString(16)).join(' ') : 'no response'}`);
+        this.obdTxId = savedTxId;
+        this.obdRxId = savedRxId;
+        return false;
+      }
+      this.emit('log', null, '[TCM-DDDI] DDDI FE00 (TCC Desired Pressure) defined OK');
+
+      // Step 4: Define DDDI FE01 → RAM 0x40014DB4 (TCC Slip Speed, 2 bytes)
+      const dddi1Resp = await this.isoTpRequest([0x2D, 0xFE, 0x01, 0x03, 0x40, 0x01, 0x4D, 0xB4, 0x02], 2000);
+      if (!dddi1Resp || dddi1Resp[0] !== 0x6D) {
+        this.emit('log', null, `[TCM-DDDI] DDDI FE01 define failed: ${dddi1Resp ? dddi1Resp.map(b => b.toString(16)).join(' ') : 'no response'}`);
+        // Non-fatal: continue with FE00 only
+        this.emit('log', null, '[TCM-DDDI] Continuing with FE00 only');
+      } else {
+        this.emit('log', null, '[TCM-DDDI] DDDI FE01 (TCC Slip Speed) defined OK');
+      }
+
+      // Step 5: Define DDDI FE02 → RAM 0x400143C2 (Turbine RPM, 2 bytes)
+      const dddi2Resp = await this.isoTpRequest([0x2D, 0xFE, 0x02, 0x03, 0x40, 0x01, 0x43, 0xC2, 0x02], 2000);
+      if (dddi2Resp && dddi2Resp[0] === 0x6D) {
+        this.emit('log', null, '[TCM-DDDI] DDDI FE02 (Turbine RPM) defined OK');
+      } else {
+        this.emit('log', null, '[TCM-DDDI] DDDI FE02 (Turbine RPM) not supported — skipping');
+      }
+
+      // Step 6: Define DDDI FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes)
+      const dddi3Resp = await this.isoTpRequest([0x2D, 0xFE, 0x03, 0x03, 0x40, 0x01, 0x4C, 0xC0, 0x02], 2000);
+      if (dddi3Resp && dddi3Resp[0] === 0x6D) {
+        this.emit('log', null, '[TCM-DDDI] DDDI FE03 (Trans Fluid Temp) defined OK');
+      } else {
+        this.emit('log', null, '[TCM-DDDI] DDDI FE03 (Trans Fluid Temp) not supported — skipping');
+      }
+
+      // Step 7: Start periodic transmission of all defined DDDIs
+      // [AA 03 00] = start periodic reads (same pattern as E41 ECM)
+      const startResp = await this.isoTpRequest([0xAA, 0x03, 0x00], 2000);
+      if (!startResp || startResp[0] !== 0xEA) {
+        // Some TCM firmware versions respond with 0x6A or 0xEA — accept both
+        if (!startResp || (startResp[0] !== 0x6A && startResp[0] !== 0xEA)) {
+          this.emit('log', null, `[TCM-DDDI] Start periodic failed: ${startResp ? startResp.map(b => b.toString(16)).join(' ') : 'no response'}`);
+          this.obdTxId = savedTxId;
+          this.obdRxId = savedRxId;
+          return false;
+        }
+      }
+      this.emit('log', null, '[TCM-DDDI] Periodic streaming started — listening for 0x5EA frames...');
+
+      // Step 8: Subscribe to 0x5EA broadcast frames
+      this.tcmDddiUnsub = this.subscribeCanMonitor((arbId, _flags, data) => {
+        if (arbId !== TCM_BROADCAST_ID || data.length < 2) return;
+        this.tcmDddiFrameCount++;
+        const subFrame = data[0];
+        const now = Date.now();
+
+        if (this.tcmDddiFrameCount <= 50 || (now - this.tcmDddiLastLogTime > 2000)) {
+          const hex = Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          console.log(`[TCM-DDDI-RX] #${this.tcmDddiFrameCount} sub=0x${subFrame.toString(16)} data=[${hex}]`);
+          this.tcmDddiLastLogTime = now;
+        }
+
+        if (subFrame === 0xFE && data.length >= 5) {
+          // FE sub-frame: TCC Desired Pressure (b1:b2) + TCC Slip Speed (b3:b4)
+          // Confirmed: (b1<<8|b2) × 0.018 = PSI, ((b3<<8|b4) - 32768) × 0.125 = rpm
+          const rawPressure = (data[1] << 8) | data[2];
+          const tccPressure = rawPressure * 0.018;
+          this.tcmDddiValues.set('TCCP_DDDI', {
+            pid: 0xDE00, name: 'TCC Desired Pressure (DDDI)', shortName: 'TCCP_DDDI',
+            value: Math.round(tccPressure * 10) / 10, unit: 'PSI',
+            rawBytes: [data[1], data[2]], timestamp: now,
+          });
+
+          if (data.length >= 5) {
+            const rawSlip = (data[3] << 8) | data[4];
+            const tccSlip = (rawSlip - 32768) * 0.125;
+            this.tcmDddiValues.set('TCCS_DDDI', {
+              pid: 0xDE01, name: 'TCC Slip Speed (DDDI)', shortName: 'TCCS_DDDI',
+              value: Math.round(tccSlip * 10) / 10, unit: 'rpm',
+              rawBytes: [data[3], data[4]], timestamp: now,
+            });
+          }
+        } else if (subFrame === 0xFD && data.length >= 5) {
+          // FD sub-frame: Turbine RPM (b1:b2) + Trans Fluid Temp (b3:b4)
+          // Formula TBD — pending truck verification of RAM addresses
+          // Using placeholder scaling until confirmed on truck
+          const rawTurbine = (data[1] << 8) | data[2];
+          // Tentative: same 0.125 scaling as turbine speed channels on similar TCMs
+          const turbineRpm = rawTurbine * 0.125;
+          this.tcmDddiValues.set('TURB_RPM_DDDI', {
+            pid: 0xDE02, name: 'Turbine RPM (DDDI)', shortName: 'TURB_RPM_DDDI',
+            value: Math.round(turbineRpm), unit: 'rpm',
+            rawBytes: [data[1], data[2]], timestamp: now,
+          });
+
+          if (data.length >= 5) {
+            const rawTemp = (data[3] << 8) | data[4];
+            // Tentative: linear scaling TBD — raw value logged for calibration
+            this.tcmDddiValues.set('TFT_DDDI', {
+              pid: 0xDE03, name: 'Trans Fluid Temp (DDDI)', shortName: 'TFT_DDDI',
+              value: rawTemp, unit: 'raw',
+              rawBytes: [data[3], data[4]], timestamp: now,
+            });
+          }
+        }
+      });
+
+      // Step 9: Verify frames arrive within 2 seconds
+      await new Promise<void>(resolve => setTimeout(resolve, 2000));
+      if (this.tcmDddiFrameCount === 0) {
+        this.emit('log', null, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM DDDI not active');
+        if (this.tcmDddiUnsub) { this.tcmDddiUnsub(); this.tcmDddiUnsub = null; }
+        this.obdTxId = savedTxId;
+        this.obdRxId = savedRxId;
+        return false;
+      }
+
+      this.tcmDddiActive = true;
+      this.emit('log', null, `[TCM-DDDI] ✓ Streaming confirmed: ${this.tcmDddiFrameCount} frames in 2s`);
+      this.obdTxId = savedTxId;
+      this.obdRxId = savedRxId;
+      return true;
+
+    } catch (err) {
+      this.emit('log', null, `[TCM-DDDI] Setup error: ${err}`);
+      this.obdTxId = savedTxId;
+      this.obdRxId = savedRxId;
+      return false;
+    }
+  }
+
+  /** Stop T87A TCM DDDI streaming and clean up. */
+  private async stopTcmDddiStreaming(): Promise<void> {
+    if (this.tcmDddiUnsub) {
+      this.tcmDddiUnsub();
+      this.tcmDddiUnsub = null;
+    }
+    this.tcmDddiActive = false;
+    this.tcmDddiValues.clear();
+    // Tell TCM to stop periodic reads
+    const savedTxId = this.obdTxId;
+    const savedRxId = this.obdRxId;
+    try {
+      this.obdTxId = 0x7E2;
+      this.obdRxId = 0x7EA;
+      await this.isoTpRequest([0xAA, 0x04, 0x00], 500);
+    } catch { /* ignore */ } finally {
+      this.obdTxId = savedTxId;
+      this.obdRxId = savedRxId;
+    }
+  }
+
+  /**
+   * Get the latest T87A TCM DDDI reading for a given shortName.
+   * Returns null if no TCM DDDI data available or data is stale (>500ms).
+   */
+  getTcmDddiReading(shortName: string): PIDReading | null {
+    const reading = this.tcmDddiValues.get(shortName);
+    if (!reading) return null;
+    // Stale check: 0x5EA frames come at ~40Hz, so 500ms = 20 missed frames
     if (Date.now() - reading.timestamp > 500) return null;
     return reading;
   }

@@ -1560,6 +1560,48 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     formula: ([a, b]) => (((a * 256) + b) * 0.1) * 0.145038,
   },
+  // ── T87A TCM DDDI Virtual PIDs (0x5EA periodic broadcast, Service 0x2D RAM streaming) ──
+  // These values are injected by the TCM DDDI streaming engine — NOT polled via Mode 22.
+  // The T87A TCM (Allison 1000 6-speed, 2017-2019 L5P Duramax) broadcasts 0x5EA frames
+  // at ~40Hz after DDDI setup via Service 0x2D. Confirmed from HP Tuners BusMaster capture
+  // on 2019 L5P Duramax.
+  // RAM addresses verified from HP Tuners DDDI source analysis:
+  //   FE00 → RAM 0x40014682 (TCC Desired Pressure, 2 bytes, ×0.018 = PSI)
+  //   FE01 → RAM 0x40014DB4 (TCC Slip, 2 bytes, signed offset 32768, ×0.125 = rpm)
+  //   FE02 → RAM 0x400143C2 (Turbine RPM, 2 bytes — formula TBD, pending truck verification)
+  //   FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes — formula TBD, pending truck verification)
+  {
+    pid: 0xDE00, name: 'TCC Desired Pressure (DDDI)', shortName: 'TCCP_DDDI',
+    unit: 'PSI', min: 0, max: 300, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    // Confirmed: (b1<<8|b2) × 0.018 = PSI. Matches HPT 27–44 psi during TCC engagement.
+    // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
+    formula: () => 0,
+  },
+  {
+    pid: 0xDE01, name: 'TCC Slip Speed (DDDI)', shortName: 'TCCS_DDDI',
+    unit: 'rpm', min: -2000, max: 2000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    // Confirmed: signed offset 32768, × 0.125 = rpm. Matches HPT TCC Slip channel.
+    // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
+    formula: () => 0,
+  },
+  {
+    pid: 0xDE02, name: 'Turbine RPM (DDDI)', shortName: 'TURB_RPM_DDDI',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    // Formula pending truck verification of RAM 0x400143C2
+    // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
+    formula: () => 0,
+  },
+  {
+    pid: 0xDE03, name: 'Trans Fluid Temp (DDDI)', shortName: 'TFT_DDDI',
+    unit: '°F', min: -40, max: 300, bytes: 2, service: 0x22, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    // Formula pending truck verification of RAM 0x40014CC0
+    // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
+    formula: () => 0,
+  },
   // ── GM Global A Boost Pressure (commaai/opendbc) ──
   {
     // Desired Boost Pressure — DID 0x1E3B
