@@ -89,6 +89,7 @@ const LiveGauge = React.memo(function LiveGauge({ reading, pid }: { reading: PID
   const range = pid.max - pid.min;
   const pct = Math.max(0, Math.min(100, ((value - pid.min) / range) * 100));
   const isMode22 = (pid.service ?? 0x01) === 0x22;
+  const isDddi = (pid.service ?? 0x01) === 0x2D;
 
   // Tesla-style color: subtle accent based on value zone
   const accentColor = pct < 30 ? 'oklch(0.70 0.14 200)' // cool blue
@@ -138,6 +139,15 @@ const LiveGauge = React.memo(function LiveGauge({ reading, pid }: { reading: PID
             fontWeight: 700, letterSpacing: '0.04em',
           }}>
             M22
+          </span>
+        )}
+        {isDddi && (
+          <span style={{
+            fontFamily: sFont.mono, fontSize: '0.42rem', color: 'oklch(0.70 0.16 155)',
+            background: 'oklch(0.12 0.06 155 / 0.4)', padding: '1px 4px', borderRadius: '3px',
+            fontWeight: 700, letterSpacing: '0.04em',
+          }}>
+            DDDI
           </span>
         )}
         <span style={{
@@ -286,7 +296,7 @@ function CustomPresetDialog({
 
   const filteredPids = ALL_PIDS.filter(p => {
     if (pidSource === 'mode01' && (p.service ?? 0x01) !== 0x01) return false;
-    if (pidSource === 'mode22' && (p.service ?? 0x01) !== 0x22) return false;
+    if (pidSource === 'mode22' && (p.service ?? 0x01) !== 0x22 && (p.service ?? 0x01) !== 0x2D) return false;
     if (pidFilter) {
       const q = pidFilter.toLowerCase();
       return p.name.toLowerCase().includes(q) || p.shortName.toLowerCase().includes(q) ||
@@ -547,6 +557,7 @@ function PIDSelector({
     let pidsToShow: PIDDefinition[];
     switch (pidSource) {
       case 'mode01': pidsToShow = STANDARD_PIDS; break;
+      // 0x2D (DDDI) PIDs are grouped with extended (0x22) since they are also manufacturer-specific
       case 'extended': pidsToShow = extendedPids; break;
       case 'vehicle': pidsToShow = vehiclePids; break;
       default: pidsToShow = ALL_PIDS; break;

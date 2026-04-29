@@ -1572,7 +1572,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   //   FE03 → RAM 0x40014CC0 (Trans Fluid Temp, 2 bytes — formula TBD, pending truck verification)
   {
     pid: 0xDE00, name: 'TCC Desired Pressure (DDDI)', shortName: 'TCCP_DDDI',
-    unit: 'PSI', min: 0, max: 300, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'PSI', min: 0, max: 300, bytes: 2, service: 0x2D, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     // Confirmed: (b1<<8|b2) × 0.018 = PSI. Matches HPT 27–44 psi during TCC engagement.
     // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
@@ -1580,7 +1580,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xDE01, name: 'TCC Slip Speed (DDDI)', shortName: 'TCCS_DDDI',
-    unit: 'rpm', min: -2000, max: 2000, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'rpm', min: -2000, max: 2000, bytes: 2, service: 0x2D, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     // Confirmed: signed offset 32768, × 0.125 = rpm. Matches HPT TCC Slip channel.
     // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
@@ -1588,7 +1588,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xDE02, name: 'Turbine RPM (DDDI)', shortName: 'TURB_RPM_DDDI',
-    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x22, category: 'transmission',
+    unit: 'rpm', min: 0, max: 10000, bytes: 2, service: 0x2D, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     // Formula pending truck verification of RAM 0x400143C2
     // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
@@ -1596,7 +1596,7 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   },
   {
     pid: 0xDE03, name: 'Trans Fluid Temp (DDDI)', shortName: 'TFT_DDDI',
-    unit: '°F', min: -40, max: 300, bytes: 2, service: 0x22, category: 'transmission',
+    unit: '°F', min: -40, max: 300, bytes: 2, service: 0x2D, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     // Formula pending truck verification of RAM 0x40014CC0
     // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)

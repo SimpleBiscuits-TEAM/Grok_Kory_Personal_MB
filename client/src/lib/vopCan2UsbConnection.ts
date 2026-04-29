@@ -895,8 +895,14 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
 
   async readPid(pid: PIDDefinition): Promise<PIDReading | null> {
     try {
-      // If this PID is served by T87A TCM DDDI streaming, return the latest TCM periodic value
-      if (this.tcmDddiActive && VopCan2UsbConnection.TCM_DDDI_SHORTNAMES.has(pid.shortName)) {
+      // If this PID is served by T87A TCM DDDI streaming, handle it exclusively here.
+      // These PIDs have no real Mode 22 DID — NEVER fall through to Mode 22 polling.
+      if (VopCan2UsbConnection.TCM_DDDI_SHORTNAMES.has(pid.shortName)) {
+        if (!this.tcmDddiActive) {
+          // Streaming not yet active — return null (gauge shows ---) rather than
+          // attempting a Mode 22 request that will always fail for synthetic 0xDExx PIDs.
+          return null;
+        }
         const tcmReading = this.getTcmDddiReading(pid.shortName);
         if (tcmReading) {
           if (Date.now() - this.tcmDddiLastLogTime > 2000) {
@@ -904,7 +910,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           }
           return tcmReading;
         }
-        console.log(`[TCM-DDDI-READ] ${pid.shortName}: no TCM DDDI data yet, falling back to Mode 22`);
+        // Streaming active but no frame yet — return null, not a Mode 22 fallback.
+        return null;
       }
       // If this PID is served by DDDI periodic streaming, return the latest periodic value
       if (this.dddiPeriodicActive && VopCan2UsbConnection.DDDI_PERIODIC_SHORTNAMES.has(pid.shortName)) {
