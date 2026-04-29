@@ -800,13 +800,17 @@ function wrapOpenWebSocket(original: Function) {
  */
 function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
   return async function(this: any, pids: any[]): Promise<any[]> {
-    // Split PIDs into Mode 01 (standard) and Mode 22 (extended)
+    // Split PIDs into Mode 01 (standard), Mode 22 (extended), and DDDI (0x2D, handled separately)
     const mode01Pids: any[] = [];
     const mode22Pids: any[] = [];
     for (const pid of pids) {
       const mode = pid.service || 0x01;
       if (mode === 0x22) {
         mode22Pids.push(pid);
+      } else if (mode === 0x2D) {
+        // DDDI PIDs (0xDE00+) are handled by TCM DDDI periodic injection below — 
+        // never send them to batch_read_mode01 (PID values > 0xFF overflow a byte)
+        continue;
       } else {
         mode01Pids.push(pid);
       }
