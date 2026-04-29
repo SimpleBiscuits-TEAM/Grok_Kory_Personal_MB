@@ -752,6 +752,14 @@ function wrapOpenWebSocket(original: Function) {
  */
 function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
   return async function(this: any, pids: any[]): Promise<any[]> {
+    // DEBUG: Log what PIDs reach wrapReadPids (first 5 cycles only)
+    if (!((this as any)._wrapReadPidsCallCount)) (this as any)._wrapReadPidsCallCount = 0;
+    (this as any)._wrapReadPidsCallCount++;
+    if ((this as any)._wrapReadPidsCallCount <= 5) {
+      const services = pids.map((p: any) => `0x${(p.service || 0x01).toString(16)}`).join(',');
+      const dddiCount = pids.filter((p: any) => (p.service || 0x01) === 0x2D).length;
+      ppeiLog(this, `[DEBUG] wrapReadPids called with ${pids.length} PIDs (services: ${services}) dddi=${dddiCount}`);
+    }
     // Split PIDs into Mode 01 (standard), Mode 22 (extended), and DDDI (0x2D, handled separately)
     const mode01Pids: any[] = [];
     const mode22Pids: any[] = [];
