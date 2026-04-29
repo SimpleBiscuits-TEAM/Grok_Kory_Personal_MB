@@ -118,22 +118,58 @@ function getCorrectionColor(factor: number): string {
 function CorrectionPreviewTable({
   result,
   map,
+  blendEnabled,
 }: {
   result: MapCorrectionResult;
   map: FuelMap;
+  blendEnabled: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
 
   const configLabel = result.mapKey.replace('alphaN_', 'Alpha-N Cyl ').replace('speedDensity_', 'Speed Density Cyl ');
 
-  // Build a lookup: [row][col] → CellCorrection
+  // When blend is enabled, compute the blended map and build a full lookup
+  // that includes interpolated gap cells and boundary-blended cells
   const correctionMap = useMemo(() => {
     const m = new Map<string, CellCorrection>();
-    for (const c of result.corrections) {
-      m.set(`${c.row}-${c.col}`, c);
+    if (blendEnabled && result.corrections.length > 0) {
+      // Compute blended map
+      const blendedMap = blendCorrectedMap(map, result.corrections);
+      // Add original corrections
+      for (const c of result.corrections) {
+        m.set(`${c.row}-${c.col}`, c);
+      }
+      // Add synthetic corrections for blended cells (gap + boundary)
+      for (let ri = 0; ri < map.data.length; ri++) {
+        for (let ci = 0; ci < map.data[ri].length; ci++) {
+          const key = `${ri}-${ci}`;
+          if (m.has(key)) continue; // already a real correction
+          const originalVal = map.data[ri][ci];
+          const blendedVal = blendedMap.data[ri][ci];
+          if (Math.abs(blendedVal - originalVal) > 0.0001) {
+            // This cell was modified by blending
+            m.set(key, {
+              row: ri,
+              col: ci,
+              originalValue: originalVal,
+              correctedValue: blendedVal,
+              correctionFactor: originalVal > 0 ? blendedVal / originalVal : 1,
+              sampleCount: 0,
+              avgActualLambda: 0,
+              targetLambda: 0,
+              tier: 'sandpaper' as const,
+              isBlended: true,
+            } as CellCorrection & { isBlended?: boolean });
+          }
+        }
+      }
+    } else {
+      for (const c of result.corrections) {
+        m.set(`${c.row}-${c.col}`, c);
+      }
     }
     return m;
-  }, [result.corrections]);
+  }, [result.corrections, blendEnabled, map]);
 
   // Stats
   const avgFactor = result.corrections.length > 0
@@ -244,8 +280,9 @@ function CorrectionPreviewTable({
                     {map.rowAxis[ri]}
                   </td>
                   {row.map((val, ci) => {
-                    const corr = correctionMap.get(`${ri}-${ci}`);
+                    const corr = correctionMap.get(`${ri}-${ci}`) as (CellCorrection & { isBlended?: boolean }) | undefined;
                     const hasCorrection = !!corr;
+                    const isBlended = !!(corr as any)?.isBlended;
                     const factor = corr?.correctionFactor ?? 1;
                     const correctedVal = corr?.correctedValue ?? val;
 
@@ -253,16 +290,22 @@ function CorrectionPreviewTable({
                       <td
                         key={ci}
                         title={hasCorrection
-                          ? `Original: ${val.toFixed(3)} → Corrected: ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x | Avg λ: ${corr!.avgActualLambda.toFixed(3)} vs Target: ${corr!.targetLambda.toFixed(3)}\nSamples: ${corr!.sampleCount}`
+                          ? isBlended
+                            ? `Blended: ${val.toFixed(3)} → ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x (interpolated/boundary blend)`
+                            : `Original: ${val.toFixed(3)} → Corrected: ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x | Avg λ: ${corr!.avgActualLambda.toFixed(3)} vs Target: ${corr!.targetLambda.toFixed(3)}\nSamples: ${corr!.sampleCount}`
                           : `${val.toFixed(3)} (no datalog samples)`
                         }
                         style={{
                           padding: '2px 4px',
                           textAlign: 'center',
-                          background: hasCorrection ? getCorrectionColor(factor) + '33' : 'transparent',
-                          color: hasCorrection ? 'white' : sColor.textDim,
+                          background: hasCorrection
+                            ? isBlended
+                              ? getCorrectionColor(factor) + '22' // dimmer for blended
+                              : getCorrectionColor(factor) + '33'
+                            : 'transparent',
+                          color: hasCorrection ? (isBlended ? sColor.textDim : 'white') : sColor.textDim,
                           fontSize: '0.64rem',
-                          fontWeight: hasCorrection ? 600 : 400,
+                          fontWeight: hasCorrection ? (isBlended ? 400 : 600) : 400,
                           border: `1px solid oklch(0.22 0.006 260)`,
                           minWidth: '48px',
                         }}
@@ -272,10 +315,11 @@ function CorrectionPreviewTable({
                             <div>{correctedVal.toFixed(3)}</div>
                             <div style={{
                               fontSize: '0.56rem',
-                              color: getCorrectionColor(factor),
+                              color: isBlended ? sColor.cyan : getCorrectionColor(factor),
                               fontWeight: 700,
+                              fontStyle: isBlended ? 'italic' : 'normal',
                             }}>
-                              {factor > 1 ? '+' : ''}{((factor - 1) * 100).toFixed(1)}%
+                              {factor > 1 ? '+' : ''}{((factor - 1) * 100).toFixed(1)}%{isBlended ? ' ≈' : ''}
                             </div>
                           </div>
                         ) : (
@@ -664,6 +708,7 @@ export default function FuelCorrectionPanel({
                 key={result.mapKey}
                 result={result}
                 map={map}
+                blendEnabled={blendEnabled}
               />
             );
           })}
