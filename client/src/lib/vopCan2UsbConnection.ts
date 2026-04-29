@@ -1288,6 +1288,9 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
           }
           const paused: string[] = [];
           for (const p of active) {
+            // DDDI PIDs (service 0x2D) are passive stream channels — they return null
+            // from readPid() until a 0x5EA frame arrives. Never count them as failures.
+            if (p.service === 0x2D) continue;
             if (!got.has(p.pid) && !nrcHits.find(r => r.pid === p.pid)) {
               const f = (fail.get(p.pid) || 0) + 1;
               fail.set(p.pid, f);
