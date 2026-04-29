@@ -2468,3 +2468,12 @@
 - [x] Add blend toggle UI to FuelCorrectionPanel
 - [x] Write tests for blend/smooth logic
 - [x] Update blend boundary: isolated corrected cells (not in a row/column group) should blend all 8 surrounding neighbors (including diagonals), excluding cells that were also corrected from the datalog
+
+## TCM DDDI Streaming Fix (2026-04-29)
+- [x] Diagnose: TCM DDDI PIDs (0xDE00-0xDE03) producing empty columns in CSV
+- [x] Root cause: _tcmDddiStreamingActive module-scope flag never reset between sessions
+- [x] Fix: Don't optimistically set _tcmDddiStreamingActive when no 0x5EA frames arrive
+- [x] Fix: Add liveness detection (10s timeout) to reset stale streaming flag
+- [x] Fix: Add Patch 6 (startLogging wrapper) to reset all TCM DDDI state on new session
+- [x] Fix: Add retry limit (3 attempts) to prevent infinite setup loops
+- [x] Improve: Enhanced debug logging with TCM state on every 20th cycle

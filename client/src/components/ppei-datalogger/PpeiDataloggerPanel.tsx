@@ -281,6 +281,8 @@ const TCM_RX_ID = 0x7EA;
 let _tcmDddiStreamingActive = false;
 let _tcmDddiFrameCount = 0;
 let _tcmDddiSetupInProgress = false;
+let _tcmDddiLastFrameTs = 0;  // timestamp of last received 0x5EA frame
+let _tcmDddiSetupAttempts = 0; // track retry attempts
 const _tcmDddiPeriodicValues = new Map<number, {
   did: number;
   shortName: string;
@@ -309,6 +311,7 @@ function parseTcmDddiPeriodicFrame(data: number[]): void {
 
   _tcmDddiFrameCount++;
   _tcmDddiStreamingActive = true;
+  _tcmDddiLastFrameTs = Date.now();
 
   if (_tcmDddiFrameCount <= 50 || _tcmDddiFrameCount % 200 === 0) {
     const hex = data.slice(0, Math.min(8, data.length)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
@@ -424,11 +427,12 @@ async function startTcmDddiStreaming(conn: any): Promise<boolean> {
     ppeiLog(conn, '[TCM-DDDI] Waiting 2s to verify 0x5EA frames arrive...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     if (_tcmDddiFrameCount === 0) {
-      ppeiLog(conn, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM may not be streaming');
-      // Still mark as active — frames might arrive later once bus settles
-      _tcmDddiStreamingActive = true;
+      ppeiLog(conn, '[TCM-DDDI] ⚠ No 0x5EA frames received in 2s — TCM may not be streaming. Will retry on next cycle.');
+      // Do NOT mark as active — allow re-setup on next wrapReadPids cycle
+      _tcmDddiStreamingActive = false;
       _tcmDddiSetupInProgress = false;
-      return true;  // Optimistic: bridge said OK, frames may be delayed
+      _tcmDddiSetupAttempts++;
+      return false;  // Setup incomplete — no frames confirmed
     }
 
     ppeiLog(conn, `[TCM-DDDI] ✓ Streaming confirmed: ${_tcmDddiFrameCount} frames in 2s`);
@@ -752,13 +756,17 @@ function wrapOpenWebSocket(original: Function) {
  */
 function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
   return async function(this: any, pids: any[]): Promise<any[]> {
-    // DEBUG: Log what PIDs reach wrapReadPids (first 5 cycles only)
+    // DEBUG: Log what PIDs reach wrapReadPids
     if (!((this as any)._wrapReadPidsCallCount)) (this as any)._wrapReadPidsCallCount = 0;
     (this as any)._wrapReadPidsCallCount++;
-    if ((this as any)._wrapReadPidsCallCount <= 5) {
+    const callCount = (this as any)._wrapReadPidsCallCount;
+    if (callCount <= 5 || callCount % 20 === 0) {
       const services = pids.map((p: any) => `0x${(p.service || 0x01).toString(16)}`).join(',');
       const dddiCount = pids.filter((p: any) => (p.service || 0x01) === 0x2D).length;
-      ppeiLog(this, `[DEBUG] wrapReadPids called with ${pids.length} PIDs (services: ${services}) dddi=${dddiCount}`);
+      const tcmState = dddiCount > 0
+        ? ` | TCM: active=${_tcmDddiStreamingActive} frames=${_tcmDddiFrameCount} attempts=${_tcmDddiSetupAttempts} lastFrame=${_tcmDddiLastFrameTs > 0 ? Math.round((Date.now() - _tcmDddiLastFrameTs) / 1000) + 's ago' : 'never'}`
+        : '';
+      ppeiLog(this, `[DEBUG] wrapReadPids #${callCount}: ${pids.length} PIDs (services: ${services}) dddi=${dddiCount}${tcmState}`);
     }
     // Split PIDs into Mode 01 (standard), Mode 22 (extended), and DDDI (0x2D, handled separately)
     const mode01Pids: any[] = [];
@@ -1074,17 +1082,35 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     // ── Inject TCM DDDI periodic values (0x5EA frames: TCC Pressure, Slip, Turbine RPM, TFT) ──
     const tcmDddiPids = pids.filter((p: any) => p.service === 0x2D);
     if (tcmDddiPids.length > 0) {
-      // Trigger TCM DDDI setup if not already streaming
-      if (!_tcmDddiStreamingActive && !_tcmDddiSetupInProgress) {
-        ppeiLog(this, `[TCM-DDDI] Detected ${tcmDddiPids.length} service 0x2D PIDs — initiating TCM DDDI setup...`);
+      // Liveness check: if we think streaming is active but no frames in 10s, reset and re-trigger
+      const TCM_LIVENESS_TIMEOUT_MS = 10000;
+      if (_tcmDddiStreamingActive && _tcmDddiLastFrameTs > 0 && (now - _tcmDddiLastFrameTs) > TCM_LIVENESS_TIMEOUT_MS) {
+        ppeiLog(this, `[TCM-DDDI] ⚠ No 0x5EA frames in ${Math.round((now - _tcmDddiLastFrameTs) / 1000)}s — resetting streaming state for re-setup`);
+        _tcmDddiStreamingActive = false;
+        _tcmDddiFrameCount = 0;
+      }
+      // Also reset if streaming flag is true but we never received ANY frame (stale from previous session)
+      if (_tcmDddiStreamingActive && _tcmDddiLastFrameTs === 0) {
+        ppeiLog(this, '[TCM-DDDI] ⚠ Streaming flag was set but no frames ever received — resetting for fresh setup');
+        _tcmDddiStreamingActive = false;
+      }
+
+      // Trigger TCM DDDI setup if not already streaming (max 3 attempts per session)
+      if (!_tcmDddiStreamingActive && !_tcmDddiSetupInProgress && _tcmDddiSetupAttempts < 3) {
+        ppeiLog(this, `[TCM-DDDI] Detected ${tcmDddiPids.length} service 0x2D PIDs — initiating TCM DDDI setup (attempt ${_tcmDddiSetupAttempts + 1}/3)...`);
         // Fire-and-forget: setup runs in background, frames will start arriving
         startTcmDddiStreaming(this).then(ok => {
           if (ok) {
             ppeiLog(this, '[TCM-DDDI] ✓ TCM DDDI streaming active — values will appear next cycle');
           } else {
-            ppeiLog(this, '[TCM-DDDI] TCM DDDI setup failed — T87A TCM may not be present');
+            ppeiLog(this, `[TCM-DDDI] TCM DDDI setup failed (attempt ${_tcmDddiSetupAttempts}/3) — T87A TCM may not be present`);
           }
         });
+      } else if (!_tcmDddiStreamingActive && _tcmDddiSetupAttempts >= 3) {
+        // Log once that we've exhausted retries
+        if ((this as any)._wrapReadPidsCallCount && (this as any)._wrapReadPidsCallCount % 100 === 0) {
+          ppeiLog(this, '[TCM-DDDI] Setup exhausted 3 attempts — TCM DDDI not available on this vehicle');
+        }
       }
 
       // Inject cached TCM DDDI values into readings
@@ -1157,6 +1183,22 @@ try {
     proto._originalReadPids = proto.readPids;
     proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
     console.log(`${PPEI_TAG} Patch 5: readPids → HYBRID batch_read_dids + DDDI periodic FRP injection`);
+    // Patch 6: startLogging → reset TCM DDDI state on each new session
+    proto._originalStartLogging = proto.startLogging;
+    proto.startLogging = async function(this: any, ...args: any[]) {
+      // Reset TCM DDDI module state so fresh setup is triggered
+      _tcmDddiStreamingActive = false;
+      _tcmDddiFrameCount = 0;
+      _tcmDddiSetupInProgress = false;
+      _tcmDddiLastFrameTs = 0;
+      _tcmDddiSetupAttempts = 0;
+      _tcmDddiPeriodicValues.clear();
+      // Also reset the debug call counter so we get fresh logs
+      (this as any)._wrapReadPidsCallCount = 0;
+      console.log(`${PPEI_TAG} [TCM-DDDI] State reset for new monitoring session`);
+      return proto._originalStartLogging.apply(this, args);
+    };
+    console.log(`${PPEI_TAG} Patch 6: startLogging → TCM DDDI state reset on new session`);
     proto._ppeiFullyPatched = true;
     console.log(`${PPEI_TAG} All PPEI patches applied successfully`);
   }
