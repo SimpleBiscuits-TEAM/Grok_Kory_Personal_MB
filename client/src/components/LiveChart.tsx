@@ -1002,6 +1002,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
       }}>
         {traces.map(trace => {
           const isMode22 = (trace.pid.service ?? 0x01) === 0x22;
+          const isDddi = (trace.pid.service ?? 0x01) === 0x2D;
           return (
             <button
               key={`${trace.pid.service}-${trace.pid.pid}`}
@@ -1026,6 +1027,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                 color: trace.visible ? sColor.text : sColor.textMuted,
               }}>
                 {isMode22 && <span style={{ color: sColor.orange, marginRight: '3px' }}>M22</span>}
+                {isDddi && <span style={{ color: 'oklch(0.70 0.16 155)', marginRight: '3px' }}>DDDI</span>}
                 {trace.pid.shortName}
               </span>
               {trace.visible && trace.readings.length > 0 && (
@@ -1055,6 +1057,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
         }}>
           {traces.filter(t => t.visible && t.readings.length > 0).slice(0, 6).map(trace => {
             const isMode22 = (trace.pid.service ?? 0x01) === 0x22;
+            const isDddi = (trace.pid.service ?? 0x01) === 0x2D;
             return (
               <div
                 key={`stat-${trace.pid.service}-${trace.pid.pid}`}
@@ -1070,6 +1073,7 @@ export default function LiveChart({ pids, readingHistory, liveReadings, isLoggin
                     background: trace.color, flexShrink: 0,
                   }} />
                   {isMode22 && <span style={{ color: sColor.orange }}>M22</span>}
+                  {isDddi && <span style={{ color: 'oklch(0.70 0.16 155)' }}>DDDI</span>}
                   {trace.pid.shortName}
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
