@@ -1088,7 +1088,8 @@ export class VopCan2UsbConnection implements FlashBridgeConnection {
     if (this.state !== 'ready') throw new Error('Device must be ready');
 
     const filteredPids = pids.filter(p => {
-      if (p.service === 0x22) return true;
+      if (p.service === 0x22) return true;  // Mode 22 always pass through
+      if (p.service === 0x2D) return true;  // DDDI streaming PIDs — never in OBD bitmask, handled by streaming engine
       return this.supportedPids.has(p.pid);
     });
     const removed = pids.filter(p => !filteredPids.includes(p));
