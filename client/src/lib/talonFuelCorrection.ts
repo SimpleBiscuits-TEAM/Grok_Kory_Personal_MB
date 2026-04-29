@@ -366,7 +366,22 @@ export const OUTLIER_THRESHOLD = 0.20;        // >20% error = suspect outlier if
 export const LAMBDA_MIN_VALID = 0.5;   // Below 0.5 = impossibly rich (sensor error)
 export const LAMBDA_MAX_VALID = 1.3;   // Above 1.3 = extreme lean/misfire (sensor error)
 
-// ─── Main Correction Engine ─────────────────────────────────────────────────────────────────
+// ─── Blend/Smooth Constants ──────────────────────────────────────────────────────────────────
+/**
+ * Blend/Smooth: prevents sharp discontinuities in the fuel map at boundaries
+ * between corrected and uncorrected cells.
+ *
+ * Two-pass approach:
+ *   1. GAP INTERPOLATION: If an uncorrected cell sits between two corrected cells
+ *      (in the same row or column), interpolate its correction factor based on
+ *      the corrected neighbors on either side.
+ *   2. BOUNDARY BLENDING: Uncorrected cells on the outer edge of the corrected
+ *      region get a partial correction that fades toward 1.0 (no correction).
+ *      Blend weight decreases with distance from the corrected region.
+ */
+export const BLEND_BOUNDARY_WEIGHT = 0.5;  // Outer boundary cells get 50% of nearest corrected neighbor's factor
+
+// ─── Main Correction Engine ───────────────────────────────────────────────────────────────────
 
 /**
  * Detect transient fueling using rate-of-change of Injector PW Final.
@@ -1147,4 +1162,157 @@ export function applyCorrectionToMap(
   }
 
   return { ...map, data: newData };
+}
+
+/**
+ * Blend/Smooth corrected fuel map to prevent sharp discontinuities.
+ *
+ * Two-pass approach:
+ *   Pass 1 - GAP INTERPOLATION: Fill uncorrected cells that sit between corrected
+ *            cells (in the same row or column) by linearly interpolating the
+ *            correction factor from the corrected neighbors on either side.
+ *   Pass 2 - BOUNDARY BLENDING: Uncorrected cells on the outer edge of the
+ *            corrected region get a partial correction (50% weight) blended
+ *            toward 1.0 (no correction).
+ *
+ * @param map - The original (uncorrected) fuel map
+ * @param corrections - The corrections that were applied
+ * @returns A new FuelMap with blended values (includes original corrections + interpolated gaps + blended boundaries)
+ */
+export function blendCorrectedMap(
+  map: FuelMap,
+  corrections: CellCorrection[],
+): FuelMap {
+  const rows = map.data.length;
+  const cols = rows > 0 ? map.data[0].length : 0;
+  if (rows === 0 || cols === 0) return { ...map, data: map.data.map(r => [...r]) };
+
+  // Build a factor grid: 1.0 = no correction, other values = correction factor
+  const factorGrid: number[][] = Array.from({ length: rows }, () => Array(cols).fill(NaN));
+  const isCorrected: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+
+  for (const corr of corrections) {
+    if (corr.row < rows && corr.col < cols) {
+      factorGrid[corr.row][corr.col] = corr.correctionFactor;
+      isCorrected[corr.row][corr.col] = true;
+    }
+  }
+
+  // Track which cells get interpolated/blended (so we don't double-process)
+  const isInterpolated: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+
+  // ── Pass 1: Gap Interpolation ──
+  // For each row, find uncorrected cells between two corrected cells and interpolate
+  for (let r = 0; r < rows; r++) {
+    interpolateGapsInLine(factorGrid[r], isCorrected[r], isInterpolated[r]);
+  }
+  // For each column, find uncorrected cells between two corrected cells and interpolate
+  for (let c = 0; c < cols; c++) {
+    const colFactors = factorGrid.map(row => row[c]);
+    const colCorrected = isCorrected.map(row => row[c]);
+    const colInterpolated = isInterpolated.map(row => row[c]);
+    interpolateGapsInLine(colFactors, colCorrected, colInterpolated);
+    // Write back
+    for (let r = 0; r < rows; r++) {
+      if (!isCorrected[r][c] && !isInterpolated[r][c] && colInterpolated[r]) {
+        // Column interpolation found a gap that row interpolation missed
+        factorGrid[r][c] = colFactors[r];
+        isInterpolated[r][c] = true;
+      } else if (isInterpolated[r][c] && colInterpolated[r]) {
+        // Both row and column found this as a gap — average the two interpolations
+        factorGrid[r][c] = (factorGrid[r][c] + colFactors[r]) / 2;
+      }
+    }
+  }
+
+  // ── Pass 2: Boundary Blending (single ring only) ──
+  // Find uncorrected cells adjacent to corrected/gap-interpolated cells and blend.
+  // Only use corrected or gap-interpolated cells as blend sources (not other boundary cells)
+  // to prevent cascading ripple effects.
+  const isBoundary: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const boundaryFactors: number[][] = Array.from({ length: rows }, () => Array(cols).fill(NaN));
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (isCorrected[r][c] || isInterpolated[r][c]) continue;
+
+      // Check 4-connected neighbors for corrected or gap-interpolated cells ONLY
+      const neighborFacs: number[] = [];
+      const neighbors = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
+      for (const [nr, nc] of neighbors) {
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          if (isCorrected[nr][nc] || isInterpolated[nr][nc]) {
+            neighborFacs.push(factorGrid[nr][nc]);
+          }
+        }
+      }
+
+      if (neighborFacs.length > 0) {
+        const avgNeighborFactor = neighborFacs.reduce((s, f) => s + f, 0) / neighborFacs.length;
+        boundaryFactors[r][c] = 1.0 + (avgNeighborFactor - 1.0) * BLEND_BOUNDARY_WEIGHT;
+        isBoundary[r][c] = true;
+      }
+    }
+  }
+
+  // Apply boundary factors to the grid
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (isBoundary[r][c]) {
+        factorGrid[r][c] = boundaryFactors[r][c];
+        isInterpolated[r][c] = true;
+      }
+    }
+  }
+
+  // ── Apply all factors to produce the blended map ──
+  const newData = map.data.map((row, r) =>
+    row.map((val, c) => {
+      const factor = factorGrid[r][c];
+      if (isNaN(factor) || (!isCorrected[r][c] && !isInterpolated[r][c])) return val;
+      return val * factor;
+    })
+  );
+
+  return { ...map, data: newData };
+}
+
+/**
+ * Interpolate gaps in a 1D line (row or column).
+ * Finds uncorrected cells between two corrected cells and linearly interpolates.
+ */
+function interpolateGapsInLine(
+  factors: number[],
+  corrected: boolean[],
+  interpolated: boolean[],
+): void {
+  const len = factors.length;
+  let i = 0;
+
+  while (i < len) {
+    // Find a corrected cell (start of potential gap)
+    if (!corrected[i]) { i++; continue; }
+
+    const gapStart = i;
+    // Scan forward to find the next corrected cell
+    let j = i + 1;
+    while (j < len && !corrected[j]) j++;
+
+    if (j < len && j - gapStart > 1) {
+      // There's a gap between gapStart and j — interpolate
+      const startFactor = factors[gapStart];
+      const endFactor = factors[j];
+      const gapLen = j - gapStart;
+
+      for (let k = gapStart + 1; k < j; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - gapStart) / gapLen;
+          factors[k] = startFactor + (endFactor - startFactor) * t;
+          interpolated[k] = true;
+        }
+      }
+    }
+
+    i = j;
+  }
 }

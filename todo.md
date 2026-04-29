@@ -2462,3 +2462,8 @@
 - [x] Fix: Transient filter rejecting ALL samples (188854/188854) — old algorithm compared Final-Desired as % of Desired, but Honda Talon ECU has steady-state difference of 100-200% (normal corrections). Rewrote to use rate-of-change of InjPwFinal between consecutive samples (20% threshold + 3-sample settle window)
 - [x] Fix: Unrealistic correction factors (16653%, 21144%) in Honda Talon fuel correction — STFT channel contained garbage data (protobuf parsing artifacts like -4.15e19). Added sanity bounds: STFT values outside -50% to +50% are now treated as invalid/NaN
 - [x] Fix: Lambda channel contains garbage values (2.38, 67.26, 133.11, 217.0) from wideband sensor saturation/parsing artifacts. Added lambda sanity bounds: values outside 0.5-1.3 are discarded as physically impossible
+- [x] Add blend/smooth toggle option to fuel correction engine
+- [x] Implement gap interpolation: fill uncorrected cells between corrected cells by interpolating
+- [x] Implement boundary blending: smooth outer boundary cells adjacent to corrected region
+- [x] Add blend toggle UI to FuelCorrectionPanel
+- [x] Write tests for blend/smooth logic

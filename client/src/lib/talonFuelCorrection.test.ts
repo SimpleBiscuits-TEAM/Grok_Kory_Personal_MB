@@ -7,7 +7,7 @@ import {
   getNAAlphaNTargets, getNASpeedDensityTargets,
   getTurboStockMapTargets, getTurbo3BarMapTargets,
   getTurboAlphaNTargets, getTargetLambdaPreset,
-  detectTurbo, computeCorrections, applyCorrectionToMap,
+  detectTurbo, computeCorrections, applyCorrectionToMap, blendCorrectedMap,
 } from './talonFuelCorrection';
 import { WP8ParseResult, WP8DataRow, WP8Channel } from './wp8Parser';
 
@@ -1186,5 +1186,108 @@ describe('Tiered Correction Strategy', () => {
     // Cyl2 is normal → sandpaper
     const cyl2Cell = cyl2!.corrections[0];
     expect(cyl2Cell.tier).toBe('sandpaper');
+  });
+});
+
+// ─── Blend/Smooth Tests ────────────────────────────────────────────────────
+
+describe('blendCorrectedMap', () => {
+  const baseMap: FuelMap = {
+    name: 'Test Map',
+    description: 'Test',
+    rowAxis: [1000, 2000, 3000, 4000, 5000],
+    colAxis: [0, 10, 20, 30, 40],
+    data: [
+      [1.0, 1.0, 1.0, 1.0, 1.0],
+      [1.0, 1.0, 1.0, 1.0, 1.0],
+      [1.0, 1.0, 1.0, 1.0, 1.0],
+      [1.0, 1.0, 1.0, 1.0, 1.0],
+      [1.0, 1.0, 1.0, 1.0, 1.0],
+    ],
+    targetLambda: [0.95, 0.95, 0.95, 0.95, 0.95],
+    rowLabel: 'RPM',
+    colLabel: 'TPS',
+    unit: 'ms',
+  };
+
+  it('should interpolate gaps between corrected cells in the same row', () => {
+    // Correct col 0 and col 4 in row 2, leave cols 1-3 as gaps
+    const corrections = [
+      { row: 2, col: 0, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
+      { row: 2, col: 4, originalValue: 1.0, correctedValue: 1.2, correctionFactor: 1.2, sampleCount: 10, avgActualLambda: 1.14, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // Col 0 should be 0.8 (directly corrected)
+    expect(result.data[2][0]).toBeCloseTo(0.8, 3);
+    // Col 4 should be 1.2 (directly corrected)
+    expect(result.data[2][4]).toBeCloseTo(1.2, 3);
+    // Col 1 should be interpolated: 0.8 + (1.2-0.8)*1/4 = 0.9
+    expect(result.data[2][1]).toBeCloseTo(0.9, 3);
+    // Col 2 should be interpolated: 0.8 + (1.2-0.8)*2/4 = 1.0
+    expect(result.data[2][2]).toBeCloseTo(1.0, 3);
+    // Col 3 should be interpolated: 0.8 + (1.2-0.8)*3/4 = 1.1
+    expect(result.data[2][3]).toBeCloseTo(1.1, 3);
+  });
+
+  it('should interpolate gaps between corrected cells in the same column', () => {
+    // Correct row 0 and row 4 in col 2, leave rows 1-3 as gaps
+    const corrections = [
+      { row: 0, col: 2, originalValue: 1.0, correctedValue: 0.9, correctionFactor: 0.9, sampleCount: 10, avgActualLambda: 0.855, targetLambda: 0.95, tier: 'sandpaper' as const },
+      { row: 4, col: 2, originalValue: 1.0, correctedValue: 1.1, correctionFactor: 1.1, sampleCount: 10, avgActualLambda: 1.045, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // Row 0 should be 0.9 (directly corrected)
+    expect(result.data[0][2]).toBeCloseTo(0.9, 3);
+    // Row 4 should be 1.1 (directly corrected)
+    expect(result.data[4][2]).toBeCloseTo(1.1, 3);
+    // Row 2 should be interpolated: 0.9 + (1.1-0.9)*2/4 = 1.0
+    expect(result.data[2][2]).toBeCloseTo(1.0, 3);
+  });
+
+  it('should blend boundary cells adjacent to corrected region', () => {
+    // Correct cell [2][2] only — boundary cells should get partial blend
+    const corrections = [
+      { row: 2, col: 2, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // Center cell should be 0.8 (directly corrected)
+    expect(result.data[2][2]).toBeCloseTo(0.8, 3);
+    // Adjacent cells (up/down/left/right) should be blended:
+    // factor = 1.0 + (0.8 - 1.0) * 0.5 = 0.9, applied to original 1.0 → 0.9
+    expect(result.data[1][2]).toBeCloseTo(0.9, 3); // up
+    expect(result.data[3][2]).toBeCloseTo(0.9, 3); // down
+    expect(result.data[2][1]).toBeCloseTo(0.9, 3); // left
+    expect(result.data[2][3]).toBeCloseTo(0.9, 3); // right
+    // Diagonal cells should NOT be blended (only 4-connected)
+    expect(result.data[1][1]).toBeCloseTo(1.0, 3);
+    expect(result.data[3][3]).toBeCloseTo(1.0, 3);
+  });
+
+  it('should not modify cells far from corrected region', () => {
+    // Correct only cell [0][0]
+    const corrections = [
+      { row: 0, col: 0, originalValue: 1.0, correctedValue: 0.7, correctionFactor: 0.7, sampleCount: 10, avgActualLambda: 0.665, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // Far corner should be untouched
+    expect(result.data[4][4]).toBeCloseTo(1.0, 3);
+    expect(result.data[3][3]).toBeCloseTo(1.0, 3);
+  });
+
+  it('should return unmodified map when no corrections provided', () => {
+    const result = blendCorrectedMap(baseMap, []);
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        expect(result.data[r][c]).toBeCloseTo(1.0, 3);
+      }
+    }
   });
 });

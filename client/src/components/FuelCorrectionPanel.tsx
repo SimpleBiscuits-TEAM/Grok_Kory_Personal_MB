@@ -17,7 +17,7 @@ import { WP8ParseResult } from '@/lib/wp8Parser';
 import {
   FuelMapState, FuelMap, CorrectionConfig, CorrectionReport,
   MapCorrectionResult, CellCorrection, VehicleMode, MapSensor,
-  computeCorrections, applyCorrectionToMap, detectTurbo,
+  computeCorrections, applyCorrectionToMap, blendCorrectedMap, detectTurbo,
   getTargetLambdaPreset,
 } from '@/lib/talonFuelCorrection';
 
@@ -321,6 +321,7 @@ export default function FuelCorrectionPanel({
   const [report, setReport] = useState<CorrectionReport | null>(null);
   const [hasApplied, setHasApplied] = useState(false);
   const [preApplyMaps, setPreApplyMaps] = useState<FuelMapState | null>(null);
+  const [blendEnabled, setBlendEnabled] = useState(false);
 
   // Auto-detect turbo on mount / data change
   const isTurboDetected = useMemo(() => {
@@ -353,12 +354,16 @@ export default function FuelCorrectionPanel({
     for (const result of report.results) {
       const map = fuelMaps[result.mapKey];
       if (map && result.corrections.length > 0) {
-        corrected[result.mapKey] = applyCorrectionToMap(map, result.corrections);
+        if (blendEnabled) {
+          corrected[result.mapKey] = blendCorrectedMap(map, result.corrections);
+        } else {
+          corrected[result.mapKey] = applyCorrectionToMap(map, result.corrections);
+        }
       }
     }
     onApplyCorrections(corrected, report.results);
     setHasApplied(true);
-  }, [report, fuelMaps, onApplyCorrections]);
+  }, [report, fuelMaps, onApplyCorrections, blendEnabled]);
 
   // Revert corrections
   const handleRevert = useCallback(() => {
@@ -479,6 +484,31 @@ export default function FuelCorrectionPanel({
           </button>
         </div>
 
+        {/* Blend/Smooth Toggle */}
+        <div>
+          <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
+            BLEND
+          </div>
+          <button
+            onClick={() => setBlendEnabled(!blendEnabled)}
+            style={{
+              background: blendEnabled ? sColor.green : 'transparent',
+              color: blendEnabled ? 'white' : sColor.textDim,
+              border: `1px solid ${blendEnabled ? sColor.green : sColor.border}`,
+              borderRadius: '2px',
+              padding: '6px 14px',
+              cursor: 'pointer',
+              fontFamily: sFont.heading,
+              fontSize: '0.85rem',
+              letterSpacing: '0.06em',
+              display: 'flex', alignItems: 'center', gap: '5px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {blendEnabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+
         {/* Correct Button */}
         <div style={{ marginLeft: 'auto' }}>
           <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
@@ -592,6 +622,9 @@ export default function FuelCorrectionPanel({
             {report.hasInjPwFinal && (
               <span style={{ color: sColor.cyan }}>TRANSIENT FILTER ON</span>
             )}
+            {blendEnabled && (
+              <span style={{ color: sColor.green }}>BLEND ON</span>
+            )}
           </div>
 
           {/* Transient fueling tuner notes */}
@@ -692,7 +725,9 @@ export default function FuelCorrectionPanel({
                       const map = fuelMaps[result.mapKey];
                       if (!map || result.corrections.length === 0) continue;
                       // Apply corrections to get the corrected map
-                      const correctedMap = applyCorrectionToMap(map, result.corrections);
+                      const correctedMap = blendEnabled
+                        ? blendCorrectedMap(map, result.corrections)
+                        : applyCorrectionToMap(map, result.corrections);
                       // Build CSV
                       const lines: string[] = [];
                       lines.push([`${correctedMap.rowLabel}\\${correctedMap.colLabel}`, ...correctedMap.colAxis.map(v => v.toString())].join(','));
