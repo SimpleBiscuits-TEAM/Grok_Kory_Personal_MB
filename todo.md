@@ -2477,3 +2477,13 @@
 - [x] Fix: Add Patch 6 (startLogging wrapper) to reset all TCM DDDI state on new session
 - [x] Fix: Add retry limit (3 attempts) to prevent infinite setup loops
 - [x] Improve: Enhanced debug logging with TCM state on every 20th cycle
+
+## TCM DDDI Direct UDS Fix (2026-04-29 v2)
+- [x] Diagnose: Bridge dddi_setup handler not responding (old bridge version or handler timeout)
+- [x] Root cause: sendRequest({type:'dddi_setup'}) times out because bridge doesn't have tcm_tcc handler
+- [x] Fix: Rewrite startTcmDddiStreaming to use direct UDS commands (sendUDSRequest) instead of bridge dddi_setup
+- [x] Fix: Add set_filter command to add 0x5EA to bridge CAN filter for periodic frame forwarding
+- [x] Fix: Increment _tcmDddiSetupAttempts in ALL failure paths (catch, !ok, !streaming)
+- [x] Fix: Add inProgress to debug log for visibility
+- [x] Fix: Reduce timeout from 15s to 8s (now irrelevant with direct UDS approach)
+- [x] Sequence: filter→stop periodic→extended session→4 IOCTL→2 DDDI→start periodic→verify 0x5EA
