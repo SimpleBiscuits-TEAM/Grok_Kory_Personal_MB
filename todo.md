@@ -2460,3 +2460,4 @@
 - [x] Add outlier notes to CorrectionReport for UI display
 - [x] Fix: tRPC mutation on /advanced page returns HTML instead of JSON (API Mutation Error) — increased body parser limit from 10mb to 50mb for large WP8 base64 uploads
 - [x] Fix: Transient filter rejecting ALL samples (188854/188854) — old algorithm compared Final-Desired as % of Desired, but Honda Talon ECU has steady-state difference of 100-200% (normal corrections). Rewrote to use rate-of-change of InjPwFinal between consecutive samples (20% threshold + 3-sample settle window)
+- [x] Fix: Unrealistic correction factors (16653%, 21144%) in Honda Talon fuel correction — STFT channel contained garbage data (protobuf parsing artifacts like -4.15e19). Added sanity bounds: STFT values outside -50% to +50% are now treated as invalid/NaN

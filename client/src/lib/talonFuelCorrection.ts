@@ -687,8 +687,13 @@ function computeMapCorrections(
     let stftVal = NaN;
     if (channelData.hasStft) {
       stftVal = channelData.stft[i];
-      if (Number.isFinite(stftVal)) {
+      // Sanity check: STFT should be in a reasonable range (-50% to +50%).
+      // Values outside this range indicate corrupt/garbage data in the channel
+      // (e.g., protobuf parsing artifacts). Ignore invalid STFT values.
+      if (Number.isFinite(stftVal) && stftVal >= -50 && stftVal <= 50) {
         correctedVal = rawVal / (1 + stftVal / 100);
+      } else {
+        stftVal = NaN; // Treat as no STFT data for this sample
       }
     }
 
