@@ -2467,3 +2467,4 @@
 - [x] Implement boundary blending: smooth outer boundary cells adjacent to corrected region
 - [x] Add blend toggle UI to FuelCorrectionPanel
 - [x] Write tests for blend/smooth logic
+- [x] Update blend boundary: isolated corrected cells (not in a row/column group) should blend all 8 surrounding neighbors (including diagonals), excluding cells that were also corrected from the datalog

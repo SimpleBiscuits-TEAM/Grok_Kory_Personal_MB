@@ -1248,8 +1248,8 @@ describe('blendCorrectedMap', () => {
     expect(result.data[2][2]).toBeCloseTo(1.0, 3);
   });
 
-  it('should blend boundary cells adjacent to corrected region', () => {
-    // Correct cell [2][2] only — boundary cells should get partial blend
+  it('should blend all 8 boundary cells for isolated corrected cell', () => {
+    // Correct cell [2][2] only (isolated) — all 8 surrounding cells should get partial blend
     const corrections = [
       { row: 2, col: 2, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
     ];
@@ -1258,15 +1258,37 @@ describe('blendCorrectedMap', () => {
 
     // Center cell should be 0.8 (directly corrected)
     expect(result.data[2][2]).toBeCloseTo(0.8, 3);
-    // Adjacent cells (up/down/left/right) should be blended:
+    // All 8 surrounding cells should be blended (isolated cell uses 8-neighbor):
     // factor = 1.0 + (0.8 - 1.0) * 0.5 = 0.9, applied to original 1.0 → 0.9
     expect(result.data[1][2]).toBeCloseTo(0.9, 3); // up
     expect(result.data[3][2]).toBeCloseTo(0.9, 3); // down
     expect(result.data[2][1]).toBeCloseTo(0.9, 3); // left
     expect(result.data[2][3]).toBeCloseTo(0.9, 3); // right
-    // Diagonal cells should NOT be blended (only 4-connected)
-    expect(result.data[1][1]).toBeCloseTo(1.0, 3);
-    expect(result.data[3][3]).toBeCloseTo(1.0, 3);
+    // Diagonal cells should ALSO be blended (8-neighbor for isolated)
+    expect(result.data[1][1]).toBeCloseTo(0.9, 3); // top-left
+    expect(result.data[1][3]).toBeCloseTo(0.9, 3); // top-right
+    expect(result.data[3][1]).toBeCloseTo(0.9, 3); // bottom-left
+    expect(result.data[3][3]).toBeCloseTo(0.9, 3); // bottom-right
+  });
+
+  it('should use 4-connected blending for cells adjacent to grouped corrections', () => {
+    // Correct two adjacent cells [2][1] and [2][2] (they form a group)
+    const corrections = [
+      { row: 2, col: 1, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
+      { row: 2, col: 2, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // Corrected cells stay at 0.8
+    expect(result.data[2][1]).toBeCloseTo(0.8, 3);
+    expect(result.data[2][2]).toBeCloseTo(0.8, 3);
+    // Cardinal neighbors should be blended
+    expect(result.data[2][0]).toBeCloseTo(0.9, 3); // left of group
+    expect(result.data[2][3]).toBeCloseTo(0.9, 3); // right of group
+    // Diagonal of grouped cells should NOT be blended (4-connected for groups)
+    expect(result.data[1][0]).toBeCloseTo(1.0, 3); // diagonal of [2][1]
+    expect(result.data[3][3]).toBeCloseTo(1.0, 3); // diagonal of [2][2]
   });
 
   it('should not modify cells far from corrected region', () => {

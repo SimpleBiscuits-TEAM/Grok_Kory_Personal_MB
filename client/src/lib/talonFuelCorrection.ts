@@ -1226,9 +1226,25 @@ export function blendCorrectedMap(
   }
 
   // ── Pass 2: Boundary Blending (single ring only) ──
-  // Find uncorrected cells adjacent to corrected/gap-interpolated cells and blend.
+  // For isolated corrected cells (no adjacent corrected/interpolated neighbors),
+  // blend all 8 surrounding cells (including diagonals), excluding other corrected cells.
+  // For cells adjacent to groups/rows/columns of corrections, use 4-connected only.
   // Only use corrected or gap-interpolated cells as blend sources (not other boundary cells)
   // to prevent cascading ripple effects.
+
+  // First, determine which corrected cells are "isolated" (no corrected/interpolated 4-neighbors)
+  const isIsolatedCorrection: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!isCorrected[r][c]) continue;
+      const cardinal = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
+      const hasAdjacentCorrected = cardinal.some(([nr, nc]) =>
+        nr >= 0 && nr < rows && nc >= 0 && nc < cols && (isCorrected[nr][nc] || isInterpolated[nr][nc])
+      );
+      isIsolatedCorrection[r][c] = !hasAdjacentCorrected;
+    }
+  }
+
   const isBoundary: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
   const boundaryFactors: number[][] = Array.from({ length: rows }, () => Array(cols).fill(NaN));
 
@@ -1236,10 +1252,20 @@ export function blendCorrectedMap(
     for (let c = 0; c < cols; c++) {
       if (isCorrected[r][c] || isInterpolated[r][c]) continue;
 
-      // Check 4-connected neighbors for corrected or gap-interpolated cells ONLY
+      // Determine which neighbors to check:
+      // If any adjacent corrected cell is isolated, use all 8 neighbors
+      // Otherwise use 4-connected only
+      const cardinal = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
+      const all8 = [[r-1, c-1], [r-1, c], [r-1, c+1], [r, c-1], [r, c+1], [r+1, c-1], [r+1, c], [r+1, c+1]];
+
+      // Check if any of our 8 neighbors is an isolated corrected cell
+      const hasIsolatedNeighbor = all8.some(([nr, nc]) =>
+        nr >= 0 && nr < rows && nc >= 0 && nc < cols && isIsolatedCorrection[nr][nc]
+      );
+
+      const neighborsToCheck = hasIsolatedNeighbor ? all8 : cardinal;
       const neighborFacs: number[] = [];
-      const neighbors = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
-      for (const [nr, nc] of neighbors) {
+      for (const [nr, nc] of neighborsToCheck) {
         if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
           if (isCorrected[nr][nc] || isInterpolated[nr][nc]) {
             neighborFacs.push(factorGrid[nr][nc]);
