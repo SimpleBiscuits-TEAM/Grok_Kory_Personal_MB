@@ -134,11 +134,12 @@ async function startServer() {
   }
 
   // ── Body Parser ────────────────────────────────────────────────────────
-  // JSON limit set to 10mb to support PDF sharing (base64-encoded dyno PDFs
-  // can be 3-6MB). For very large files, use direct-to-S3 presigned URLs.
-  // The urlencoded limit stays at 10mb for form submissions with file data.
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+  // JSON limit set to 50mb to support large WP8 datalog uploads via
+  // datalogCache.cacheDatalog (base64-encoded WP8 files can be 10-30MB).
+  // Also covers PDF sharing (base64-encoded dyno PDFs can be 3-6MB).
+  // For very large files, use direct-to-S3 presigned URLs.
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // ── Canonical Domain Redirect ──────────────────────────────────────────
   // ppei.ai → www.ppei.ai

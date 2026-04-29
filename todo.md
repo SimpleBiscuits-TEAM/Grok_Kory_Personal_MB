@@ -2458,3 +2458,4 @@
 - [x] Pattern recognition: group adjacent cells (8-neighbor) with >5% error, average correction across group
 - [x] Keep cylinders independent (no cross-referencing Cyl1/Cyl2 corrections)
 - [x] Add outlier notes to CorrectionReport for UI display
+- [x] Fix: tRPC mutation on /advanced page returns HTML instead of JSON (API Mutation Error) — increased body parser limit from 10mb to 50mb for large WP8 base64 uploads
