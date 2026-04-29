@@ -360,6 +360,12 @@ export const SANDPAPER_THRESHOLD = 0.05;      // ≤5% error = fine cell-by-cell
 export const HAMMER_CHISEL_THRESHOLD = 0.05;  // >5% error = regional averaging
 export const OUTLIER_THRESHOLD = 0.20;        // >20% error = suspect outlier if isolated
 
+// ─── Lambda Sanity Bounds ─────────────────────────────────────────────────────────────────
+// Physical limits for lambda sensor readings. Values outside this range are sensor errors,
+// protobuf parsing artifacts, or wideband saturation. Discard these samples.
+export const LAMBDA_MIN_VALID = 0.5;   // Below 0.5 = impossibly rich (sensor error)
+export const LAMBDA_MAX_VALID = 1.3;   // Above 1.3 = extreme lean/misfire (sensor error)
+
 // ─── Main Correction Engine ─────────────────────────────────────────────────────────────────
 
 /**
@@ -703,6 +709,13 @@ function computeMapCorrections(
     const actualLambda = channelData.isAlreadyLambda
       ? correctedVal
       : correctedVal / 14.7;
+
+    // ── Lambda sanity bounds ──
+    // A real lambda sensor cannot physically read above ~1.3 (extreme lean/misfire)
+    // or below ~0.5 (impossibly rich). Values outside this range indicate sensor
+    // errors, protobuf parsing artifacts, or wideband sensor saturation.
+    // Discard these samples — they would corrupt the correction factors.
+    if (actualLambda < LAMBDA_MIN_VALID || actualLambda > LAMBDA_MAX_VALID) continue;
 
     // Find the RPM row
     const rpmRow = findNearestIdx(map.rowAxis, rpm);
