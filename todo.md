@@ -2501,3 +2501,8 @@
 - [x] Skip service 0xBB PIDs in batch_read loop (alongside 0x2D DDDI skip)
 - [x] Ensure all set_filter calls include 0x1F5 to prevent filter overwrites
 - [x] Gear numeric mapping: Park=0, Rev=-1, Neutral=0, 1st=1, ..., 10th=10
+
+## Bug Fix — Passive CAN PIDs Greyed Out (2026-04-30)
+- [x] Fix: GEAR_T87A (0xBB01) and GEAR_NUM_T87A (0xBB02) are greyed out / unselectable in PID selector
+- [x] Fix: Added isPassive check (service === 0xBB) to isSupported condition in PID selector
+- [x] Added blue 'CAN' badge for passive CAN PIDs in PID selector list
