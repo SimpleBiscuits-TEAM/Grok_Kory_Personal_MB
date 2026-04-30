@@ -2481,3 +2481,4 @@
 - [x] Sample-weighted smoothing — high-sample cells resist smoothing
 - [x] Verify correction factor is calculated from average AFR reading per cell
 - [x] Show average and max cell sample counts near MIN SAMPLES input for reference
+- [x] Add retry logic with exponential backoff to LLM and storage calls for transient 502/503 errors

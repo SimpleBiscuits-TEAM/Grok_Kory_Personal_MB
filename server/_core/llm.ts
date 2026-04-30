@@ -289,6 +289,12 @@ const normalizeResponseFormat = ({
   };
 };
 
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   assertApiKey();
 
@@ -344,21 +350,49 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const url = resolveApiUrl();
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${ENV.forgeApiKey}`,
+  };
+  const body = JSON.stringify(payload);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 500;
+      console.log(`[LLM] Retry ${attempt}/${MAX_RETRIES} after ${Math.round(delay)}ms...`);
+      await sleep(delay);
+    }
+
+    try {
+      const response = await fetch(url, { method: "POST", headers, body });
+
+      if (response.ok) {
+        return (await response.json()) as InvokeResult;
+      }
+
+      const errorText = await response.text();
+
+      if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < MAX_RETRIES) {
+        lastError = new Error(
+          `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+        );
+        continue;
+      }
+
+      throw new Error(
+        `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+      );
+    } catch (err: any) {
+      if (err.message?.includes('LLM invoke failed') && !RETRYABLE_STATUS_CODES.has(parseInt(err.message.match(/\d{3}/)?.[0] || '0'))) {
+        throw err;
+      }
+      lastError = err;
+      if (attempt >= MAX_RETRIES) throw err;
+    }
   }
 
-  return (await response.json()) as InvokeResult;
+  throw lastError || new Error('LLM invoke failed after retries');
 }
