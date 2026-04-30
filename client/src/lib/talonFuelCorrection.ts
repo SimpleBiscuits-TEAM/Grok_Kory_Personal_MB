@@ -17,7 +17,7 @@
  *   - When Short Term Fuel Trims (STFT) are present, factor them into the
  *     actual AFR before computing lambda. Negative STFT = ECU pulling fuel,
  *     positive STFT = ECU adding fuel. Corrected AFR = measured AFR / (1 + STFT/100).
- *   - Turbo auto-detection: MAP > 100 kPa = turbo
+ *   - Turbo auto-detection: MAP > 105 kPa = turbo
  *   - Turbo SD column lookup: use Desired Injector Pulsewidth interpolated against
  *     SD Cyl1 table (MAP not accurate enough on turbo applications)
  *   - When "Manifold Absolute Pressure Corrected" channel is available, use it for
@@ -232,7 +232,7 @@ export function getTargetLambdaPreset(
 
 /**
  * Detect if the vehicle is turbocharged from the datalog.
- * Turbo = MAP > 100 kPa at any point.
+ * Turbo = MAP > 105 kPa at any point.
  */
 export function detectTurbo(wp8Data: WP8ParseResult): boolean {
   const keys = getHondaTalonKeyChannels(wp8Data);
@@ -242,7 +242,7 @@ export function detectTurbo(wp8Data: WP8ParseResult): boolean {
 
   for (const row of wp8Data.rows) {
     const mapVal = row.values[mapIdx];
-    if (Number.isFinite(mapVal) && mapVal > 100) return true;
+    if (Number.isFinite(mapVal) && mapVal > 105) return true;
   }
   return false;
 }

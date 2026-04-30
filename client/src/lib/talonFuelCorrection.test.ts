@@ -158,26 +158,26 @@ describe('Target Lambda Presets', () => {
 // ─── Turbo Detection Tests ──────────────────────────────────────────────────
 
 describe('Turbo Detection', () => {
-  it('detects turbo when MAP > 100 kPa', () => {
+  it('detects turbo when MAP > 105 kPa', () => {
     const wp8 = makeWP8Data({
       channelNames: ['Engine Speed', 'Manifold Absolute Pressure'],
       rows: [
         [3000, 80],
         [4000, 95],
-        [5000, 105],  // > 100 kPa
+        [5000, 110],  // > 105 kPa
         [6000, 90],
       ],
     });
     expect(detectTurbo(wp8)).toBe(true);
   });
 
-  it('detects NA when MAP never exceeds 100 kPa', () => {
+  it('detects NA when MAP never exceeds 105 kPa', () => {
     const wp8 = makeWP8Data({
       channelNames: ['Engine Speed', 'Manifold Absolute Pressure'],
       rows: [
         [3000, 80],
         [4000, 95],
-        [5000, 99],
+        [5000, 103],  // 103 kPa is below 105 threshold — still NA
         [6000, 90],
       ],
     });
