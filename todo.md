@@ -2487,3 +2487,17 @@
 - [x] Fix: Add inProgress to debug log for visibility
 - [x] Fix: Reduce timeout from 15s to 8s (now irrelevant with direct UDS approach)
 - [x] Sequence: filter→stop periodic→extended session→4 IOCTL→2 DDDI→start periodic→verify 0x5EA
+
+## T87A Passive CAN Gear State (2026-04-30)
+- [x] Analyze HPT CSV + BUSMASTER trace to identify gear state CAN message
+- [x] Confirmed: CAN arb ID 0x1F5, byte[0] = gear enum (0x0F=Park, 0x0E=Rev, 0x0D=Neutral, 0x01=1st, etc.)
+- [x] Confirmed: CAN arb ID 0x1F5, byte[3] = gear number (1=Park, 2=Rev, 3=Neutral, 4=1st, etc.)
+- [x] Add GEAR_T87A (0xBB01) and GEAR_NUM_T87A (0xBB02) PID definitions with service 0xBB
+- [x] Add 0x1F5 to bridge hardware CAN filter (OBD mode init + _gm_session_setup update)
+- [x] Add 0x1F5 to bridge software filter (_filter_ids in _gm_session_setup)
+- [x] Add 0x1F5 parsing to WebSocket interceptor (parsePassiveGearFrame)
+- [x] Add passive CAN value injection to wrapReadPids (with 5s staleness check)
+- [x] Add Patch 6 reset for passive CAN state + set_filter([0x1F5, 0x5EA, 0x5E8])
+- [x] Skip service 0xBB PIDs in batch_read loop (alongside 0x2D DDDI skip)
+- [x] Ensure all set_filter calls include 0x1F5 to prevent filter overwrites
+- [x] Gear numeric mapping: Park=0, Rev=-1, Neutral=0, 1st=1, ..., 10th=10

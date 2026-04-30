@@ -329,14 +329,16 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mo
         )
         await bridge.protocol.start()
 
-    # Add 0x5E8 (ECM DDDI) and 0x5EA (TCM DDDI) to the software filter
+    # Add 0x5E8 (ECM DDDI), 0x5EA (TCM DDDI), and 0x1F5 (gear state broadcast) to the software filter
     bridge.protocol._filter_ids.add(DDDI_PERIODIC_ARB_ID)  # 0x5E8
     bridge.protocol._filter_ids.add(0x5EA)  # T87A TCM DDDI periodic
+    bridge.protocol._filter_ids.add(0x1F5)  # T87A gear state passive broadcast
     if hasattr(bridge.protocol, '_ppei_listener'):
         bridge.protocol._ppei_listener._filter_ids.add(DDDI_PERIODIC_ARB_ID)
         bridge.protocol._ppei_listener._filter_ids.add(0x5EA)
+        bridge.protocol._ppei_listener._filter_ids.add(0x1F5)
 
-    # Update hardware CAN filters to include 0x5E8 + 0x5EA
+    # Update hardware CAN filters to include 0x5E8 + 0x5EA + 0x1F5
     if bridge.bus and getattr(bridge, '_ppei_hw_filters_active', False):
         try:
             bridge.bus.set_filters([
@@ -344,8 +346,9 @@ async def _gm_session_setup(bridge, tx_id: int, rx_id: int, req_id: str, dddi_mo
                 {"can_id": 0x7DF, "can_mask": 0x7FF, "extended": False},
                 {"can_id": DDDI_PERIODIC_ARB_ID, "can_mask": 0x7FF, "extended": False},
                 {"can_id": 0x5EA, "can_mask": 0x7FF, "extended": False},
+                {"can_id": 0x1F5, "can_mask": 0x7FF, "extended": False},  # T87A gear state broadcast
             ])
-            log.info(f"[PPEI] Hardware CAN filters updated: added 0x{DDDI_PERIODIC_ARB_ID:03X} + 0x5EA")
+            log.info(f"[PPEI] Hardware CAN filters updated: added 0x{DDDI_PERIODIC_ARB_ID:03X} + 0x5EA + 0x1F5")
         except Exception as e:
             log.warning(f"[PPEI] Could not update CAN filters: {e}")
 
@@ -723,9 +726,10 @@ def _ppei_init_can_bus(self, bitrate: int = None, fd: bool = False) -> bool:
                 self.bus.set_filters([
                     {"can_id": 0x7E0, "can_mask": 0x7F0, "extended": False},
                     {"can_id": 0x7DF, "can_mask": 0x7FF, "extended": False},
+                    {"can_id": 0x1F5, "can_mask": 0x7FF, "extended": False},  # T87A gear state broadcast
                 ])
                 self._ppei_hw_filters_active = True
-                log.info(f"[PPEI] Hardware CAN filters applied (mode=obd): 0x7E0-0x7EF + 0x7DF")
+                log.info(f"[PPEI] Hardware CAN filters applied (mode=obd): 0x7E0-0x7EF + 0x7DF + 0x1F5")
             elif mode == FILTER_MODE_UNIVERSAL:
                 self.bus.set_filters(None)
                 self._ppei_hw_filters_active = False

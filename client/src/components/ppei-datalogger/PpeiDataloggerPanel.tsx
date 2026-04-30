@@ -298,6 +298,115 @@ const TCM_VDID_TCC_SLIP = 0xDE01;
 const TCM_VDID_TURBINE_RPM = 0xDE02;
 const TCM_VDID_TRANS_TEMP = 0xDE03;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// T87A PASSIVE CAN BROADCAST (0x1F5) — Gear State
+// ═══════════════════════════════════════════════════════════════════════════
+// GM trucks broadcast transmission data on arb ID 0x1F5 at ~41 Hz.
+// No request needed — just listen for the frames on the CAN bus.
+// Confirmed from unfiltered BUSMASTER trace on 2019 L5P Duramax (T87A TCM).
+// Frame layout:
+//   byte[0] = Current Gear State: 0x0F=Park, 0x0E=Reverse, 0x0D=Neutral, 0x01=1st, ..., 0x0A=10th
+//   byte[1] = Mirror of byte[0]
+//   byte[3] = Gear Sequence Number: 1=Park, 2=Reverse, 3=Neutral, 4=1st, ..., 13=10th
+//   byte[6] = Direction flag: 0=Park/Neutral, 1=Forward, 2=Reverse
+const PASSIVE_CAN_GEAR_ARB_ID = 0x1F5;
+const PASSIVE_CAN_GEAR_PID = 0xBB01;  // matches obdConnection.ts
+const PASSIVE_CAN_GEAR_NUM_PID = 0xBB02;  // matches obdConnection.ts
+
+// Gear state enum for display
+const GEAR_STATE_MAP: Record<number, string> = {
+  0x0F: 'Park',
+  0x0E: 'Reverse',
+  0x0D: 'Neutral',
+  0x01: '1st',
+  0x02: '2nd',
+  0x03: '3rd',
+  0x04: '4th',
+  0x05: '5th',
+  0x06: '6th',
+  0x07: '7th',
+  0x08: '8th',
+  0x09: '9th',
+  0x0A: '10th',
+};
+
+// Map gear byte to a meaningful numeric value for gauge display and CSV
+// Park=0, Reverse=-1, Neutral=0, 1st=1, 2nd=2, ..., 10th=10
+const GEAR_NUMERIC_MAP: Record<number, number> = {
+  0x0F: 0,    // Park
+  0x0E: -1,   // Reverse
+  0x0D: 0,    // Neutral
+  0x01: 1,    // 1st
+  0x02: 2,    // 2nd
+  0x03: 3,    // 3rd
+  0x04: 4,    // 4th
+  0x05: 5,    // 5th
+  0x06: 6,    // 6th
+  0x07: 7,    // 7th
+  0x08: 8,    // 8th
+  0x09: 9,    // 9th
+  0x0A: 10,   // 10th
+};
+
+// Module-level state for passive CAN gear broadcast
+let _passiveGearFrameCount = 0;
+let _passiveGearLastFrameTs = 0;
+const _passiveCanValues = new Map<number, {
+  did: number;
+  shortName: string;
+  value: number;
+  displayValue: string;
+  unit: string;
+  rawBytes: number[];
+  timestamp: number;
+}>();
+
+/**
+ * Parse a 0x1F5 passive CAN gear state frame.
+ * Called from the WebSocket interceptor for every 0x1F5 frame.
+ */
+function parsePassiveGearFrame(data: number[]): void {
+  if (!data || data.length < 4) return;
+  const now = Date.now();
+  _passiveGearFrameCount++;
+  _passiveGearLastFrameTs = now;
+
+  const gearByte = data[0];
+  const gearNum = data[3];
+  const gearName = GEAR_STATE_MAP[gearByte] || `Unknown(0x${gearByte.toString(16)})`;
+
+  // Store gear state (byte[0]) — numeric value for gauge, display name for UI
+  const gearNumericValue = GEAR_NUMERIC_MAP[gearByte] ?? gearByte;
+  _passiveCanValues.set(PASSIVE_CAN_GEAR_PID, {
+    did: PASSIVE_CAN_GEAR_PID,
+    shortName: 'GEAR_T87A',
+    value: gearNumericValue,
+    displayValue: gearName,
+    unit: '',
+    rawBytes: [gearByte],
+    timestamp: now,
+  });
+
+  // Store gear number (byte[3]) — numeric gear position
+  _passiveCanValues.set(PASSIVE_CAN_GEAR_NUM_PID, {
+    did: PASSIVE_CAN_GEAR_NUM_PID,
+    shortName: 'GEAR_NUM_T87A',
+    value: gearNum,
+    displayValue: String(gearNum),
+    unit: '',
+    rawBytes: [gearNum],
+    timestamp: now,
+  });
+
+  // Log first few frames for debugging
+  if (_passiveGearFrameCount <= 5 || _passiveGearFrameCount % 200 === 0) {
+    const ref = _ppeiConnectionRef;
+    if (ref) {
+      ppeiLog(ref, `[PASSIVE-0x1F5] Gear=${gearName} (0x${gearByte.toString(16)}) GearNum=${gearNum} frame#${_passiveGearFrameCount}`);
+    }
+  }
+}
+
 /**
  * Parse a 0x5EA TCM DDDI periodic frame.
  * Frame format: [sub_frame_id, b1, b2, b3, b4, ...]
@@ -410,7 +519,7 @@ async function startTcmDddiStreaming(conn: any): Promise<boolean> {
     ppeiLog(conn, '[TCM-DDDI] Step 0: Adding 0x5EA to bridge CAN filter...');
     try {
       await conn.sendRequest(
-        { type: 'set_filter', arb_ids: [0x5EA, 0x5E8] },
+        { type: 'set_filter', arb_ids: [0x5EA, 0x5E8, PASSIVE_CAN_GEAR_ARB_ID] },
         2000
       );
       ppeiLog(conn, '[TCM-DDDI] ✓ Filter updated (0x5EA + 0x5E8 + RESPONSE_IDS)');
@@ -781,6 +890,11 @@ function wrapOpenWebSocket(original: Function) {
               parseTcmDddiPeriodicFrame(dataArr);
             }
 
+            // ── Passive CAN broadcast parsing (0x1F5 Gear State) ──
+            if (arbId === PASSIVE_CAN_GEAR_ARB_ID && dataArr.length >= 4) {
+              parsePassiveGearFrame(dataArr);
+            }
+
             // Log first 5 frames to DEVICE CONSOLE, rest only to F12
             if (frameCount <= 5) {
               const arbHex = `0x${arbId.toString(16).toUpperCase()}`;
@@ -796,7 +910,7 @@ function wrapOpenWebSocket(original: Function) {
           originalOnMessage.call(this.ws, event);
         }
       };
-      ppeiLog(this, 'WebSocket interceptor installed (with DDDI 0x5E8 + 0x5EA periodic parsers)');
+      ppeiLog(this, 'WebSocket interceptor installed (DDDI 0x5E8 + 0x5EA + passive 0x1F5 gear)');
     }
   };
 }
@@ -839,6 +953,10 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       } else if (mode === 0x2D) {
         // DDDI PIDs (0xDE00+) are handled by TCM DDDI periodic injection below — 
         // never send them to batch_read_mode01 (PID values > 0xFF overflow a byte)
+        continue;
+      } else if (mode === 0xBB) {
+        // Passive CAN broadcast PIDs (0xBB01+) — values injected from WebSocket interceptor
+        // Never send to batch_read (these are listen-only, no request needed)
         continue;
       } else {
         mode01Pids.push(pid);
@@ -1213,6 +1331,40 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
 
+    // ── Inject passive CAN broadcast values (0x1F5 Gear State) ──
+    const passivePids = pids.filter((p: any) => p.service === 0xBB);
+    if (passivePids.length > 0) {
+      const PASSIVE_MAX_AGE_MS = 5000;
+      const injectedFromPassive: string[] = [];
+      for (const pid of passivePids) {
+        const passiveVal = _passiveCanValues.get(pid.pid);
+        if (passiveVal && (now - passiveVal.timestamp) < PASSIVE_MAX_AGE_MS) {
+          const existing = readings.findIndex((r: any) => r.pid === pid.pid);
+          const reading = {
+            pid: passiveVal.did,
+            name: pid.name,
+            shortName: passiveVal.shortName,
+            value: passiveVal.value,
+            displayValue: passiveVal.displayValue,
+            unit: passiveVal.unit,
+            rawBytes: passiveVal.rawBytes,
+            timestamp: passiveVal.timestamp,
+          };
+          if (existing >= 0) {
+            readings[existing] = reading;
+          } else {
+            readings.push(reading);
+          }
+          injectedFromPassive.push(`${passiveVal.shortName}=${passiveVal.displayValue}`);
+        }
+      }
+      if (injectedFromPassive.length > 0 && (_passiveGearFrameCount <= 20 || _passiveGearFrameCount % 200 === 0)) {
+        ppeiLog(this,
+          `⚡ Passive CAN: ${injectedFromPassive.join(', ')}`
+        );
+      }
+    }
+
     return readings;
   };
 }
@@ -1254,9 +1406,32 @@ try {
       _tcmDddiLastFrameTs = 0;
       _tcmDddiSetupAttempts = 0;
       _tcmDddiPeriodicValues.clear();
+      // Reset passive CAN state
+      _passiveGearFrameCount = 0;
+      _passiveGearLastFrameTs = 0;
+      _passiveCanValues.clear();
       // Also reset the debug call counter so we get fresh logs
       (this as any)._wrapReadPidsCallCount = 0;
-      console.log(`${PPEI_TAG} [TCM-DDDI] State reset for new monitoring session`);
+      console.log(`${PPEI_TAG} State reset for new monitoring session (TCM-DDDI + passive CAN)`);
+
+      // Add passive CAN arb IDs (0x1F5 gear state) to bridge filter
+      // so the bridge forwards these broadcast frames to the WebSocket.
+      // Fire-and-forget — if it fails, we just won't get passive data.
+      try {
+        if (this.ws && this.sendRequest) {
+          this.sendRequest(
+            { type: 'set_filter', arb_ids: [PASSIVE_CAN_GEAR_ARB_ID, TCM_DDDI_PERIODIC_ARB_ID, 0x5E8] },
+            2000
+          ).then(() => {
+            console.log(`${PPEI_TAG} [PASSIVE] CAN filter updated: 0x1F5 + 0x5EA + 0x5E8 + RESPONSE_IDS`);
+          }).catch((e: any) => {
+            console.log(`${PPEI_TAG} [PASSIVE] CAN filter update failed (bridge may not support set_filter): ${e}`);
+          });
+        }
+      } catch (e) {
+        console.log(`${PPEI_TAG} [PASSIVE] CAN filter setup error: ${e}`);
+      }
+
       return proto._originalStartLogging.apply(this, args);
     };
     console.log(`${PPEI_TAG} Patch 6: startLogging → TCM DDDI state reset on new session`);

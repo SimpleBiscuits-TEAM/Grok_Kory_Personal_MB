@@ -1224,6 +1224,7 @@ export class PCANConnection {
     const filteredPids = pids.filter(p => {
       if (p.service === 0x22) return true; // Extended PIDs aren't in the bitmask
       if (p.service === 0x2D) return true; // TCM DDDI PIDs — passive stream, not polled
+      if (p.service === 0xBB) return true; // Passive CAN broadcast PIDs — just listen, not polled
       return this.supportedPids.has(p.pid);
     });
 

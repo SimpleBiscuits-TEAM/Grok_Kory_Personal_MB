@@ -1602,6 +1602,29 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
     // Value injected by tcmDddiPeriodicValues — formula stub only (never called by batch poller)
     formula: () => 0,
   },
+  // ── T87A Passive CAN Broadcast PIDs (no request needed, just listen) ──
+  // These are GM proprietary CAN messages broadcast continuously by the TCM.
+  // Service 0xBB is a V-OP marker for "passive broadcast" — not a real UDS service.
+  // The WebSocket interceptor in PpeiDataloggerPanel parses these frames and injects values.
+  {
+    // Trans Current Gear — Passive CAN 0x1F5 byte[0]
+    // HP Tuners channel 14100 "Trans Current Gear"
+    // Confirmed from unfiltered BUSMASTER trace on 2019 L5P Duramax (T87A TCM)
+    // Broadcast at ~41 Hz, no request needed.
+    // Byte[0] enum: 0x0F=Park, 0x0E=Reverse, 0x0D=Neutral, 0x01=1st, 0x02=2nd, ... 0x0A=10th
+    pid: 0xBB01, name: 'Trans Current Gear (T87A)', shortName: 'GEAR_T87A',
+    unit: '', min: 0, max: 15, bytes: 1, service: 0xBB, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
+  {
+    // Gear Sequence Number — Passive CAN 0x1F5 byte[3]
+    // 1=Park, 2=Reverse, 3=Neutral, 4=1st, 5=2nd, ... 13=10th
+    pid: 0xBB02, name: 'Gear Number (T87A)', shortName: 'GEAR_NUM_T87A',
+    unit: '', min: 0, max: 15, bytes: 1, service: 0xBB, category: 'transmission',
+    manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
+    formula: ([a]) => a,
+  },
   // ── GM Global A Boost Pressure (commaai/opendbc) ──
   {
     // Desired Boost Pressure — DID 0x1E3B
