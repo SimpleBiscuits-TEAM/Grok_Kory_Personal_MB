@@ -2511,5 +2511,3 @@
 - [x] Remap GEAR_T87A to show PRND state: P/R/N/D using byte[3] (1=P, 2=R, 3=N, 4+=D)
 - [x] Remap GEAR_NUM_T87A to show actual gear number: 0 in P/R/N, 1-10 in Drive
 - [x] Use byte[3] as the primary source (sequence: 1=Park, 2=Rev, 3=Neutral, 4+=gears)
-- [x] Fix passive CAN 0x1F5 not being received — add to software filter in batch_read_dids and batch_read_mode01 handlers
-- [x] Add 0xBB01/0xBB02 to DDDI_EXEMPT_PIDS to prevent pausing passive CAN PIDs
