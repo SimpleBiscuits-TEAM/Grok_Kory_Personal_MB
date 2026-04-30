@@ -16,7 +16,7 @@ import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
   Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
-  GitCompare, ArrowRight, Wrench, TrendingUp, Copy, ClipboardCheck
+  GitCompare, ArrowRight, Wrench, TrendingUp, Copy, ClipboardCheck, ClipboardPaste
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
@@ -292,6 +292,8 @@ function FuelMapCard({
   const [pasteZoneFocused, setPasteZoneFocused] = useState(false);
   const [pastedPreview, setPastedPreview] = useState<string | null>(null);
   const [factCheckWarning, setFactCheckWarning] = useState<string | null>(null);
+  const [showPasteData, setShowPasteData] = useState(false);
+  const [pasteDataText, setPasteDataText] = useState('');
 
   const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
@@ -449,6 +451,113 @@ function FuelMapCard({
       setPasteText('');
     }
   }, [pasteText, config, onLoad, validateDimensions]);
+
+  /**
+   * PASTE DATA: Replace only cell values while keeping existing axes from OCR scan.
+   * Accepts tab/comma-separated numeric data. Can include axis headers (will be stripped)
+   * or just raw cell values matching the current map dimensions.
+   */
+  const handlePasteData = useCallback(() => {
+    if (!map) return;
+    const text = pasteDataText.trim();
+    if (!text) return;
+
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) {
+      toast.error('No data found in pasted text');
+      return;
+    }
+
+    // Try to detect if the pasted data includes axis headers
+    // If first row has the same number of numeric cells as map.colAxis.length + 1,
+    // it likely includes a row header column
+    const firstRowCells = lines[0].split(/[,\t]+/).map(c => c.trim());
+    const expectedCols = map.colAxis.length;
+    const expectedRows = map.rowAxis.length;
+
+    let dataLines = lines;
+    let hasRowHeaders = false;
+    let hasColHeader = false;
+
+    // Check if first row looks like a column axis header
+    // (contains the colLabel or first cell matches a known label pattern)
+    const firstCell = firstRowCells[0].toLowerCase();
+    if (firstCell.includes('rpm') || firstCell.includes('tps') || firstCell.includes('map') ||
+        firstCell.includes('\\') || firstCell.includes('/') || firstCell === '' ||
+        firstCell.includes('throttle') || firstCell.includes('kpa')) {
+      hasColHeader = true;
+      dataLines = lines.slice(1);
+    }
+
+    // Check if each data row starts with a row axis value
+    // by seeing if the first cell of data rows matches known RPM values
+    if (dataLines.length > 0) {
+      const testRow = dataLines[0].split(/[,\t]+/).map(c => c.trim());
+      const firstVal = parseFloat(testRow[0]);
+      // If first value matches a row axis value (within tolerance) or
+      // if the row has expectedCols + 1 cells, it has row headers
+      if (!isNaN(firstVal) && testRow.length > expectedCols) {
+        hasRowHeaders = true;
+      } else if (!isNaN(firstVal) && map.rowAxis.some(r => Math.abs(r - firstVal * 1000) < 50 || Math.abs(r - firstVal) < 50)) {
+        hasRowHeaders = true;
+      }
+    }
+
+    // Parse the data
+    const newData: number[][] = [];
+    for (const line of dataLines) {
+      const cells = line.split(/[,\t]+/).map(c => c.trim());
+      const numericCells = hasRowHeaders ? cells.slice(1) : cells;
+      const row = numericCells.map(c => {
+        // Remove any non-numeric suffixes (like * or + markers from C3)
+        const cleaned = c.replace(/[^0-9.\-]/g, '');
+        return parseFloat(cleaned);
+      }).filter(n => !isNaN(n));
+      if (row.length > 0) {
+        newData.push(row);
+      }
+    }
+
+    if (newData.length === 0) {
+      toast.error('Could not parse any numeric data from pasted text');
+      return;
+    }
+
+    // Validate dimensions
+    if (newData.length !== expectedRows) {
+      toast.warning(
+        `Row count mismatch: expected ${expectedRows} rows but got ${newData.length}. ` +
+        `Pasting ${Math.min(newData.length, expectedRows)} rows.`,
+        { duration: 5000 }
+      );
+    }
+    if (newData[0]?.length !== expectedCols) {
+      toast.warning(
+        `Column count mismatch: expected ${expectedCols} cols but got ${newData[0]?.length}. ` +
+        `Pasting ${Math.min(newData[0]?.length || 0, expectedCols)} cols per row.`,
+        { duration: 5000 }
+      );
+    }
+
+    // Apply new data values while keeping existing axes, targetLambda, labels
+    const updatedData = map.data.map((existingRow, ri) => {
+      if (ri >= newData.length) return [...existingRow]; // Keep existing if pasted data is shorter
+      return existingRow.map((existingVal, ci) => {
+        if (ci >= (newData[ri]?.length || 0)) return existingVal; // Keep existing if row is shorter
+        return newData[ri][ci];
+      });
+    });
+
+    const updatedMap: FuelMap = {
+      ...map,
+      data: updatedData,
+    };
+
+    onLoad(updatedMap);
+    setShowPasteData(false);
+    setPasteDataText('');
+    toast.success(`Cell values updated (${Math.min(newData.length, expectedRows)}×${Math.min(newData[0]?.length || 0, expectedCols)}). Axes preserved from scan.`);
+  }, [map, pasteDataText, onLoad]);
 
   const startEdit = (row: number, col: number) => {
     if (!map) return;
@@ -768,6 +877,19 @@ function FuelMapCard({
               >
                 <Download style={{ width: 12, height: 12 }} />EXPORT CSV
               </button>
+              <button
+                onClick={() => setShowPasteData(!showPasteData)}
+                style={{
+                  background: showPasteData ? 'oklch(0.15 0.06 200)' : 'transparent',
+                  color: sColor.yellow, border: showPasteData ? `1px solid ${sColor.yellow}` : 'none',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                  padding: showPasteData ? '1px 4px' : undefined,
+                  borderRadius: '2px',
+                }}
+              >
+                <ClipboardPaste style={{ width: 12, height: 12 }} />PASTE DATA
+              </button>
               <button onClick={onClear} style={{
                 background: 'transparent', color: sColor.textDim, border: 'none',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
@@ -777,6 +899,68 @@ function FuelMapCard({
               </button>
             </div>
           </div>
+
+          {/* Paste Data panel */}
+          {showPasteData && (
+            <div style={{
+              background: 'oklch(0.12 0.02 200)',
+              border: `1px solid oklch(0.30 0.06 200)`,
+              borderRadius: '3px',
+              padding: '12px',
+              marginBottom: '8px',
+            }}>
+              <div style={{ marginBottom: '8px' }}>
+                <span style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.yellow, letterSpacing: '0.04em' }}>
+                  PASTE CELL DATA
+                </span>
+                <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, margin: '4px 0 0' }}>
+                  Paste cell values from C3 below. Axis values (RPM rows &amp; MAP/TPS columns) will be preserved from the screenshot scan.
+                  Accepts tab-separated or comma-separated data. Row headers and column headers will be auto-detected and stripped.
+                </p>
+              </div>
+              <textarea
+                value={pasteDataText}
+                onChange={e => setPasteDataText(e.target.value)}
+                placeholder={`Paste ${map?.rowAxis.length || 35} rows × ${map?.colAxis.length || 25} columns of cell values from C3...\n\nExample (tab or comma separated):\n1.296\t1.296\t1.296\t1.418\t1.540\t1.655...\n1.296\t1.296\t1.296\t1.418\t1.540\t1.655...`}
+                style={{
+                  width: '100%',
+                  background: 'oklch(0.08 0.004 260)', color: 'white',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                  border: `1px solid ${sColor.border}`, borderRadius: '2px',
+                  padding: '8px', minHeight: '120px', resize: 'vertical',
+                }}
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={handlePasteData}
+                  disabled={!pasteDataText.trim()}
+                  style={{
+                    background: pasteDataText.trim() ? sColor.yellow : 'oklch(0.25 0.010 260)',
+                    color: pasteDataText.trim() ? '#000' : sColor.textDim,
+                    fontFamily: sFont.heading, fontSize: '0.85rem',
+                    letterSpacing: '0.08em', padding: '6px 16px', border: 'none',
+                    borderRadius: '2px', cursor: pasteDataText.trim() ? 'pointer' : 'not-allowed',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  APPLY DATA
+                </button>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
+                  Expected: {map?.rowAxis.length || '?'} rows × {map?.colAxis.length || '?'} cols
+                </span>
+                <button
+                  onClick={() => { setShowPasteData(false); setPasteDataText(''); }}
+                  style={{
+                    background: 'transparent', color: sColor.textDim, border: 'none',
+                    cursor: 'pointer', fontFamily: sFont.mono, fontSize: '0.7rem',
+                    marginLeft: 'auto',
+                  }}
+                >
+                  CANCEL
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Fact-check warning */}
           {factCheckWarning && (
