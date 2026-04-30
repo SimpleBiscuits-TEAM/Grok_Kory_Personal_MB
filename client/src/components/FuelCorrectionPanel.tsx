@@ -17,7 +17,7 @@ import { WP8ParseResult } from '@/lib/wp8Parser';
 import {
   FuelMapState, FuelMap, CorrectionConfig, CorrectionReport,
   MapCorrectionResult, CellCorrection, VehicleMode, MapSensor,
-  computeCorrections, applyCorrectionToMap, blendCorrectedMap, detectTurbo,
+  computeCorrections, applyCorrectionToMap, blendCorrectedMap, smoothCorrectedMap, detectTurbo,
   getTargetLambdaPreset,
 } from '@/lib/talonFuelCorrection';
 
@@ -119,10 +119,12 @@ function CorrectionPreviewTable({
   result,
   map,
   blendEnabled,
+  smoothEnabled,
 }: {
   result: MapCorrectionResult;
   map: FuelMap;
   blendEnabled: boolean;
+  smoothEnabled: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
 
@@ -134,10 +136,20 @@ function CorrectionPreviewTable({
     const m = new Map<string, CellCorrection>();
     if (blendEnabled && result.corrections.length > 0) {
       // Compute blended map
-      const blendedMap = blendCorrectedMap(map, result.corrections);
-      // Add original corrections
+      let processedMap = blendCorrectedMap(map, result.corrections);
+      // Apply smoothing to the blended map if enabled
+      if (smoothEnabled) {
+        const smoothed = smoothCorrectedMap(processedMap, result.corrections);
+        processedMap = { ...smoothed, blendedCells: processedMap.blendedCells };
+      }
+      // Add original corrections (with smoothed values if applicable)
       for (const c of result.corrections) {
-        m.set(`${c.row}-${c.col}`, c);
+        const smoothedVal = processedMap.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: smoothedVal,
+          correctionFactor: c.originalValue > 0 ? smoothedVal / c.originalValue : 1,
+        });
       }
       // Add synthetic corrections for blended cells (gap + boundary)
       for (let ri = 0; ri < map.data.length; ri++) {
@@ -145,7 +157,7 @@ function CorrectionPreviewTable({
           const key = `${ri}-${ci}`;
           if (m.has(key)) continue; // already a real correction
           const originalVal = map.data[ri][ci];
-          const blendedVal = blendedMap.data[ri][ci];
+          const blendedVal = processedMap.data[ri][ci];
           if (Math.abs(blendedVal - originalVal) > 0.0001) {
             // This cell was modified by blending
             m.set(key, {
@@ -163,13 +175,25 @@ function CorrectionPreviewTable({
           }
         }
       }
+    } else if (smoothEnabled && result.corrections.length > 0) {
+      // Smooth without blend
+      const correctedMap = applyCorrectionToMap(map, result.corrections);
+      const smoothed = smoothCorrectedMap(correctedMap, result.corrections);
+      for (const c of result.corrections) {
+        const smoothedVal = smoothed.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: smoothedVal,
+          correctionFactor: c.originalValue > 0 ? smoothedVal / c.originalValue : 1,
+        });
+      }
     } else {
       for (const c of result.corrections) {
         m.set(`${c.row}-${c.col}`, c);
       }
     }
     return m;
-  }, [result.corrections, blendEnabled, map]);
+  }, [result.corrections, blendEnabled, smoothEnabled, map]);
 
   // Stats
   const avgFactor = result.corrections.length > 0
@@ -366,6 +390,7 @@ export default function FuelCorrectionPanel({
   const [hasApplied, setHasApplied] = useState(false);
   const [preApplyMaps, setPreApplyMaps] = useState<FuelMapState | null>(null);
   const [blendEnabled, setBlendEnabled] = useState(false);
+  const [smoothEnabled, setSmoothEnabled] = useState(false);
 
   // Auto-detect turbo on mount / data change
   const isTurboDetected = useMemo(() => {
@@ -398,16 +423,23 @@ export default function FuelCorrectionPanel({
     for (const result of report.results) {
       const map = fuelMaps[result.mapKey];
       if (map && result.corrections.length > 0) {
+        let resultMap: FuelMap;
         if (blendEnabled) {
-          corrected[result.mapKey] = blendCorrectedMap(map, result.corrections);
+          resultMap = blendCorrectedMap(map, result.corrections);
         } else {
-          corrected[result.mapKey] = applyCorrectionToMap(map, result.corrections);
+          resultMap = applyCorrectionToMap(map, result.corrections);
         }
+        // Apply smoothing if enabled
+        if (smoothEnabled) {
+          const smoothed = smoothCorrectedMap(resultMap, result.corrections);
+          resultMap = { ...smoothed, blendedCells: resultMap.blendedCells };
+        }
+        corrected[result.mapKey] = resultMap;
       }
     }
     onApplyCorrections(corrected, report.results);
     setHasApplied(true);
-  }, [report, fuelMaps, onApplyCorrections, blendEnabled]);
+  }, [report, fuelMaps, onApplyCorrections, blendEnabled, smoothEnabled]);
 
   // Revert corrections
   const handleRevert = useCallback(() => {
@@ -528,7 +560,7 @@ export default function FuelCorrectionPanel({
           </button>
         </div>
 
-        {/* Blend/Smooth Toggle */}
+        {/* Blend Toggle */}
         <div>
           <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
             BLEND
@@ -550,6 +582,31 @@ export default function FuelCorrectionPanel({
             }}
           >
             {blendEnabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+
+        {/* Smooth Toggle */}
+        <div>
+          <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
+            SMOOTH
+          </div>
+          <button
+            onClick={() => setSmoothEnabled(!smoothEnabled)}
+            style={{
+              background: smoothEnabled ? sColor.cyan : 'transparent',
+              color: smoothEnabled ? 'white' : sColor.textDim,
+              border: `1px solid ${smoothEnabled ? sColor.cyan : sColor.border}`,
+              borderRadius: '2px',
+              padding: '6px 14px',
+              cursor: 'pointer',
+              fontFamily: sFont.heading,
+              fontSize: '0.85rem',
+              letterSpacing: '0.06em',
+              display: 'flex', alignItems: 'center', gap: '5px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {smoothEnabled ? 'ON' : 'OFF'}
           </button>
         </div>
 
@@ -669,6 +726,9 @@ export default function FuelCorrectionPanel({
             {blendEnabled && (
               <span style={{ color: sColor.green }}>BLEND ON</span>
             )}
+            {smoothEnabled && (
+              <span style={{ color: sColor.cyan }}>SMOOTH ON</span>
+            )}
           </div>
 
           {/* Transient fueling tuner notes */}
@@ -709,6 +769,7 @@ export default function FuelCorrectionPanel({
                 result={result}
                 map={map}
                 blendEnabled={blendEnabled}
+                smoothEnabled={smoothEnabled}
               />
             );
           })}
@@ -770,9 +831,14 @@ export default function FuelCorrectionPanel({
                       const map = fuelMaps[result.mapKey];
                       if (!map || result.corrections.length === 0) continue;
                       // Apply corrections to get the corrected map
-                      const correctedMap = blendEnabled
+                      let correctedMap = blendEnabled
                         ? blendCorrectedMap(map, result.corrections)
                         : applyCorrectionToMap(map, result.corrections);
+                      // Apply smoothing if enabled
+                      if (smoothEnabled) {
+                        const smoothed = smoothCorrectedMap(correctedMap, result.corrections);
+                        correctedMap = { ...smoothed, blendedCells: correctedMap.blendedCells };
+                      }
                       // Build CSV
                       const lines: string[] = [];
                       lines.push([`${correctedMap.rowLabel}\\${correctedMap.colLabel}`, ...correctedMap.colAxis.map(v => v.toString())].join(','));

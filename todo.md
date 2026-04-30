@@ -2474,3 +2474,4 @@
 - [x] Highlight blended cells in distinct color (cyan/teal) in Fuel Maps tab after Apply Corrections with BLEND ON
 - [x] Fix: FuelCorrectionPanel state (report, blend toggle, hasApplied) lost when switching tabs — persist across tab switches
 - [x] Fix: Fuel map screenshot OCR/scan cell alignment issue — scanned values shifted from correct positions in source image
+- [x] Add smoothing feature to fuel correction tool — eliminate sharp peaks/valleys while preserving natural gradient

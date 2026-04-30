@@ -8,6 +8,7 @@ import {
   getTurboStockMapTargets, getTurbo3BarMapTargets,
   getTurboAlphaNTargets, getTargetLambdaPreset,
   detectTurbo, computeCorrections, applyCorrectionToMap, blendCorrectedMap,
+  smoothCorrectedMap, CellCorrection,
 } from './talonFuelCorrection';
 import { WP8ParseResult, WP8DataRow, WP8Channel } from './wp8Parser';
 
@@ -1338,5 +1339,207 @@ describe('blendCorrectedMap', () => {
     expect(result.blendedCells!.has('3:1')).toBe(true); // bottom-left
     expect(result.blendedCells!.has('3:2')).toBe(true); // bottom
     expect(result.blendedCells!.has('3:3')).toBe(true); // bottom-right
+  });
+});
+
+// ─── Smoothing Tests ──────────────────────────────────────────────────────────
+
+describe('smoothCorrectedMap', () => {
+  it('should smooth a spike that deviates significantly from neighbors', () => {
+    // Create a 5x5 map with a smooth gradient, then introduce a spike
+    const data = [
+      [1.0, 1.2, 1.4, 1.6, 1.8],
+      [1.1, 1.3, 1.5, 1.7, 1.9],
+      [1.2, 1.4, 3.0, 1.8, 2.0],  // 3.0 is a spike at [2][2]
+      [1.3, 1.5, 1.7, 1.9, 2.1],
+      [1.4, 1.6, 1.8, 2.0, 2.2],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200, 1400, 1600],
+      colAxis: [0, 1, 2, 3, 4],
+      data,
+    });
+
+    // Create a correction that produced the spike
+    const corrections: CellCorrection[] = [{
+      row: 2, col: 2,
+      originalValue: 1.6,
+      correctedValue: 3.0,
+      correctionFactor: 3.0 / 1.6,
+      sampleCount: 5,
+      avgActualLambda: 1.2,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result = smoothCorrectedMap(map, corrections);
+
+    // The spike at [2][2] should be pulled toward its neighbors
+    // Neighbors average around 1.6, so 3.0 should be significantly reduced
+    expect(result.data[2][2]).toBeLessThan(3.0);
+    expect(result.data[2][2]).toBeGreaterThan(1.6); // Still corrected, just less extreme
+    expect(result.smoothedCells.has('2:2')).toBe(true);
+  });
+
+  it('should NOT smooth cells that are within the deviation threshold', () => {
+    // Create a map with a small, reasonable correction (2% change)
+    const data = [
+      [1.0, 1.2, 1.4, 1.6, 1.8],
+      [1.1, 1.3, 1.5, 1.7, 1.9],
+      [1.2, 1.4, 1.62, 1.8, 2.0],  // 1.62 is only ~1% above neighbors avg
+      [1.3, 1.5, 1.7, 1.9, 2.1],
+      [1.4, 1.6, 1.8, 2.0, 2.2],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200, 1400, 1600],
+      colAxis: [0, 1, 2, 3, 4],
+      data,
+    });
+
+    const corrections: CellCorrection[] = [{
+      row: 2, col: 2,
+      originalValue: 1.6,
+      correctedValue: 1.62,
+      correctionFactor: 1.62 / 1.6,
+      sampleCount: 10,
+      avgActualLambda: 0.86,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result = smoothCorrectedMap(map, corrections);
+
+    // Value should remain unchanged since it's within threshold
+    expect(result.data[2][2]).toBeCloseTo(1.62, 2);
+  });
+
+  it('should preserve the overall gradient direction after smoothing', () => {
+    // Create a map with increasing values left-to-right (like a real fuel table)
+    const data = [
+      [2.0, 2.5, 3.0, 3.5, 4.0],
+      [2.1, 2.6, 3.1, 3.6, 4.1],
+      [2.2, 2.7, 5.5, 3.7, 4.2],  // 5.5 is a big spike
+      [2.3, 2.8, 3.3, 3.8, 4.3],
+      [2.4, 2.9, 3.4, 3.9, 4.4],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200, 1400, 1600],
+      colAxis: [0, 1, 2, 3, 4],
+      data,
+    });
+
+    const corrections: CellCorrection[] = [{
+      row: 2, col: 2,
+      originalValue: 3.2,
+      correctedValue: 5.5,
+      correctionFactor: 5.5 / 3.2,
+      sampleCount: 3,
+      avgActualLambda: 1.4,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result = smoothCorrectedMap(map, corrections);
+
+    // After smoothing, the value should still be > its left neighbor
+    // and the gradient should be preserved
+    expect(result.data[2][2]).toBeGreaterThan(result.data[2][1]);
+    expect(result.data[2][2]).toBeLessThan(5.5);
+  });
+
+  it('should return smoothedCells set with keys of cells that were smoothed', () => {
+    const data = [
+      [1.0, 1.2, 1.4],
+      [1.1, 4.0, 1.5],  // 4.0 is a spike
+      [1.2, 1.4, 1.6],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200],
+      colAxis: [0, 1, 2],
+      data,
+    });
+
+    const corrections: CellCorrection[] = [{
+      row: 1, col: 1,
+      originalValue: 1.3,
+      correctedValue: 4.0,
+      correctionFactor: 4.0 / 1.3,
+      sampleCount: 2,
+      avgActualLambda: 1.5,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result = smoothCorrectedMap(map, corrections);
+
+    expect(result.smoothedCells.size).toBeGreaterThan(0);
+    expect(result.smoothedCells.has('1:1')).toBe(true);
+  });
+
+  it('should not modify cells that are not corrected or blended', () => {
+    const data = [
+      [1.0, 1.2, 1.4],
+      [1.1, 4.0, 1.5],  // 4.0 is a spike at corrected cell
+      [1.2, 1.4, 1.6],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200],
+      colAxis: [0, 1, 2],
+      data,
+    });
+
+    const corrections: CellCorrection[] = [{
+      row: 1, col: 1,
+      originalValue: 1.3,
+      correctedValue: 4.0,
+      correctionFactor: 4.0 / 1.3,
+      sampleCount: 2,
+      avgActualLambda: 1.5,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result = smoothCorrectedMap(map, corrections);
+
+    // Non-corrected cells should remain unchanged
+    expect(result.data[0][0]).toBe(1.0);
+    expect(result.data[0][1]).toBe(1.2);
+    expect(result.data[0][2]).toBe(1.4);
+    expect(result.data[2][0]).toBe(1.2);
+    expect(result.data[2][2]).toBe(1.6);
+  });
+
+  it('should handle multiple iterations for better smoothing', () => {
+    const data = [
+      [1.0, 1.2, 1.4, 1.6, 1.8],
+      [1.1, 1.3, 1.5, 1.7, 1.9],
+      [1.2, 1.4, 5.0, 1.8, 2.0],  // Big spike
+      [1.3, 1.5, 1.7, 1.9, 2.1],
+      [1.4, 1.6, 1.8, 2.0, 2.2],
+    ];
+    const map = makeFuelMap({
+      rowAxis: [800, 1000, 1200, 1400, 1600],
+      colAxis: [0, 1, 2, 3, 4],
+      data,
+    });
+
+    const corrections: CellCorrection[] = [{
+      row: 2, col: 2,
+      originalValue: 1.6,
+      correctedValue: 5.0,
+      correctionFactor: 5.0 / 1.6,
+      sampleCount: 2,
+      avgActualLambda: 1.5,
+      targetLambda: 0.85,
+      tier: 'sandpaper' as any,
+    }];
+
+    const result1 = smoothCorrectedMap(map, corrections, { iterations: 1 });
+    const result3 = smoothCorrectedMap(map, corrections, { iterations: 3 });
+    const result5 = smoothCorrectedMap(map, corrections, { iterations: 5 });
+
+    // More iterations should produce a smoother (closer to neighbors) result
+    expect(result3.data[2][2]).toBeLessThan(result1.data[2][2]);
+    expect(result5.data[2][2]).toBeLessThan(result3.data[2][2]);
   });
 });

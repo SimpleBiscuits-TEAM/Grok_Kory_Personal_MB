@@ -1338,3 +1338,142 @@ function interpolateGapsInLine(
     i = j;
   }
 }
+
+// ─── Smoothing Engine ─────────────────────────────────────────────────────────
+
+/**
+ * Smoothing pass for corrected fuel maps.
+ *
+ * Fuel tables should have smooth gradients:
+ *   - Values generally increase from left to right (more fuel at higher TPS/MAP)
+ *   - Values peak around peak torque RPM, then may decrease at higher RPM
+ *   - No sharp "spikes" or "dips" that deviate significantly from neighbors
+ *
+ * Algorithm:
+ *   1. For each corrected/blended cell, compute the "expected" value as the
+ *      weighted average of its 8 neighbors (Gaussian-weighted by distance).
+ *   2. If the cell deviates from the expected value by more than a threshold,
+ *      pull it toward the expected value by a smoothing factor.
+ *   3. Repeat for multiple iterations to propagate smoothness.
+ *   4. Only smooth cells that were corrected or blended — leave untouched cells alone.
+ *
+ * This preserves the overall correction direction while eliminating unrealistic
+ * spikes that would cause driveability issues.
+ *
+ * @param map - The fuel map (after corrections/blending have been applied)
+ * @param corrections - The cell corrections that were applied
+ * @param options - Smoothing parameters
+ * @returns A new FuelMap with smoothed values + set of smoothed cell keys
+ */
+export interface SmoothingOptions {
+  /** Number of smoothing iterations (more = smoother). Default: 3 */
+  iterations?: number;
+  /** Max deviation threshold (fraction) before smoothing kicks in. Default: 0.03 (3%) */
+  deviationThreshold?: number;
+  /** How aggressively to pull toward expected value (0-1). Default: 0.6 */
+  smoothingStrength?: number;
+  /** Whether to also smooth blended cells or only data-corrected cells. Default: true */
+  smoothBlended?: boolean;
+}
+
+export function smoothCorrectedMap(
+  map: FuelMap,
+  corrections: CellCorrection[],
+  options?: SmoothingOptions,
+): FuelMap & { smoothedCells: Set<string> } {
+  const {
+    iterations = 3,
+    deviationThreshold = 0.03,
+    smoothingStrength = 0.6,
+    smoothBlended = true,
+  } = options || {};
+
+  const rows = map.data.length;
+  const cols = rows > 0 ? map.data[0].length : 0;
+  if (rows === 0 || cols === 0) {
+    return { ...map, data: map.data.map(r => [...r]), smoothedCells: new Set() };
+  }
+
+  // Build a set of cells that are eligible for smoothing
+  const correctedKeys = new Set<string>();
+  for (const corr of corrections) {
+    correctedKeys.add(`${corr.row}:${corr.col}`);
+  }
+
+  const blendedKeys = map.blendedCells || new Set<string>();
+
+  // Determine which cells can be smoothed
+  const isSmootable: boolean[][] = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => {
+      const key = `${r}:${c}`;
+      if (correctedKeys.has(key)) return true;
+      if (smoothBlended && blendedKeys.has(key)) return true;
+      return false;
+    })
+  );
+
+  // Work on a copy of the data
+  let data = map.data.map(r => [...r]);
+  const smoothedCells = new Set<string>();
+
+  // Gaussian-like weights for 8-connected neighbors
+  // Cardinal neighbors (distance 1) get weight 1.0
+  // Diagonal neighbors (distance √2) get weight 0.707
+  const neighborOffsets: { dr: number; dc: number; weight: number }[] = [
+    { dr: -1, dc: -1, weight: 0.707 },
+    { dr: -1, dc:  0, weight: 1.0 },
+    { dr: -1, dc:  1, weight: 0.707 },
+    { dr:  0, dc: -1, weight: 1.0 },
+    { dr:  0, dc:  1, weight: 1.0 },
+    { dr:  1, dc: -1, weight: 0.707 },
+    { dr:  1, dc:  0, weight: 1.0 },
+    { dr:  1, dc:  1, weight: 0.707 },
+  ];
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const nextData = data.map(r => [...r]);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!isSmootable[r][c]) continue;
+
+        const currentVal = data[r][c];
+        if (currentVal <= 0) continue; // Skip zero/negative cells
+
+        // Compute weighted average of neighbors
+        let weightedSum = 0;
+        let totalWeight = 0;
+
+        for (const { dr, dc, weight } of neighborOffsets) {
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            const neighborVal = data[nr][nc];
+            if (neighborVal > 0) {
+              weightedSum += neighborVal * weight;
+              totalWeight += weight;
+            }
+          }
+        }
+
+        if (totalWeight === 0) continue;
+
+        const expectedVal = weightedSum / totalWeight;
+        const deviation = Math.abs(currentVal - expectedVal) / expectedVal;
+
+        // Only smooth if deviation exceeds threshold
+        if (deviation > deviationThreshold) {
+          // Pull toward expected value by smoothingStrength
+          const smoothedVal = currentVal + (expectedVal - currentVal) * smoothingStrength;
+          // Round to 3 decimal places (fuel table precision)
+          nextData[r][c] = Math.round(smoothedVal * 1000) / 1000;
+          smoothedCells.add(`${r}:${c}`);
+        }
+      }
+    }
+
+    data = nextData;
+  }
+
+  return { ...map, data, smoothedCells };
+}
