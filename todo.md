@@ -2482,3 +2482,4 @@
 - [x] Verify correction factor is calculated from average AFR reading per cell
 - [x] Show average and max cell sample counts near MIN SAMPLES input for reference
 - [x] Add retry logic with exponential backoff to LLM and storage calls for transient 502/503 errors
+- [x] Fix: Strat AI agent incorrectly bringing Knox into customer conversations — removed Knox routing from system prompt, reinforced that Strat must ask for details, use own reasoning, and escalate to live agent only (never another AI)
