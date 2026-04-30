@@ -309,44 +309,30 @@ const TCM_VDID_TRANS_TEMP = 0xDE03;
 //   byte[1] = Mirror of byte[0]
 //   byte[3] = Gear Sequence Number: 1=Park, 2=Reverse, 3=Neutral, 4=1st, ..., 13=10th
 //   byte[6] = Direction flag: 0=Park/Neutral, 1=Forward, 2=Reverse
+//
+// PRIMARY SOURCE: byte[3] — most reliable for PRND + gear number
+//   GEAR_T87A (0xBB01): PRND state → P/R/N/D display
+//   GEAR_NUM_T87A (0xBB02): Gear number → 0 in P/R/N, 1-10 in Drive
 const PASSIVE_CAN_GEAR_ARB_ID = 0x1F5;
 const PASSIVE_CAN_GEAR_PID = 0xBB01;  // matches obdConnection.ts
 const PASSIVE_CAN_GEAR_NUM_PID = 0xBB02;  // matches obdConnection.ts
 
-// Gear state enum for display
-const GEAR_STATE_MAP: Record<number, string> = {
-  0x0F: 'Park',
-  0x0E: 'Reverse',
-  0x0D: 'Neutral',
-  0x01: '1st',
-  0x02: '2nd',
-  0x03: '3rd',
-  0x04: '4th',
-  0x05: '5th',
-  0x06: '6th',
-  0x07: '7th',
-  0x08: '8th',
-  0x09: '9th',
-  0x0A: '10th',
+// byte[3] → PRND state label for display
+const GEAR_SEQ_TO_PRND: Record<number, string> = {
+  1: 'P',
+  2: 'R',
+  3: 'N',
 };
+// byte[3] >= 4 → Drive (gear = byte[3] - 3)
 
-// Map gear byte to a meaningful numeric value for gauge display and CSV
-// Park=0, Reverse=-1, Neutral=0, 1st=1, 2nd=2, ..., 10th=10
-const GEAR_NUMERIC_MAP: Record<number, number> = {
-  0x0F: 0,    // Park
-  0x0E: -1,   // Reverse
-  0x0D: 0,    // Neutral
-  0x01: 1,    // 1st
-  0x02: 2,    // 2nd
-  0x03: 3,    // 3rd
-  0x04: 4,    // 4th
-  0x05: 5,    // 5th
-  0x06: 6,    // 6th
-  0x07: 7,    // 7th
-  0x08: 8,    // 8th
-  0x09: 9,    // 9th
-  0x0A: 10,   // 10th
+// byte[3] → numeric value for PRND PID (CSV/gauge)
+// P=0, R=-1, N=0, D=1 (always 1 to indicate "in drive")
+const GEAR_SEQ_TO_PRND_NUMERIC: Record<number, number> = {
+  1: 0,    // Park
+  2: -1,   // Reverse
+  3: 0,    // Neutral
 };
+// byte[3] >= 4 → 1 (in drive)
 
 // Module-level state for passive CAN gear broadcast
 let _passiveGearFrameCount = 0;
@@ -364,6 +350,7 @@ const _passiveCanValues = new Map<number, {
 /**
  * Parse a 0x1F5 passive CAN gear state frame.
  * Called from the WebSocket interceptor for every 0x1F5 frame.
+ * Uses byte[3] as primary source (sequence: 1=P, 2=R, 3=N, 4=1st, ..., 13=10th)
  */
 function parsePassiveGearFrame(data: number[]): void {
   if (!data || data.length < 4) return;
@@ -371,30 +358,44 @@ function parsePassiveGearFrame(data: number[]): void {
   _passiveGearFrameCount++;
   _passiveGearLastFrameTs = now;
 
-  const gearByte = data[0];
-  const gearNum = data[3];
-  const gearName = GEAR_STATE_MAP[gearByte] || `Unknown(0x${gearByte.toString(16)})`;
+  const gearSeq = data[3]; // byte[3] = sequence number (primary source)
 
-  // Store gear state (byte[0]) — numeric value for gauge, display name for UI
-  const gearNumericValue = GEAR_NUMERIC_MAP[gearByte] ?? gearByte;
+  // Determine PRND state and gear number from byte[3]
+  let prndLabel: string;
+  let prndNumeric: number;
+  let gearNumber: number;
+
+  if (gearSeq >= 4) {
+    // In Drive — gear number is (seq - 3): 4→1st, 5→2nd, ..., 13→10th
+    gearNumber = gearSeq - 3;
+    prndLabel = 'D';
+    prndNumeric = 1; // 1 = in drive
+  } else {
+    // P/R/N
+    prndLabel = GEAR_SEQ_TO_PRND[gearSeq] || `?${gearSeq}`;
+    prndNumeric = GEAR_SEQ_TO_PRND_NUMERIC[gearSeq] ?? 0;
+    gearNumber = 0; // no gear engaged in P/R/N
+  }
+
+  // Store PRND state (0xBB01) — shows P, R, N, or D
   _passiveCanValues.set(PASSIVE_CAN_GEAR_PID, {
     did: PASSIVE_CAN_GEAR_PID,
     shortName: 'GEAR_T87A',
-    value: gearNumericValue,
-    displayValue: gearName,
+    value: prndNumeric,
+    displayValue: prndLabel,
     unit: '',
-    rawBytes: [gearByte],
+    rawBytes: [data[0], data[3]],
     timestamp: now,
   });
 
-  // Store gear number (byte[3]) — numeric gear position
+  // Store gear number (0xBB02) — 0 in P/R/N, 1-10 in Drive
   _passiveCanValues.set(PASSIVE_CAN_GEAR_NUM_PID, {
     did: PASSIVE_CAN_GEAR_NUM_PID,
     shortName: 'GEAR_NUM_T87A',
-    value: gearNum,
-    displayValue: String(gearNum),
+    value: gearNumber,
+    displayValue: gearNumber > 0 ? String(gearNumber) : prndLabel,
     unit: '',
-    rawBytes: [gearNum],
+    rawBytes: [data[3]],
     timestamp: now,
   });
 
@@ -402,7 +403,7 @@ function parsePassiveGearFrame(data: number[]): void {
   if (_passiveGearFrameCount <= 5 || _passiveGearFrameCount % 200 === 0) {
     const ref = _ppeiConnectionRef;
     if (ref) {
-      ppeiLog(ref, `[PASSIVE-0x1F5] Gear=${gearName} (0x${gearByte.toString(16)}) GearNum=${gearNum} frame#${_passiveGearFrameCount}`);
+      ppeiLog(ref, `[PASSIVE-0x1F5] PRND=${prndLabel} Gear=${gearNumber} seq=${gearSeq} frame#${_passiveGearFrameCount}`);
     }
   }
 }

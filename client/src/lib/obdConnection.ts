@@ -1607,21 +1607,21 @@ export const GM_EXTENDED_PIDS: PIDDefinition[] = [
   // Service 0xBB is a V-OP marker for "passive broadcast" — not a real UDS service.
   // The WebSocket interceptor in PpeiDataloggerPanel parses these frames and injects values.
   {
-    // Trans Current Gear — Passive CAN 0x1F5 byte[0]
-    // HP Tuners channel 14100 "Trans Current Gear"
-    // Confirmed from unfiltered BUSMASTER trace on 2019 L5P Duramax (T87A TCM)
+    // PRND State — Passive CAN 0x1F5 byte[3] (primary source)
+    // Confirmed from BUSMASTER trace + live test on 2019 L5P Duramax (T87A TCM)
     // Broadcast at ~41 Hz, no request needed.
-    // Byte[0] enum: 0x0F=Park, 0x0E=Reverse, 0x0D=Neutral, 0x01=1st, 0x02=2nd, ... 0x0A=10th
-    pid: 0xBB01, name: 'Trans Current Gear (T87A)', shortName: 'GEAR_T87A',
-    unit: '', min: 0, max: 15, bytes: 1, service: 0xBB, category: 'transmission',
+    // byte[3]: 1=Park, 2=Reverse, 3=Neutral, 4+=Drive (gear = seq-3)
+    // Display: P, R, N, or D | Numeric: P=0, R=-1, N=0, D=1
+    pid: 0xBB01, name: 'PRND State (T87A)', shortName: 'GEAR_T87A',
+    unit: '', min: -1, max: 1, bytes: 1, service: 0xBB, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     formula: ([a]) => a,
   },
   {
-    // Gear Sequence Number — Passive CAN 0x1F5 byte[3]
-    // 1=Park, 2=Reverse, 3=Neutral, 4=1st, 5=2nd, ... 13=10th
+    // Gear Number — Passive CAN 0x1F5 byte[3] (primary source)
+    // 0 when in P/R/N, 1-10 when in Drive (= byte[3] - 3)
     pid: 0xBB02, name: 'Gear Number (T87A)', shortName: 'GEAR_NUM_T87A',
-    unit: '', min: 0, max: 15, bytes: 1, service: 0xBB, category: 'transmission',
+    unit: '', min: 0, max: 10, bytes: 1, service: 0xBB, category: 'transmission',
     manufacturer: 'gm', fuelType: 'any', ecuHeader: '7E2',
     formula: ([a]) => a,
   },

@@ -2506,3 +2506,8 @@
 - [x] Fix: GEAR_T87A (0xBB01) and GEAR_NUM_T87A (0xBB02) are greyed out / unselectable in PID selector
 - [x] Fix: Added isPassive check (service === 0xBB) to isSupported condition in PID selector
 - [x] Added blue 'CAN' badge for passive CAN PIDs in PID selector list
+
+## Gear PID Remapping — PRND + Gear Number (2026-04-30)
+- [x] Remap GEAR_T87A to show PRND state: P/R/N/D using byte[3] (1=P, 2=R, 3=N, 4+=D)
+- [x] Remap GEAR_NUM_T87A to show actual gear number: 0 in P/R/N, 1-10 in Drive
+- [x] Use byte[3] as the primary source (sequence: 1=Park, 2=Rev, 3=Neutral, 4+=gears)
