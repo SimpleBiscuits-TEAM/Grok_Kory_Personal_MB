@@ -1740,15 +1740,15 @@ export default function HondaTalonTuner({
         />
       )}
 
-      {/* Correct Section */}
-      {activeSection === 'correct' && (
+      {/* Correct Section — kept mounted to preserve state across tab switches */}
+      <div style={{ display: activeSection === 'correct' ? 'block' : 'none' }}>
         <FuelCorrectionPanel
           fuelMaps={fuelMaps as unknown as CorrectionFuelMapState}
           wp8Data={localWP8}
           onApplyCorrections={(corrected, results) => handleApplyCorrections(corrected as Partial<FuelMapState>, results)}
           onUpdateTargetLambda={(key, targets) => handleUpdateTargetLambda(key as keyof FuelMapState, targets)}
         />
-      )}
+      </div>
 
       {/* Datalog Section */}
       {activeSection === 'datalog' && (
