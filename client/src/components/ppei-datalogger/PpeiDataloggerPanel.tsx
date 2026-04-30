@@ -399,11 +399,12 @@ function parsePassiveGearFrame(data: number[]): void {
     timestamp: now,
   });
 
-  // Log first few frames for debugging
-  if (_passiveGearFrameCount <= 5 || _passiveGearFrameCount % 200 === 0) {
+  // Log first few frames AND every 50th for debugging — include full hex dump
+  if (_passiveGearFrameCount <= 10 || _passiveGearFrameCount % 50 === 0) {
     const ref = _ppeiConnectionRef;
     if (ref) {
-      ppeiLog(ref, `[PASSIVE-0x1F5] PRND=${prndLabel} Gear=${gearNumber} seq=${gearSeq} frame#${_passiveGearFrameCount}`);
+      const hexDump = data.map((b, i) => `[${i}]=0x${b.toString(16).toUpperCase().padStart(2, '0')}`).join(' ');
+      ppeiLog(ref, `[PASSIVE-0x1F5] PRND=${prndLabel} Gear=${gearNumber} seq=${gearSeq} frame#${_passiveGearFrameCount} | ${hexDump}`);
     }
   }
 }
