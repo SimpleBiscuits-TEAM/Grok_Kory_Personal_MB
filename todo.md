@@ -2473,3 +2473,4 @@
 - [x] Update turbo detection threshold from 100 kPa to 105 kPa (prevent NA logs from being misidentified as turbo)
 - [x] Highlight blended cells in distinct color (cyan/teal) in Fuel Maps tab after Apply Corrections with BLEND ON
 - [x] Fix: FuelCorrectionPanel state (report, blend toggle, hasApplied) lost when switching tabs — persist across tab switches
+- [x] Fix: Fuel map screenshot OCR/scan cell alignment issue — scanned values shifted from correct positions in source image

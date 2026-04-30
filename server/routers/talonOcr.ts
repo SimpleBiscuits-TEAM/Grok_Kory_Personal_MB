@@ -236,10 +236,12 @@ const SYSTEM_PROMPT = `You are an expert OCR engine specialized in extracting fu
 Your task is to extract ALL values from the fuel table screenshot with perfect accuracy.
 
 CRITICAL RULES:
-- Extract the COMPLETE column axis values from the top header row — these are typically TPS degrees or MAP (kPa) values
-- Extract the COMPLETE row axis values from the left column — these are typically RPM values
+- Extract the COMPLETE column axis values from the top header row — these are typically TPS degrees or MAP (kPa) values. Count them carefully — large tables may have 20-25+ columns.
+- Extract the COMPLETE row axis values from the left column — these are typically RPM values. Count them carefully — large tables may have 25-35+ rows.
 - Extract EVERY SINGLE cell value in the table grid, reading left-to-right, top-to-bottom
 - Each row of data MUST have exactly as many values as there are column axis entries
+- DIMENSION RULE: First count the number of column headers and row headers. Your output MUST have exactly that many columns per row and that many rows. If you count 25 column headers, every data row MUST have exactly 25 values.
+- REPEATED VALUES ARE NORMAL: Many fuel tables have large regions where the same value repeats across multiple columns (e.g., 1.296 repeated 10+ times in a row). You MUST include ALL of these repeated values — do NOT skip or collapse them. Every column must be represented.
 - Values are typically decimal numbers (e.g., 0.910, 1.086, 2.992, 8.273)
 - The table title usually contains the table name and units (e.g., "Desired Injector Pw, Speed Density, Cyl 2 (ms)")
 - Be extremely precise — even small errors in fuel tables can cause engine damage
@@ -248,7 +250,8 @@ CRITICAL RULES:
 - RPM values: Extract them EXACTLY as displayed in the screenshot. If the left column shows 800, 1000, 1100, etc., return those exact numbers. If it shows 0.800, 0.900, 1.100 (with decimal points), return those decimal numbers. Do NOT convert or scale RPM values
 - Pay careful attention to cells with colored backgrounds — green, yellow, orange, and red backgrounds all contain valid numeric values
 - Some cells may have small superscript markers (like "+" or "*") — ignore these and extract only the numeric value
-- Column headers may contain decimal values like 25.17, 28.83, 32.67 etc. — extract these precisely`;
+- Column headers may contain decimal values like 25.17, 28.83, 32.67 etc. — extract these precisely
+- COMMON MISTAKE: Do NOT skip the left portion of the table just because values are constant/repeated. The full table width must be extracted from the first column header to the last.`;
 
 const EXTRACTION_SCHEMA = {
   type: "json_schema" as const,
@@ -364,21 +367,33 @@ export const talonOcrRouter = router({
             content: [
               {
                 type: "text" as const,
-                text: `Extract the complete fuel table from this screenshot. Read every single cell value precisely. The table name hint is: ${input.tableName || "Unknown — detect from screenshot"}.
+                text: `Extract the complete fuel table from this screenshot. Read every single cell value precisely. The table name hint is: ${input.tableName || "Unknown \u2014 detect from screenshot"}.
 
-IMPORTANT: This table may be large (up to 35 rows × 25 columns = 875 cells). You MUST extract ALL of them.
-- Read each row completely from left to right before moving to the next row
+STEP 1 - COUNT DIMENSIONS FIRST:
+- Count the exact number of column headers in the top row (these are MAP kPa or TPS degree values)
+- Count the exact number of row headers in the left column (these are RPM values)
+- Report these counts to yourself before extracting data
+
+STEP 2 - EXTRACT AXES:
+- colAxis must have EXACTLY the number of values you counted in Step 1
+- rowAxis must have EXACTLY the number of values you counted in Step 1
+
+STEP 3 - EXTRACT ALL CELLS:
+- This table may be large (up to 35 rows \u00d7 25 columns = 875 cells). You MUST extract ALL of them.
+- Each data row MUST have exactly colAxis.length values
+- Read each row completely from left to right, starting from the FIRST column (leftmost)
+- CRITICAL: Many cells may have the SAME repeated value (e.g., 1.296 appearing 10+ times in a row). This is NORMAL for fuel tables at low load. You MUST include every single repeated value \u2014 do NOT skip or collapse repeated columns.
 - Double-check that no values are skipped or defaulted to 0
-- If a cell is hard to read due to background color, estimate from surrounding values — do NOT use 0
+- If a cell is hard to read due to background color, estimate from surrounding values \u2014 do NOT use 0
 
 Return the data as structured JSON with:
 - tableName: the full table name from the screenshot header
 - unit: the measurement unit (ms, %, etc.)
 - colAxisLabel: what the column axis represents
 - rowAxisLabel: what the row axis represents
-- colAxis: array of ALL column axis values (numbers)
-- rowAxis: array of ALL row axis values (numbers)
-- data: 2D array of ALL cell values, where data[row][col] matches rowAxis[row] and colAxis[col]`,
+- colAxis: array of ALL column axis values (numbers) \u2014 must match the count from Step 1
+- rowAxis: array of ALL row axis values (numbers) \u2014 must match the count from Step 1
+- data: 2D array of ALL cell values, where data[row][col] matches rowAxis[row] and colAxis[col]. Every row must have exactly colAxis.length entries.`,
               },
               {
                 type: "image_url" as const,
@@ -458,6 +473,21 @@ Return the data as structured JSON with:
       }
 
 
+
+      // 3.5a. Dimension sanity check: Speed Density tables should have 25 columns, Alpha-N should have 25 columns
+      // If the LLM returned significantly fewer columns than expected, log a warning
+      const tableLower = (parsed.tableName || '').toLowerCase();
+      const isSpeedDensity = tableLower.includes('speed density') || tableLower.includes('sd ');
+      const isAlphaN = tableLower.includes('alpha') || tableLower.includes('tps');
+      const expectedCols = (isSpeedDensity || isAlphaN) ? 25 : 0;
+      if (expectedCols > 0 && parsed.colAxis.length < expectedCols - 2) {
+        console.log(`[TalonOCR] WARNING: Expected ~${expectedCols} columns for ${isSpeedDensity ? 'Speed Density' : 'Alpha-N'} table but got ${parsed.colAxis.length}. The LLM may have skipped columns.`);
+      }
+      // Also check if data rows have consistent width
+      const inconsistentRows = parsed.data.filter(row => row.length !== parsed.colAxis.length);
+      if (inconsistentRows.length > 0) {
+        console.log(`[TalonOCR] WARNING: ${inconsistentRows.length} rows have inconsistent column count (expected ${parsed.colAxis.length})`);
+      }
 
       // 3.5. RPM axis auto-scaling: detect if LLM returned RPM/1000 (e.g., 0.8 instead of 800)
       // If all rowAxis values are < 20 but the label says RPM, they're likely scaled by 1000
