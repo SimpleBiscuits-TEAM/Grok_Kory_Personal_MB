@@ -391,6 +391,7 @@ export default function FuelCorrectionPanel({
   const [preApplyMaps, setPreApplyMaps] = useState<FuelMapState | null>(null);
   const [blendEnabled, setBlendEnabled] = useState(false);
   const [smoothEnabled, setSmoothEnabled] = useState(false);
+  const [minSamples, setMinSamples] = useState(1);
 
   // Auto-detect turbo on mount / data change
   const isTurboDetected = useMemo(() => {
@@ -406,12 +407,12 @@ export default function FuelCorrectionPanel({
   // Run correction
   const handleCorrect = useCallback(() => {
     if (!wp8Data) return;
-    const config: CorrectionConfig = { vehicleMode, mapSensor };
+    const config: CorrectionConfig = { vehicleMode, mapSensor, minSamples };
     const result = computeCorrections(fuelMaps, wp8Data, config);
     setReport(result);
     setHasApplied(false);
     setPreApplyMaps(null);
-  }, [fuelMaps, wp8Data, vehicleMode, mapSensor]);
+  }, [fuelMaps, wp8Data, vehicleMode, mapSensor, minSamples]);
 
   // Apply corrections to fuel maps
   const handleApply = useCallback(() => {
@@ -452,7 +453,7 @@ export default function FuelCorrectionPanel({
 
   // Apply target lambda presets when mode/sensor changes
   const handleApplyPresets = useCallback(() => {
-    const config: CorrectionConfig = { vehicleMode, mapSensor };
+    const config: CorrectionConfig = { vehicleMode, mapSensor, minSamples };
     const mapKeys: (keyof FuelMapState)[] = [
       'alphaN_cyl1', 'alphaN_cyl2',
       'speedDensity_cyl1', 'speedDensity_cyl2',
@@ -608,6 +609,34 @@ export default function FuelCorrectionPanel({
           >
             {smoothEnabled ? 'ON' : 'OFF'}
           </button>
+        </div>
+
+        {/* Min Samples Input */}
+        <div>
+          <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
+            MIN SAMPLES
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={999}
+            value={minSamples}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val) && val >= 1) setMinSamples(val);
+            }}
+            style={{
+              background: 'transparent',
+              color: sColor.text,
+              border: `1px solid ${sColor.border}`,
+              borderRadius: '2px',
+              padding: '6px 8px',
+              width: '60px',
+              fontFamily: sFont.mono,
+              fontSize: '0.85rem',
+              textAlign: 'center',
+            }}
+          />
         </div>
 
         {/* Correct Button */}

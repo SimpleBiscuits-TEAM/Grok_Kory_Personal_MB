@@ -62,6 +62,7 @@ export type MapSensor = 'stock' | '3bar';
 export interface CorrectionConfig {
   vehicleMode: VehicleMode;
   mapSensor: MapSensor;  // Only relevant when vehicleMode === 'turbo'
+  minSamples: number;    // Minimum sample count required before a cell is used for correction
 }
 
 /** Correction tier classification */
@@ -860,6 +861,18 @@ function computeMapCorrections(
     return patternCount >= Math.min(2, neighbors.length);
   }
 
+  // Apply minimum sample threshold: cells below minSamples are treated as no-data
+  const minSamples = config.minSamples || 1;
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      if (rawCounts[r][c] < minSamples) {
+        rawFactors[r][c] = NaN;
+        rawLambdas[r][c] = NaN;
+        rawCounts[r][c] = 0;
+      }
+    }
+  }
+
   // First pass: classify each cell into tiers
   const cellTiers: CorrectionTier[][] = [];
   for (let r = 0; r < numRows; r++) {
@@ -1388,6 +1401,12 @@ export function smoothCorrectedMap(
     smoothBlended = true,
   } = options || {};
 
+  // Build sample count lookup from corrections
+  const sampleCountMap = new Map<string, number>();
+  for (const corr of corrections) {
+    sampleCountMap.set(`${corr.row}:${corr.col}`, corr.sampleCount);
+  }
+
   const rows = map.data.length;
   const cols = rows > 0 ? map.data[0].length : 0;
   if (rows === 0 || cols === 0) {
@@ -1402,11 +1421,28 @@ export function smoothCorrectedMap(
 
   const blendedKeys = map.blendedCells || new Set<string>();
 
+  // Compute the average sample count of corrected cells (for relative comparison)
+  let totalSampleCount = 0;
+  let correctedCellCount = 0;
+  for (const corr of corrections) {
+    if (corr.sampleCount > 0) {
+      totalSampleCount += corr.sampleCount;
+      correctedCellCount++;
+    }
+  }
+  const avgSampleCount = correctedCellCount > 0 ? totalSampleCount / correctedCellCount : 1;
+
   // Determine which cells can be smoothed
+  // High-sample cells (>= 2x average) are NOT smoothable — their data is more reliable
   const isSmootable: boolean[][] = Array.from({ length: rows }, (_, r) =>
     Array.from({ length: cols }, (_, c) => {
       const key = `${r}:${c}`;
-      if (correctedKeys.has(key)) return true;
+      if (correctedKeys.has(key)) {
+        // Skip smoothing for cells with significantly higher sample count than average
+        const cellSamples = sampleCountMap.get(key) || 0;
+        if (cellSamples >= avgSampleCount * 2) return false; // High-confidence cell, don't smooth
+        return true;
+      }
       if (smoothBlended && blendedKeys.has(key)) return true;
       return false;
     })
@@ -1463,11 +1499,24 @@ export function smoothCorrectedMap(
 
         // Only smooth if deviation exceeds threshold
         if (deviation > deviationThreshold) {
-          // Pull toward expected value by smoothingStrength
-          const smoothedVal = currentVal + (expectedVal - currentVal) * smoothingStrength;
-          // Round to 3 decimal places (fuel table precision)
-          nextData[r][c] = Math.round(smoothedVal * 1000) / 1000;
-          smoothedCells.add(`${r}:${c}`);
+          // Scale smoothing strength inversely by sample count:
+          // Cells with more samples get less smoothing (they're more reliable)
+          const cellKey = `${r}:${c}`;
+          const cellSamples = sampleCountMap.get(cellKey) || 0;
+          let effectiveStrength = smoothingStrength;
+          if (cellSamples > 0 && avgSampleCount > 0) {
+            // Reduce strength proportionally: at 1x avg → full strength, at 2x avg → 0 strength
+            const sampleRatio = cellSamples / avgSampleCount;
+            effectiveStrength = smoothingStrength * Math.max(0, 1 - (sampleRatio - 1));
+          }
+
+          if (effectiveStrength > 0.01) {
+            // Pull toward expected value by effective strength
+            const smoothedVal = currentVal + (expectedVal - currentVal) * effectiveStrength;
+            // Round to 3 decimal places (fuel table precision)
+            nextData[r][c] = Math.round(smoothedVal * 1000) / 1000;
+            smoothedCells.add(cellKey);
+          }
         }
       }
     }
