@@ -1090,6 +1090,15 @@ async def _ppei_handle_message(self, msg: dict):
             self.bus, rx_broadcast=self._broadcast_rx_stream
         )
         await self.protocol.start()
+    # Always ensure passive CAN broadcast IDs are in the software filter
+    # (0x1F5 = gear state, 0x5E8 = ECM DDDI, 0x5EA = TCM DDDI)
+    self.protocol._filter_ids.add(0x1F5)
+    self.protocol._filter_ids.add(0x5E8)
+    self.protocol._filter_ids.add(0x5EA)
+    if hasattr(self.protocol, '_ppei_listener'):
+        self.protocol._ppei_listener._filter_ids.add(0x1F5)
+        self.protocol._ppei_listener._filter_ids.add(0x5E8)
+        self.protocol._ppei_listener._filter_ids.add(0x5EA)
 
     proto = self.protocol
     start_all = time.time()
@@ -1320,6 +1329,14 @@ async def _ppei_batch_read_mode01(self, msg: dict):
             self.bus, rx_broadcast=self._broadcast_rx_stream
         )
         await self.protocol.start()
+    # Always ensure passive CAN broadcast IDs are in the software filter
+    self.protocol._filter_ids.add(0x1F5)
+    self.protocol._filter_ids.add(0x5E8)
+    self.protocol._filter_ids.add(0x5EA)
+    if hasattr(self.protocol, '_ppei_listener'):
+        self.protocol._ppei_listener._filter_ids.add(0x1F5)
+        self.protocol._ppei_listener._filter_ids.add(0x5E8)
+        self.protocol._ppei_listener._filter_ids.add(0x5EA)
     proto = self.protocol
     start_all = time.time()
 
