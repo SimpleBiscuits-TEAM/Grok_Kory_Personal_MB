@@ -637,6 +637,17 @@ export default function FuelCorrectionPanel({
               textAlign: 'center',
             }}
           />
+          {report && (() => {
+            const allSamples = report.results.flatMap(r => r.corrections.map(c => c.sampleCount));
+            if (allSamples.length === 0) return null;
+            const avg = Math.round(allSamples.reduce((a, b) => a + b, 0) / allSamples.length);
+            const max = Math.max(...allSamples);
+            return (
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, marginTop: '3px' }}>
+                avg: {avg} | max: {max}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Correct Button */}

@@ -2480,3 +2480,4 @@
 - [x] Add minimum sample threshold input — cells below threshold are skipped for correction
 - [x] Sample-weighted smoothing — high-sample cells resist smoothing
 - [x] Verify correction factor is calculated from average AFR reading per cell
+- [x] Show average and max cell sample counts near MIN SAMPLES input for reference
