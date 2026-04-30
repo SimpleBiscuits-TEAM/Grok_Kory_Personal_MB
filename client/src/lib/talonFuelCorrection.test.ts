@@ -1313,4 +1313,30 @@ describe('blendCorrectedMap', () => {
       }
     }
   });
+
+  it('should return blendedCells set identifying interpolated/boundary cells', () => {
+    // Correct cell [2][2] — isolated cell
+    const corrections = [
+      { row: 2, col: 2, originalValue: 1.0, correctedValue: 0.8, correctionFactor: 0.8, sampleCount: 10, avgActualLambda: 0.76, targetLambda: 0.95, tier: 'sandpaper' as const },
+    ];
+
+    const result = blendCorrectedMap(baseMap, corrections);
+
+    // blendedCells should be defined and contain boundary cells
+    expect(result.blendedCells).toBeDefined();
+    expect(result.blendedCells!.size).toBeGreaterThan(0);
+
+    // The corrected cell itself should NOT be in blendedCells
+    expect(result.blendedCells!.has('2:2')).toBe(false);
+
+    // All 8 neighbors should be in blendedCells (they are boundary-blended)
+    expect(result.blendedCells!.has('1:1')).toBe(true); // top-left
+    expect(result.blendedCells!.has('1:2')).toBe(true); // top
+    expect(result.blendedCells!.has('1:3')).toBe(true); // top-right
+    expect(result.blendedCells!.has('2:1')).toBe(true); // left
+    expect(result.blendedCells!.has('2:3')).toBe(true); // right
+    expect(result.blendedCells!.has('3:1')).toBe(true); // bottom-left
+    expect(result.blendedCells!.has('3:2')).toBe(true); // bottom
+    expect(result.blendedCells!.has('3:3')).toBe(true); // bottom-right
+  });
 });

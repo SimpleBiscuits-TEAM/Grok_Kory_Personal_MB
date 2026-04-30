@@ -45,6 +45,8 @@ export interface FuelMap {
   rowLabel: string;
   colLabel: string;
   unit: string;
+  /** Set of "row:col" keys for cells that were blended (interpolated/boundary), not from datalog data */
+  blendedCells?: Set<string>;
 }
 
 export interface FuelMapState {
@@ -1269,15 +1271,32 @@ export function blendCorrectedMap(
   }
 
   // ── Apply all factors to produce the blended map ──
+  const blendedCellKeys = new Set<string>();
   const newData = map.data.map((row, r) =>
     row.map((val, c) => {
       const factor = factorGrid[r][c];
       if (isNaN(factor) || (!isCorrected[r][c] && !isInterpolated[r][c])) return val;
+      // Track cells that are blended (interpolated/boundary) vs directly corrected from data
+      if (!isCorrected[r][c] && isInterpolated[r][c]) {
+        blendedCellKeys.add(`${r}:${c}`);
+      }
       return val * factor;
     })
   );
 
-  return { ...map, data: newData };
+  return { ...map, data: newData, blendedCells: blendedCellKeys };
+}
+
+/**
+ * Same as blendCorrectedMap but returns the set of blended cell keys separately.
+ * Useful when the caller needs to know which cells were blended for highlighting.
+ */
+export function getBlendedCellKeys(
+  map: FuelMap,
+  corrections: CellCorrection[],
+): Set<string> {
+  const result = blendCorrectedMap(map, corrections);
+  return (result as any).blendedCells || new Set<string>();
 }
 
 /**

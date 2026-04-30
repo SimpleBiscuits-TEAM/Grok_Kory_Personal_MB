@@ -39,6 +39,8 @@ export interface CorrectedCellInfo {
   avgActualLambda: number;
   targetLambda: number;
   avgStft?: number;
+  /** True if this cell was blended (interpolated/boundary), not from datalog data */
+  isBlended?: boolean;
 }
 export type CorrectedCellsMap = Record<string, Map<string, CorrectedCellInfo>>;
 
@@ -74,6 +76,8 @@ interface FuelMap {
   rowLabel: string;
   colLabel: string;
   unit: string;
+  /** Set of "row:col" keys for cells that were blended (not from datalog data) */
+  blendedCells?: Set<string>;
 }
 
 interface FuelMapState {
@@ -899,11 +903,18 @@ function FuelMapCard({
                       const cellKey = `${ri}:${ci}`;
                       const corrInfo = correctedCells?.get(cellKey) || null;
                       const isCorrected = !!corrInfo;
+                      const isBlended = corrInfo?.isBlended === true;
 
-                      // Build rich tooltip for corrected cells
+                      // Build rich tooltip for corrected/blended cells
                       const cellTitle = isCorrected
-                        ? `Original: ${corrInfo.originalValue.toFixed(3)} → Corrected: ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\nActual λ: ${corrInfo.avgActualLambda.toFixed(3)} vs Target λ: ${corrInfo.targetLambda.toFixed(3)}\nSamples: ${corrInfo.sampleCount}${corrInfo.avgStft !== undefined ? `\nAvg STFT: ${corrInfo.avgStft.toFixed(1)}%` : ''}`
+                        ? isBlended
+                          ? `Blended: ${corrInfo.originalValue.toFixed(3)} → ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\n(Interpolated from neighboring corrections)`
+                          : `Original: ${corrInfo.originalValue.toFixed(3)} → Corrected: ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\nActual λ: ${corrInfo.avgActualLambda.toFixed(3)} vs Target λ: ${corrInfo.targetLambda.toFixed(3)}\nSamples: ${corrInfo.sampleCount}${corrInfo.avgStft !== undefined ? `\nAvg STFT: ${corrInfo.avgStft.toFixed(1)}%` : ''}`
                         : `${val.toFixed(3)} (no correction data)`;
+
+                      // Color scheme: green = data-corrected, cyan = blended
+                      const corrBorderColor = isBlended ? 'oklch(0.75 0.15 195)' : 'oklch(0.75 0.18 145)';
+                      const corrGlowColor = isBlended ? 'oklch(0.65 0.15 195 / 0.5)' : 'oklch(0.65 0.18 145 / 0.5)';
 
                       return (
                         <td
@@ -924,11 +935,11 @@ function FuelMapCard({
                             border: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '3px solid white'
                               : isEditing ? `2px solid ${sColor.redBright}`
-                              : isCorrected ? '2px solid oklch(0.75 0.18 145)'
+                              : isCorrected ? `2px solid ${corrBorderColor}`
                               : '1px solid oklch(0.40 0.006 260)',
                             boxShadow: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '0 0 8px rgba(255,255,255,0.5)'
-                              : isCorrected ? '0 0 6px oklch(0.65 0.18 145 / 0.5)'
+                              : isCorrected ? `0 0 6px ${corrGlowColor}`
                               : 'none',
                           }}
                         >
@@ -962,6 +973,12 @@ function FuelMapCard({
             <span>{min.toFixed(3)}</span>
             <span style={{ flex: 1, textAlign: 'center' }}>
               Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = log-based tuning reference
+              {correctedCells && correctedCells.size > 0 && (
+                <span style={{ marginLeft: 8 }}>
+                  | <span style={{ color: 'oklch(0.75 0.18 145)', fontWeight: 700 }}>■</span> Data-corrected
+                  {' '}<span style={{ color: 'oklch(0.75 0.15 195)', fontWeight: 700 }}>■</span> Blended
+                </span>
+              )}
               {overlay?.isActive && (
                 <span style={{ marginLeft: 8, color: getDeviationColor(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2), fontWeight: 700 }}>
                   | LIVE: λ={config.key.includes('cyl1') ? overlay.lambda1.toFixed(3) : overlay.lambda2.toFixed(3)}
@@ -1509,6 +1526,28 @@ export default function HondaTalonTuner({
             avgStft: corr.avgStft,
           });
         }
+        // Also add blended cells (from blendCorrectedMap) if the map has them
+        const correctedMap = correctedMaps[result.mapKey as keyof FuelMapState];
+        if (correctedMap?.blendedCells) {
+          const originalMap = fuelMaps[result.mapKey as keyof FuelMapState];
+          for (const cellKey of correctedMap.blendedCells) {
+            if (!cellMap.has(cellKey)) {
+              const [r, c] = cellKey.split(':').map(Number);
+              const origVal = originalMap?.data?.[r]?.[c] ?? 0;
+              const newVal = correctedMap.data[r]?.[c] ?? origVal;
+              const factor = origVal !== 0 ? newVal / origVal : 1;
+              cellMap.set(cellKey, {
+                originalValue: origVal,
+                correctedValue: newVal,
+                correctionFactor: factor,
+                sampleCount: 0,
+                avgActualLambda: 0,
+                targetLambda: 0,
+                isBlended: true,
+              });
+            }
+          }
+        }
         cellsMap[result.mapKey] = cellMap;
       }
       setCorrectedCells(cellsMap);
@@ -1516,7 +1555,7 @@ export default function HondaTalonTuner({
       // Revert: clear all highlights
       setCorrectedCells({});
     }
-  }, []);
+  }, [fuelMaps]);
 
   const handleUpdateTargetLambda = useCallback((mapKey: keyof FuelMapState, targets: number[]) => {
     setFuelMaps(prev => {

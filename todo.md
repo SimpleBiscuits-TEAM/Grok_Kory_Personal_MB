@@ -2471,3 +2471,4 @@
 - [x] Fix: Blend preview table now shows interpolated/boundary blended cells when BLEND is ON. Blended cells shown in cyan italic with ≈ suffix, dimmer background to distinguish from datalog-corrected cells.
 - [x] Fix: Grouped corrected cells should blend all 8 neighbors (diagonals included), not just 4 cardinal
 - [x] Update turbo detection threshold from 100 kPa to 105 kPa (prevent NA logs from being misidentified as turbo)
+- [x] Highlight blended cells in distinct color (cyan/teal) in Fuel Maps tab after Apply Corrections with BLEND ON
