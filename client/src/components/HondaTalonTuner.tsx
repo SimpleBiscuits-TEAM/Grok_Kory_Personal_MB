@@ -493,14 +493,15 @@ function FuelMapCard({
     // by seeing if the first cell of data rows matches known RPM values
     if (dataLines.length > 0) {
       const testRow = dataLines[0].split(/[,\t]+/).map(c => c.trim());
+      const numericCount = testRow.filter(c => !isNaN(parseFloat(c.replace(/[^0-9.\-]/g, '')))).length;
       const firstVal = parseFloat(testRow[0]);
-      // If first value matches a row axis value (within tolerance) or
-      // if the row has expectedCols + 1 cells, it has row headers
-      if (!isNaN(firstVal) && testRow.length > expectedCols) {
-        hasRowHeaders = true;
-      } else if (!isNaN(firstVal) && map.rowAxis.some(r => Math.abs(r - firstVal * 1000) < 50 || Math.abs(r - firstVal) < 50)) {
+      // If the row has MORE cells than expected columns, the extra one is a row header
+      if (!isNaN(firstVal) && numericCount > expectedCols) {
         hasRowHeaders = true;
       }
+      // Only check RPM matching if row has expectedCols + 1 cells
+      // Do NOT strip the first column if the row already has exactly expectedCols values
+      // because that would truncate the last column
     }
 
     // Parse the data

@@ -2476,3 +2476,4 @@
 - [x] Fix: Fuel map screenshot OCR/scan cell alignment issue — scanned values shifted from correct positions in source image
 - [x] Add smoothing feature to fuel correction tool — eliminate sharp peaks/valleys while preserving natural gradient
 - [x] Add Paste Data feature: after screenshot scan, allow pasting cell values from C3 while keeping OCR-extracted axis values
+- [x] Fix: Paste Data cutting off last column — false row header detection when data has exactly expectedCols values
