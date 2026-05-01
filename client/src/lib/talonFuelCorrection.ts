@@ -1477,17 +1477,27 @@ export function smoothCorrectedMap(
         if (currentVal <= 0) continue; // Skip zero/negative cells
 
         // Compute weighted average of neighbors
+        // Weight = geometric distance weight * sample count weight
+        // Neighbors with more samples exert stronger influence
         let weightedSum = 0;
         let totalWeight = 0;
 
-        for (const { dr, dc, weight } of neighborOffsets) {
+        for (const { dr, dc, weight: distWeight } of neighborOffsets) {
           const nr = r + dr;
           const nc = c + dc;
           if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
             const neighborVal = data[nr][nc];
             if (neighborVal > 0) {
-              weightedSum += neighborVal * weight;
-              totalWeight += weight;
+              // Sample-count weight: neighbors with more samples pull harder
+              // Use sqrt to dampen the effect (avoid one high-sample cell dominating)
+              const neighborKey = `${nr}:${nc}`;
+              const neighborSamples = sampleCountMap.get(neighborKey) || 0;
+              const sampleWeight = neighborSamples > 0
+                ? Math.sqrt(neighborSamples / avgSampleCount)
+                : 0.5; // Blended/interpolated cells get half weight
+              const combinedWeight = distWeight * sampleWeight;
+              weightedSum += neighborVal * combinedWeight;
+              totalWeight += combinedWeight;
             }
           }
         }
@@ -1507,7 +1517,8 @@ export function smoothCorrectedMap(
           if (cellSamples > 0 && avgSampleCount > 0) {
             // Reduce strength proportionally: at 1x avg → full strength, at 2x avg → 0 strength
             const sampleRatio = cellSamples / avgSampleCount;
-            effectiveStrength = smoothingStrength * Math.max(0, 1 - (sampleRatio - 1));
+            // Cells below avg get full strength, cells above avg get reduced strength (linear to 0 at 2x)
+            effectiveStrength = smoothingStrength * Math.min(1, Math.max(0, 1 - (sampleRatio - 1)));
           }
 
           if (effectiveStrength > 0.01) {
