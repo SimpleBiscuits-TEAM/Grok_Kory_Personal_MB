@@ -120,11 +120,13 @@ function CorrectionPreviewTable({
   map,
   blendEnabled,
   smoothEnabled,
+  hasApplied,
 }: {
   result: MapCorrectionResult;
   map: FuelMap;
   blendEnabled: boolean;
   smoothEnabled: boolean;
+  hasApplied: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
 
@@ -132,10 +134,27 @@ function CorrectionPreviewTable({
 
   // When blend is enabled, compute the blended map and build a full lookup
   // that includes interpolated gap cells and boundary-blended cells
+  // IMPORTANT: After apply, map.data already contains corrected values, so we must NOT
+  // re-apply correction factors (which would double-correct). Instead, just show the
+  // current map values with the original correction metadata.
   const correctionMap = useMemo(() => {
     const m = new Map<string, CellCorrection>();
-    if (blendEnabled && result.corrections.length > 0) {
-      // Compute blended map
+    if (hasApplied) {
+      // After apply, map.data already has corrections baked in.
+      // Show the current map values alongside the original correction metadata.
+      for (const c of result.corrections) {
+        const currentVal = map.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: currentVal,
+          correctionFactor: c.originalValue > 0 ? currentVal / c.originalValue : 1,
+        });
+      }
+      // Also show blended cells if blend was on when applied
+      // These are cells that differ from the original correction's originalValue neighborhood
+      // but aren't in the corrections array — they're already in map.data too
+    } else if (blendEnabled && result.corrections.length > 0) {
+      // Compute blended map (pre-apply preview)
       let processedMap = blendCorrectedMap(map, result.corrections);
       // Apply smoothing to the blended map if enabled
       if (smoothEnabled) {
@@ -193,7 +212,7 @@ function CorrectionPreviewTable({
       }
     }
     return m;
-  }, [result.corrections, blendEnabled, smoothEnabled, map]);
+  }, [result.corrections, blendEnabled, smoothEnabled, map, hasApplied]);
 
   // Stats
   const avgFactor = result.corrections.length > 0
@@ -810,6 +829,7 @@ export default function FuelCorrectionPanel({
                 map={map}
                 blendEnabled={blendEnabled}
                 smoothEnabled={smoothEnabled}
+                hasApplied={hasApplied}
               />
             );
           })}
