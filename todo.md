@@ -2511,3 +2511,45 @@
 - [x] Remap GEAR_T87A to show PRND state: P/R/N/D using byte[3] (1=P, 2=R, 3=N, 4+=D)
 - [x] Remap GEAR_NUM_T87A to show actual gear number: 0 in P/R/N, 1-10 in Drive
 - [x] Use byte[3] as the primary source (sequence: 1=Park, 2=Rev, 3=Neutral, 4+=gears)
+- [x] Fix: Blend preview table now shows interpolated/boundary blended cells when BLEND is ON. Blended cells shown in cyan italic with ≈ suffix, dimmer background to distinguish from datalog-corrected cells.
+- [x] Fix: Grouped corrected cells should blend all 8 neighbors (diagonals included), not just 4 cardinal
+- [x] Update turbo detection threshold from 100 kPa to 105 kPa (prevent NA logs from being misidentified as turbo)
+- [x] Highlight blended cells in distinct color (cyan/teal) in Fuel Maps tab after Apply Corrections with BLEND ON
+- [x] Fix: FuelCorrectionPanel state (report, blend toggle, hasApplied) lost when switching tabs — persist across tab switches
+- [x] Fix: Fuel map screenshot OCR/scan cell alignment issue — scanned values shifted from correct positions in source image
+- [x] Add smoothing feature to fuel correction tool — eliminate sharp peaks/valleys while preserving natural gradient
+- [x] Add Paste Data feature: after screenshot scan, allow pasting cell values from C3 while keeping OCR-extracted axis values
+- [x] Fix: Paste Data cutting off last column — false row header detection when data has exactly expectedCols values
+- [x] Add minimum sample threshold input — cells below threshold are skipped for correction
+- [x] Sample-weighted smoothing — high-sample cells resist smoothing
+- [x] Verify correction factor is calculated from average AFR reading per cell
+- [x] Show average and max cell sample counts near MIN SAMPLES input for reference
+- [x] Add retry logic with exponential backoff to LLM and storage calls for transient 502/503 errors
+- [x] Fix: Strat AI agent incorrectly bringing Knox into customer conversations — removed Knox routing from system prompt, reinforced that Strat must ask for details, use own reasoning, and escalate to live agent only (never another AI)
+- [x] Fix: BLEND toggle on Speed Density table changes corrected cell values — should only blend between original and corrected without recalculating corrections
+- [x] Enhance: smoothCorrectedMap neighbor influence weighted by sample counts (high-sample neighbors pull more strongly during smoothing)
+- [x] Fix: BLEND toggle double-applies correction factors on Alpha-N table after Apply Corrections — blendCorrectedMap multiplies correctionFactor onto already-corrected map.data
+- [x] Fix: Alpha-N TPS=8 column not blending — open-ended gap interpolation now extends beyond single boundary ring
+- [x] Fix: SD blend left-side gap interpolation — when no corrected value exists to the left, find next value greater than corrected value and interpolate monotonically between them
+- [x] Update: NA Alpha-N target lambda presets — 0-36 TPS = 0.95, 40 = 0.925, 45 = 0.90, 50 = 0.875, 55-72 = 0.85
+- [ ] Fix: Alpha-N blend left-side interpolation (4250-5000 RPM, left of TPS 12) — values go up-down-up instead of monotonically decreasing; must find anchor with value less than corrected, skip at least 1 cell, and interpolate linearly
+
+## Blend Interpolation Fix (4250-5000 RPM non-monotonic bumps)
+- [x] Fix column pass to not overwrite row-interpolated values (row is authoritative for L-R monotonicity)
+- [x] Fix left open-ended gap: skip adjacent anchors (distance 1), keep scanning for anchor at distance > 1
+- [x] Fix right open-ended gap: same skip logic for symmetry
+- [x] Add Pass 1b: pre-boundary row-wise non-monotonic bump fix (enrichment overshoot detection)
+- [x] Add Pass 3: post-boundary monotonicity enforcement (re-interpolate where blending created bumps)
+- [x] Update test expectations for uniform map isolated cell (symmetric interpolation on both sides)
+- [x] Verify with realistic Speed Density map data (4250-5000 RPM, MAP axis)
+
+## Column Pass Anchor Logic (vertical interpolation)
+- [x] Implement column-specific open-ended gap logic with anchor finding
+- [x] Top boundary: scan up for cell > corrected value, or skip 3 use 4th
+- [x] Bottom boundary: scan down for cell < corrected value, or skip 3 use 4th
+- [x] Column pass still does not overwrite row-interpolated cells
+
+## Blend Fixes (May 2026)
+- [x] Cap blended cell correction at 20% max (factor between 0.80 and 1.20)
+- [x] Fix 4250-4750 RPM left-side up-down-up pattern (column pass breaking row monotonicity)
+- [x] Use 8-sided boundary blend for isolated single outlier corrections (no row/col interpolation)

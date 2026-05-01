@@ -16,7 +16,7 @@ import {
   Upload, Loader2, Table2, LineChart, Download, Trash2,
   ChevronDown, ChevronRight, AlertCircle, CheckCircle,
   Fuel, Gauge, Thermometer, Activity, Camera, ImageIcon,
-  GitCompare, ArrowRight, Wrench, TrendingUp, Copy, ClipboardCheck
+  GitCompare, ArrowRight, Wrench, TrendingUp, Copy, ClipboardCheck, ClipboardPaste
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { WP8ParseResult, WP8Channel, getHondaTalonKeyChannels, wp8ToCSV } from '@/lib/wp8Parser';
@@ -39,6 +39,8 @@ export interface CorrectedCellInfo {
   avgActualLambda: number;
   targetLambda: number;
   avgStft?: number;
+  /** True if this cell was blended (interpolated/boundary), not from datalog data */
+  isBlended?: boolean;
 }
 export type CorrectedCellsMap = Record<string, Map<string, CorrectedCellInfo>>;
 
@@ -74,6 +76,8 @@ interface FuelMap {
   rowLabel: string;
   colLabel: string;
   unit: string;
+  /** Set of "row:col" keys for cells that were blended (not from datalog data) */
+  blendedCells?: Set<string>;
 }
 
 interface FuelMapState {
@@ -288,6 +292,8 @@ function FuelMapCard({
   const [pasteZoneFocused, setPasteZoneFocused] = useState(false);
   const [pastedPreview, setPastedPreview] = useState<string | null>(null);
   const [factCheckWarning, setFactCheckWarning] = useState<string | null>(null);
+  const [showPasteData, setShowPasteData] = useState(false);
+  const [pasteDataText, setPasteDataText] = useState('');
 
   const extractMutation = trpc.talonOcr.extractFuelTable.useMutation();
 
@@ -445,6 +451,114 @@ function FuelMapCard({
       setPasteText('');
     }
   }, [pasteText, config, onLoad, validateDimensions]);
+
+  /**
+   * PASTE DATA: Replace only cell values while keeping existing axes from OCR scan.
+   * Accepts tab/comma-separated numeric data. Can include axis headers (will be stripped)
+   * or just raw cell values matching the current map dimensions.
+   */
+  const handlePasteData = useCallback(() => {
+    if (!map) return;
+    const text = pasteDataText.trim();
+    if (!text) return;
+
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length === 0) {
+      toast.error('No data found in pasted text');
+      return;
+    }
+
+    // Try to detect if the pasted data includes axis headers
+    // If first row has the same number of numeric cells as map.colAxis.length + 1,
+    // it likely includes a row header column
+    const firstRowCells = lines[0].split(/[,\t]+/).map(c => c.trim());
+    const expectedCols = map.colAxis.length;
+    const expectedRows = map.rowAxis.length;
+
+    let dataLines = lines;
+    let hasRowHeaders = false;
+    let hasColHeader = false;
+
+    // Check if first row looks like a column axis header
+    // (contains the colLabel or first cell matches a known label pattern)
+    const firstCell = firstRowCells[0].toLowerCase();
+    if (firstCell.includes('rpm') || firstCell.includes('tps') || firstCell.includes('map') ||
+        firstCell.includes('\\') || firstCell.includes('/') || firstCell === '' ||
+        firstCell.includes('throttle') || firstCell.includes('kpa')) {
+      hasColHeader = true;
+      dataLines = lines.slice(1);
+    }
+
+    // Check if each data row starts with a row axis value
+    // by seeing if the first cell of data rows matches known RPM values
+    if (dataLines.length > 0) {
+      const testRow = dataLines[0].split(/[,\t]+/).map(c => c.trim());
+      const numericCount = testRow.filter(c => !isNaN(parseFloat(c.replace(/[^0-9.\-]/g, '')))).length;
+      const firstVal = parseFloat(testRow[0]);
+      // If the row has MORE cells than expected columns, the extra one is a row header
+      if (!isNaN(firstVal) && numericCount > expectedCols) {
+        hasRowHeaders = true;
+      }
+      // Only check RPM matching if row has expectedCols + 1 cells
+      // Do NOT strip the first column if the row already has exactly expectedCols values
+      // because that would truncate the last column
+    }
+
+    // Parse the data
+    const newData: number[][] = [];
+    for (const line of dataLines) {
+      const cells = line.split(/[,\t]+/).map(c => c.trim());
+      const numericCells = hasRowHeaders ? cells.slice(1) : cells;
+      const row = numericCells.map(c => {
+        // Remove any non-numeric suffixes (like * or + markers from C3)
+        const cleaned = c.replace(/[^0-9.\-]/g, '');
+        return parseFloat(cleaned);
+      }).filter(n => !isNaN(n));
+      if (row.length > 0) {
+        newData.push(row);
+      }
+    }
+
+    if (newData.length === 0) {
+      toast.error('Could not parse any numeric data from pasted text');
+      return;
+    }
+
+    // Validate dimensions
+    if (newData.length !== expectedRows) {
+      toast.warning(
+        `Row count mismatch: expected ${expectedRows} rows but got ${newData.length}. ` +
+        `Pasting ${Math.min(newData.length, expectedRows)} rows.`,
+        { duration: 5000 }
+      );
+    }
+    if (newData[0]?.length !== expectedCols) {
+      toast.warning(
+        `Column count mismatch: expected ${expectedCols} cols but got ${newData[0]?.length}. ` +
+        `Pasting ${Math.min(newData[0]?.length || 0, expectedCols)} cols per row.`,
+        { duration: 5000 }
+      );
+    }
+
+    // Apply new data values while keeping existing axes, targetLambda, labels
+    const updatedData = map.data.map((existingRow, ri) => {
+      if (ri >= newData.length) return [...existingRow]; // Keep existing if pasted data is shorter
+      return existingRow.map((existingVal, ci) => {
+        if (ci >= (newData[ri]?.length || 0)) return existingVal; // Keep existing if row is shorter
+        return newData[ri][ci];
+      });
+    });
+
+    const updatedMap: FuelMap = {
+      ...map,
+      data: updatedData,
+    };
+
+    onLoad(updatedMap);
+    setShowPasteData(false);
+    setPasteDataText('');
+    toast.success(`Cell values updated (${Math.min(newData.length, expectedRows)}×${Math.min(newData[0]?.length || 0, expectedCols)}). Axes preserved from scan.`);
+  }, [map, pasteDataText, onLoad]);
 
   const startEdit = (row: number, col: number) => {
     if (!map) return;
@@ -764,6 +878,19 @@ function FuelMapCard({
               >
                 <Download style={{ width: 12, height: 12 }} />EXPORT CSV
               </button>
+              <button
+                onClick={() => setShowPasteData(!showPasteData)}
+                style={{
+                  background: showPasteData ? 'oklch(0.15 0.06 200)' : 'transparent',
+                  color: sColor.yellow, border: showPasteData ? `1px solid ${sColor.yellow}` : 'none',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                  padding: showPasteData ? '1px 4px' : undefined,
+                  borderRadius: '2px',
+                }}
+              >
+                <ClipboardPaste style={{ width: 12, height: 12 }} />PASTE DATA
+              </button>
               <button onClick={onClear} style={{
                 background: 'transparent', color: sColor.textDim, border: 'none',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px',
@@ -773,6 +900,68 @@ function FuelMapCard({
               </button>
             </div>
           </div>
+
+          {/* Paste Data panel */}
+          {showPasteData && (
+            <div style={{
+              background: 'oklch(0.12 0.02 200)',
+              border: `1px solid oklch(0.30 0.06 200)`,
+              borderRadius: '3px',
+              padding: '12px',
+              marginBottom: '8px',
+            }}>
+              <div style={{ marginBottom: '8px' }}>
+                <span style={{ fontFamily: sFont.heading, fontSize: '0.85rem', color: sColor.yellow, letterSpacing: '0.04em' }}>
+                  PASTE CELL DATA
+                </span>
+                <p style={{ fontFamily: sFont.body, fontSize: '0.75rem', color: sColor.textDim, margin: '4px 0 0' }}>
+                  Paste cell values from C3 below. Axis values (RPM rows &amp; MAP/TPS columns) will be preserved from the screenshot scan.
+                  Accepts tab-separated or comma-separated data. Row headers and column headers will be auto-detected and stripped.
+                </p>
+              </div>
+              <textarea
+                value={pasteDataText}
+                onChange={e => setPasteDataText(e.target.value)}
+                placeholder={`Paste ${map?.rowAxis.length || 35} rows × ${map?.colAxis.length || 25} columns of cell values from C3...\n\nExample (tab or comma separated):\n1.296\t1.296\t1.296\t1.418\t1.540\t1.655...\n1.296\t1.296\t1.296\t1.418\t1.540\t1.655...`}
+                style={{
+                  width: '100%',
+                  background: 'oklch(0.08 0.004 260)', color: 'white',
+                  fontFamily: sFont.mono, fontSize: '0.7rem',
+                  border: `1px solid ${sColor.border}`, borderRadius: '2px',
+                  padding: '8px', minHeight: '120px', resize: 'vertical',
+                }}
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={handlePasteData}
+                  disabled={!pasteDataText.trim()}
+                  style={{
+                    background: pasteDataText.trim() ? sColor.yellow : 'oklch(0.25 0.010 260)',
+                    color: pasteDataText.trim() ? '#000' : sColor.textDim,
+                    fontFamily: sFont.heading, fontSize: '0.85rem',
+                    letterSpacing: '0.08em', padding: '6px 16px', border: 'none',
+                    borderRadius: '2px', cursor: pasteDataText.trim() ? 'pointer' : 'not-allowed',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  APPLY DATA
+                </button>
+                <span style={{ fontFamily: sFont.mono, fontSize: '0.65rem', color: sColor.textDim }}>
+                  Expected: {map?.rowAxis.length || '?'} rows × {map?.colAxis.length || '?'} cols
+                </span>
+                <button
+                  onClick={() => { setShowPasteData(false); setPasteDataText(''); }}
+                  style={{
+                    background: 'transparent', color: sColor.textDim, border: 'none',
+                    cursor: 'pointer', fontFamily: sFont.mono, fontSize: '0.7rem',
+                    marginLeft: 'auto',
+                  }}
+                >
+                  CANCEL
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Fact-check warning */}
           {factCheckWarning && (
@@ -899,11 +1088,18 @@ function FuelMapCard({
                       const cellKey = `${ri}:${ci}`;
                       const corrInfo = correctedCells?.get(cellKey) || null;
                       const isCorrected = !!corrInfo;
+                      const isBlended = corrInfo?.isBlended === true;
 
-                      // Build rich tooltip for corrected cells
+                      // Build rich tooltip for corrected/blended cells
                       const cellTitle = isCorrected
-                        ? `Original: ${corrInfo.originalValue.toFixed(3)} → Corrected: ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\nActual λ: ${corrInfo.avgActualLambda.toFixed(3)} vs Target λ: ${corrInfo.targetLambda.toFixed(3)}\nSamples: ${corrInfo.sampleCount}${corrInfo.avgStft !== undefined ? `\nAvg STFT: ${corrInfo.avgStft.toFixed(1)}%` : ''}`
+                        ? isBlended
+                          ? `Blended: ${corrInfo.originalValue.toFixed(3)} → ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\n(Interpolated from neighboring corrections)`
+                          : `Original: ${corrInfo.originalValue.toFixed(3)} → Corrected: ${corrInfo.correctedValue.toFixed(3)}\nFactor: ${corrInfo.correctionFactor.toFixed(3)}x (${corrInfo.correctionFactor > 1 ? '+' : ''}${((corrInfo.correctionFactor - 1) * 100).toFixed(1)}%)\nActual λ: ${corrInfo.avgActualLambda.toFixed(3)} vs Target λ: ${corrInfo.targetLambda.toFixed(3)}\nSamples: ${corrInfo.sampleCount}${corrInfo.avgStft !== undefined ? `\nAvg STFT: ${corrInfo.avgStft.toFixed(1)}%` : ''}`
                         : `${val.toFixed(3)} (no correction data)`;
+
+                      // Color scheme: green = data-corrected, cyan = blended
+                      const corrBorderColor = isBlended ? 'oklch(0.75 0.15 195)' : 'oklch(0.75 0.18 145)';
+                      const corrGlowColor = isBlended ? 'oklch(0.65 0.15 195 / 0.5)' : 'oklch(0.65 0.18 145 / 0.5)';
 
                       return (
                         <td
@@ -924,11 +1120,11 @@ function FuelMapCard({
                             border: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '3px solid white'
                               : isEditing ? `2px solid ${sColor.redBright}`
-                              : isCorrected ? '2px solid oklch(0.75 0.18 145)'
+                              : isCorrected ? `2px solid ${corrBorderColor}`
                               : '1px solid oklch(0.40 0.006 260)',
                             boxShadow: (overlay?.isActive && overlay.row === ri && overlay.col === ci)
                               ? '0 0 8px rgba(255,255,255,0.5)'
-                              : isCorrected ? '0 0 6px oklch(0.65 0.18 145 / 0.5)'
+                              : isCorrected ? `0 0 6px ${corrGlowColor}`
                               : 'none',
                           }}
                         >
@@ -962,6 +1158,12 @@ function FuelMapCard({
             <span>{min.toFixed(3)}</span>
             <span style={{ flex: 1, textAlign: 'center' }}>
               Dbl-click to edit | <span style={{ color: sColor.cyan }}>TARGET λ</span> = log-based tuning reference
+              {correctedCells && correctedCells.size > 0 && (
+                <span style={{ marginLeft: 8 }}>
+                  | <span style={{ color: 'oklch(0.75 0.18 145)', fontWeight: 700 }}>■</span> Data-corrected
+                  {' '}<span style={{ color: 'oklch(0.75 0.15 195)', fontWeight: 700 }}>■</span> Blended
+                </span>
+              )}
               {overlay?.isActive && (
                 <span style={{ marginLeft: 8, color: getDeviationColor(config.key.includes('cyl1') ? overlay.deviation1 : overlay.deviation2), fontWeight: 700 }}>
                   | LIVE: λ={config.key.includes('cyl1') ? overlay.lambda1.toFixed(3) : overlay.lambda2.toFixed(3)}
@@ -1509,6 +1711,28 @@ export default function HondaTalonTuner({
             avgStft: corr.avgStft,
           });
         }
+        // Also add blended cells (from blendCorrectedMap) if the map has them
+        const correctedMap = correctedMaps[result.mapKey as keyof FuelMapState];
+        if (correctedMap?.blendedCells) {
+          const originalMap = fuelMaps[result.mapKey as keyof FuelMapState];
+          for (const cellKey of correctedMap.blendedCells) {
+            if (!cellMap.has(cellKey)) {
+              const [r, c] = cellKey.split(':').map(Number);
+              const origVal = originalMap?.data?.[r]?.[c] ?? 0;
+              const newVal = correctedMap.data[r]?.[c] ?? origVal;
+              const factor = origVal !== 0 ? newVal / origVal : 1;
+              cellMap.set(cellKey, {
+                originalValue: origVal,
+                correctedValue: newVal,
+                correctionFactor: factor,
+                sampleCount: 0,
+                avgActualLambda: 0,
+                targetLambda: 0,
+                isBlended: true,
+              });
+            }
+          }
+        }
         cellsMap[result.mapKey] = cellMap;
       }
       setCorrectedCells(cellsMap);
@@ -1516,7 +1740,7 @@ export default function HondaTalonTuner({
       // Revert: clear all highlights
       setCorrectedCells({});
     }
-  }, []);
+  }, [fuelMaps]);
 
   const handleUpdateTargetLambda = useCallback((mapKey: keyof FuelMapState, targets: number[]) => {
     setFuelMaps(prev => {
@@ -1701,15 +1925,15 @@ export default function HondaTalonTuner({
         />
       )}
 
-      {/* Correct Section */}
-      {activeSection === 'correct' && (
+      {/* Correct Section — kept mounted to preserve state across tab switches */}
+      <div style={{ display: activeSection === 'correct' ? 'block' : 'none' }}>
         <FuelCorrectionPanel
           fuelMaps={fuelMaps as unknown as CorrectionFuelMapState}
           wp8Data={localWP8}
           onApplyCorrections={(corrected, results) => handleApplyCorrections(corrected as Partial<FuelMapState>, results)}
           onUpdateTargetLambda={(key, targets) => handleUpdateTargetLambda(key as keyof FuelMapState, targets)}
         />
-      )}
+      </div>
 
       {/* Datalog Section */}
       {activeSection === 'datalog' && (

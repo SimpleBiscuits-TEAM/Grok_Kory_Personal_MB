@@ -17,7 +17,7 @@
  *   - When Short Term Fuel Trims (STFT) are present, factor them into the
  *     actual AFR before computing lambda. Negative STFT = ECU pulling fuel,
  *     positive STFT = ECU adding fuel. Corrected AFR = measured AFR / (1 + STFT/100).
- *   - Turbo auto-detection: MAP > 100 kPa = turbo
+ *   - Turbo auto-detection: MAP > 105 kPa = turbo
  *   - Turbo SD column lookup: use Desired Injector Pulsewidth interpolated against
  *     SD Cyl1 table (MAP not accurate enough on turbo applications)
  *   - When "Manifold Absolute Pressure Corrected" channel is available, use it for
@@ -45,6 +45,8 @@ export interface FuelMap {
   rowLabel: string;
   colLabel: string;
   unit: string;
+  /** Set of "row:col" keys for cells that were blended (interpolated/boundary), not from datalog data */
+  blendedCells?: Set<string>;
 }
 
 export interface FuelMapState {
@@ -60,6 +62,7 @@ export type MapSensor = 'stock' | '3bar';
 export interface CorrectionConfig {
   vehicleMode: VehicleMode;
   mapSensor: MapSensor;  // Only relevant when vehicleMode === 'turbo'
+  minSamples: number;    // Minimum sample count required before a cell is used for correction
 }
 
 /** Correction tier classification */
@@ -159,12 +162,17 @@ export function getNASpeedDensityTargets(colAxis: number[]): number[] {
 
 /**
  * Generate NA target lambda presets for Alpha-N tables.
- * 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
+ * TPS axis: 0, 0.195, 0.39, 0.976, 1.952, 3.026, 4.002, 4.978, 5.954, 8.003,
+ *           9.955, 12.005, 13.957, 16.006, 20.008, 24.01, 28.011, 32.013, 36.014,
+ *           40.016, 44.994, 49.971, 54.949, 60.024, 72.712
+ * 0-36.014° = 0.95, 40.016° = 0.925, 44.994° = 0.90, 49.971° = 0.875, 54.949°+ = 0.85
  */
 export function getNAAlphaNTargets(colAxis: number[]): number[] {
   return colAxis.map(tps => {
-    if (tps <= 40) return 0.95;
+    if (tps <= 37) return 0.95;
+    if (tps <= 41) return 0.925;
     if (tps <= 45) return 0.90;
+    if (tps <= 50) return 0.875;
     return 0.85;
   });
 }
@@ -232,7 +240,7 @@ export function getTargetLambdaPreset(
 
 /**
  * Detect if the vehicle is turbocharged from the datalog.
- * Turbo = MAP > 100 kPa at any point.
+ * Turbo = MAP > 105 kPa at any point.
  */
 export function detectTurbo(wp8Data: WP8ParseResult): boolean {
   const keys = getHondaTalonKeyChannels(wp8Data);
@@ -242,7 +250,7 @@ export function detectTurbo(wp8Data: WP8ParseResult): boolean {
 
   for (const row of wp8Data.rows) {
     const mapVal = row.values[mapIdx];
-    if (Number.isFinite(mapVal) && mapVal > 100) return true;
+    if (Number.isFinite(mapVal) && mapVal > 105) return true;
   }
   return false;
 }
@@ -381,7 +389,159 @@ export const LAMBDA_MAX_VALID = 1.3;   // Above 1.3 = extreme lean/misfire (sens
  */
 export const BLEND_BOUNDARY_WEIGHT = 0.5;  // Outer boundary cells get 50% of nearest corrected neighbor's factor
 
-// ─── Main Correction Engine ───────────────────────────────────────────────────────────────────
+/**
+ * Interpolate gaps in a column (vertical direction).
+ * Uses different anchor-finding logic than rows because vertical patterns differ:
+ *   - Values do NOT necessarily increase monotonically from top to bottom
+ *   - Top boundary: scan UP for cell with value GREATER than corrected value
+ *     (if none found, skip 3 cells and use the 4th as anchor)
+ *   - Bottom boundary: scan DOWN for cell with value LESS than corrected value
+ *     (if none found, skip 3 cells and use the 4th as anchor)
+ *
+ * @param factors - The factor grid column (mutated in place)
+ * @param corrected - Which cells are directly corrected
+ * @param interpolated - Which cells have been interpolated (mutated in place)
+ * @param originalValues - The original map values for this column
+ */
+function interpolateGapsInColumn(
+  factors: number[],
+  corrected: boolean[],
+  interpolated: boolean[],
+  originalValues: number[],
+): void {
+  const len = factors.length;
+
+  // ── Standard gap interpolation (between two corrected cells in the same column) ──
+  let i = 0;
+  while (i < len) {
+    if (!corrected[i]) { i++; continue; }
+
+    const gapStart = i;
+    let j = i + 1;
+    while (j < len && !corrected[j]) j++;
+
+    if (j < len && j - gapStart > 1) {
+      const startFactor = factors[gapStart];
+      const endFactor = factors[j];
+      const gapLen = j - gapStart;
+
+      for (let k = gapStart + 1; k < j; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - gapStart) / gapLen;
+          factors[k] = startFactor + (endFactor - startFactor) * t;
+          interpolated[k] = true;
+        }
+      }
+    }
+
+    i = j;
+  }
+
+  // ── Open-ended gap interpolation (column-specific anchor logic) ──
+
+  // Find all corrected cell indices in this column
+  const correctedIndices: number[] = [];
+  for (let idx = 0; idx < len; idx++) {
+    if (corrected[idx]) correctedIndices.push(idx);
+  }
+  if (correctedIndices.length === 0) return;
+
+  const topmostCorrected = correctedIndices[0]; // closest to top of table (index 0)
+  const bottommostCorrected = correctedIndices[correctedIndices.length - 1]; // closest to bottom
+
+  // ── Top boundary (above the highest corrected cell) ──
+  // Scan UP (toward index 0) for a cell with value GREATER than the corrected value.
+  // If none found, skip 3 cells and use the 4th as anchor.
+  if (topmostCorrected > 0) {
+    const correctedValue = originalValues[topmostCorrected] * factors[topmostCorrected];
+    const corrFactor = factors[topmostCorrected];
+
+    let anchorIdx = -1;
+    for (let k = topmostCorrected - 1; k >= 0; k--) {
+      if (corrected[k] || interpolated[k]) {
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] > correctedValue) {
+        // Found a cell with value greater than corrected — use as anchor
+        // Must be at least 2 positions away for interpolation
+        if ((topmostCorrected - k) > 1) {
+          anchorIdx = k;
+          break;
+        }
+        // Distance 1 — keep scanning
+      }
+    }
+
+    // Fallback: if no anchor found, skip 3 cells and use the 4th
+    if (anchorIdx < 0) {
+      const fallbackIdx = Math.max(0, topmostCorrected - 4);
+      if (fallbackIdx < topmostCorrected - 1) {
+        // Only use fallback if there's at least 1 cell to interpolate
+        anchorIdx = fallbackIdx;
+      }
+    }
+
+    if (anchorIdx >= 0 && anchorIdx < topmostCorrected - 1) {
+      // Interpolate from anchor (factor=1.0) to topmostCorrected (factor=corrFactor)
+      const gapLen = topmostCorrected - anchorIdx;
+      for (let k = anchorIdx + 1; k < topmostCorrected; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - anchorIdx) / gapLen;
+          factors[k] = 1.0 + (corrFactor - 1.0) * t;
+          interpolated[k] = true;
+        }
+      }
+    }
+  }
+
+  // ── Bottom boundary (below the lowest corrected cell) ──
+  // Scan DOWN (toward last index) for a cell with value LESS than the corrected value.
+  // If none found, skip 3 cells and use the 4th as anchor.
+  if (bottommostCorrected < len - 1) {
+    const correctedValue = originalValues[bottommostCorrected] * factors[bottommostCorrected];
+    const corrFactor = factors[bottommostCorrected];
+
+    let anchorIdx = -1;
+    for (let k = bottommostCorrected + 1; k < len; k++) {
+      if (corrected[k] || interpolated[k]) {
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] < correctedValue) {
+        // Found a cell with value less than corrected — use as anchor
+        // Must be at least 2 positions away for interpolation
+        if ((k - bottommostCorrected) > 1) {
+          anchorIdx = k;
+          break;
+        }
+        // Distance 1 — keep scanning
+      }
+    }
+
+    // Fallback: if no anchor found, skip 3 cells and use the 4th
+    if (anchorIdx < 0) {
+      const fallbackIdx = Math.min(len - 1, bottommostCorrected + 4);
+      if (fallbackIdx > bottommostCorrected + 1) {
+        // Only use fallback if there's at least 1 cell to interpolate
+        anchorIdx = fallbackIdx;
+      }
+    }
+
+    if (anchorIdx >= 0 && anchorIdx > bottommostCorrected + 1) {
+      // Interpolate from bottommostCorrected (factor=corrFactor) to anchor (factor=1.0)
+      const gapLen = anchorIdx - bottommostCorrected;
+      for (let k = bottommostCorrected + 1; k < anchorIdx; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - bottommostCorrected) / gapLen;
+          factors[k] = corrFactor + (1.0 - corrFactor) * t;
+          interpolated[k] = true;
+        }
+      }
+    }
+  }
+}
+// ─── Smoothing Engine ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Detect transient fueling using rate-of-change of Injector PW Final.
@@ -858,6 +1018,18 @@ function computeMapCorrections(
     return patternCount >= Math.min(2, neighbors.length);
   }
 
+  // Apply minimum sample threshold: cells below minSamples are treated as no-data
+  const minSamples = config.minSamples || 1;
+  for (let r = 0; r < numRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      if (rawCounts[r][c] < minSamples) {
+        rawFactors[r][c] = NaN;
+        rawLambdas[r][c] = NaN;
+        rawCounts[r][c] = 0;
+      }
+    }
+  }
+
   // First pass: classify each cell into tiers
   const cellTiers: CorrectionTier[][] = [];
   for (let r = 0; r < numRows; r++) {
@@ -1187,6 +1359,31 @@ export function blendCorrectedMap(
   const cols = rows > 0 ? map.data[0].length : 0;
   if (rows === 0 || cols === 0) return { ...map, data: map.data.map(r => [...r]) };
 
+  // Maximum blend factor deviation from 1.0 for non-corrected cells (20% cap)
+  const MAX_BLEND_DEVIATION = 0.20;
+
+  // ── Detect isolated corrections (single outliers with no neighboring corrections) ──
+  // These get only 8-sided boundary blend, not row/column interpolation.
+  const isIsolated = new Set<string>();
+  for (const corr of corrections) {
+    if (corr.row >= rows || corr.col >= cols) continue;
+    // Check if any other correction is within 2 cells in any direction
+    let hasNeighbor = false;
+    for (const other of corrections) {
+      if (other === corr) continue;
+      if (other.row >= rows || other.col >= cols) continue;
+      const rowDist = Math.abs(other.row - corr.row);
+      const colDist = Math.abs(other.col - corr.col);
+      if (rowDist <= 2 && colDist <= 2) {
+        hasNeighbor = true;
+        break;
+      }
+    }
+    if (!hasNeighbor) {
+      isIsolated.add(`${corr.row}:${corr.col}`);
+    }
+  }
+
   // Build a factor grid: 1.0 = no correction, other values = correction factor
   const factorGrid: number[][] = Array.from({ length: rows }, () => Array(cols).fill(NaN));
   const isCorrected: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
@@ -1201,49 +1398,171 @@ export function blendCorrectedMap(
   // Track which cells get interpolated/blended (so we don't double-process)
   const isInterpolated: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
 
+  // ── Handle isolated corrections with 8-sided boundary blend only ──
+  // Skip them from row/column interpolation by temporarily removing from isCorrected,
+  // then apply their boundary blend separately.
+  const isolatedCorrections: CellCorrection[] = [];
+  const groupedCorrections: CellCorrection[] = [];
+  for (const corr of corrections) {
+    if (corr.row >= rows || corr.col >= cols) continue;
+    if (isIsolated.has(`${corr.row}:${corr.col}`)) {
+      isolatedCorrections.push(corr);
+    } else {
+      groupedCorrections.push(corr);
+    }
+  }
+
+  // Remove isolated corrections from the factor grid — they won't participate in row/col interpolation
+  for (const corr of isolatedCorrections) {
+    factorGrid[corr.row][corr.col] = NaN;
+    isCorrected[corr.row][corr.col] = false;
+  }
+
   // ── Pass 1: Gap Interpolation ──
   // For each row, find uncorrected cells between two corrected cells and interpolate
+  // Also handle open-ended gaps using original map values for monotonic ramp
   for (let r = 0; r < rows; r++) {
-    interpolateGapsInLine(factorGrid[r], isCorrected[r], isInterpolated[r]);
+    interpolateGapsInLine(factorGrid[r], isCorrected[r], isInterpolated[r], map.data[r]);
   }
-  // For each column, find uncorrected cells between two corrected cells and interpolate
+  // For each column, find uncorrected cells between two corrected cells and interpolate.
+  // IMPORTANT: Column pass does NOT overwrite row-interpolated values.
+  // Row blending is authoritative because fuel maps are monotonically increasing L-R
+  // (more airflow = more fuel), so the row pass establishes definitive ramp values.
+  // Column pass only fills cells that the row pass didn't touch.
+  //
+  // Column anchor logic (different from row):
+  //   - Top boundary (above highest corrected cell): scan UP for cell with value > corrected value.
+  //     If none found, skip 3 cells and use the 4th as anchor.
+  //   - Bottom boundary (below lowest corrected cell): scan DOWN for cell with value < corrected value.
+  //     If none found, skip 3 cells and use the 4th as anchor.
   for (let c = 0; c < cols; c++) {
     const colFactors = factorGrid.map(row => row[c]);
     const colCorrected = isCorrected.map(row => row[c]);
     const colInterpolated = isInterpolated.map(row => row[c]);
-    interpolateGapsInLine(colFactors, colCorrected, colInterpolated);
-    // Write back
+    const colOriginalValues = map.data.map(row => row[c]);
+    interpolateGapsInColumn(colFactors, colCorrected, colInterpolated, colOriginalValues);
+    // Write back — only for cells NOT already handled by row interpolation
     for (let r = 0; r < rows; r++) {
       if (!isCorrected[r][c] && !isInterpolated[r][c] && colInterpolated[r]) {
-        // Column interpolation found a gap that row interpolation missed
+        // Column interpolation found a gap that row interpolation missed — use it
         factorGrid[r][c] = colFactors[r];
         isInterpolated[r][c] = true;
-      } else if (isInterpolated[r][c] && colInterpolated[r]) {
-        // Both row and column found this as a gap — average the two interpolations
-        factorGrid[r][c] = (factorGrid[r][c] + colFactors[r]) / 2;
+      }
+      // If row already interpolated this cell, leave it alone (row is authoritative)
+    }
+  }
+
+  // ── Pass 1b: Row-wise Non-Monotonic Bump Fix (before boundary blending) ──
+  // After row+column interpolation and averaging, some interpolated cells may have
+  // blended values that create a non-monotonic "bump" — i.e., the blended value
+  // increases then decreases (or vice versa) when it should be a smooth ramp.
+  //
+  // The user's specific issue: at 4250-5000 RPM left of TPS 12, values go up then
+  // back down when moving left from the corrected cell. The fix:
+  // For each interpolated cell to the LEFT of a corrected cell, if its blended value
+  // exceeds the corrected value, find the next cell further left that is below the
+  // corrected value and use it as an anchor for re-interpolation.
+  //
+  // This only targets the specific pattern: interpolated cells whose blended values
+  // overshoot the corrected cell they're ramping toward.
+  for (let r = 0; r < rows; r++) {
+    // Compute current blended values for this row
+    const rowValues = map.data[r].map((val, c) => {
+      const factor = factorGrid[r][c];
+      if (isNaN(factor) || (!isCorrected[r][c] && !isInterpolated[r][c])) return val;
+      return val * factor;
+    });
+
+    // For each corrected cell, check interpolated cells to its left
+    for (let c = 0; c < cols; c++) {
+      if (!isCorrected[r][c]) continue;
+      const correctedValue = rowValues[c];
+      const corrFactor = factorGrid[r][c];
+
+      // Check left side: if correction is enrichment (factor > 1), blended values
+      // to the left should not exceed the corrected value
+      if (corrFactor > 1.0) {
+        for (let k = c - 1; k >= 0; k--) {
+          if (isCorrected[r][k]) break; // hit another correction, stop
+          if (!isInterpolated[r][k]) break; // hit untouched cell, stop
+          if (rowValues[k] > correctedValue) {
+            // This interpolated cell overshoots the corrected value — find anchor
+            // Scan further left for a cell with value < correctedValue
+            let anchorCol = -1;
+            for (let a = k - 1; a >= 0; a--) {
+              if (isCorrected[r][a]) break;
+              if (!isInterpolated[r][a]) {
+                // Untouched cell — use as anchor if its value < correctedValue
+                if (rowValues[a] < correctedValue) anchorCol = a;
+                break;
+              }
+              if (rowValues[a] < correctedValue) {
+                anchorCol = a;
+                break;
+              }
+            }
+            if (anchorCol >= 0) {
+              // Re-interpolate from anchor to corrected cell
+              const gapLen = c - anchorCol;
+              for (let j = anchorCol + 1; j < c; j++) {
+                if (!isInterpolated[r][j] || isCorrected[r][j]) continue;
+                const t = (j - anchorCol) / gapLen;
+                const targetValue = rowValues[anchorCol] + (correctedValue - rowValues[anchorCol]) * t;
+                if (map.data[r][j] > 0) {
+                  factorGrid[r][j] = targetValue / map.data[r][j];
+                  rowValues[j] = targetValue;
+                }
+              }
+            }
+            break; // done with this corrected cell's left side
+          }
+        }
+      }
+
+      // Check right side: if correction is lean (factor < 1), blended values
+      // to the right should not go below the corrected value
+      if (corrFactor < 1.0) {
+        for (let k = c + 1; k < cols; k++) {
+          if (isCorrected[r][k]) break;
+          if (!isInterpolated[r][k]) break;
+          if (rowValues[k] < correctedValue) {
+            // This interpolated cell undershoots — find anchor to the right
+            let anchorCol = -1;
+            for (let a = k + 1; a < cols; a++) {
+              if (isCorrected[r][a]) break;
+              if (!isInterpolated[r][a]) {
+                if (rowValues[a] > correctedValue) anchorCol = a;
+                break;
+              }
+              if (rowValues[a] > correctedValue) {
+                anchorCol = a;
+                break;
+              }
+            }
+            if (anchorCol >= 0) {
+              const gapLen = anchorCol - c;
+              for (let j = c + 1; j < anchorCol; j++) {
+                if (!isInterpolated[r][j] || isCorrected[r][j]) continue;
+                const t = (j - c) / gapLen;
+                const targetValue = correctedValue + (rowValues[anchorCol] - correctedValue) * t;
+                if (map.data[r][j] > 0) {
+                  factorGrid[r][j] = targetValue / map.data[r][j];
+                  rowValues[j] = targetValue;
+                }
+              }
+            }
+            break;
+          }
+        }
       }
     }
   }
 
   // ── Pass 2: Boundary Blending (single ring only) ──
-  // For isolated corrected cells (no adjacent corrected/interpolated neighbors),
-  // blend all 8 surrounding cells (including diagonals), excluding other corrected cells.
-  // For cells adjacent to groups/rows/columns of corrections, use 4-connected only.
+  // For ALL cells adjacent (8-connected) to corrected/interpolated cells,
+  // blend using all 8 neighbors as potential sources.
   // Only use corrected or gap-interpolated cells as blend sources (not other boundary cells)
   // to prevent cascading ripple effects.
-
-  // First, determine which corrected cells are "isolated" (no corrected/interpolated 4-neighbors)
-  const isIsolatedCorrection: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (!isCorrected[r][c]) continue;
-      const cardinal = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
-      const hasAdjacentCorrected = cardinal.some(([nr, nc]) =>
-        nr >= 0 && nr < rows && nc >= 0 && nc < cols && (isCorrected[nr][nc] || isInterpolated[nr][nc])
-      );
-      isIsolatedCorrection[r][c] = !hasAdjacentCorrected;
-    }
-  }
 
   const isBoundary: boolean[][] = Array.from({ length: rows }, () => Array(cols).fill(false));
   const boundaryFactors: number[][] = Array.from({ length: rows }, () => Array(cols).fill(NaN));
@@ -1252,20 +1571,11 @@ export function blendCorrectedMap(
     for (let c = 0; c < cols; c++) {
       if (isCorrected[r][c] || isInterpolated[r][c]) continue;
 
-      // Determine which neighbors to check:
-      // If any adjacent corrected cell is isolated, use all 8 neighbors
-      // Otherwise use 4-connected only
-      const cardinal = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
-      const all8 = [[r-1, c-1], [r-1, c], [r-1, c+1], [r, c-1], [r, c+1], [r+1, c-1], [r+1, c], [r+1, c+1]];
+      // Always check all 8 neighbors (including diagonals) for blend sources
+      const all8: [number, number][] = [[r-1, c-1], [r-1, c], [r-1, c+1], [r, c-1], [r, c+1], [r+1, c-1], [r+1, c], [r+1, c+1]];
 
-      // Check if any of our 8 neighbors is an isolated corrected cell
-      const hasIsolatedNeighbor = all8.some(([nr, nc]) =>
-        nr >= 0 && nr < rows && nc >= 0 && nc < cols && isIsolatedCorrection[nr][nc]
-      );
-
-      const neighborsToCheck = hasIsolatedNeighbor ? all8 : cardinal;
       const neighborFacs: number[] = [];
-      for (const [nr, nc] of neighborsToCheck) {
+      for (const [nr, nc] of all8) {
         if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
           if (isCorrected[nr][nc] || isInterpolated[nr][nc]) {
             neighborFacs.push(factorGrid[nr][nc]);
@@ -1291,41 +1601,202 @@ export function blendCorrectedMap(
     }
   }
 
+  // ── Pass 3: Post-Boundary Monotonicity Enforcement ──
+  // After all blending passes, enforce that blended values don't create non-monotonic
+  // bumps where the original map was monotonically increasing.
+  // For each row, scan left-to-right: if a blended cell's value is LESS than the
+  // previous blended cell's value, AND the original values were increasing (or equal),
+  // then re-interpolate from the last valid anchor to the next corrected cell.
+  // This uses the user's specified approach: find the next value to the left that is
+  // less than the corrected value and use it as an anchor for interpolation.
+  for (let r = 0; r < rows; r++) {
+    // Compute current blended values for this row
+    const rowBlended = map.data[r].map((val, c) => {
+      const factor = factorGrid[r][c];
+      if (isNaN(factor) || (!isCorrected[r][c] && !isInterpolated[r][c])) return val;
+      return val * factor;
+    });
+
+    // Scan for non-monotonic bumps in blended values where original was increasing
+    // Only fix cells that are interpolated/boundary (not corrected, not untouched)
+    for (let c = 1; c < cols; c++) {
+      if (!isInterpolated[r][c] || isCorrected[r][c]) continue;
+      // Check if this blended cell is less than the previous cell
+      if (rowBlended[c] < rowBlended[c - 1] - 0.0001) {
+        // Only fix if original values were increasing (this is a blend artifact)
+        if (map.data[r][c] >= map.data[r][c - 1]) {
+          // Find the rightmost corrected/interpolated anchor to the right
+          let rightAnchor = -1;
+          for (let k = c; k < cols; k++) {
+            if (isCorrected[r][k]) {
+              rightAnchor = k;
+              break;
+            }
+          }
+          // Find the leftmost valid anchor to the left (last cell that's not part of the bump)
+          let leftAnchor = c - 1;
+          // Walk left to find where the bump started
+          while (leftAnchor > 0 && isInterpolated[r][leftAnchor] && !isCorrected[r][leftAnchor]) {
+            if (rowBlended[leftAnchor] <= rowBlended[leftAnchor - 1] + 0.0001 || !isInterpolated[r][leftAnchor - 1]) break;
+            leftAnchor--;
+          }
+
+          if (rightAnchor > 0 && rightAnchor > leftAnchor + 1) {
+            // Re-interpolate between leftAnchor and rightAnchor
+            const leftVal = rowBlended[leftAnchor];
+            const rightVal = rowBlended[rightAnchor];
+            const gapLen = rightAnchor - leftAnchor;
+            for (let k = leftAnchor + 1; k < rightAnchor; k++) {
+              if (!isInterpolated[r][k] || isCorrected[r][k]) continue;
+              const t = (k - leftAnchor) / gapLen;
+              const newVal = leftVal + (rightVal - leftVal) * t;
+              if (map.data[r][k] > 0) {
+                factorGrid[r][k] = newVal / map.data[r][k];
+                rowBlended[k] = newVal;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Also scan right-to-left for the right side of corrections
+    for (let c = cols - 2; c >= 0; c--) {
+      if (!isInterpolated[r][c] || isCorrected[r][c]) continue;
+      if (rowBlended[c] > rowBlended[c + 1] + 0.0001) {
+        if (map.data[r][c] <= map.data[r][c + 1]) {
+          // Find the leftmost corrected anchor to the left
+          let leftAnchor = -1;
+          for (let k = c; k >= 0; k--) {
+            if (isCorrected[r][k]) {
+              leftAnchor = k;
+              break;
+            }
+          }
+          // Find the rightmost valid anchor
+          let rightAnchor = c + 1;
+          while (rightAnchor < cols - 1 && isInterpolated[r][rightAnchor] && !isCorrected[r][rightAnchor]) {
+            if (rowBlended[rightAnchor] >= rowBlended[rightAnchor + 1] - 0.0001 || !isInterpolated[r][rightAnchor + 1]) break;
+            rightAnchor++;
+          }
+
+          if (leftAnchor >= 0 && rightAnchor > leftAnchor + 1) {
+            const leftVal = rowBlended[leftAnchor];
+            const rightVal = rowBlended[rightAnchor];
+            const gapLen = rightAnchor - leftAnchor;
+            for (let k = leftAnchor + 1; k < rightAnchor; k++) {
+              if (!isInterpolated[r][k] || isCorrected[r][k]) continue;
+              const t = (k - leftAnchor) / gapLen;
+              const newVal = leftVal + (rightVal - leftVal) * t;
+              if (map.data[r][k] > 0) {
+                factorGrid[r][k] = newVal / map.data[r][k];
+                rowBlended[k] = newVal;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Apply 20% cap to all blended (non-corrected) factors ──
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (isCorrected[r][c]) continue; // Don't cap directly corrected cells
+      if (!isInterpolated[r][c]) continue;
+      const factor = factorGrid[r][c];
+      if (isNaN(factor)) continue;
+      // Clamp factor to [1 - MAX_BLEND_DEVIATION, 1 + MAX_BLEND_DEVIATION]
+      factorGrid[r][c] = Math.max(1.0 - MAX_BLEND_DEVIATION, Math.min(1.0 + MAX_BLEND_DEVIATION, factor));
+    }
+  }
+
+  // ── Re-add isolated corrections with 8-sided boundary blend only ──
+  for (const corr of isolatedCorrections) {
+    const r = corr.row;
+    const c = corr.col;
+    // Apply the correction factor to the isolated cell itself
+    factorGrid[r][c] = corr.correctionFactor;
+    isCorrected[r][c] = true;
+
+    // Apply 8-sided boundary blend to its neighbors
+    const neighbors: [number, number][] = [
+      [r-1, c-1], [r-1, c], [r-1, c+1],
+      [r, c-1],             [r, c+1],
+      [r+1, c-1], [r+1, c], [r+1, c+1],
+    ];
+    for (const [nr, nc] of neighbors) {
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      if (isCorrected[nr][nc] || isInterpolated[nr][nc]) continue;
+      // Boundary blend: 50% of the correction factor's deviation from 1.0
+      const boundaryFactor = 1.0 + (corr.correctionFactor - 1.0) * BLEND_BOUNDARY_WEIGHT;
+      // Also cap the boundary blend at 20%
+      factorGrid[nr][nc] = Math.max(1.0 - MAX_BLEND_DEVIATION, Math.min(1.0 + MAX_BLEND_DEVIATION, boundaryFactor));
+      isInterpolated[nr][nc] = true;
+    }
+  }
+
   // ── Apply all factors to produce the blended map ──
+  const blendedCellKeys = new Set<string>();
   const newData = map.data.map((row, r) =>
     row.map((val, c) => {
       const factor = factorGrid[r][c];
       if (isNaN(factor) || (!isCorrected[r][c] && !isInterpolated[r][c])) return val;
+      // Track cells that are blended (interpolated/boundary) vs directly corrected from data
+      if (!isCorrected[r][c] && isInterpolated[r][c]) {
+        blendedCellKeys.add(`${r}:${c}`);
+      }
       return val * factor;
     })
   );
 
-  return { ...map, data: newData };
+  return { ...map, data: newData, blendedCells: blendedCellKeys };
+}
+
+/**
+ * Same as blendCorrectedMap but returns the set of blended cell keys separately.
+ * Useful when the caller needs to know which cells were blended for highlighting.
+ */
+export function getBlendedCellKeys(
+  map: FuelMap,
+  corrections: CellCorrection[],
+): Set<string> {
+  const result = blendCorrectedMap(map, corrections);
+  return (result as any).blendedCells || new Set<string>();
 }
 
 /**
  * Interpolate gaps in a 1D line (row or column).
- * Finds uncorrected cells between two corrected cells and linearly interpolates.
+ * Handles three cases:
+ * 1. Gaps BETWEEN two corrected cells — linear interpolation of factors
+ * 2. Open-ended LEFT gap — from leftmost corrected cell back to where original
+ *    map values naturally exceed the corrected value (monotonic ramp)
+ * 3. Open-ended RIGHT gap — from rightmost corrected cell forward to where original
+ *    map values naturally exceed the corrected value (monotonic ramp)
+ *
+ * @param factors - The factor grid line (mutated in place)
+ * @param corrected - Which cells are directly corrected
+ * @param interpolated - Which cells have been interpolated (mutated in place)
+ * @param originalValues - The original map values for this line (needed for open-ended gaps)
  */
 function interpolateGapsInLine(
   factors: number[],
   corrected: boolean[],
   interpolated: boolean[],
+  originalValues?: number[],
 ): void {
   const len = factors.length;
-  let i = 0;
 
+  // ── Standard gap interpolation (between two corrected cells) ──
+  let i = 0;
   while (i < len) {
-    // Find a corrected cell (start of potential gap)
     if (!corrected[i]) { i++; continue; }
 
     const gapStart = i;
-    // Scan forward to find the next corrected cell
     let j = i + 1;
     while (j < len && !corrected[j]) j++;
 
     if (j < len && j - gapStart > 1) {
-      // There's a gap between gapStart and j — interpolate
       const startFactor = factors[gapStart];
       const endFactor = factors[j];
       const gapLen = j - gapStart;
@@ -1341,4 +1812,322 @@ function interpolateGapsInLine(
 
     i = j;
   }
+
+  // ── Open-ended gap interpolation (edges without a second anchor) ──
+  if (!originalValues) return;
+
+  // Find all corrected cell indices
+  const correctedIndices: number[] = [];
+  for (let idx = 0; idx < len; idx++) {
+    if (corrected[idx]) correctedIndices.push(idx);
+  }
+  if (correctedIndices.length === 0) return;
+
+  const leftmostCorrected = correctedIndices[0];
+  const rightmostCorrected = correctedIndices[correctedIndices.length - 1];
+
+  // ── Left open-ended gap ──
+  // From leftmost corrected cell, extend leftward.
+  // Fuel maps are monotonically increasing left-to-right (more airflow = more fuel).
+  // So to the LEFT of a corrected cell, we look for the first cell with a value
+  // LESS THAN the corrected value — that's the natural anchor where the ramp starts.
+  // Interpolate smoothly between that anchor value and the corrected value.
+  // IMPORTANT: The anchor must be at least 2 positions away (distance > 1) so there's
+  // at least one cell between anchor and corrected to interpolate. If the first candidate
+  // is immediately adjacent (distance 1), keep scanning further left for a valid anchor.
+  if (leftmostCorrected > 1) {
+    const correctedValue = originalValues[leftmostCorrected] * factors[leftmostCorrected];
+    const corrFactor = factors[leftmostCorrected];
+
+    // Scan left to find anchor: first cell where original value < corrected value
+    // that is at least 2 positions away from the corrected cell.
+    // This ensures there's at least 1 cell in between to interpolate.
+    let anchorIdx = -1;
+    for (let k = leftmostCorrected - 1; k >= 0; k--) {
+      if (corrected[k] || interpolated[k]) {
+        // Hit another corrected/interpolated cell — stop, this is already handled
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] < correctedValue) {
+        // Found a candidate — but only use it if distance > 1
+        if ((leftmostCorrected - k) > 1) {
+          anchorIdx = k;
+          break;
+        }
+        // Distance is exactly 1 — skip this candidate and keep scanning left
+        // to find one further away
+      }
+    }
+
+    if (anchorIdx >= 0) {
+      // Interpolate from anchor (factor=1.0, keeps original lower value) to leftmostCorrected (factor=corrFactor)
+      const gapLen = leftmostCorrected - anchorIdx;
+      for (let k = anchorIdx + 1; k < leftmostCorrected; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - anchorIdx) / gapLen;
+          factors[k] = 1.0 + (corrFactor - 1.0) * t;
+          interpolated[k] = true;
+        }
+      }
+    } else if (anchorIdx < 0) {
+      // No valid anchor found — use gradual fade
+      // Blend from 1.0 at the edge to corrFactor at the corrected cell
+      // Only blend up to 5 cells max to avoid over-extending
+      const blendStart = Math.max(0, leftmostCorrected - 5);
+      const blendLen = leftmostCorrected - blendStart;
+      if (blendLen > 1) {
+        for (let k = blendStart; k < leftmostCorrected; k++) {
+          if (!corrected[k] && !interpolated[k]) {
+            const t = (k - blendStart) / blendLen;
+            factors[k] = 1.0 + (corrFactor - 1.0) * t;
+            interpolated[k] = true;
+          }
+        }
+      }
+    }
+  }
+
+  // ── Right open-ended gap ──
+  // From rightmost corrected cell, extend rightward.
+  // Fuel maps are monotonically increasing left-to-right (more airflow = more fuel).
+  // So to the RIGHT of a corrected cell, we look for the first cell with a value
+  // GREATER THAN the corrected value — that's the natural anchor where the ramp ends.
+  // Interpolate smoothly between the corrected value and that anchor value.
+  // IMPORTANT: The anchor must be at least 2 positions away (distance > 1) so there's
+  // at least one cell between corrected and anchor to interpolate.
+  if (rightmostCorrected < len - 2) {
+    const correctedValue = originalValues[rightmostCorrected] * factors[rightmostCorrected];
+    const corrFactor = factors[rightmostCorrected];
+
+    // Scan right to find anchor: first cell where original value > corrected value
+    // that is at least 2 positions away from the corrected cell.
+    let anchorIdx = -1;
+    for (let k = rightmostCorrected + 1; k < len; k++) {
+      if (corrected[k] || interpolated[k]) {
+        // Hit another corrected/interpolated cell — stop
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] > correctedValue) {
+        // Found a candidate — but only use it if distance > 1
+        if ((k - rightmostCorrected) > 1) {
+          anchorIdx = k;
+          break;
+        }
+        // Distance is exactly 1 — skip and keep scanning right
+      }
+    }
+
+    if (anchorIdx >= 0) {
+      // Interpolate from rightmostCorrected (factor=corrFactor) to anchor (factor=1.0, keeps original higher value)
+      const gapLen = anchorIdx - rightmostCorrected;
+      for (let k = rightmostCorrected + 1; k < anchorIdx; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - rightmostCorrected) / gapLen;
+          factors[k] = corrFactor + (1.0 - corrFactor) * t;
+          interpolated[k] = true;
+        }
+      }
+    } else if (anchorIdx < 0) {
+      // No valid anchor found — use gradual fade
+      const blendEnd = Math.min(len - 1, rightmostCorrected + 5);
+      const blendLen = blendEnd - rightmostCorrected;
+      if (blendLen > 1) {
+        for (let k = rightmostCorrected + 1; k <= blendEnd; k++) {
+          if (!corrected[k] && !interpolated[k]) {
+            const t = (k - rightmostCorrected) / blendLen;
+            factors[k] = corrFactor + (1.0 - corrFactor) * t;
+            interpolated[k] = true;
+          }
+        }
+      }
+    }
+  }
+}
+
+// ─── Smoothing Engine ─────────────────────────────────────────────────────────
+
+/**
+ * Smoothing pass for corrected fuel maps.
+ *
+ * Fuel tables should have smooth gradients:
+ *   - Values generally increase from left to right (more fuel at higher TPS/MAP)
+ *   - Values peak around peak torque RPM, then may decrease at higher RPM
+ *   - No sharp "spikes" or "dips" that deviate significantly from neighbors
+ *
+ * Algorithm:
+ *   1. For each corrected/blended cell, compute the "expected" value as the
+ *      weighted average of its 8 neighbors (Gaussian-weighted by distance).
+ *   2. If the cell deviates from the expected value by more than a threshold,
+ *      pull it toward the expected value by a smoothing factor.
+ *   3. Repeat for multiple iterations to propagate smoothness.
+ *   4. Only smooth cells that were corrected or blended — leave untouched cells alone.
+ *
+ * This preserves the overall correction direction while eliminating unrealistic
+ * spikes that would cause driveability issues.
+ *
+ * @param map - The fuel map (after corrections/blending have been applied)
+ * @param corrections - The cell corrections that were applied
+ * @param options - Smoothing parameters
+ * @returns A new FuelMap with smoothed values + set of smoothed cell keys
+ */
+export interface SmoothingOptions {
+  /** Number of smoothing iterations (more = smoother). Default: 3 */
+  iterations?: number;
+  /** Max deviation threshold (fraction) before smoothing kicks in. Default: 0.03 (3%) */
+  deviationThreshold?: number;
+  /** How aggressively to pull toward expected value (0-1). Default: 0.6 */
+  smoothingStrength?: number;
+  /** Whether to also smooth blended cells or only data-corrected cells. Default: true */
+  smoothBlended?: boolean;
+}
+
+export function smoothCorrectedMap(
+  map: FuelMap,
+  corrections: CellCorrection[],
+  options?: SmoothingOptions,
+): FuelMap & { smoothedCells: Set<string> } {
+  const {
+    iterations = 3,
+    deviationThreshold = 0.03,
+    smoothingStrength = 0.6,
+    smoothBlended = true,
+  } = options || {};
+
+  // Build sample count lookup from corrections
+  const sampleCountMap = new Map<string, number>();
+  for (const corr of corrections) {
+    sampleCountMap.set(`${corr.row}:${corr.col}`, corr.sampleCount);
+  }
+
+  const rows = map.data.length;
+  const cols = rows > 0 ? map.data[0].length : 0;
+  if (rows === 0 || cols === 0) {
+    return { ...map, data: map.data.map(r => [...r]), smoothedCells: new Set() };
+  }
+
+  // Build a set of cells that are eligible for smoothing
+  const correctedKeys = new Set<string>();
+  for (const corr of corrections) {
+    correctedKeys.add(`${corr.row}:${corr.col}`);
+  }
+
+  const blendedKeys = map.blendedCells || new Set<string>();
+
+  // Compute the average sample count of corrected cells (for relative comparison)
+  let totalSampleCount = 0;
+  let correctedCellCount = 0;
+  for (const corr of corrections) {
+    if (corr.sampleCount > 0) {
+      totalSampleCount += corr.sampleCount;
+      correctedCellCount++;
+    }
+  }
+  const avgSampleCount = correctedCellCount > 0 ? totalSampleCount / correctedCellCount : 1;
+
+  // Determine which cells can be smoothed
+  // High-sample cells (>= 2x average) are NOT smoothable — their data is more reliable
+  const isSmootable: boolean[][] = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => {
+      const key = `${r}:${c}`;
+      if (correctedKeys.has(key)) {
+        // Skip smoothing for cells with significantly higher sample count than average
+        const cellSamples = sampleCountMap.get(key) || 0;
+        if (cellSamples >= avgSampleCount * 2) return false; // High-confidence cell, don't smooth
+        return true;
+      }
+      if (smoothBlended && blendedKeys.has(key)) return true;
+      return false;
+    })
+  );
+
+  // Work on a copy of the data
+  let data = map.data.map(r => [...r]);
+  const smoothedCells = new Set<string>();
+
+  // Gaussian-like weights for 8-connected neighbors
+  // Cardinal neighbors (distance 1) get weight 1.0
+  // Diagonal neighbors (distance √2) get weight 0.707
+  const neighborOffsets: { dr: number; dc: number; weight: number }[] = [
+    { dr: -1, dc: -1, weight: 0.707 },
+    { dr: -1, dc:  0, weight: 1.0 },
+    { dr: -1, dc:  1, weight: 0.707 },
+    { dr:  0, dc: -1, weight: 1.0 },
+    { dr:  0, dc:  1, weight: 1.0 },
+    { dr:  1, dc: -1, weight: 0.707 },
+    { dr:  1, dc:  0, weight: 1.0 },
+    { dr:  1, dc:  1, weight: 0.707 },
+  ];
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const nextData = data.map(r => [...r]);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!isSmootable[r][c]) continue;
+
+        const currentVal = data[r][c];
+        if (currentVal <= 0) continue; // Skip zero/negative cells
+
+        // Compute weighted average of neighbors
+        // Weight = geometric distance weight * sample count weight
+        // Neighbors with more samples exert stronger influence
+        let weightedSum = 0;
+        let totalWeight = 0;
+
+        for (const { dr, dc, weight: distWeight } of neighborOffsets) {
+          const nr = r + dr;
+          const nc = c + dc;
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            const neighborVal = data[nr][nc];
+            if (neighborVal > 0) {
+              // Sample-count weight: neighbors with more samples pull harder
+              // Use sqrt to dampen the effect (avoid one high-sample cell dominating)
+              const neighborKey = `${nr}:${nc}`;
+              const neighborSamples = sampleCountMap.get(neighborKey) || 0;
+              const sampleWeight = neighborSamples > 0
+                ? Math.sqrt(neighborSamples / avgSampleCount)
+                : 0.5; // Blended/interpolated cells get half weight
+              const combinedWeight = distWeight * sampleWeight;
+              weightedSum += neighborVal * combinedWeight;
+              totalWeight += combinedWeight;
+            }
+          }
+        }
+
+        if (totalWeight === 0) continue;
+
+        const expectedVal = weightedSum / totalWeight;
+        const deviation = Math.abs(currentVal - expectedVal) / expectedVal;
+
+        // Only smooth if deviation exceeds threshold
+        if (deviation > deviationThreshold) {
+          // Scale smoothing strength inversely by sample count:
+          // Cells with more samples get less smoothing (they're more reliable)
+          const cellKey = `${r}:${c}`;
+          const cellSamples = sampleCountMap.get(cellKey) || 0;
+          let effectiveStrength = smoothingStrength;
+          if (cellSamples > 0 && avgSampleCount > 0) {
+            // Reduce strength proportionally: at 1x avg → full strength, at 2x avg → 0 strength
+            const sampleRatio = cellSamples / avgSampleCount;
+            // Cells below avg get full strength, cells above avg get reduced strength (linear to 0 at 2x)
+            effectiveStrength = smoothingStrength * Math.min(1, Math.max(0, 1 - (sampleRatio - 1)));
+          }
+
+          if (effectiveStrength > 0.01) {
+            // Pull toward expected value by effective strength
+            const smoothedVal = currentVal + (expectedVal - currentVal) * effectiveStrength;
+            // Round to 3 decimal places (fuel table precision)
+            nextData[r][c] = Math.round(smoothedVal * 1000) / 1000;
+            smoothedCells.add(cellKey);
+          }
+        }
+      }
+    }
+
+    data = nextData;
+  }
+
+  return { ...map, data, smoothedCells };
 }

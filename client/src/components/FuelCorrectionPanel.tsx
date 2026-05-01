@@ -17,7 +17,7 @@ import { WP8ParseResult } from '@/lib/wp8Parser';
 import {
   FuelMapState, FuelMap, CorrectionConfig, CorrectionReport,
   MapCorrectionResult, CellCorrection, VehicleMode, MapSensor,
-  computeCorrections, applyCorrectionToMap, blendCorrectedMap, detectTurbo,
+  computeCorrections, applyCorrectionToMap, blendCorrectedMap, smoothCorrectedMap, detectTurbo,
   getTargetLambdaPreset,
 } from '@/lib/talonFuelCorrection';
 
@@ -118,22 +118,101 @@ function getCorrectionColor(factor: number): string {
 function CorrectionPreviewTable({
   result,
   map,
+  blendEnabled,
+  smoothEnabled,
+  hasApplied,
 }: {
   result: MapCorrectionResult;
   map: FuelMap;
+  blendEnabled: boolean;
+  smoothEnabled: boolean;
+  hasApplied: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
 
   const configLabel = result.mapKey.replace('alphaN_', 'Alpha-N Cyl ').replace('speedDensity_', 'Speed Density Cyl ');
 
-  // Build a lookup: [row][col] → CellCorrection
+  // When blend is enabled, compute the blended map and build a full lookup
+  // that includes interpolated gap cells and boundary-blended cells
+  // IMPORTANT: After apply, map.data already contains corrected values, so we must NOT
+  // re-apply correction factors (which would double-correct). Instead, just show the
+  // current map values with the original correction metadata.
   const correctionMap = useMemo(() => {
     const m = new Map<string, CellCorrection>();
-    for (const c of result.corrections) {
-      m.set(`${c.row}-${c.col}`, c);
+    if (hasApplied) {
+      // After apply, map.data already has corrections baked in.
+      // Show the current map values alongside the original correction metadata.
+      for (const c of result.corrections) {
+        const currentVal = map.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: currentVal,
+          correctionFactor: c.originalValue > 0 ? currentVal / c.originalValue : 1,
+        });
+      }
+      // Also show blended cells if blend was on when applied
+      // These are cells that differ from the original correction's originalValue neighborhood
+      // but aren't in the corrections array — they're already in map.data too
+    } else if (blendEnabled && result.corrections.length > 0) {
+      // Compute blended map (pre-apply preview)
+      let processedMap = blendCorrectedMap(map, result.corrections);
+      // Apply smoothing to the blended map if enabled
+      if (smoothEnabled) {
+        const smoothed = smoothCorrectedMap(processedMap, result.corrections);
+        processedMap = { ...smoothed, blendedCells: processedMap.blendedCells };
+      }
+      // Add original corrections (with smoothed values if applicable)
+      for (const c of result.corrections) {
+        const smoothedVal = processedMap.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: smoothedVal,
+          correctionFactor: c.originalValue > 0 ? smoothedVal / c.originalValue : 1,
+        });
+      }
+      // Add synthetic corrections for blended cells (gap + boundary)
+      for (let ri = 0; ri < map.data.length; ri++) {
+        for (let ci = 0; ci < map.data[ri].length; ci++) {
+          const key = `${ri}-${ci}`;
+          if (m.has(key)) continue; // already a real correction
+          const originalVal = map.data[ri][ci];
+          const blendedVal = processedMap.data[ri][ci];
+          if (Math.abs(blendedVal - originalVal) > 0.0001) {
+            // This cell was modified by blending
+            m.set(key, {
+              row: ri,
+              col: ci,
+              originalValue: originalVal,
+              correctedValue: blendedVal,
+              correctionFactor: originalVal > 0 ? blendedVal / originalVal : 1,
+              sampleCount: 0,
+              avgActualLambda: 0,
+              targetLambda: 0,
+              tier: 'sandpaper' as const,
+              isBlended: true,
+            } as CellCorrection & { isBlended?: boolean });
+          }
+        }
+      }
+    } else if (smoothEnabled && result.corrections.length > 0) {
+      // Smooth without blend
+      const correctedMap = applyCorrectionToMap(map, result.corrections);
+      const smoothed = smoothCorrectedMap(correctedMap, result.corrections);
+      for (const c of result.corrections) {
+        const smoothedVal = smoothed.data[c.row]?.[c.col] ?? c.correctedValue;
+        m.set(`${c.row}-${c.col}`, {
+          ...c,
+          correctedValue: smoothedVal,
+          correctionFactor: c.originalValue > 0 ? smoothedVal / c.originalValue : 1,
+        });
+      }
+    } else {
+      for (const c of result.corrections) {
+        m.set(`${c.row}-${c.col}`, c);
+      }
     }
     return m;
-  }, [result.corrections]);
+  }, [result.corrections, blendEnabled, smoothEnabled, map, hasApplied]);
 
   // Stats
   const avgFactor = result.corrections.length > 0
@@ -244,8 +323,9 @@ function CorrectionPreviewTable({
                     {map.rowAxis[ri]}
                   </td>
                   {row.map((val, ci) => {
-                    const corr = correctionMap.get(`${ri}-${ci}`);
+                    const corr = correctionMap.get(`${ri}-${ci}`) as (CellCorrection & { isBlended?: boolean }) | undefined;
                     const hasCorrection = !!corr;
+                    const isBlended = !!(corr as any)?.isBlended;
                     const factor = corr?.correctionFactor ?? 1;
                     const correctedVal = corr?.correctedValue ?? val;
 
@@ -253,16 +333,22 @@ function CorrectionPreviewTable({
                       <td
                         key={ci}
                         title={hasCorrection
-                          ? `Original: ${val.toFixed(3)} → Corrected: ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x | Avg λ: ${corr!.avgActualLambda.toFixed(3)} vs Target: ${corr!.targetLambda.toFixed(3)}\nSamples: ${corr!.sampleCount}`
+                          ? isBlended
+                            ? `Blended: ${val.toFixed(3)} → ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x (interpolated/boundary blend)`
+                            : `Original: ${val.toFixed(3)} → Corrected: ${correctedVal.toFixed(3)}\nFactor: ${factor.toFixed(3)}x | Avg λ: ${corr!.avgActualLambda.toFixed(3)} vs Target: ${corr!.targetLambda.toFixed(3)}\nSamples: ${corr!.sampleCount}`
                           : `${val.toFixed(3)} (no datalog samples)`
                         }
                         style={{
                           padding: '2px 4px',
                           textAlign: 'center',
-                          background: hasCorrection ? getCorrectionColor(factor) + '33' : 'transparent',
-                          color: hasCorrection ? 'white' : sColor.textDim,
+                          background: hasCorrection
+                            ? isBlended
+                              ? getCorrectionColor(factor) + '22' // dimmer for blended
+                              : getCorrectionColor(factor) + '33'
+                            : 'transparent',
+                          color: hasCorrection ? (isBlended ? sColor.textDim : 'white') : sColor.textDim,
                           fontSize: '0.64rem',
-                          fontWeight: hasCorrection ? 600 : 400,
+                          fontWeight: hasCorrection ? (isBlended ? 400 : 600) : 400,
                           border: `1px solid oklch(0.22 0.006 260)`,
                           minWidth: '48px',
                         }}
@@ -272,10 +358,11 @@ function CorrectionPreviewTable({
                             <div>{correctedVal.toFixed(3)}</div>
                             <div style={{
                               fontSize: '0.56rem',
-                              color: getCorrectionColor(factor),
+                              color: isBlended ? sColor.cyan : getCorrectionColor(factor),
                               fontWeight: 700,
+                              fontStyle: isBlended ? 'italic' : 'normal',
                             }}>
-                              {factor > 1 ? '+' : ''}{((factor - 1) * 100).toFixed(1)}%
+                              {factor > 1 ? '+' : ''}{((factor - 1) * 100).toFixed(1)}%{isBlended ? ' ≈' : ''}
                             </div>
                           </div>
                         ) : (
@@ -322,6 +409,8 @@ export default function FuelCorrectionPanel({
   const [hasApplied, setHasApplied] = useState(false);
   const [preApplyMaps, setPreApplyMaps] = useState<FuelMapState | null>(null);
   const [blendEnabled, setBlendEnabled] = useState(false);
+  const [smoothEnabled, setSmoothEnabled] = useState(false);
+  const [minSamples, setMinSamples] = useState(1);
 
   // Auto-detect turbo on mount / data change
   const isTurboDetected = useMemo(() => {
@@ -337,12 +426,12 @@ export default function FuelCorrectionPanel({
   // Run correction
   const handleCorrect = useCallback(() => {
     if (!wp8Data) return;
-    const config: CorrectionConfig = { vehicleMode, mapSensor };
+    const config: CorrectionConfig = { vehicleMode, mapSensor, minSamples };
     const result = computeCorrections(fuelMaps, wp8Data, config);
     setReport(result);
     setHasApplied(false);
     setPreApplyMaps(null);
-  }, [fuelMaps, wp8Data, vehicleMode, mapSensor]);
+  }, [fuelMaps, wp8Data, vehicleMode, mapSensor, minSamples]);
 
   // Apply corrections to fuel maps
   const handleApply = useCallback(() => {
@@ -354,16 +443,23 @@ export default function FuelCorrectionPanel({
     for (const result of report.results) {
       const map = fuelMaps[result.mapKey];
       if (map && result.corrections.length > 0) {
+        let resultMap: FuelMap;
         if (blendEnabled) {
-          corrected[result.mapKey] = blendCorrectedMap(map, result.corrections);
+          resultMap = blendCorrectedMap(map, result.corrections);
         } else {
-          corrected[result.mapKey] = applyCorrectionToMap(map, result.corrections);
+          resultMap = applyCorrectionToMap(map, result.corrections);
         }
+        // Apply smoothing if enabled
+        if (smoothEnabled) {
+          const smoothed = smoothCorrectedMap(resultMap, result.corrections);
+          resultMap = { ...smoothed, blendedCells: resultMap.blendedCells };
+        }
+        corrected[result.mapKey] = resultMap;
       }
     }
     onApplyCorrections(corrected, report.results);
     setHasApplied(true);
-  }, [report, fuelMaps, onApplyCorrections, blendEnabled]);
+  }, [report, fuelMaps, onApplyCorrections, blendEnabled, smoothEnabled]);
 
   // Revert corrections
   const handleRevert = useCallback(() => {
@@ -376,7 +472,7 @@ export default function FuelCorrectionPanel({
 
   // Apply target lambda presets when mode/sensor changes
   const handleApplyPresets = useCallback(() => {
-    const config: CorrectionConfig = { vehicleMode, mapSensor };
+    const config: CorrectionConfig = { vehicleMode, mapSensor, minSamples };
     const mapKeys: (keyof FuelMapState)[] = [
       'alphaN_cyl1', 'alphaN_cyl2',
       'speedDensity_cyl1', 'speedDensity_cyl2',
@@ -484,7 +580,7 @@ export default function FuelCorrectionPanel({
           </button>
         </div>
 
-        {/* Blend/Smooth Toggle */}
+        {/* Blend Toggle */}
         <div>
           <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
             BLEND
@@ -507,6 +603,70 @@ export default function FuelCorrectionPanel({
           >
             {blendEnabled ? 'ON' : 'OFF'}
           </button>
+        </div>
+
+        {/* Smooth Toggle */}
+        <div>
+          <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
+            SMOOTH
+          </div>
+          <button
+            onClick={() => setSmoothEnabled(!smoothEnabled)}
+            style={{
+              background: smoothEnabled ? sColor.cyan : 'transparent',
+              color: smoothEnabled ? 'white' : sColor.textDim,
+              border: `1px solid ${smoothEnabled ? sColor.cyan : sColor.border}`,
+              borderRadius: '2px',
+              padding: '6px 14px',
+              cursor: 'pointer',
+              fontFamily: sFont.heading,
+              fontSize: '0.85rem',
+              letterSpacing: '0.06em',
+              display: 'flex', alignItems: 'center', gap: '5px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {smoothEnabled ? 'ON' : 'OFF'}
+          </button>
+        </div>
+
+        {/* Min Samples Input */}
+        <div>
+          <div style={{ fontFamily: sFont.mono, fontSize: '0.68rem', color: sColor.textDim, marginBottom: '4px' }}>
+            MIN SAMPLES
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={999}
+            value={minSamples}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (!isNaN(val) && val >= 1) setMinSamples(val);
+            }}
+            style={{
+              background: 'transparent',
+              color: sColor.text,
+              border: `1px solid ${sColor.border}`,
+              borderRadius: '2px',
+              padding: '6px 8px',
+              width: '60px',
+              fontFamily: sFont.mono,
+              fontSize: '0.85rem',
+              textAlign: 'center',
+            }}
+          />
+          {report && (() => {
+            const allSamples = report.results.flatMap(r => r.corrections.map(c => c.sampleCount));
+            if (allSamples.length === 0) return null;
+            const avg = Math.round(allSamples.reduce((a, b) => a + b, 0) / allSamples.length);
+            const max = Math.max(...allSamples);
+            return (
+              <div style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textDim, marginTop: '3px' }}>
+                avg: {avg} | max: {max}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Correct Button */}
@@ -548,7 +708,7 @@ export default function FuelCorrectionPanel({
           {vehicleMode === 'na' ? (
             <>
               <strong style={{ color: sColor.blue }}>NA Mode:</strong> SD targets = 0.95 all columns.
-              Alpha-N targets = 0.95 (0-40° TPS), 0.90 (45°), 0.85 (50°+).
+              Alpha-N targets = 0.95 (0-36° TPS), 0.925 (40°), 0.90 (45°), 0.875 (50°), 0.85 (55°+).
             </>
           ) : mapSensor === 'stock' ? (
             <>
@@ -625,6 +785,9 @@ export default function FuelCorrectionPanel({
             {blendEnabled && (
               <span style={{ color: sColor.green }}>BLEND ON</span>
             )}
+            {smoothEnabled && (
+              <span style={{ color: sColor.cyan }}>SMOOTH ON</span>
+            )}
           </div>
 
           {/* Transient fueling tuner notes */}
@@ -664,6 +827,9 @@ export default function FuelCorrectionPanel({
                 key={result.mapKey}
                 result={result}
                 map={map}
+                blendEnabled={blendEnabled}
+                smoothEnabled={smoothEnabled}
+                hasApplied={hasApplied}
               />
             );
           })}
@@ -725,9 +891,14 @@ export default function FuelCorrectionPanel({
                       const map = fuelMaps[result.mapKey];
                       if (!map || result.corrections.length === 0) continue;
                       // Apply corrections to get the corrected map
-                      const correctedMap = blendEnabled
+                      let correctedMap = blendEnabled
                         ? blendCorrectedMap(map, result.corrections)
                         : applyCorrectionToMap(map, result.corrections);
+                      // Apply smoothing if enabled
+                      if (smoothEnabled) {
+                        const smoothed = smoothCorrectedMap(correctedMap, result.corrections);
+                        correctedMap = { ...smoothed, blendedCells: correctedMap.blendedCells };
+                      }
                       // Build CSV
                       const lines: string[] = [];
                       lines.push([`${correctedMap.rowLabel}\\${correctedMap.colLabel}`, ...correctedMap.colAxis.map(v => v.toString())].join(','));

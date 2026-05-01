@@ -154,21 +154,53 @@ export async function storagePut(
   const { baseUrl, apiKey } = getForgeConfig();
   const key = normalizeKey(relKey);
   const uploadUrl = buildUploadUrl(baseUrl, key);
-  const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: buildAuthHeaders(apiKey),
-    body: formData,
-  });
 
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText);
-    throw new Error(
-      `Storage upload failed (${response.status} ${response.statusText}): ${message}`,
-    );
+  const RETRYABLE = new Set([429, 502, 503, 504]);
+  const MAX_RETRIES = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = 1000 * Math.pow(2, attempt - 1) + Math.random() * 500;
+      console.log(`[Storage] Retry ${attempt}/${MAX_RETRIES} after ${Math.round(delay)}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
+    try {
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: buildAuthHeaders(apiKey),
+        body: formData,
+      });
+
+      if (response.ok) {
+        const url = (await response.json()).url;
+        return { key, url };
+      }
+
+      const message = await response.text().catch(() => response.statusText);
+
+      if (RETRYABLE.has(response.status) && attempt < MAX_RETRIES) {
+        lastError = new Error(
+          `Storage upload failed (${response.status} ${response.statusText}): ${message}`,
+        );
+        continue;
+      }
+
+      throw new Error(
+        `Storage upload failed (${response.status} ${response.statusText}): ${message}`,
+      );
+    } catch (err: any) {
+      if (err.message?.includes('Storage upload failed') && !RETRYABLE.has(parseInt(err.message.match(/\d{3}/)?.[0] || '0'))) {
+        throw err;
+      }
+      lastError = err;
+      if (attempt >= MAX_RETRIES) throw err;
+    }
   }
-  const url = (await response.json()).url;
-  return { key, url };
+
+  throw lastError || new Error('Storage upload failed after retries');
 }
 
 export async function storageGet(
