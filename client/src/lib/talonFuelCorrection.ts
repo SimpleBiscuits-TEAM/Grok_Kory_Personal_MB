@@ -162,12 +162,14 @@ export function getNASpeedDensityTargets(colAxis: number[]): number[] {
 
 /**
  * Generate NA target lambda presets for Alpha-N tables.
- * 0-40° TPS = 0.95, 45° = 0.9, 50°+ = 0.85
+ * 0-36° TPS = 0.95, 40° = 0.925, 45° = 0.90, 50° = 0.875, 55°+ = 0.85
  */
 export function getNAAlphaNTargets(colAxis: number[]): number[] {
   return colAxis.map(tps => {
-    if (tps <= 40) return 0.95;
+    if (tps <= 36) return 0.95;
+    if (tps <= 40) return 0.925;
     if (tps <= 45) return 0.90;
+    if (tps <= 50) return 0.875;
     return 0.85;
   });
 }

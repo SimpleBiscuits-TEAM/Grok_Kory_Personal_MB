@@ -708,7 +708,7 @@ export default function FuelCorrectionPanel({
           {vehicleMode === 'na' ? (
             <>
               <strong style={{ color: sColor.blue }}>NA Mode:</strong> SD targets = 0.95 all columns.
-              Alpha-N targets = 0.95 (0-40° TPS), 0.90 (45°), 0.85 (50°+).
+              Alpha-N targets = 0.95 (0-36° TPS), 0.925 (40°), 0.90 (45°), 0.875 (50°), 0.85 (55°+).
             </>
           ) : mapSensor === 'stock' ? (
             <>

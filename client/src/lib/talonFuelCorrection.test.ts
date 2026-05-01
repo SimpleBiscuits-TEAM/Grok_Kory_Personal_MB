@@ -66,17 +66,21 @@ function makeWP8Data(opts: {
 
 describe('Target Lambda Presets', () => {
   it('NA Alpha-N: 0-40 TPS = 0.95, 45 = 0.90, 50+ = 0.85', () => {
-    const colAxis = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 100];
+    const colAxis = [0, 5, 10, 15, 20, 25, 30, 35, 36, 40, 45, 50, 55, 60, 70, 80, 100];
     const targets = getNAAlphaNTargets(colAxis);
 
-    // 0-40 should be 0.95
+    // 0-36 should be 0.95
     for (let i = 0; i <= 8; i++) {
       expect(targets[i]).toBe(0.95);
     }
+    // 40 should be 0.925
+    expect(targets[9]).toBe(0.925);
     // 45 should be 0.90
-    expect(targets[9]).toBe(0.90);
-    // 50+ should be 0.85
-    for (let i = 10; i < targets.length; i++) {
+    expect(targets[10]).toBe(0.90);
+    // 50 should be 0.875
+    expect(targets[11]).toBe(0.875);
+    // 55+ should be 0.85
+    for (let i = 12; i < targets.length; i++) {
       expect(targets[i]).toBe(0.85);
     }
   });
