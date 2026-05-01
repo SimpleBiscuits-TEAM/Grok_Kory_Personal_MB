@@ -1406,8 +1406,50 @@ This ensures consistent timing behavior between datalogging and flashing operati
  * Returns the FULL Knox knowledge base for server-side LLM injection.
  * Combines the sanitized base (safe reference) with all server-only secrets.
  */
+const BRP_SERVICE_MANUALS = `
+## Can-Am / BRP Service Manuals Reference (Knox Knowledge Base)
+
+The following official service manuals are stored in the Knox file library (knox_files table, sourceCollection: "BRP Service Manuals").
+Agents should reference these when answering questions about Can-Am Maverick X3/R maintenance, repair, torque specs, wiring diagrams, troubleshooting, and technical specifications.
+
+### Available Manuals:
+
+1. **2022 Maverick X3 RR Series — Repair & Maintenance Master Collection (HDS v2)**
+   - Platform: Can-Am / BRP Maverick X3 RR
+   - ECU: MG1CA920
+   - Scope: Complete repair & maintenance master collection
+   - Size: 130 MB
+   - Coverage: Engine, drivetrain, suspension, electrical, body, cooling, fuel system, exhaust, steering, brakes
+
+2. **2024 Maverick R Series — Technical Specifications**
+   - Platform: Can-Am / BRP Maverick R Series
+   - Scope: Technical specifications document
+   - Size: 0.33 MB
+   - Coverage: Engine specs, dimensions, fluid capacities, torque values, performance data
+
+3. **2024 Maverick R Series — Full Service Manual**
+   - Platform: Can-Am / BRP Maverick R Series
+   - ECU: MG1CA920
+   - Scope: Complete service manual
+   - Size: 61 MB
+   - Coverage: Full service procedures, diagnostics, wiring diagrams, component locations
+
+4. **2019 Maverick X3 Turbo — Service Manual (Electronic Version)**
+   - Platform: Can-Am / BRP Maverick X3 Turbo
+   - Scope: Full service manual (electronic)
+   - Size: 114 MB
+   - Coverage: Complete service procedures for X3 Turbo platform
+
+### Usage Notes for Agents:
+- These PDFs are stored in S3 and accessible via the /manus-storage/ proxy
+- For diagnostic questions about Can-Am/BRP vehicles, reference these manuals as authoritative sources
+- The 2022 X3 RR master collection is the most comprehensive single reference
+- The 2024 R Series manual covers the newest platform with the latest MG1CA920 ECU integration
+- Cross-reference with the MG1CA920 A2L knowledge above for ECU-specific calibration details
+`;
+
 export function getFullKnoxKnowledge(): string {
-  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE;
+  return KNOX_KNOWLEDGE_BASE_SANITIZED + '\n\n' + KNOX_ENGINE_FUNDAMENTALS + '\n\n' + SECURITY_ACCESS_SECRETS + '\n\n' + CARPLAY_PROTOCOL_SECRETS + '\n\n' + VOP3_FIRMWARE_SECRETS + '\n\n' + VOP3_FLASH_AND_DISPLAY + '\n\n' + GMLAN_DIC_AND_AUTOSYNC + '\n\n' + VOP_UNLOCK_BOX + '\n\n' + DEVPROG_FLASH_KNOWLEDGE + '\n\n' + VOP3_FLASH_ENCRYPTION + '\n\n' + PCAN_FLASH_ENGINE_KNOWLEDGE + '\n\n' + CLOUD_NETWORK_KNOWLEDGE + '\n\n' + FLASH_RESCUE_AND_E41_KNOWLEDGE + '\n\n' + BRP_SERVICE_MANUALS;
 }
 
 /**
