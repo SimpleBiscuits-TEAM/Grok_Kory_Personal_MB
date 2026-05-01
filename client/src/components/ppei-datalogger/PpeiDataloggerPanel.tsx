@@ -281,6 +281,8 @@ const TCM_RX_ID = 0x7EA;
 let _tcmDddiStreamingActive = false;
 let _tcmDddiFrameCount = 0;
 let _tcmDddiSetupInProgress = false;
+let _tcmDddiLastFrameTs = 0;  // timestamp of last received 0x5EA frame
+let _tcmDddiSetupAttempts = 0; // track retry attempts
 const _tcmDddiPeriodicValues = new Map<number, {
   did: number;
   shortName: string;
@@ -296,6 +298,116 @@ const TCM_VDID_TCC_SLIP = 0xDE01;
 const TCM_VDID_TURBINE_RPM = 0xDE02;
 const TCM_VDID_TRANS_TEMP = 0xDE03;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// T87A PASSIVE CAN BROADCAST (0x1F5) — Gear State
+// ═══════════════════════════════════════════════════════════════════════════
+// GM trucks broadcast transmission data on arb ID 0x1F5 at ~41 Hz.
+// No request needed — just listen for the frames on the CAN bus.
+// Confirmed from unfiltered BUSMASTER trace on 2019 L5P Duramax (T87A TCM).
+// Frame layout:
+//   byte[0] = Current Gear State: 0x0F=Park, 0x0E=Reverse, 0x0D=Neutral, 0x01=1st, ..., 0x0A=10th
+//   byte[1] = Mirror of byte[0]
+//   byte[3] = Gear Sequence Number: 1=Park, 2=Reverse, 3=Neutral, 4=1st, ..., 13=10th
+//   byte[6] = Direction flag: 0=Park/Neutral, 1=Forward, 2=Reverse
+//
+// PRIMARY SOURCE: byte[3] — most reliable for PRND + gear number
+//   GEAR_T87A (0xBB01): PRND state → P/R/N/D display
+//   GEAR_NUM_T87A (0xBB02): Gear number → 0 in P/R/N, 1-10 in Drive
+const PASSIVE_CAN_GEAR_ARB_ID = 0x1F5;
+const PASSIVE_CAN_GEAR_PID = 0xBB01;  // matches obdConnection.ts
+const PASSIVE_CAN_GEAR_NUM_PID = 0xBB02;  // matches obdConnection.ts
+
+// byte[3] → PRND state label for display
+const GEAR_SEQ_TO_PRND: Record<number, string> = {
+  1: 'P',
+  2: 'R',
+  3: 'N',
+};
+// byte[3] >= 4 → Drive (gear = byte[3] - 3)
+
+// byte[3] → numeric value for PRND PID (CSV/gauge)
+// P=0, R=-1, N=0, D=1 (always 1 to indicate "in drive")
+const GEAR_SEQ_TO_PRND_NUMERIC: Record<number, number> = {
+  1: 0,    // Park
+  2: -1,   // Reverse
+  3: 0,    // Neutral
+};
+// byte[3] >= 4 → 1 (in drive)
+
+// Module-level state for passive CAN gear broadcast
+let _passiveGearFrameCount = 0;
+let _passiveGearLastFrameTs = 0;
+const _passiveCanValues = new Map<number, {
+  did: number;
+  shortName: string;
+  value: number;
+  displayValue: string;
+  unit: string;
+  rawBytes: number[];
+  timestamp: number;
+}>();
+
+/**
+ * Parse a 0x1F5 passive CAN gear state frame.
+ * Called from the WebSocket interceptor for every 0x1F5 frame.
+ * Uses byte[3] as primary source (sequence: 1=P, 2=R, 3=N, 4=1st, ..., 13=10th)
+ */
+function parsePassiveGearFrame(data: number[]): void {
+  if (!data || data.length < 4) return;
+  const now = Date.now();
+  _passiveGearFrameCount++;
+  _passiveGearLastFrameTs = now;
+
+  const gearSeq = data[3]; // byte[3] = sequence number (primary source)
+
+  // Determine PRND state and gear number from byte[3]
+  let prndLabel: string;
+  let prndNumeric: number;
+  let gearNumber: number;
+
+  if (gearSeq >= 4) {
+    // In Drive — gear number is (seq - 3): 4→1st, 5→2nd, ..., 13→10th
+    gearNumber = gearSeq - 3;
+    prndLabel = 'D';
+    prndNumeric = 1; // 1 = in drive
+  } else {
+    // P/R/N
+    prndLabel = GEAR_SEQ_TO_PRND[gearSeq] || `?${gearSeq}`;
+    prndNumeric = GEAR_SEQ_TO_PRND_NUMERIC[gearSeq] ?? 0;
+    gearNumber = 0; // no gear engaged in P/R/N
+  }
+
+  // Store PRND state (0xBB01) — shows P, R, N, or D
+  _passiveCanValues.set(PASSIVE_CAN_GEAR_PID, {
+    did: PASSIVE_CAN_GEAR_PID,
+    shortName: 'GEAR_T87A',
+    value: prndNumeric,
+    displayValue: prndLabel,
+    unit: '',
+    rawBytes: [data[0], data[3]],
+    timestamp: now,
+  });
+
+  // Store gear number (0xBB02) — 0 in P/R/N, 1-10 in Drive
+  _passiveCanValues.set(PASSIVE_CAN_GEAR_NUM_PID, {
+    did: PASSIVE_CAN_GEAR_NUM_PID,
+    shortName: 'GEAR_NUM_T87A',
+    value: gearNumber,
+    displayValue: gearNumber > 0 ? String(gearNumber) : prndLabel,
+    unit: '',
+    rawBytes: [data[3]],
+    timestamp: now,
+  });
+
+  // Log first few frames for debugging
+  if (_passiveGearFrameCount <= 5 || _passiveGearFrameCount % 200 === 0) {
+    const ref = _ppeiConnectionRef;
+    if (ref) {
+      ppeiLog(ref, `[PASSIVE-0x1F5] PRND=${prndLabel} Gear=${gearNumber} seq=${gearSeq} frame#${_passiveGearFrameCount}`);
+    }
+  }
+}
+
 /**
  * Parse a 0x5EA TCM DDDI periodic frame.
  * Frame format: [sub_frame_id, b1, b2, b3, b4, ...]
@@ -309,6 +421,7 @@ function parseTcmDddiPeriodicFrame(data: number[]): void {
 
   _tcmDddiFrameCount++;
   _tcmDddiStreamingActive = true;
+  _tcmDddiLastFrameTs = Date.now();
 
   if (_tcmDddiFrameCount <= 50 || _tcmDddiFrameCount % 200 === 0) {
     const hex = data.slice(0, Math.min(8, data.length)).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
@@ -377,8 +490,8 @@ function parseTcmDddiPeriodicFrame(data: number[]): void {
 }
 
 /**
- * Start T87A TCM DDDI streaming via the PCAN bridge.
- * Sends UDS commands to TCM (0x7E2→0x7EA): extended session, DDDI defines, start periodic.
+ * Start T87A TCM DDDI streaming via direct UDS commands to TCM (0x7E2→0x7EA).
+ * Sequence: extended session → IOCTL defines → DDDI maps → start periodic.
  * After setup, 0x5EA frames will arrive passively on the CAN bus.
  */
 async function startTcmDddiStreaming(conn: any): Promise<boolean> {
@@ -387,48 +500,109 @@ async function startTcmDddiStreaming(conn: any): Promise<boolean> {
   _tcmDddiSetupInProgress = true;
   _tcmDddiFrameCount = 0;
 
+  // TCM DDDI payloads (from HP Tuners DDDI source analysis)
+  const IOCTL_PAYLOADS = [
+    [0x2D, 0xFE, 0x00, 0x40, 0x01, 0x46, 0x82, 0x02],  // TCC Desired Pressure
+    [0x2D, 0xFE, 0x01, 0x40, 0x01, 0x4D, 0xB4, 0x02],  // TCC Slip Speed
+    [0x2D, 0xFE, 0x02, 0x40, 0x01, 0x43, 0xC2, 0x02],  // Turbine RPM
+    [0x2D, 0xFE, 0x03, 0x40, 0x01, 0x4C, 0xC0, 0x02],  // Trans Fluid Temp
+  ];
+  const DDDI_PAYLOADS = [
+    [0x2C, 0xFE, 0xFE, 0x00, 0xFE, 0x01],  // Periodic FE = slots 0+1
+    [0x2C, 0xFD, 0xFE, 0x02, 0xFE, 0x03],  // Periodic FD = slots 2+3
+  ];
+  const PERIODIC_START = [0xAA, 0x04, 0xFE, 0xFD];  // Start periodic on 0x5EA
+
   try {
-    ppeiLog(conn, '[TCM-DDDI] Starting T87A TCM DDDI streaming setup via bridge (0x7E2→0x7EA)...');
+    ppeiLog(conn, `[TCM-DDDI] Starting T87A TCM DDDI setup (attempt ${_tcmDddiSetupAttempts + 1}/3) via direct UDS to 0x7E2→0x7EA...`);
 
-    // Use the bridge's dddi_setup command with tcm_tcc mode.
-    // This delegates the entire multi-frame ISO-TP sequence (extended session +
-    // IOCTL 0x2D defines + DDDI 0x2C maps + 0xAA start periodic) to the Python
-    // bridge, which has its own ISO-TP stack and avoids the JS multi-frame
-    // concurrency issue with the shared udsResponseListener.
-    const setupResult = await conn.sendRequest(
-      {
-        type: 'dddi_setup',
-        tx_id: TCM_TX_ID,   // 0x7E2
-        rx_id: TCM_RX_ID,   // 0x7EA
-        dddi_mode: 'tcm_tcc',
-      },
-      15000  // 15s timeout — bridge does extended session + 4 IOCTL + 2 DDDI + start periodic
-    );
+    // Step 0: Add 0x5EA to bridge CAN filter so periodic frames reach WebSocket
+    ppeiLog(conn, '[TCM-DDDI] Step 0: Adding 0x5EA to bridge CAN filter...');
+    try {
+      await conn.sendRequest(
+        { type: 'set_filter', arb_ids: [0x5EA, 0x5E8, PASSIVE_CAN_GEAR_ARB_ID] },
+        2000
+      );
+      ppeiLog(conn, '[TCM-DDDI] ✓ Filter updated (0x5EA + 0x5E8 + RESPONSE_IDS)');
+    } catch (e) {
+      ppeiLog(conn, `[TCM-DDDI] Filter update failed: ${e} — 0x5EA frames may not reach WebSocket`);
+    }
+    await new Promise(r => setTimeout(r, 30));
 
-    if (!setupResult || !setupResult.ok) {
-      const errMsg = setupResult?.error || 'unknown error';
-      ppeiLog(conn, `[TCM-DDDI] Bridge dddi_setup(tcm_tcc) failed: ${errMsg}`);
+    // Step 1: Stop any existing periodic transmissions
+    ppeiLog(conn, '[TCM-DDDI] Step 1: Stopping existing periodic transmissions...');
+    try {
+      await conn.sendUDSRequest(0xAA, 0x00, undefined, TCM_TX_ID, 1000, TCM_RX_ID);
+    } catch { /* ignore — may not have active periodic */ }
+    await new Promise(r => setTimeout(r, 50));
+
+    // Step 2: Extended diagnostic session (0x10 0x03)
+    ppeiLog(conn, '[TCM-DDDI] Step 2: Requesting extended diagnostic session...');
+    const extResp = await conn.sendUDSRequest(0x10, 0x03, undefined, TCM_TX_ID, 2000, TCM_RX_ID);
+    if (!extResp || !extResp.positiveResponse) {
+      ppeiLog(conn, `[TCM-DDDI] ✖ TCM did not respond to extended session request (attempt ${_tcmDddiSetupAttempts + 1}) — TCM may not be present on bus`);
       _tcmDddiSetupInProgress = false;
+      _tcmDddiSetupAttempts++;
+      return false;
+    }
+    ppeiLog(conn, '[TCM-DDDI] ✓ Extended session established');
+    await new Promise(r => setTimeout(r, 30));
+
+    // Step 3: IOCTL 0x2D defines (4 RAM data sources)
+    ppeiLog(conn, '[TCM-DDDI] Step 3: Sending 4 IOCTL defines...');
+    let ioctlOk = 0;
+    for (let i = 0; i < IOCTL_PAYLOADS.length; i++) {
+      const payload = IOCTL_PAYLOADS[i];
+      // sendUDSRequest(service, subFunction, data, targetAddress, timeoutMs, responseArbIdOverride)
+      // payload = [0x2D, 0xFE, 0x0X, ...] → service=0x2D, sub=undefined, data=full payload minus service byte
+      const resp = await conn.sendUDSRequest(payload[0], undefined, payload.slice(1), TCM_TX_ID, 2000, TCM_RX_ID);
+      if (resp && resp.positiveResponse) {
+        ioctlOk++;
+      } else {
+        ppeiLog(conn, `[TCM-DDDI] IOCTL slot ${i} failed (NRC or no response)`);
+      }
+      await new Promise(r => setTimeout(r, 20));
+    }
+    ppeiLog(conn, `[TCM-DDDI] IOCTL: ${ioctlOk}/4 successful`);
+    if (ioctlOk === 0) {
+      ppeiLog(conn, `[TCM-DDDI] ✖ All IOCTL defines failed (attempt ${_tcmDddiSetupAttempts + 1}) — TCM may not support DDDI`);
+      _tcmDddiSetupInProgress = false;
+      _tcmDddiSetupAttempts++;
       return false;
     }
 
-    ppeiLog(conn, `[TCM-DDDI] Bridge setup OK: ioctl=${setupResult.ioctl_ok}, dddi=${setupResult.dddi_ok}, streaming=${setupResult.streaming}`);
-
-    if (!setupResult.streaming) {
-      ppeiLog(conn, '[TCM-DDDI] Bridge reports streaming=false — periodic start may have failed');
-      _tcmDddiSetupInProgress = false;
-      return false;
+    // Step 4: DDDI 0x2C maps (2 periodic ID definitions)
+    ppeiLog(conn, '[TCM-DDDI] Step 4: Sending 2 DDDI map definitions...');
+    let dddiOk = 0;
+    for (let i = 0; i < DDDI_PAYLOADS.length; i++) {
+      const payload = DDDI_PAYLOADS[i];
+      const resp = await conn.sendUDSRequest(payload[0], undefined, payload.slice(1), TCM_TX_ID, 2000, TCM_RX_ID);
+      if (resp && resp.positiveResponse) {
+        dddiOk++;
+      } else {
+        ppeiLog(conn, `[TCM-DDDI] DDDI map ${i} failed`);
+      }
+      await new Promise(r => setTimeout(r, 20));
     }
+    ppeiLog(conn, `[TCM-DDDI] DDDI maps: ${dddiOk}/2 successful`);
 
-    // Wait 2 seconds to verify 0x5EA frames arrive in the WebSocket
+    // Step 5: Start periodic streaming (0xAA 0x04 0xFE 0xFD)
+    ppeiLog(conn, '[TCM-DDDI] Step 5: Starting periodic streaming...');
+    // 0xAA may not send a positive response on some ECUs — just send and continue
+    try {
+      await conn.sendUDSRequest(PERIODIC_START[0], undefined, PERIODIC_START.slice(1), TCM_TX_ID, 1000, TCM_RX_ID);
+    } catch { /* 0xAA often has no response */ }
+    ppeiLog(conn, '[TCM-DDDI] Periodic start command sent');
+
+    // Step 6: Wait 2 seconds to verify 0x5EA frames arrive
     ppeiLog(conn, '[TCM-DDDI] Waiting 2s to verify 0x5EA frames arrive...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     if (_tcmDddiFrameCount === 0) {
-      ppeiLog(conn, '[TCM-DDDI] No 0x5EA frames received in 2s — TCM may not be streaming');
-      // Still mark as active — frames might arrive later once bus settles
-      _tcmDddiStreamingActive = true;
+      ppeiLog(conn, `[TCM-DDDI] ⚠ No 0x5EA frames received in 2s (attempt ${_tcmDddiSetupAttempts + 1}) — TCM may not be streaming. Will retry.`);
+      _tcmDddiStreamingActive = false;
       _tcmDddiSetupInProgress = false;
-      return true;  // Optimistic: bridge said OK, frames may be delayed
+      _tcmDddiSetupAttempts++;
+      return false;
     }
 
     ppeiLog(conn, `[TCM-DDDI] ✓ Streaming confirmed: ${_tcmDddiFrameCount} frames in 2s`);
@@ -437,8 +611,9 @@ async function startTcmDddiStreaming(conn: any): Promise<boolean> {
     return true;
 
   } catch (err) {
-    ppeiLog(conn, `[TCM-DDDI] Setup error: ${err}`);
+    ppeiLog(conn, `[TCM-DDDI] Setup error (attempt ${_tcmDddiSetupAttempts + 1}): ${err}`);
     _tcmDddiSetupInProgress = false;
+    _tcmDddiSetupAttempts++;
     return false;
   }
 }
@@ -716,6 +891,11 @@ function wrapOpenWebSocket(original: Function) {
               parseTcmDddiPeriodicFrame(dataArr);
             }
 
+            // ── Passive CAN broadcast parsing (0x1F5 Gear State) ──
+            if (arbId === PASSIVE_CAN_GEAR_ARB_ID && dataArr.length >= 4) {
+              parsePassiveGearFrame(dataArr);
+            }
+
             // Log first 5 frames to DEVICE CONSOLE, rest only to F12
             if (frameCount <= 5) {
               const arbHex = `0x${arbId.toString(16).toUpperCase()}`;
@@ -731,7 +911,7 @@ function wrapOpenWebSocket(original: Function) {
           originalOnMessage.call(this.ws, event);
         }
       };
-      ppeiLog(this, 'WebSocket interceptor installed (with DDDI 0x5E8 + 0x5EA periodic parsers)');
+      ppeiLog(this, 'WebSocket interceptor installed (DDDI 0x5E8 + 0x5EA + passive 0x1F5 gear)');
     }
   };
 }
@@ -752,13 +932,17 @@ function wrapOpenWebSocket(original: Function) {
  */
 function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
   return async function(this: any, pids: any[]): Promise<any[]> {
-    // DEBUG: Log what PIDs reach wrapReadPids (first 5 cycles only)
+    // DEBUG: Log what PIDs reach wrapReadPids
     if (!((this as any)._wrapReadPidsCallCount)) (this as any)._wrapReadPidsCallCount = 0;
     (this as any)._wrapReadPidsCallCount++;
-    if ((this as any)._wrapReadPidsCallCount <= 5) {
+    const callCount = (this as any)._wrapReadPidsCallCount;
+    if (callCount <= 5 || callCount % 20 === 0) {
       const services = pids.map((p: any) => `0x${(p.service || 0x01).toString(16)}`).join(',');
       const dddiCount = pids.filter((p: any) => (p.service || 0x01) === 0x2D).length;
-      ppeiLog(this, `[DEBUG] wrapReadPids called with ${pids.length} PIDs (services: ${services}) dddi=${dddiCount}`);
+      const tcmState = dddiCount > 0
+        ? ` | TCM: active=${_tcmDddiStreamingActive} inProgress=${_tcmDddiSetupInProgress} frames=${_tcmDddiFrameCount} attempts=${_tcmDddiSetupAttempts} lastFrame=${_tcmDddiLastFrameTs > 0 ? Math.round((Date.now() - _tcmDddiLastFrameTs) / 1000) + 's ago' : 'never'}`
+        : '';
+      ppeiLog(this, `[DEBUG] wrapReadPids #${callCount}: ${pids.length} PIDs (services: ${services}) dddi=${dddiCount}${tcmState}`);
     }
     // Split PIDs into Mode 01 (standard), Mode 22 (extended), and DDDI (0x2D, handled separately)
     const mode01Pids: any[] = [];
@@ -770,6 +954,10 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       } else if (mode === 0x2D) {
         // DDDI PIDs (0xDE00+) are handled by TCM DDDI periodic injection below — 
         // never send them to batch_read_mode01 (PID values > 0xFF overflow a byte)
+        continue;
+      } else if (mode === 0xBB) {
+        // Passive CAN broadcast PIDs (0xBB01+) — values injected from WebSocket interceptor
+        // Never send to batch_read (these are listen-only, no request needed)
         continue;
       } else {
         mode01Pids.push(pid);
@@ -1074,17 +1262,35 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
     // ── Inject TCM DDDI periodic values (0x5EA frames: TCC Pressure, Slip, Turbine RPM, TFT) ──
     const tcmDddiPids = pids.filter((p: any) => p.service === 0x2D);
     if (tcmDddiPids.length > 0) {
-      // Trigger TCM DDDI setup if not already streaming
-      if (!_tcmDddiStreamingActive && !_tcmDddiSetupInProgress) {
-        ppeiLog(this, `[TCM-DDDI] Detected ${tcmDddiPids.length} service 0x2D PIDs — initiating TCM DDDI setup...`);
+      // Liveness check: if we think streaming is active but no frames in 10s, reset and re-trigger
+      const TCM_LIVENESS_TIMEOUT_MS = 10000;
+      if (_tcmDddiStreamingActive && _tcmDddiLastFrameTs > 0 && (now - _tcmDddiLastFrameTs) > TCM_LIVENESS_TIMEOUT_MS) {
+        ppeiLog(this, `[TCM-DDDI] ⚠ No 0x5EA frames in ${Math.round((now - _tcmDddiLastFrameTs) / 1000)}s — resetting streaming state for re-setup`);
+        _tcmDddiStreamingActive = false;
+        _tcmDddiFrameCount = 0;
+      }
+      // Also reset if streaming flag is true but we never received ANY frame (stale from previous session)
+      if (_tcmDddiStreamingActive && _tcmDddiLastFrameTs === 0) {
+        ppeiLog(this, '[TCM-DDDI] ⚠ Streaming flag was set but no frames ever received — resetting for fresh setup');
+        _tcmDddiStreamingActive = false;
+      }
+
+      // Trigger TCM DDDI setup if not already streaming (max 3 attempts per session)
+      if (!_tcmDddiStreamingActive && !_tcmDddiSetupInProgress && _tcmDddiSetupAttempts < 3) {
+        ppeiLog(this, `[TCM-DDDI] Detected ${tcmDddiPids.length} service 0x2D PIDs — initiating TCM DDDI setup (attempt ${_tcmDddiSetupAttempts + 1}/3)...`);
         // Fire-and-forget: setup runs in background, frames will start arriving
         startTcmDddiStreaming(this).then(ok => {
           if (ok) {
             ppeiLog(this, '[TCM-DDDI] ✓ TCM DDDI streaming active — values will appear next cycle');
           } else {
-            ppeiLog(this, '[TCM-DDDI] TCM DDDI setup failed — T87A TCM may not be present');
+            ppeiLog(this, `[TCM-DDDI] TCM DDDI setup failed (attempt ${_tcmDddiSetupAttempts}/3) — T87A TCM may not be present`);
           }
         });
+      } else if (!_tcmDddiStreamingActive && _tcmDddiSetupAttempts >= 3) {
+        // Log once that we've exhausted retries
+        if ((this as any)._wrapReadPidsCallCount && (this as any)._wrapReadPidsCallCount % 100 === 0) {
+          ppeiLog(this, '[TCM-DDDI] Setup exhausted 3 attempts — TCM DDDI not available on this vehicle');
+        }
       }
 
       // Inject cached TCM DDDI values into readings
@@ -1126,6 +1332,40 @@ function wrapReadPids(originalReadPids: Function, originalReadPid: Function) {
       }
     }
 
+    // ── Inject passive CAN broadcast values (0x1F5 Gear State) ──
+    const passivePids = pids.filter((p: any) => p.service === 0xBB);
+    if (passivePids.length > 0) {
+      const PASSIVE_MAX_AGE_MS = 5000;
+      const injectedFromPassive: string[] = [];
+      for (const pid of passivePids) {
+        const passiveVal = _passiveCanValues.get(pid.pid);
+        if (passiveVal && (now - passiveVal.timestamp) < PASSIVE_MAX_AGE_MS) {
+          const existing = readings.findIndex((r: any) => r.pid === pid.pid);
+          const reading = {
+            pid: passiveVal.did,
+            name: pid.name,
+            shortName: passiveVal.shortName,
+            value: passiveVal.value,
+            displayValue: passiveVal.displayValue,
+            unit: passiveVal.unit,
+            rawBytes: passiveVal.rawBytes,
+            timestamp: passiveVal.timestamp,
+          };
+          if (existing >= 0) {
+            readings[existing] = reading;
+          } else {
+            readings.push(reading);
+          }
+          injectedFromPassive.push(`${passiveVal.shortName}=${passiveVal.displayValue}`);
+        }
+      }
+      if (injectedFromPassive.length > 0 && (_passiveGearFrameCount <= 20 || _passiveGearFrameCount % 200 === 0)) {
+        ppeiLog(this,
+          `⚡ Passive CAN: ${injectedFromPassive.join(', ')}`
+        );
+      }
+    }
+
     return readings;
   };
 }
@@ -1157,6 +1397,45 @@ try {
     proto._originalReadPids = proto.readPids;
     proto.readPids = wrapReadPids(proto._originalReadPids, proto._originalReadPid || proto.readPid);
     console.log(`${PPEI_TAG} Patch 5: readPids → HYBRID batch_read_dids + DDDI periodic FRP injection`);
+    // Patch 6: startLogging → reset TCM DDDI state on each new session
+    proto._originalStartLogging = proto.startLogging;
+    proto.startLogging = async function(this: any, ...args: any[]) {
+      // Reset TCM DDDI module state so fresh setup is triggered
+      _tcmDddiStreamingActive = false;
+      _tcmDddiFrameCount = 0;
+      _tcmDddiSetupInProgress = false;
+      _tcmDddiLastFrameTs = 0;
+      _tcmDddiSetupAttempts = 0;
+      _tcmDddiPeriodicValues.clear();
+      // Reset passive CAN state
+      _passiveGearFrameCount = 0;
+      _passiveGearLastFrameTs = 0;
+      _passiveCanValues.clear();
+      // Also reset the debug call counter so we get fresh logs
+      (this as any)._wrapReadPidsCallCount = 0;
+      console.log(`${PPEI_TAG} State reset for new monitoring session (TCM-DDDI + passive CAN)`);
+
+      // Add passive CAN arb IDs (0x1F5 gear state) to bridge filter
+      // so the bridge forwards these broadcast frames to the WebSocket.
+      // Fire-and-forget — if it fails, we just won't get passive data.
+      try {
+        if (this.ws && this.sendRequest) {
+          this.sendRequest(
+            { type: 'set_filter', arb_ids: [PASSIVE_CAN_GEAR_ARB_ID, TCM_DDDI_PERIODIC_ARB_ID, 0x5E8] },
+            2000
+          ).then(() => {
+            console.log(`${PPEI_TAG} [PASSIVE] CAN filter updated: 0x1F5 + 0x5EA + 0x5E8 + RESPONSE_IDS`);
+          }).catch((e: any) => {
+            console.log(`${PPEI_TAG} [PASSIVE] CAN filter update failed (bridge may not support set_filter): ${e}`);
+          });
+        }
+      } catch (e) {
+        console.log(`${PPEI_TAG} [PASSIVE] CAN filter setup error: ${e}`);
+      }
+
+      return proto._originalStartLogging.apply(this, args);
+    };
+    console.log(`${PPEI_TAG} Patch 6: startLogging → TCM DDDI state reset on new session`);
     proto._ppeiFullyPatched = true;
     console.log(`${PPEI_TAG} All PPEI patches applied successfully`);
   }

@@ -2468,6 +2468,49 @@
 - [x] Add blend toggle UI to FuelCorrectionPanel
 - [x] Write tests for blend/smooth logic
 - [x] Update blend boundary: isolated corrected cells (not in a row/column group) should blend all 8 surrounding neighbors (including diagonals), excluding cells that were also corrected from the datalog
+
+## TCM DDDI Streaming Fix (2026-04-29)
+- [x] Diagnose: TCM DDDI PIDs (0xDE00-0xDE03) producing empty columns in CSV
+- [x] Root cause: _tcmDddiStreamingActive module-scope flag never reset between sessions
+- [x] Fix: Don't optimistically set _tcmDddiStreamingActive when no 0x5EA frames arrive
+- [x] Fix: Add liveness detection (10s timeout) to reset stale streaming flag
+- [x] Fix: Add Patch 6 (startLogging wrapper) to reset all TCM DDDI state on new session
+- [x] Fix: Add retry limit (3 attempts) to prevent infinite setup loops
+- [x] Improve: Enhanced debug logging with TCM state on every 20th cycle
+
+## TCM DDDI Direct UDS Fix (2026-04-29 v2)
+- [x] Diagnose: Bridge dddi_setup handler not responding (old bridge version or handler timeout)
+- [x] Root cause: sendRequest({type:'dddi_setup'}) times out because bridge doesn't have tcm_tcc handler
+- [x] Fix: Rewrite startTcmDddiStreaming to use direct UDS commands (sendUDSRequest) instead of bridge dddi_setup
+- [x] Fix: Add set_filter command to add 0x5EA to bridge CAN filter for periodic frame forwarding
+- [x] Fix: Increment _tcmDddiSetupAttempts in ALL failure paths (catch, !ok, !streaming)
+- [x] Fix: Add inProgress to debug log for visibility
+- [x] Fix: Reduce timeout from 15s to 8s (now irrelevant with direct UDS approach)
+- [x] Sequence: filter→stop periodic→extended session→4 IOCTL→2 DDDI→start periodic→verify 0x5EA
+
+## T87A Passive CAN Gear State (2026-04-30)
+- [x] Analyze HPT CSV + BUSMASTER trace to identify gear state CAN message
+- [x] Confirmed: CAN arb ID 0x1F5, byte[0] = gear enum (0x0F=Park, 0x0E=Rev, 0x0D=Neutral, 0x01=1st, etc.)
+- [x] Confirmed: CAN arb ID 0x1F5, byte[3] = gear number (1=Park, 2=Rev, 3=Neutral, 4=1st, etc.)
+- [x] Add GEAR_T87A (0xBB01) and GEAR_NUM_T87A (0xBB02) PID definitions with service 0xBB
+- [x] Add 0x1F5 to bridge hardware CAN filter (OBD mode init + _gm_session_setup update)
+- [x] Add 0x1F5 to bridge software filter (_filter_ids in _gm_session_setup)
+- [x] Add 0x1F5 parsing to WebSocket interceptor (parsePassiveGearFrame)
+- [x] Add passive CAN value injection to wrapReadPids (with 5s staleness check)
+- [x] Add Patch 6 reset for passive CAN state + set_filter([0x1F5, 0x5EA, 0x5E8])
+- [x] Skip service 0xBB PIDs in batch_read loop (alongside 0x2D DDDI skip)
+- [x] Ensure all set_filter calls include 0x1F5 to prevent filter overwrites
+- [x] Gear numeric mapping: Park=0, Rev=-1, Neutral=0, 1st=1, ..., 10th=10
+
+## Bug Fix — Passive CAN PIDs Greyed Out (2026-04-30)
+- [x] Fix: GEAR_T87A (0xBB01) and GEAR_NUM_T87A (0xBB02) are greyed out / unselectable in PID selector
+- [x] Fix: Added isPassive check (service === 0xBB) to isSupported condition in PID selector
+- [x] Added blue 'CAN' badge for passive CAN PIDs in PID selector list
+
+## Gear PID Remapping — PRND + Gear Number (2026-04-30)
+- [x] Remap GEAR_T87A to show PRND state: P/R/N/D using byte[3] (1=P, 2=R, 3=N, 4+=D)
+- [x] Remap GEAR_NUM_T87A to show actual gear number: 0 in P/R/N, 1-10 in Drive
+- [x] Use byte[3] as the primary source (sequence: 1=Park, 2=Rev, 3=Neutral, 4+=gears)
 - [x] Fix: Blend preview table now shows interpolated/boundary blended cells when BLEND is ON. Blended cells shown in cyan italic with ≈ suffix, dimmer background to distinguish from datalog-corrected cells.
 - [x] Fix: Grouped corrected cells should blend all 8 neighbors (diagonals included), not just 4 cardinal
 - [x] Update turbo detection threshold from 100 kPa to 105 kPa (prevent NA logs from being misidentified as turbo)

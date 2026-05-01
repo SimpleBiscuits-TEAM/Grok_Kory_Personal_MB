@@ -816,8 +816,9 @@ function PIDSelector({
               {pids.map(pid => {
                 const isMode22 = (pid.service ?? 0x01) === 0x22;
                 const isDddi = (pid.service ?? 0x01) === 0x2D;
-                // DDDI PIDs (0x2D) are never in the OBD bitmask — always treat as supported
-                const isSupported = isMode22 || isDddi || supportedPids === null || supportedPids.has(pid.pid);
+                const isPassive = (pid.service ?? 0x01) === 0xBB;
+                // DDDI (0x2D) and passive CAN (0xBB) PIDs are never in the OBD bitmask — always treat as supported
+                const isSupported = isMode22 || isDddi || isPassive || supportedPids === null || supportedPids.has(pid.pid);
                 const isSelected = selectedPids.has(pid.pid);
                 return (
                   <label
@@ -839,7 +840,7 @@ function PIDSelector({
                       checked={isSelected}
                       onChange={() => onTogglePid(pid.pid)}
                       disabled={disabled || !isSupported}
-                      style={{ accentColor: isDddi ? 'oklch(0.70 0.16 155)' : isMode22 ? sColor.orange : sColor.red }}
+                      style={{ accentColor: isPassive ? 'oklch(0.70 0.18 250)' : isDddi ? 'oklch(0.70 0.16 155)' : isMode22 ? sColor.orange : sColor.red }}
                     />
                     {isMode22 && (
                       <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: sColor.orange, background: 'oklch(0.15 0.02 55 / 0.4)', padding: '0px 3px', borderRadius: '2px' }}>
@@ -851,7 +852,12 @@ function PIDSelector({
                         DDDI
                       </span>
                     )}
-                    <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, minWidth: (isMode22 || isDddi) ? '40px' : '28px' }}>
+                    {isPassive && (
+                      <span style={{ fontFamily: sFont.mono, fontSize: '0.45rem', color: 'oklch(0.70 0.18 250)', background: 'oklch(0.12 0.06 250 / 0.4)', padding: '0px 3px', borderRadius: '2px' }}>
+                        CAN
+                      </span>
+                    )}
+                    <span style={{ fontFamily: sFont.mono, fontSize: '0.6rem', color: sColor.textMuted, minWidth: (isMode22 || isDddi || isPassive) ? '40px' : '28px' }}>
                       0x{pid.pid.toString(16).toUpperCase().padStart(isMode22 ? 4 : 2, '0')}
                     </span>
                     <span style={{ fontFamily: sFont.body, fontSize: '0.72rem', color: sColor.text, flex: 1 }}>
