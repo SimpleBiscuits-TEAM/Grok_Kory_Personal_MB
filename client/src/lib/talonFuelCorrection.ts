@@ -1377,15 +1377,17 @@ function interpolateGapsInLine(
 
   // ── Left open-ended gap ──
   // From leftmost corrected cell, extend leftward.
-  // Find the anchor: the first cell to the left where the original map value
-  // is >= the corrected value at the leftmost corrected cell (natural crossover).
-  // Interpolate factor from 1.0 (at anchor) to correctionFactor (at corrected cell).
+  // Fuel maps are monotonically increasing left-to-right (more airflow = more fuel).
+  // So to the LEFT of a corrected cell, we look for the first cell with a value
+  // LESS THAN the corrected value — that's the natural anchor where the ramp starts.
+  // Interpolate smoothly between that anchor value and the corrected value.
   // Only activate if there are at least 2 cells to interpolate (otherwise boundary blending handles it).
   if (leftmostCorrected > 1) {
     const correctedValue = originalValues[leftmostCorrected] * factors[leftmostCorrected];
     const corrFactor = factors[leftmostCorrected];
 
-    // Scan left to find anchor: where original value >= corrected value
+    // Scan left to find anchor: first cell where original value < corrected value
+    // (i.e., the natural lower point in the increasing ramp)
     let anchorIdx = -1;
     for (let k = leftmostCorrected - 1; k >= 0; k--) {
       if (corrected[k] || interpolated[k]) {
@@ -1393,7 +1395,7 @@ function interpolateGapsInLine(
         anchorIdx = -1;
         break;
       }
-      if (originalValues[k] >= correctedValue) {
+      if (originalValues[k] < correctedValue) {
         anchorIdx = k;
         break;
       }
@@ -1401,7 +1403,7 @@ function interpolateGapsInLine(
 
     // Only interpolate if there's a meaningful gap (at least 2 cells between anchor and corrected)
     if (anchorIdx >= 0 && (leftmostCorrected - anchorIdx) > 1) {
-      // Interpolate from anchor (factor=1.0) to leftmostCorrected (factor=corrFactor)
+      // Interpolate from anchor (factor=1.0, keeps original lower value) to leftmostCorrected (factor=corrFactor)
       const gapLen = leftmostCorrected - anchorIdx;
       for (let k = anchorIdx + 1; k < leftmostCorrected; k++) {
         if (!corrected[k] && !interpolated[k]) {
@@ -1411,7 +1413,7 @@ function interpolateGapsInLine(
         }
       }
     } else if (anchorIdx < 0) {
-      // No natural crossover found — use a gradual fade over available cells
+      // No anchor found (all cells to the left are >= corrected value) — use gradual fade
       // Blend from 1.0 at the edge to corrFactor at the corrected cell
       // Only blend up to 5 cells max to avoid over-extending
       const blendStart = Math.max(0, leftmostCorrected - 5);
@@ -1430,14 +1432,17 @@ function interpolateGapsInLine(
 
   // ── Right open-ended gap ──
   // From rightmost corrected cell, extend rightward.
-  // Find the anchor: the first cell to the right where the original map value
-  // is >= the corrected value at the rightmost corrected cell (natural crossover).
+  // Fuel maps are monotonically increasing left-to-right (more airflow = more fuel).
+  // So to the RIGHT of a corrected cell, we look for the first cell with a value
+  // GREATER THAN the corrected value — that's the natural anchor where the ramp ends.
+  // Interpolate smoothly between the corrected value and that anchor value.
   // Only activate if there are at least 2 cells to interpolate.
   if (rightmostCorrected < len - 2) {
     const correctedValue = originalValues[rightmostCorrected] * factors[rightmostCorrected];
     const corrFactor = factors[rightmostCorrected];
 
-    // Scan right to find anchor: where original value >= corrected value
+    // Scan right to find anchor: first cell where original value > corrected value
+    // (i.e., the natural higher point in the increasing ramp)
     let anchorIdx = -1;
     for (let k = rightmostCorrected + 1; k < len; k++) {
       if (corrected[k] || interpolated[k]) {
@@ -1445,7 +1450,7 @@ function interpolateGapsInLine(
         anchorIdx = -1;
         break;
       }
-      if (originalValues[k] >= correctedValue) {
+      if (originalValues[k] > correctedValue) {
         anchorIdx = k;
         break;
       }
@@ -1453,7 +1458,7 @@ function interpolateGapsInLine(
 
     // Only interpolate if there's a meaningful gap (at least 2 cells between corrected and anchor)
     if (anchorIdx >= 0 && (anchorIdx - rightmostCorrected) > 1) {
-      // Interpolate from rightmostCorrected (factor=corrFactor) to anchor (factor=1.0)
+      // Interpolate from rightmostCorrected (factor=corrFactor) to anchor (factor=1.0, keeps original higher value)
       const gapLen = anchorIdx - rightmostCorrected;
       for (let k = rightmostCorrected + 1; k < anchorIdx; k++) {
         if (!corrected[k] && !interpolated[k]) {
@@ -1463,7 +1468,7 @@ function interpolateGapsInLine(
         }
       }
     } else if (anchorIdx < 0) {
-      // No natural crossover found — use a gradual fade over available cells
+      // No anchor found (all cells to the right are <= corrected value) — use gradual fade
       const blendEnd = Math.min(len - 1, rightmostCorrected + 5);
       const blendLen = blendEnd - rightmostCorrected;
       if (blendLen > 1) {
