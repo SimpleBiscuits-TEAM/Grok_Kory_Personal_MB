@@ -1218,15 +1218,17 @@ export function blendCorrectedMap(
 
   // ── Pass 1: Gap Interpolation ──
   // For each row, find uncorrected cells between two corrected cells and interpolate
+  // Also handle open-ended gaps using original map values for monotonic ramp
   for (let r = 0; r < rows; r++) {
-    interpolateGapsInLine(factorGrid[r], isCorrected[r], isInterpolated[r]);
+    interpolateGapsInLine(factorGrid[r], isCorrected[r], isInterpolated[r], map.data[r]);
   }
   // For each column, find uncorrected cells between two corrected cells and interpolate
   for (let c = 0; c < cols; c++) {
     const colFactors = factorGrid.map(row => row[c]);
     const colCorrected = isCorrected.map(row => row[c]);
     const colInterpolated = isInterpolated.map(row => row[c]);
-    interpolateGapsInLine(colFactors, colCorrected, colInterpolated);
+    const colOriginalValues = map.data.map(row => row[c]);
+    interpolateGapsInLine(colFactors, colCorrected, colInterpolated, colOriginalValues);
     // Write back
     for (let r = 0; r < rows; r++) {
       if (!isCorrected[r][c] && !isInterpolated[r][c] && colInterpolated[r]) {
@@ -1314,27 +1316,36 @@ export function getBlendedCellKeys(
 
 /**
  * Interpolate gaps in a 1D line (row or column).
- * Finds uncorrected cells between two corrected cells and linearly interpolates.
+ * Handles three cases:
+ * 1. Gaps BETWEEN two corrected cells — linear interpolation of factors
+ * 2. Open-ended LEFT gap — from leftmost corrected cell back to where original
+ *    map values naturally exceed the corrected value (monotonic ramp)
+ * 3. Open-ended RIGHT gap — from rightmost corrected cell forward to where original
+ *    map values naturally exceed the corrected value (monotonic ramp)
+ *
+ * @param factors - The factor grid line (mutated in place)
+ * @param corrected - Which cells are directly corrected
+ * @param interpolated - Which cells have been interpolated (mutated in place)
+ * @param originalValues - The original map values for this line (needed for open-ended gaps)
  */
 function interpolateGapsInLine(
   factors: number[],
   corrected: boolean[],
   interpolated: boolean[],
+  originalValues?: number[],
 ): void {
   const len = factors.length;
-  let i = 0;
 
+  // ── Standard gap interpolation (between two corrected cells) ──
+  let i = 0;
   while (i < len) {
-    // Find a corrected cell (start of potential gap)
     if (!corrected[i]) { i++; continue; }
 
     const gapStart = i;
-    // Scan forward to find the next corrected cell
     let j = i + 1;
     while (j < len && !corrected[j]) j++;
 
     if (j < len && j - gapStart > 1) {
-      // There's a gap between gapStart and j — interpolate
       const startFactor = factors[gapStart];
       const endFactor = factors[j];
       const gapLen = j - gapStart;
@@ -1349,6 +1360,122 @@ function interpolateGapsInLine(
     }
 
     i = j;
+  }
+
+  // ── Open-ended gap interpolation (edges without a second anchor) ──
+  if (!originalValues) return;
+
+  // Find all corrected cell indices
+  const correctedIndices: number[] = [];
+  for (let idx = 0; idx < len; idx++) {
+    if (corrected[idx]) correctedIndices.push(idx);
+  }
+  if (correctedIndices.length === 0) return;
+
+  const leftmostCorrected = correctedIndices[0];
+  const rightmostCorrected = correctedIndices[correctedIndices.length - 1];
+
+  // ── Left open-ended gap ──
+  // From leftmost corrected cell, extend leftward.
+  // Find the anchor: the first cell to the left where the original map value
+  // is >= the corrected value at the leftmost corrected cell (natural crossover).
+  // Interpolate factor from 1.0 (at anchor) to correctionFactor (at corrected cell).
+  // Only activate if there are at least 2 cells to interpolate (otherwise boundary blending handles it).
+  if (leftmostCorrected > 1) {
+    const correctedValue = originalValues[leftmostCorrected] * factors[leftmostCorrected];
+    const corrFactor = factors[leftmostCorrected];
+
+    // Scan left to find anchor: where original value >= corrected value
+    let anchorIdx = -1;
+    for (let k = leftmostCorrected - 1; k >= 0; k--) {
+      if (corrected[k] || interpolated[k]) {
+        // Hit another corrected/interpolated cell — stop, this is already handled
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] >= correctedValue) {
+        anchorIdx = k;
+        break;
+      }
+    }
+
+    // Only interpolate if there's a meaningful gap (at least 2 cells between anchor and corrected)
+    if (anchorIdx >= 0 && (leftmostCorrected - anchorIdx) > 1) {
+      // Interpolate from anchor (factor=1.0) to leftmostCorrected (factor=corrFactor)
+      const gapLen = leftmostCorrected - anchorIdx;
+      for (let k = anchorIdx + 1; k < leftmostCorrected; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - anchorIdx) / gapLen;
+          factors[k] = 1.0 + (corrFactor - 1.0) * t;
+          interpolated[k] = true;
+        }
+      }
+    } else if (anchorIdx < 0) {
+      // No natural crossover found — use a gradual fade over available cells
+      // Blend from 1.0 at the edge to corrFactor at the corrected cell
+      // Only blend up to 5 cells max to avoid over-extending
+      const blendStart = Math.max(0, leftmostCorrected - 5);
+      const blendLen = leftmostCorrected - blendStart;
+      if (blendLen > 1) {
+        for (let k = blendStart; k < leftmostCorrected; k++) {
+          if (!corrected[k] && !interpolated[k]) {
+            const t = (k - blendStart) / blendLen;
+            factors[k] = 1.0 + (corrFactor - 1.0) * t;
+            interpolated[k] = true;
+          }
+        }
+      }
+    }
+  }
+
+  // ── Right open-ended gap ──
+  // From rightmost corrected cell, extend rightward.
+  // Find the anchor: the first cell to the right where the original map value
+  // is >= the corrected value at the rightmost corrected cell (natural crossover).
+  // Only activate if there are at least 2 cells to interpolate.
+  if (rightmostCorrected < len - 2) {
+    const correctedValue = originalValues[rightmostCorrected] * factors[rightmostCorrected];
+    const corrFactor = factors[rightmostCorrected];
+
+    // Scan right to find anchor: where original value >= corrected value
+    let anchorIdx = -1;
+    for (let k = rightmostCorrected + 1; k < len; k++) {
+      if (corrected[k] || interpolated[k]) {
+        // Hit another corrected/interpolated cell — stop
+        anchorIdx = -1;
+        break;
+      }
+      if (originalValues[k] >= correctedValue) {
+        anchorIdx = k;
+        break;
+      }
+    }
+
+    // Only interpolate if there's a meaningful gap (at least 2 cells between corrected and anchor)
+    if (anchorIdx >= 0 && (anchorIdx - rightmostCorrected) > 1) {
+      // Interpolate from rightmostCorrected (factor=corrFactor) to anchor (factor=1.0)
+      const gapLen = anchorIdx - rightmostCorrected;
+      for (let k = rightmostCorrected + 1; k < anchorIdx; k++) {
+        if (!corrected[k] && !interpolated[k]) {
+          const t = (k - rightmostCorrected) / gapLen;
+          factors[k] = corrFactor + (1.0 - corrFactor) * t;
+          interpolated[k] = true;
+        }
+      }
+    } else if (anchorIdx < 0) {
+      // No natural crossover found — use a gradual fade over available cells
+      const blendEnd = Math.min(len - 1, rightmostCorrected + 5);
+      const blendLen = blendEnd - rightmostCorrected;
+      if (blendLen > 1) {
+        for (let k = rightmostCorrected + 1; k <= blendEnd; k++) {
+          if (!corrected[k] && !interpolated[k]) {
+            const t = (k - rightmostCorrected) / blendLen;
+            factors[k] = corrFactor + (1.0 - corrFactor) * t;
+            interpolated[k] = true;
+          }
+        }
+      }
+    }
   }
 }
 

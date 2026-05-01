@@ -2486,3 +2486,5 @@
 - [x] Fix: BLEND toggle on Speed Density table changes corrected cell values — should only blend between original and corrected without recalculating corrections
 - [x] Enhance: smoothCorrectedMap neighbor influence weighted by sample counts (high-sample neighbors pull more strongly during smoothing)
 - [x] Fix: BLEND toggle double-applies correction factors on Alpha-N table after Apply Corrections — blendCorrectedMap multiplies correctionFactor onto already-corrected map.data
+- [x] Fix: Alpha-N TPS=8 column not blending — open-ended gap interpolation now extends beyond single boundary ring
+- [x] Fix: SD blend left-side gap interpolation — when no corrected value exists to the left, find next value greater than corrected value and interpolate monotonically between them
