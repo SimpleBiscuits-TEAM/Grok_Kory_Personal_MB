@@ -1268,15 +1268,15 @@ describe('blendCorrectedMap', () => {
     expect(result.data[2][2]).toBeCloseTo(0.8, 3);
     // Surrounding cells should be blended. With open-ended gap interpolation on a uniform map:
     // Left side: [2][1] gets interpolated (gradual fade) with factor ~0.9, making it an interpolated cell.
-    // This causes [2][3] boundary to average corrected [2][2] (0.8) + interpolated [2][1] (0.9) = 0.85,
-    // then boundary = 1.0 + (0.85-1.0)*0.5 = 0.925
     // [1][2] gets interpolated by column pass (gradual fade above corrected cell)
-    // [3][2] boundary: neighbors include [2][2](corrected,0.8) + [2][1](row-interpolated,0.9)
-    // avgNeighborFactor = (0.8+0.9)/2 = 0.85, boundary = 1.0+(0.85-1.0)*0.5 = 0.925
+    // [3][2] gets interpolated by column pass (gradual fade below corrected cell)
+    // [2][3] gets boundary blend: neighbors include corrected + column-interpolated cells
+    // With the anchor-skip fix, both column and row open-ended gaps now produce
+    // interpolated cells on both sides when the map is uniform.
     expect(result.data[1][2]).toBeCloseTo(0.9, 3); // up (column-interpolated)
-    expect(result.data[3][2]).toBeCloseTo(0.925, 3); // down (boundary with interpolated neighbor influence)
+    expect(result.data[3][2]).toBeCloseTo(0.9, 3); // down (column-interpolated, symmetric on uniform map)
     expect(result.data[2][1]).toBeCloseTo(0.9, 3); // left (interpolated by open-ended gap)
-    expect(result.data[2][3]).toBeCloseTo(0.925, 3); // right (boundary, avg of corrected + interpolated neighbor)
+    expect(result.data[2][3]).toBeCloseTo(0.9, 3); // right (interpolated by open-ended gap, symmetric)
     // Diagonal cells get blended based on multiple interpolated neighbors from row+column passes
     // Exact values depend on complex multi-pass interactions; verify they're in valid range
     expect(result.data[1][1]).toBeLessThan(1.0); // top-left blended

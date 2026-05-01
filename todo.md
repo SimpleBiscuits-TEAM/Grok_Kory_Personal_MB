@@ -2489,3 +2489,24 @@
 - [x] Fix: Alpha-N TPS=8 column not blending — open-ended gap interpolation now extends beyond single boundary ring
 - [x] Fix: SD blend left-side gap interpolation — when no corrected value exists to the left, find next value greater than corrected value and interpolate monotonically between them
 - [x] Update: NA Alpha-N target lambda presets — 0-36 TPS = 0.95, 40 = 0.925, 45 = 0.90, 50 = 0.875, 55-72 = 0.85
+- [ ] Fix: Alpha-N blend left-side interpolation (4250-5000 RPM, left of TPS 12) — values go up-down-up instead of monotonically decreasing; must find anchor with value less than corrected, skip at least 1 cell, and interpolate linearly
+
+## Blend Interpolation Fix (4250-5000 RPM non-monotonic bumps)
+- [x] Fix column pass to not overwrite row-interpolated values (row is authoritative for L-R monotonicity)
+- [x] Fix left open-ended gap: skip adjacent anchors (distance 1), keep scanning for anchor at distance > 1
+- [x] Fix right open-ended gap: same skip logic for symmetry
+- [x] Add Pass 1b: pre-boundary row-wise non-monotonic bump fix (enrichment overshoot detection)
+- [x] Add Pass 3: post-boundary monotonicity enforcement (re-interpolate where blending created bumps)
+- [x] Update test expectations for uniform map isolated cell (symmetric interpolation on both sides)
+- [x] Verify with realistic Speed Density map data (4250-5000 RPM, MAP axis)
+
+## Column Pass Anchor Logic (vertical interpolation)
+- [x] Implement column-specific open-ended gap logic with anchor finding
+- [x] Top boundary: scan up for cell > corrected value, or skip 3 use 4th
+- [x] Bottom boundary: scan down for cell < corrected value, or skip 3 use 4th
+- [x] Column pass still does not overwrite row-interpolated cells
+
+## Blend Fixes (May 2026)
+- [x] Cap blended cell correction at 20% max (factor between 0.80 and 1.20)
+- [x] Fix 4250-4750 RPM left-side up-down-up pattern (column pass breaking row monotonicity)
+- [x] Use 8-sided boundary blend for isolated single outlier corrections (no row/col interpolation)
