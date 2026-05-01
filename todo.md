@@ -2488,4 +2488,4 @@
 - [x] Fix: BLEND toggle double-applies correction factors on Alpha-N table after Apply Corrections — blendCorrectedMap multiplies correctionFactor onto already-corrected map.data
 - [x] Fix: Alpha-N TPS=8 column not blending — open-ended gap interpolation now extends beyond single boundary ring
 - [x] Fix: SD blend left-side gap interpolation — when no corrected value exists to the left, find next value greater than corrected value and interpolate monotonically between them
-- [ ] Update: NA Alpha-N target lambda presets — 0-36 TPS = 0.95, 40 = 0.925, 45 = 0.90, 50 = 0.875, 55-72 = 0.85
+- [x] Update: NA Alpha-N target lambda presets — 0-36 TPS = 0.95, 40 = 0.925, 45 = 0.90, 50 = 0.875, 55-72 = 0.85

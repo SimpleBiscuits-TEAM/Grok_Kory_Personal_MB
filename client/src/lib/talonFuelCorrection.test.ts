@@ -66,21 +66,24 @@ function makeWP8Data(opts: {
 
 describe('Target Lambda Presets', () => {
   it('NA Alpha-N: 0-40 TPS = 0.95, 45 = 0.90, 50+ = 0.85', () => {
-    const colAxis = [0, 5, 10, 15, 20, 25, 30, 35, 36, 40, 45, 50, 55, 60, 70, 80, 100];
+    // Actual Honda Talon Alpha-N TPS axis
+    const colAxis = [0, 0.195, 0.39, 0.976, 1.952, 3.026, 4.002, 4.978, 5.954, 8.003,
+      9.955, 12.005, 13.957, 16.006, 20.008, 24.01, 28.011, 32.013, 36.014,
+      40.016, 44.994, 49.971, 54.949, 60.024, 72.712];
     const targets = getNAAlphaNTargets(colAxis);
 
-    // 0-36 should be 0.95
-    for (let i = 0; i <= 8; i++) {
+    // 0-36.014 should be 0.95 (indices 0-18)
+    for (let i = 0; i <= 18; i++) {
       expect(targets[i]).toBe(0.95);
     }
-    // 40 should be 0.925
-    expect(targets[9]).toBe(0.925);
-    // 45 should be 0.90
-    expect(targets[10]).toBe(0.90);
-    // 50 should be 0.875
-    expect(targets[11]).toBe(0.875);
-    // 55+ should be 0.85
-    for (let i = 12; i < targets.length; i++) {
+    // 40.016 should be 0.925
+    expect(targets[19]).toBe(0.925);
+    // 44.994 should be 0.90
+    expect(targets[20]).toBe(0.90);
+    // 49.971 should be 0.875
+    expect(targets[21]).toBe(0.875);
+    // 54.949+ should be 0.85
+    for (let i = 22; i < targets.length; i++) {
       expect(targets[i]).toBe(0.85);
     }
   });
