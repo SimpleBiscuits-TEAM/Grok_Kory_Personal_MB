@@ -1347,6 +1347,16 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       }
     });
 
+    conn.on('dtcRead', (e) => {
+      const result = e.data as DTCReadResult;
+      if (result) {
+        setDtcResult(result);
+        if (result.totalCount > 0) {
+          setShowDTCPanel(true);
+        }
+      }
+    });
+
     connectionRef.current = conn;
 
     const success = await conn.connect();
@@ -2006,6 +2016,13 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       pids: pidsToLog,
       readings: new Map(readingHistory),
       vehicleInfo: vehicleInfo || undefined,
+      dtcs: dtcResult && dtcResult.totalCount > 0 ? {
+        stored: dtcResult.stored.map(d => d.code),
+        pending: dtcResult.pending.map(d => d.code),
+        permanent: dtcResult.permanent.map(d => d.code),
+        total: dtcResult.totalCount,
+        milStatus: dtcResult.milStatus,
+      } : undefined,
     };
     const csv = exportSessionToCSV(session);
     const filename = `live_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
@@ -2013,7 +2030,7 @@ export default function DataloggerPanel({ onOpenInAnalyzer, injectedPids }: Data
       onOpenInAnalyzer(csv, filename);
     }
     addLog('Live data exported and sent to Analyzer');
-  }, [readingHistory, vehicleFilteredPids, selectedPids, sampleRateMs, vehicleInfo, onOpenInAnalyzer, addLog]);
+  }, [readingHistory, vehicleFilteredPids, selectedPids, sampleRateMs, vehicleInfo, onOpenInAnalyzer, addLog, dtcResult]);
 
   const handleDeleteSession = useCallback((id: string) => {
     setCompletedSessions(prev => prev.filter(s => s.id !== id));
