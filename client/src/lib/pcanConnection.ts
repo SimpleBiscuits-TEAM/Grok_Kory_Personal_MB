@@ -1239,6 +1239,32 @@ export class PCANConnection {
       throw new Error('No supported PIDs to log');
     }
 
+    // ─── DTC Scan: capture stored + pending DTCs before logging starts ───
+    let sessionDtcs: LogSession['dtcs'] | undefined;
+    try {
+      this.emit('log', null, 'Scanning for DTCs before logging...');
+      const dtcResult = await this.readDTCs();
+      const totalDtcs = dtcResult.codes.length + dtcResult.pending.length + dtcResult.permanent.length;
+      sessionDtcs = {
+        stored: dtcResult.codes,
+        pending: dtcResult.pending,
+        permanent: dtcResult.permanent,
+        readTimestamp: Date.now(),
+      };
+      if (totalDtcs > 0) {
+        const parts: string[] = [];
+        if (dtcResult.codes.length > 0) parts.push(`Stored: ${dtcResult.codes.join(', ')}`);
+        if (dtcResult.pending.length > 0) parts.push(`Pending: ${dtcResult.pending.join(', ')}`);
+        if (dtcResult.permanent.length > 0) parts.push(`Permanent: ${dtcResult.permanent.join(', ')}`);
+        this.emit('log', null, `DTCs found (${totalDtcs}): ${parts.join(' | ')}`);
+        this.emit('dtcRead', null, sessionDtcs);
+      } else {
+        this.emit('log', null, 'No DTCs found');
+      }
+    } catch {
+      this.emit('log', null, 'DTC scan skipped (not supported or timed out)');
+    }
+
     const session: LogSession = {
       id: `pcan_log_${Date.now()}`,
       startTime: Date.now(),
@@ -1246,6 +1272,7 @@ export class PCANConnection {
       pids: [...filteredPids],
       readings: new Map(),
       vehicleInfo: this.vehicleInfo,
+      dtcs: sessionDtcs,
     };
 
     for (const pid of filteredPids) {

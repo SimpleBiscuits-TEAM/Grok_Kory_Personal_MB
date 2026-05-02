@@ -51,6 +51,14 @@ export interface VehicleMeta {
   channelCount?: number;
   /** Heuristic diesel vs spark-ignition classification from columns/PIDs (see combustionInference). */
   combustionInference?: CombustionInferenceResult;
+  /** DTCs captured at the start of the datalog session */
+  dtcs?: {
+    stored: string[];
+    pending: string[];
+    permanent: string[];
+    total: number;
+    readAt?: string; // ISO timestamp
+  };
 }
 
 export interface DuramaxData {
@@ -282,6 +290,31 @@ function extractVehicleMeta(lines: string[]): VehicleMeta | undefined {
       case 'displacement': meta.displacement = v; break;
       case 'cylinders': meta.cylinders = parseInt(v, 10) || undefined; break;
       case 'protocol': meta.protocol = v; break;
+      case 'dtcs_stored': {
+        if (!meta.dtcs) meta.dtcs = { stored: [], pending: [], permanent: [], total: 0 };
+        meta.dtcs.stored = v === 'none' ? [] : v.split(',').map(s => s.trim()).filter(Boolean);
+        break;
+      }
+      case 'dtcs_pending': {
+        if (!meta.dtcs) meta.dtcs = { stored: [], pending: [], permanent: [], total: 0 };
+        meta.dtcs.pending = v === 'none' ? [] : v.split(',').map(s => s.trim()).filter(Boolean);
+        break;
+      }
+      case 'dtcs_permanent': {
+        if (!meta.dtcs) meta.dtcs = { stored: [], pending: [], permanent: [], total: 0 };
+        meta.dtcs.permanent = v.split(',').map(s => s.trim()).filter(Boolean);
+        break;
+      }
+      case 'dtcs_total': {
+        if (!meta.dtcs) meta.dtcs = { stored: [], pending: [], permanent: [], total: 0 };
+        meta.dtcs.total = parseInt(v, 10) || 0;
+        break;
+      }
+      case 'dtcs_readat': {
+        if (!meta.dtcs) meta.dtcs = { stored: [], pending: [], permanent: [], total: 0 };
+        meta.dtcs.readAt = v;
+        break;
+      }
       case 'session': meta.sessionName = v; break;
       case 'duration': meta.durationSec = parseFloat(v) || undefined; break;
       case 'samplerate': meta.sampleRateMs = parseInt(v, 10) || undefined; break;

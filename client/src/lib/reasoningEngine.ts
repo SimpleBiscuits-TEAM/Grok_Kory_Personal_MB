@@ -1447,5 +1447,14 @@ function generateSummary(
     );
   }
 
+  // Include DTCs from the datalog session in the summary
+  if (diagnostics.dtcs && diagnostics.dtcs.total > 0) {
+    const dtcParts: string[] = [];
+    if (diagnostics.dtcs.stored.length > 0) dtcParts.push(`Stored: ${diagnostics.dtcs.stored.join(', ')}`);
+    if (diagnostics.dtcs.pending.length > 0) dtcParts.push(`Pending: ${diagnostics.dtcs.pending.join(', ')}`);
+    if (diagnostics.dtcs.permanent.length > 0) dtcParts.push(`Permanent: ${diagnostics.dtcs.permanent.join(', ')}`);
+    parts.push(`Vehicle DTCs at time of datalog (${diagnostics.dtcs.total}): ${dtcParts.join(' | ')}. These should be considered alongside the data analysis.`);
+  }
+
   return parts.join(' ');
 }

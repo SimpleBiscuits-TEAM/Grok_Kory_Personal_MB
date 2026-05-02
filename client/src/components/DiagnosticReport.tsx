@@ -244,6 +244,85 @@ export function DiagnosticReportComponent({ report }: DiagnosticReportProps) {
             </div>
           </div>
 
+          {/* DTCs from vehicle */}
+          {report.dtcs && report.dtcs.total > 0 && (
+            <div style={{
+              background: 'oklch(0.13 0.006 260)',
+              border: '1px solid oklch(0.22 0.008 260)',
+              borderLeft: '4px solid oklch(0.52 0.22 25)',
+              borderRadius: '3px',
+              padding: '1rem 1.25rem',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <AlertCircle style={{ width: '18px', height: '18px', color: 'oklch(0.52 0.22 25)' }} />
+                <h3 style={{
+                  fontFamily: '"Bebas Neue", "Impact", sans-serif',
+                  fontSize: '1rem',
+                  letterSpacing: '0.06em',
+                  color: 'oklch(0.75 0.18 25)',
+                  margin: 0,
+                }}>DIAGNOSTIC TROUBLE CODES ({report.dtcs.total})</h3>
+              </div>
+              {report.dtcs.stored.length > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.60 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stored DTCs</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                    {report.dtcs.stored.map((code, i) => (
+                      <span key={`stored-${i}`} style={{
+                        fontFamily: '"Share Tech Mono", monospace',
+                        fontSize: '0.85rem',
+                        background: 'oklch(0.18 0.015 25)',
+                        color: 'oklch(0.80 0.15 25)',
+                        padding: '3px 10px',
+                        borderRadius: '2px',
+                        border: '1px solid oklch(0.30 0.06 25)',
+                      }}>{code}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {report.dtcs.pending.length > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.60 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending DTCs</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                    {report.dtcs.pending.map((code, i) => (
+                      <span key={`pending-${i}`} style={{
+                        fontFamily: '"Share Tech Mono", monospace',
+                        fontSize: '0.85rem',
+                        background: 'oklch(0.18 0.015 60)',
+                        color: 'oklch(0.80 0.15 60)',
+                        padding: '3px 10px',
+                        borderRadius: '2px',
+                        border: '1px solid oklch(0.30 0.06 60)',
+                      }}>{code}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {report.dtcs.permanent.length > 0 && (
+                <div>
+                  <span style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.8rem', color: 'oklch(0.60 0.010 260)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Permanent DTCs</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                    {report.dtcs.permanent.map((code, i) => (
+                      <span key={`perm-${i}`} style={{
+                        fontFamily: '"Share Tech Mono", monospace',
+                        fontSize: '0.85rem',
+                        background: 'oklch(0.18 0.015 0)',
+                        color: 'oklch(0.75 0.20 0)',
+                        padding: '3px 10px',
+                        borderRadius: '2px',
+                        border: '1px solid oklch(0.30 0.10 0)',
+                      }}>{code}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p style={{ fontFamily: '"Rajdhani", sans-serif', fontSize: '0.78rem', color: 'oklch(0.50 0.008 260)', margin: 0, marginTop: '10px' }}>
+                DTCs were captured at the start of the datalog session. These codes provide context for the diagnostic analysis.
+              </p>
+            </div>
+          )}
+
           {/* Critical Issues */}
           {criticalIssues.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>

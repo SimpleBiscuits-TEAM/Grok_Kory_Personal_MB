@@ -27,6 +27,13 @@ export interface DiagnosticReport {
   issues: DiagnosticIssue[];
   summary: string;
   timestamp: Date;
+  /** DTCs captured at the start of the datalog session (from CSV metadata) */
+  dtcs?: {
+    stored: string[];
+    pending: string[];
+    permanent: string[];
+    total: number;
+  };
 }
 
 interface RawDataPoint {
@@ -316,6 +323,12 @@ export function analyzeDiagnostics(data: any): DiagnosticReport {
     issues: dedupedIssues,
     summary,
     timestamp: new Date(),
+    dtcs: vehicleMeta?.dtcs ? {
+      stored: vehicleMeta.dtcs.stored,
+      pending: vehicleMeta.dtcs.pending,
+      permanent: vehicleMeta.dtcs.permanent,
+      total: vehicleMeta.dtcs.total,
+    } : undefined,
   };
 }
 

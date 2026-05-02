@@ -159,6 +159,13 @@ export interface LogSession {
   pids: PIDDefinition[];
   readings: Map<number, PIDReading[]>;  // pid -> readings over time
   vehicleInfo?: VehicleInfo;
+  /** DTCs captured at the start of the logging session */
+  dtcs?: {
+    stored: string[];   // Mode 03 — confirmed/stored DTCs
+    pending: string[];   // Mode 07 — pending DTCs
+    permanent: string[]; // Mode 0A — permanent DTCs (if supported)
+    readTimestamp: number;
+  };
 }
 
 export interface VehicleInfo {
@@ -4543,6 +4550,16 @@ export function exportSessionToCSV(session: LogSession): string {
   if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
   if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
 
+  // DTC info captured at session start
+  if (session.dtcs) {
+    const d = session.dtcs;
+    metaRows.push(`# DTCs_Stored: ${d.stored.length > 0 ? d.stored.join(', ') : 'none'}`);
+    metaRows.push(`# DTCs_Pending: ${d.pending.length > 0 ? d.pending.join(', ') : 'none'}`);
+    if (d.permanent.length > 0) metaRows.push(`# DTCs_Permanent: ${d.permanent.join(', ')}`);
+    metaRows.push(`# DTCs_Total: ${d.stored.length + d.pending.length + d.permanent.length}`);
+    metaRows.push(`# DTCs_ReadAt: ${new Date(d.readTimestamp).toISOString()}`);
+  }
+
   // Build header
   const header = ['Timestamp (ms)', 'Elapsed (s)', ...pids.map(p => `${p.shortName} (${p.unit})`)];
   const rows: string[] = [...metaRows, header.join(',')];
@@ -4635,6 +4652,16 @@ export function sessionToAnalyzerCSV(session: LogSession): string {
   if (vi?.displacement) metaRows.push(`# Displacement: ${vi.displacement}`);
   if (vi?.cylinders) metaRows.push(`# Cylinders: ${vi.cylinders}`);
   if (vi?.protocol) metaRows.push(`# Protocol: ${vi.protocol}`);
+
+  // DTC info captured at session start
+  if (session.dtcs) {
+    const d = session.dtcs;
+    metaRows.push(`# DTCs_Stored: ${d.stored.length > 0 ? d.stored.join(', ') : 'none'}`);
+    metaRows.push(`# DTCs_Pending: ${d.pending.length > 0 ? d.pending.join(', ') : 'none'}`);
+    if (d.permanent.length > 0) metaRows.push(`# DTCs_Permanent: ${d.permanent.join(', ')}`);
+    metaRows.push(`# DTCs_Total: ${d.stored.length + d.pending.length + d.permanent.length}`);
+    metaRows.push(`# DTCs_ReadAt: ${new Date(d.readTimestamp).toISOString()}`);
+  }
 
   // HP Tuners format header
   const header = ['Time', ...pids.map(p => p.name)];

@@ -2553,3 +2553,12 @@
 - [x] Cap blended cell correction at 20% max (factor between 0.80 and 1.20)
 - [x] Fix 4250-4750 RPM left-side up-down-up pattern (column pass breaking row monotonicity)
 - [x] Use 8-sided boundary blend for isolated single outlier corrections (no row/col interpolation)
+
+## DTC Scanning During Datalog (2026-05-02)
+- [x] Add Mode 03 (stored DTCs) query at start of datalog session
+- [x] Add Mode 07 (pending DTCs) query at start of datalog session
+- [x] Include DTCs in CSV export header/metadata for analysis context
+- [x] Display active DTCs in DiagnosticReport component (full report view)
+- [x] Parse DTC metadata in analyzer's dataProcessor.ts (VehicleMeta.dtcs)
+- [x] Pass DTCs to reasoning engine for AI analysis context
+- [x] Add dtcs field to LogSession interface
