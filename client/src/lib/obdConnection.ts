@@ -4250,6 +4250,27 @@ export class OBDConnection {
       throw new Error('No supported PIDs to log');
     }
 
+    // ── DTC Scan: capture stored/pending/permanent DTCs before logging ──
+    let sessionDtcs: LogSession['dtcs'] = undefined;
+    try {
+      this.emit('log', null, 'Scanning DTCs before logging session...');
+      const dtcResult = await this.readDTCs();
+      if (dtcResult.totalCount > 0) {
+        sessionDtcs = {
+          stored: dtcResult.stored.map(d => d.code),
+          pending: dtcResult.pending.map(d => d.code),
+          permanent: dtcResult.permanent.map(d => d.code),
+          total: dtcResult.totalCount,
+          milStatus: dtcResult.milStatus,
+        };
+        this.emit('log', null, `DTCs found: ${dtcResult.totalCount} (Stored: ${dtcResult.stored.length}, Pending: ${dtcResult.pending.length}, Permanent: ${dtcResult.permanent.length})`);
+      } else {
+        this.emit('log', null, 'No DTCs found.');
+      }
+    } catch (err) {
+      this.emit('log', null, `DTC scan failed (non-blocking): ${err}`);
+    }
+
     const session: LogSession = {
       id: `log_${Date.now()}`,
       startTime: Date.now(),
@@ -4257,6 +4278,7 @@ export class OBDConnection {
       pids: [...pidsToUse],
       readings: new Map(),
       vehicleInfo: this.vehicleInfo,
+      dtcs: sessionDtcs,
     };
 
     // Initialize reading arrays
